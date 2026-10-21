@@ -25,14 +25,14 @@ export function pickUpdate(prs, required) {
   return behind[0] ?? null;
 }
 
-/** The tier runs to re-run: a failed tier check on a pull request that someone other than its author approved on the
- * head commit after that check started, so an approval landing while the job ran is not lost. The tier check itself
- * decides whether the approver may approve. */
+/** The tier jobs to re-run, alone, so no reviewer runs again for a click: a failed tier check on a pull request that
+ * someone other than its author approved on the head commit after that check started, so an approval landing while
+ * the job ran is not lost. The tier check itself decides whether the approver may approve. */
 export function pickReruns(prs) {
   return prs
-    .filter((p) => RED.has(p.checks.tier?.state) && p.checks.tier.runId)
+    .filter((p) => RED.has(p.checks.tier?.state) && p.checks.tier.jobId)
     .filter((p) => p.approvals.some((a) => a.login !== p.author && a.oid === p.head && a.at > p.checks.tier.startedAt))
-    .map((p) => ({ number: p.number, runId: p.checks.tier.runId }));
+    .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId }));
 }
 
 const QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100){nodes{
@@ -52,7 +52,7 @@ function openPulls(repo) {
     const runs = (p.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).filter((c) => c.name && c.checkSuite?.app?.slug === 'github-actions');
     const checks = {};
     for (const run of runs.sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))))
-      checks[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', runId: /\/runs\/(\d+)/.exec(run.detailsUrl ?? '')?.[1] };
+      checks[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', jobId: /\/job\/(\d+)/.exec(run.detailsUrl ?? '')?.[1] };
     return {
       number: p.number,
       isDraft: p.isDraft,
@@ -77,8 +77,8 @@ function requiredOf(repo) {
 function sweep(repo) {
   const required = requiredOf(repo);
   const prs = openPulls(repo);
-  for (const { number, runId } of pickReruns(prs)) {
-    gh(['run', 'rerun', runId, '--failed', '--repo', repo]);
+  for (const { number, jobId } of pickReruns(prs)) {
+    gh(['run', 'rerun', '--job', jobId, '--repo', repo]);
     console.log(`queue: re-ran the tier check of ${repo}#${number} after its approval`);
   }
   const pr = pickUpdate(prs, required);

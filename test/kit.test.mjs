@@ -313,16 +313,22 @@ describe('verify-trusted', () => {
     git(r.dir, 'clone', '-q', join(r.dir, 'app.git'), trusted);
   });
   after(() => r.cleanup());
-  const candidate = (files) => {
+  const candidate = (files, env = {}) => {
     git(r.repo, 'switch', '-q', '-C', 'c', 'origin/main');
     commit(r.repo, files, 'candidate');
-    return run(trusted, join(trusted, 'scripts/verify-trusted'), [r.repo, git(r.repo, 'rev-parse', 'origin/main')]);
+    return run(trusted, join(trusted, 'scripts/verify-trusted'), [r.repo, git(r.repo, 'rev-parse', 'origin/main')], env);
   };
 
   test('passes a good candidate that changes no protected path', () => {
     const out = candidate({ 'src/math.js': MUL, 'test/mul.test.js': RED_AT_BASE });
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /main's verify and red-check pass on the candidate/);
+  });
+  test('hands the PR body to red-check, so a No-red line passes it there and review judges the reason', () => {
+    assert.equal(candidate({ 'src/math.js': MUL }).code, 1);
+    write(r.dir, { 'body.txt': 'Tóm tắt\nNo-red: adds a helper nothing calls yet\n' });
+    const out = candidate({ 'src/math.js': MUL }, { GATE_BODY_FILE: join(r.dir, 'body.txt') });
+    assert.equal(out.code, 0, out.out);
   });
   test('runs main\'s verify on every candidate, not only on a gate change', () => {
     const out = candidate({ 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });

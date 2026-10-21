@@ -2,7 +2,7 @@
 # Requires the change's new or changed tests to fail at the base and pass at the head, judged on JUnit reports:
 # at the base tests > 0, failures > 0 and errors == 0 (a test that cannot load there proves nothing); at the head
 # every one passes. Passes without a source change, or on a "No-red: <reason of 20 or more characters>" line in the
-# PR body, which the review judges and the ledger counts.
+# PR body, which the reviewer must accept for `review` to pass; the ledger counts it.
 #   scripts/red-check [--base <rev>] [--body <file>]
 set -uo pipefail
 top=$(git rev-parse --show-toplevel) || exit 2

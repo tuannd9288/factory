@@ -17,8 +17,8 @@ This repository is in the factory (`tuannd9288/factory`). Its gate lives here, i
 | `scripts/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
 | `scripts/prove-check --all` | `prove-check: 6 checks fail on their fixtures` |
 
-Run `scripts/setup` once per clone. Run `scripts/verify` before every push; CI runs `main`'s copy of it on your
-change.
+Run `scripts/setup` once per clone. Run `scripts/verify` and `scripts/red-check --base origin/main` before every
+push; CI runs `main`'s copies of both on your change, as the one check `verify`.
 
 ## How a change lands
 

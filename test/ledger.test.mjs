@@ -117,7 +117,7 @@ test('the digest gives every rate with its count, and lists what waits for the H
 });
 
 const REQUIRED = ['verify', 'review', 'verdict', 'tier'];
-const checks = (over = {}) => Object.fromEntries(REQUIRED.map((name) => [name, { state: 'SUCCESS', startedAt: '2026-10-21T10:00:00Z', runId: '42', ...over[name] }]));
+const checks = (over = {}) => Object.fromEntries(REQUIRED.map((name, i) => [name, { state: 'SUCCESS', startedAt: '2026-10-21T10:00:00Z', jobId: String(40 + i), ...over[name] }]));
 
 test('the queue updates the oldest pull request left behind, one at a time, reading only the required checks', async () => {
   const { pickUpdate } = await import('../bin/lib/queue.mjs');
@@ -132,16 +132,16 @@ test('the queue updates the oldest pull request left behind, one at a time, read
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND', { checks: { ...checks({ tier: { state: 'FAILURE' } }), lint: { state: 'FAILURE' } } })], REQUIRED).number, 1);
 });
 
-test('the queue re-runs a failed tier check once someone other than the author approved the head after it started', async () => {
+test('the queue re-runs the failed tier job alone once someone other than the author approved the head after it started', async () => {
   const { pickReruns } = await import('../bin/lib/queue.mjs');
-  const pr = (approvals, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', runId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals, checks: checks({ tier, verdict: { state: 'FAILURE', runId: '43' } }) });
-  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), [{ number: 7, runId: '42' }]);
+  const pr = (approvals, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', jobId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals, checks: checks({ tier, verdict: { state: 'FAILURE', jobId: '43' } }) });
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), [{ number: 7, jobId: '42' }]);
   // An approval that landed while the job ran, after it read the reviews, still re-runs it.
-  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:00:30Z' }])]), [{ number: 7, runId: '42' }]);
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:00:30Z' }])]), [{ number: 7, jobId: '42' }]);
   assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T09:55:00Z' }])]), []);
   assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'old', at: '2026-10-21T10:05:00Z' }])]), []);
   assert.deepEqual(pickReruns([pr([{ login: 'agent', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), []);
-  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }], { state: 'SUCCESS', startedAt: '2026-10-21T10:00:00Z', runId: '42' })]), []);
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }], { state: 'SUCCESS', startedAt: '2026-10-21T10:00:00Z', jobId: '42' })]), []);
 });
 
 test('a sweep runs once, alone, never as the Human, and leaves a failure report until a sweep succeeds', () => {
