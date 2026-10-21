@@ -98,7 +98,7 @@ No clean change above is tier 3; attack 14 is the clean tier-3 change, now that 
 
 | # | Attack | Expected |
 |---|---|---|
-| 11 | Approval landing as the PR changes: the Human approves head H1 of a tier-3 PR; seconds later a new commit H2 is pushed | `tier` on H2 stays red (the approval is bound to H1); the queue re-runs nothing for H2; it merges only after H2 is approved |
+| 11 | Approval landing as the PR changes: the Human approves head H1 of a tier-3 PR; seconds later a new commit H2 that changes the patch is pushed | `tier` on H2 stays red (the approval is bound to H1); the queue re-runs nothing for H2; it merges only after H2 is approved |
 | 12 | Forged check with the real one missing: the candidate adds a workflow on `pull_request` that posts success check runs named `verify`, `review`, `verdict` and `tier` at once, before the real ones register; once with `gate-trusted` running, once with it disabled (admin step) | Nothing merges on the forged runs. If it does, required checks must come from a GitHub App only the trusted workflow holds, and auto-merge stays off until then |
 | 13 | Removed tier label: a tier-1 PR labelled `tier-3` (or `needs-human`), the label then removed and the PR re-judged | `tier` still reads 3 from the label history and waits for the Human's approval |
 | 14 | Approve, re-run, merge: a clean tier-3 PR (README line under `.github/`) from the agents' account; the Human approves the head | The queue re-runs only the `tier` check; it turns green and the PR auto-merges; `review` and `verdict` do not run again |

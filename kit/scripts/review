@@ -8,7 +8,8 @@
 #            reviewer's explicit acceptance
 #   verdict  the reviewer's verdict from tier 2; it passes at once on tier 1, so the required check always exists
 # The reviewer runs only once `verify` (gate.yml, on pull_request) passed on the head: the cheaper judge first, and a
-# red head needs a new commit anyway. The job waits for it up to GATE_WAIT seconds (default 1500), then fails closed.
+# red head needs a new commit anyway. The job waits for it up to GATE_WAIT seconds (default 1800, verify's own
+# timeout), then fails closed.
 #   tier     labels the tier; on tier 3 it requires a code owner who is not the author to have approved the head
 #            commit, or a commit whose own patch the head carries unchanged (scripts/lib/approval.mjs); the queue
 #            re-runs it after that approval, so the reviewer never runs again for a click
@@ -86,7 +87,7 @@ esac
 
 # Waits for gate.yml's verify on the head; returns 1 unless it passed.
 wait_verify() {
-  local deadline=$((SECONDS + ${GATE_WAIT:-1500})) state
+  local deadline=$((SECONDS + ${GATE_WAIT:-1800})) state
   while :; do
     state=$(node scripts/lib/history.mjs check --repo "${GITHUB_REPOSITORY:-}" --head "$head" --name verify) ||
       { echo "$job: verify on ${head:0:8} could not be read ($state), so this check fails closed"; return 1; }
