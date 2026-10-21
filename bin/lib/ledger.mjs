@@ -1,15 +1,18 @@
-// The factory's ledger: one row per task (one pull request), from GitHub and the repository's Claude Code profile,
-// with no model; and the weekly Vietnamese digest built from those rows, every rate with its count and its 95% Wilson
-// interval. See bin/factory-ledger for the arguments.
+// The factory's ledger: one row per task, from GitHub and the repository's Claude Code profile, with no model; and the
+// weekly Vietnamese digest built from those rows, every rate with its count and its 95% Wilson interval. A task is an
+// issue labelled task, from its assignment (the label) to its close, with every pull request that closes it; a pull
+// request that closes no task is a task of its own, from its opening. Cost is API-equivalent usage, never cash.
+// See bin/factory-ledger for the arguments.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { requiredChecks } from '../../kit/scripts/lib/policy.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PRICES = JSON.parse(readFileSync(join(here, 'prices.json'), 'utf8')).models;
-export const REQUIRED = ['verify', 'rules', 'red-check', 'verify-trusted', 'review', 'verdict'];
+export const REQUIRED = requiredChecks(join(here, '../../kit'));
 
 /** The 95% Wilson interval of k successes in n, as fractions; null when n is 0. */
 export function wilson(k, n, z = 1.96) {
@@ -89,7 +92,13 @@ export function branchCosts(profileDir) {
   return byBranch;
 }
 
-/** One ledger row from a pull request as the GraphQL query below returns it. */
+/** Whether a task that started at start and ended at end (null while open) was alive in the window [from, to]: it
+ * started in it, was open at its end, or ended inside it. */
+export function inWindow(start, end, from, to) {
+  return Date.parse(start) <= to && (!end || Date.parse(end) >= from);
+}
+
+/** One pull request's row, as the GraphQL query below returns it; a task of its own when it closes no task. */
 export function rowOf(repo, pr, { human, costs, profile }) {
   const labels = pr.labels.nodes.map((l) => l.name);
   const tiers = labels.map((l) => /^tier-([123])$/.exec(l)?.[1]).filter(Boolean).map(Number);
@@ -130,6 +139,7 @@ export function rowOf(repo, pr, { human, costs, profile }) {
     number: pr.number,
     title: pr.title,
     url: pr.url,
+    prs: [pr.number],
     who: [pr.author?.login ?? '?', ...(branch ? [...branch.models].map((m) => m.replace(/^claude-/, '')) : [])].join(' · '),
     tier: tiers.length ? Math.max(...tiers) : null,
     state: pr.mergedAt ? 'landed' : pr.state === 'OPEN' ? 'open' : 'abandoned',
@@ -146,6 +156,37 @@ export function rowOf(repo, pr, { human, costs, profile }) {
   };
 }
 
+/** One task's row: an issue labelled task, from its assignment to its close, with the rows of every pull request that
+ * closes it. Its cost stays unknown while any of its pull requests' is, and before it has one. */
+export function taskRow(repo, issue, prRows) {
+  const prs = [...prRows].sort((a, b) => a.created.localeCompare(b.created) || a.number - b.number);
+  const assigned = issue.timelineItems.nodes.filter((e) => e.label?.name === 'task').map((e) => e.createdAt).sort()[0] ?? issue.createdAt;
+  const landed = prs.find((r) => r.state === 'landed');
+  const tiers = prs.map((r) => r.tier).filter((t) => t !== null);
+  const unknown = prs.find((r) => r.cost === null);
+  const why = [...new Set(prs.flatMap((r) => (r.touchedWhy ? r.touchedWhy.split(', ') : [])))];
+  return {
+    repo,
+    number: issue.number,
+    title: issue.title,
+    url: issue.url,
+    prs: prs.map((r) => r.number),
+    who: prs[0]?.who ?? '?',
+    tier: tiers.length ? Math.max(...tiers) : null,
+    state: landed ? 'landed' : issue.state === 'OPEN' || prs.some((r) => r.state === 'open') ? 'open' : 'abandoned',
+    rounds: prs.reduce((sum, r) => sum + r.rounds, 0),
+    firstPass: prs.find((r) => r.firstPass !== null)?.firstPass ?? null,
+    noRed: prs.some((r) => r.noRed),
+    touched: why.length > 0,
+    touchedWhy: why.join(', '),
+    cost: !prs.length || unknown ? null : prs.reduce((sum, r) => sum + r.cost, 0),
+    costNote: !prs.length ? 'chưa có PR' : unknown ? `#${unknown.number}: ${unknown.costNote}` : [...new Set(prs.map((r) => r.costNote).filter(Boolean))].join('; '),
+    created: assigned,
+    merged: landed?.merged ?? null,
+    hours: landed ? (Date.parse(landed.merged) - Date.parse(assigned)) / 36e5 : null,
+  };
+}
+
 const STATE = { landed: 'đã merge', open: 'đang mở', abandoned: 'bỏ' };
 
 /** The weekly digest, in Vietnamese markdown. */
@@ -158,7 +199,7 @@ export function digest(rows, { since, until, secrets = new Map() }) {
   const lines = [
     `# Bản tin xưởng ${since} → ${until}`,
     '',
-    `${n} việc (mỗi việc một PR): ${landed.length} đã merge, ${rows.filter((r) => r.state === 'open').length} đang mở, ${rows.filter((r) => r.state === 'abandoned').length} bỏ.`,
+    `${n} việc: ${landed.length} đã merge, ${rows.filter((r) => r.state === 'open').length} đang mở, ${rows.filter((r) => r.state === 'abandoned').length} bỏ (${rows.filter((r) => r.state === 'abandoned' && !r.prs.length).length} bỏ trước khi có PR).`,
     '',
     '## Cần anh quyết',
     '',
@@ -176,33 +217,45 @@ export function digest(rows, { since, until, secrets = new Map() }) {
     `- Dùng No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
     `- Có chi phí đo được: ${rate(costed.length, n)}`,
     `- Số vòng trung bình (commit được cổng chấm): ${rounds.length ? (rounds.reduce((s, r) => s + r.rounds, 0) / rounds.length).toFixed(2).replace('.', ',') : '–'} (n=${rounds.length})`,
-    `- Chi phí mỗi việc đã merge (giá API, mọi lần thử cộng lại): ${costed.length && landed.length ? `$${(costed.reduce((s, r) => s + r.cost, 0) / landed.length).toFixed(2)} (chi phí đo được trên ${costed.length}/${n} việc)` : 'chưa đo được'}`,
+    `- Chi phí tương đương giá API mỗi việc đã merge (mọi lần thử cộng lại; không phải tiền mặt): ${costed.length && landed.length ? `$${(costed.reduce((s, r) => s + r.cost, 0) / landed.length).toFixed(2)} (chi phí đo được trên ${costed.length}/${n} việc)` : 'chưa đo được'}`,
     '',
     '## Từng việc',
     '',
-    '| Repo | PR | Việc | Ai | Bậc | Vòng | Chi phí | Anh chạm | Kết quả |',
+    '| Repo | Việc | PR | Ai | Bậc | Vòng | Giá API | Anh chạm | Kết quả |',
     '|---|---|---|---|---|---|---|---|---|',
   );
   for (const r of rows) {
     const cost = r.cost === null ? `? (${r.costNote})` : `$${r.cost.toFixed(2)}${r.costNote ? ` (${r.costNote})` : ''}`;
     lines.push(
-      `| ${r.repo.split('/')[1]} | [#${r.number}](${r.url}) | ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `có (${r.touchedWhy})` : 'không'} | ${STATE[r.state]} |`,
+      `| ${r.repo.split('/')[1]} | [#${r.number}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `có (${r.touchedWhy})` : 'không'} | ${STATE[r.state]} |`,
     );
   }
   if (secrets.size) {
     lines.push('', '## Secret cấp repo (phải là 0: job của mọi nhánh đều đọc được)', '');
     for (const [repo, names] of secrets) lines.push(`- ${repo}: ${names === null ? 'không kiểm được' : names.length ? names.join(', ') : '0'}`);
   }
-  lines.push('', 'Chi phí: token trong profile Claude Code của repo, theo nhánh của PR, tính theo giá API (bin/lib/prices.json). Anh chạm: anh duyệt, nhãn needs-human, hoặc merge không qua auto-merge.');
+  lines.push(
+    '',
+    'Việc: một issue có nhãn task, tính từ lúc gắn nhãn đến lúc đóng, gồm mọi PR đóng nó; PR không đóng việc nào là một việc riêng, tính từ lúc mở.',
+    'Giá API: token trong profile Claude Code của repo, theo nhánh của PR, tính theo giá API (bin/lib/prices.json). Đó là mức dùng, không phải tiền đã trả; chưa gồm reviewer chạy trên GitHub.',
+    'Tiền mặt: phí thuê bao Claude, trả theo tháng, không chia theo việc. Ledger không thấy khoản tiền mặt nào khác.',
+    'Anh chạm: anh duyệt, nhãn needs-human, hoặc merge không qua auto-merge.',
+  );
   return `${lines.join('\n')}\n`;
 }
 
 const QUERY = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){
 number title url body author{login} createdAt mergedAt state headRefName
+closingIssuesReferences(first:10){nodes{number labels(first:20){nodes{name}}}}
 labels(first:30){nodes{name}}
 reviews(first:50){nodes{author{login} state}}
 timelineItems(first:100,itemTypes:[LABELED_EVENT,AUTO_MERGE_ENABLED_EVENT,AUTO_MERGE_DISABLED_EVENT,MERGED_EVENT]){nodes{__typename ... on LabeledEvent{label{name}} ... on MergedEvent{createdAt}}}
 commits(first:100){nodes{commit{oid parents{totalCount} checkSuites(first:20){nodes{app{slug} checkRuns(first:40){nodes{name conclusion}}}}}}}}}}`;
+
+const ISSUE = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){
+number title url createdAt closedAt state stateReason
+timelineItems(first:50,itemTypes:[LABELED_EVENT]){nodes{__typename ... on LabeledEvent{createdAt label{name}}}}
+closedByPullRequestsReferences(first:20,includeClosedPrs:true){nodes{number}}}}}`;
 
 function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -248,20 +301,33 @@ function main(argv) {
     const [owner, name] = repo.split('/');
     const profile = join(profiles, owner, name, 'claude');
     const costs = existsSync(profile) ? branchCosts(profile) : null;
-    const list = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc`])).flat();
-    for (const p of list) {
-      const created = Date.parse(p.created_at);
-      if (created < from || created > to) continue;
-      const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `n=${p.number}`]));
-      rows.push(rowOf(repo, data.data.repository.pullRequest, { human, costs, profile: existsSync(profile) }));
+    const graphql = (query, n) => JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `n=${n}`])).data.repository;
+    const list = (path) => JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/${path}`])).flat().filter((x) => inWindow(x.created_at, x.closed_at, from, to));
+    const pulls = new Map();
+    const pull = (n) => {
+      if (!pulls.has(n)) {
+        const node = graphql(QUERY, n).pullRequest;
+        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: existsSync(profile) }) });
+      }
+      return pulls.get(n);
+    };
+    for (const i of list('issues?labels=task&state=all&per_page=100')) {
+      if (i.pull_request) continue;
+      const node = graphql(ISSUE, i.number).issue;
+      const row = taskRow(repo, node, node.closedByPullRequestsReferences.nodes.map((p) => pull(p.number).row));
+      if (inWindow(row.created, node.closedAt, from, to)) rows.push(row);
+    }
+    for (const p of list('pulls?state=all&per_page=100&sort=created&direction=desc')) {
+      const { node, row } = pull(p.number);
+      if (!node.closingIssuesReferences.nodes.some((i) => i.labels.nodes.some((l) => l.name === 'task'))) rows.push(row);
     }
   }
   rows.sort((a, b) => a.created.localeCompare(b.created));
   if (opts.mode === 'rows') {
-    const head = ['repo', 'pr', 'who', 'tier', 'state', 'rounds', 'first_pass', 'no_red', 'human_touched', 'why', 'cost_usd', 'cost_note', 'hours_to_merge', 'title'];
+    const head = ['repo', 'task', 'prs', 'who', 'tier', 'state', 'rounds', 'first_pass', 'no_red', 'human_touched', 'why', 'cost_usd', 'cost_note', 'hours_to_merge', 'title'];
     console.log(head.join('\t'));
     for (const r of rows)
-      console.log([r.repo, r.number, r.who, r.tier ?? '', r.state, r.rounds, r.firstPass ?? '', r.noRed, r.touched, r.touchedWhy, r.cost?.toFixed(4) ?? '', r.costNote, r.hours?.toFixed(2) ?? '', r.title].join('\t'));
+      console.log([r.repo, r.number, r.prs.join(' '), r.who, r.tier ?? '', r.state, r.rounds, r.firstPass ?? '', r.noRed, r.touched, r.touchedWhy, r.cost?.toFixed(4) ?? '', r.costNote, r.hours?.toFixed(2) ?? '', r.title].join('\t'));
     return;
   }
   const secrets = new Map();

@@ -6,6 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as ledger from '../bin/lib/ledger.mjs';
 import { branchCosts, costOf, digest, rate, rowOf, wilson } from '../bin/lib/ledger.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,7 +46,8 @@ test('counts a message once although its blocks repeat its usage, per branch', (
 });
 
 const run = (name, conclusion) => ({ name, conclusion });
-const green = ['verify', 'rules', 'red-check', 'verify-trusted', 'review', 'verdict'].map((n) => run(n, 'SUCCESS'));
+// The checks kit/.gate/ruleset.json requires; a first commit is green when every one of them passed on it.
+const green = ['verify', 'review', 'verdict', 'tier'].map((n) => run(n, 'SUCCESS'));
 const pr = (over) => ({
   number: 7,
   title: 'Limit sends',
@@ -104,7 +106,9 @@ test('the digest gives every rate with its count, and lists what waits for the H
   ];
   const text = digest(rows, { since: '2026-10-14', until: '2026-10-21', secrets: new Map([['o/r', ['DEPLOY_KEY']], ['o/s', []], ['o/t', null]]) });
   assert.match(text, /- o\/r: DEPLOY_KEY\n- o\/s: 0\n- o\/t: không kiểm được/);
-  assert.match(text, /2 việc \(mỗi việc một PR\): 1 đã merge, 1 đang mở, 0 bỏ/);
+  assert.match(text, /2 việc: 1 đã merge, 1 đang mở, 0 bỏ \(0 bỏ trước khi có PR\)/);
+  assert.match(text, /Chi phí tương đương giá API mỗi việc đã merge/);
+  assert.match(text, /\nTiền mặt: phí thuê bao Claude, trả theo tháng, không chia theo việc/);
   assert.match(text, /o\/r#1 Limit sends — bậc 3, chờ anh duyệt/);
   assert.match(text, /Việc đã merge: 1\/2 \(50,0%; KTC 95%: /);
   assert.match(text, /anh phải chạm: 0\/1 /);
@@ -169,4 +173,53 @@ test('a sweep runs once, alone, never as the Human, and leaves a failure report 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+const issue = (over) => ({
+  number: 3,
+  title: 'Rate-limit sends',
+  url: 'https://github.com/o/r/issues/3',
+  createdAt: '2026-10-19T08:00:00Z',
+  closedAt: null,
+  state: 'OPEN',
+  stateReason: null,
+  timelineItems: { nodes: [{ __typename: 'LabeledEvent', createdAt: '2026-10-19T09:00:00Z', label: { name: 'task' } }] },
+  ...over,
+});
+
+test('a task runs from its assignment to its close, across every pull request that closes it', () => {
+  const opts = { human: 'boss', costs: new Map([['limit', { dollars: 1, models: new Set(['claude-sonnet-5-5']), unpriced: new Set() }], ['limit-2', { dollars: 2, models: new Set(['claude-sonnet-5-5']), unpriced: new Set() }]]), profile: true };
+  const dropped = rowOf('o/r', pr({ number: 7, state: 'CLOSED', labels: { nodes: [{ name: 'tier-2' }] }, commits: { nodes: [commit('a', [run('verify', 'FAILURE')])] } }), opts);
+  const merged = rowOf('o/r', pr({ number: 8, headRefName: 'limit-2', createdAt: '2026-10-20T10:00:00Z', mergedAt: '2026-10-20T13:00:00Z', state: 'MERGED', commits: { nodes: [commit('b', green)] }, timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'MergedEvent' }] } }), opts);
+  const row = ledger.taskRow('o/r', issue({ state: 'CLOSED', closedAt: '2026-10-20T13:00:00Z' }), [merged, dropped]);
+  assert.equal(row.number, 3);
+  assert.deepEqual(row.prs, [7, 8]);
+  assert.equal(row.state, 'landed');
+  assert.equal(row.created, '2026-10-19T09:00:00Z');
+  assert.equal(row.hours, 28);
+  assert.equal(row.rounds, 2);
+  assert.equal(row.firstPass, false);
+  assert.equal(row.tier, 2);
+  assert.equal(row.cost, 3);
+});
+
+test('a task dropped before any pull request is a row, and its cost stays unknown', () => {
+  const row = ledger.taskRow('o/r', issue({ state: 'CLOSED', stateReason: 'NOT_PLANNED', closedAt: '2026-10-20T08:00:00Z' }), []);
+  assert.equal(row.state, 'abandoned');
+  assert.deepEqual(row.prs, []);
+  assert.equal(row.cost, null);
+  assert.equal(row.costNote, 'chưa có PR');
+  assert.equal(row.firstPass, null);
+  const text = digest([row], { since: '2026-10-14', until: '2026-10-21' });
+  assert.match(text, /1 việc: 0 đã merge, 0 đang mở, 1 bỏ \(1 bỏ trước khi có PR\)/);
+});
+
+test('the window holds every task alive in it: started in it, open at its end, or closed inside it', () => {
+  const from = Date.parse('2026-10-14T00:00:00Z');
+  const to = Date.parse('2026-10-21T23:59:59Z');
+  assert.equal(ledger.inWindow('2026-10-01T00:00:00Z', null, from, to), true);
+  assert.equal(ledger.inWindow('2026-10-01T00:00:00Z', '2026-10-15T00:00:00Z', from, to), true);
+  assert.equal(ledger.inWindow('2026-10-15T00:00:00Z', '2026-10-30T00:00:00Z', from, to), true);
+  assert.equal(ledger.inWindow('2026-10-01T00:00:00Z', '2026-10-10T00:00:00Z', from, to), false);
+  assert.equal(ledger.inWindow('2026-10-25T00:00:00Z', null, from, to), false);
 });
