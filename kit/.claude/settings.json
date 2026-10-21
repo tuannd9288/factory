@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git push --no-verify:*)",
+      "Bash(git push --delete:*)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(git commit -n:*)",
+      "Bash(git tag:*)",
+      "Bash(gh pr merge --admin:*)",
+      "Bash(gh pr review --approve:*)",
+      "Bash(gh release:*)",
+      "Bash(gh api -X DELETE:*)",
+      "Bash(gh repo delete:*)",
+      "Bash(gh ruleset:*)",
+      "Read(./.env*)",
+      "Read(~/.ssh/**)"
+    ]
+  }
+}

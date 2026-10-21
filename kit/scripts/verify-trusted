@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# The gate's check of a change to the gate itself, run from main's checkout so the candidate cannot edit it.
+#   scripts/verify-trusted <candidate-dir> <base-sha>
+# With no gate file changed it passes at once. Otherwise: main's checks run on the candidate's code (main's gate files
+# laid over a copy of it), and the candidate's own checks must fail on main's fixtures (prove-check --tree), so a
+# verify replaced by `exit 0` or a check switched off is caught here.
+set -uo pipefail
+trusted=$(git rev-parse --show-toplevel) || exit 2
+candidate=$(cd "${1:?candidate checkout}" && pwd) || exit 2
+base=${2:?base sha}
+cd "$trusted" || exit 2
+
+gate_paths='^(\.github/|\.gate/|\.githooks/|scripts/(verify|verify-trusted|setup|rules|tier|red-check|prove-check|review)$|scripts/lib/)'
+changed=$(git -C "$candidate" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD) || { echo "verify-trusted: could not diff the candidate against $base"; exit 2; }
+gate=$(printf '%s\n' "$changed" | grep -E "$gate_paths")
+if [ -z "$gate" ]; then
+  echo "verify-trusted: no gate file changed"
+  exit 0
+fi
+echo "verify-trusted: the change touches the gate:"
+printf '%s\n' "$gate" | sed 's/^/  /'
+
+work=$(mktemp -d) || exit 2
+trap 'git -C "$candidate" worktree prune >/dev/null 2>&1; rm -rf "$work"' EXIT
+status=0
+
+# 1. Main's checks on the candidate's code.
+git -C "$candidate" worktree add --detach --quiet "$work/overlay" HEAD || exit 2
+(
+  cd "$work/overlay" || exit 2
+  printf '%s\n' "$gate" | while IFS= read -r path; do
+    if git -C "$trusted" cat-file -e "HEAD:$path" 2>/dev/null; then
+      mkdir -p "$(dirname "$path")" && git -C "$trusted" show "HEAD:$path" >"$path"
+      [ -x "$trusted/$path" ] && chmod +x "$path"
+    else
+      rm -f "$path"
+    fi
+  done
+  git add -A && GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=gate GIT_CONFIG_KEY_1=user.email \
+    GIT_CONFIG_VALUE_1=gate@localhost GIT_CONFIG_KEY_2=core.hooksPath GIT_CONFIG_VALUE_2=/dev/null \
+    git commit -qm "main's gate files over the candidate" --allow-empty
+) >/dev/null 2>&1 || { echo "verify-trusted: could not lay main's gate files over the candidate"; exit 2; }
+. .gate/config.sh || exit 2
+gate_prepare "$work/overlay" >/dev/null 2>&1
+(cd "$work/overlay" && GATE_BASE="$base" scripts/verify) >"$work/verify.out" 2>&1 || status=1
+if [ "$status" -ne 0 ]; then
+  echo "verify-trusted: main's verify fails on the candidate's code:"
+  tail -n 30 "$work/verify.out" | sed 's/^/  /'
+fi
+
+# 2. The candidate's checks against main's fixtures.
+if ! scripts/prove-check --all --tree "$candidate" >"$work/prove.out" 2>&1; then
+  status=1
+  echo "verify-trusted: the candidate's checks no longer fail on main's fixtures:"
+  sed 's/^/  /' "$work/prove.out"
+fi
+[ "$status" -eq 0 ] && echo "verify-trusted: main's verify passes on the candidate, and the candidate's checks fail on main's fixtures"
+exit "$status"

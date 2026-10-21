@@ -1,0 +1,116 @@
+# The gate's trusted half. On pull_request_target GitHub runs main's copy of this file, and every job runs main's
+# scripts from ./trusted, whatever the pull request changes. The candidate is checked out into ./candidate:
+# verify-trusted runs its code under main's checks with no secrets; review and verdict only read it, with the
+# reviewer's credentials from the environment "reviewer", whose branch policy admits main alone. No job is skipped by
+# a condition, since a skipped job satisfies a required check.
+name: gate-trusted
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-trusted-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  BASE: ${{ github.event.pull_request.base.sha }}
+
+jobs:
+  verify-trusted:
+    name: verify-trusted
+    runs-on: ${{ fromJSON(vars.GATE_RUNNER || '"ubuntu-latest"') }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - run: scripts/verify-trusted ../candidate "$BASE"
+        working-directory: trusted
+
+  review:
+    name: review
+    runs-on: ubuntu-latest
+    environment: reviewer
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - run: scripts/review review ../candidate "$BASE"
+        working-directory: trusted
+        env:
+          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
+
+  verdict:
+    name: verdict
+    runs-on: ubuntu-latest
+    environment: reviewer
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - run: scripts/review verdict ../candidate "$BASE"
+        working-directory: trusted
+        env:
+          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
+          GATE_TIER_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+
+  tier:
+    name: tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - working-directory: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          out=$(../trusted/scripts/tier --base "$BASE" --rules ../trusted --labels "$LABELS")
+          echo "$out" | tee -a "$GITHUB_STEP_SUMMARY"
+          n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label "tier-$n"
+          for k in 1 2 3; do
+            [ "$k" -lt "$n" ] && gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "tier-$k" >/dev/null 2>&1
+          done
+          exit 0

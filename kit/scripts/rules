@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# The hand-in rules on the lines a change adds; see scripts/lib/rules.mjs for the arguments.
+exec node "$(dirname "$0")/lib/rules.mjs" "$@"

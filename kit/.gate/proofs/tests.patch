@@ -1,0 +1,14 @@
+Proof for the tests check: a test that fails.
+Says: tests failed
+
+diff --git a/gate-proof/failing.test.mjs b/gate-proof/failing.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/gate-proof/failing.test.mjs
+@@ -0,0 +1,6 @@
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++
++test('gate proof: one plus one', () => {
++  assert.equal(1 + 1, 3);
++});

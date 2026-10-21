@@ -1,0 +1,11 @@
+Proof for the rules check: a test focused with .only, which makes the runner skip every other test.
+Says: test-focused
+
+diff --git a/gate-proof/focused.test.mjs b/gate-proof/focused.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/gate-proof/focused.test.mjs
+@@ -0,0 +1,3 @@
++import { test } from 'node:test';
++
++test.only('the only test that runs', () => {});

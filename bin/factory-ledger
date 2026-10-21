@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The factory's ledger and weekly digest, read from GitHub and the repositories' Claude Code profiles; no model runs.
+#   bin/factory-ledger [--repo owner/name]... [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--rows | --digest]
+#                      [--post owner/name]
+# --rows prints one tab-separated row per task (one pull request opened in the window); --digest (the default) prints
+# the Vietnamese digest; --post files it as an issue labelled "digest" in the named repository (the factory's own).
+# Without --repo it reads every repository under FACTORY_ROOT (default: this clone) that has joined.
+exec node "$(dirname "$0")/lib/ledger.mjs" "$@"

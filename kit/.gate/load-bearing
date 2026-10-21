@@ -1,0 +1,7 @@
+# Tier 2: paths where a defect costs money, data or trust. A change here needs the verdict as well as the review,
+# and its failing test is committed first with a Failing-test: trailer. One gitignore-style pattern per line.
+# The Human confirms this list when the repository joins; it is empty until then. Examples:
+#   src/auth/
+#   src/billing/
+#   migrations/
+#   src/webhooks/signature.*

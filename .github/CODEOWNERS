@@ -1,0 +1,2 @@
+# Every change to the factory changes every repository's gate at its next kit pull request: all of it is tier 3.
+* @tuannd9288

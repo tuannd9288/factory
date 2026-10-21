@@ -1,0 +1,17 @@
+{
+  "$comment": "US dollars per million tokens, Anthropic first-party API rates, from the claude-api skill of Claude Code 2.1.305 (price table cached 2026-10-06). Cache writes are 1.25x input for the 5-minute TTL and 2x for the 1-hour TTL; cache reads are per model. Subscription sessions are not billed per token: the ledger reports what the same tokens cost on the API, so arms and months compare on one price basis.",
+  "models": {
+    "claude-fable-5-1": { "input": 10, "output": 50, "write5m": 12.5, "write1h": 20, "read": 0.25 },
+    "claude-fable-5": { "input": 10, "output": 50, "write5m": 12.5, "write1h": 20, "read": 1 },
+    "claude-opus-5-5": { "input": 4, "output": 20, "write5m": 5, "write1h": 8, "read": 0.2 },
+    "claude-opus-5": { "input": 5, "output": 25, "write5m": 6.25, "write1h": 10, "read": 0.5 },
+    "claude-opus-4-8": { "input": 5, "output": 25, "write5m": 6.25, "write1h": 10, "read": 0.5 },
+    "claude-opus-4-7": { "input": 5, "output": 25, "write5m": 6.25, "write1h": 10, "read": 0.5 },
+    "claude-opus-4-6": { "input": 5, "output": 25, "write5m": 6.25, "write1h": 10, "read": 0.5 },
+    "claude-sonnet-5-5": { "input": 2, "output": 10, "write5m": 2.5, "write1h": 4, "read": 0.2 },
+    "claude-sonnet-5": { "input": 2, "output": 10, "write5m": 2.5, "write1h": 4, "read": 0.2 },
+    "claude-sonnet-4-6": { "input": 3, "output": 15, "write5m": 3.75, "write1h": 6, "read": 0.3 },
+    "claude-haiku-5-5": { "input": 0.1, "output": 0.5, "write5m": 0.125, "write1h": 0.2, "read": 0.01 },
+    "claude-haiku-4-5": { "input": 1, "output": 5, "write5m": 1.25, "write1h": 2, "read": 0.1 }
+  }
+}

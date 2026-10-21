@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# The review and verdict jobs, run from main's checkout on the candidate's diff, which is read and never run.
+#   scripts/review review|verdict <candidate-dir> <base-sha>
+# GATE_REVIEWER picks the reviewer; it is a repository variable, which only an admin sets:
+#   stub    scratch repositories only: no model runs; it fails while the diff adds a line holding GATE-STUB-FINDING
+#           (review) or GATE-STUB-VERDICT (verdict)
+#   unset   fails closed: no reviewer is configured, so nothing merges on this gate
+# The verdict passes at once on tier 1, so the required check always exists; the tier comes from main's rules and
+# only rises with the pull request's tier labels (GATE_TIER_LABELS).
+set -uo pipefail
+trusted=$(git rev-parse --show-toplevel) || exit 2
+job=${1:?review or verdict}
+candidate=$(cd "${2:?candidate checkout}" && pwd) || exit 2
+base=${3:?base sha}
+cd "$trusted" || exit 2
+
+if [ "$job" = verdict ]; then
+  tier=$(cd "$candidate" && "$trusted/scripts/tier" --base "$base" --rules "$trusted" --labels "${GATE_TIER_LABELS:-}") || { echo "verdict: the tier could not be computed, so the verdict is required"; tier="tier 2"; }
+  echo "$tier"
+  case "$tier" in
+    "tier 1"*) echo "verdict: tier 1: not required"; exit 0 ;;
+  esac
+fi
+
+case "${GATE_REVIEWER:-}" in
+  stub)
+    marker=GATE-STUB-FINDING
+    [ "$job" = verdict ] && marker=GATE-STUB-VERDICT
+    hits=$(git -C "$candidate" diff --no-color -U0 "$base" HEAD | grep -E "^\+.*$marker" | head -5)
+    if [ -n "$hits" ]; then
+      echo "$job (stub, no model ran): a blocking finding is open:"
+      printf '%s\n' "$hits" | sed 's/^/  /'
+      exit 1
+    fi
+    echo "$job (stub, no model ran): no finding"
+    ;;
+  "")
+    echo "$job: no reviewer is configured (repository variable GATE_REVIEWER is unset), so this check fails closed"
+    exit 1
+    ;;
+  *)
+    echo "$job: unknown reviewer '$GATE_REVIEWER'; the reviewer is chosen on the Human's fixtures before it is wired here"
+    exit 1
+    ;;
+esac

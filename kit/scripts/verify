@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# The repository's one gate command. It prints only failures and a one-line summary; a check that cannot run fails.
+#   scripts/verify                 every check, then every check's proof (scripts/prove-check --all)
+#   scripts/verify --fast          the hand-in rules and gate_fast on the staged files (the pre-commit hook)
+#   scripts/verify --only <check>  one check, no proofs (prove-check runs this)
+#   scripts/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
+# GATE_BASE names the commit the rules check reads from (default: the merge-base with origin/main).
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 2
+export GATE_REPORT=${GATE_REPORT:-$PWD/.gate/report.xml}
+. .gate/config.sh || { echo "verify: could not read .gate/config.sh"; exit 2; }
+
+BUILTIN="instructions rules tests"
+start=$SECONDS
+log=$(mktemp -d) || exit 2
+trap 'rm -rf "$log"' EXIT
+ran=0
+failed=""
+
+# run <name> <command...>: silent while it passes; on a failure, its name and the end of its output.
+run() {
+  local name=$1
+  shift
+  ran=$((ran + 1))
+  "$@" >"$log/$name" 2>&1
+  local code=$?
+  [ "$code" -eq 0 ] && return 0
+  failed="$failed $name"
+  if [ "$code" -eq 127 ] || [ "$code" -eq 126 ]; then echo "verify: $name could not run (exit $code)"; else echo "verify: $name failed"; fi
+  tail -n 40 "$log/$name" | sed 's/^/  /'
+  return 0
+}
+
+check_instructions() {
+  [ -f AGENTS.md ] || { echo "AGENTS.md is missing"; return 1; }
+  local n
+  n=$(wc -l <AGENTS.md | tr -d ' ')
+  [ "$n" -le 150 ] || { echo "AGENTS.md has $n lines; at most 150"; return 1; }
+  [ "$(cat CLAUDE.md 2>/dev/null)" = "@AGENTS.md" ] || { echo "CLAUDE.md must be the single line @AGENTS.md"; return 1; }
+}
+
+check_rules() {
+  scripts/rules ${GATE_BASE:+--base "$GATE_BASE"}
+}
+
+check_tests() {
+  mkdir -p "$(dirname "$GATE_REPORT")" && rm -f "$GATE_REPORT"
+  local code=0 summary
+  gate_tests "$@" >/dev/null 2>&1 || code=$?
+  summary=$(node scripts/lib/junit.mjs --failures "$GATE_REPORT") || { echo "the JUnit report could not be read"; return 1; }
+  case "$summary" in
+    "tests=0 "*) echo "no tests ran ($(echo "$summary" | head -1))"; return 1 ;;
+  esac
+  [ "$code" -eq 0 ] && return 0
+  echo "tests failed (exit $code): $summary"
+  return 1
+}
+
+known() {
+  case " $BUILTIN $GATE_CHECKS " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+case "${1:-}" in
+  --fast)
+    run rules scripts/rules --staged
+    staged=$(git diff --cached --name-only --diff-filter=ACMR)
+    # shellcheck disable=SC2086
+    run fast gate_fast $staged
+    ;;
+  --only)
+    known "${2:-}" || { echo "verify: no check named '${2:-}' (checks: $BUILTIN $GATE_CHECKS)"; exit 2; }
+    run "$2" "check_$2"
+    ;;
+  --tests)
+    shift
+    [ "$#" -gt 0 ] || { echo "verify: --tests needs test files"; exit 2; }
+    run tests check_tests "$@"
+    ;;
+  "")
+    for name in $BUILTIN $GATE_CHECKS; do run "$name" "check_$name"; done
+    [ -z "$failed" ] && run proofs scripts/prove-check --all
+    ;;
+  *)
+    echo "verify: unknown argument $1"
+    exit 2
+    ;;
+esac
+
+took=$((SECONDS - start))
+if [ -z "$failed" ]; then
+  echo "verify: $ran passed in ${took}s"
+  exit 0
+fi
+echo "verify: failed:$failed (of $ran) in ${took}s"
+exit 1

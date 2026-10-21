@@ -1,0 +1,21 @@
+Proof for red-check: a source change whose new test already passes at the base, so it shows nothing.
+Run: scripts/red-check --base HEAD~1
+Says: pass at the base
+
+diff --git a/gate-proof/red.mjs b/gate-proof/red.mjs
+new file mode 100644
+--- /dev/null
++++ b/gate-proof/red.mjs
+@@ -0,0 +1 @@
++export const answer = () => 42;
+diff --git a/gate-proof/red.test.mjs b/gate-proof/red.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/gate-proof/red.test.mjs
+@@ -0,0 +1,6 @@
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++
++test('arithmetic holds anywhere', () => {
++  assert.equal(2 * 21, 42);
++});

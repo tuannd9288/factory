@@ -1,0 +1,16 @@
+The factory takes the following from other projects.
+
+seatwork (https://github.com/sting9k/seatwork), commit f5373411227c982069d30cceb8774bbf67a0badb
+(Release 1.5.2, 2026-10-19). The repository carries no license file at that commit; its owner allows free use
+in this factory.
+
+  kit/.gate/handin.json        plugin/shared/safety/handin.json, verbatim: the 34 hand-in rules, the
+                               language, skip, test and check-config tables.
+  kit/scripts/lib/rules.mjs    a dependency-free port of the matcher in plugin/server/safety/handin.ts:
+                               parseDiff, maskOf, layerOf, lineFindings (with the hard-coded secret check and
+                               entropy), assertionsDropped, checkConfigFindings and the test-deleted finding;
+                               the ASSERTION pattern of plugin/server/safety/council/gaming.ts.
+                               Not taken: the council (gaming, narrowing), the command gate (scriptCommands),
+                               answersInSource, the dependency and related-test readers, the finding store and
+                               its acknowledgements, which the line comment `gate-allow <rule>: <reason>`
+                               replaces. Added here: the Failing-test guard, and skipping .gate/proofs/.

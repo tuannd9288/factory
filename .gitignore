@@ -1,0 +1,11 @@
+# This root holds the factory's own files; every repository cloned beside them is ignored.
+/*
+!/.gitignore
+!/.github/
+!/AGENTS.md
+!/NOTICE
+!/bin/
+!/kit/
+!/scripts/
+!/test/
+.DS_Store

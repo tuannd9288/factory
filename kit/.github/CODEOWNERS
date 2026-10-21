@@ -1,0 +1,10 @@
+# Tier 3: a change to the gate or to the rules agents follow waits for the Human's approval.
+# GitHub reads this file from the base branch, so a pull request cannot take itself out of it.
+# scripts/tier reads it too; a deploy configuration the repository has belongs here as well.
+/.github/   @OWNER
+/.gate/     @OWNER
+/.githooks/ @OWNER
+/.claude/   @OWNER
+/scripts/   @OWNER
+/AGENTS.md  @OWNER
+/CLAUDE.md  @OWNER

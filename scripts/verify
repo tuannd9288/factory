@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# The factory's own checks: the kit's tests, which show each check failing on a bad input, and the kit's templates.
+# Prints only failures and a one-line summary.
+set -uo pipefail
+cd "$(dirname "$0")/.." || exit 2
+start=$SECONDS
+failed=0
+
+n=$(wc -l <kit/AGENTS.md | tr -d ' ')
+[ "$n" -le 150 ] || { echo "verify: kit/AGENTS.md has $n lines; at most 150"; failed=1; }
+for f in kit/scripts/* kit/.githooks/* bin/onboard bin/factory-ledger scripts/verify; do
+  [ -f "$f" ] || continue
+  head -1 "$f" | grep -q bash || continue
+  bash -n "$f" 2>/dev/null || { echo "verify: $f does not parse"; failed=1; }
+done
+
+out=$(env -u NODE_TEST_CONTEXT node --test --test-concurrency=4 'test/*.test.mjs' 2>&1)
+code=$?
+summary=$(printf '%s\n' "$out" | grep -E '^ℹ (tests|fail) [0-9]+$' | sed 's/^ℹ //' | tr '\n' ' ')
+tests=$(printf '%s\n' "$out" | sed -n 's/^ℹ tests \([0-9][0-9]*\)$/\1/p')
+if [ "$code" -ne 0 ]; then
+  printf '%s\n' "$out" | grep -E '^\s*✖|AssertionError|Error:' | head -40
+  echo "verify: the kit's tests failed (${summary% })"
+  failed=1
+elif [ "${tests:-0}" -eq 0 ]; then
+  echo "verify: no tests ran"
+  failed=1
+fi
+[ "$failed" -eq 0 ] || { echo "verify: failed in $((SECONDS - start))s"; exit 1; }
+echo "verify: ${tests} tests passed in $((SECONDS - start))s"

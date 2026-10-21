@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Takes a repository into the factory: clones it under the factory root, creates its agent profile (only now),
+# writes its .envrc, and opens the kit pull request in it. Logging into the profile stays the Human's.
+#   bin/onboard <repo-url> [--no-pr]
+# FACTORY_ROOT (default: this clone) is where repositories live; AGENT_PROFILES (default: ~/.agent-profiles) where
+# profiles live; FACTORY_HUMAN (default: tuannd9288) is the code owner of tier 3.
+set -euo pipefail
+factory=$(cd "$(dirname "$0")/.." && pwd)
+root=${FACTORY_ROOT:-$factory}
+profiles=${AGENT_PROFILES:-$HOME/.agent-profiles}
+human=${FACTORY_HUMAN:-tuannd9288}
+url=${1:?usage: bin/onboard <repo-url> [--no-pr]}
+open_pr=1
+[ "${2:-}" = --no-pr ] && open_pr=0
+name=$(basename "${url%/}" .git)
+dest=$root/$name
+[ -e "$dest" ] && { echo "onboard: $dest exists; nothing done"; exit 1; }
+
+echo "onboard: cloning $url into $dest"
+git clone --quiet "$url" "$dest"
+
+mkdir -p "$profiles/$name/claude" "$profiles/$name/codex"
+echo "onboard: profile $profiles/$name/{claude,codex}"
+
+shown=$profiles
+[ "$profiles" = "$HOME/.agent-profiles" ] && shown='$HOME/.agent-profiles'
+cat >"$dest/.envrc" <<EOF
+export CLAUDE_CONFIG_DIR="$shown/$name/claude"
+export CODEX_HOME="$shown/$name/codex"
+EOF
+grep -qx '.envrc' "$dest/.git/info/exclude" 2>/dev/null || echo '.envrc' >>"$dest/.git/info/exclude"
+if command -v direnv >/dev/null; then direnv allow "$dest"; else echo "onboard: direnv is not installed; run 'direnv allow' in $dest later"; fi
+
+cd "$dest"
+git switch --quiet -c factory/kit
+lists=$(mktemp -d)
+trap 'rm -rf "$lists"' EXIT
+(cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
+: >"$lists/kept"
+while IFS= read -r path; do
+  if [ -e "$path" ]; then
+    echo "$path" >>"$lists/kept"
+    continue
+  fi
+  mkdir -p "$(dirname "$path")"
+  cp -p "$factory/kit/$path" "$path"
+  case "$path" in
+    .github/CODEOWNERS) sed -i.bak "s/@OWNER/@$human/" "$path" && rm -f "$path.bak" ;;
+    AGENTS.md) sed -i.bak "s/<repo>/$name/" "$path" && rm -f "$path.bak" ;;
+  esac
+done <"$lists/kit"
+{ cat "$lists/kit"; echo .gate/kit-files; } | LC_ALL=C sort -u >.gate/kit-files
+scripts/setup
+git add -A
+git commit --quiet -m "Join the factory: gate, hooks, hand-in rules and templates" \
+  -m "From tuannd9288/factory $(git -C "$factory" rev-parse --short HEAD 2>/dev/null || echo '(uncommitted)'). Files the repository already had were kept: $(wc -l <"$lists/kept" | tr -d ' ')."
+echo "onboard: kit committed on factory/kit ($(wc -l <"$lists/kit" | tr -d ' ') files, $(wc -l <"$lists/kept" | tr -d ' ') kept as they were)"
+
+[ "$open_pr" -eq 1 ] || { echo "onboard: --no-pr; push factory/kit and open the pull request yourself"; exit 0; }
+
+slug=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+for label in tier-1 tier-2 tier-3 needs-human; do gh label create "$label" --repo "$slug" --force >/dev/null; done
+git push --quiet -u origin factory/kit
+kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
+gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng: cổng, hook, luật nộp bài và mẫu" --body "$(cat <<EOF
+## Tóm tắt cho người quyết định
+- Mục đích: đưa $name vào xưởng bằng bộ kit của tuannd9288/factory.
+- Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\`, \`.githooks/\`, hai workflow cổng, mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`.
+- Bằng chứng: hook pre-commit đã chạy \`scripts/verify --fast\` khi commit.
+- Bậc: 3 (chạm \`.github/\`, \`scripts/\`, \`.gate/\`).
+- Hoàn tác: revert PR này.
+- Cần anh quyết: có — xác nhận \`.gate/load-bearing\` và nhập ruleset; đề xuất: duyệt sau khi phiên của repo điền danh sách đường dẫn bậc 2.
+
+## File repo đã có, kit giữ nguyên (phiên của repo hợp nhất tay)
+${kept:-  - không có}
+
+## Việc của anh sau khi merge
+1. Nhập ruleset: \`gh api -X POST repos/$slug/rulesets --input .gate/ruleset.json\`.
+2. Tạo environment \`reviewer\` chỉ cho nhánh \`main\`, đặt secret của reviewer vào đó (không đặt secret ở mức repo: job \`pull_request\` của mọi nhánh đọc được).
+3. Biến repo: \`GATE_RUNNER\` (ví dụ \`["self-hosted","factory"]\`; bỏ trống là runner GitHub), \`GATE_REVIEWER\` (chưa đặt thì \`review\` và \`verdict\` đỏ, không gì tự merge).
+4. Đăng nhập profile: mở pane mới trong repo, kiểm tra \`echo \$CLAUDE_CONFIG_DIR\`, chạy \`claude\`.
+EOF
+)"
