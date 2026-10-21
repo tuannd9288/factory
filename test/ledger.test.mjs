@@ -115,6 +115,7 @@ test('the queue updates the oldest pull request left behind, one at a time', asy
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: 'PENDING' })]), null);
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: 'FAILURE' })]).number, 1);
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'CLEAN')]), null);
+  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND', { checks: 'FAILURE' }), p(2, '2026-10-21T02', 'BEHIND')]).number, 2);
 });
 
 test('the queue re-runs a failed verdict once someone other than the author approved the head after it', async () => {

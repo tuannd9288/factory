@@ -8,12 +8,13 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-/** The pull request to update now, or null: the oldest one waiting on auto-merge behind its base, unless another
- * one waiting on auto-merge is up to date and still being judged. */
+/** The pull request to update now, or null: the oldest one waiting on auto-merge behind its base whose last
+ * judgement did not fail (a failing one needs a new commit, which the gate judges anyway), unless another one waiting
+ * on auto-merge is up to date and still being judged. */
 export function pickUpdate(prs) {
   const waiting = prs.filter((p) => p.autoMerge && !p.isDraft);
   if (waiting.some((p) => p.mergeStateStatus !== 'BEHIND' && p.checks === 'PENDING')) return null;
-  const behind = waiting.filter((p) => p.mergeStateStatus === 'BEHIND').sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const behind = waiting.filter((p) => p.mergeStateStatus === 'BEHIND' && p.checks !== 'FAILURE').sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return behind[0] ?? null;
 }
 
