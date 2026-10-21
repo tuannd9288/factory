@@ -21,9 +21,11 @@ done
 [ -n "$base" ] || base=$(git merge-base HEAD origin/main 2>/dev/null) || { echo "red-check: no merge-base with origin/main; pass --base"; exit 2; }
 base=$(git rev-parse --verify "$base^{commit}") || { echo "red-check: $base is not a commit"; exit 2; }
 
-kinds=$(git -c core.quotePath=false diff --name-only --no-renames --diff-filter=AM "$base" HEAD | node scripts/lib/paths.mjs) || { echo "red-check: could not sort the changed paths"; exit 2; }
-tests=$(printf '%s\n' "$kinds" | sed -n 's/^test	//p')
-sources=$(printf '%s\n' "$kinds" | sed -n 's/^source	//p')
+# A deleted source file is a source change; a test is one the head still holds.
+kinds() { git -c core.quotePath=false diff --name-only --no-renames --diff-filter="$1" "$base" HEAD | node scripts/lib/paths.mjs; }
+tests=$(kinds AM) && sources=$(kinds AMD) || { echo "red-check: could not sort the changed paths"; exit 2; }
+tests=$(printf '%s\n' "$tests" | sed -n 's/^test	//p')
+sources=$(printf '%s\n' "$sources" | sed -n 's/^source	//p')
 
 if [ -z "$sources" ]; then
   echo "red-check: no source change"

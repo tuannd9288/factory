@@ -124,7 +124,7 @@ describe('junit reader', () => {
 
 describe('red-check', () => {
   let r;
-  before(() => (r = repoWithKit()));
+  before(() => (r = repoWithKit({ 'src/old.js': 'export const old = 1;\n' })));
   after(() => r.cleanup());
   const branch = (name, files, body) => {
     git(r.repo, 'switch', '-q', '-C', name, 'origin/main');
@@ -169,6 +169,11 @@ describe('red-check', () => {
     assert.equal(out.code, 1, out.out);
     out = branch('notest-reason', { 'src/math.js': MUL }, 'Summary\nNo-red: adds a helper nothing calls yet\n');
     assert.equal(out.code, 0, out.out);
+  });
+  test('counts a deleted source file as a source change', () => {
+    const out = branch('gone', { 'src/old.js': null });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /source changed with no new or changed test:\n {2}src\/old\.js/);
   });
   test('fails when the tests do not pass at the head', () => {
     const out = branch('broken', { 'src/math.js': MUL.replace('a * b', 'a + b'), 'test/mul.test.js': RED_AT_BASE });
@@ -268,6 +273,18 @@ describe('verify and prove-check', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /no tests ran|tests failed|could not run/);
     git(r.repo, 'checkout', '-q', '--', '.gate/config.sh');
+  });
+  test('fails a JUnit report that lists failures although the runner exits 0', () => {
+    const config = readFileSync(join(r.repo, '.gate/config.sh'), 'utf8');
+    write(r.repo, {
+      '.gate/config.sh': config.replace('"$@"\n}', '"$@" || true\n}'),
+      'test/fail.test.js': "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\ntest('fails', () => assert.equal(1, 2));\n",
+    });
+    const out = script(r.repo, 'verify', ['--only', 'tests']);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tests failed \(exit 0\): tests=\d+ failures=1/);
+    git(r.repo, 'checkout', '-q', '--', '.gate/config.sh');
+    write(r.repo, { 'test/fail.test.js': null });
   });
   test('prove-check fails a check that passes its fixture', () => {
     write(r.repo, { 'scripts/rules': '#!/usr/bin/env bash\nexit 0\n' });

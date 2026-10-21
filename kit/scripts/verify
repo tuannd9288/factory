@@ -52,10 +52,11 @@ check_tests() {
   local code=0 summary
   gate_tests "$@" >/dev/null 2>&1 || code=$?
   summary=$(node scripts/lib/junit.mjs --failures "$GATE_REPORT") || { echo "the JUnit report could not be read"; return 1; }
+  # The report decides as much as the exit code: a runner that exits 0 over failed tests still fails here.
   case "$summary" in
     "tests=0 "*) echo "no tests ran ($(echo "$summary" | head -1))"; return 1 ;;
+    *" failures=0 errors=0 "*) [ "$code" -eq 0 ] && return 0 ;;
   esac
-  [ "$code" -eq 0 ] && return 0
   echo "tests failed (exit $code): $summary"
   return 1
 }
