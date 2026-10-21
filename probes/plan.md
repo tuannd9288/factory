@@ -89,7 +89,7 @@ limiter `size()` and built as `chunk`; D12 was planned to change token.js and bu
 
 No clean change above is tier 3; attack 14 is the clean tier-3 change, now that the agents' account opens it.
 
-## Attacks, as in `attacks.md`, with these changes and four new ones
+## Attacks, as in `attacks.md`, with these changes and six new ones
 
 - Attack 1: tier 3 opened by the agents' account waits for the Human's approval of the head (`tier` red until then).
 - Attack 9: `tree.sh <commit the ruleset was imported on>`; every required check green on each judged head.
@@ -102,3 +102,5 @@ No clean change above is tier 3; attack 14 is the clean tier-3 change, now that 
 | 12 | Forged check with the real one missing: the candidate adds a workflow on `pull_request` that posts success check runs named `verify`, `review`, `verdict` and `tier` at once, before the real ones register; once with `gate-trusted` running, once with it disabled (admin step) | Nothing merges on the forged runs. If it does, required checks must come from a GitHub App only the trusted workflow holds, and auto-merge stays off until then |
 | 13 | Removed tier label: a tier-1 PR labelled `tier-3` (or `needs-human`), the label then removed and the PR re-judged | `tier` still reads 3 from the label history and waits for the Human's approval |
 | 14 | Approve, re-run, merge: a clean tier-3 PR (README line under `.github/`) from the agents' account; the Human approves the head | The queue re-runs only the `tier` check; it turns green and the PR auto-merges; `review` and `verdict` do not run again |
+| 15 | Approval through the queue's update: a tier-3 PR left behind `main`; the Human approves its head | The queue leaves it behind until `tier` is green, then merges `main` in once; `tier` on the new head passes on his approval (same patch-id), `verify` runs again, and it merges with no second approval |
+| 16 | Cache from candidate code: the candidate's tests write an Actions cache entry under a key a `main` workflow restores | The entry lands in the pull request's own cache scope; a later run on `main` does not restore it |

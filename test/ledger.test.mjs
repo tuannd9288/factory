@@ -121,7 +121,7 @@ const checks = (over = {}) => Object.fromEntries(REQUIRED.map((name, i) => [name
 
 test('the queue updates the oldest pull request left behind, one at a time, reading only the required checks', async () => {
   const { pickUpdate } = await import('../bin/lib/queue.mjs');
-  const p = (number, createdAt, mergeStateStatus, over = {}) => ({ number, createdAt, mergeStateStatus, autoMerge: true, isDraft: false, checks: checks(), ...over });
+  const p = (number, createdAt, mergeStateStatus, over = {}) => ({ number, createdAt, mergeStateStatus, autoMerge: true, isDraft: false, labels: [], checks: checks(), ...over });
   assert.equal(pickUpdate([p(2, '2026-10-21T02', 'BEHIND'), p(1, '2026-10-21T01', 'BEHIND'), p(3, '2026-10-21T00', 'BEHIND', { autoMerge: false })], REQUIRED).number, 1);
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: checks({ review: { state: 'PENDING' } }) })], REQUIRED), null);
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: { verify: checks().verify } })], REQUIRED), null);
@@ -130,6 +130,14 @@ test('the queue updates the oldest pull request left behind, one at a time, read
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND', { checks: checks({ verify: { state: 'FAILURE' } }) }), p(2, '2026-10-21T02', 'BEHIND')], REQUIRED).number, 2);
   // An optional check that failed, and a tier check waiting on the Human, do not stop the update.
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND', { checks: { ...checks({ tier: { state: 'FAILURE' } }), lint: { state: 'FAILURE' } } })], REQUIRED).number, 1);
+});
+
+test('the queue leaves a tier-3 pull request behind main until its tier check passes, so the Human approves once', async () => {
+  const { pickUpdate } = await import('../bin/lib/queue.mjs');
+  const p = (number, labels, tier) => ({ number, createdAt: `2026-10-21T0${number}`, mergeStateStatus: 'BEHIND', autoMerge: true, isDraft: false, labels, checks: checks({ tier: { state: tier } }) });
+  assert.equal(pickUpdate([p(1, ['tier-3'], 'FAILURE'), p(2, ['tier-1'], 'SUCCESS')], REQUIRED).number, 2);
+  assert.equal(pickUpdate([p(1, ['tier-2', 'needs-human'], 'PENDING')], REQUIRED), null);
+  assert.equal(pickUpdate([p(1, ['tier-3'], 'SUCCESS')], REQUIRED).number, 1);
 });
 
 test('the queue re-runs the failed tier job alone once someone other than the author approved the head after it started', async () => {

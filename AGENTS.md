@@ -24,7 +24,7 @@ The change sets the tier, by the paths it touches (`scripts/tier`), never the au
 |---|---|---|---|
 | 1 | no tier-2 or tier-3 path | `verify`, `review`, `verdict`, `tier` green on the head commit; `verdict` passes at once | none |
 | 2 | a `.gate/load-bearing` path, or a dependency manifest | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
-| 3 | a path in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), or the label `needs-human` | tier 2 and his approval of the head commit, which `tier` checks | approves from the summary |
+| 3 | a path in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), or the label `needs-human` | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks | approves from the summary |
 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
 removed.
@@ -71,7 +71,7 @@ Run `bin/onboard <repo-url>` from this root. It does what the old layout did by 
    Codex profile joins when Codex does);
 3. writes `.envrc` (`CLAUDE_CONFIG_DIR` pointing at the profile), adds it to `.git/info/exclude` and runs
    `direnv allow`; an `.envrc` the repository has is kept, and onboard prints the line to add to it;
-4. lays the kit over it: `scripts/`, `.gate/`, `.githooks/`, the two gate workflows, the PR template, `CODEOWNERS`,
+4. lays the kit over it: `scripts/`, `.gate/`, `.githooks/`, the gate workflows, the PR template, `CODEOWNERS`,
    deny rules, an `AGENTS.md` and the one-line `CLAUDE.md`. Files the repository already has are kept and listed in
    the pull request for its session to merge by hand;
 5. runs the full `scripts/verify`, and only when it passes commits the kit and opens its pull request. When it fails
@@ -88,6 +88,8 @@ without the queue every auto-merge pull request strands when another lands. Each
 repository whose sweep failed keeps `~/.local/state/factory/queue-<owner>-<repo>.failed` until one succeeds. A
 rollback is a revert pull request through the gate. Only when the gate itself is broken does the Human turn the
 ruleset off, after taking auto-merge off every open pull request, since with the ruleset off each would land unjudged.
+The queue leaves a tier-3 pull request behind `main` until the Human approved it, then updates it once; his approval
+holds on the updated head, whose patch is unchanged (`git patch-id`), so he is asked once.
 
 Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
 `direnv exec <root>/<repo> claude -p "…"`.

@@ -1,7 +1,9 @@
-// What a pull request's history on GitHub says, read with gh (GraphQL): every label it ever had, which removing a
-// label does not erase, and how many of its head commits the gate judged red.
+// What a pull request's history on GitHub says, read with gh: every label it ever had, which removing a label does
+// not erase, how many of its head commits the gate judged red, and where a check stands on one commit.
 //   node scripts/lib/history.mjs labels --repo <owner/name> --pr <n>                  the labels, comma-separated
 //   node scripts/lib/history.mjs rounds --repo <owner/name> --pr <n> --checks <a,b>   commits a named check failed on
+//   node scripts/lib/history.mjs check --repo <owner/name> --head <sha> --name <check>
+//     the latest GitHub Actions run of that check on the commit: its conclusion, or pending before it completes
 // Exit 2 when GitHub cannot be read or the history does not fit one page: a history half read decides nothing.
 import { execFileSync } from 'node:child_process';
 
@@ -29,8 +31,16 @@ function pull(query) {
 }
 
 try {
-  if (!owner || !name || !opt('--pr')) throw new Error('--repo owner/name and --pr are needed');
-  if (args[0] === 'labels') {
+  if (!owner || !name || !(opt('--pr') || opt('--head'))) throw new Error('--repo owner/name and --pr or --head are needed');
+  if (args[0] === 'check') {
+    const out = execFileSync('gh', ['api', `repos/${owner}/${name}/commits/${opt('--head')}/check-runs?check_name=${opt('--name')}&per_page=100`], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const runs = JSON.parse(out).check_runs.filter((c) => c.app?.slug === 'github-actions' && c.name === opt('--name'));
+    const last = runs.sort((a, b) => String(a.started_at).localeCompare(String(b.started_at))).at(-1);
+    console.log(last?.status === 'completed' ? last.conclusion : 'pending');
+  } else if (args[0] === 'labels') {
     const items = pull(LABELS).timelineItems;
     if (items.totalCount > items.nodes.length) throw new Error(`${items.totalCount} label events, more than one page`);
     console.log([...new Set(items.nodes.map((n) => n.label?.name).filter(Boolean))].join(','));
@@ -42,7 +52,7 @@ try {
       commit.checkSuites.nodes.some((s) => s.app?.slug === 'github-actions' && s.checkRuns.nodes.some((c) => checks.has(c.name) && RED.has(c.conclusion))),
     );
     console.log(red.length);
-  } else throw new Error('usage: history.mjs labels|rounds --repo owner/name --pr n [--checks a,b]');
+  } else throw new Error('usage: history.mjs labels|rounds|check --repo owner/name --pr n|--head sha [--checks a,b] [--name c]');
 } catch (error) {
   console.log(`history: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
   process.exit(2);

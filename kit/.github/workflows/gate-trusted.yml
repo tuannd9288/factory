@@ -1,17 +1,15 @@
-# The gate. On pull_request_target GitHub runs main's copy of this file, and every job runs main's scripts from
-# ./trusted, whatever the pull request changes. The required checks are the jobs named in .gate/ruleset.json:
-#   verify   the only job that runs the candidate's code: main's verify and red-check on it (scripts/verify-trusted).
-#            It holds no secret and keeps no token. No job here restores an Actions cache, which this event shares
-#            with main.
+# The jobs that read the pull request as data. On pull_request_target GitHub runs main's copy of this file, and every
+# job runs main's scripts from ./trusted, whatever the pull request changes. None runs the candidate's code, which
+# runs only in gate.yml on pull_request, and none restores an Actions cache, which this event shares with main.
 #   review, verdict
-#            wait for verify, then read the candidate as data: its commits are fetched into main's checkout with no
-#            work tree. The reviewer's credentials come from the environment "reviewer", whose branch policy admits
-#            main alone.
-#   tier     the tier, and on tier 3 the Human's approval of the head; it needs no other job, so after his approval
-#            the queue re-runs it alone and no reviewer runs again.
-# A job skipped because a job it needs failed counts as passing for a required check. review and verdict need only
-# verify, which is required itself, so a red verify still blocks the merge; tier needs nothing. rounds, not required,
-# runs after a red verify, review or verdict and labels needs-human at the third red head commit.
+#            read the candidate as data: its commits are fetched into main's checkout with no work tree. They wait
+#            for gate.yml's verify on the head and run the reviewer only once it passed. The reviewer's credentials
+#            come from the environment "reviewer", whose branch policy admits main alone.
+#   tier     the tier, and on tier 3 the Human's approval of the head, or of a commit whose patch the head carries
+#            unchanged; it waits on nothing, so after his approval the queue re-runs it alone.
+# The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json). No required job here has
+# `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
+# review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
 name: gate-trusted
 
 on:
@@ -32,38 +30,14 @@ env:
   GATE_PR: ${{ github.event.pull_request.number }}
 
 jobs:
-  verify:
-    name: verify
-    runs-on: ${{ fromJSON(vars.GATE_RUNNER || '"ubuntu-latest"') }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: trusted
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: candidate
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - run: |
-          printf '%s\n' "$BODY" >"$RUNNER_TEMP/pr-body.txt"
-          GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" scripts/verify-trusted ../candidate "$BASE"
-        working-directory: trusted
-        env:
-          BODY: ${{ github.event.pull_request.body }}
-
   review:
     name: review
-    needs: verify
     runs-on: ubuntu-latest
     environment: reviewer
     timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,15 +59,16 @@ jobs:
         env:
           GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
           BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
 
   verdict:
     name: verdict
-    needs: verify
     runs-on: ubuntu-latest
     environment: reviewer
     timeout-minutes: 40
     permissions:
       contents: read
+      checks: read
       pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,7 +120,7 @@ jobs:
 
   rounds:
     name: rounds
-    needs: [verify, review, verdict]
+    needs: [review, verdict]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 10

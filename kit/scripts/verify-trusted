@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The gate's mechanical check of every pull request, run from main's checkout so the candidate cannot edit it: the
-# `verify` job of gate-trusted.yml.
+# `verify` job of gate.yml, on pull_request.
 #   scripts/verify-trusted <candidate-dir> <base-sha>
 # 1. Main's copy of every .gate/protected path that differs is laid over a copy of the candidate, and main's verify
 #    and red-check run there, from the merge-base: the candidate's code under main's policy.

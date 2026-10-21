@@ -15,13 +15,18 @@ const CALL_MS = 60_000;
 
 /** The pull request to update now, or null: the oldest one waiting on auto-merge behind its base whose required
  * checks did not fail (a failing one needs a new commit, which the gate judges anyway; a red tier check only waits on
- * the Human), unless another one waiting on auto-merge is up to date and still being judged. */
+ * the Human), unless another one waiting on auto-merge is up to date and still being judged. A tier-3 one waits
+ * behind until its tier check passed, the Human's approval given: his approval then holds on the updated head, whose
+ * patch is unchanged, and he is asked once. */
 export function pickUpdate(prs, required) {
   const waiting = prs.filter((p) => p.autoMerge && !p.isDraft);
   const judging = (p) => required.some((name) => !p.checks[name] || p.checks[name].state === 'PENDING');
   const failed = (p) => required.some((name) => name !== 'tier' && RED.has(p.checks[name]?.state));
+  const unapproved = (p) => p.labels.some((l) => l === 'tier-3' || l === 'needs-human') && p.checks.tier?.state !== 'SUCCESS';
   if (waiting.some((p) => p.mergeStateStatus !== 'BEHIND' && judging(p))) return null;
-  const behind = waiting.filter((p) => p.mergeStateStatus === 'BEHIND' && !failed(p)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const behind = waiting
+    .filter((p) => p.mergeStateStatus === 'BEHIND' && !failed(p) && !unapproved(p))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return behind[0] ?? null;
 }
 
@@ -36,7 +41,7 @@ export function pickReruns(prs) {
 }
 
 const QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100){nodes{
-number isDraft createdAt mergeStateStatus autoMergeRequest{enabledAt} author{login} headRefOid
+number isDraft createdAt mergeStateStatus autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name status conclusion startedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
 
@@ -61,6 +66,7 @@ function openPulls(repo) {
       autoMerge: Boolean(p.autoMergeRequest),
       author: p.author?.login,
       head: p.headRefOid,
+      labels: p.labels.nodes.map((l) => l.name),
       approvals: p.reviews.nodes.map((r) => ({ login: r.author?.login, oid: r.commit?.oid, at: r.submittedAt })),
       checks,
     };

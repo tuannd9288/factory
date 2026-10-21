@@ -80,7 +80,7 @@ kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng: cổng, hook, luật nộp bài và mẫu" --body "$(cat <<EOF
 ## Tóm tắt cho người quyết định
 - Mục đích: đưa $name vào xưởng bằng bộ kit của tuannd9288/factory.
-- Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (có \`protected\`: các đường dẫn bậc 3), \`.githooks/\`, hai workflow cổng, mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`.
+- Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (có \`protected\`: các đường dẫn bậc 3), \`.githooks/\`, ba workflow (gate, gate-trusted, main), mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`.
 - Bằng chứng: \`scripts/verify\` đầy đủ xanh trước khi commit.
 - Bậc: 3 (chạm \`.github/\`, \`scripts/\`, \`.gate/\`).
 - Hoàn tác: revert PR này.

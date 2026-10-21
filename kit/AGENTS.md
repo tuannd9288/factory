@@ -33,10 +33,12 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    body: `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
 4. Open the pull request with the template, in Vietnamese, and enable auto-merge (`gh pr merge --auto --merge`).
    Then release the branch and move on; do not wait for CI.
-5. The gate decides, from `main`'s scripts (`gate-trusted.yml`). Every pull request needs four checks green on
-   its head commit: `verify` (main's verify, rules and red-check on your code), `review` and `verdict` (the
-   reviewer reads your change as data; `verdict` passes at once on tier 1), and `tier`, which on tier 3 waits for
-   the Human's approval of the head commit. A label never lowers the tier, even once removed.
+5. The gate decides, from `main`'s scripts. Every pull request needs four checks green on its head commit:
+   `verify` (`gate.yml`: main's verify, rules and red-check on your code), then `review` and `verdict`
+   (`gate-trusted.yml`: the reviewer reads your change as data once `verify` passed; `verdict` passes at once on
+   tier 1), and `tier`, which on tier 3 waits for the Human's approval of your change. His approval holds while the
+   patch is unchanged, as when the queue merges `main` in; any change to the patch needs a new one. A label never
+   lowers the tier, even once removed.
 6. A blocking finding is fixed by a new commit, or answered in its thread with `withdraw <id>: <reason>` for
    the reviewer to judge. At the third head commit judged red, `rounds` labels the pull request `needs-human`,
    which makes it tier 3: the Human decides.
@@ -61,15 +63,15 @@ answer; a reversible question never blocks the work.
 | A new test fails at the base and passes at the head | `red-check`, inside `verify` |
 | A failing test committed first is not weakened later | `scripts/rules` (`failing-test-edited`) |
 | Every check is shown failing on a fixture | `scripts/prove-check` in `verify` and `verify-trusted` |
-| Every pull request is judged by `main`'s scripts, whatever it changes | `gate-trusted.yml` (`pull_request_target`), `scripts/verify-trusted` |
+| Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `scripts/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
 | Tier-3 paths are one list, and CODEOWNERS ends with exactly it | `.gate/protected`; `verify` (`policy`) |
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
 | Commit subject present, at most 72 characters | `.githooks/commit-msg` |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
-| Tier 3 lands only with the Human's approval of the head commit | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
+| Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
 | No `--no-verify`, tags, releases, `.env` reads | `.claude/settings.json` deny rules, in Claude Code only; nothing on GitHub refuses a tag or a release |
 | Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
-| No gate job restores an Actions cache: `pull_request_target` shares `main`'s | prose; the factory's tests check the kit's workflows |
+| A candidate's code runs only in `gate.yml`'s `verify`: on `pull_request`, which cannot write `main`'s Actions cache, never under `pull_request_target`; on a GitHub-hosted runner, never on a self-hosted one that also runs `main`'s or a deploy's jobs; with no secret and a read-only token | the factory's tests check the kit's workflows; a change to a workflow here is tier 3 |
 | `AGENTS.md` at most 150 lines; `CLAUDE.md` is `@AGENTS.md` | `scripts/verify` (`instructions`) |
 
 A rule with no enforcer goes here as `prose` and gets one, or is deleted, within 30 days.
