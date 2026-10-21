@@ -11,8 +11,9 @@ repository's own `AGENTS.md` governs.
   once the repository's gate is green on its head commit. The Human keeps tier 3, a change stuck after three
   rounds, and every deploy.
 - No change auto-merges in a repository until its gate has passed the attacks and the 20 seeded + 20 clean probes
-  on the scratch repository `tuannd9288/factory-scratch` (bar: at least 18/20 seeded caught, every load-bearing one
-  caught, at most 1/20 clean blocked). `REPORT.md` of the build has the numbers.
+  on a scratch repository against two bars (the Human, 2026-10-21): the mechanical bar, every mechanical defect
+  caught; and the full-gate bar, with the real reviewer, at least 18/20 seeded caught, every load-bearing one caught,
+  at most 1/20 clean blocked. `probes/plan.md` states both; `probes/results.md` has the first run's numbers.
 - agent-desk stays parked. Every lead, worker and reviewer runs through Claude Code.
 
 ## Tiers
@@ -21,16 +22,17 @@ The change sets the tier, by the paths it touches (`scripts/tier`), never the au
 
 | Tier | Trigger | Must be true to merge | The Human |
 |---|---|---|---|
-| 1 | no tier-2 or tier-3 path | `verify`, `rules`, `red-check`, `verify-trusted`, `review` green on the head commit | none |
-| 2 | a `.gate/load-bearing` path, or a dependency manifest | tier 1 and `verdict` | reads it in the weekly digest and on the deploy page |
-| 3 | a path in `.github/CODEOWNERS`: the gate, `AGENTS.md`, `.claude/` | tier 2 and his approval of the head commit, which `verdict` checks | approves from the summary |
+| 1 | no tier-2 or tier-3 path | `verify`, `review`, `verdict`, `tier` green on the head commit; `verdict` passes at once | none |
+| 2 | a `.gate/load-bearing` path, or a dependency manifest | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
+| 3 | a path in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), or the label `needs-human` | tier 2 and his approval of the head commit, which `tier` checks | approves from the summary |
 
-A tier never drops within a pull request: the labels `tier-N` only raise it.
+A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
+removed.
 
 Agents open pull requests under their own GitHub account, never the Human's. GitHub refuses an author's approval of
 his own pull request, and its code-owner rule asks nothing of an author who owns the code: on the scratch repository
-a tier-3 pull request opened from the Human's account merged with no approval (2026-10-21). So `verdict` itself
-requires, on tier 3, an approval of the head commit by a code owner who is not the author.
+a tier-3 pull request opened from the Human's account merged with no approval (2026-10-21). So the `tier` check
+itself requires, on tier 3, an approval of the head commit by a code owner who is not the author.
 
 ## What the Human keeps
 
