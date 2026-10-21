@@ -676,6 +676,9 @@ describe('workflows and ruleset', () => {
         assert.equal(j.environment, undefined, `${wf.file} ${id} runs the candidate's code in an environment`);
         assert.doesNotMatch(JSON.stringify(j), /secrets\./, `${wf.file} ${id} hands the candidate's code a secret`);
         assert.deepEqual(j.permissions ?? wf.permissions, { contents: 'read' }, `${wf.file} ${id} gives the candidate's code more than read`);
+        // On pull_request a checkout with no ref is the merge ref, the candidate's code: main's scripts come from the base.
+        for (const step of j.steps.filter((x) => String(x.uses).startsWith('actions/checkout') && !runsCandidate({ steps: [x] })))
+          assert.equal(step.with?.ref, '${{ github.event.pull_request.base.sha }}', `${wf.file} ${id} takes its scripts from ${step.with?.ref ?? 'the merge ref'}`);
       }
     }
     assert.ok(candidate > 0, 'no job runs the candidate\'s code');
