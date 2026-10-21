@@ -14,12 +14,12 @@ for f in kit/scripts/* kit/.githooks/* bin/onboard bin/factory-ledger scripts/ve
   bash -n "$f" 2>/dev/null || { echo "verify: $f does not parse"; failed=1; }
 done
 
-out=$(env -u NODE_TEST_CONTEXT node --test --test-concurrency=4 'test/*.test.mjs' 2>&1)
+out=$(env -u NODE_TEST_CONTEXT node --test --test-reporter=spec --test-concurrency=4 'test/*.test.mjs' 2>&1)
 code=$?
 summary=$(printf '%s\n' "$out" | grep -E '^ℹ (tests|fail) [0-9]+$' | sed 's/^ℹ //' | tr '\n' ' ')
 tests=$(printf '%s\n' "$out" | sed -n 's/^ℹ tests \([0-9][0-9]*\)$/\1/p')
 if [ "$code" -ne 0 ]; then
-  printf '%s\n' "$out" | grep -E '^\s*✖|AssertionError|Error:' | head -40
+  printf '%s\n' "$out" | grep -E -A12 '^\s*✖' | head -80
   echo "verify: the kit's tests failed (${summary% })"
   failed=1
 elif [ "${tests:-0}" -eq 0 ]; then
