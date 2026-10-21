@@ -36,6 +36,9 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - run: scripts/verify-trusted ../candidate "$BASE"
         working-directory: trusted
 
@@ -55,6 +58,9 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - run: scripts/review review ../candidate "$BASE"
         working-directory: trusted
         env:
@@ -76,6 +82,9 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - run: scripts/review verdict ../candidate "$BASE"
         working-directory: trusted
         env:
@@ -100,6 +109,9 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
       - working-directory: candidate
         env:
           GH_TOKEN: ${{ github.token }}
