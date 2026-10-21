@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# The factory's merge queue, for repositories where GitHub offers none, run as the Human's gh login.
-#   bin/factory-queue sweep --repo owner/name... [--every seconds]   update the oldest auto-merge PR left behind main
-#   bin/factory-queue pause --repo owner/name...                     take auto-merge off every open PR, remember them
-#   bin/factory-queue resume --repo owner/name...                    put auto-merge back on the remembered PRs
-# A rollback: pause, turn the ruleset off, merge the revert, turn the ruleset on, resume. Without pause, every PR
-# waiting on auto-merge lands unjudged the moment the ruleset is off.
+# The factory's merge queue, for repositories where GitHub offers none, run once per call by launchd as the agents'
+# GitHub account (it refuses the Human's):
+#   bin/factory-queue sweep --repo owner/name...   update the oldest auto-merge PR left behind main, and re-run a
+#                                                  tier check after the Human approved its head
+# A rollback is a revert pull request through the gate. Turning the ruleset off is the Human's emergency step alone,
+# with auto-merge off on every open pull request first: with the ruleset off, every one of them would land unjudged.
 exec node "$(dirname "$0")/lib/queue.mjs" "$@"

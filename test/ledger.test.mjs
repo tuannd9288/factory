@@ -1,10 +1,14 @@
 // The ledger's arithmetic and its reading of pull requests and session files, on fixtures; no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { branchCosts, costOf, digest, rate, rowOf, wilson } from '../bin/lib/ledger.mjs';
+
+const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('the Wilson interval of 18 of 20', () => {
   const [a, b] = wilson(18, 20);
@@ -108,22 +112,61 @@ test('the digest gives every rate with its count, and lists what waits for the H
   assert.match(text, /\| \? \(không có profile\) \|/);
 });
 
-test('the queue updates the oldest pull request left behind, one at a time', async () => {
+const REQUIRED = ['verify', 'review', 'verdict', 'tier'];
+const checks = (over = {}) => Object.fromEntries(REQUIRED.map((name) => [name, { state: 'SUCCESS', startedAt: '2026-10-21T10:00:00Z', runId: '42', ...over[name] }]));
+
+test('the queue updates the oldest pull request left behind, one at a time, reading only the required checks', async () => {
   const { pickUpdate } = await import('../bin/lib/queue.mjs');
-  const p = (number, createdAt, mergeStateStatus, over = {}) => ({ number, createdAt, mergeStateStatus, autoMerge: true, isDraft: false, checks: 'SUCCESS', ...over });
-  assert.equal(pickUpdate([p(2, '2026-10-21T02', 'BEHIND'), p(1, '2026-10-21T01', 'BEHIND'), p(3, '2026-10-21T00', 'BEHIND', { autoMerge: false })]).number, 1);
-  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: 'PENDING' })]), null);
-  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: 'FAILURE' })]).number, 1);
-  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'CLEAN')]), null);
-  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND', { checks: 'FAILURE' }), p(2, '2026-10-21T02', 'BEHIND')]).number, 2);
+  const p = (number, createdAt, mergeStateStatus, over = {}) => ({ number, createdAt, mergeStateStatus, autoMerge: true, isDraft: false, checks: checks(), ...over });
+  assert.equal(pickUpdate([p(2, '2026-10-21T02', 'BEHIND'), p(1, '2026-10-21T01', 'BEHIND'), p(3, '2026-10-21T00', 'BEHIND', { autoMerge: false })], REQUIRED).number, 1);
+  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: checks({ review: { state: 'PENDING' } }) })], REQUIRED), null);
+  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: { verify: checks().verify } })], REQUIRED), null);
+  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: checks({ verify: { state: 'FAILURE' } }) })], REQUIRED).number, 1);
+  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'CLEAN')], REQUIRED), null);
+  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND', { checks: checks({ verify: { state: 'FAILURE' } }) }), p(2, '2026-10-21T02', 'BEHIND')], REQUIRED).number, 2);
+  // An optional check that failed, and a tier check waiting on the Human, do not stop the update.
+  assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND', { checks: { ...checks({ tier: { state: 'FAILURE' } }), lint: { state: 'FAILURE' } } })], REQUIRED).number, 1);
 });
 
-test('the queue re-runs a failed verdict once someone other than the author approved the head after it', async () => {
+test('the queue re-runs a failed tier check once someone other than the author approved the head after it started', async () => {
   const { pickReruns } = await import('../bin/lib/queue.mjs');
-  const pr = (approvals, verdict = { conclusion: 'FAILURE', completedAt: '2026-10-21T10:00:00Z', runId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals, verdict });
+  const pr = (approvals, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', runId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals, checks: checks({ tier, verdict: { state: 'FAILURE', runId: '43' } }) });
   assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), [{ number: 7, runId: '42' }]);
+  // An approval that landed while the job ran, after it read the reviews, still re-runs it.
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:00:30Z' }])]), [{ number: 7, runId: '42' }]);
   assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T09:55:00Z' }])]), []);
   assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'old', at: '2026-10-21T10:05:00Z' }])]), []);
   assert.deepEqual(pickReruns([pr([{ login: 'agent', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), []);
-  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }], { conclusion: 'SUCCESS', completedAt: '', runId: '42' })]), []);
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }], { state: 'SUCCESS', startedAt: '2026-10-21T10:00:00Z', runId: '42' })]), []);
+});
+
+test('a sweep runs once, alone, never as the Human, and leaves a failure report until a sweep succeeds', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'queue-'));
+  try {
+    writeFileSync(join(dir, 'gh'), '#!/bin/sh\necho "$*" >>"$Q/calls"\ncase "$*" in\n  "api user"*) echo "${Q_LOGIN:-agent-bot}" ;;\n  *graphql*) cat "$Q/pulls.json" ;;\n  *rules/branches*) echo \'[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"verify"}]}}]\' ;;\n  *) exit 1 ;;\nesac\n');
+    chmodSync(join(dir, 'gh'), 0o755);
+    const state = join(dir, 'state');
+    const sweep = (env = {}) => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, ...env } });
+    const report = join(state, 'queue-o-app.failed');
+    writeFileSync(join(dir, 'pulls.json'), 'not json');
+    let out = sweep();
+    assert.equal(out.status, 1, out.stdout + out.stderr);
+    assert.match(readFileSync(report, 'utf8'), /^20\d\d-.*o\/app/);
+    writeFileSync(join(dir, 'pulls.json'), JSON.stringify({ data: { repository: { pullRequests: { nodes: [] } } } }));
+    out = sweep({ Q_LOGIN: 'tuannd9288' });
+    assert.equal(out.status, 2, out.stdout + out.stderr);
+    assert.match(out.stderr, /runs as the agents' account, not the Human's \(tuannd9288\)/);
+    mkdirSync(join(state, 'queue.lock'), { recursive: true });
+    writeFileSync(join(dir, 'calls'), '');
+    out = sweep();
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(out.stdout, /another sweep is running/);
+    assert.equal(readFileSync(join(dir, 'calls'), 'utf8'), '');
+    rmSync(join(state, 'queue.lock'), { recursive: true });
+    out = sweep();
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.ok(!existsSync(report));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

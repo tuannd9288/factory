@@ -54,7 +54,7 @@ Everything else that can be undone, agents decide and report after.
 | `kit/` | What every repository receives through one pull request when it joins |
 | `bin/onboard` | Takes a repository in |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest |
-| `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, re-runs a tier-3 verdict after approval, pauses auto-merge for a rollback |
+| `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
@@ -77,11 +77,12 @@ proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit p
 `.gate/ruleset.json`, creates the `reviewer` environment, and logs into the profile in a new pane opened in the
 repository (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
 
-Keep `bin/factory-queue sweep --repo <owner/repo>... --every 60` running under the Human's `gh` login: the ruleset
-requires a branch to be up to date, GitHub updates none by itself, and without the queue every auto-merge pull
-request strands when another lands. A rollback (the gate itself broken): `bin/factory-queue pause`, turn the ruleset
-off, merge the fix by hand, turn the ruleset on, `bin/factory-queue resume`. With the ruleset off, every pull request
-still waiting on auto-merge would land unjudged.
+Run `bin/factory-queue sweep --repo <owner/repo>...` from launchd every minute, logged into `gh` as the agents'
+account (it refuses the Human's): the ruleset requires a branch to be up to date, GitHub updates none by itself, and
+without the queue every auto-merge pull request strands when another lands. Each run is one sweep under a lock; a
+repository whose sweep failed keeps `~/.local/state/factory/queue-<owner>-<repo>.failed` until one succeeds. A
+rollback is a revert pull request through the gate. Only when the gate itself is broken does the Human turn the
+ruleset off, after taking auto-merge off every open pull request, since with the ruleset off each would land unjudged.
 
 Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
 `direnv exec <root>/<repo> claude -p "…"`.
