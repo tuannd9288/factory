@@ -21,7 +21,7 @@ while [ "$#" -gt 0 ]; do
     *) names="$names $1"; shift ;;
   esac
 done
-[ "$all" -eq 1 ] && names="instructions rules tests $GATE_CHECKS red-check tier"
+[ "$all" -eq 1 ] && names="instructions policy rules tests $GATE_CHECKS red-check tier"
 [ -n "$names" ] || { echo "prove-check: name a check, or --all"; exit 2; }
 
 # The fixture's commits name a throwaway author and run no hooks; the repository's own config is not touched.

@@ -1,5 +1,5 @@
 {
-  "$comment": "Hand-in rules on added lines. level: block sends the candidate back, warn rides up with it. in: the part of the line a pattern reads (code, comment, string, or the whole line). files: test, source or any. languages: ids from `languages`, or `*`. path: only the files whose path it matches. skip: paths never read. tests: paths of test files. checkConfig: files that decide what the checks run or how strict they are; checkKeys: the lines of a manifest that do. The command guard reads the attributes-driver rule too, by its id.",
+  "$comment": "Hand-in rules on added lines. level: block sends the candidate back, warn rides up with it. in: the part of the line a pattern reads (code, comment, string, or the whole line). files: test, source or any. languages: ids from `languages`, or `*`. path: only the files whose path it matches. skip: paths never read. tests: paths of test files.",
   "languages": {
     "javascript": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".vue", ".svelte"],
     "python": [".py"],
@@ -24,20 +24,6 @@
     "(Test|Tests|Spec)\\.(java|kt|swift|cs)$",
     "_spec\\.rb$"
   ],
-  "checkConfig": [
-    "(^|/)(jest|vitest|vite|playwright|karma|cypress|babel)\\.config\\.[cm]?[jt]s$",
-    "(^|/)\\.mocharc(\\.[a-z]+)?$",
-    "(^|/)(pytest\\.ini|tox\\.ini|setup\\.cfg|noxfile\\.py|\\.coveragerc|mypy\\.ini|ruff\\.toml|\\.flake8|pyrightconfig\\.json)$",
-    "(^|/)tsconfig[^/]*\\.json$",
-    "(^|/)(\\.eslintrc(\\.[a-z]+)?|eslint\\.config\\.[cm]?[jt]s|\\.golangci\\.ya?ml|clippy\\.toml)$",
-    "(^|/)\\.github/workflows/",
-    "(^|/)\\.gitlab-ci\\.ya?ml$",
-    "(^|/)\\.circleci/",
-    "(^|/)Jenkinsfile$",
-    "(^|/)\\.husky/",
-    "(^|/)(\\.pre-commit-config\\.ya?ml|lefthook\\.ya?ml)$"
-  ],
-  "checkKeys": "^\\s*\"(test|lint|check|typecheck|verify)[\\w:-]*\"\\s*:|^\\s*\\[tool\\.(pytest|mypy|ruff|coverage|pyright)|^\\s*(addopts|testpaths|python_files|omit|strict|deselect|ignore_missing_imports)\\s*=",
   "rules": [
     {
       "id": "test-focused",

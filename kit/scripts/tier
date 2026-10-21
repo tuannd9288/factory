@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Prints the change's tier and why: 3 touches a CODEOWNERS path, 2 a .gate/load-bearing path or a dependency, else 1.
+# Prints the change's tier and why: 3 touches a .gate/protected path or line, 2 a .gate/load-bearing path or a
+# dependency, else 1. Exit 2 when a policy file or the diff cannot be read.
 #   scripts/tier [--base <rev>] [--head <rev>] [--rules <dir>] [--labels <a,b>] [--max <n>]
-# --rules names the checkout whose CODEOWNERS and .gate/load-bearing decide (CI passes main's); --max exits 1 above it.
+# --rules names the checkout whose .gate/ policy decides (CI passes main's); --labels the labels the pull request ever
+# had; --max exits 1 above it.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(git rev-parse --show-toplevel) || exit 2
@@ -18,8 +20,10 @@ while [ "$#" -gt 0 ]; do
   shift 2
 done
 [ -n "$base" ] || base=$(git merge-base HEAD origin/main 2>/dev/null) || { echo "tier: no merge-base with origin/main; pass --base"; exit 2; }
-out=$(node "$here/lib/tier.mjs" --rules "$rules" --repo "$repo" --base "$base" --head "$head" --labels "$labels") || exit 2
+out=$(node "$here/lib/tier.mjs" --rules "$rules" --repo "$repo" --base "$base" --head "$head" --labels "$labels")
+code=$?
 echo "$out"
+[ "$code" -eq 0 ] || exit 2
 n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
 [ -n "$n" ] || exit 2
 if [ -n "$max" ] && [ "$n" -gt "$max" ]; then echo "tier: tier $n is above $max"; exit 1; fi

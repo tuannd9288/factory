@@ -1,10 +1,43 @@
-# Tier 3: a change to the gate or to the rules agents follow waits for the Human's approval.
-# GitHub reads this file from the base branch, so a pull request cannot take itself out of it.
-# scripts/tier reads it too; a deploy configuration the repository has belongs here as well.
-/.github/   @OWNER
-/.gate/     @OWNER
-/.githooks/ @OWNER
-/.claude/   @OWNER
-/scripts/   @OWNER
-/AGENTS.md  @OWNER
-/CLAUDE.md  @OWNER
+# Tier 3: the gate and every input that decides what the checks run wait for the Human's approval. GitHub reads this
+# file from the base branch and takes the last line that matches, so these lines come last and equal .gate/protected
+# (scripts/verify checks it). The repository's own owners, if it has any, go above them.
+/.github/                @OWNER
+/.gate/                  @OWNER
+/.githooks/              @OWNER
+/.claude/                @OWNER
+/scripts/                @OWNER
+/AGENTS.md               @OWNER
+/CLAUDE.md               @OWNER
+.gitattributes           @OWNER
+tsconfig*.json           @OWNER
+jsconfig.json            @OWNER
+jest.config.*            @OWNER
+vitest.config.*          @OWNER
+vite.config.*            @OWNER
+playwright.config.*      @OWNER
+cypress.config.*         @OWNER
+karma.conf.*             @OWNER
+babel.config.*           @OWNER
+.babelrc*                @OWNER
+.mocharc*                @OWNER
+.eslintrc*               @OWNER
+eslint.config.*          @OWNER
+biome.json*              @OWNER
+pytest.ini               @OWNER
+tox.ini                  @OWNER
+setup.cfg                @OWNER
+noxfile.py               @OWNER
+.coveragerc              @OWNER
+mypy.ini                 @OWNER
+ruff.toml                @OWNER
+.ruff.toml               @OWNER
+.flake8                  @OWNER
+pyrightconfig.json       @OWNER
+.golangci.y*ml           @OWNER
+clippy.toml              @OWNER
+.gitlab-ci.yml           @OWNER
+.circleci/               @OWNER
+Jenkinsfile              @OWNER
+.husky/                  @OWNER
+.pre-commit-config.y*ml  @OWNER
+lefthook.y*ml            @OWNER

@@ -1,0 +1,50 @@
+# Tier 3: every input that decides what the checks run or how strict they are. One gitignore-style path pattern per
+# line, or "key <file pattern> <regex>": a changed line of that file that the regex matches.
+#   scripts/tier reads this file from main's checkout, so a pull request cannot take itself out of it.
+#   scripts/verify-trusted lays main's copy of every protected path over the candidate before main's checks run.
+#   scripts/verify (policy) requires .github/CODEOWNERS to end with exactly these paths, each with an owner, so GitHub
+#   asks for the Human's review on them. A key line cannot be put in CODEOWNERS: tier alone guards it, and
+#   verify-trusted keeps the candidate's manifest, since main's copy would undo its dependencies.
+# A repository adds what decides its own checks: a Makefile its gate_tests calls, a conftest.py that skips tests.
+/.github/
+/.gate/
+/.githooks/
+/.claude/
+/scripts/
+/AGENTS.md
+/CLAUDE.md
+.gitattributes
+tsconfig*.json
+jsconfig.json
+jest.config.*
+vitest.config.*
+vite.config.*
+playwright.config.*
+cypress.config.*
+karma.conf.*
+babel.config.*
+.babelrc*
+.mocharc*
+.eslintrc*
+eslint.config.*
+biome.json*
+pytest.ini
+tox.ini
+setup.cfg
+noxfile.py
+.coveragerc
+mypy.ini
+ruff.toml
+.ruff.toml
+.flake8
+pyrightconfig.json
+.golangci.y*ml
+clippy.toml
+.gitlab-ci.yml
+.circleci/
+Jenkinsfile
+.husky/
+.pre-commit-config.y*ml
+lefthook.y*ml
+key package.json "(pre|post)?(test|lint|check|typecheck|verify)([:-][\w:-]*)?"\s*:
+key pyproject.toml ^\s*\[tool\.(pytest|mypy|ruff|coverage|pyright)|^\s*(addopts|testpaths|python_files|omit|strict|deselect|ignore_missing_imports)\s*=

@@ -45,8 +45,6 @@ const RULES = table.rules.map((r) => ({ ...r, test: new RegExp(r.pattern, r.flag
 // The kit's proof fixtures are bad on purpose; the hand-in rules do not read them.
 const SKIP = [...table.skip, '^\\.gate/proofs/'].map((p) => new RegExp(p));
 const TESTS = table.tests.map((p) => new RegExp(p));
-const CHECK_CONFIG = table.checkConfig.map((p) => new RegExp(p));
-const CHECK_KEYS = new RegExp(table.checkKeys);
 const EXTENSIONS = new Map(Object.entries(table.languages).flatMap(([lang, exts]) => exts.map((e) => [e, lang])));
 const isTestPath = (path) => TESTS.some((p) => p.test(path));
 
@@ -278,18 +276,6 @@ function assertionsDropped(change) {
   ];
 }
 
-/** A change to what decides the checks: a runner, lint or CI file, or the check lines of a manifest. */
-function checkConfigFindings(change) {
-  const hint = 'This decides what the checks run or how strict they are; say in the PR why it changed.';
-  const at = (line, text) => [{ rule: 'check-config', level: 'warn', path: change.path, line, text, hint }];
-  if (CHECK_CONFIG.some((p) => p.test(change.path))) return at(change.added[0]?.[0] ?? 0, change.path);
-  if (!/(^|\/)(package\.json|pyproject\.toml)$/.test(change.path)) return [];
-  const added = change.added.find(([, line]) => CHECK_KEYS.test(line));
-  if (added) return at(added[0], added[1].trim());
-  const removed = change.removed.find((line) => CHECK_KEYS.test(line));
-  return removed ? at(0, removed.trim()) : [];
-}
-
 function inspect(change) {
   const isTest = isTestPath(change.path);
   if (change.deleted)
@@ -301,7 +287,6 @@ function inspect(change) {
   const language = languageOf(change.path);
   const out = lineFindings(change, text, language, isTest);
   if (isTest && language) out.push(...assertionsDropped(change));
-  out.push(...checkConfigFindings(change));
   return out;
 }
 

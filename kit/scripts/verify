@@ -10,7 +10,7 @@ cd "$(git rev-parse --show-toplevel)" || exit 2
 export GATE_REPORT=${GATE_REPORT:-$PWD/.gate/report.xml}
 . .gate/config.sh || { echo "verify: could not read .gate/config.sh"; exit 2; }
 
-BUILTIN="instructions rules tests"
+BUILTIN="instructions policy rules tests"
 start=$SECONDS
 log=$(mktemp -d) || exit 2
 trap 'rm -rf "$log"' EXIT
@@ -37,6 +37,10 @@ check_instructions() {
   n=$(wc -l <AGENTS.md | tr -d ' ')
   [ "$n" -le 150 ] || { echo "AGENTS.md has $n lines; at most 150"; return 1; }
   [ "$(cat CLAUDE.md 2>/dev/null)" = "@AGENTS.md" ] || { echo "CLAUDE.md must be the single line @AGENTS.md"; return 1; }
+}
+
+check_policy() {
+  node scripts/lib/policy.mjs check
 }
 
 check_rules() {

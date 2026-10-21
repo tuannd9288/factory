@@ -205,13 +205,30 @@ describe('tier', () => {
   test('a tier label from an earlier commit only raises the tier', () => {
     assert.match(tierOf({ 'src/math.js': MUL }, ['--labels', 'tier-2,bug']).out, /^tier 2/);
   });
+  test('tier 3 for what decides the checks: a type-check config, a manifest test script, a .gitattributes', () => {
+    assert.match(tierOf({ 'tsconfig.json': '{ "compilerOptions": { "strict": false } }\n' }).out, /^tier 3\n {2}tsconfig\.json \(protected: tsconfig\*\.json\)/);
+    assert.match(tierOf({ 'package.json': '{ "name": "app", "private": true, "type": "module", "scripts": { "test": "true" } }\n' }).out, /^tier 3\n {2}package\.json/);
+    assert.match(tierOf({ 'src/.gitattributes': '*.js -diff\n' }).out, /^tier 3/);
+  });
+  test('fails closed when a policy file or the diff cannot be read', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'no-policy-'));
+    let out = tierOf({ 'src/math.js': MUL }, ['--rules', empty]);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /could not read .*\.gate\/protected/);
+    rmSync(empty, { recursive: true });
+    out = script(r.repo, 'tier', ['--base', 'no-such-commit']);
+    assert.equal(out.code, 2, out.out);
+  });
+  test('a needs-human label makes the pull request the Human\'s: tier 3', () => {
+    assert.match(tierOf({ 'src/math.js': MUL }, ['--labels', 'needs-human']).out, /^tier 3\n {2}label needs-human/);
+  });
   test('the rules come from --rules, not from the change', () => {
     const main = join(r.dir, 'main-checkout');
     if (!existsSync(main)) git(r.dir, 'clone', '-q', join(r.dir, 'app.git'), main);
-    let out = tierOf({ '.github/CODEOWNERS': '# emptied\n', '.gate/load-bearing': '# emptied\n', 'src/auth/x.js': 'export const x = 1;\n' });
+    let out = tierOf({ '.github/CODEOWNERS': '# narrowed\n', '.gate/protected': '/README.md\n', '.gate/load-bearing': '# emptied\n', 'src/auth/x.js': 'export const x = 1;\n' });
     assert.match(out.out, /^tier 1/);
-    out = tierOf({ '.github/CODEOWNERS': '# emptied\n', '.gate/load-bearing': '# emptied\n', 'src/auth/x.js': 'export const x = 1;\n' }, ['--rules', main]);
-    assert.match(out.out, /^tier 3\n {2}\.gate\/load-bearing/);
+    out = tierOf({ '.github/CODEOWNERS': '# narrowed\n', '.gate/protected': '/README.md\n', '.gate/load-bearing': '# emptied\n', 'src/auth/x.js': 'export const x = 1;\n' }, ['--rules', main]);
+    assert.match(out.out, /^tier 3\n {2}\.gate\/load-bearing \(protected: \/\.gate\/\)/);
   });
 });
 
@@ -223,7 +240,20 @@ describe('verify and prove-check', () => {
   test('passes quietly on a good tree: one summary line', () => {
     const out = script(r.repo, 'verify', [], { GATE_BASE: 'origin/main' });
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out.trim(), /^verify: 4 passed in \d+s$/);
+    assert.match(out.out.trim(), /^verify: 5 passed in \d+s$/);
+  });
+  test('fails when CODEOWNERS does not end with every protected path', () => {
+    const owners = readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8');
+    write(r.repo, { '.gate/protected': `${readFileSync(join(r.repo, '.gate/protected'), 'utf8')}gate-proof/\n` });
+    let out = script(r.repo, 'verify', [], { GATE_BASE: 'origin/main' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /policy failed[\s\S]*gate-proof\/ is not among the last lines of \.github\/CODEOWNERS/);
+    git(r.repo, 'checkout', '-q', '--', '.gate/protected');
+    write(r.repo, { '.github/CODEOWNERS': `${owners}* @someone\n` });
+    out = script(r.repo, 'verify', ['--only', 'policy']);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /\* is not a protected path/);
+    git(r.repo, 'checkout', '-q', '--', '.github/CODEOWNERS');
   });
   test('fails an AGENTS.md over 150 lines', () => {
     write(r.repo, { 'AGENTS.md': `${readFileSync(join(r.repo, 'AGENTS.md'), 'utf8')}${'x\n'.repeat(150)}` });
@@ -271,10 +301,20 @@ describe('verify-trusted', () => {
     return run(trusted, join(trusted, 'scripts/verify-trusted'), [r.repo, git(r.repo, 'rev-parse', 'origin/main')]);
   };
 
-  test('passes at once when no gate file changed', () => {
-    const out = candidate({ 'src/math.js': MUL });
+  test('passes a good candidate that changes no protected path', () => {
+    const out = candidate({ 'src/math.js': MUL, 'test/mul.test.js': RED_AT_BASE });
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /no gate file changed/);
+    assert.match(out.out, /main's verify and red-check pass on the candidate/);
+  });
+  test('runs main\'s verify on every candidate, not only on a gate change', () => {
+    const out = candidate({ 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /main's verify fails on the candidate's code[\s\S]*test-focused/);
+  });
+  test('lays main\'s copy of every protected path over the candidate: a .gitattributes hiding code from the rules', () => {
+    const out = candidate({ '.gitattributes': '*.js -diff\n', 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /test-focused/);
   });
   test('fails a verify replaced by exit 0', () => {
     const out = candidate({ 'scripts/verify': '#!/usr/bin/env bash\nexit 0\n' });
@@ -408,7 +448,7 @@ describe('onboard', () => {
       assert.match(readFileSync(join(r.repo, '.git/info/exclude'), 'utf8'), /^\.envrc$/m);
       assert.equal(readFileSync(join(r.repo, 'AGENTS.md'), 'utf8'), '# own rules\n');
       assert.match(r.onboard, /1 kept as they were/);
-      assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts\/ {3}@tuannd9288$/m);
+      assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts\/ +@tuannd9288$/m);
       assert.equal(git(r.repo, 'config', '--local', 'core.hooksPath'), '.githooks');
     } finally {
       r.cleanup();
