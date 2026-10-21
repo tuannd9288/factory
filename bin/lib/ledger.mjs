@@ -246,7 +246,7 @@ function main(argv) {
   const to = Date.parse(`${opts.until}T23:59:59Z`);
   for (const repo of opts.repos) {
     const [owner, name] = repo.split('/');
-    const profile = join(profiles, name, 'claude');
+    const profile = join(profiles, owner, name, 'claude');
     const costs = existsSync(profile) ? branchCosts(profile) : null;
     const list = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc`])).flat();
     for (const p of list) {

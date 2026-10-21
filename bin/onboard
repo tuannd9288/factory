@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Takes a repository into the factory: clones it under the factory root, creates its agent profile (only now),
-# writes its .envrc, and opens the kit pull request in it. Logging into the profile stays the Human's.
+# Takes a repository into the factory: clones it under the factory root, creates its Claude Code profile (only now),
+# writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
+# the Human's.
 #   bin/onboard <repo-url> [--no-pr]
 # FACTORY_ROOT (default: this clone) is where repositories live; AGENT_PROFILES (default: ~/.agent-profiles) where
-# profiles live; FACTORY_HUMAN (default: tuannd9288) is the code owner of tier 3.
+# profiles live, as <owner>/<repo>/claude so two owners' repositories of one name never share one; FACTORY_HUMAN
+# (default: tuannd9288) is the code owner of tier 3.
 set -euo pipefail
 factory=$(cd "$(dirname "$0")/.." && pwd)
 root=${FACTORY_ROOT:-$factory}
@@ -12,24 +14,30 @@ human=${FACTORY_HUMAN:-tuannd9288}
 url=${1:?usage: bin/onboard <repo-url> [--no-pr]}
 open_pr=1
 [ "${2:-}" = --no-pr ] && open_pr=0
-name=$(basename "${url%/}" .git)
+path=${url%/}
+path=${path%.git}
+name=$(basename "$path")
+owner=$(basename "$(dirname "$path")")
+owner=${owner##*:}
 dest=$root/$name
 [ -e "$dest" ] && { echo "onboard: $dest exists; nothing done"; exit 1; }
 
 echo "onboard: cloning $url into $dest"
 git clone --quiet "$url" "$dest"
 
-mkdir -p "$profiles/$name/claude" "$profiles/$name/codex"
-echo "onboard: profile $profiles/$name/{claude,codex}"
-
-shown=$profiles
-[ "$profiles" = "$HOME/.agent-profiles" ] && shown='$HOME/.agent-profiles'
-cat >"$dest/.envrc" <<EOF
-export CLAUDE_CONFIG_DIR="$shown/$name/claude"
-export CODEX_HOME="$shown/$name/codex"
-EOF
-grep -qx '.envrc' "$dest/.git/info/exclude" 2>/dev/null || echo '.envrc' >>"$dest/.git/info/exclude"
-if command -v direnv >/dev/null; then direnv allow "$dest"; else echo "onboard: direnv is not installed; run 'direnv allow' in $dest later"; fi
+profile=$profiles/$owner/$name/claude
+mkdir -p "$profile"
+echo "onboard: profile $profile"
+shown=$profile
+[ "$profiles" = "$HOME/.agent-profiles" ] && shown="\$HOME/.agent-profiles/$owner/$name/claude"
+line="export CLAUDE_CONFIG_DIR=\"$shown\""
+if [ -e "$dest/.envrc" ]; then
+  echo "onboard: $dest/.envrc exists and is kept; add to it: $line"
+else
+  echo "$line" >"$dest/.envrc"
+  grep -qx '.envrc' "$dest/.git/info/exclude" 2>/dev/null || echo '.envrc' >>"$dest/.git/info/exclude"
+  if command -v direnv >/dev/null; then direnv allow "$dest"; else echo "onboard: direnv is not installed; run 'direnv allow' in $dest later"; fi
+fi
 
 cd "$dest"
 git switch --quiet -c factory/kit
@@ -52,6 +60,13 @@ done <"$lists/kit"
 { cat "$lists/kit"; echo .gate/kit-files; } | LC_ALL=C sort -u >.gate/kit-files
 scripts/setup
 git add -A
+# The kit lands only on a repository where the whole gate passes: a commit nobody verified is not a kit pull request.
+if ! GATE_BASE=HEAD scripts/verify; then
+  echo "onboard: the kit is staged on factory/kit, not committed: scripts/verify fails. Fill .gate/config.sh (test"
+  echo "command, fast checks), merge the files the repository already had, run scripts/verify, then commit and open"
+  echo "the pull request."
+  exit 1
+fi
 git commit --quiet -m "Join the factory: gate, hooks, hand-in rules and templates" \
   -m "From tuannd9288/factory $(git -C "$factory" rev-parse --short HEAD 2>/dev/null || echo '(uncommitted)'). Files the repository already had were kept: $(wc -l <"$lists/kept" | tr -d ' ')."
 echo "onboard: kit committed on factory/kit ($(wc -l <"$lists/kit" | tr -d ' ') files, $(wc -l <"$lists/kept" | tr -d ' ') kept as they were)"
@@ -59,17 +74,17 @@ echo "onboard: kit committed on factory/kit ($(wc -l <"$lists/kit" | tr -d ' ') 
 [ "$open_pr" -eq 1 ] || { echo "onboard: --no-pr; push factory/kit and open the pull request yourself"; exit 0; }
 
 slug=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-for label in tier-1 tier-2 tier-3 needs-human; do gh label create "$label" --repo "$slug" --force >/dev/null; done
+for label in tier-1 tier-2 tier-3 needs-human task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
 git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng: cổng, hook, luật nộp bài và mẫu" --body "$(cat <<EOF
 ## Tóm tắt cho người quyết định
 - Mục đích: đưa $name vào xưởng bằng bộ kit của tuannd9288/factory.
-- Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\`, \`.githooks/\`, hai workflow cổng, mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`.
-- Bằng chứng: hook pre-commit đã chạy \`scripts/verify --fast\` khi commit.
+- Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (có \`protected\`: các đường dẫn bậc 3), \`.githooks/\`, hai workflow cổng, mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`.
+- Bằng chứng: \`scripts/verify\` đầy đủ xanh trước khi commit.
 - Bậc: 3 (chạm \`.github/\`, \`scripts/\`, \`.gate/\`).
 - Hoàn tác: revert PR này.
-- Cần anh quyết: có — xác nhận \`.gate/load-bearing\` và nhập ruleset; đề xuất: duyệt sau khi phiên của repo điền danh sách đường dẫn bậc 2.
+- Cần anh quyết: có — xác nhận \`.gate/load-bearing\` (bậc 2) và \`.gate/protected\` (bậc 3), rồi nhập ruleset; đề xuất: duyệt sau khi phiên của repo điền hai danh sách này.
 
 ## File repo đã có, kit giữ nguyên (phiên của repo hợp nhất tay)
 ${kept:-  - không có}
@@ -79,5 +94,6 @@ ${kept:-  - không có}
 2. Tạo environment \`reviewer\` chỉ cho nhánh \`main\`, đặt secret của reviewer vào đó (không đặt secret ở mức repo: job \`pull_request\` của mọi nhánh đọc được).
 3. Biến repo: \`GATE_RUNNER\` (ví dụ \`["self-hosted","factory"]\`; bỏ trống là runner GitHub), \`GATE_REVIEWER\` (chưa đặt thì \`review\` và \`verdict\` đỏ, không gì tự merge).
 4. Đăng nhập profile: mở pane mới trong repo, kiểm tra \`echo \$CLAUDE_CONFIG_DIR\`, chạy \`claude\`.
+5. Thêm repo vào lệnh \`bin/factory-queue sweep\` của launchd (chạy bằng tài khoản của agent).
 EOF
 )"

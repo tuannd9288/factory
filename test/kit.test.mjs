@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { commit, factory, git, repoWithKit, run, script, write } from './helpers.mjs';
 
 const RED_AT_BASE =
@@ -540,12 +540,14 @@ describe('hooks', () => {
 });
 
 describe('onboard', () => {
-  test('clones, makes the profile, writes .envrc, and keeps files the repository had', () => {
+  test('clones, makes the Claude profile keyed by owner and repository, writes .envrc, and keeps files the repository had', () => {
     const r = repoWithKit({ 'AGENTS.md': '# own rules\n' });
     try {
-      assert.ok(existsSync(join(r.dir, 'profiles/app/claude')));
-      assert.ok(existsSync(join(r.dir, 'profiles/app/codex')));
-      assert.match(readFileSync(join(r.repo, '.envrc'), 'utf8'), /CLAUDE_CONFIG_DIR=".*profiles\/app\/claude"/);
+      const owner = basename(r.dir);
+      assert.ok(existsSync(join(r.dir, 'profiles', owner, 'app/claude')));
+      assert.ok(!existsSync(join(r.dir, 'profiles', owner, 'app/codex')));
+      assert.ok(!existsSync(join(r.dir, 'profiles/app')));
+      assert.match(readFileSync(join(r.repo, '.envrc'), 'utf8'), new RegExp(`^export CLAUDE_CONFIG_DIR=".*profiles/${owner}/app/claude"\n$`));
       assert.match(readFileSync(join(r.repo, '.git/info/exclude'), 'utf8'), /^\.envrc$/m);
       assert.equal(readFileSync(join(r.repo, 'AGENTS.md'), 'utf8'), '# own rules\n');
       assert.match(r.onboard, /1 kept as they were/);
@@ -553,6 +555,32 @@ describe('onboard', () => {
       assert.equal(git(r.repo, 'config', '--local', 'core.hooksPath'), '.githooks');
     } finally {
       r.cleanup();
+    }
+  });
+  test('keeps an .envrc the repository has, and says what to add to it', () => {
+    const r = repoWithKit({ '.envrc': 'export FOO=1\n' });
+    try {
+      assert.equal(readFileSync(join(r.repo, '.envrc'), 'utf8'), 'export FOO=1\n');
+      assert.match(r.onboard, /\.envrc exists and is kept; add to it: export CLAUDE_CONFIG_DIR=/);
+    } finally {
+      r.cleanup();
+    }
+  });
+  test('commits the kit only after the full verify passes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factory-onboard-'));
+    try {
+      const seed = join(dir, 'seed');
+      git(dir, 'init', '-q', '-b', 'main', seed);
+      commit(seed, { 'test/broken.test.js': "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\ntest('broken', () => assert.equal(1, 2));\n" }, 'start');
+      git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
+      const out = run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr'], { FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles') });
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /verify: failed: tests[\s\S]*the kit is staged on factory\/kit, not committed/);
+      const repo = join(dir, 'root/app');
+      assert.equal(git(repo, 'rev-parse', 'HEAD'), git(seed, 'rev-parse', 'HEAD'));
+      assert.match(git(repo, 'status', '--porcelain'), /^A {2}scripts\/verify$/m);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
   test('refuses a folder that exists', () => {

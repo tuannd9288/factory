@@ -65,12 +65,15 @@ Everything else that can be undone, agents decide and report after.
 Run `bin/onboard <repo-url>` from this root. It does what the old layout did by hand:
 
 1. clones the repository into `<root>/<repo>`;
-2. creates its profile `~/.agent-profiles/<repo>/{claude,codex}`, only now; it holds state only, never edit it;
-3. writes `.envrc` (`CLAUDE_CONFIG_DIR`, `CODEX_HOME` pointing at the profile), adds it to `.git/info/exclude`
-   and runs `direnv allow`;
-4. opens the kit pull request in the repository: `scripts/`, `.gate/`, `.githooks/`, the two gate workflows,
-   the PR template, `CODEOWNERS`, deny rules, an `AGENTS.md` and the one-line `CLAUDE.md`. Files the repository
-   already has are kept and listed in the pull request for its session to merge by hand.
+2. creates its profile `~/.agent-profiles/<owner>/<repo>/claude`, only now; it holds state only, never edit it (a
+   Codex profile joins when Codex does);
+3. writes `.envrc` (`CLAUDE_CONFIG_DIR` pointing at the profile), adds it to `.git/info/exclude` and runs
+   `direnv allow`; an `.envrc` the repository has is kept, and onboard prints the line to add to it;
+4. lays the kit over it: `scripts/`, `.gate/`, `.githooks/`, the two gate workflows, the PR template, `CODEOWNERS`,
+   deny rules, an `AGENTS.md` and the one-line `CLAUDE.md`. Files the repository already has are kept and listed in
+   the pull request for its session to merge by hand;
+5. runs the full `scripts/verify`, and only when it passes commits the kit and opens its pull request. When it fails
+   the kit stays staged on `factory/kit` for the repository's session to finish.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (tier 3), imports
