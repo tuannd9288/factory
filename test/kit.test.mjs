@@ -334,6 +334,45 @@ describe('review', () => {
     out = job('verdict', { 'src/math.js': MUL }, { GATE_REVIEWER: '', GATE_TIER_LABELS: 'tier-2' });
     assert.equal(out.code, 1, out.out);
   });
+  test('the verdict on tier 3 waits for a code owner other than the author to approve the head commit', () => {
+    const bin = join(r.dir, 'fake-bin');
+    write(bin, { gh: '#!/bin/sh\ncat "$FAKE_REVIEWS"\n' });
+    run(bin, 'chmod', ['+x', 'gh']);
+    const reviews = join(r.dir, 'reviews.json');
+    const verdict = (list, author = 'agent-bot') => {
+      writeFileSync(reviews, JSON.stringify([list]));
+      git(r.repo, 'switch', '-q', '-C', 'rv', 'origin/main');
+      commit(r.repo, { 'AGENTS.md': '# app\n' }, 'rv');
+      const head = git(r.repo, 'rev-parse', 'HEAD');
+      const env = { GATE_REVIEWER: 'stub', PATH: `${bin}:${process.env.PATH}`, FAKE_REVIEWS: reviews, GATE_PR: '7', GATE_PR_AUTHOR: author, GATE_HEAD: head };
+      return { head, out: run(r.repo, join(r.repo, 'scripts/review'), ['verdict', r.repo, git(r.repo, 'rev-parse', 'origin/main')], env) };
+    };
+    const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
+    let { out } = verdict([]);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    ({ out } = verdict([review('tuannd9288', 'APPROVED', '0'.repeat(40))]));
+    assert.equal(out.code, 1, out.out);
+    const { head } = verdict([]);
+    ({ out } = verdict([review('tuannd9288', 'APPROVED', head), review('tuannd9288', 'CHANGES_REQUESTED', head, '2026-10-21T11:00:00Z')]));
+    assert.equal(out.code, 1, out.out);
+    ({ out } = verdict([review('someone', 'APPROVED', head)]));
+    assert.equal(out.code, 1, out.out);
+    ({ out } = verdict([], 'tuannd9288'));
+    assert.match(out.out, /agents need their own GitHub account/);
+  });
+  test('the verdict on tier 3 passes once the code owner approved the head commit', () => {
+    const bin = join(r.dir, 'fake-bin');
+    const reviews = join(r.dir, 'reviews.json');
+    git(r.repo, 'switch', '-q', '-C', 'rv', 'origin/main');
+    commit(r.repo, { 'AGENTS.md': '# app\n' }, 'rv');
+    const head = git(r.repo, 'rev-parse', 'HEAD');
+    writeFileSync(reviews, JSON.stringify([[{ user: { login: 'TuanND9288' }, state: 'APPROVED', commit_id: head, submitted_at: '2026-10-21T10:00:00Z' }]]));
+    const env = { GATE_REVIEWER: 'stub', PATH: `${bin}:${process.env.PATH}`, FAKE_REVIEWS: reviews, GATE_PR: '7', GATE_PR_AUTHOR: 'agent-bot', GATE_HEAD: head };
+    const out = run(r.repo, join(r.repo, 'scripts/review'), ['verdict', r.repo, git(r.repo, 'rev-parse', 'origin/main')], env);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /tuannd9288 approved/);
+  });
 });
 
 describe('hooks', () => {

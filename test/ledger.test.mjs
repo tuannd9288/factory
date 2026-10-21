@@ -116,3 +116,13 @@ test('the queue updates the oldest pull request left behind, one at a time', asy
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'BEHIND'), p(2, '2026-10-21T02', 'BLOCKED', { checks: 'FAILURE' })]).number, 1);
   assert.equal(pickUpdate([p(1, '2026-10-21T01', 'CLEAN')]), null);
 });
+
+test('the queue re-runs a failed verdict once someone other than the author approved the head after it', async () => {
+  const { pickReruns } = await import('../bin/lib/queue.mjs');
+  const pr = (approvals, verdict = { conclusion: 'FAILURE', completedAt: '2026-10-21T10:00:00Z', runId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals, verdict });
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), [{ number: 7, runId: '42' }]);
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T09:55:00Z' }])]), []);
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'old', at: '2026-10-21T10:05:00Z' }])]), []);
+  assert.deepEqual(pickReruns([pr([{ login: 'agent', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), []);
+  assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }], { conclusion: 'SUCCESS', completedAt: '', runId: '42' })]), []);
+});

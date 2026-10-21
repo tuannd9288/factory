@@ -32,7 +32,7 @@ Run `scripts/setup` once per clone. Run `scripts/verify` before every push; CI r
 4. Open the pull request with the template, in Vietnamese, and enable auto-merge (`gh pr merge --auto --merge`).
    Then release the branch and move on; do not wait for CI.
 5. The gate decides. Tier 1 needs `verify`, `rules`, `red-check`, `verify-trusted` and `review` green on the
-   head commit; tier 2 adds `verdict`; tier 3 adds the Human's approval as code owner.
+   head commit; tier 2 adds `verdict`; on tier 3 `verdict` also waits for the Human's approval of the head commit.
 6. A blocking finding is fixed by a new commit, or answered in its thread with `withdraw <id>: <reason>` for
    the reviewer to judge. After three rounds the pull request gets the label `needs-human`.
 
@@ -58,6 +58,7 @@ answer; a reversible question never blocks the work.
 | A change to the gate is judged by `main`'s gate | `verify-trusted` (`pull_request_target`) |
 | Commit subject present, at most 72 characters | `.githooks/commit-msg` |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
+| Tier 3 lands only with the Human's approval of the head commit | `verdict` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
 | No `--no-verify`, tags, releases, `.env` reads | `.claude/settings.json` deny rules, in Claude Code only; nothing on GitHub refuses a tag or a release |
 | Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
 | `AGENTS.md` at most 150 lines; `CLAUDE.md` is `@AGENTS.md` | `scripts/verify` (`instructions`) |

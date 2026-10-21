@@ -23,9 +23,14 @@ The change sets the tier, by the paths it touches (`scripts/tier`), never the au
 |---|---|---|---|
 | 1 | no tier-2 or tier-3 path | `verify`, `rules`, `red-check`, `verify-trusted`, `review` green on the head commit | none |
 | 2 | a `.gate/load-bearing` path, or a dependency manifest | tier 1 and `verdict` | reads it in the weekly digest and on the deploy page |
-| 3 | a path in `.github/CODEOWNERS`: the gate, `AGENTS.md`, `.claude/` | tier 2 and his approval as code owner | approves from the summary |
+| 3 | a path in `.github/CODEOWNERS`: the gate, `AGENTS.md`, `.claude/` | tier 2 and his approval of the head commit, which `verdict` checks | approves from the summary |
 
 A tier never drops within a pull request: the labels `tier-N` only raise it.
+
+Agents open pull requests under their own GitHub account, never the Human's. GitHub refuses an author's approval of
+his own pull request, and its code-owner rule asks nothing of an author who owns the code: on the scratch repository
+a tier-3 pull request opened from the Human's account merged with no approval (2026-10-21). So `verdict` itself
+requires, on tier 3, an approval of the head commit by a code owner who is not the author.
 
 ## What the Human keeps
 
@@ -49,6 +54,7 @@ Everything else that can be undone, agents decide and report after.
 | `kit/` | What every repository receives through one pull request when it joins |
 | `bin/onboard` | Takes a repository in |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest |
+| `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, re-runs a tier-3 verdict after approval, pauses auto-merge for a rollback |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
 | `NOTICE` | What was taken from other projects, with the commit |
@@ -69,6 +75,12 @@ Then the repository's session fills `.gate/config.sh` (test command, fast checks
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (tier 3), imports
 `.gate/ruleset.json`, creates the `reviewer` environment, and logs into the profile in a new pane opened in the
 repository (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
+
+Keep `bin/factory-queue sweep --repo <owner/repo>... --every 60` running under the Human's `gh` login: the ruleset
+requires a branch to be up to date, GitHub updates none by itself, and without the queue every auto-merge pull
+request strands when another lands. A rollback (the gate itself broken): `bin/factory-queue pause`, turn the ruleset
+off, merge the fix by hand, turn the ruleset on, `bin/factory-queue resume`. With the ruleset off, every pull request
+still waiting on auto-merge would land unjudged.
 
 Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
 `direnv exec <root>/<repo> claude -p "…"`.

@@ -6,7 +6,9 @@
 #           (review) or GATE-STUB-VERDICT (verdict)
 #   unset   fails closed: no reviewer is configured, so nothing merges on this gate
 # The verdict passes at once on tier 1, so the required check always exists; the tier comes from main's rules and
-# only rises with the pull request's tier labels (GATE_TIER_LABELS).
+# only rises with the pull request's tier labels (GATE_TIER_LABELS). On tier 3 it also needs the approval of a code
+# owner who is not the author, on the head commit (GATE_PR, GATE_PR_AUTHOR, GATE_HEAD; reviews read with gh), and is
+# re-run after that approval.
 set -uo pipefail
 trusted=$(git rev-parse --show-toplevel) || exit 2
 job=${1:?review or verdict}
@@ -19,6 +21,10 @@ if [ "$job" = verdict ]; then
   echo "$tier"
   case "$tier" in
     "tier 1"*) echo "verdict: tier 1: not required"; exit 0 ;;
+    "tier 3"*)
+      reviews=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/pulls/${GATE_PR:-}/reviews" 2>/dev/null) || { echo "verdict: tier 3 needs the Human's approval, and the reviews could not be read"; exit 1; }
+      printf '%s' "$reviews" | node scripts/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "${GATE_HEAD:-}" || exit 1
+      ;;
   esac
 fi
 

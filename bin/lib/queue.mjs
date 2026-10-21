@@ -1,7 +1,7 @@
 // The factory's merge queue for repositories without GitHub's: the ruleset requires a branch to be up to date, and
 // GitHub never updates one by itself, so a pull request waiting on auto-merge strands once another lands. sweep
 // updates one waiting pull request at a time per repository, the oldest first, as the person whose gh is logged in, so
-// the update triggers the gate. pause and resume take auto-merge off every open pull request and put it back, for
+// the update triggers the gate; it also re-runs a tier-3 verdict that failed before the Human approved. pause and resume take auto-merge off every open pull request and put it back, for
 // the minutes a ruleset is off during a rollback. See bin/factory-queue for the arguments.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,27 +17,50 @@ export function pickUpdate(prs) {
   return behind[0] ?? null;
 }
 
+/** The verdict runs to re-run: a failed verdict on a pull request that someone other than its author approved on the
+ * head commit after that verdict finished. The verdict itself decides whether the approver may approve. */
+export function pickReruns(prs) {
+  return prs
+    .filter((p) => p.verdict?.conclusion === 'FAILURE' && p.verdict.runId)
+    .filter((p) => p.approvals.some((a) => a.login !== p.author && a.oid === p.head && a.at > p.verdict.completedAt))
+    .map((p) => ({ number: p.number, runId: p.verdict.runId }));
+}
+
 const QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100){nodes{
-number isDraft createdAt mergeStateStatus autoMergeRequest{enabledAt}
-commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}}`;
+number isDraft createdAt mergeStateStatus autoMergeRequest{enabledAt} author{login} headRefOid
+reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
+commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:60){nodes{... on CheckRun{name conclusion completedAt detailsUrl}}}}}}}}}}}`;
 
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
 function openPulls(repo) {
   const [owner, name] = repo.split('/');
   const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`]));
-  return data.data.repository.pullRequests.nodes.map((p) => ({
-    number: p.number,
-    isDraft: p.isDraft,
-    createdAt: p.createdAt,
-    mergeStateStatus: p.mergeStateStatus,
-    autoMerge: Boolean(p.autoMergeRequest),
-    checks: p.commits.nodes[0]?.commit.statusCheckRollup?.state ?? 'PENDING',
-  }));
+  return data.data.repository.pullRequests.nodes.map((p) => {
+    const rollup = p.commits.nodes[0]?.commit.statusCheckRollup;
+    const verdict = (rollup?.contexts.nodes ?? []).filter((c) => c.name === 'verdict').sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)))[0];
+    return {
+      number: p.number,
+      isDraft: p.isDraft,
+      createdAt: p.createdAt,
+      mergeStateStatus: p.mergeStateStatus,
+      autoMerge: Boolean(p.autoMergeRequest),
+      checks: rollup?.state ?? 'PENDING',
+      author: p.author?.login,
+      head: p.headRefOid,
+      approvals: p.reviews.nodes.map((r) => ({ login: r.author?.login, oid: r.commit?.oid, at: r.submittedAt })),
+      verdict: verdict && { conclusion: verdict.conclusion, completedAt: verdict.completedAt ?? '', runId: /\/runs\/(\d+)/.exec(verdict.detailsUrl ?? '')?.[1] },
+    };
+  });
 }
 
 function sweep(repo) {
-  const pr = pickUpdate(openPulls(repo));
+  const prs = openPulls(repo);
+  for (const { number, runId } of pickReruns(prs)) {
+    gh(['run', 'rerun', runId, '--failed', '--repo', repo]);
+    console.log(`queue: re-ran the verdict of ${repo}#${number} after its approval`);
+  }
+  const pr = pickUpdate(prs);
   if (!pr) return;
   gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
   console.log(`queue: updated ${repo}#${pr.number} to its base`);
