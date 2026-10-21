@@ -22,6 +22,13 @@ auto-merge at 11:24:02Z (merge 22893d7, its head 63167e0 green on all six checks
 its branch, mine, turned the PR record to CLOSED. Every clean change was dry-run locally with verify and red-check
 before it was opened, as an agent would; the defects were only checked to build.
 
+The tier-3 approval in verdict was seen refusing D16 on scratch ("the only code owner (@tuannd9288) wrote this pull
+request"); approve, re-run and merge could not be checked with one GitHub identity and is covered by the kit tests.
+
+To run the probes again: `run.sh`'s edits target the tree before the probes (scratch main 40878f3e). Scratch main has
+since taken D15, D17, D19, D20 and the twenty clean changes, so first reset scratch main to 40878f3e (the ruleset off
+for that push: an admin step) or make a new scratch repository from the kit.
+
 Every merge on scratch main after the ruleset (31, `tree.sh`): merged tree equal to the judged head's tree, head
 already holding main, six of six required checks green on that head.
 
