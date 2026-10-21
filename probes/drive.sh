@@ -1,8 +1,9 @@
-# Probe helpers for factory-scratch: each probe is a branch in its own worktree off origin/main, committed without the
-# local hooks (the gate in CI is what is measured), pushed, and opened as a pull request.
-SP=${PROBE_HOME:?set PROBE_HOME to a folder holding a clone of factory-scratch at root/factory-scratch}
-R=$SP/root/factory-scratch
-REPO=tuannd9288/factory-scratch
+# Probe helpers for the scratch repository PROBE_REPO (owner/name): each probe is a branch in its own worktree off
+# origin/main, committed without the local hooks (the gate in CI is what is measured), pushed, and opened as a pull
+# request. PROBE_HOME holds a clone of it at root/<name>, and the worktrees.
+REPO=${PROBE_REPO:?set PROBE_REPO to the scratch repository, owner/name}
+SP=${PROBE_HOME:?set PROBE_HOME to a folder holding a clone of $REPO at root/${REPO#*/}}
+R=$SP/root/${REPO#*/}
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
 probe_start() { # name
   git -C "$R" fetch -q origin main

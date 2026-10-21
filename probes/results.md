@@ -1,7 +1,8 @@
 # Probe results, 2026-10-21
 
 tuannd9288/factory-scratch, GitHub-hosted runners, kit 138139d on scratch main from 5b700102, GATE_REVIEWER=stub
-(no model runs). Plan and expected layers: `plan.md`, written before any probe was opened. Attacks: `attacks.md`.
+(no model runs). Plan and expected layers: `plan.md` as of commit 15d6e21, written before any probe was opened.
+Attacks: `attacks.md`. The plan for the next run, with both bars, is the current `plan.md`.
 
 | Measure | Result | 95% Wilson | Bar | Met |
 |---|---|---|---|---|
@@ -25,9 +26,9 @@ before it was opened, as an agent would; the defects were only checked to build.
 The tier-3 approval in verdict was seen refusing D16 on scratch ("the only code owner (@tuannd9288) wrote this pull
 request"); approve, re-run and merge could not be checked with one GitHub identity and is covered by the kit tests.
 
-To run the probes again: `run.sh`'s edits target the tree before the probes (scratch main 40878f3e). Scratch main has
-since taken D15, D17, D19, D20 and the twenty clean changes, so first reset scratch main to 40878f3e (the ruleset off
-for that push: an admin step) or make a new scratch repository from the kit.
+To run the probes again: the builders (`probes.sh`) edit the tree before the probes (scratch main 40878f3e). Scratch
+main has since taken D15, D17, D19, D20 and the twenty clean changes, so the next run uses a new scratch repository
+seeded from that tree, named by `PROBE_REPO`.
 
 Every merge on scratch main after the ruleset (31, `tree.sh`): merged tree equal to the judged head's tree, head
 already holding main, six of six required checks green on that head.
