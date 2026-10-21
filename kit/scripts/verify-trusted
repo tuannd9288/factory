@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The gate's check of a change to the gate itself, run from main's checkout so the candidate cannot edit it.
 #   scripts/verify-trusted <candidate-dir> <base-sha>
-# With no gate file changed it passes at once. Otherwise: main's checks run on the candidate's code (main's gate files
-# laid over a copy of it), and the candidate's own checks must fail on main's fixtures (prove-check --tree), so a
-# verify replaced by `exit 0` or a check switched off is caught here.
+# With no gate file changed it passes at once. Otherwise: main's verify and red-check run on the candidate's code
+# (main's gate files laid over a copy of it), and the candidate's own checks must fail on main's fixtures
+# (prove-check --tree), so a verify replaced by `exit 0`, a check switched off, or a gate.yml whose jobs pass without
+# checking is caught here. GATE_BODY_FILE names a file holding the PR body, for red-check's No-red line.
 set -uo pipefail
 trusted=$(git rev-parse --show-toplevel) || exit 2
 candidate=$(cd "${1:?candidate checkout}" && pwd) || exit 2
@@ -48,11 +49,18 @@ if [ "$status" -ne 0 ]; then
   tail -n 30 "$work/verify.out" | sed 's/^/  /'
 fi
 
-# 2. The candidate's checks against main's fixtures.
+# 2. Main's red-check on the candidate's code; the candidate runs its own red-check job, which it can edit.
+if ! (cd "$work/overlay" && scripts/red-check --base "$base" ${GATE_BODY_FILE:+--body "$GATE_BODY_FILE"}) >"$work/red.out" 2>&1; then
+  status=1
+  echo "verify-trusted: main's red-check fails on the candidate's code:"
+  tail -n 20 "$work/red.out" | sed 's/^/  /'
+fi
+
+# 3. The candidate's checks against main's fixtures.
 if ! scripts/prove-check --all --tree "$candidate" >"$work/prove.out" 2>&1; then
   status=1
   echo "verify-trusted: the candidate's checks no longer fail on main's fixtures:"
   sed 's/^/  /' "$work/prove.out"
 fi
-[ "$status" -eq 0 ] && echo "verify-trusted: main's verify passes on the candidate, and the candidate's checks fail on main's fixtures"
+[ "$status" -eq 0 ] && echo "verify-trusted: main's verify and red-check pass on the candidate, and its checks fail on main's fixtures"
 exit "$status"

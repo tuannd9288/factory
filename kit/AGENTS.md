@@ -57,7 +57,9 @@ answer; a reversible question never blocks the work.
 | Every check is shown failing on a fixture | `scripts/prove-check` in `verify` and `verify-trusted` |
 | A change to the gate is judged by `main`'s gate | `verify-trusted` (`pull_request_target`) |
 | Commit subject present, at most 72 characters | `.githooks/commit-msg` |
-| No `--no-verify`, `--admin`, self-approval, tags, releases, `.env` reads | `.claude/settings.json` deny rules; the ruleset behind them |
+| No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
+| No `--no-verify`, tags, releases, `.env` reads | `.claude/settings.json` deny rules, in Claude Code only; nothing on GitHub refuses a tag or a release |
+| Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
 | `AGENTS.md` at most 150 lines; `CLAUDE.md` is `@AGENTS.md` | `scripts/verify` (`instructions`) |
 
 A rule with no enforcer goes here as `prose` and gets one, or is deleted, within 30 days.

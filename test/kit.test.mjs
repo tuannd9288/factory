@@ -287,6 +287,11 @@ describe('verify-trusted', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /rules PASSED its fixture/);
   });
+  test('fails a candidate that switches its own red-check off and changes code with no test', () => {
+    const out = candidate({ '.github/workflows/gate.yml': '# every job passes\n', 'src/math.js': MUL });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /main's red-check fails on the candidate's code/);
+  });
   test('fails a candidate whose code main\'s verify rejects', () => {
     const out = candidate({ 'scripts/rules': '#!/usr/bin/env bash\nexit 0\n', 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
     assert.equal(out.code, 1, out.out);

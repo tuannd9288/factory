@@ -106,7 +106,9 @@ export function rowOf(repo, pr, { human, costs, profile }) {
     }
     if (!byRule) reasons.push('merge tay');
   }
+  // A round is a commit the gate judged that someone wrote; the queue's merges of main into the branch are not rounds.
   const judged = pr.commits.nodes
+    .filter((c) => (c.commit.parents?.totalCount ?? 1) < 2)
     .map((c) => ({
       oid: c.commit.oid,
       runs: c.commit.checkSuites.nodes.filter((s) => s.app?.slug === 'github-actions').flatMap((s) => s.checkRuns.nodes),
@@ -147,7 +149,7 @@ export function rowOf(repo, pr, { human, costs, profile }) {
 const STATE = { landed: 'đã merge', open: 'đang mở', abandoned: 'bỏ' };
 
 /** The weekly digest, in Vietnamese markdown. */
-export function digest(rows, { since, until }) {
+export function digest(rows, { since, until, secrets = new Map() }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -187,6 +189,10 @@ export function digest(rows, { since, until }) {
       `| ${r.repo.split('/')[1]} | [#${r.number}](${r.url}) | ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `có (${r.touchedWhy})` : 'không'} | ${STATE[r.state]} |`,
     );
   }
+  if (secrets.size) {
+    lines.push('', '## Secret cấp repo (phải là 0: job của mọi nhánh đều đọc được)', '');
+    for (const [repo, names] of secrets) lines.push(`- ${repo}: ${names === null ? 'không kiểm được' : names.length ? names.join(', ') : '0'}`);
+  }
   lines.push('', 'Chi phí: token trong profile Claude Code của repo, theo nhánh của PR, tính theo giá API (bin/lib/prices.json). Anh chạm: anh duyệt, nhãn needs-human, hoặc merge không qua auto-merge.');
   return `${lines.join('\n')}\n`;
 }
@@ -196,7 +202,7 @@ number title url body author{login} createdAt mergedAt state headRefName
 labels(first:30){nodes{name}}
 reviews(first:50){nodes{author{login} state}}
 timelineItems(first:100,itemTypes:[LABELED_EVENT,AUTO_MERGE_ENABLED_EVENT,AUTO_MERGE_DISABLED_EVENT,MERGED_EVENT]){nodes{__typename ... on LabeledEvent{label{name}} ... on MergedEvent{createdAt}}}
-commits(first:100){nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:40){nodes{name conclusion}}}}}}}}}}`;
+commits(first:100){nodes{commit{oid parents{totalCount} checkSuites(first:20){nodes{app{slug} checkRuns(first:40){nodes{name conclusion}}}}}}}}}}`;
 
 function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -258,7 +264,15 @@ function main(argv) {
       console.log([r.repo, r.number, r.who, r.tier ?? '', r.state, r.rounds, r.firstPass ?? '', r.noRed, r.touched, r.touchedWhy, r.cost?.toFixed(4) ?? '', r.costNote, r.hours?.toFixed(2) ?? '', r.title].join('\t'));
     return;
   }
-  const text = digest(rows, opts);
+  const secrets = new Map();
+  for (const repo of opts.repos) {
+    try {
+      secrets.set(repo, JSON.parse(gh(['api', `repos/${repo}/actions/secrets`])).secrets.map((x) => x.name));
+    } catch {
+      secrets.set(repo, null);
+    }
+  }
+  const text = digest(rows, { ...opts, secrets });
   if (!opts.post) {
     process.stdout.write(text);
     return;

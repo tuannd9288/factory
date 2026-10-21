@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The factory's merge queue, for repositories where GitHub offers none, run as the Human's gh login.
+#   bin/factory-queue sweep --repo owner/name... [--every seconds]   update the oldest auto-merge PR left behind main
+#   bin/factory-queue pause --repo owner/name...                     take auto-merge off every open PR, remember them
+#   bin/factory-queue resume --repo owner/name...                    put auto-merge back on the remembered PRs
+# A rollback: pause, turn the ruleset off, merge the revert, turn the ruleset on, resume. Without pause, every PR
+# waiting on auto-merge lands unjudged the moment the ruleset is off.
+exec node "$(dirname "$0")/lib/queue.mjs" "$@"
