@@ -1,8 +1,17 @@
-# The gate's trusted half. On pull_request_target GitHub runs main's copy of this file, and every job runs main's
-# scripts from ./trusted, whatever the pull request changes. The candidate is checked out into ./candidate:
-# verify-trusted runs its code under main's checks with no secrets; review and verdict only read it, with the
-# reviewer's credentials from the environment "reviewer", whose branch policy admits main alone. No job is skipped by
-# a condition, since a skipped job satisfies a required check.
+# The gate. On pull_request_target GitHub runs main's copy of this file, and every job runs main's scripts from
+# ./trusted, whatever the pull request changes. The required checks are the jobs named in .gate/ruleset.json:
+#   verify   the only job that runs the candidate's code: main's verify and red-check on it (scripts/verify-trusted).
+#            It holds no secret and keeps no token. No job here restores an Actions cache, which this event shares
+#            with main.
+#   review, verdict
+#            wait for verify, then read the candidate as data: its commits are fetched into main's checkout with no
+#            work tree. The reviewer's credentials come from the environment "reviewer", whose branch policy admits
+#            main alone.
+#   tier     the tier, and on tier 3 the Human's approval of the head; it needs no other job, so after his approval
+#            the queue re-runs it alone and no reviewer runs again.
+# A job skipped because a job it needs failed counts as passing for a required check. review and verdict need only
+# verify, which is required itself, so a red verify still blocks the merge; tier needs nothing. rounds, not required,
+# runs after a red verify, review or verdict and labels needs-human at the third red head commit.
 name: gate-trusted
 
 on:
@@ -18,10 +27,13 @@ concurrency:
 
 env:
   BASE: ${{ github.event.pull_request.base.sha }}
+  HEAD: ${{ github.event.pull_request.head.sha }}
+  GATE_HEAD: ${{ github.event.pull_request.head.sha }}
+  GATE_PR: ${{ github.event.pull_request.number }}
 
 jobs:
-  verify-trusted:
-    name: verify-trusted
+  verify:
+    name: verify
     runs-on: ${{ fromJSON(vars.GATE_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 30
     steps:
@@ -48,6 +60,7 @@ jobs:
 
   review:
     name: review
+    needs: verify
     runs-on: ubuntu-latest
     environment: reviewer
     timeout-minutes: 30
@@ -55,23 +68,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: trusted
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: candidate
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - run: scripts/review review ../candidate "$BASE"
+      - name: Fetch the candidate's commits, with no work tree
+        run: git -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch --no-tags --quiet origin "$HEAD"
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: |
+          printf '%s\n' "$BODY" >"$RUNNER_TEMP/pr-body.txt"
+          GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" scripts/review review --base "$BASE" --head "$HEAD"
         working-directory: trusted
         env:
           GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
+          BODY: ${{ github.event.pull_request.body }}
 
   verdict:
     name: verdict
+    needs: verify
     runs-on: ubuntu-latest
     environment: reviewer
     timeout-minutes: 40
@@ -82,24 +99,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: trusted
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: candidate
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - run: scripts/review verdict ../candidate "$BASE"
+      - name: Fetch the candidate's commits, with no work tree
+        run: git -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch --no-tags --quiet origin "$HEAD"
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: scripts/review verdict --base "$BASE" --head "$HEAD"
         working-directory: trusted
         env:
           GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
-          GATE_TIER_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          GATE_PR: ${{ github.event.pull_request.number }}
-          GATE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          GATE_HEAD: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
 
   tier:
@@ -113,27 +126,41 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: trusted
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: candidate
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - working-directory: candidate
+      - name: Fetch the candidate's commits, with no work tree
+        run: git -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch --no-tags --quiet origin "$HEAD"
+        working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-        run: |
-          out=$(../trusted/scripts/tier --base "$BASE" --rules ../trusted --labels "$LABELS")
-          echo "$out" | tee -a "$GITHUB_STEP_SUMMARY"
-          n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
-          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --add-label "tier-$n"
-          for k in 1 2 3; do
-            [ "$k" -lt "$n" ] && gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label "tier-$k" >/dev/null 2>&1
-          done
-          exit 0
+      - run: scripts/review tier --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash
+        working-directory: trusted
+        env:
+          GATE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          GH_TOKEN: ${{ github.token }}
+
+  rounds:
+    name: rounds
+    needs: [verify, review, verdict]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: scripts/review rounds
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}

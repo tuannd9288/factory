@@ -25,11 +25,9 @@
         "do_not_enforce_on_create": false,
         "required_status_checks": [
           { "context": "verify", "integration_id": 15368 },
-          { "context": "rules", "integration_id": 15368 },
-          { "context": "red-check", "integration_id": 15368 },
-          { "context": "verify-trusted", "integration_id": 15368 },
           { "context": "review", "integration_id": 15368 },
-          { "context": "verdict", "integration_id": 15368 }
+          { "context": "verdict", "integration_id": 15368 },
+          { "context": "tier", "integration_id": 15368 }
         ]
       }
     }

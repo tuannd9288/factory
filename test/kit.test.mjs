@@ -1,6 +1,7 @@
 // The kit's checks, each shown failing on a bad input and passing on a good one.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -356,79 +357,162 @@ describe('verify-trusted', () => {
   });
 });
 
-describe('review', () => {
+describe('review, verdict, tier and rounds', () => {
+  // The trusted jobs run in main's checkout, into which the candidate's commits are fetched without a work tree.
   let r;
+  let trusted;
+  let fake;
   before(() => {
     r = repoWithKit();
     git(r.repo, 'switch', '-q', 'main');
     commit(r.repo, { '.gate/load-bearing': 'src/auth/\n' }, 'auth is load-bearing');
     git(r.repo, 'push', '-q', 'origin', 'main');
+    trusted = join(r.dir, 'trusted');
+    git(r.dir, 'clone', '-q', join(r.dir, 'app.git'), trusted);
+    fake = join(r.dir, 'fake');
+    write(fake, {
+      'bin/gh': [
+        '#!/bin/sh',
+        'case "$*" in',
+        '  *LABELED_EVENT*) cat "$FAKE/labels.json" ;;',
+        '  *checkSuites*) cat "$FAKE/rounds.json" ;;',
+        '  *reviews*) cat "$FAKE/reviews.json" ;;',
+        '  "pr edit"*) echo "$*" >>"$FAKE/edits" ;;',
+        '  *) echo "fake gh: $*" >&2; exit 1 ;;',
+        'esac',
+        '',
+      ].join('\n'),
+    });
+    run(fake, 'chmod', ['+x', 'bin/gh']);
   });
   after(() => r.cleanup());
-  const job = (kind, files, env) => {
-    git(r.repo, 'switch', '-q', '-C', 'rv', 'origin/main');
-    commit(r.repo, files, 'rv');
-    return run(r.repo, join(r.repo, 'scripts/review'), [kind, r.repo, git(r.repo, 'rev-parse', 'origin/main')], env);
+  const labels = (...names) =>
+    write(fake, { 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { totalCount: names.length, nodes: names.map((name) => ({ label: { name } })) } } } } }) });
+  const reviews = (list) => write(fake, { 'reviews.json': JSON.stringify([list]) });
+  /** Commits files on a candidate branch, fetches it into the trusted checkout, and runs one job there. */
+  /** Runs one job in the trusted checkout on a head already fetched there, as a re-run does. */
+  const again = (kind, head, env = {}) => {
+    write(fake, { edits: '' });
+    const out = run(trusted, join(trusted, 'scripts/review'), [kind, '--base', git(trusted, 'rev-parse', 'origin/main'), '--head', head], {
+      PATH: `${join(fake, 'bin')}:${process.env.PATH}`,
+      FAKE: fake,
+      GITHUB_REPOSITORY: 'o/app',
+      GATE_HEAD: head,
+      ...env,
+    });
+    return { ...out, head, edits: readFileSync(join(fake, 'edits'), 'utf8') };
   };
+  /** Commits files on a candidate branch, fetches it into the trusted checkout, and runs one job there. */
+  const job = (kind, files, env = {}) => {
+    git(r.repo, 'switch', '-q', '-C', 'rv', 'origin/main');
+    const head = commit(r.repo, files, 'rv');
+    git(trusted, 'fetch', '-q', r.repo, 'rv');
+    return again(kind, head, env);
+  };
+  const pr = { GATE_PR: '7', GATE_PR_AUTHOR: 'agent-bot' };
+  const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
 
-  test('fails closed with no reviewer configured', () => {
+  test('review fails closed with no reviewer configured, and reads the candidate with no work tree', () => {
+    assert.ok(!existsSync(join(trusted, 'src/auth')));
     const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: '' });
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /no reviewer is configured/);
   });
-  test('the stub fails while its marker is in the diff, and passes without it', () => {
+  test('the stub blocks while its marker is in the diff, and passes without it', () => {
     let out = job('review', { 'src/math.js': `${MUL}// GATE-STUB-FINDING off by one\n` }, { GATE_REVIEWER: 'stub' });
     assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /stub-1: .*GATE-STUB-FINDING off by one/);
     out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'stub' });
     assert.equal(out.code, 0, out.out);
   });
+  test('a job judging a commit other than the pull request\'s head fails', () => {
+    const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'stub', GATE_HEAD: '0'.repeat(40) });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /the pull request's head is 0{40}/);
+  });
+  test('a No-red line needs the reviewer\'s explicit acceptance, which the stub never gives', () => {
+    write(r.dir, { 'body.txt': 'Tóm tắt\nNo-red: renames a local variable, nothing to fail\n' });
+    const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'stub', GATE_BODY_FILE: join(r.dir, 'body.txt') });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /No-red .* not accepted \(unjudged\)/);
+  });
+  test('a reviewer result that is malformed, unbound to the head, or silent on a No-red claim fails', () => {
+    const check = (result, args = []) =>
+      spawnSync('node', [join(factory, 'kit/scripts/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40), ...args], { input: result, encoding: 'utf8' });
+    const good = { reviewer: 'x', job: 'review', base: 'b'.repeat(40), head: 'h'.repeat(40), blocking: [], noRed: 'unjudged' };
+    assert.equal(check(JSON.stringify(good)).status, 0);
+    assert.equal(check('not json').status, 2);
+    assert.equal(check('').status, 2);
+    assert.equal(check(JSON.stringify({ ...good, head: 'a'.repeat(40) })).status, 2);
+    assert.equal(check(JSON.stringify({ ...good, job: 'verdict' })).status, 2);
+    assert.equal(check(JSON.stringify({ ...good, blocking: [{ id: 'f1' }] })).status, 2);
+    assert.equal(check(JSON.stringify({ ...good, blocking: [{ id: 'f1', claim: 'off by one' }] })).status, 1);
+    assert.equal(check(JSON.stringify(good), ['--no-red']).status, 1);
+    assert.equal(check(JSON.stringify({ ...good, noRed: 'accepted' }), ['--no-red']).status, 0);
+  });
   test('the verdict passes at once on tier 1 and is required on tier 2', () => {
-    let out = job('verdict', { 'src/math.js': MUL }, { GATE_REVIEWER: '' });
+    labels();
+    let out = job('verdict', { 'src/math.js': MUL }, { GATE_REVIEWER: '', ...pr });
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /tier 1: not required/);
-    out = job('verdict', { 'src/auth/t.js': 'export const t = 1;\n' }, { GATE_REVIEWER: '' });
-    assert.equal(out.code, 1, out.out);
-    out = job('verdict', { 'src/math.js': MUL }, { GATE_REVIEWER: '', GATE_TIER_LABELS: 'tier-2' });
+    out = job('verdict', { 'src/auth/t.js': 'export const t = 1;\n' }, { GATE_REVIEWER: '', ...pr });
     assert.equal(out.code, 1, out.out);
   });
-  test('the verdict on tier 3 waits for a code owner other than the author to approve the head commit', () => {
-    const bin = join(r.dir, 'fake-bin');
-    write(bin, { gh: '#!/bin/sh\ncat "$FAKE_REVIEWS"\n' });
-    run(bin, 'chmod', ['+x', 'gh']);
-    const reviews = join(r.dir, 'reviews.json');
-    const verdict = (list, author = 'agent-bot') => {
-      writeFileSync(reviews, JSON.stringify([list]));
-      git(r.repo, 'switch', '-q', '-C', 'rv', 'origin/main');
-      commit(r.repo, { 'AGENTS.md': '# app\n' }, 'rv');
-      const head = git(r.repo, 'rev-parse', 'HEAD');
-      const env = { GATE_REVIEWER: 'stub', PATH: `${bin}:${process.env.PATH}`, FAKE_REVIEWS: reviews, GATE_PR: '7', GATE_PR_AUTHOR: author, GATE_HEAD: head };
-      return { head, out: run(r.repo, join(r.repo, 'scripts/review'), ['verdict', r.repo, git(r.repo, 'rev-parse', 'origin/main')], env) };
-    };
-    const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
-    let { out } = verdict([]);
+  test('a tier label removed from the pull request still counts: the tier is the highest it ever had', () => {
+    labels('bug', 'tier-2');
+    const out = job('verdict', { 'src/math.js': MUL }, { GATE_REVIEWER: '', ...pr });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^tier 2\n {2}label tier-2/);
+  });
+  test('the tier fails closed when the pull request\'s labels cannot be read', () => {
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"totalCount":500,"nodes":[]}}}}}' });
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /fails closed/);
+  });
+  test('tier labels the pull request, and passes tier 1 and 2 without the Human', () => {
+    labels();
+    const out = job('tier', { 'src/auth/t.js': 'export const t = 1;\n' }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.edits, /pr edit 7 --repo o\/app --add-label tier-2/);
+  });
+  test('tier 3 waits for a code owner other than the author to approve the head commit', () => {
+    labels();
+    reviews([]);
+    let out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
-    ({ out } = verdict([review('tuannd9288', 'APPROVED', '0'.repeat(40))]));
-    assert.equal(out.code, 1, out.out);
-    const { head } = verdict([]);
-    ({ out } = verdict([review('tuannd9288', 'APPROVED', head), review('tuannd9288', 'CHANGES_REQUESTED', head, '2026-10-21T11:00:00Z')]));
-    assert.equal(out.code, 1, out.out);
-    ({ out } = verdict([review('someone', 'APPROVED', head)]));
-    assert.equal(out.code, 1, out.out);
-    ({ out } = verdict([], 'tuannd9288'));
+    reviews([review('tuannd9288', 'APPROVED', '0'.repeat(40))]);
+    assert.equal(job('tier', { 'AGENTS.md': '# app\n' }, pr).code, 1);
+    out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    reviews([review('tuannd9288', 'APPROVED', out.head), review('tuannd9288', 'CHANGES_REQUESTED', out.head, '2026-10-21T11:00:00Z')]);
+    assert.equal(again('tier', out.head, pr).code, 1);
+    reviews([review('someone', 'APPROVED', out.head)]);
+    assert.equal(again('tier', out.head, pr).code, 1);
+    out = again('tier', out.head, { ...pr, GATE_PR_AUTHOR: 'tuannd9288' });
     assert.match(out.out, /agents need their own GitHub account/);
   });
-  test('the verdict on tier 3 passes once the code owner approved the head commit', () => {
-    const bin = join(r.dir, 'fake-bin');
-    const reviews = join(r.dir, 'reviews.json');
-    git(r.repo, 'switch', '-q', '-C', 'rv', 'origin/main');
-    commit(r.repo, { 'AGENTS.md': '# app\n' }, 'rv');
-    const head = git(r.repo, 'rev-parse', 'HEAD');
-    writeFileSync(reviews, JSON.stringify([[{ user: { login: 'TuanND9288' }, state: 'APPROVED', commit_id: head, submitted_at: '2026-10-21T10:00:00Z' }]]));
-    const env = { GATE_REVIEWER: 'stub', PATH: `${bin}:${process.env.PATH}`, FAKE_REVIEWS: reviews, GATE_PR: '7', GATE_PR_AUTHOR: 'agent-bot', GATE_HEAD: head };
-    const out = run(r.repo, join(r.repo, 'scripts/review'), ['verdict', r.repo, git(r.repo, 'rev-parse', 'origin/main')], env);
+  test('tier 3 passes once the code owner approved the head commit; needs-human is tier 3 too', () => {
+    labels('needs-human');
+    reviews([]);
+    const first = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(first.code, 1, first.out);
+    reviews([review('TuanND9288', 'APPROVED', first.head)]);
+    const out = again('tier', first.head, pr);
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /tuannd9288 approved/);
+    assert.match(out.out, /tier 3\n {2}label needs-human[\s\S]*tuannd9288 approved/);
+  });
+  test('rounds labels the pull request needs-human at its third head commit judged red', () => {
+    const red = (oid, name = 'verify', conclusion = 'FAILURE') => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion }] } }] } } });
+    const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { totalCount: nodes.length, nodes } } } } }) });
+    rounds(red('a'), red('b', 'review'), red('c', 'verify', 'SUCCESS'), red('d', 'tier'));
+    let out = job('rounds', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /2 head commits judged red/);
+    assert.equal(out.edits, '');
+    rounds(red('a'), red('b', 'review'), red('c', 'verdict', 'TIMED_OUT'));
+    out = job('rounds', { 'src/math.js': MUL }, pr);
+    assert.match(out.edits, /--add-label needs-human/);
   });
 });
 
@@ -479,6 +563,36 @@ describe('onboard', () => {
       assert.match(out.out, /exists; nothing done/);
     } finally {
       r.cleanup();
+    }
+  });
+});
+
+describe('workflows', () => {
+  const yaml = (file) => JSON.parse(spawnSync('ruby', ['-ryaml', '-rjson', '-e', 'puts JSON.generate(YAML.load_file(ARGV[0]))', join(factory, 'kit', file)], { encoding: 'utf8' }).stdout);
+  const ruleset = JSON.parse(readFileSync(join(factory, 'kit/.gate/ruleset.json'), 'utf8'));
+  const required = ruleset.rules.flatMap((r) => r.parameters?.required_status_checks ?? []).map((c) => c.context);
+
+  test('every required check is a job of gate-trusted.yml, and a job skipped by needs leans only on a required one', () => {
+    const jobs = yaml('.github/workflows/gate-trusted.yml').jobs;
+    const names = Object.values(jobs).map((j) => j.name);
+    for (const check of required) assert.ok(names.includes(check), `${check} is not a job of gate-trusted.yml`);
+    for (const [id, j] of Object.entries(jobs)) {
+      if (!required.includes(j.name)) continue;
+      assert.equal(j.if, undefined, `${id} is skipped by a condition`);
+      for (const need of [j.needs ?? []].flat()) assert.ok(required.includes(jobs[need].name), `${id} needs ${need}, which is not required`);
+    }
+    assert.deepEqual([jobs.tier.needs].flat().filter(Boolean), []);
+    assert.deepEqual([jobs.review.needs, jobs.verdict.needs].flat(), ['verify', 'verify']);
+  });
+  test('only verify checks out the candidate; no job restores a cache or keeps a token', () => {
+    for (const file of ['.github/workflows/gate-trusted.yml', '.github/workflows/gate.yml']) {
+      for (const [id, j] of Object.entries(yaml(file).jobs)) {
+        for (const step of j.steps) {
+          if (String(step.uses).startsWith('actions/checkout')) assert.equal(step.with['persist-credentials'], false, `${file} ${id} keeps its token`);
+          if (String(step.with?.ref ?? '').includes('head.sha')) assert.equal(id, 'verify', `${file} ${id} checks out the candidate`);
+          assert.ok(!/actions\/cache|^cache$/.test(`${step.uses ?? ''}`) && !step.with?.cache, `${file} ${id} uses a cache`);
+        }
+      }
     }
   });
 });

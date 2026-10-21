@@ -1,51 +1,99 @@
 #!/usr/bin/env bash
-# The review and verdict jobs, run from main's checkout on the candidate's diff, which is read and never run.
-#   scripts/review review|verdict <candidate-dir> <base-sha>
+# The jobs of gate-trusted.yml that read the pull request as data: they run in main's checkout, into which the
+# candidate's commits were fetched with no work tree, so nothing of the candidate runs and none of its instruction,
+# hook, skill or settings files is on disk for a reviewer to load.
+#   scripts/review review|verdict|tier --base <sha> --head <sha>
+#   scripts/review rounds
+#   review   the reviewer's findings, on every pull request; a No-red line in the PR body (GATE_BODY_FILE) needs the
+#            reviewer's explicit acceptance
+#   verdict  the reviewer's verdict from tier 2; it passes at once on tier 1, so the required check always exists
+#   tier     labels the tier; on tier 3 it requires the approval of the head commit by a code owner who is not the
+#            author, and the queue re-runs it after that approval, so the reviewer never runs again for a click
+#   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3)
+# The tier is main's policy on the diff from the merge-base, raised by every label the pull request ever had (GATE_PR
+# and GITHUB_REPOSITORY, read with gh). GATE_HEAD, the pull request's head, must be the head judged.
 # GATE_REVIEWER picks the reviewer; it is a repository variable, which only an admin sets:
-#   stub    scratch repositories only: no model runs; it fails while the diff adds a line holding GATE-STUB-FINDING
-#           (review) or GATE-STUB-VERDICT (verdict)
+#   stub    scratch repositories only: scripts/lib/stub-reviewer.mjs, no model
 #   unset   fails closed: no reviewer is configured, so nothing merges on this gate
-# The verdict passes at once on tier 1, so the required check always exists; the tier comes from main's rules and
-# only rises with the pull request's tier labels (GATE_TIER_LABELS). On tier 3 it also needs the approval of a code
-# owner who is not the author, on the head commit (GATE_PR, GATE_PR_AUTHOR, GATE_HEAD; reviews read with gh), and is
-# re-run after that approval.
+# A reviewer's result counts only through scripts/lib/result.mjs: a missing, malformed or unbound one fails.
 set -uo pipefail
 trusted=$(git rev-parse --show-toplevel) || exit 2
-job=${1:?review or verdict}
-candidate=$(cd "${2:?candidate checkout}" && pwd) || exit 2
-base=${3:?base sha}
 cd "$trusted" || exit 2
-
-if [ "$job" = verdict ]; then
-  tier=$(cd "$candidate" && "$trusted/scripts/tier" --base "$base" --rules "$trusted" --labels "${GATE_TIER_LABELS:-}") || { echo "verdict: the tier could not be computed, so the verdict is required"; tier="tier 2"; }
-  echo "$tier"
-  case "$tier" in
-    "tier 1"*) echo "verdict: tier 1: not required"; exit 0 ;;
-    "tier 3"*)
-      reviews=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/pulls/${GATE_PR:-}/reviews" 2>/dev/null) || { echo "verdict: tier 3 needs the Human's approval, and the reviews could not be read"; exit 1; }
-      printf '%s' "$reviews" | node scripts/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "${GATE_HEAD:-}" || exit 1
-      ;;
+job=${1:-}
+[ "$#" -gt 0 ] && shift
+base="" head=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --base) base=$2 ;;
+    --head) head=$2 ;;
+    *) echo "review: unknown argument $1"; exit 2 ;;
   esac
+  shift 2
+done
+case "$job" in review | verdict | tier | rounds) ;; *) echo "usage: scripts/review review|verdict|tier --base <sha> --head <sha>, or scripts/review rounds"; exit 2 ;; esac
+# A red round is a head commit on which a required check other than tier failed; tier waits on the Human, not the writer.
+if [ "$job" = rounds ]; then
+  checks=$(node scripts/lib/policy.mjs checks | grep -vx tier | paste -sd, -) &&
+    n=$(node scripts/lib/history.mjs rounds --repo "${GITHUB_REPOSITORY:-}" --pr "${GATE_PR:-}" --checks "$checks") ||
+    { echo "rounds: the pull request's rounds could not be read: ${n:-$checks}"; exit 1; }
+  echo "rounds: $n head commits judged red"
+  [ "$n" -ge 3 ] || exit 0
+  gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label needs-human >/dev/null || { echo "rounds: could not add the label needs-human"; exit 1; }
+  echo "rounds: labelled needs-human after three red rounds; the tier check now waits for the Human's approval of the head"
+  exit 0
+fi
+head=$(git rev-parse --verify --quiet "${head:-none}^{commit}") && fork=$(git merge-base "${base:-none}" "$head" 2>/dev/null) ||
+  { echo "$job: the base or the head is not in this checkout; fetch the candidate's commits first"; exit 2; }
+if [ -n "${GATE_HEAD:-}" ] && [ "$GATE_HEAD" != "$head" ]; then
+  echo "$job: judging $head, but the pull request's head is $GATE_HEAD"
+  exit 1
 fi
 
-case "${GATE_REVIEWER:-}" in
-  stub)
-    marker=GATE-STUB-FINDING
-    [ "$job" = verdict ] && marker=GATE-STUB-VERDICT
-    hits=$(git -C "$candidate" diff --no-color -U0 "$base" HEAD | grep -E "^\+.*$marker" | head -5)
-    if [ -n "$hits" ]; then
-      echo "$job (stub, no model ran): a blocking finding is open:"
-      printf '%s\n' "$hits" | sed 's/^/  /'
-      exit 1
+# Prints the tier; returns 1 when it could not be computed, which fails the job closed.
+tier_of() {
+  local out code
+  out=$(scripts/tier --base "$fork" --head "$head" --rules "$trusted" ${GATE_PR:+--pr "$GATE_PR"})
+  code=$?
+  echo "$out"
+  [ "$code" -eq 0 ] || { echo "$job: the tier could not be computed, so this check fails closed"; return 1; }
+}
+
+case "$job" in
+  tier)
+    out=$(tier_of) || { echo "$out"; exit 1; }
+    echo "$out"
+    n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
+    if [ -n "${GATE_PR:-}" ]; then
+      gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label "tier-$n" >/dev/null || echo "tier: could not add the label tier-$n, which only shows the tier"
+      for k in 1 2 3; do
+        [ "$k" -lt "$n" ] && gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label "tier-$k" >/dev/null 2>&1
+      done
     fi
-    echo "$job (stub, no model ran): no finding"
+    [ "$n" = 3 ] || exit 0
+    reviews=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/pulls/${GATE_PR:-}/reviews") || { echo "tier: tier 3 needs the Human's approval, and the reviews could not be read"; exit 1; }
+    printf '%s' "$reviews" | node scripts/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" || exit 1
+    exit 0
     ;;
+  verdict)
+    out=$(tier_of) || { echo "$out"; exit 1; }
+    echo "$out"
+    case "$out" in "tier 1"*) echo "verdict: tier 1: not required"; exit 0 ;; esac
+    ;;
+esac
+
+claim=""
+if [ "$job" = review ] && [ -n "${GATE_BODY_FILE:-}" ] && grep -Eq '^No-red: .{20,}' "$GATE_BODY_FILE"; then claim=--no-red; fi
+result=$(mktemp) || exit 2
+trap 'rm -f "$result"' EXIT
+case "${GATE_REVIEWER:-}" in
+  stub) node scripts/lib/stub-reviewer.mjs "$job" "$fork" "$head" >"$result" ;;
   "")
     echo "$job: no reviewer is configured (repository variable GATE_REVIEWER is unset), so this check fails closed"
     exit 1
     ;;
   *)
-    echo "$job: unknown reviewer '$GATE_REVIEWER'; the reviewer is chosen on the Human's fixtures before it is wired here"
+    echo "$job: unknown reviewer '$GATE_REVIEWER'; a reviewer is wired here once the Human's fixtures have chosen it"
     exit 1
     ;;
 esac
+node scripts/lib/result.mjs --job "$job" --base "$fork" --head "$head" $claim <"$result" || exit 1

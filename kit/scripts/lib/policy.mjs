@@ -3,6 +3,7 @@
 // parse throws: a policy nobody can read decides nothing.
 //   node scripts/lib/policy.mjs protected [--rules <dir>]   paths on stdin, the protected ones on stdout
 //   node scripts/lib/policy.mjs check [--rules <dir>]       CODEOWNERS ends with exactly the protected paths, owned
+//   node scripts/lib/policy.mjs checks [--rules <dir>]      the required checks of .gate/ruleset.json, one per line
 // Exit 0 fine, 1 on a mismatch, 2 when a policy file cannot be read.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -73,6 +74,20 @@ export function protectedOf(dir) {
   return { paths, keys };
 }
 
+/** The names of the checks .gate/ruleset.json requires on main. */
+export function requiredChecks(dir) {
+  const file = join(dir, '.gate/ruleset.json');
+  let ruleset;
+  try {
+    ruleset = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`could not read ${file}: ${error.code ?? error.message}`);
+  }
+  const names = (ruleset.rules ?? []).flatMap((r) => r.parameters?.required_status_checks ?? []).map((c) => c.context);
+  if (!names.length) throw new Error(`${file} requires no check`);
+  return names;
+}
+
 /** The problems with .github/CODEOWNERS against .gate/protected: GitHub takes the last matching line, so the protected
  * paths come last, each with an owner, and nothing after them can take one back. */
 export function ownersProblems(dir) {
@@ -100,6 +115,10 @@ function main(argv) {
       for (const path of readFileSync(0, 'utf8').split('\n').filter(Boolean)) if (paths.some((p) => p.re.test(path))) console.log(path);
       return 0;
     }
+    if (command === 'checks') {
+      for (const name of requiredChecks(dir)) console.log(name);
+      return 0;
+    }
     if (command === 'check') {
       const problems = ownersProblems(dir);
       for (const p of problems) console.log(`policy: ${p}`);
@@ -110,7 +129,7 @@ function main(argv) {
     console.log(`policy: ${error.message}`);
     return 2;
   }
-  console.log('usage: policy.mjs protected|check [--rules <dir>]');
+  console.log('usage: policy.mjs protected|check|checks [--rules <dir>]');
   return 2;
 }
 
