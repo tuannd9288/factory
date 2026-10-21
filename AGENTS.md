@@ -55,6 +55,7 @@ Everything else that can be undone, agents decide and report after.
 | `bin/onboard` | Takes a repository in |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, re-runs a tier-3 verdict after approval, pauses auto-merge for a rollback |
+| `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
 | `NOTICE` | What was taken from other projects, with the commit |
