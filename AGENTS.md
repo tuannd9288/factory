@@ -119,9 +119,12 @@ the Human logs in: `mkdir -p ~/.agent-profiles/verifier/codex`, then `CODEX_HOME
 before Codex's own login command. Until he has, every live verdict is BLOCKED and nothing auto-merges.
 
 Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
-`cd <root>/<repo> && direnv exec . claude -p "…"`. `direnv exec DIR` loads DIR's `.envrc` but keeps the caller's
-directory (from `/` it printed `/`, 2026-10-22), so without the `cd` Claude starts outside the repository: on the
-right profile, but without its deny rules and its `AGENTS.md`.
+`cd <root>/<repo> && direnv exec . claude -p "…" --permission-mode acceptEdits --allowedTools "Bash(git:*)" …`.
+`direnv exec DIR` loads DIR's `.envrc` but keeps the caller's directory (from `/` it printed `/`, 2026-10-22), so
+without the `cd` Claude starts outside the repository: on the right profile, but without its deny rules and its
+`AGENTS.md`. With no permission mode `claude -p` starts in `default` and denies every call that needs approval
+(2.1.308, 2026-10-22: `git branch x` gave "This command requires approval"); name the mode and the tools the run may
+use. A deny rule still wins over a grant (`git tag` was denied under `Bash(git:*)`).
 
 pstack, per repository: the kit's `.claude/settings.json` pins it through a `settings` marketplace named for the
 commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository
