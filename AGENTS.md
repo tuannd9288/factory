@@ -129,7 +129,15 @@ and profile, after the Human has opened `claude` in the repository and trusted t
 repository root with `claude plugin install pstack@pstack-f713f14 --scope project`. Never at user scope: no install
 without `--scope project`, and never the `--marketplace` form, which declares the marketplace in the profile's user
 settings. A new pin is a new marketplace name, in a tier-3 pull request per repository; attack 23 checks that two
-pins share one profile without clashing.
+pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-22 (`probes/results.md`, attack 23):
+
+- The install needs a profile that has trusted the folder; on an untrusted profile it fails with `Plugin "pstack" not
+  found in marketplace`. It rewrites `.claude/settings.json` (same content, keys reordered), so the repository's
+  session commits that diff once, in the tier-3 pull request.
+- pstack runs only when typed. Its skills carry `disable-model-invocation`, so an agent's own Skill call is refused.
+  `claude -p "/pstack:poteto-mode …"` starts the skill; a prompt that only asks for it does not. Unattended runs
+  therefore follow the kit's `AGENTS.md` alone unless the prompt starts with `/pstack:<skill>`.
+- Two pins under two marketplace names share one profile, each folder loading its own.
 
 pstack is a Cursor plugin; in Claude Code its texts run, and these parts do not, so the factory does not use them:
 

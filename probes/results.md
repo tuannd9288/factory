@@ -75,3 +75,45 @@ already holding main, six of six required checks green on that head.
 | C18 | #52 | tier-1 | landed | - |
 | C19 | #53 | tier-1 | landed | - |
 | C20 | #54 | tier-1 | landed | - |
+
+## Attack 23 and the pin trial (issue #3), Claude Code 2.1.308, 2026-10-22
+
+Folders on the Mac mini under `~/factory-probes/attack-23`: `case2/{a,b}` (names `pstack-f713f14`, `pstack-1e5c90a`),
+`case1/{a,b}` (name `pstack-pin` in both, pins f713f14 and 1e5c90a). Each holds one commit with its settings file.
+Logs: `~/factory-runs/issue-3/`.
+
+**Registry half, unlogged scratch profile (`CLAUDE_CONFIG_DIR=$T/registry`): no login asked, but it fails.**
+`claude plugin install pstack@pstack-f713f14 --scope project` printed `Plugin "pstack" not found in marketplace
+"pstack-f713f14"`, likewise for `pstack-1e5c90a` and `pstack-pin`; `plugin list --json` was `[]` and no
+`plugins/` directory appeared. The same install on the writer profile, which trusted `case2/a`, succeeded. A profile
+that never trusted the folder does not read the project's `extraKnownMarketplaces`. So the plan's registry half
+cannot run on a profile the Human has not trusted the folders on.
+
+**Case 2 (two names, one writer profile, installs without cache override): passes.**
+`plugin list --json` run from `a` showed `pstack@pstack-f713f14` 0.15.25 `enabled: true` and `pstack@pstack-1e5c90a`
+`enabled: false`; run from `b` the reverse. `claude -p --max-turns 1 --output-format stream-json --verbose "reply ok"`:
+the `init` event's `plugins[]` for `a` held `pstack` at `.../plugins/cache/pstack-f713f14/pstack/0.15.25` and for `b`
+`.../cache/pstack-1e5c90a/pstack/0.15.24`; 54 pstack skills listed in each. Both marketplaces are in
+`plugin marketplace list --json`.
+- With `CLAUDE_CODE_PLUGIN_CACHE_DIR=$C/plugins` (the plan's session half) an empty override makes the install fail with
+  the same `not found` error, and a session loads no pstack (`init` lists only the three builtin plugins). The
+  override only works over a registry the same override filled, so the plan's session half, as written, does not.
+- Not met: `git status --porcelain` is not empty after the install. It rewrote `.claude/settings.json` (22 lines
+  moved, no change of content: `permissions` first, then `enabledPlugins`, then `extraKnownMarketplaces`). An
+  uninstall rewrites it too. So the install is a tier-3 change of its own.
+- Not run for lack of a Human step: `.orphaned_at` and `known_marketplaces.json` stability across the third listing sit
+  in the profile, which an agent does not open. The three `plugin list` outputs above were stable.
+
+**Case 1 (one name, two pins): not run.** The `case1` folders are untrusted on every profile; the Human must trust them.
+It would show whether the second install overwrites the first.
+
+**#3 proper, `case2/a`, writer profile, no override.**
+- Interactive (Herdr sibling pane, `claude` v2.1.308): typed `/pstack:poteto-mode say which skill you are running and
+  stop`; output `I'm running the pstack:poteto-mode skill. I've stopped there as you asked.` The typed form resolves.
+- Unattended, typed form: `claude -p --max-turns 2 --output-format stream-json --verbose "/pstack:poteto-mode say
+  which skill you are running and stop"` answered `I'm running the **poteto-mode** skill from the pstack plugin,
+  version 0.15.25.` The skill ran.
+- Unattended, skill named in prose: the model called the Skill tool and got `Skill pstack:poteto-mode cannot be used
+  with Skill tool due to disable-model-invocation. Ask the user to run /pstack:poteto-mode themselves`. It did not run.
+- Answer to the open question: `disable-model-invocation: true` stops a skill the prompt only names, not one the prompt
+  starts with its slash.

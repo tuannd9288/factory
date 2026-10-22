@@ -66,7 +66,9 @@ merged pull request, whether a verdict covered its head, and the weekly digest l
 
 ## Where pstack yields
 
-pstack's playbooks run here, except at these six points, where the gate's rule wins:
+pstack's playbooks run here when a session starts one by typing `/pstack:<skill>`, at the prompt's start in
+`claude -p` too; they never start themselves, so an unattended run follows this file alone otherwise. They yield at
+these six points, where the gate's rule wins:
 
 - Never rewrite a pushed commit: no rebase or amend of a pushed branch, no force-push. Bring `main` in by merging
   it (`git pull --no-rebase`). The round count and the Human's tier-3 approval live on the pushed commits.
