@@ -37,7 +37,8 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 ## What the Human keeps
 
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy.
-- Admin steps: importing a repository's ruleset, its `reviewer` environment and secrets, registering the runner.
+- Admin steps: running `bin/onboard-owner` (the agents' account, rulesets, the `reviewer` environment), the
+  reviewer's secrets, registering the runner.
 - Logging into a repository's profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.
@@ -54,7 +55,9 @@ Everything else that can be undone, agents decide and report after.
 | Path | What it is |
 |---|---|
 | `kit/` | What every repository receives through one pull request when it joins |
-| `bin/onboard` | Takes a repository in |
+| `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
+| `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
+| `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results |
@@ -64,7 +67,14 @@ Everything else that can be undone, agents decide and report after.
 
 ## Taking a repository in
 
-Run `bin/onboard <repo-url>` from this root. It does what the old layout did by hand:
+Two halves, the Human's first. From this clone, logged into `gh` as the repository's owner, he runs
+`bin/onboard-owner <owner/repo> --id <id>`, reads the changes it prints, and runs it again with `--apply`. The id is
+the repository's own (`gh api repos/<owner/repo> --jq .id`), so a typo or a renamed repository is refused. It invites
+the agents' account (write), sets `factory-branches` (every branch: no rewrite) and `factory-bootstrap` (`main`: a
+pull request, one approval of the last push, merge commits only), creates the `reviewer` environment for `main`, and
+reads it all back; it calls only `gh api`, never `git` and nothing the repository holds. Once the agents' account
+has accepted the invitation, an agent runs `bin/onboard <repo-url>` from this root, logged into `gh` as that account.
+It refuses any other login, and a `main` without the bootstrap pull request rule:
 
 1. clones the repository into `<root>/<repo>`;
 2. creates its profile `~/.agent-profiles/<owner>/<repo>/claude`, only now; it holds state only, never edit it (a
@@ -76,13 +86,14 @@ Run `bin/onboard <repo-url>` from this root. It does what the old layout did by 
 4. lays the kit over it: `scripts/`, `.gate/`, `.githooks/`, the gate workflows, the PR template, `CODEOWNERS`,
    deny rules, an `AGENTS.md` and the one-line `CLAUDE.md`. Files the repository already has are kept and listed in
    the pull request for its session to merge by hand;
-5. runs the full `scripts/verify`, and only when it passes commits the kit and opens its pull request. When it fails
-   the kit stays staged on `factory/kit` for the repository's session to finish.
+5. runs the full `scripts/verify`, and only when it passes commits the kit and opens its pull request, authored by
+   the agents' account. When it fails the kit stays staged on `factory/kit` for the repository's session to finish.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
-proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (tier 3), imports
-`.gate/ruleset.json`, creates the `reviewer` environment, and logs into the profile in a new pane opened in the
-repository (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
+proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (the bootstrap rule asks
+for his approval), runs `bin/onboard-owner … --apply` again once it merged, which puts the kit's `factory-gate` in and
+only then takes `factory-bootstrap` out, sets the reviewer's secrets in `reviewer`, and logs into the profile in a new
+pane opened in the repository (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
 
 Run `bin/factory-queue sweep --repo <owner/repo>...` from launchd every minute, logged into `gh` as the agents'
 account (it refuses the Human's): the ruleset requires a branch to be up to date, GitHub updates none by itself, and

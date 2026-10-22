@@ -3,14 +3,17 @@
 # writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
 # the Human's.
 #   bin/onboard <repo-url> [--no-pr]
+# This is the agents' half. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
+# main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
 # FACTORY_ROOT (default: this clone) is where repositories live; AGENT_PROFILES (default: ~/.agent-profiles) where
 # profiles live, as <owner>/<repo>/claude so two owners' repositories of one name never share one; FACTORY_HUMAN
-# (default: tuannd9288) is the code owner of tier 3.
+# (default: tuannd9288) is the code owner of tier 3; FACTORY_AGENT (default: tuan9288-agent) the agents' account.
 set -euo pipefail
 factory=$(cd "$(dirname "$0")/.." && pwd)
 root=${FACTORY_ROOT:-$factory}
 profiles=${AGENT_PROFILES:-$HOME/.agent-profiles}
 human=${FACTORY_HUMAN:-tuannd9288}
+agent=${FACTORY_AGENT:-tuan9288-agent}
 url=${1:?usage: bin/onboard <repo-url> [--no-pr]}
 open_pr=1
 [ "${2:-}" = --no-pr ] && open_pr=0
@@ -21,6 +24,18 @@ owner=$(basename "$(dirname "$path")")
 owner=${owner##*:}
 dest=$root/$name
 [ -e "$dest" ] && { echo "onboard: $dest exists; nothing done"; exit 1; }
+if [ "$open_pr" -eq 1 ]; then
+  login=$(gh api user --jq .login)
+  lc() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
+  if [ "$(lc "$login")" != "$(lc "$agent")" ]; then
+    echo "onboard: opens the kit pull request as the agents' account ($agent), not as $login; nothing done"
+    exit 2
+  fi
+  if ! gh api "repos/$owner/$name/rules/branches/main" | grep -Eq '"type": ?"pull_request"'; then
+    echo "onboard: main has no pull request rule: the Human runs bin/onboard-owner first; nothing done"
+    exit 2
+  fi
+fi
 
 echo "onboard: cloning $url into $dest"
 git clone --quiet "$url" "$dest"
@@ -86,14 +101,14 @@ gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng
 - Bằng chứng: \`scripts/verify\` đầy đủ xanh trước khi commit.
 - Bậc: 3 (chạm \`.github/\`, \`scripts/\`, \`.gate/\`).
 - Hoàn tác: revert PR này.
-- Cần anh quyết: có — xác nhận \`.gate/load-bearing\` (bậc 2) và \`.gate/protected\` (bậc 3), rồi nhập ruleset; đề xuất: duyệt sau khi phiên của repo điền hai danh sách này.
+- Cần anh quyết: có — xác nhận \`.gate/load-bearing\` (bậc 2) và \`.gate/protected\` (bậc 3); đề xuất: duyệt sau khi phiên của repo điền hai danh sách này.
 
 ## File repo đã có, kit giữ nguyên (phiên của repo hợp nhất tay)
 ${kept:-  - không có}
 
 ## Việc của anh sau khi merge
-1. Nhập ruleset: \`gh api -X POST repos/$slug/rulesets --input .gate/ruleset.json\`.
-2. Tạo environment \`reviewer\` chỉ cho nhánh \`main\`, đặt secret của reviewer vào đó (không đặt secret ở mức repo: job \`pull_request\` của mọi nhánh đọc được).
+1. Từ bản clone của factory, chạy lại \`bin/onboard-owner $slug --id <id> --apply\`: nó thay ruleset tạm của \`main\` bằng \`factory-gate\` của kit và đọc lại những gì đã đặt.
+2. Đặt secret của reviewer vào environment \`reviewer\` (chỉ nhánh \`main\`; không đặt secret ở mức repo: job \`pull_request\` của mọi nhánh đọc được).
 3. Biến repo: \`GATE_RUNNER\` (ví dụ \`["self-hosted","factory"]\`; bỏ trống là runner GitHub), \`GATE_REVIEWER\` (chưa đặt thì \`review\` và \`verdict\` đỏ, không gì tự merge).
 4. Đăng nhập profile: mở pane mới trong repo, kiểm tra \`echo \$CLAUDE_CONFIG_DIR\`, chạy \`claude\`.
 5. Thêm repo vào lệnh \`bin/factory-queue sweep\` của launchd (chạy bằng tài khoản của agent).
