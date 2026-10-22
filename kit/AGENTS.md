@@ -66,8 +66,8 @@ merged pull request, whether a verdict covered its head, and the weekly digest l
 
 ## Where pstack yields
 
-pstack's playbooks run here when a session starts one by typing `/pstack:<skill>`, at the prompt's start in
-`claude -p` too; they never start themselves, so an unattended run follows this file alone otherwise. They yield at
+pstack's playbooks run here when a session types `/pstack:<skill>`, at the prompt's start in `claude -p` too. Its
+skills but `setup-pstack` refuse the model's own call; its agents `poteto-agent` and `comment-sicko` do not. They yield at
 these six points, where the gate's rule wins:
 
 - Never rewrite a pushed commit: no rebase or amend of a pushed branch, no force-push. Bring `main` in by merging

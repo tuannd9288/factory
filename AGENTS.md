@@ -131,12 +131,15 @@ without `--scope project`, and never the `--marketplace` form, which declares th
 settings. A new pin is a new marketplace name, in a tier-3 pull request per repository; attack 23 checks that two
 pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-22 (`probes/results.md`, attack 23):
 
-- The install needs a profile that has trusted the folder; on an untrusted profile it fails with `Plugin "pstack" not
-  found in marketplace`. It rewrites `.claude/settings.json` (same content, keys reordered), so the repository's
-  session commits that diff once, in the tier-3 pull request.
-- pstack runs only when typed. Its skills carry `disable-model-invocation`, so an agent's own Skill call is refused.
-  `claude -p "/pstack:poteto-mode …"` starts the skill; a prompt that only asks for it does not. Unattended runs
-  therefore follow the kit's `AGENTS.md` alone unless the prompt starts with `/pstack:<skill>`.
+- The install fails with `Plugin "pstack" not found in marketplace` in a folder the profile has not trusted (logged-in
+  writer profile, untrusted `case1/a`). The kit ships `.claude/settings.json` in the order the installer writes, so the
+  install leaves `git status` empty; an uninstall rewrites `enabledPlugins` to `{}`.
+- 53 of 54 pstack skills carry `disable-model-invocation`, so the model's own Skill call is refused; `setup-pstack`
+  does not. The agents `pstack:poteto-agent` and `pstack:comment-sicko` have no guard: a model may spawn them, and with
+  poteto-agent poteto-mode's playbook, in a run nobody typed (#8 decides whether to forbid that).
+- `claude -p "/pstack:poteto-mode …"` starts the skill; a prompt that only names it does not. So an unattended prompt
+  starts a skill explicitly with `/pstack:<skill>` at its start; without that the run follows the kit's `AGENTS.md`
+  and whatever the model spawns.
 - Two pins under two marketplace names share one profile, each folder loading its own.
 
 pstack is a Cursor plugin; in Claude Code its texts run, and these parts do not, so the factory does not use them:
