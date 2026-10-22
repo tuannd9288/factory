@@ -226,6 +226,26 @@ test('a tag ruleset whose bypass actor was changed is put back, and one that rea
   }
 });
 
+test('a second bypass actor on the live tag ruleset is taken out: exactly one PUT, to the factory-tags id', () => {
+  const w = world();
+  try {
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    w.set({ collaborator: 'write', invitations: [] });
+    const admin = { actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' };
+    w.set({ rulesets: w.state().rulesets.map((r) => (r.name === 'factory-tags' ? { ...r, bypass_actors: [admin, { actor_id: 6, actor_type: 'RepositoryRole', bypass_mode: 'always' }] } : r)) });
+    w.clear();
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const tagsId = w.state().rulesets.find((r) => r.name === 'factory-tags').id;
+    const writes = w.writes();
+    assert.equal(writes.length, 1, writes.join('\n'));
+    assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${tagsId} `));
+    assert.deepEqual(w.state().rulesets.find((r) => r.name === 'factory-tags').bypass_actors, [admin]);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('a setting that does not read back as set leaves the onboarding incomplete', () => {
   const w = world({ ignore: 'rulesets' });
   try {
