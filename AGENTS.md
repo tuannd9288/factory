@@ -100,3 +100,14 @@ right profile, but without its deny rules and its `AGENTS.md`.
 
 pstack, per profile: a repository's `.claude/settings.json` may pin pstack through a `settings` marketplace; open
 `claude` in a worktree of the repository, trust the folder, then install it once in that profile with `/plugin`.
+
+pstack is a Cursor plugin; in Claude Code its texts run, and these parts do not, so the factory does not use them:
+
+- `/setup-pstack`: it writes `~/.cursor/rules/pstack-models.mdc`, a Cursor rule for the whole machine that Claude
+  Code never loads. Every role keeps its default model.
+- Cursor cloud verifiers: Shipping's independent verifier of each pull request and Autopilot's owners are Cursor
+  cloud agents. Here the gate's reviewer (`review`, `verdict`) is the only judge that did not write the change.
+- The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): they read
+  `~/.cursor/projects/<slug>/agent-transcripts/`, where Claude Code writes nothing. Adapted, they would read the
+  Human's own profile, which the kit's deny rules refuse.
+- `cursor-team-kit`'s `deslop`, `control-ui` and `control-cli`: they ship in another Cursor plugin, not in pstack.
