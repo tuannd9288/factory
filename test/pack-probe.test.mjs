@@ -192,3 +192,19 @@ test('the contract file names a check for each clause and AGENTS.md links it', (
   assert.match(readFileSync(join(factory, 'AGENTS.md'), 'utf8'), /probes\/pack-contract\.md/);
   assert.ok(existsSync(join(factory, 'probes/pack-probe.mjs')));
 });
+
+test('the seed script makes a small Node repository whose tests pass, and refuses a folder that exists', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pack-seed-'));
+  try {
+    const seed = join(dir, 'seed');
+    const made = spawnSync(join(factory, 'probes/pack-seed.sh'), [seed], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@l', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@l' } });
+    assert.equal(made.status, 0, made.stdout + made.stderr);
+    assert.equal(git(seed, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+    assert.equal(git(seed, 'status', '--porcelain'), '');
+    const tests = spawnSync('node', ['--test'], { cwd: seed, encoding: 'utf8', env: { ...process.env, NODE_TEST_CONTEXT: '' } });
+    assert.equal(tests.status, 0, tests.stdout + tests.stderr);
+    assert.notEqual(spawnSync(join(factory, 'probes/pack-seed.sh'), [seed], { encoding: 'utf8' }).status, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
