@@ -108,7 +108,7 @@ answer; a reversible question never blocks the work.
 | Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `scripts/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
 | Tier-3 paths are one list, and CODEOWNERS ends with exactly it | `.gate/protected`; `verify` (`policy`) |
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
-| Commit subject present, at most 72 characters, never `wip` or a placeholder | `.githooks/commit-msg` |
+| Commit subject present, at most 72 characters, never `wip`, a placeholder or `fixup!` | `verify` (`subjects`, every commit of the change); `.githooks/commit-msg` is the local copy |
 | Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
 | Auto-merge only on a base of `main`; a pull request opens only after a local pass; a waiting `tier` or `needs-human` stops your pushes | prose |
 | Auto-merge armed only while a live PASS or PASS+NOTES covers the head or its patch; disarmed before a new patch is pushed | `scripts/live-verify --covered`; the ledger lists each merged pull request no verdict covered |

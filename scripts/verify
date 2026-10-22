@@ -14,6 +14,11 @@ for f in kit/scripts/* kit/.githooks/* bin/onboard bin/onboard-owner bin/kit-evi
   bash -n "$f" 2>/dev/null || { echo "verify: $f does not parse"; failed=1; }
 done
 
+# On a pull request, the subject of every commit it adds: the kit's own rules, from the same source as the hook.
+if [ -n "${GATE_BASE:-}" ]; then
+  subjects=$(node kit/scripts/lib/subject.mjs --base "$GATE_BASE" 2>&1) || { echo "verify: a commit subject breaks a rule"; printf '%s\n' "$subjects"; failed=1; }
+fi
+
 for f in kit/.github/workflows/*.yml .github/workflows/*.yml; do
   ruby -ryaml -e 'YAML.load_file(ARGV[0])' "$f" >/dev/null 2>&1 || { echo "verify: $f does not parse as YAML"; failed=1; }
 done

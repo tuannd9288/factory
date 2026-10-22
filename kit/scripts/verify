@@ -4,13 +4,13 @@
 #   scripts/verify --fast          the hand-in rules and gate_fast on the staged files (the pre-commit hook)
 #   scripts/verify --only <check>  one check, no proofs (prove-check runs this)
 #   scripts/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
-# GATE_BASE names the commit the rules check reads from (default: the merge-base with origin/main).
+# GATE_BASE names the commit the rules and subjects checks read from (default: the merge-base with origin/main).
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 2
 export GATE_REPORT=${GATE_REPORT:-$PWD/.gate/report.xml}
 . .gate/config.sh || { echo "verify: could not read .gate/config.sh"; exit 2; }
 
-BUILTIN="instructions policy rules tests"
+BUILTIN="instructions policy rules subjects tests"
 start=$SECONDS
 log=$(mktemp -d) || exit 2
 trap 'rm -rf "$log"' EXIT
@@ -45,6 +45,10 @@ check_policy() {
 
 check_rules() {
   scripts/rules ${GATE_BASE:+--base "$GATE_BASE"}
+}
+
+check_subjects() {
+  node scripts/lib/subject.mjs --base "${GATE_BASE:-}"
 }
 
 check_tests() {
