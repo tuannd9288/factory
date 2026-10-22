@@ -75,3 +75,25 @@ already holding main, six of six required checks green on that head.
 | C18 | #52 | tier-1 | landed | - |
 | C19 | #53 | tier-1 | landed | - |
 | C20 | #54 | tier-1 | landed | - |
+
+## Issue #4: the tag ruleset and attack 22, 2026-10-22
+
+On `tuannd9288/factory-scratch`, cloned over HTTPS only, as `tuan9288-agent` (`gh auth status` showed it active before
+every push). Rulesets imported by the Human: `factory-branches` (id 25631764), `factory-tags` (id 25631767, only bypass
+`RepositoryRole` 5). Logs: `~/factory-runs/issue-4/`.
+
+- **Tag push, refused.** `git tag probe-agent-tag && git push origin probe-agent-tag`: `GH013: Repository rule violations
+  found for refs/tags/probe-agent-tag ... Cannot create ref due to creations being restricted`.
+- **Release, refused.** `gh release create probe-agent-release --target main --notes probe -R tuannd9288/factory-scratch`:
+  `HTTP 422 ... Cannot create ref due to creations being restricted. Published releases must have a valid tag`.
+- **The Human's half, from the Lead's comment on #4:** as admin `tuannd9288` he created the release `probe-human-tag`
+  (`--target main`) and deleted it with `--cleanup-tag`; both succeeded, so `RepositoryRole` 5 resolves and bypasses.
+  A `git push` of a tag by him was not run; his release stands as the bypass evidence.
+- **Attack 22, passes.** `probe-22` cut from `main~1` plus one commit (`59ec9a5`), pull request #55, behind `main`.
+  `gh pr update-branch 55`: `PR branch updated` (merge commit `0297d7b`). Then `git reset --hard 59ec9a5` and
+  `git push --force-with-lease origin probe-22`: `GH013 ... Cannot force-push to this branch`; the remote stayed at
+  `0297d7b`. `gh pr close 55 --delete-branch` closed it and deleted the branch (`non_fast_forward` does not refuse a
+  deletion). So `factory-branches` on `~ALL` holds with the queue's update-by-merge.
+- **Change:** `bin/rulesets/tags.json` is `factory-tags` as imported; `bin/onboard-owner` wants it before and after the
+  kit lands, and its tests cover the file, the dry run, `--apply`, the read-back and a changed bypass list. Its live dry
+  run and apply on a fresh repository happen at #6's sitting, as the Human's step.
