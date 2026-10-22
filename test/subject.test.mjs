@@ -2,7 +2,7 @@
 // `subjects` check, which also runs on the factory's own pull requests.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commit, factory, git, repoWithKit, run, script, write } from './helpers.mjs';
@@ -109,5 +109,79 @@ describe("the factory's own pull requests", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('what the subject is, and when the script runs', () => {
+  const msg = (dir, text) => {
+    const file = join(dir, 'msg');
+    writeFileSync(file, text);
+    return file;
+  };
+  const hook = (file) => run(factory, join(factory, 'kit/.githooks/commit-msg'), [file]);
+
+  test('the subject is git\'s: blank and comment lines skipped, the first paragraph joined by spaces', async () => {
+    const { subjectOf } = await import(join(factory, 'kit/scripts/lib/subject.mjs'));
+    assert.equal(subjectOf('\n\nAdd g\n\nbody\n'), 'Add g');
+    assert.equal(subjectOf('# a comment\nAdd g\n# another\nmore\n\nbody'), 'Add g more');
+    assert.equal(subjectOf('First line of\nthe subject\n\nbody'), 'First line of the subject');
+    assert.equal(subjectOf(''), '');
+  });
+  test('the hook passes a message that opens with a blank line, and fails a two-line subject that is too long joined', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subject-msg-'));
+    try {
+      assert.equal(hook(msg(dir, '\nAdd g\n')).code, 0);
+      const out = hook(msg(dir, `${'a'.repeat(40)}\n${'b'.repeat(40)}\n\nbody\n`));
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /81 characters; at most 72/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test('run through a symlinked path the script still judges, rather than exiting 0 unrun', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subject-link-'));
+    try {
+      symlinkSync(join(factory, 'kit/scripts/lib'), join(dir, 'lib'));
+      const out = run(factory, 'node', [join(dir, 'lib/subject.mjs'), msg(dir, 'WIP\n')]);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /not 'WIP'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test('the length is in characters, not UTF-16 units: 71 x and an emoji is 72', async () => {
+    const { subjectProblem } = await import(join(factory, 'kit/scripts/lib/subject.mjs'));
+    assert.equal(subjectProblem(`${'x'.repeat(71)}\u{1F600}`), null);
+    assert.match(subjectProblem(`${'x'.repeat(72)}\u{1F600}`), /73 characters/);
+  });
+  test('a subject holding a control character is reported as it is', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subject-ctl-'));
+    try {
+      git(dir, 'init', '-q', '-b', 'main');
+      const base = commit(dir, { a: '1\n' }, 'Start');
+      git(dir, 'switch', '-q', '-c', 'work');
+      const file = msg(dir, 'WIP \u0001 odd\n');
+      writeFileSync(join(dir, 'b'), '1\n');
+      git(dir, 'add', 'b');
+      git(dir, 'commit', '-q', '-F', file);
+      const sha = git(dir, 'rev-parse', '--short', 'HEAD');
+      const out = run(dir, 'node', [join(factory, 'kit/scripts/lib/subject.mjs'), '--base', base]);
+      assert.equal(out.code, 1, out.out);
+      assert.ok(out.out.startsWith(`${sha}: say what the commit changes, not 'WIP \u0001 odd'`), JSON.stringify(out.out));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test('kit/AGENTS.md shows the counts verify and prove-check now print, and has not grown', () => {
+    const text = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
+    assert.match(text, /`verify: 6 passed in 12s`/);
+    assert.match(text, /`prove-check: 7 checks fail on their fixtures`/);
+    assert.ok(text.split('\n').length - 1 <= 140, 'kit/AGENTS.md grew');
+    assert.match(text, /fixup!` or `squash!`/);
+  });
+  test('the factory\'s verify fails at once when it runs on a pull request with no base', () => {
+    const out = run(factory, join(factory, 'scripts/verify'), [], { GITHUB_EVENT_NAME: 'pull_request', GATE_BASE: '' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /pull request but GATE_BASE is empty/);
   });
 });
