@@ -16,6 +16,7 @@ This repository is in the factory (`tuannd9288/factory`). Its gate lives here, i
 | `scripts/tier` | `tier 1` (2: load-bearing path or dependency; 3: a path in `.gate/protected`, or label `needs-human`) |
 | `scripts/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
 | `scripts/prove-check --all` | `prove-check: 6 checks fail on their fixtures` |
+| `scripts/live-verify <pr>` | `live-verify: PASS on #12 (head 1a2b3c4, patch 5d6e7f8)`, posted on the pull request |
 
 Run `scripts/setup` once per clone. Run `scripts/verify` and `scripts/red-check --base origin/main` before every
 push; CI runs `main`'s copies of both on your change, as the one check `verify`.
@@ -32,8 +33,11 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR
    body: `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
 4. Once `scripts/verify` and `red-check` pass locally, open the pull request with the template, in Vietnamese,
-   and, when its base is `main`, enable auto-merge (`gh pr merge --auto --merge`). Then release the branch and
-   move on; do not wait for CI.
+   and run `scripts/live-verify <pr>`. On PASS or PASS+NOTES, and when its base is `main`, enable auto-merge
+   (`gh pr merge --auto --merge`). FAIL: fix forward with a red test, then run it again. BLOCKED: stop, and put
+   the reason and your recommended answer in the pull request. Before pushing a new patch to an armed pull
+   request, disarm it (`gh pr merge --disable-auto`); arm it again once `scripts/live-verify --covered <pr>`
+   passes. Then release the branch and move on; do not wait for CI.
 5. The gate decides, from `main`'s scripts. Every pull request needs four checks green on its head commit:
    `verify` (`gate.yml`: main's verify, rules and red-check on your code), then `review` and `verdict`
    (`gate-trusted.yml`: the reviewer reads your change as data once `verify` passed; `verdict` passes at once on
@@ -43,6 +47,22 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
 6. A blocking finding is fixed by a new commit. A finding you dispute goes to the Human: label the pull request
    `needs-human` and put your recommended answer in it. At the third head commit judged red, `rounds` labels the
    pull request `needs-human`, which makes it tier 3: the Human decides.
+
+## The live verifier
+
+pstack's Shipping verifies each pull request live before it lands (pstack `shipping.md:5`, `:7`;
+`autopilot-full.md:14`); `scripts/live-verify` does it here, with two substitutes:
+
+- Codex CLI (`codex exec`) for Shipping's Cursor cloud agent: another vendor's model than the Claude Code that wrote
+  the change, run on this machine in a fresh pair of worktrees under `.claude/worktrees/`, on its own profile
+  (`~/.agent-profiles/verifier/codex`), which the Human logs in; an agent never logs in. Its sandbox is
+  `workspace-write` over the two worktrees, no approval prompts, outbound network only when the driver asks for it,
+  no bypass flag. Cursor's cloud agents do not run under Claude Code.
+- `.gate/driver.json` for `control-ui` and `control-cli`, which ship in another Cursor plugin: the repository's own
+  way to run the change as a user, filled by its session and read from `main`. No driver is BLOCKED, never PASS.
+
+The verdict is not a gate input: it lowers no tier and replaces no required check. The ledger records, for each
+merged pull request, whether a verdict covered its head, and the weekly digest lists the misses.
 
 ## Where pstack yields
 
@@ -91,6 +111,7 @@ answer; a reversible question never blocks the work.
 | Commit subject present, at most 72 characters, never `wip` or a placeholder | `.githooks/commit-msg` |
 | Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
 | Auto-merge only on a base of `main`; a pull request opens only after a local pass; a waiting `tier` or `needs-human` stops your pushes | prose |
+| Auto-merge armed only while a live PASS or PASS+NOTES covers the head or its patch; disarmed before a new patch is pushed | `scripts/live-verify --covered`; the ledger lists each merged pull request no verdict covered |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
 | Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
 | No force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`), and `.claude/settings.json` deny rules |

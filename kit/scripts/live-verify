@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# The live verifier: Codex, which did not write the change, runs it the way a user would, parent against head, and
+# posts PASS, PASS+NOTES, FAIL or BLOCKED on the pull request, with the head, the parent and the patch it covers.
+#   scripts/live-verify <pr>              run it once the pull request is open; exit 0 PASS, 1 FAIL, 2 BLOCKED
+#   scripts/live-verify --covered <pr>    exit 0 when a PASS or PASS+NOTES covers the current head or its patch
+# The verifier's profile is GATE_VERIFIER_HOME (default: ~/.agent-profiles/verifier/codex), which the Human logs in.
+# GATE_VERIFY_MINUTES (default: 30) bounds one Codex run. The verdict is no gate input: it lowers no tier.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 2
+exec node scripts/lib/live-verify.mjs "$@"

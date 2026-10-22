@@ -39,7 +39,7 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy.
 - Admin steps: running `bin/onboard-owner` (the agents' account, rulesets, the `reviewer` environment), the
   reviewer's secrets, registering the runner.
-- Logging into a repository's profile. An agent never logs in or switches accounts.
+- Logging into a repository's profile and the verifier's Codex profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.
 
@@ -110,6 +110,10 @@ ruleset off, after taking auto-merge off every open pull request, since with the
 The queue leaves a tier-3 pull request behind `main` until the Human approved it, then updates it once; his approval
 holds on the updated head, whose patch is unchanged (`git patch-id`), so he is asked once.
 
+The live verifier runs on one Codex profile for every repository, `~/.agent-profiles/verifier/codex`, which only
+the Human logs in: `mkdir -p ~/.agent-profiles/verifier/codex`, then `CODEX_HOME=~/.agent-profiles/verifier/codex`
+before Codex's own login command. Until he has, every live verdict is BLOCKED and nothing auto-merges.
+
 Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
 `cd <root>/<repo> && direnv exec . claude -p "…"`. `direnv exec DIR` loads DIR's `.envrc` but keeps the caller's
 directory (from `/` it printed `/`, 2026-10-22), so without the `cd` Claude starts outside the repository: on the
@@ -127,8 +131,9 @@ pstack is a Cursor plugin; in Claude Code its texts run, and these parts do not,
 
 - `/setup-pstack`: it writes `~/.cursor/rules/pstack-models.mdc`, a Cursor rule for the whole machine that Claude
   Code never loads. Every role keeps its default model.
-- Cursor cloud verifiers: Shipping's independent verifier of each pull request and Autopilot's owners are Cursor
-  cloud agents. Here the gate's reviewer (`review`, `verdict`) is the only judge that did not write the change.
+- Autopilot's owners and swarm of verifiers: Cursor cloud agents. Shipping's one verifier per pull request is taken,
+  on the Codex CLI instead (`scripts/live-verify`, kit `AGENTS.md` § The live verifier); its verdict is no gate
+  input, so the gate's reviewer (`review`, `verdict`) stays the only judge the merge waits for.
 - The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): they read
   `~/.cursor/projects/<slug>/agent-transcripts/`, where Claude Code writes nothing. Adapted, they would read the
   Human's own profile, which the kit's deny rules refuse.

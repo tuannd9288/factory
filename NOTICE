@@ -14,3 +14,28 @@ in this factory.
                                answersInSource, the dependency and related-test readers, the finding store and
                                its acknowledgements, which the line comment `gate-allow <rule>: <reason>`
                                replaces. Added here: the Failing-test guard, and skipping .gate/proofs/.
+
+pstack (https://github.com/cursor/plugins, path pstack), commit f713f14203cd6420cec13cd7c55c32d598dbab68
+(version 0.15.25). MIT License, Copyright (c) 2026 Lauren Tan. No code is copied; these contracts are ported.
+
+  kit/scripts/live-verify,     skills/poteto-mode/playbooks/shipping.md:5 (one verifier per pull request, an
+  kit/scripts/lib/             agent that did not write it, runs the change as a user would, parent against
+  live-verify.mjs,             head, and posts PASS, PASS+NOTES or FAIL on it), shipping.md:7 (a verdict covers
+  kit/scripts/lib/verdict.mjs  a patch; git patch-id decides whether it survives a new head), autopilot-full.md:14
+                               (re-run the gates, prove the load-bearing behaviour live through a named driver,
+                               audit the diff), skills/swarm/SKILL.md:20, :23, :31 and :37 (a done predicate;
+                               a brief that stands alone and names the exact SHAs; PASS, ISSUES or BLOCKED with
+                               every proven issue; a result without its SHAs is dropped, its worker respawned
+                               once, then it is a gap, never a pass).
+                               Switched: Cursor's cloud agent for the Codex CLI on this machine, another vendor's
+                               model than the writer's; control-ui and control-cli for the repository's
+                               .gate/driver.json. Not taken, with the reason: shipping.md:6 and :9 (landing a
+                               stack's verified run, the queued watcher), since the kit arms auto-merge only on a
+                               base of main and bin/factory-queue keeps branches up to date; shipping.md:7's
+                               carry-over of a verdict across a patch that differs only in tests, docs or lint,
+                               since any patch change here needs a new verdict; autopilot-full.md:14's swarm of
+                               independent verifiers, since one verifier per pull request runs on one Codex
+                               subscription; swarm/SKILL.md:21-22 and :27 (races, the model from
+                               pstack-models.mdc, cloud workers), since the verifier's profile keeps its model.
+  kit/AGENTS.md                the six points where pstack yields to the gate, each citing the line it departs
+  ("Where pstack yields")      from; kit/.claude/settings.json pins pstack itself at this commit.
