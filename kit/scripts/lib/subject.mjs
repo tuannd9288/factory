@@ -14,7 +14,9 @@ const PLACEHOLDER = /^(WIP|wip)|^(fix|update|changes|\.)$/;
 const AUTOSQUASH = /^(fixup|squash)! /;
 
 /** The rule a subject breaks, as a sentence, or null. */
-export function subjectProblem(subject) {
+export function subjectProblem(raw) {
+  // The hook trims; git's %s keeps leading spaces, so both judge the trimmed text.
+  const subject = (raw ?? '').trim();
   if (!subject) return 'the subject line is empty';
   const length = [...subject].length;
   if (length > MAX) return `the subject has ${length} characters; at most ${MAX}`;
