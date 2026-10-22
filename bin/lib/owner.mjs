@@ -86,7 +86,8 @@ function current(slug, agent, names) {
   const list = gh(['api', `${repo}/rulesets?per_page=100`]) ?? [];
   const environment = maybe(`${repo}/environments/${ENV}`);
   return {
-    collaborator: gh(['api', `${repo}/collaborators/${agent}/permission`])?.permission ?? 'none',
+    // GitHub may answer 404 for an account that is not a collaborator yet, the case the invitation is for.
+    collaborator: maybe(`${repo}/collaborators/${agent}/permission`)?.permission ?? 'none',
     invited: invitations.some((i) => i.invitee?.login?.toLowerCase() === agent.toLowerCase() && i.permissions === 'write'),
     rulesets: list.filter((r) => names.has(r.name)).map((r) => gh(['api', `${repo}/rulesets/${r.id}`])),
     environment,

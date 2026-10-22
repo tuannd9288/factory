@@ -32,7 +32,10 @@ if (args[0] !== 'api') process.exit(1);
 if (path === 'user') done({ login: state.login });
 if (path === repo) done(state.repo);
 if (path.startsWith(repo + '/contents/.gate/kit-files')) state.kitLanded ? done({ path: '.gate/kit-files' }) : missing();
-if (path === repo + '/collaborators/' + agent + '/permission') done({ permission: state.collaborator ?? 'none', role_name: state.collaborator ?? 'none' });
+if (path === repo + '/collaborators/' + agent + '/permission') {
+  if (!state.collaborator && state.permission404) missing();
+  done({ permission: state.collaborator ?? 'none', role_name: state.collaborator ?? 'none' });
+}
 if (path === repo + '/collaborators/' + agent && method === 'PUT') {
   if (kept('collaborator') && !state.collaborator && !state.invitations.length) state.invitations.push({ id: 7, invitee: { login: agent }, permissions: 'write' });
   done();
@@ -182,6 +185,18 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     const drop = writes.findIndex((l) => / -X DELETE repos\/tuannd9288\/app\/rulesets\/\d+/.test(l));
     assert.ok(gate >= 0 && drop > gate, writes.join('\n'));
     assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-gate']);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
+  // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
+  const w = world({ permission404: true });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /done {4}collaborator tuan9288-agent \(write\)/);
   } finally {
     w.cleanup();
   }
