@@ -167,6 +167,8 @@ const s = JSON.parse(fs.readFileSync(process.env.MOCK_STREAMS, 'utf8'));
 const sh = (c) => execSync(c, { stdio: 'ignore' });
 if (prompt.includes('gh issue create')) {
   if (process.env.MOCK_CRASH) process.exit(1);
+  const body = /pack-probe-body-\w+\.md/.exec(prompt);
+  if (process.env.MOCK_BODY && body) fs.writeFileSync(body[0], 'body\n');
   sh('git commit --allow-empty -qm "Pack probe"; git push -q -u origin HEAD');
   if (process.env.MOCK_SLEEP) execSync('sleep ' + process.env.MOCK_SLEEP);
   console.log(s.pr);
@@ -468,7 +470,7 @@ test('each session gets only the commands it runs: no blanket git or gh, the tag
       assert.doesNotMatch(line, /live-verify:\*\)$|Bash\(gh api/);
     }
     for (const rule of ['Bash(git branch probe-ctl-*)', 'Bash(git tag x)', 'Bash(printenv CLAUDE_CONFIG_DIR)']) assert.ok(a.includes(`'${rule}'`) || a.includes(rule), rule);
-    for (const rule of ['Bash(git add *)', 'Bash(git commit *)', 'Bash(git push -u origin probe-pack-*)', 'Bash(gh issue create *)', 'Bash(gh pr create *)', 'Bash(scripts/verify *)']) assert.ok(pr.includes(rule), rule);
+    for (const rule of ['Bash(git add *)', 'Bash(git commit *)', 'Bash(gh issue create *)', 'Bash(gh pr create *)', 'Bash(scripts/verify *)']) assert.ok(pr.includes(rule), rule);
     assert.ok(!a.includes('gh pr create') && !a.includes('git push'), 'the first session grants no push or pull request');
   } finally {
     w.cleanup();
@@ -562,6 +564,66 @@ test('a clone made dirty by the pstack install is refused with the file named an
   } finally {
     w.cleanup();
   }
+});
+
+// --- fixes 3: the push grant has no *, hooks cannot be skipped, bodies go through a file ---
+
+test('the PR session may push only its own branch: an exact grant, no * on any git push', async () => {
+  const w = await world();
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    const [a, pr] = w.calls().split('\n').filter((l) => l.startsWith('claude -p'));
+    const pushes = [a, pr].flatMap((line) => line.match(/Bash\(git push[^)]*\)/g) ?? []);
+    assert.equal(pushes.length, 1, pushes.join(' '));
+    assert.match(pushes[0], /^Bash\(git push -u origin probe-pack-[0-9a-z]+\)$/);
+    assert.doesNotMatch(pushes[0], /\*/);
+    assert.ok(pr.includes(pushes[0].replace(/^Bash\(|\)$/g, '')) || pr.includes(pushes[0]));
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('hooks cannot be skipped: --no-verify and -n are disallowed in both sessions', async () => {
+  const w = await world();
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    const lines = w.calls().split('\n').filter((l) => l.startsWith('claude -p'));
+    assert.equal(lines.length, 2);
+    for (const line of lines) {
+      assert.ok(line.includes('Bash(git commit *--no-verify*)'), line.slice(0, 60));
+      assert.ok(line.includes('Bash(git commit * -n *)'));
+      assert.match(line, /--disallowedTools Bash\(gh pr merge:\*\)/);
+    }
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the PR session writes its body to a file and commits with -m only, and the cleanup removes the file', async () => {
+  const w = await world({ env: { MOCK_BODY: '1' } });
+  try {
+    writeFileSync(join(w.repo, '.git/info/exclude'), 'pack-probe-body-*.md\n', { flag: 'a' }); // ignored, so git clean would leave it
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    const pr = w.calls().split('\n').find((l) => l.startsWith('claude -p') && l.includes('gh issue create'));
+    assert.match(pr, /--body-file pack-probe-body-[0-9a-z]+\.md/);
+    assert.match(pr, /git commit -m/);
+    assert.doesNotMatch(pr, /\$\(cat|<<'?EOF/);
+    assert.deepEqual(readdirSync(w.repo).filter((n) => n.startsWith('pack-probe-body')), [], 'the body file is left in the clone');
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('AGENTS.md says a trailing * admits any arguments, and a command with a variable or $(…) is denied under a grant', () => {
+  const agents = readFileSync(join(factory, 'AGENTS.md'), 'utf8');
+  const launcher = agents.slice(agents.indexOf('Unattended runs'), agents.indexOf('pstack, per repository'));
+  assert.match(launcher, /trailing `\*` admits any arguments, a refspec included/);
+  assert.match(launcher, /variable or `\$\(…\)`.*denied/s);
+  assert.match(launcher, /2\.1\.308/);
 });
 
 test('the seed script makes a small Node repository whose tests pass, and refuses a folder that exists', () => {
