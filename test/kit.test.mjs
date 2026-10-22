@@ -689,3 +689,61 @@ describe('workflows and ruleset', () => {
     assert.equal(rule.parameters.require_last_push_approval, false);
   });
 });
+
+describe('deny rules', () => {
+  const deny = JSON.parse(readFileSync(join(factory, 'kit/.claude/settings.json'), 'utf8')).permissions.deny;
+  const escape = (s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  /** Whether a deny rule refuses a Bash command, as Claude Code's permissions docs describe the matching: `*` stands
+   * for any text, `:*` is a trailing ` *`, a trailing ` *` that is the rule's only wildcard also matches the bare
+   * command, and a deny rule applies to each subcommand, past a leading assignment. This models the docs, not Claude
+   * Code itself: probe 17 of probes/plan.md tries the same forms in a session. */
+  const refused = (command) =>
+    command
+      .split(/&&|\|\||[;|\n]/)
+      .map((s) => s.trim().replace(/^(\w+=\S*\s+)+/, ''))
+      .some((sub) =>
+        deny.some((rule) => {
+          const pattern = /^Bash\((.*)\)$/.exec(rule)?.[1]?.replace(/:\*$/, ' *');
+          if (pattern === undefined) return false;
+          const bare = pattern.endsWith(' *') && pattern.indexOf('*') === pattern.length - 1 && sub === pattern.slice(0, -2);
+          return bare || new RegExp(`^${pattern.split('*').map(escape).join('.*')}$`, 's').test(sub);
+        }),
+      );
+
+  test('refuse a force-push in every form, wherever its flag stands: a rewrite drops the red heads rounds counts and the commit the Human approved', () => {
+    const sha = '0123456789abcdef0123456789abcdef01234567';
+    for (const command of [
+      'git push --force origin br',
+      'git push -f origin br',
+      'git push --force-with-lease origin br',
+      'git push --force-with-lease=br origin br',
+      `git push --force-with-lease=br:${sha} origin br`,
+      `git push --force-with-lease=br:${sha} --force-if-includes origin br`,
+      'git push origin br --force-with-lease',
+      `git push origin br --force-with-lease=br:${sha}`,
+      'git push origin br --force',
+      'git push -u origin br -f',
+      'git push origin +br',
+      'git push origin +HEAD:br',
+      'git push --mirror origin',
+      `git -C . push --force-with-lease=br:${sha} origin br`,
+      'git -c push.default=current push -f',
+      'cd app && git push --force-with-lease origin br',
+      'GIT_TRACE=1 git push --force-with-lease origin br',
+    ])
+      assert.ok(refused(command), `not refused: ${command}`);
+    for (const command of [
+      'git push',
+      'git push -u origin factory/kit',
+      'git push origin feature-fix',
+      'git push --set-upstream origin br',
+      'git push --follow-tags origin br',
+      'git push origin HEAD:refs/heads/br',
+      'git -C app push -u origin br',
+      'git pull --no-rebase origin main',
+      'git fetch && git reset --hard origin/br',
+      'git stash push -m "parser split"',
+    ])
+      assert.ok(!refused(command), `refused: ${command}`);
+  });
+});
