@@ -176,12 +176,40 @@ describe('what the subject is, and when the script runs', () => {
     const text = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
     assert.match(text, /`verify: 6 passed in 12s`/);
     assert.match(text, /`prove-check: 7 checks fail on their fixtures`/);
-    assert.ok(text.split('\n').length - 1 <= 140, 'kit/AGENTS.md grew');
+    assert.ok(text.split('\n').length - 1 <= 142, 'kit/AGENTS.md grew past main\'s 142 lines');
     assert.match(text, /fixup!` or `squash!`/);
   });
-  test('the factory\'s verify fails at once when it runs on a pull request with no base', () => {
-    const out = run(factory, join(factory, 'scripts/verify'), [], { GITHUB_EVENT_NAME: 'pull_request', GATE_BASE: '' });
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /pull request but GATE_BASE is empty/);
+  test('the factory\'s verify fails at once when it runs on a pull request with no base, even with the guard missing it ends in seconds', () => {
+    // A stub node first on PATH: without the guard, verify would run its whole test suite, which runs this test again.
+    const dir = mkdtempSync(join(tmpdir(), 'subject-stub-'));
+    try {
+      writeFileSync(join(dir, 'node'), '#!/bin/sh\necho "stub node: not run" >&2\nexit 0\n', { mode: 0o755 });
+      const out = run(factory, join(factory, 'scripts/verify'), [], { GITHUB_EVENT_NAME: 'pull_request', GATE_BASE: '', PATH: `${dir}:${process.env.PATH}` }, 20_000);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /pull request but GATE_BASE is empty/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test('leading spaces do not hide a rule: "  WIP" is refused by the hook and by verify alike', async () => {
+    const { subjectProblem } = await import(join(factory, 'kit/scripts/lib/subject.mjs'));
+    for (const subject of ['  WIP', ' fix', '  fixup! Add a', '   ']) assert.ok(subjectProblem(subject), JSON.stringify(subject));
+    assert.equal(subjectProblem('  Add a thing'), null);
+    const dir = mkdtempSync(join(tmpdir(), 'subject-space-'));
+    try {
+      git(dir, 'init', '-q', '-b', 'main');
+      const base = commit(dir, { a: '1\n' }, 'Start');
+      git(dir, 'switch', '-q', '-c', 'work');
+      writeFileSync(join(dir, 'b'), '1\n');
+      git(dir, 'add', 'b');
+      writeFileSync(join(dir, 'msg'), '  WIP\n');
+      git(dir, 'commit', '-q', '--cleanup=verbatim', '-F', join(dir, 'msg'));
+      // (git 2.x already drops the leading spaces in %s; the trim is for any git that keeps them.)
+      const out = run(dir, 'node', [join(factory, 'kit/scripts/lib/subject.mjs'), '--base', base]);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /not '  WIP'|not 'WIP'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
