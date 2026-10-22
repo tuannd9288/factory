@@ -162,6 +162,9 @@ for label in tier-1 tier-2 tier-3 needs-human task; do gh label create "$label" 
 git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 replaced=$(sed 's/^/  - `/; s/$/`/' "$lists/replaced")
+moved=""
+[ -n "$own" ] && moved='Phần riêng của repo mà anh đã duyệt (`--own`) nằm trong hai mục cuối của `AGENTS.md`, Layout và Facts the code cannot tell; bằng chứng bên dưới in đủ từng dòng.'
+grep -q '^\.githooks/' "$lists/replaced" && moved="${moved:+$moved }Lệnh của hook cũ (\`.githooks/\`) chuyển vào \`gate_fast\` trong \`.gate/config.sh\`, việc của phiên của repo."
 gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng: cổng, hook, luật nộp bài và mẫu" --body "$(cat <<EOF
 ## Tóm tắt cho người quyết định
 - Mục đích: đưa $name vào xưởng bằng bộ kit của tuannd9288/factory.
@@ -176,9 +179,9 @@ ${kept:-  - không có}
 
 ## File repo đã có, kit đã thay
 ${replaced:-  - không có}
-
-Phần riêng của repo mà anh đã duyệt (\`--own\`) nằm trong hai mục cuối của \`AGENTS.md\`, Layout và Facts the code cannot tell; bằng chứng bên dưới in đủ từng dòng. Lệnh của hook cũ (\`.githooks/\`) chuyển vào \`gate_fast\` trong \`.gate/config.sh\`, việc của phiên của repo.
-
+${moved:+
+$moved
+}
 ## Bằng chứng kit (bin/kit-evidence, mã của factory, chỉ đọc object git)
 \`\`\`text
 $evidence

@@ -281,6 +281,8 @@ describe('the kit pull request', () => {
       assert.match(text, /`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/);
       assert.match(text, new RegExp(`bin/kit-evidence --factory <factory> --commit ${ahead} --repo <clone> --base [0-9a-f]{40} --head ${head} --slug tuannd9288/app --id 1234`));
       assert.match(text, /^## File repo đã có, kit đã thay\n {2}- không có$/m);
+      // Nothing replaced, no --own: nothing to say about own parts or an old hook.
+      assert.doesNotMatch(text, /--own|gate_fast/);
     } finally {
       w.cleanup();
     }
@@ -295,6 +297,7 @@ describe('the kit pull request', () => {
       const text = readFileSync(w.body, 'utf8');
       assert.match(text, /^## File repo đã có, kit đã thay\n {2}- `\.githooks\/pre-commit`\n {2}- `AGENTS\.md`\n/m);
       assert.match(text, /`gate_fast` trong `\.gate\/config\.sh`/);
+      assert.match(text, /Phần riêng của repo mà anh đã duyệt \(`--own`\)/);
       assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}\.githooks\/pre-commit \(was [0-9a-f]{12}\)\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
       assert.match(text, /^ {2}AGENTS\.md:\d+: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app\.$/m);
     } finally {
