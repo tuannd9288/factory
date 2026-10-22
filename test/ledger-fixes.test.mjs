@@ -233,3 +233,14 @@ test('an entry repeated for each content block counts once, so the latest N are 
     p.cleanup();
   }
 });
+
+test('the canary fails on the newest 10 entries alone: the newest file still holds older entries that have the field', () => {
+  const p = profile([{ name: 'a.jsonl', day: 1, entries: [entry(), entry(), ...Array.from({ length: 10 }, noBranch)] }]);
+  try {
+    const r = check(['--profile-dir', p.dir]);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /stale: .*gitBranch/);
+  } finally {
+    p.cleanup();
+  }
+});

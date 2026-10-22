@@ -17,7 +17,7 @@ const entry = (over = {}) => ({
   message: {
     id: 'm1',
     model: 'claude-sonnet-5-5',
-    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 2 },
+    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 2, cache_creation: { ephemeral_1h_input_tokens: 1, ephemeral_5m_input_tokens: 1 } },
     content: [{ type: 'text', text: SECRET, input: { command: SECRET } }],
   },
   ...over,
@@ -64,7 +64,7 @@ test('check mode names a missing field and exits non-zero', () => {
     assert.doesNotMatch(r.out, /missing: .*gitBranch/, 'the latest entry has gitBranch');
     r = check([p.dir], ['--latest', '50']);
     assert.match(r.out, /missing: none/, 'a field some entry has is not missing');
-    assert.match(r.out, /partly: .*message\.usage\.cache_read_input_tokens \(1\/2\)/);
+    assert.match(r.out, /stale: .*message\.usage\.cache_read_input_tokens/, 'the newest session file lacks it: stale, not partly');
     assert.match(r.out, /partly: .*gitBranch \(1\/2\)/);
   } finally {
     p.cleanup();

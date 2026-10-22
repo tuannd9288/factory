@@ -51,6 +51,9 @@ Everything else that can be undone, agents decide and report after.
 - This folder stays out of every sync between the Macs. Code moves only through GitHub.
 - `.gitignore` admits only the factory's own files, so every repository folder is ignored.
 - A change to `kit/` changes every repository's gate at its next kit pull request: it is tier 3 here.
+- The weekly digest is `bin/factory-ledger --post tuannd9288/factory`: it posts even when the canary (`--check`) finds a
+  field missing or stale, saying so in one line. No job runs it yet; its schedule (launchd, as the agents' account) is
+  the Human's to set up.
 
 | Path | What it is |
 |---|---|
