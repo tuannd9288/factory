@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
@@ -235,6 +235,21 @@ test('the agent\'s half opens the kit pull request only as the agents\' account,
     assert.equal(out.status, 2, out.stdout + out.stderr);
     assert.match(out.stdout + out.stderr, /main has no pull request rule: the Human runs bin\/onboard-owner first/);
     assert.ok(!existsSync(join(dir, 'root/app')), 'cloned before refusing');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the factory\'s tools run the same started through a symlinked directory, as under /var/folders on macOS', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linked-'));
+  try {
+    symlinkSync(join(factory, 'bin'), join(dir, 'bin'));
+    for (const tool of ['factory-ledger', 'factory-queue', 'onboard-owner', 'kit-evidence']) {
+      const direct = spawnSync(join(factory, 'bin', tool), ['bogus'], { encoding: 'utf8' });
+      const linked = spawnSync(join(dir, 'bin', tool), ['bogus'], { encoding: 'utf8' });
+      assert.notEqual(direct.status, 0, tool);
+      assert.equal(linked.status, direct.status, `${tool}: ${linked.stdout}${linked.stderr}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

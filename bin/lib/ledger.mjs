@@ -4,10 +4,10 @@
 // request that closes no task is a task of its own, from its opening. Cost is API-equivalent usage, never cash.
 // See bin/factory-ledger for the arguments.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/scripts/lib/policy.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -349,7 +349,8 @@ function main(argv) {
   console.log(gh(['issue', 'create', '--repo', opts.post, '--title', `Bản tin xưởng ${opts.since} → ${opts.until}`, '--label', 'digest', '--body-file', file]).trim());
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     main(process.argv.slice(2));
   } catch (error) {

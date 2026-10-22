@@ -6,9 +6,9 @@
 // and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds.
 // See bin/factory-queue for the arguments.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
 const CALL_MS = 60_000;
@@ -144,7 +144,8 @@ function main(argv) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     process.exitCode = main(process.argv.slice(2)) ?? 0;
   } catch (error) {

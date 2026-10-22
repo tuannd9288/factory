@@ -5,9 +5,9 @@
 // scripts or hooks, so nothing the target holds runs with his authority. A second run changes nothing.
 // See bin/onboard-owner for the arguments.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FILES = {
@@ -157,7 +157,8 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
