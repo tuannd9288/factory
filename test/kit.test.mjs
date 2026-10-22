@@ -788,6 +788,13 @@ describe('deny rules', () => {
     for (const path of ['~/.agent-profiles/o/app/claude/projects/-x/1.jsonl', '~/Desktop/workspaces/app/src/a.js'])
       assert.ok(!unreadable(path), `unreadable: ${path}`);
   });
+
+  test('refuse a read of the live verifier\'s Codex profile, which holds its login, and leave the agent its own', () => {
+    for (const path of ['~/.agent-profiles/verifier/codex/auth.json', '~/.agent-profiles/verifier/codex/sessions/a.jsonl'])
+      assert.ok(unreadable(path), `readable: ${path}`);
+    // A deny covers Edit and Write too: one over all of ~/.agent-profiles/ would stop the agent's own auto memory.
+    assert.ok(!unreadable('~/.agent-profiles/o/app/claude/projects/-x/memory/MEMORY.md'));
+  });
 });
 
 describe('the pstack pin', () => {

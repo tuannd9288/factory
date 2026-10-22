@@ -45,7 +45,8 @@
       "Read(~/.claude-acc*/**)",
       "Read(~/.claude-profiles/**)",
       "Read(~/.claude.json*)",
-      "Read(~/.cursor/**)"
+      "Read(~/.cursor/**)",
+      "Read(~/.agent-profiles/verifier/**)"
     ]
   }
 }
