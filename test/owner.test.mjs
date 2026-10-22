@@ -53,7 +53,10 @@ if (one) {
   if (method === 'DELETE') { state.rulesets.splice(i, 1); done(); }
   // GitHub answers with defaults the request did not set; a read-back compares only what was asked for.
   const r = state.rulesets[i];
-  done({ ...r, rules: r.rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { required_reviewers: [], ...x.parameters } } : x)) });
+  const read = { ...r, rules: r.rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { required_reviewers: [], ...x.parameters } } : x)) };
+  // So does the tag ruleset: a bypass actor with a field of its own, a parameter on the update rule, a top-level field.
+  if (r.target === 'tag') done({ ...read, current_user_can_bypass: 'never', bypass_actors: read.bypass_actors.map((b) => ({ ...b, actor_name: 'admin' })), rules: read.rules.map((x) => (x.type === 'update' ? { ...x, parameters: { update_allows_fetch_and_merge: false } } : x)) });
+  done(read);
 }
 const env = repo + '/environments/reviewer';
 if (path === env) {
@@ -213,7 +216,10 @@ test('a tag ruleset whose bypass actor was changed is put back, and one that rea
     w.clear();
     const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 0, out.out);
-    assert.match(w.writes().join('\n'), / -X PUT repos\/tuannd9288\/app\/rulesets\/\d+/);
+    const tagsId = w.state().rulesets.find((r) => r.name === 'factory-tags').id;
+    const writes = w.writes();
+    assert.equal(writes.length, 1, writes.join('\n'));
+    assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${tagsId} `));
     assert.deepEqual(w.state().rulesets.find((r) => r.name === 'factory-tags').bypass_actors, [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' }]);
   } finally {
     w.cleanup();
@@ -226,6 +232,7 @@ test('a setting that does not read back as set leaves the onboarding incomplete'
     const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /incomplete: .*factory-branches/);
+    assert.match(out.out, /incomplete: .*factory-tags/);
   } finally {
     w.cleanup();
   }
