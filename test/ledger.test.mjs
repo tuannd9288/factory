@@ -140,6 +140,15 @@ test('the queue leaves a tier-3 pull request behind main until its tier check pa
   assert.equal(pickUpdate([p(1, ['tier-3'], 'SUCCESS')], REQUIRED).number, 1);
 });
 
+test('one conflicting pull request, whose verify never runs, does not stop the queue for its repository', async () => {
+  const { pickUpdate } = await import('../bin/lib/queue.mjs');
+  const p = (number, mergeStateStatus, over = {}) => ({ number, createdAt: `2026-10-21T0${number}`, mergeStateStatus, autoMerge: true, isDraft: false, labels: [], checks: checks(), ...over });
+  // pull_request does not run on a head that conflicts with its base, so its verify is missing, not pending.
+  const { verify, ...waiting } = checks({ review: { state: 'PENDING' }, verdict: { state: 'PENDING' } });
+  assert.equal(pickUpdate([p(1, 'DIRTY', { checks: waiting }), p(2, 'BEHIND')], REQUIRED)?.number, 2);
+  assert.equal(pickUpdate([p(1, 'UNKNOWN', { checks: waiting }), p(2, 'BEHIND')], REQUIRED), null);
+});
+
 test('the queue re-runs the failed tier job alone once someone other than the author approved the head after it started', async () => {
   const { pickReruns } = await import('../bin/lib/queue.mjs');
   const pr = (approvals, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', jobId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals, checks: checks({ tier, verdict: { state: 'FAILURE', jobId: '43' } }) });

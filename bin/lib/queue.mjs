@@ -15,15 +15,16 @@ const CALL_MS = 60_000;
 
 /** The pull request to update now, or null: the oldest one waiting on auto-merge behind its base whose required
  * checks did not fail (a failing one needs a new commit, which the gate judges anyway; a red tier check only waits on
- * the Human), unless another one waiting on auto-merge is up to date and still being judged. A tier-3 one waits
- * behind until its tier check passed, the Human's approval given: his approval then holds on the updated head, whose
- * patch is unchanged, and he is asked once. */
+ * the Human), unless another one waiting on auto-merge is up to date and still being judged. One that conflicts with
+ * its base is not being judged: pull_request never runs on it, so its verify stays missing, and it cannot land until
+ * its owner resolves the conflict. A tier-3 one waits behind until its tier check passed, the Human's approval given:
+ * his approval then holds on the updated head, whose patch is unchanged, and he is asked once. */
 export function pickUpdate(prs, required) {
   const waiting = prs.filter((p) => p.autoMerge && !p.isDraft);
   const judging = (p) => required.some((name) => !p.checks[name] || p.checks[name].state === 'PENDING');
   const failed = (p) => required.some((name) => name !== 'tier' && RED.has(p.checks[name]?.state));
   const unapproved = (p) => p.labels.some((l) => l === 'tier-3' || l === 'needs-human') && p.checks.tier?.state !== 'SUCCESS';
-  if (waiting.some((p) => p.mergeStateStatus !== 'BEHIND' && judging(p))) return null;
+  if (waiting.some((p) => !['BEHIND', 'DIRTY'].includes(p.mergeStateStatus) && judging(p))) return null;
   const behind = waiting
     .filter((p) => p.mergeStateStatus === 'BEHIND' && !failed(p) && !unapproved(p))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
