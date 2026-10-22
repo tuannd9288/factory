@@ -98,8 +98,13 @@ Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envr
 directory (from `/` it printed `/`, 2026-10-22), so without the `cd` Claude starts outside the repository: on the
 right profile, but without its deny rules and its `AGENTS.md`.
 
-pstack, per profile: a repository's `.claude/settings.json` may pin pstack through a `settings` marketplace; open
-`claude` in a worktree of the repository, trust the folder, then install it once in that profile with `/plugin`.
+pstack, per repository: the kit's `.claude/settings.json` pins it through a `settings` marketplace named for the
+commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository
+and profile, after the Human has opened `claude` in the repository and trusted the folder, install it from the
+repository root with `claude plugin install pstack@pstack-f713f14 --scope project`. Never at user scope: no install
+without `--scope project`, and never the `--marketplace` form, which declares the marketplace in the profile's user
+settings. A new pin is a new marketplace name, in a tier-3 pull request per repository; attack 23 checks that two
+pins share one profile without clashing.
 
 pstack is a Cursor plugin; in Claude Code its texts run, and these parts do not, so the factory does not use them:
 
