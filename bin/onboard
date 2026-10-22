@@ -132,7 +132,7 @@ $evidence
 Kiểm lại từ bản clone của factory: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
 
 ## Việc của anh sau khi merge
-1. Từ bản clone của factory, chạy lại \`bin/onboard-owner $slug --id <id> --apply\`: nó thay ruleset tạm của \`main\` bằng \`factory-gate\` của kit và đọc lại những gì đã đặt.
+1. Từ bản clone của factory, chạy lại \`bin/onboard-owner $slug --id $id --apply\`: nó thay ruleset tạm của \`main\` bằng \`factory-gate\` của kit và đọc lại những gì đã đặt.
 2. Đặt secret của reviewer vào environment \`reviewer\` (chỉ nhánh \`main\`; không đặt secret ở mức repo: job \`pull_request\` của mọi nhánh đọc được).
 3. Biến repo: \`GATE_RUNNER\` (ví dụ \`["self-hosted","factory"]\`; bỏ trống là runner GitHub), \`GATE_REVIEWER\` (chưa đặt thì \`review\` và \`verdict\` đỏ, không gì tự merge).
 4. Đăng nhập profile: mở pane mới trong repo, kiểm tra \`echo \$CLAUDE_CONFIG_DIR\`, chạy \`claude\`.

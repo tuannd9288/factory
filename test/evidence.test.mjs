@@ -198,6 +198,8 @@ describe('the kit pull request', () => {
       assert.match(text, /^repository: tuannd9288\/app \(id 1234\)$/m);
       const head = git(join(dir, 'root/app'), 'rev-parse', 'HEAD');
       assert.match(text, new RegExp(`^head: ${head}$`, 'm'));
+      // The Human's next step, ready to copy: the repository's own id, not a placeholder.
+      assert.match(text, /`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/);
       assert.match(text, new RegExp(`bin/kit-evidence --factory <factory> --commit ${ahead} --repo <clone> --base [0-9a-f]{40} --head ${head} --slug tuannd9288/app --id 1234`));
     } finally {
       rmSync(dir, { recursive: true, force: true });
