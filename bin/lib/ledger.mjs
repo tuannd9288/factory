@@ -64,10 +64,8 @@ function jsonlFiles(dir) {
   return out;
 }
 
-/** Cost per git branch from a Claude Code profile's session files: dollars, models, and unpriced models. */
-export function branchCosts(profileDir) {
-  const byBranch = new Map();
-  const seen = new Set();
+/** Every assistant entry with usage in a profile folder's session files, in file order, parsed. */
+function* assistantEntries(profileDir) {
   for (const file of jsonlFiles(join(profileDir, 'projects'))) {
     for (const line of readFileSync(file, 'utf8').split('\n')) {
       if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
@@ -77,20 +75,118 @@ export function branchCosts(profileDir) {
       } catch {
         continue;
       }
-      const message = entry.message;
-      if (entry.type !== 'assistant' || !message?.usage || !entry.gitBranch) continue;
-      const key = message.id ?? entry.requestId ?? entry.uuid;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const row = byBranch.get(entry.gitBranch) ?? { dollars: 0, models: new Set(), unpriced: new Set() };
-      const dollars = costOf(message.model, message.usage);
-      if (dollars === null) row.unpriced.add(message.model);
-      else row.dollars += dollars;
-      row.models.add(message.model);
-      byBranch.set(entry.gitBranch, row);
+      if (entry.type === 'assistant' && entry.message?.usage) yield entry;
     }
   }
+}
+
+/** Adds an assistant entry's cost to its git branch's row; an entry without a branch, or seen before, adds nothing. */
+function charge(byBranch, seen, entry) {
+  const message = entry.message;
+  if (!entry.gitBranch) return;
+  const key = message.id ?? entry.requestId ?? entry.uuid;
+  if (seen.has(key)) return;
+  seen.add(key);
+  const row = byBranch.get(entry.gitBranch) ?? { dollars: 0, models: new Set(), unpriced: new Set() };
+  const dollars = costOf(message.model, message.usage);
+  if (dollars === null) row.unpriced.add(message.model);
+  else row.dollars += dollars;
+  row.models.add(message.model);
+  byBranch.set(entry.gitBranch, row);
+}
+
+/** Cost per git branch from a Claude Code profile's session files: dollars, models, and unpriced models. */
+export function branchCosts(profileDir) {
+  const byBranch = new Map();
+  const seen = new Set();
+  for (const entry of assistantEntries(profileDir)) charge(byBranch, seen, entry);
   return byBranch;
+}
+
+/** Cost per git branch of one repository: every entry of its own profile (today's one profile per repository), plus the
+ * entries of the extra profile folders whose working directory is the repository's folder <root>/<name> or under it
+ * (a worktree). An entry in two places counts once; null when there is no profile folder to read at all. */
+export function repoCosts({ own, extra = [], root, name }) {
+  const dir = join(root, name);
+  const under = (cwd) => typeof cwd === 'string' && (cwd === dir || cwd.startsWith(`${dir}/`));
+  const byBranch = new Map();
+  const seen = new Set();
+  let any = false;
+  if (own && existsSync(own)) {
+    any = true;
+    for (const entry of assistantEntries(own)) charge(byBranch, seen, entry);
+  }
+  for (const folder of extra) {
+    if (!existsSync(folder)) continue;
+    any = true;
+    for (const entry of assistantEntries(folder)) if (under(entry.cwd)) charge(byBranch, seen, entry);
+  }
+  return any ? byBranch : null;
+}
+
+/** The fields of an assistant entry the ledger reads: a path, or paths of which one is enough. */
+export const READS = [
+  'type',
+  'gitBranch',
+  'cwd',
+  'message.model',
+  'message.usage.input_tokens',
+  'message.usage.output_tokens',
+  'message.usage.cache_read_input_tokens',
+  'message.usage.cache_creation_input_tokens',
+  'message.id|requestId|uuid',
+];
+// Subtrees that hold the conversation: the canary never opens them.
+const PRIVATE = new Set(['content', 'input', 'output', 'toolUseResult', 'text', 'thinking', 'wireToolInputs']);
+
+const valueAt = (entry, path) => path.split('.').reduce((v, k) => (v && typeof v === 'object' ? v[k] : undefined), entry);
+const kind = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
+
+/** The canary: over the latest `latest` assistant entries of the profile folders, which of the fields the ledger reads
+ * are present in none of them, and every key path (to depth 4, outside the conversation) with the types it has and in
+ * how many entries. It reads values only to learn their type and reports none. */
+export function inspect(profileDirs, { latest = 50 } = {}) {
+  const dated = [];
+  for (const dir of profileDirs)
+    for (const file of jsonlFiles(join(dir, 'projects'))) dated.push({ file, time: statSync(file).mtimeMs });
+  dated.sort((a, b) => a.time - b.time);
+  const entries = [];
+  for (const { file } of dated) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
+      try {
+        const e = JSON.parse(line);
+        if (e.type === 'assistant' && e.message?.usage) entries.push(e);
+      } catch {}
+    }
+  }
+  const seen = new Set();
+  const sample = entries.filter((e) => {
+    const key = e.message.id ?? e.requestId ?? e.uuid;
+    return key === undefined || !seen.has(key) ? (seen.add(key), true) : false;
+  }).slice(-latest);
+  const paths = new Map();
+  const walk = (value, path, depth, seenHere) => {
+    for (const [k, v] of Object.entries(value)) {
+      const p = path ? `${path}.${k}` : k;
+      const row = paths.get(p) ?? { types: new Set(), count: 0 };
+      row.types.add(kind(v));
+      if (!seenHere.has(p)) row.count += 1;
+      seenHere.add(p);
+      paths.set(p, row);
+      if (v && typeof v === 'object' && !Array.isArray(v) && depth < 4 && !PRIVATE.has(k)) walk(v, p, depth + 1, seenHere);
+    }
+  };
+  for (const e of sample) walk(e, '', 1, new Set());
+  const has = (e, r) => r.split('|').some((p) => valueAt(e, p) !== undefined && valueAt(e, p) !== null);
+  const missing = READS.filter((r) => !sample.some((e) => has(e, r)));
+  const partly = READS.filter((r) => !missing.includes(r) && sample.some((e) => !has(e, r))).map((r) => `${r} (${sample.filter((e) => has(e, r)).length}/${sample.length})`);
+  return {
+    entries: sample.length,
+    missing,
+    partly,
+    paths: [...paths].map(([path, r]) => ({ path, types: [...r.types].sort(), count: r.count })).sort((a, b) => a.path.localeCompare(b.path)),
+  };
 }
 
 /** Whether a task that started at start and ended at end (null while open) was alive in the window [from, to]: it
@@ -314,8 +410,23 @@ function patchIn(dir) {
   };
 }
 
+/** `--check`: the canary, printed. Exit 1 when a field the ledger reads is missing, or there is nothing to read. */
+function check(dirs, latest) {
+  const r = inspect(dirs, { latest });
+  if (!r.entries) {
+    console.log(`ledger check: no assistant entries with usage in ${dirs.length} profile folder(s): ${dirs.join(', ') || 'none named'}`);
+    return 1;
+  }
+  console.log(`ledger check: ${r.entries} assistant entries (the latest) from ${dirs.length} profile folder(s)`);
+  const width = Math.max(...r.paths.map((p) => p.path.length));
+  for (const p of r.paths) console.log(`  ${p.path.padEnd(width)}  ${p.types.join('|').padEnd(14)}  ${p.count}/${r.entries}`);
+  console.log(`missing: ${r.missing.length ? r.missing.join(', ') : 'none'}`);
+  if (r.partly.length) console.log(`partly: ${r.partly.join(', ')}`);
+  return r.missing.length ? 1 : 0;
+}
+
 function main(argv) {
-  const opts = { repos: [], since: null, until: null, mode: 'digest', post: null };
+  const opts = { repos: [], since: null, until: null, mode: 'digest', post: null, check: false, latest: 50, profileDirs: (process.env.FACTORY_PROFILE_DIRS ?? '').split(':').filter(Boolean) };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--repo') opts.repos.push(argv[++i]);
@@ -324,7 +435,20 @@ function main(argv) {
     else if (a === '--rows') opts.mode = 'rows';
     else if (a === '--digest') opts.mode = 'digest';
     else if (a === '--post') opts.post = argv[++i];
+    else if (a === '--check') opts.check = true;
+    else if (a === '--latest') opts.latest = Number(argv[++i]);
+    else if (a === '--profile-dir') opts.profileDirs.push(argv[++i]);
     else throw new Error(`unknown argument ${a}`);
+  }
+  if (opts.check) {
+    const profiles = process.env.AGENT_PROFILES ?? join(process.env.HOME, '.agent-profiles');
+    const own = [];
+    if (!opts.profileDirs.length && existsSync(profiles))
+      for (const owner of readdirSync(profiles))
+        for (const name of existsSync(join(profiles, owner)) ? readdirSync(join(profiles, owner)) : [])
+          if (existsSync(join(profiles, owner, name, 'claude'))) own.push(join(profiles, owner, name, 'claude'));
+    process.exitCode = check(opts.profileDirs.length ? opts.profileDirs : own, opts.latest);
+    return;
   }
   const day = (d) => d.toISOString().slice(0, 10);
   opts.until ??= day(new Date());
@@ -342,14 +466,14 @@ function main(argv) {
   for (const repo of opts.repos) {
     const [owner, name] = repo.split('/');
     const profile = join(profiles, owner, name, 'claude');
-    const costs = existsSync(profile) ? branchCosts(profile) : null;
+    const costs = repoCosts({ own: profile, extra: opts.profileDirs, root, name });
     const graphql = (query, n) => JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `n=${n}`])).data.repository;
     const list = (path) => JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/${path}`])).flat().filter((x) => inWindow(x.created_at, x.closed_at, from, to));
     const pulls = new Map();
     const pull = (n) => {
       if (!pulls.has(n)) {
         const node = graphql(QUERY, n).pullRequest;
-        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: existsSync(profile), patchOf: patchIn(clones.get(repo)) }) });
+        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: costs !== null, patchOf: patchIn(clones.get(repo)) }) });
       }
       return pulls.get(n);
     };
