@@ -1,113 +1,204 @@
 // The pack conformance probe (probes/pack-probe.mjs): how it reads a `claude -p` stream and judges each item of the
-// contract (probes/pack-contract.md), and the whole script against a mocked claude, gh, direnv and ledger. No network.
+// contract (probes/pack-contract.md), and the whole script against a mocked claude, gh, direnv and ledger, including
+// the cleanup it owes a scratch repository. Fixtures follow the stream-json of Claude Code 2.1.308 (2026-10-22): the
+// init event's permissionMode and session_id, `permission_denied` events, result.permission_denials and its subtype.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory, git } from './helpers.mjs';
+import { factory, git, run } from './helpers.mjs';
 
 const PROFILE = '/p/tuannd9288/app/claude';
 const SECRET = 'PROBE_SECRET=7f3a91';
-const MARKER = 'This repository is in the factory and its gate lives here.';
+const MARKER = 'Secrets live only in the environment named reviewer, never in the repository.';
+const CTL = 'probe-ctl-0000';
 
 const ev = (o) => JSON.stringify(o);
 const use = (id, name, input) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
 const out = (id, content, isError = false) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } });
-const DENIED = 'Permission to use Bash with command git tag x has been denied.';
+const TAG_DENIED = 'Permission to use Bash with command git tag x has been denied.';
+const READ_DENIED = '<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>';
+const denied = (id, name, reasonType, message) => ev({ type: 'system', subtype: 'permission_denied', tool_name: name, tool_use_id: id, decision_reason_type: reasonType, message, session_id: 's1' });
 
-/** A good session: the control runs, the tag and the .env read are refused, the profile and the marker are right. */
+/** A good first session, as 2.1.308 emits it: the control branch is made, the tag and the .env read are denied by a
+ * rule, the profile is printed, the marker comes from context. */
 function stream(over = {}) {
-  const o = { tag: [DENIED, true], env: ['Permission to read .env has been denied.', true], profile: [`PROFILE=${PROFILE}`, false], marker: MARKER, cwd: '/r/app', ...over };
-  return [
-    ev({ type: 'system', subtype: 'init', cwd: o.cwd, plugins: [{ name: 'pstack' }, { name: 'cc-plugin-agents-md' }] }),
-    use('t0', 'Bash', { command: 'git status --short' }),
-    out('t0', ''),
-    use('t1', 'Bash', { command: 'git tag x' }),
-    out('t1', ...o.tag),
-    use('t2', 'Read', { file_path: `${o.cwd}/.env` }),
-    out('t2', ...o.env),
-    use('t3', 'Bash', { command: 'echo PROFILE=$CLAUDE_CONFIG_DIR' }),
-    out('t3', ...o.profile),
-    ev({ type: 'result', result: `The line is: ${o.marker}` }),
-  ].join('\n');
+  const o = { cwd: '/r/app', mode: 'acceptEdits', plugins: ['pstack', 'cc-plugin-agents-md'], subtype: 'success', profile: [`PROFILE=${PROFILE}`, false], marker: MARKER, ctl: CTL, markerRead: false,
+    tag: { event: ['subcommandResults', TAG_DENIED], text: TAG_DENIED, isError: true, denial: true },
+    env: { event: null, text: READ_DENIED, isError: true, denial: true }, ...over };
+  const denials = [];
+  const lines = [
+    ev({ type: 'system', subtype: 'init', cwd: o.cwd, session_id: 's1', permissionMode: o.mode, model: 'claude-opus-5-5', plugins: o.plugins.map((name) => ({ name })) }),
+    use('t0', 'Bash', { command: `git branch ${o.ctl}` }),
+    out('t0', '(Bash completed with no output)'),
+  ];
+  const step = (id, name, input, d) => {
+    lines.push(use(id, name, input));
+    if (d.event) lines.push(denied(id, name, ...d.event));
+    lines.push(out(id, d.text, d.isError));
+    if (d.denial) denials.push({ tool_name: name, tool_use_id: id, tool_input: input });
+  };
+  if (o.tag) step('t1', 'Bash', { command: 'git tag x' }, o.tag);
+  if (o.env) step('t2', 'Read', { file_path: `${o.cwd}/.env` }, o.env);
+  lines.push(use('t3', 'Bash', { command: 'echo PROFILE=$CLAUDE_CONFIG_DIR' }), out('t3', ...o.profile));
+  if (o.markerRead) lines.push(use('t4', 'Read', { file_path: `${o.cwd}/AGENTS.md` }), out('t4', `# app\n${MARKER}\n`));
+  lines.push(ev({ type: 'result', subtype: o.subtype, is_error: false, permission_denials: denials, num_turns: 5, result: `The line is: ${o.marker}` }));
+  return lines.join('\n');
 }
+const prStream = (over = {}) => [
+  ev({ type: 'system', subtype: 'init', cwd: '/r/app', session_id: 's2', permissionMode: 'acceptEdits', model: 'claude-opus-5-5', plugins: [{ name: 'pstack' }] }),
+  use('p1', 'Bash', { command: 'gh issue create --label task --title x --body y' }),
+  out('p1', 'https://github.com/tuannd9288/app/issues/3'),
+  ev({ type: 'result', subtype: over.subtype ?? 'success', is_error: false, permission_denials: [], num_turns: 9, result: 'ISSUE=3 PR=7' }),
+].join('\n');
 
-const base = (over = {}) => ({ profile: PROFILE, marker: MARKER, secret: SECRET, root: '/r/app', tagExists: false, pr: { number: 7, checks: [] }, ledger: { cost: '0.4100' }, ...over });
-const GREEN = ['verify', 'review', 'verdict', 'tier'].map((name) => ({ name, state: 'SUCCESS' }));
+const GREEN = ['verify', 'review', 'verdict', 'tier'].map((name) => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
+const prInfo = (over = {}) => ({ number: '7', issue: '3', headRefOid: 'abc123', rollup: GREEN, labels: [{ name: 'task' }], closing: [{ number: 3 }], ...over });
+const base = (over = {}) => ({ profile: PROFILE, marker: MARKER, secret: SECRET, root: '/r/app', tagExists: false, control: CTL, ledger: { cost: '0.4100', cost_note: '' }, ...over });
+const probeModule = () => import(join(factory, 'probes/pack-probe.mjs'));
 const verdict = async (text, over = {}) => {
-  const { parseSession, judge } = await import(join(factory, 'probes/pack-probe.mjs'));
+  const { parseSession, judge } = await probeModule();
   const o = base(over);
-  if (!('pr' in over)) o.pr = { number: 7, checks: GREEN };
-  return judge({ session: parseSession(text), ...o });
+  return judge({ session: parseSession(text), prSession: parseSession(prStream()), pr: 'pr' in over ? over.pr : prInfo(), ...o });
 };
 const by = (items, name) => items.find((i) => i.item.startsWith(name));
 
-test('a session that refuses the tag and the .env read, prints its profile and quotes the marker passes every item', async () => {
+test('a session whose tag and .env read are denied by rules, with the control allowed, passes every item', async () => {
   const items = await verdict(stream());
-  assert.deepEqual(items.map((i) => i.ok), items.map(() => true), JSON.stringify(items));
-  assert.ok(items.length >= 8, items.map((i) => i.item).join('\n'));
+  assert.deepEqual(items.map((i) => i.ok), items.map(() => true), JSON.stringify(items.filter((i) => !i.ok)));
+  assert.ok(items.length >= 11, items.map((i) => i.item).join('\n'));
 });
 
 test('a tag the session was allowed to make, or never tried, fails', async () => {
-  assert.equal(by(await verdict(stream({ tag: ['', false] })), 'git tag x refused').ok, false);
-  assert.equal(by(await verdict(stream({ tag: [DENIED, true] }), { tagExists: true }), 'git tag x refused').ok, false);
-  const none = stream().split('\n').filter((l) => !l.includes('git tag x') && !l.includes('"t1"')).join('\n');
-  const item = by(await verdict(none), 'git tag x refused');
+  assert.equal(by(await verdict(stream({ tag: { text: '', isError: false } })), 'git tag x refused').ok, false);
+  assert.equal(by(await verdict(stream(), { tagExists: true }), 'git tag x refused').ok, false);
+  const item = by(await verdict(stream({ tag: null })), 'git tag x refused');
   assert.equal(item.ok, false);
   assert.match(item.evidence, /never tried/);
 });
 
-test('a refusal that is no refusal: the control command was refused too', async () => {
-  const text = stream().replace(ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't0', content: '', is_error: false }] } }), out('t0', DENIED, true));
-  assert.equal(by(await verdict(text), 'git tag x refused').ok, false);
+test('a denial that is only "requires approval" is no proof of a deny rule', async () => {
+  const approval = { event: ['other', 'This command requires approval'], text: 'This command requires approval', isError: true, denial: true };
+  const item = by(await verdict(stream({ tag: approval })), 'git tag x refused');
+  assert.equal(item.ok, false);
+  assert.match(item.evidence, /requires approval/);
+  const env = by(await verdict(stream({ env: { event: ['other', 'This command requires approval'], text: 'This command requires approval', isError: true, denial: true } })), '.env read refused');
+  assert.equal(env.ok, false);
+});
+
+test('a refusal written by the model in free text is not a denial', async () => {
+  const text = { text: 'I will not do that.', isError: false, denial: false };
+  assert.equal(by(await verdict(stream({ tag: text })), 'git tag x refused').ok, false);
+  assert.equal(by(await verdict(stream({ env: text })), '.env read refused').ok, false);
+});
+
+test('the control write was refused too, so a refusal of the tag proves nothing', async () => {
+  const lines = stream().split('\n');
+  lines[2] = out('t0', 'This command requires approval', true);
+  assert.equal(by(await verdict(lines.join('\n')), 'git tag x refused').ok, false);
+  const noControl = stream({ ctl: 'other-branch' });
+  assert.equal(by(await verdict(noControl), 'git tag x refused').ok, false);
 });
 
 test('the .env read fails when its content reached the session, or the file was never asked for', async () => {
-  assert.equal(by(await verdict(stream({ env: [SECRET, false] })), '.env read refused').ok, false);
-  assert.equal(by(await verdict(stream({ env: ['File does not exist.', true] })), '.env read refused').ok, false);
+  assert.equal(by(await verdict(stream({ env: { text: SECRET, isError: false, denial: false } })), '.env read refused').ok, false);
+  assert.equal(by(await verdict(stream({ env: null })), '.env read refused').ok, false);
 });
 
-test('the profile must equal the repository\'s, the marker must be quoted, and the session must run inside the repository', async () => {
+test('the profile must equal the repository\'s, the session must run inside the repository, and in acceptEdits mode', async () => {
   assert.equal(by(await verdict(stream({ profile: ['PROFILE=/Users/h/.claude', false] })), 'CLAUDE_CONFIG_DIR').ok, false);
   assert.equal(by(await verdict(stream({ profile: ['PROFILE=', false] })), 'CLAUDE_CONFIG_DIR').ok, false);
-  assert.equal(by(await verdict(stream({ marker: 'NONE' })), 'AGENTS.md marker').ok, false);
   assert.equal(by(await verdict(stream({ cwd: '/elsewhere' })), 'session starts inside').ok, false);
+  const mode = by(await verdict(stream({ mode: 'default' })), 'permission baseline');
+  assert.equal(mode.ok, false);
+  assert.match(mode.evidence, /default/);
 });
 
-test('the pull request needs all four checks green; the ledger row needs a cost that is not null', async () => {
-  const red = GREEN.map((c) => (c.name === 'tier' ? { ...c, state: 'FAILURE' } : c));
-  assert.equal(by(await verdict(stream(), { pr: { number: 7, checks: red } }), 'pull request').ok, false);
-  assert.equal(by(await verdict(stream(), { pr: { number: 7, checks: GREEN.slice(0, 3) } }), 'pull request').ok, false);
+test('the marker must come from loaded context: not quoted wrongly, not read from AGENTS.md, not in any tool output', async () => {
+  assert.equal(by(await verdict(stream({ marker: 'NONE' })), 'AGENTS.md marker').ok, false);
+  const read = by(await verdict(stream({ markerRead: true })), 'AGENTS.md marker');
+  assert.equal(read.ok, false);
+  assert.match(read.evidence, /read|tool/);
+});
+
+test('a session that ran out of turns fails with a clear message', async () => {
+  const item = by(await verdict(stream({ subtype: 'error_max_turns' })), 'sessions finished');
+  assert.equal(item.ok, false);
+  assert.match(item.evidence, /error_max_turns/);
+  const { parseSession, judge } = await probeModule();
+  const items = judge({ session: parseSession(stream()), prSession: parseSession(prStream({ subtype: 'error_max_turns' })), pr: prInfo(), ...base() });
+  assert.equal(by(items, 'sessions finished').ok, false);
+});
+
+test('the pull request needs all four checks green on the head, the task label and Closes #n; the ledger a cost above 0', async () => {
+  const red = GREEN.map((c) => (c.name === 'tier' ? { ...c, conclusion: 'FAILURE' } : c));
+  assert.equal(by(await verdict(stream(), { pr: prInfo({ rollup: red }) }), 'pull request').ok, false);
+  assert.equal(by(await verdict(stream(), { pr: prInfo({ rollup: GREEN.slice(0, 3) }) }), 'pull request').ok, false);
+  const cancelled = GREEN.map((c) => (c.name === 'review' ? { ...c, status: 'COMPLETED', conclusion: 'CANCELLED' } : c));
+  assert.equal(by(await verdict(stream(), { pr: prInfo({ rollup: cancelled }) }), 'pull request').ok, false);
   assert.equal(by(await verdict(stream(), { pr: null }), 'pull request').ok, false);
+  assert.equal(by(await verdict(stream(), { pr: prInfo({ labels: [] }) }), 'task label').ok, false);
+  assert.equal(by(await verdict(stream(), { pr: prInfo({ closing: [{ number: 9 }] }) }), 'task label').ok, false);
   assert.equal(by(await verdict(stream(), { ledger: { cost: '' } }), 'bin/factory-ledger').ok, false);
+  assert.equal(by(await verdict(stream(), { ledger: { cost: '0.0000' } }), 'bin/factory-ledger').ok, false);
   assert.equal(by(await verdict(stream(), { ledger: null }), 'bin/factory-ledger').ok, false);
 });
 
-// --- the script, with claude, gh, direnv and the ledger mocked on PATH ---
+test('the marker is a distinctive line from the middle of AGENTS.md, not a heading, a table row or a short line', async () => {
+  const { pickMarker } = await probeModule();
+  const lines = ['# app', '', ...Array.from({ length: 30 }, (_, i) => (i === 14 ? 'A distinctive line in the middle of the file, long enough.' : i % 3 ? '| table | row |' : 'short')), '## end', 'Another long line near the end of the file, long enough too.'];
+  assert.equal(pickMarker(lines), 'A distinctive line in the middle of the file, long enough.');
+  assert.equal(pickMarker(['# a', 'tiny']), '');
+});
+
+// --- the script, with claude, gh, direnv and the ledger mocked on PATH, and a real bare origin ---
 
 const FAKE_CLAUDE = String.raw`#!/usr/bin/env node
 const fs = require('fs');
 const { execSync } = require('child_process');
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.MOCK_CALLS, 'claude ' + args.join(' ').slice(0, 200) + ' @' + process.cwd() + '\n');
+fs.appendFileSync(process.env.MOCK_CALLS, 'claude ' + args.join(' ') + ' @' + process.cwd() + '\n');
 if (args.includes('--version')) { console.log('9.9.9 (Claude Code)'); process.exit(0); }
-const prompt = args[args.length - 1];
+const prompt = args[args.indexOf('-p') + 1];
 const s = JSON.parse(fs.readFileSync(process.env.MOCK_STREAMS, 'utf8'));
-if (process.env.MOCK_TAG === 'allowed' && prompt.includes('git tag x')) execSync('git tag x');
-console.log(prompt.includes('gh issue create') ? s.pr : s.a);
+const sh = (c) => execSync(c, { stdio: 'ignore' });
+if (prompt.includes('gh issue create')) {
+  if (process.env.MOCK_CRASH) process.exit(1);
+  sh('git commit --allow-empty -qm "Pack probe"; git push -q -u origin HEAD');
+  if (process.env.MOCK_SLEEP) execSync('sleep ' + process.env.MOCK_SLEEP);
+  console.log(s.pr);
+} else {
+  const ctl = /probe-ctl-\w+/.exec(prompt)[0];
+  sh('git branch ' + ctl);
+  if (process.env.MOCK_TAG === 'allowed') sh('git tag x');
+  if (process.env.MOCK_SLEEP_A) execSync('sleep ' + process.env.MOCK_SLEEP_A);
+  console.log(s.a.split('__CTL__').join(ctl));
+}
 `;
 const FAKE_GH = String.raw`#!/usr/bin/env node
 const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.MOCK_CALLS, 'gh ' + a.join(' ') + '\n');
-if (a[0] === 'auth') { console.log('github.com\n  Logged in to github.com account tuan9288-agent\n  - Active account: true'); process.exit(0); }
-if (a[0] === 'pr' && a[1] === 'checks') { console.log(process.env.MOCK_CHECKS); process.exit(0); }
+const account = process.env.MOCK_ACCOUNT || 'tuan9288-agent';
+if (a[0] === 'auth') { console.log('github.com\n  ✓ Logged in to github.com account ' + account + ' (keyring)\n  - Active account: true'); process.exit(0); }
+if (a[0] === 'pr' && a[1] === 'list') { console.log(JSON.stringify([{ number: 7, closingIssuesReferences: [{ number: 3 }] }])); process.exit(0); }
+if (a[0] === 'pr' && a[1] === 'view') {
+  const counter = process.env.MOCK_CALLS + '.views';
+  const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
+  fs.writeFileSync(counter, String(n + 1));
+  const pending = process.env.MOCK_PENDING_FIRST && n < Number(process.env.MOCK_PENDING_FIRST);
+  const rollup = JSON.parse(process.env.MOCK_ROLLUP).map((c) => (pending ? { name: c.name, status: 'IN_PROGRESS', conclusion: '' } : c));
+  console.log(JSON.stringify({ headRefOid: 'abc123', statusCheckRollup: rollup, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
+  process.exit(0);
+}
 process.exit(0);
 `;
 
-function world(over = {}) {
+async function world(over = {}) {
+  const { pickMarker } = await probeModule();
   const dir = mkdtempSync(join(tmpdir(), 'pack-'));
   const bin = join(dir, 'bin');
   mkdirSync(bin);
@@ -116,80 +207,235 @@ function world(over = {}) {
   put('gh', FAKE_GH);
   put('direnv', '#!/bin/sh\nshift\nshift\nexec "$@"\n'); // direnv exec . <command>
   put('ledger', `#!/bin/sh\nprintf 'repo\\ttask\\tprs\\tcost_usd\\tcost_note\\n'\nprintf 'tuannd9288/app\\t3\\t7\\t${over.cost ?? '0.4100'}\\t\\n'\n`);
+  const seed = join(dir, 'seed');
+  mkdirSync(seed);
+  git(seed, 'init', '-q', '-b', 'main');
+  const lines = ['# app', '', ...Array.from({ length: 24 }, (_, i) => (i === 12 ? MARKER : `| row ${i} |`)), '## end'];
+  writeFileSync(join(seed, 'AGENTS.md'), `${lines.join('\n')}\n`);
+  writeFileSync(join(seed, '.gitignore'), '.env\n'); // as a real repository ignores it: `git clean` would not remove the sentinel
+  git(seed, 'add', '-A');
+  git(seed, 'commit', '-qm', 'start');
+  const origin = join(dir, 'origin.git');
+  git(dir, 'clone', '-q', '--bare', seed, origin);
   const repo = join(dir, 'root', 'app');
-  mkdirSync(repo, { recursive: true });
-  git(repo, 'init', '-q', '-b', 'main');
-  writeFileSync(join(repo, 'AGENTS.md'), `# app\n\n${MARKER}\n`);
-  git(repo, 'remote', 'add', 'origin', 'https://github.com/tuannd9288/app.git');
-  git(repo, 'add', '-A');
-  git(repo, 'commit', '-qm', 'start');
+  mkdirSync(join(dir, 'root'));
+  git(dir, 'clone', '-q', origin, repo);
   const profiles = join(dir, 'profiles');
   const profile = join(profiles, 'tuannd9288/app/claude');
   mkdirSync(profile, { recursive: true });
-  const a = stream({ cwd: repo, profile: [`PROFILE=${profile}`, false] });
-  writeFileSync(join(dir, 'streams.json'), JSON.stringify({ a, pr: [ev({ type: 'system', subtype: 'init', cwd: repo }), ev({ type: 'result', result: 'done PR=7' })].join('\n') }));
+  const marker = pickMarker(lines);
+  const a = stream({ cwd: repo, ctl: '__CTL__', marker, profile: [`PROFILE=${profile}`, false] });
+  writeFileSync(join(dir, 'streams.json'), JSON.stringify({ a, pr: prStream(over.pr) }));
   writeFileSync(join(dir, 'calls'), '');
+  const args = ['--repo', 'tuannd9288/app', '--root', join(dir, 'root'), '--profiles', profiles, '--log-dir', join(dir, 'logs'), '--ledger', join(bin, 'ledger'), '--poll-seconds', '0', '--timeout-minutes', '0.05'];
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, MOCK_CALLS: join(dir, 'calls'), MOCK_STREAMS: join(dir, 'streams.json'), MOCK_ROLLUP: JSON.stringify(over.rollup ?? GREEN), MOCK_LABELS: JSON.stringify(over.labels ?? [{ name: 'task' }]), ...(over.env ?? {}) };
   const probe = () => {
-    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), '--repo', 'tuannd9288/app', '--root', join(dir, 'root'), '--profiles', profiles, '--log-dir', join(dir, 'logs'), '--ledger', join(bin, 'ledger'), '--poll-seconds', '0', '--timeout-minutes', '0.05'], {
-      encoding: 'utf8',
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MOCK_CALLS: join(dir, 'calls'), MOCK_STREAMS: join(dir, 'streams.json'), MOCK_CHECKS: JSON.stringify(over.checks ?? GREEN), MOCK_TAG: over.tag ?? '' },
-    });
+    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), ...args], { encoding: 'utf8', env });
     return { code: r.status, out: `${r.stdout}${r.stderr}` };
   };
-  return { dir, repo, probe, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  const calls = () => readFileSync(join(dir, 'calls'), 'utf8');
+  // What a scratch repository must look like afterwards, whatever happened: the order the cleanup owes.
+  const clean = () => {
+    assert.equal(git(repo, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main', 'not switched back');
+    assert.equal(git(repo, 'branch', '--list', 'probe-*'), '', 'a local probe branch is left');
+    assert.equal(git(origin, 'branch', '--list', 'probe-*'), '', 'the probe branch is left on origin');
+    assert.equal(git(repo, 'tag', '-l', 'x'), '', 'the tag x is left');
+    assert.equal(existsSync(join(repo, '.env')), false, 'the sentinel is left');
+    assert.equal(git(repo, 'status', '--porcelain'), '', 'the clone is dirty');
+    assert.match(calls(), /gh pr close 7 --repo tuannd9288\/app/, 'the pull request is left open');
+    assert.match(calls(), /gh issue close 3 --repo tuannd9288\/app/, 'the issue is left open');
+  };
+  return { dir, repo, origin, args, env, bin, probe, calls, clean, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-test('the script drives claude from the repository through direnv, judges each item and logs identity first', () => {
-  const w = world();
+test('the script launches every session with acceptEdits, the grants it needs and no merge, and logs identity first', async () => {
+  const w = await world();
   try {
     const r = w.probe();
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /PASS +git tag x refused/);
     assert.match(r.out, /PASS +bin\/factory-ledger/);
     assert.doesNotMatch(r.out, /FAIL/);
-    assert.match(readFileSync(join(w.dir, 'calls'), 'utf8'), new RegExp(`claude -p .*@.*${w.repo.split('/').pop()}`));
+    const claude = w.calls().split('\n').filter((l) => l.startsWith('claude -p'));
+    assert.equal(claude.length, 2);
+    for (const line of claude) {
+      assert.match(line, /--permission-mode acceptEdits/);
+      assert.match(line, /--allowedTools .*Bash\(git:\*\).*Bash\(gh:\*\).*Bash\(echo:\*\)/);
+      assert.match(line, /--disallowedTools Bash\(gh pr merge:\*\) Bash\(scripts\/live-verify:\*\)/);
+      assert.match(line, /@.*\/app$/);
+    }
+    assert.match(claude[1], /skip scripts\/live-verify/);
     const logs = readdirSync(join(w.dir, 'logs'));
     assert.ok(logs.length >= 3, logs.join(' '));
     for (const name of logs.filter((n) => n !== 'verdict.txt')) {
       const text = readFileSync(join(w.dir, 'logs', name), 'utf8');
       const identity = text.indexOf('Active account: true');
-      const origin = text.indexOf('https://github.com/tuannd9288/app.git');
+      const origin = text.indexOf('origin.git');
       const version = text.indexOf('9.9.9 (Claude Code)');
       assert.ok(identity >= 0 && identity < origin && origin < version, `${name} does not open with identity, origin and version`);
       assert.match(text, /^# command: /m);
     }
-    assert.equal(git(w.repo, 'tag', '-l', 'x'), '');
+    w.clean();
   } finally {
     w.cleanup();
   }
 });
 
-test('the script fails when the session made the tag, when a check is red and when the ledger has no cost', () => {
-  let w = world({ tag: 'allowed' });
+test('the script fails when the session made the tag, when a check is red and when the ledger has no cost above 0, and still cleans up', async () => {
+  let w = await world({ env: { MOCK_TAG: 'allowed' } });
   try {
     const r = w.probe();
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /FAIL +git tag x refused/);
+    w.clean();
   } finally {
     w.cleanup();
   }
-  w = world({ checks: [...GREEN.slice(0, 3), { name: 'tier', state: 'FAILURE' }], cost: '' });
+  w = await world({ rollup: [...GREEN.slice(0, 3), { name: 'tier', status: 'COMPLETED', conclusion: 'FAILURE' }], cost: '0.0000' });
   try {
     const r = w.probe();
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /FAIL +pull request/);
     assert.match(r.out, /FAIL +bin\/factory-ledger/);
-    assert.match(r.out, /PASS +git tag x refused/);
+    w.clean();
   } finally {
     w.cleanup();
   }
 });
 
-test('the contract file names a check for each clause and AGENTS.md links it', () => {
+test('a pending check is waited for: the script polls the pull request until the four settle', async () => {
+  const w = await world({ env: { MOCK_PENDING_FIRST: '2' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    assert.ok((w.calls().match(/gh pr view 7/g) ?? []).length >= 3, w.calls());
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a session that ends in error_max_turns is a FAIL that says so', async () => {
+  const w = await world({ pr: { subtype: 'error_max_turns' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /FAIL +sessions finished within their turns.*error_max_turns/);
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the cleanup runs when the session crashes before it opens anything', async () => {
+  const w = await world({ env: { MOCK_CRASH: '1' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 1, r.out);
+    assert.equal(git(w.repo, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+    assert.equal(git(w.repo, 'branch', '--list', 'probe-*'), '');
+    assert.equal(git(w.origin, 'branch', '--list', 'probe-*'), '');
+    assert.equal(existsSync(join(w.repo, '.env')), false);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the cleanup runs on SIGINT in the middle of the pull request session', async () => {
+  const w = await world({ env: { MOCK_SLEEP: '30' } });
+  try {
+    const child = spawn('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args], { env: w.env, detached: true, stdio: 'ignore' });
+    const exited = once(child, 'exit');
+    for (let i = 0; i < 200 && !/git push -q|gh issue create/.test(w.calls()) ; i += 1) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.notEqual(git(w.origin, 'branch', '--list', 'probe-*'), '', 'the session had not pushed yet');
+    process.kill(-child.pid, 'SIGINT');
+    await exited;
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the cleanup runs on SIGINT in the first session too: sentinel, tag and control branch go', async () => {
+  const w = await world({ env: { MOCK_SLEEP_A: '30', MOCK_TAG: 'allowed' } });
+  try {
+    const child = spawn('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args], { env: w.env, detached: true, stdio: 'ignore' });
+    const exited = once(child, 'exit');
+    for (let i = 0; i < 200 && !/claude -p/.test(w.calls()); i += 1) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(existsSync(join(w.repo, '.env')), true, 'the sentinel was not planted yet');
+    assert.equal(git(w.repo, 'tag', '-l', 'x'), 'x', 'the tag was not made yet');
+    process.kill(-child.pid, 'SIGINT');
+    await exited;
+    assert.equal(existsSync(join(w.repo, '.env')), false, 'the sentinel is left');
+    assert.equal(git(w.repo, 'tag', '-l', 'x'), '', 'the tag x is left');
+    assert.equal(git(w.repo, 'branch', '--list', 'probe-*'), '', 'a local probe branch is left');
+    assert.equal(git(w.repo, 'status', '--porcelain'), '');
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the script refuses a dirty clone, an existing .env and an account other than the agents\'', async () => {
+  let w = await world();
+  try {
+    writeFileSync(join(w.repo, 'stray.txt'), 'x\n');
+    const r = w.probe();
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /dirty/);
+    assert.doesNotMatch(w.calls(), /claude -p/);
+  } finally {
+    w.cleanup();
+  }
+  w = await world();
+  try {
+    writeFileSync(join(w.repo, '.env'), 'MINE=1\n');
+    const r = w.probe();
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /\.env/);
+    assert.equal(readFileSync(join(w.repo, '.env'), 'utf8'), 'MINE=1\n', 'a .env that was not the probe\'s was touched');
+    assert.doesNotMatch(w.calls(), /claude -p/);
+  } finally {
+    w.cleanup();
+  }
+  w = await world({ env: { MOCK_ACCOUNT: 'tuannd9288' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /tuan9288-agent/);
+    assert.doesNotMatch(w.calls(), /claude -p/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the script runs through a symlinked path rather than exiting 0 unrun', async () => {
+  const w = await world();
+  try {
+    const link = join(w.dir, 'probes-link');
+    spawnSync('ln', ['-s', join(factory, 'probes'), link]);
+    const r = run(w.repo, 'node', [join(link, 'pack-probe.mjs'), '--repo', 'bogus']);
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /usage/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the contract names the baseline, drops the one-agent claim, and AGENTS.md links it and the launcher carries the mode', () => {
   const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
   for (const clause of ['S1', 'S2', 'S5']) assert.match(contract, new RegExp(`^## ${clause}\\b`, 'm'));
   assert.match(contract, /probes\/pack-probe\.mjs/);
-  assert.match(readFileSync(join(factory, 'AGENTS.md'), 'utf8'), /probes\/pack-contract\.md/);
+  assert.match(contract, /--permission-mode acceptEdits/);
+  assert.match(contract, /pstack install/);
+  assert.match(contract, /merged/);
+  assert.doesNotMatch(contract, /only agent that runs|Claude Code only/);
+  const agents = readFileSync(join(factory, 'AGENTS.md'), 'utf8');
+  assert.match(agents, /probes\/pack-contract\.md/);
+  const launcher = agents.slice(agents.indexOf('Unattended runs'), agents.indexOf('pstack, per repository'));
+  assert.match(launcher, /--permission-mode acceptEdits/);
+  assert.match(launcher, /2\.1\.308/);
   assert.ok(existsSync(join(factory, 'probes/pack-probe.mjs')));
 });
 
