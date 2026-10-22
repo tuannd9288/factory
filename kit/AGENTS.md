@@ -39,9 +39,9 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    tier 1), and `tier`, which on tier 3 waits for the Human's approval of your change. His approval holds while the
    patch is unchanged, as when the queue merges `main` in; any change to the patch needs a new one. A label never
    lowers the tier, even once removed.
-6. A blocking finding is fixed by a new commit, or answered in its thread with `withdraw <id>: <reason>` for
-   the reviewer to judge. At the third head commit judged red, `rounds` labels the pull request `needs-human`,
-   which makes it tier 3: the Human decides.
+6. A blocking finding is fixed by a new commit. A finding you dispute goes to the Human: label the pull request
+   `needs-human` and put your recommended answer in it. At the third head commit judged red, `rounds` labels the
+   pull request `needs-human`, which makes it tier 3: the Human decides.
 
 ## What the Human keeps
 

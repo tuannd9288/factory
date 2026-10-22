@@ -692,6 +692,10 @@ describe('workflows and ruleset', () => {
     }
     assert.ok(candidate > 0, 'no job runs the candidate\'s code');
   });
+  test('kit/AGENTS.md asks for no reply in a thread while no workflow reads one', () => {
+    if (workflows.some((wf) => events(wf).some((e) => /comment/.test(e)))) return;
+    assert.doesNotMatch(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /\bthread\b|\bwithdraw\b/);
+  });
   test('the ruleset keeps an approval through a push, for the tier check binds it to the patch', () => {
     const rule = ruleset.rules.find((r) => r.type === 'pull_request');
     assert.equal(rule.parameters.dismiss_stale_reviews_on_push, false);
