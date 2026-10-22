@@ -8,7 +8,7 @@ failed=0
 
 n=$(wc -l <kit/AGENTS.md | tr -d ' ')
 [ "$n" -le 150 ] || { echo "verify: kit/AGENTS.md has $n lines; at most 150"; failed=1; }
-for f in kit/scripts/* kit/.githooks/* bin/onboard bin/onboard-owner bin/factory-ledger bin/factory-queue scripts/verify; do
+for f in kit/scripts/* kit/.githooks/* bin/onboard bin/onboard-owner bin/kit-evidence bin/factory-ledger bin/factory-queue scripts/verify; do
   [ -f "$f" ] || continue
   head -1 "$f" | grep -q bash || continue
   bash -n "$f" 2>/dev/null || { echo "verify: $f does not parse"; failed=1; }

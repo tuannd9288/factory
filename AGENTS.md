@@ -57,6 +57,7 @@ Everything else that can be undone, agents decide and report after.
 | `kit/` | What every repository receives through one pull request when it joins |
 | `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
 | `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
+| `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
@@ -88,6 +89,11 @@ It refuses any other login, and a `main` without the bootstrap pull request rule
    the pull request for its session to merge by hand;
 5. runs the full `scripts/verify`, and only when it passes commits the kit and opens its pull request, authored by
    the agents' account. When it fails the kit stays staged on `factory/kit` for the repository's session to finish.
+   The pull request carries `bin/kit-evidence`'s result: every managed file against the kit at the factory commit
+   (contents, modes, symlinks), the two rendered files line by line, the files the repository kept, and nothing else
+   changed, bound to that commit, the kit's tree, the repository's id, base and head. Onboard opens it only from a
+   factory commit on `origin/main` whose `kit/` has no uncommitted, untracked or ignored file, since it lays the kit
+   from the working tree.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (the bootstrap rule asks

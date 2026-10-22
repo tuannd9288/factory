@@ -35,6 +35,16 @@ if [ "$open_pr" -eq 1 ]; then
     echo "onboard: main has no pull request rule: the Human runs bin/onboard-owner first; nothing done"
     exit 2
   fi
+  # The kit is laid from this clone's working tree, and its evidence names a commit: the two must be one, on main.
+  if git -C "$factory" status --porcelain --ignored --untracked-files=all -- kit | grep -v '\.DS_Store$' | grep -q .; then
+    echo "onboard: the factory's kit has changes no commit holds; commit and push them first; nothing done"
+    exit 2
+  fi
+  kit_commit=$(git -C "$factory" rev-parse HEAD)
+  if ! git -C "$factory" merge-base --is-ancestor "$kit_commit" refs/remotes/origin/main 2>/dev/null; then
+    echo "onboard: the factory's commit ${kit_commit:0:7} is not on its origin/main; push it first; nothing done"
+    exit 2
+  fi
 fi
 
 echo "onboard: cloning $url into $dest"
@@ -57,6 +67,7 @@ fi
 grep -qx '.claude/worktrees/' "$dest/.git/info/exclude" 2>/dev/null || echo '.claude/worktrees/' >>"$dest/.git/info/exclude"
 
 cd "$dest"
+base=$(git rev-parse HEAD)
 git switch --quiet -c factory/kit
 lists=$(mktemp -d)
 trap 'rm -rf "$lists"' EXIT
@@ -91,6 +102,14 @@ echo "onboard: kit committed on factory/kit ($(wc -l <"$lists/kit" | tr -d ' ') 
 [ "$open_pr" -eq 1 ] || { echo "onboard: --no-pr; push factory/kit and open the pull request yourself"; exit 0; }
 
 slug=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+id=$(gh api "repos/$slug" --jq .id)
+head=$(git rev-parse HEAD)
+if ! evidence=$("$factory/bin/kit-evidence" --factory "$factory" --commit "$kit_commit" --repo "$dest" --base "$base" \
+  --head "$head" --slug "$slug" --id "$id" --human "$human") || ! grep -qx 'kit-evidence: PASS' <<<"$evidence"; then
+  printf '%s\n' "$evidence"
+  echo "onboard: the kit evidence fails; factory/kit is committed, not pushed, and no pull request is open"
+  exit 1
+fi
 for label in tier-1 tier-2 tier-3 needs-human task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
 git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
@@ -98,13 +117,19 @@ gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng
 ## Tóm tắt cho người quyết định
 - Mục đích: đưa $name vào xưởng bằng bộ kit của tuannd9288/factory.
 - Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (có \`protected\`: các đường dẫn bậc 3), \`.githooks/\`, ba workflow (gate, gate-trusted, main), mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`.
-- Bằng chứng: \`scripts/verify\` đầy đủ xanh trước khi commit.
+- Bằng chứng: \`scripts/verify\` đầy đủ xanh trước khi commit; file của kit khớp commit \`${kit_commit:0:7}\` của factory (bên dưới).
 - Bậc: 3 (chạm \`.github/\`, \`scripts/\`, \`.gate/\`).
 - Hoàn tác: revert PR này.
 - Cần anh quyết: có — xác nhận \`.gate/load-bearing\` (bậc 2) và \`.gate/protected\` (bậc 3); đề xuất: duyệt sau khi phiên của repo điền hai danh sách này.
 
 ## File repo đã có, kit giữ nguyên (phiên của repo hợp nhất tay)
 ${kept:-  - không có}
+
+## Bằng chứng kit (bin/kit-evidence, mã của factory, chỉ đọc object git)
+\`\`\`text
+$evidence
+\`\`\`
+Kiểm lại từ bản clone của factory: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
 
 ## Việc của anh sau khi merge
 1. Từ bản clone của factory, chạy lại \`bin/onboard-owner $slug --id <id> --apply\`: nó thay ruleset tạm của \`main\` bằng \`factory-gate\` của kit và đọc lại những gì đã đặt.

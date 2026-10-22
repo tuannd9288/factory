@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 export const factory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // Commits made by the tests name a throwaway author and run no hooks unless a test asks for them.
-const quiet = {
+export const quiet = {
   GIT_CONFIG_COUNT: '3',
   GIT_CONFIG_KEY_0: 'user.name',
   GIT_CONFIG_VALUE_0: 'test',
@@ -47,7 +47,7 @@ export function commit(cwd, files, message = 'change') {
   return git(cwd, 'rev-parse', 'HEAD');
 }
 
-const APP = {
+export const APP = {
   'package.json': '{ "name": "app", "private": true, "type": "module" }\n',
   'src/math.js': 'export function add(a, b) {\n  return a + b;\n}\n',
   'test/math.test.js':
