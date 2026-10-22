@@ -70,7 +70,9 @@ Run `bin/onboard <repo-url>` from this root. It does what the old layout did by 
 2. creates its profile `~/.agent-profiles/<owner>/<repo>/claude`, only now; it holds state only, never edit it (a
    Codex profile joins when Codex does);
 3. writes `.envrc` (`CLAUDE_CONFIG_DIR` pointing at the profile), adds it to `.git/info/exclude` and runs
-   `direnv allow`; an `.envrc` the repository has is kept, and onboard prints the line to add to it;
+   `direnv allow`; an `.envrc` the repository has is kept, and onboard prints the line to add to it. Either way
+   `.claude/worktrees/` joins `.git/info/exclude`: Claude Code's worktrees go there, inside the repository, so they
+   find its `.envrc`, and `git add -A` never stages one under the tier-3 `.claude/`;
 4. lays the kit over it: `scripts/`, `.gate/`, `.githooks/`, the gate workflows, the PR template, `CODEOWNERS`,
    deny rules, an `AGENTS.md` and the one-line `CLAUDE.md`. Files the repository already has are kept and listed in
    the pull request for its session to merge by hand;

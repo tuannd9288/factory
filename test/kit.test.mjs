@@ -585,6 +585,13 @@ describe('hooks', () => {
 });
 
 describe('onboard', () => {
+  /** Claude Code's worktrees live under .claude/worktrees/, inside the tier-3 path .claude/: a `git add -A` in the
+   * main checkout must not stage one. */
+  const assertWorktreesIgnored = (repo) => {
+    assert.match(readFileSync(join(repo, '.git/info/exclude'), 'utf8'), /^\.claude\/worktrees\/$/m);
+    write(repo, { '.claude/worktrees/t/a.txt': 'a\n' });
+    assert.equal(git(repo, 'status', '--porcelain', '--', '.claude/worktrees'), '');
+  };
   test('clones, makes the Claude profile keyed by owner and repository, writes .envrc, and keeps files the repository had', () => {
     const r = repoWithKit({ 'AGENTS.md': '# own rules\n' });
     try {
@@ -594,6 +601,7 @@ describe('onboard', () => {
       assert.ok(!existsSync(join(r.dir, 'profiles/app')));
       assert.match(readFileSync(join(r.repo, '.envrc'), 'utf8'), new RegExp(`^export CLAUDE_CONFIG_DIR=".*profiles/${owner}/app/claude"\n$`));
       assert.match(readFileSync(join(r.repo, '.git/info/exclude'), 'utf8'), /^\.envrc$/m);
+      assertWorktreesIgnored(r.repo);
       assert.equal(readFileSync(join(r.repo, 'AGENTS.md'), 'utf8'), '# own rules\n');
       assert.match(r.onboard, /1 kept as they were/);
       assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts\/ +@tuannd9288$/m);
@@ -607,6 +615,7 @@ describe('onboard', () => {
     try {
       assert.equal(readFileSync(join(r.repo, '.envrc'), 'utf8'), 'export FOO=1\n');
       assert.match(r.onboard, /\.envrc exists and is kept; add to it: export CLAUDE_CONFIG_DIR=/);
+      assertWorktreesIgnored(r.repo);
     } finally {
       r.cleanup();
     }

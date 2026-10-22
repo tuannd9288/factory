@@ -38,6 +38,8 @@ else
   grep -qx '.envrc' "$dest/.git/info/exclude" 2>/dev/null || echo '.envrc' >>"$dest/.git/info/exclude"
   if command -v direnv >/dev/null; then direnv allow "$dest"; else echo "onboard: direnv is not installed; run 'direnv allow' in $dest later"; fi
 fi
+# Claude Code's worktrees sit under .claude/worktrees/, inside the tier-3 path .claude/; they find the .envrc above.
+grep -qx '.claude/worktrees/' "$dest/.git/info/exclude" 2>/dev/null || echo '.claude/worktrees/' >>"$dest/.git/info/exclude"
 
 cd "$dest"
 git switch --quiet -c factory/kit
