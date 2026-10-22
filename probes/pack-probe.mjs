@@ -24,8 +24,11 @@ const PENDING = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUEST
 // or `gh -R x pr merge` match none of these; code.claude.com/docs/en/permissions, fetched 2026-10-22). Edits come with
 // acceptEdits. A deny rule still wins over a grant.
 const ALLOWED_A = ['Bash(git branch probe-ctl-*)', 'Bash(git tag x)', 'Bash(printenv CLAUDE_CONFIG_DIR)'];
-const ALLOWED_PR = ['Bash(git add *)', 'Bash(git commit *)', 'Bash(git push -u origin probe-pack-*)', 'Bash(gh issue create *)', 'Bash(gh pr create *)', 'Bash(scripts/verify *)'];
-const DISALLOWED = ['Bash(gh pr merge:*)', 'Bash(scripts/live-verify:*)'];
+// The push is granted for the one branch the probe names before the session starts, with no *: a trailing * admits any
+// refspec, `probe-pack-x:refs/tags/y` included.
+const allowedPr = (branch) => ['Bash(git add *)', 'Bash(git commit *)', `Bash(git push -u origin ${branch})`, 'Bash(gh issue create *)', 'Bash(gh pr create *)', 'Bash(scripts/verify *)'];
+// Hooks stay on: `git commit *` would also admit --no-verify and -n (the kit's own deny rules name them too).
+const DISALLOWED = ['Bash(gh pr merge:*)', 'Bash(scripts/live-verify:*)', 'Bash(git commit *--no-verify*)', 'Bash(git commit * -n *)', 'Bash(git commit -n *)', 'Bash(git commit --no-verify*)'];
 
 /** A `claude -p --output-format stream-json` run (Claude Code 2.1.308): where it started, its mode and plugins, each
  * tool call with its result, the denials the result reports and the permission_denied events. */
@@ -220,6 +223,7 @@ function main(argv) {
   const original = sh('git rev-parse --abbrev-ref HEAD', dir).out.trim();
   const branch = `probe-pack-${stamp}`;
   const control = `probe-ctl-${stamp}`;
+  const bodyName = `pack-probe-body-${stamp}.md`;
   const st = { sentinel: false, branched: false, pr: null, issue: null };
   let items = [];
 
@@ -276,6 +280,7 @@ function main(argv) {
     step('git tag -d x');
     step('git clean -fdq');
     if (st.sentinel) rmSync(envFile, { force: true });
+    rmSync(join(dir, bodyName), { force: true });
   };
 
   process.on('SIGINT', () => (interrupted = true));
@@ -308,9 +313,9 @@ function main(argv) {
       st.branched = true;
       prSession = session(
         'session-pr.log',
-        `This is a conformance probe in a scratch repository. The branch ${branch} is checked out, cut from origin/main. Do exactly these steps in order, nothing else. 1. Write docs/pack-probe-${stamp}.md with one line of text. 2. Run \`gh issue create --label task --title "Pack probe ${stamp}" --body probe\`. 3. Run scripts/verify. 4. \`git add docs\` and commit it with a plain subject, hooks on. 5. \`git push -u origin ${branch}\`. 6. Open the pull request with \`gh pr create --base main\`, its body starting with "Closes #<the issue number>" and then the template's sections. 7. Print one line: ISSUE=<issue number> PR=<pull request number>. Do not merge, and skip scripts/live-verify: the probe closes the pull request itself. Branches are never rewritten or force-pushed.`,
+        `This is a conformance probe in a scratch repository. The branch ${branch} is checked out, cut from origin/main. Do exactly these steps in order, nothing else. 1. Write docs/pack-probe-${stamp}.md with one line of text. 2. Run \`gh issue create --label task --title "Pack probe ${stamp}" --body probe\`. 3. Run scripts/verify. 4. \`git add docs\`, then \`git commit -m 'Add the pack probe note'\`: a plain -m subject only, hooks on, no command substitution and no here-document, which are denied. 5. \`git push -u origin ${branch}\`. 6. Write the pull request body to the file ${bodyName} in the repository root (not committed): its first line "Closes #<the issue number>", then the template's sections; and open the pull request with \`gh pr create --base main --title "Pack probe ${stamp}" --body-file ${bodyName}\`. 7. Print one line: ISSUE=<issue number> PR=<pull request number>. Do not merge, and skip scripts/live-verify: the probe closes the pull request itself. Branches are never rewritten or force-pushed.`,
         o.maxTurnsPr,
-        ALLOWED_PR,
+        allowedPr(branch),
       );
       const text = `${prSession.text}\n${prSession.tools.map((t) => t.output ?? '').join('\n')}`;
       st.issue = /ISSUE=(\d+)/.exec(text)?.[1] ?? /\/issues\/(\d+)/.exec(text)?.[1] ?? null;

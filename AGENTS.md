@@ -124,9 +124,11 @@ Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envr
 without the `cd` Claude starts outside the repository: on the right profile, but without its deny rules and its
 `AGENTS.md`. With no permission mode `claude -p` starts in `default` and denies every call that needs approval
 (2.1.308, 2026-10-22: `git branch x` gave "This command requires approval"); name the mode and the exact commands the
-run may use, never a blanket `git` or `gh` grant: a rule matches the text before its first `*` as written, so those
-also allow `git -C . tag y` and `gh -R x pr merge` (code.claude.com/docs/en/permissions, fetched 2026-10-22). A deny
-rule still wins over a grant (`git tag` was denied under a blanket git grant).
+run may use (code.claude.com/docs/en/permissions, fetched 2026-10-22). A rule matches the text before its first `*`
+as written, so a blanket `git` or `gh` grant also allows `git -C . tag y` and `gh -R x pr merge`, and a
+trailing `*` admits any arguments, a refspec included (`git push origin b:refs/tags/y`): grant a push with no `*`. A
+deny rule still wins over a grant; a command holding a variable or `$(…)` is denied even under a matching grant
+(2.1.308, grants-check): use `--body-file`, a plain `-m '…'`.
 
 pstack, per repository: the kit's `.claude/settings.json` pins it through a `settings` marketplace named for the
 commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository
