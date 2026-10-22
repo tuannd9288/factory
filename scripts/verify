@@ -15,6 +15,10 @@ for f in kit/scripts/* kit/.githooks/* bin/onboard bin/onboard-owner bin/kit-evi
 done
 
 # On a pull request, the subject of every commit it adds: the kit's own rules, from the same source as the hook.
+if [ "${GITHUB_EVENT_NAME:-}" = pull_request ] && [ -z "${GATE_BASE:-}" ]; then
+  echo "verify: running on a pull request but GATE_BASE is empty, so no commit subject would be checked"
+  exit 1
+fi
 if [ -n "${GATE_BASE:-}" ]; then
   subjects=$(node kit/scripts/lib/subject.mjs --base "$GATE_BASE" 2>&1) || { echo "verify: a commit subject breaks a rule"; printf '%s\n' "$subjects"; failed=1; }
 fi
