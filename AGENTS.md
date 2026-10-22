@@ -94,7 +94,9 @@ The queue leaves a tier-3 pull request behind `main` until the Human approved it
 holds on the updated head, whose patch is unchanged (`git patch-id`), so he is asked once.
 
 Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
-`direnv exec <root>/<repo> claude -p "…"`.
+`cd <root>/<repo> && direnv exec . claude -p "…"`. `direnv exec DIR` loads DIR's `.envrc` but keeps the caller's
+directory (from `/` it printed `/`, 2026-10-22), so without the `cd` Claude starts outside the repository: on the
+right profile, but without its deny rules and its `AGENTS.md`.
 
 pstack, per profile: a repository's `.claude/settings.json` may pin pstack through a `settings` marketplace; open
 `claude` in a worktree of the repository, trust the folder, then install it once in that profile with `/plugin`.

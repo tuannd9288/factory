@@ -637,6 +637,11 @@ describe('onboard', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+  test('AGENTS.md starts an unattended run inside the repository, for direnv exec keeps the caller\'s directory', () => {
+    const runs = [...readFileSync(join(factory, 'AGENTS.md'), 'utf8').matchAll(/`([^`]*direnv exec [^`]*claude[^`]*)`/g)].map((m) => m[1]);
+    assert.ok(runs.length, 'AGENTS.md gives no unattended run');
+    for (const line of runs) assert.match(line, /^cd <root>\/<repo> && direnv exec \. /);
+  });
   test('refuses a folder that exists', () => {
     const r = repoWithKit();
     try {
