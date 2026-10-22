@@ -240,3 +240,38 @@ test('the window holds every task alive in it: started in it, open at its end, o
   assert.equal(ledger.inWindow('2026-10-01T00:00:00Z', '2026-10-10T00:00:00Z', from, to), false);
   assert.equal(ledger.inWindow('2026-10-25T00:00:00Z', null, from, to), false);
 });
+
+const H = 'a'.repeat(40);
+const H2 = 'b'.repeat(40);
+const P = 'c'.repeat(40);
+const said = (verdict, head, patch, login = 'agent', runs = 1) => ({
+  author: { login },
+  body: `live-verify: ${verdict}\nhead: ${head}\nparent: ${'d'.repeat(40)}\npatch: ${patch}\ndriver: cli\ncodex: codex-cli 0.159.2, ${runs} run${runs > 1 ? 's' : ''}\n`,
+});
+
+test('a merged pull request is covered by a live verdict on its merged head, or on one whose patch it carries', () => {
+  const opts = { human: 'boss', costs: null, profile: false };
+  const merged = (comments, patchOf) =>
+    rowOf('o/r', pr({ mergedAt: '2026-10-20T12:00:00Z', state: 'MERGED', headRefOid: H2, mergeCommit: { oid: 'e'.repeat(40) }, comments: { nodes: comments } }), { ...opts, patchOf });
+  assert.equal(merged([said('PASS', H2, 'f'.repeat(40))], () => null).live, true);
+  assert.equal(merged([], () => P).live, false);
+  assert.equal(merged([said('PASS+NOTES', H, P)], () => P).live, true);
+  assert.equal(merged([said('PASS', H, P), said('FAIL', H, P)], () => P).live, false);
+  // Without the patch of the merged head, an older head's verdict may still carry it: not known, not a miss.
+  assert.equal(merged([said('PASS', H, P)], () => null).live, null);
+  assert.equal(merged([said('PASS', H2, P, 'someone')], () => P).live, false);
+  assert.equal(merged([said('BLOCKED', H, '-', 'agent', 0), said('PASS', H2, P, 'agent', 2)], () => P).codexRuns, 2);
+  assert.equal(rowOf('o/r', pr({ comments: { nodes: [said('PASS', H, P)] } }), opts).live, undefined);
+});
+
+test('the digest lists every merged pull request no live verdict covered, and Codex runs on a line of their own', () => {
+  const opts = { human: 'boss', costs: null, profile: false };
+  const merged = (number, comments, patch) =>
+    rowOf('o/r', pr({ number, mergedAt: '2026-10-20T12:00:00Z', state: 'MERGED', headRefOid: H2, mergeCommit: { oid: 'e'.repeat(40) }, comments: { nodes: comments } }), { ...opts, patchOf: () => patch });
+  const rows = [merged(1, [said('PASS', H2, P)], P), merged(2, [], P), merged(3, [said('PASS', H, P, 'agent', 2)], null), rowOf('o/r', pr({ number: 4 }), opts)];
+  const text = digest(rows, { since: '2026-10-14', until: '2026-10-21' });
+  assert.match(text, /- PR đã merge có verdict người kiểm phủ head: 1\/2 \(50,0%; KTC 95%: /);
+  assert.match(text, /- Không có verdict phủ: o\/r#2 Limit sends\n/);
+  assert.match(text, /- Chưa xác định \(không tính được patch-id trong bản clone\): o\/r#3\n/);
+  assert.match(text, /- Lượt chạy Codex: 3 \(thuê bao Codex của người kiểm, trả theo tháng; không có giá API, không chia theo việc\)/);
+});

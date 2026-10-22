@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/scripts/lib/policy.mjs';
+import { coverage } from '../../kit/scripts/lib/verdict.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PRICES = JSON.parse(readFileSync(join(here, 'prices.json'), 'utf8')).models;
@@ -98,8 +99,10 @@ export function inWindow(start, end, from, to) {
   return Date.parse(start) <= to && (!end || Date.parse(end) >= from);
 }
 
-/** One pull request's row, as the GraphQL query below returns it; a task of its own when it closes no task. */
-export function rowOf(repo, pr, { human, costs, profile }) {
+/** One pull request's row, as the GraphQL query below returns it; a task of its own when it closes no task. patchOf
+ * gives the merged head's patch-id from a local clone, or null; a merged pull request's live is whether a live
+ * verdict covered that head (scripts/live-verify), null when that cannot be told. */
+export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null }) {
   const labels = pr.labels.nodes.map((l) => l.name);
   const tiers = labels.map((l) => /^tier-([123])$/.exec(l)?.[1]).filter(Boolean).map(Number);
   const events = pr.timelineItems.nodes;
@@ -134,12 +137,18 @@ export function rowOf(repo, pr, { human, costs, profile }) {
     cost = branch.dollars;
     costNote = branch.unpriced.size ? `thiếu giá: ${[...branch.unpriced].join(', ')}` : '';
   }
+  const comments = pr.comments?.nodes ?? [];
+  const lv = coverage(comments, { author: pr.author?.login, head: pr.headRefOid, patch: pr.mergedAt ? patchOf(pr.mergeCommit?.oid, pr.headRefOid) : null });
+  const live = pr.mergedAt ? lv.covered : undefined;
   return {
     repo,
     number: pr.number,
     title: pr.title,
     url: pr.url,
     prs: [pr.number],
+    live,
+    livePRs: pr.mergedAt ? [{ number: pr.number, title: pr.title, covered: live }] : [],
+    codexRuns: lv.runs,
     who: [pr.author?.login ?? '?', ...(branch ? [...branch.models].map((m) => m.replace(/^claude-/, '')) : [])].join(' · '),
     tier: tiers.length ? Math.max(...tiers) : null,
     state: pr.mergedAt ? 'landed' : pr.state === 'OPEN' ? 'open' : 'abandoned',
@@ -171,6 +180,8 @@ export function taskRow(repo, issue, prRows) {
     title: issue.title,
     url: issue.url,
     prs: prs.map((r) => r.number),
+    livePRs: prs.flatMap((r) => r.livePRs ?? []),
+    codexRuns: prs.reduce((sum, r) => sum + (r.codexRuns ?? 0), 0),
     who: prs[0]?.who ?? '?',
     tier: tiers.length ? Math.max(...tiers) : null,
     state: landed ? 'landed' : issue.state === 'OPEN' || prs.some((r) => r.state === 'open') ? 'open' : 'abandoned',
@@ -219,6 +230,19 @@ export function digest(rows, { since, until, secrets = new Map() }) {
     `- Số vòng trung bình (commit được cổng chấm): ${rounds.length ? (rounds.reduce((s, r) => s + r.rounds, 0) / rounds.length).toFixed(2).replace('.', ',') : '–'} (n=${rounds.length})`,
     `- Chi phí tương đương giá API mỗi việc đã merge (mọi lần thử cộng lại; không phải tiền mặt): ${costed.length && landed.length ? `$${(costed.reduce((s, r) => s + r.cost, 0) / landed.length).toFixed(2)} (chi phí đo được trên ${costed.length}/${n} việc)` : 'chưa đo được'}`,
     '',
+    '## Người kiểm chạy thật (Codex, scripts/live-verify; không phải đầu vào của cổng)',
+    '',
+  );
+  const livePRs = rows.flatMap((r) => (r.livePRs ?? []).map((p) => ({ ...p, repo: r.repo })));
+  const known = livePRs.filter((p) => p.covered !== null);
+  const named = (list) => (list.length ? list.map((p) => `${p.repo}#${p.number}`).join(', ') : 'không có');
+  const missed = known.filter((p) => !p.covered);
+  lines.push(
+    `- PR đã merge có verdict người kiểm phủ head: ${rate(known.filter((p) => p.covered).length, known.length)}`,
+    `- Không có verdict phủ: ${missed.length ? missed.map((p) => `${p.repo}#${p.number} ${p.title}`).join('; ') : 'không có'}`,
+    `- Chưa xác định (không tính được patch-id trong bản clone): ${named(livePRs.filter((p) => p.covered === null))}`,
+    `- Lượt chạy Codex: ${rows.reduce((sum, r) => sum + (r.codexRuns ?? 0), 0)} (thuê bao Codex của người kiểm, trả theo tháng; không có giá API, không chia theo việc)`,
+    '',
     '## Từng việc',
     '',
     '| Repo | Việc | PR | Ai | Bậc | Vòng | Giá API | Anh chạm | Kết quả |',
@@ -238,14 +262,15 @@ export function digest(rows, { since, until, secrets = new Map() }) {
     '',
     'Việc: một issue có nhãn task, tính từ lúc gắn nhãn đến lúc đóng, gồm mọi PR đóng nó; PR không đóng việc nào là một việc riêng, tính từ lúc mở.',
     'Giá API: token trong profile Claude Code của repo, theo nhánh của PR, tính theo giá API (bin/lib/prices.json). Đó là mức dùng, không phải tiền đã trả; chưa gồm reviewer chạy trên GitHub.',
-    'Tiền mặt: phí thuê bao Claude, trả theo tháng, không chia theo việc. Ledger không thấy khoản tiền mặt nào khác.',
+    'Tiền mặt: phí thuê bao Claude, trả theo tháng, không chia theo việc; thuê bao Codex của người kiểm cũng vậy. Ledger không thấy khoản tiền mặt nào khác.',
     'Anh chạm: anh duyệt, nhãn needs-human, hoặc merge không qua auto-merge.',
   );
   return `${lines.join('\n')}\n`;
 }
 
 const QUERY = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){
-number title url body author{login} createdAt mergedAt state headRefName
+number title url body author{login} createdAt mergedAt state headRefName headRefOid mergeCommit{oid}
+comments(first:100){nodes{author{login} body}}
 closingIssuesReferences(first:10){nodes{number labels(first:20){nodes{name}}}}
 labels(first:30){nodes{name}}
 reviews(first:50){nodes{author{login} state}}
@@ -261,16 +286,32 @@ function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-function reposUnder(root) {
-  const out = [];
+/** The factory's clones under root, by owner/name. */
+function clonesUnder(root) {
+  const out = new Map();
   for (const name of existsSync(root) ? readdirSync(root) : []) {
     const dir = join(root, name);
     if (!existsSync(join(dir, '.gate/config.sh')) || !existsSync(join(dir, '.git'))) continue;
     const url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim();
     const m = /github\.com[:/](.+?)(\.git)?$/.exec(url);
-    if (m) out.push(m[1]);
+    if (m) out.set(m[1], dir);
   }
   return out;
+}
+
+/** A merged head's patch-id in a clone, as scripts/live-verify computes it: its diff from its merge-base with the
+ * main it merged into; null when the clone lacks either commit. */
+function patchIn(dir) {
+  const git = (args, input) => execFileSync('git', ['-C', dir, ...args], { input, encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['pipe', 'pipe', 'ignore'] });
+  return (merge, head) => {
+    if (!dir || !merge || !head) return null;
+    try {
+      const fork = git(['merge-base', `${merge}^1`, head]).trim();
+      return git(['patch-id', '--verbatim'], git(['diff', '--binary', '--no-renames', fork, head])).split(' ')[0].trim() || null;
+    } catch {
+      return null;
+    }
+  };
 }
 
 function main(argv) {
@@ -291,7 +332,8 @@ function main(argv) {
   const root = process.env.FACTORY_ROOT ?? join(here, '..', '..');
   const profiles = process.env.AGENT_PROFILES ?? join(process.env.HOME, '.agent-profiles');
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
-  if (!opts.repos.length) opts.repos = reposUnder(root);
+  const clones = clonesUnder(root);
+  if (!opts.repos.length) opts.repos = [...clones.keys()];
   if (!opts.repos.length) throw new Error(`no repository under ${root}; pass --repo owner/name`);
 
   const rows = [];
@@ -307,7 +349,7 @@ function main(argv) {
     const pull = (n) => {
       if (!pulls.has(n)) {
         const node = graphql(QUERY, n).pullRequest;
-        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: existsSync(profile) }) });
+        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: existsSync(profile), patchOf: patchIn(clones.get(repo)) }) });
       }
       return pulls.get(n);
     };
@@ -324,10 +366,10 @@ function main(argv) {
   }
   rows.sort((a, b) => a.created.localeCompare(b.created));
   if (opts.mode === 'rows') {
-    const head = ['repo', 'task', 'prs', 'who', 'tier', 'state', 'rounds', 'first_pass', 'no_red', 'human_touched', 'why', 'cost_usd', 'cost_note', 'hours_to_merge', 'title'];
+    const head = ['repo', 'task', 'prs', 'who', 'tier', 'state', 'rounds', 'first_pass', 'no_red', 'human_touched', 'why', 'cost_usd', 'cost_note', 'hours_to_merge', 'live_verdict', 'codex_runs', 'title'];
     console.log(head.join('\t'));
     for (const r of rows)
-      console.log([r.repo, r.number, r.prs.join(' '), r.who, r.tier ?? '', r.state, r.rounds, r.firstPass ?? '', r.noRed, r.touched, r.touchedWhy, r.cost?.toFixed(4) ?? '', r.costNote, r.hours?.toFixed(2) ?? '', r.title].join('\t'));
+      console.log([r.repo, r.number, r.prs.join(' '), r.who, r.tier ?? '', r.state, r.rounds, r.firstPass ?? '', r.noRed, r.touched, r.touchedWhy, r.cost?.toFixed(4) ?? '', r.costNote, r.hours?.toFixed(2) ?? '', (r.livePRs ?? []).map((p) => `#${p.number}:${p.covered === null ? '?' : p.covered ? 'yes' : 'no'}`).join(' '), r.codexRuns ?? 0, r.title].join('\t'));
     return;
   }
   const secrets = new Map();
