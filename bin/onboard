@@ -2,9 +2,12 @@
 # Takes a repository into the factory: clones it under the factory root, creates its Claude Code profile (only now),
 # writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
 # the Human's.
-#   bin/onboard <repo-url> [--no-pr]
+#   bin/onboard <repo-url> [--no-pr] [--own <file>]
 # This is the agents' half. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
+# The kit replaces the repository's own AGENTS.md, CLAUDE.md and hooks; its own parts the Human approved come in through
+# --own <file>, which holds the two sections the kit's AGENTS.md ends with (bin/lib/own.mjs), and a repository with its
+# own AGENTS.md or CLAUDE.md is refused without it. Every other file the repository already has is kept.
 # FACTORY_ROOT (default: this clone) is where repositories live; AGENT_PROFILES (default: ~/.agent-profiles) where
 # profiles live, as <owner>/<repo>/claude so two owners' repositories of one name never share one; FACTORY_HUMAN
 # (default: tuannd9288) is the code owner of tier 3; FACTORY_AGENT (default: tuan9288-agent) the agents' account.
@@ -14,9 +17,17 @@ root=${FACTORY_ROOT:-$factory}
 profiles=${AGENT_PROFILES:-$HOME/.agent-profiles}
 human=${FACTORY_HUMAN:-tuannd9288}
 agent=${FACTORY_AGENT:-tuan9288-agent}
-url=${1:?usage: bin/onboard <repo-url> [--no-pr]}
+url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>]}
+shift
 open_pr=1
-[ "${2:-}" = --no-pr ] && open_pr=0
+own=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --no-pr) open_pr=0; shift ;;
+    --own) own=${2:?onboard: --own needs a file}; shift 2 ;;
+    *) echo "onboard: unknown argument $1; nothing done"; exit 2 ;;
+  esac
+done
 path=${url%/}
 path=${path%.git}
 name=$(basename "$path")
@@ -24,6 +35,11 @@ owner=$(basename "$(dirname "$path")")
 owner=${owner##*:}
 dest=$root/$name
 [ -e "$dest" ] && { echo "onboard: $dest exists; nothing done"; exit 1; }
+if [ -n "$own" ]; then
+  [ -f "$own" ] || { echo "onboard: --own $own is not a file; nothing done"; exit 2; }
+  own=$(cd "$(dirname "$own")" && pwd)/$(basename "$own")
+  why=$(node "$factory/bin/lib/own.mjs" check "$own" "$factory/kit/AGENTS.md") || { echo "onboard: $why; nothing done"; exit 2; }
+fi
 if [ "$open_pr" -eq 1 ]; then
   login=$(gh api user --jq .login)
   lc() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
@@ -49,6 +65,20 @@ fi
 
 echo "onboard: cloning $url into $dest"
 git clone --quiet "$url" "$dest"
+# The kit replaces the repository's own instructions; without the parts of them the Human approved, they would be lost.
+# $dest did not exist before this run (checked above), so the clone is this run's own to remove.
+theirs=""
+[ -e "$dest/AGENTS.md" ] || [ -L "$dest/AGENTS.md" ] && theirs="AGENTS.md"
+if [ -e "$dest/CLAUDE.md" ] || [ -L "$dest/CLAUDE.md" ]; then
+  [ -L "$dest/CLAUDE.md" ] || ! cmp -s "$dest/CLAUDE.md" "$factory/kit/CLAUDE.md" && theirs="${theirs:+$theirs and }CLAUDE.md"
+fi
+if [ -n "$theirs" ] && [ -z "$own" ]; then
+  rm -rf "$dest"
+  echo "onboard: $name has its own $theirs, which the kit replaces. Put the parts of it the Human approved into a file"
+  echo "with the two sections '## Layout' and '## Facts the code cannot tell', then run again with --own <file>; the clone"
+  echo "is removed and nothing else was done"
+  exit 2
+fi
 
 profile=$profiles/$owner/$name/claude
 mkdir -p "$profile"
@@ -73,18 +103,34 @@ lists=$(mktemp -d)
 trap 'rm -rf "$lists"' EXIT
 (cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
 : >"$lists/kept"
+: >"$lists/replaced"
 while IFS= read -r path; do
-  if [ -e "$path" ]; then
-    echo "$path" >>"$lists/kept"
-    continue
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    case "$path" in
+      AGENTS.md | CLAUDE.md | .githooks/*)
+        # Removed first: cp would write through a link (a CLAUDE.md linked to AGENTS.md) into the file it names.
+        echo "$path" >>"$lists/replaced"
+        rm -f "$path"
+        ;;
+      *)
+        echo "$path" >>"$lists/kept"
+        continue
+        ;;
+    esac
   fi
   mkdir -p "$(dirname "$path")"
   cp -p "$factory/kit/$path" "$path"
   case "$path" in
     .github/CODEOWNERS) sed -i.bak "s/@OWNER/@$human/" "$path" && rm -f "$path.bak" ;;
-    AGENTS.md) sed -i.bak "s/<repo>/$name/" "$path" && rm -f "$path.bak" ;;
+    AGENTS.md)
+      sed -i.bak "s/<repo>/$name/" "$path" && rm -f "$path.bak"
+      [ -z "$own" ] || node "$factory/bin/lib/own.mjs" fill "$own" "$path"
+      ;;
   esac
 done <"$lists/kit"
+# A file the repository had exactly as the kit's was not replaced: git sees no change in it.
+while IFS= read -r path; do git diff --quiet HEAD -- "$path" || echo "$path"; done <"$lists/replaced" >"$lists/changed"
+mv "$lists/changed" "$lists/replaced"
 { cat "$lists/kit"; echo .gate/kit-files; } | LC_ALL=C sort -u >.gate/kit-files
 scripts/setup
 git add -A
@@ -95,9 +141,11 @@ if ! GATE_BASE=HEAD scripts/verify; then
   echo "the pull request."
   exit 1
 fi
+n_kept=$(wc -l <"$lists/kept" | tr -d ' ')
+n_replaced=$(wc -l <"$lists/replaced" | tr -d ' ')
 git commit --quiet -m "Join the factory: gate, hooks, hand-in rules and templates" \
-  -m "From tuannd9288/factory $(git -C "$factory" rev-parse --short HEAD 2>/dev/null || echo '(uncommitted)'). Files the repository already had were kept: $(wc -l <"$lists/kept" | tr -d ' ')."
-echo "onboard: kit committed on factory/kit ($(wc -l <"$lists/kit" | tr -d ' ') files, $(wc -l <"$lists/kept" | tr -d ' ') kept as they were)"
+  -m "From tuannd9288/factory $(git -C "$factory" rev-parse --short HEAD 2>/dev/null || echo '(uncommitted)'). Kept as the repository had them: $n_kept. Replaced by the kit's: $n_replaced$([ "$n_replaced" -eq 0 ] || echo " ($(paste -sd, "$lists/replaced" | sed 's/,/, /g'))")."
+echo "onboard: kit committed on factory/kit ($(wc -l <"$lists/kit" | tr -d ' ') files, $n_kept kept as they were, $n_replaced replaced by the kit's)"
 
 [ "$open_pr" -eq 1 ] || { echo "onboard: --no-pr; push factory/kit and open the pull request yourself"; exit 0; }
 
@@ -113,6 +161,7 @@ fi
 for label in tier-1 tier-2 tier-3 needs-human task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
 git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
+replaced=$(sed 's/^/  - `/; s/$/`/' "$lists/replaced")
 gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng: cổng, hook, luật nộp bài và mẫu" --body "$(cat <<EOF
 ## Tóm tắt cho người quyết định
 - Mục đích: đưa $name vào xưởng bằng bộ kit của tuannd9288/factory.
@@ -124,6 +173,11 @@ gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng
 
 ## File repo đã có, kit giữ nguyên (phiên của repo hợp nhất tay)
 ${kept:-  - không có}
+
+## File repo đã có, kit đã thay
+${replaced:-  - không có}
+
+Phần riêng của repo mà anh đã duyệt (\`--own\`) nằm trong hai mục cuối của \`AGENTS.md\`, Layout và Facts the code cannot tell; bằng chứng bên dưới in đủ từng dòng. Lệnh của hook cũ (\`.githooks/\`) chuyển vào \`gate_fast\` trong \`.gate/config.sh\`, việc của phiên của repo.
 
 ## Bằng chứng kit (bin/kit-evidence, mã của factory, chỉ đọc object git)
 \`\`\`text

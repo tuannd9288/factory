@@ -2,10 +2,10 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, symlinkSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { commit, factory, git, repoWithKit, run, script, write } from './helpers.mjs';
+import { APP, commit, factory, git, quiet, repoWithKit, run, script, write } from './helpers.mjs';
 
 const RED_AT_BASE =
   "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport * as m from '../src/math.js';\n\ntest('multiplies', () => {\n  assert.equal(m.mul(2, 3), 6);\n});\n";
@@ -593,7 +593,7 @@ describe('onboard', () => {
     assert.equal(git(repo, 'status', '--porcelain', '--', '.claude/worktrees'), '');
   };
   test('clones, makes the Claude profile keyed by owner and repository, writes .envrc, and keeps files the repository had', () => {
-    const r = repoWithKit({ 'AGENTS.md': '# own rules\n' });
+    const r = repoWithKit({ '.github/pull_request_template.md': '## Our own\n' });
     try {
       const owner = basename(r.dir);
       assert.ok(existsSync(join(r.dir, 'profiles', owner, 'app/claude')));
@@ -602,7 +602,7 @@ describe('onboard', () => {
       assert.match(readFileSync(join(r.repo, '.envrc'), 'utf8'), new RegExp(`^export CLAUDE_CONFIG_DIR=".*profiles/${owner}/app/claude"\n$`));
       assert.match(readFileSync(join(r.repo, '.git/info/exclude'), 'utf8'), /^\.envrc$/m);
       assertWorktreesIgnored(r.repo);
-      assert.equal(readFileSync(join(r.repo, 'AGENTS.md'), 'utf8'), '# own rules\n');
+      assert.equal(readFileSync(join(r.repo, '.github/pull_request_template.md'), 'utf8'), '## Our own\n');
       assert.match(r.onboard, /1 kept as they were/);
       assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts\/ +@tuannd9288$/m);
       assert.equal(git(r.repo, 'config', '--local', 'core.hooksPath'), '.githooks');
@@ -641,6 +641,89 @@ describe('onboard', () => {
     const runs = [...readFileSync(join(factory, 'AGENTS.md'), 'utf8').matchAll(/`([^`]*direnv exec [^`]*claude[^`]*)`/g)].map((m) => m[1]);
     assert.ok(runs.length, 'AGENTS.md gives no unattended run');
     for (const line of runs) assert.match(line, /^cd <root>\/<repo> && direnv exec \. /);
+  });
+  /** A seed repository with `files` (null-valued entries skipped) and, beside it, what onboard needs; `link` makes
+   * CLAUDE.md a symlink to AGENTS.md, as some repositories keep it. */
+  const seeded = (files, { link = false } = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), 'factory-own-'));
+    const seed = join(dir, 'seed');
+    git(dir, 'init', '-q', '-b', 'main', seed);
+    write(seed, { ...APP, ...files });
+    for (const hook of Object.keys(files).filter((p) => p.startsWith('.githooks/'))) chmodSync(join(seed, hook), 0o755);
+    if (link) symlinkSync('AGENTS.md', join(seed, 'CLAUDE.md'));
+    commit(seed, {}, 'start');
+    git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
+    const onboard = (...args) =>
+      run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr', ...args], {
+        ...quiet,
+        FACTORY_ROOT: join(dir, 'root'),
+        AGENT_PROFILES: join(dir, 'profiles'),
+      });
+    const own = (text) => {
+      writeFileSync(join(dir, 'own.md'), text);
+      return join(dir, 'own.md');
+    };
+    return { dir, repo: join(dir, 'root/app'), onboard, own, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+  const OWN = '## Layout\n\n`src/` holds the app; `test/` its tests.\n\n## Facts the code cannot tell\n\n- 2026-10-01, the Human: the app ships on Fridays.\n';
+  const kitLines = () => readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8').split('\n').length - 1;
+
+  test("replaces the repository's own AGENTS.md, CLAUDE.md and hooks with the kit's, its approved parts in Layout and Facts", () => {
+    const s = seeded({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n', '.githooks/commit-msg': '#!/bin/sh\nexit 0\n' }, { link: true });
+    try {
+      const out = s.onboard('--own', s.own(OWN));
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /0 kept as they were, 4 replaced by the kit's/);
+      const agents = readFileSync(join(s.repo, 'AGENTS.md'), 'utf8');
+      const kit = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8').replace('<repo>', 'app');
+      assert.equal(agents, `${kit.slice(0, kit.indexOf('## Layout'))}${OWN}`);
+      assert.ok(!lstatSync(join(s.repo, 'CLAUDE.md')).isSymbolicLink(), 'CLAUDE.md is still a link');
+      assert.equal(readFileSync(join(s.repo, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
+      for (const hook of ['pre-commit', 'commit-msg']) assert.equal(readFileSync(join(s.repo, '.githooks', hook), 'utf8'), readFileSync(join(factory, 'kit/.githooks', hook), 'utf8'));
+      assert.match(git(s.repo, 'log', '-1', '--format=%B'), /Kept as the repository had them: 0\. Replaced by the kit's: 4 \(\.githooks\/commit-msg, \.githooks\/pre-commit, AGENTS\.md, CLAUDE\.md\)\./);
+    } finally {
+      s.cleanup();
+    }
+  });
+  test("refuses a repository with its own AGENTS.md or CLAUDE.md and no --own, and leaves no clone or profile behind", () => {
+    for (const files of [{ 'AGENTS.md': '# Our map\n' }, { 'CLAUDE.md': '@AGENTS.md\n\nOur rules.\n' }]) {
+      const s = seeded(files);
+      try {
+        const out = s.onboard();
+        assert.equal(out.code, 2, out.out);
+        assert.match(out.out, /has its own (AGENTS|CLAUDE)\.md[\s\S]*--own <file>/);
+        assert.ok(!existsSync(s.repo), 'the clone is left behind');
+        assert.ok(!existsSync(join(s.dir, 'profiles')), 'a profile was made');
+      } finally {
+        s.cleanup();
+      }
+    }
+    const s = seeded({ 'CLAUDE.md': '@AGENTS.md\n' });
+    try {
+      assert.equal(s.onboard().code, 0);
+    } finally {
+      s.cleanup();
+    }
+  });
+  test('refuses an --own file over the line budget, with a heading of its own, or without both sections, before cloning', () => {
+    const s = seeded({ 'AGENTS.md': '# Our map\n' });
+    try {
+      const budget = 150 - (kitLines() - 2);
+      const long = `## Layout\n\n${'- a line\n'.repeat(budget)}\n## Facts the code cannot tell\n\n- one more\n`;
+      let out = s.onboard('--own', s.own(long));
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, new RegExp(`its two bodies are ${budget + 1} lines; the kit's AGENTS\\.md leaves room for ${budget} \\(at most 150 lines\\)`));
+      assert.ok(!existsSync(s.repo), 'cloned before refusing');
+      out = s.onboard('--own', s.own(OWN.replace('its tests.', 'its tests.\n# Our rules win')));
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /line 2 of Layout is a heading \(# Our rules win\)/);
+      out = s.onboard('--own', s.own('## Layout\n\n`src/` holds the app.\n'));
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /no section "## Facts the code cannot tell"/);
+      assert.ok(!existsSync(s.repo), 'cloned before refusing');
+    } finally {
+      s.cleanup();
+    }
   });
   test('refuses a folder that exists', () => {
     const r = repoWithKit();

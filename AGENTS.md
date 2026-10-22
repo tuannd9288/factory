@@ -85,13 +85,17 @@ It refuses any other login, and a `main` without the bootstrap pull request rule
    `.claude/worktrees/` joins `.git/info/exclude`: Claude Code's worktrees go there, inside the repository, so they
    find its `.envrc`, and `git add -A` never stages one under the tier-3 `.claude/`;
 4. lays the kit over it: `scripts/`, `.gate/`, `.githooks/`, the gate workflows, the PR template, `CODEOWNERS`,
-   deny rules, an `AGENTS.md` and the one-line `CLAUDE.md`. Files the repository already has are kept and listed in
-   the pull request for its session to merge by hand;
+   deny rules, an `AGENTS.md` and the one-line `CLAUDE.md`. The repository's own `AGENTS.md`, `CLAUDE.md` and hooks
+   are replaced, since a kept one would switch the kit's off; the parts of them the Human approved come in through
+   `--own <file>`, which holds only the kit `AGENTS.md`'s last two sections, `## Layout` and `## Facts the code cannot
+   tell`, within its 150 lines (`bin/lib/own.mjs`). A repository with its own `AGENTS.md` or `CLAUDE.md` and no
+   `--own` is refused and its clone removed. Every other file the repository already has is kept. Both lists go in
+   the pull request, kept ones for its session to merge by hand, and the old hook's commands into `gate_fast`;
 5. runs the full `scripts/verify`, and only when it passes commits the kit and opens its pull request, authored by
    the agents' account. When it fails the kit stays staged on `factory/kit` for the repository's session to finish.
    The pull request carries `bin/kit-evidence`'s result: every managed file against the kit at the factory commit
-   (contents, modes, symlinks), the two rendered files line by line, the files the repository kept, and nothing else
-   changed, bound to that commit, the kit's tree, the repository's id, base and head. Onboard opens it only from a
+   (contents, modes, symlinks), the two rendered files line by line with the `--own` parts in full, the files the
+   kit replaced with the blob each had, the files the repository kept, and nothing else changed, bound to that commit, the kit's tree, the repository's id, base and head. Onboard opens it only from a
    factory commit on `origin/main` whose `kit/` has no uncommitted, untracked or ignored file, since it lays the kit
    from the working tree.
 

@@ -2,16 +2,21 @@
 // contents, modes and symlinks compared by git object, never by running anything the repository holds. It reads both
 // sides with ls-tree and cat-file only. A managed file is one of four kinds: as in the kit (same mode, same blob);
 // rendered (CODEOWNERS and AGENTS.md, which bin/onboard fills in, shown line by line); kept (the repository had the
-// path, and onboard left its file as it was); generated (.gate/kit-files, the sorted inventory). A managed file that is
-// none of these, one missing, or a path the pull request changes outside the inventory fails it. The result names the
-// factory commit, the kit's tree, the repository's id, base and head, so it holds for those and nothing else.
-// See bin/kit-evidence for the arguments.
+// path, and onboard left its file as it was); generated (.gate/kit-files, the sorted inventory). Where the repository
+// had its own AGENTS.md, CLAUDE.md or hook, the kit's file replaced it, and the evidence names the blob it had; the
+// repository's own parts that --own put in AGENTS.md's last two sections are shown in full, every other line of it
+// must be the kit's. A managed file that is none of these, one missing, or a path the pull request changes outside
+// the inventory fails it. The result names the factory commit, the kit's tree, the repository's id, base and head, so
+// it holds for those and nothing else. See bin/kit-evidence for the arguments.
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { LAYOUT, fill, parseOwn } from './own.mjs';
 
 const INVENTORY = '.gate/kit-files';
 const FILLED = { '.github/CODEOWNERS': (v) => ['@OWNER', `@${v.human}`], 'AGENTS.md': (v) => ['<repo>', v.name] };
+// What the kit replaces when the repository has its own (bin/onboard's REPLACE): its instructions and its hooks.
+const REPLACES = (path) => path === 'AGENTS.md' || path === 'CLAUDE.md' || path.startsWith('.githooks/');
 const GIT_MS = 60_000;
 
 const git = (dir, args, encoding = 'utf8') => execFileSync('git', ['-C', dir, ...args], { encoding, maxBuffer: 64 << 20, timeout: GIT_MS });
@@ -38,6 +43,28 @@ export function render(path, text, { name, human }) {
     .join('\n');
 }
 
+/** Whether text is the rendered kit file `to` with only its last two sections' bodies changed, the repository's own
+ * parts from --own: ok, the line before which `to` and text agree, and each part's lines shown in full; or why not. */
+function ownParts(path, to, text) {
+  const kitLines = to.split('\n');
+  const at = kitLines.indexOf(LAYOUT);
+  const lines = text.split('\n');
+  if (at < 0 || lines.slice(0, at).join('\n') !== kitLines.slice(0, at).join('\n')) return { ok: false };
+  let own;
+  try {
+    own = parseOwn(lines.slice(at).join('\n'));
+  } catch (error) {
+    return { ok: false, why: `the repository's own parts: ${error.message}` };
+  }
+  const { text: want, layoutAt, factsAt } = fill(to, own);
+  if (want !== text) return { ok: false };
+  const shown = (from, body, name) => [
+    `${path}:${from}${body.length > 1 ? `-${from + body.length - 1}` : ''}: the repository's own ${name} (${body.length} line${body.length > 1 ? 's' : ''}):`,
+    ...body.map((l) => `  | ${l}`),
+  ];
+  return { ok: true, upTo: at, filled: [...shown(layoutAt, own.layout, 'Layout'), ...shown(factsAt, own.facts, 'Facts the code cannot tell')] };
+}
+
 export function evidence({ factory, commit, repo, base, head, slug, id, human }) {
   const name = slug.split('/')[1];
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
@@ -52,23 +79,34 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   const rendered = [];
   const filled = new Set();
   const kept = [];
+  const replaced = [];
   let exact = 0;
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const have = now.get(path);
     const had = at.get(path);
+    const own = had && (had.mode !== want.mode || had.oid !== want.oid);
+    const same = own && have && have.mode === had.mode && have.oid === had.oid;
     if (!have) fails.push(`missing: ${path}`);
-    else if (had && have.mode === had.mode && have.oid === had.oid && (had.mode !== want.mode || had.oid !== want.oid)) kept.push(path);
-    else if (had && (had.mode !== want.mode || had.oid !== want.oid)) fails.push(`differs: ${path} (the repository's own, changed)`);
+    else if (same && REPLACES(path)) fails.push(`differs: ${path} (the repository's own, which the kit replaces)`);
+    else if (same) kept.push(path);
+    else if (own && !REPLACES(path)) fails.push(`differs: ${path} (the repository's own, changed)`);
     else if (have.mode !== want.mode) fails.push(`differs: ${path} (mode ${have.mode}, the kit's ${want.mode})`);
-    else if (!FILLED[path]) have.oid === want.oid ? exact++ : fails.push(`differs: ${path} (content)`);
-    else {
+    else if (!FILLED[path] && have.oid !== want.oid) fails.push(`differs: ${path} (content)`);
+    else if (!FILLED[path]) {
+      exact++;
+      if (own) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
+    } else {
       const from = blob(factory, want.oid);
       const to = render(path, from, { name, human });
-      if (blob(repo, have.oid) !== to) fails.push(`differs: ${path} (content)`);
+      const text = blob(repo, have.oid);
+      const parts = text === to ? { ok: true } : ownParts(path, to, text);
+      if (!parts.ok) fails.push(`differs: ${path} (${parts.why ?? 'content'})`);
       else {
         filled.add(path);
+        if (own) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
         const before = from.split('\n');
-        to.split('\n').forEach((line, i) => line !== before[i] && rendered.push(`${path}:${i + 1}: \`${before[i]}\` → \`${line}\``));
+        to.split('\n').forEach((line, i) => i < (parts.upTo ?? Infinity) && line !== before[i] && rendered.push(`${path}:${i + 1}: \`${before[i]}\` → \`${line}\``));
+        if (parts.filled) rendered.push(...parts.filled);
       }
     }
   }
@@ -88,6 +126,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   ];
   if (fails.length) lines.push('failures:', ...fails.map((f) => `  ${f}`));
   lines.push('rendered (bin/onboard fills these in):', ...(rendered.length ? rendered.map((l) => `  ${l}`) : ['  none']));
+  lines.push("replaced (the repository's own at the base, now the kit's):", ...(replaced.length ? replaced.map((p) => `  ${p}`) : ['  none']));
   lines.push("kept (the repository's own, unchanged):", ...(kept.length ? kept.map((p) => `  ${p}`) : ['  none']));
   return { pass: !fails.length, text: lines.join('\n') };
 }

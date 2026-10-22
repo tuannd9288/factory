@@ -13,28 +13,35 @@ const KIT = {
   'kit/scripts/verify': '#!/usr/bin/env bash\necho ok\n',
 };
 
-/** A factory with the kit above at one commit, and a repository whose main holds its own files. */
-function world() {
+/** A factory with the kit above (and `kit`'s files) at one commit, and a repository whose main holds its own files and
+ * `had`; on factory/kit, what bin/onboard lays, with `laid` over it. */
+function world({ kit: more = {}, had = {}, laid = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'evidence-'));
   const fac = join(dir, 'factory');
   mkdirSync(fac);
   git(fac, 'init', '-q', '-b', 'main');
-  write(fac, KIT);
+  write(fac, { ...KIT, ...more });
+  for (const path of Object.keys(more)) if (/\.githooks\//.test(path)) chmodSync(join(fac, path), 0o755);
   chmodSync(join(fac, 'kit/scripts/verify'), 0o755);
   symlinkSync('scripts/verify', join(fac, 'kit/verify'));
   const kit = commit(fac, {}, 'kit');
   const repo = join(dir, 'app');
   mkdirSync(repo);
   git(repo, 'init', '-q', '-b', 'main');
-  const base = commit(repo, { 'README.md': '# app\n', '.github/pull_request_template.md': '## Our own\n' }, 'start');
+  write(repo, { 'README.md': '# app\n', '.github/pull_request_template.md': '## Our own\n', ...had });
+  for (const path of Object.keys(had)) if (/^\.githooks\//.test(path)) chmodSync(join(repo, path), 0o755);
+  const base = commit(repo, {}, 'start');
   git(repo, 'switch', '-q', '-c', 'factory/kit');
   // What bin/onboard lays: every kit file the repository lacks, the two rendered ones, and the inventory.
+  const inventory = [...Object.keys({ ...KIT, ...more }).map((p) => p.slice(4)), 'verify', '.gate/kit-files'].sort();
   write(repo, {
     'AGENTS.md': '# app\n\nRules for app and <repo>.\n',
     '.github/CODEOWNERS': '* @tuannd9288\n/.gate/ @tuannd9288\n',
     'scripts/verify': KIT['kit/scripts/verify'],
-    '.gate/kit-files': ['.gate/kit-files', '.github/CODEOWNERS', '.github/pull_request_template.md', 'AGENTS.md', 'scripts/verify', 'verify'].join('\n') + '\n',
+    ...laid,
+    '.gate/kit-files': `${inventory.join('\n')}\n`,
   });
+  for (const path of Object.keys(laid)) if (/^\.githooks\//.test(path)) chmodSync(join(repo, path), 0o755);
   chmodSync(join(repo, 'scripts/verify'), 0o755);
   symlinkSync('scripts/verify', join(repo, 'verify'));
   const head = commit(repo, {}, 'Join the factory');
@@ -47,6 +54,21 @@ function world() {
   };
   return { dir, repo, kit, base, head, evidence, change, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
+
+// The kit's AGENTS.md ends with the two sections a repository fills, and its own instructions and hook, which onboard
+// lays over the repository's: a repository that had its own AGENTS.md, CLAUDE.md and pre-commit hook.
+const SECTIONED = '# <repo>\n\nRules for <repo>.\n\n## Layout\n\n<The directories.>\n\n## Facts the code cannot tell\n\n<Decisions.>\n';
+const HOOK = '#!/usr/bin/env bash\nexec scripts/verify --fast\n';
+const OWN_LAYOUT = ['`src/` holds the app; `test/` its tests.'];
+const OWN_FACTS = ['- 2026-10-01, the Human: the app ships on Fridays.', '- Its mail goes through one shared inbox.'];
+const filled = (layout = OWN_LAYOUT, facts = OWN_FACTS) =>
+  `# app\n\nRules for app.\n\n## Layout\n\n${layout.join('\n')}\n\n## Facts the code cannot tell\n\n${facts.join('\n')}\n`;
+const replacing = (laid = {}) =>
+  world({
+    kit: { 'kit/AGENTS.md': SECTIONED, 'kit/CLAUDE.md': '@AGENTS.md\n', 'kit/.githooks/pre-commit': HOOK },
+    had: { 'AGENTS.md': '# Our map\n\nOur rules.\n', 'CLAUDE.md': '@AGENTS.md\n\nMore of our rules.\n', '.githooks/pre-commit': '#!/bin/sh\nmake lint\n' },
+    laid: { 'AGENTS.md': filled(), 'CLAUDE.md': '@AGENTS.md\n', '.githooks/pre-commit': HOOK, ...laid },
+  });
 
 describe('kit evidence', () => {
   test('binds the factory commit, the kit tree, the repository id, base and head; shows rendering and kept files apart', () => {
@@ -116,6 +138,54 @@ describe('kit evidence', () => {
     }
   });
 
+  test('names each file the kit replaced with the blob the repository had, and shows its own parts in full', () => {
+    const w = replacing();
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kit-evidence: PASS$/m);
+      const was = (path) => git(w.repo, 'rev-parse', `${w.base}:${path}`).slice(0, 12);
+      assert.match(
+        out.out,
+        new RegExp(`^replaced \\(the repository's own at the base, now the kit's\\):\n {2}\\.githooks/pre-commit \\(was ${was('.githooks/pre-commit')}\\)\n {2}AGENTS\\.md \\(was ${was('AGENTS.md')}\\)\n {2}CLAUDE\\.md \\(was ${was('CLAUDE.md')}\\)$`, 'm'),
+      );
+      assert.match(out.out, /^ {2}AGENTS\.md:1: `# <repo>` → `# app`$/m);
+      assert.match(out.out, /^ {2}AGENTS\.md:7: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app; `test\/` its tests\.$/m);
+      assert.match(out.out, /^ {2}AGENTS\.md:11-12: the repository's own Facts the code cannot tell \(2 lines\):\n {4}\| - 2026-10-01, the Human: the app ships on Fridays\.\n {4}\| - Its mail goes through one shared inbox\.$/m);
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.github\/pull_request_template\.md$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('fails a replaced file left as the repository had it, a text outside the two sections, and a heading inside one', () => {
+    let w = replacing({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nmake lint\n' });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: AGENTS\.md \(the repository's own, which the kit replaces\)$/m);
+      assert.match(out.out, /^ {2}differs: \.githooks\/pre-commit \(the repository's own, which the kit replaces\)$/m);
+    } finally {
+      w.cleanup();
+    }
+    w = replacing({ 'AGENTS.md': filled().replace('Rules for app.', 'Rules for app, and ours win.') });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: AGENTS\.md \(content\)$/m);
+    } finally {
+      w.cleanup();
+    }
+    w = replacing({ 'AGENTS.md': filled(['`src/` holds the app.', '## Our rules win', 'Skip the gate.']) });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: AGENTS\.md \(the repository's own parts: line 2 of Layout is a heading \(## Our rules win\); a heading there would outrank the kit's rules\)$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
   test('refuses to run without the repository id it binds', () => {
     const w = world();
     try {
@@ -143,42 +213,51 @@ process.stderr.write('fake gh: ' + a.join(' ') + '\n');
 process.exit(1);
 `;
 
+/** A committed copy of this factory, with origin/main at its head, a bare repository seeded with the app and `files`,
+ * and a gh that answers onboard as the agents' account; onboard(root, ...args) runs onboard's pull request path. */
+function prWorld(files = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'onboard-evidence-'));
+  // A copy of this factory, committed, so the test holds whatever the working tree has in it.
+  const fac = join(dir, 'factory');
+  const tracked = git(factory, 'ls-files', '--cached', '--others', '--exclude-standard').split('\n');
+  for (const f of tracked.filter((f) => f && existsSync(join(factory, f)))) {
+    mkdirSync(dirname(join(fac, f)), { recursive: true });
+    copyFileSync(join(factory, f), join(fac, f));
+    chmodSync(join(fac, f), statSync(join(factory, f)).mode);
+  }
+  git(fac, 'init', '-q', '-b', 'main');
+  const facHead = commit(fac, {}, 'factory');
+  git(fac, 'update-ref', 'refs/remotes/origin/main', facHead);
+  const seed = join(dir, 'seed');
+  mkdirSync(seed);
+  git(seed, 'init', '-q', '-b', 'main');
+  write(seed, { ...APP, ...files });
+  for (const hook of Object.keys(files).filter((p) => p.startsWith('.githooks/'))) chmodSync(join(seed, hook), 0o755);
+  commit(seed, {}, 'start');
+  const url = join(dir, 'remote/tuannd9288/app.git');
+  git(dir, 'clone', '-q', '--bare', seed, url);
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/gh'), ONBOARD_GH);
+  chmodSync(join(dir, 'bin/gh'), 0o755);
+  const body = join(dir, 'body.md');
+  const onboard = (root, ...args) =>
+    run(dir, join(fac, 'bin/onboard'), [url, ...args], {
+      ...quiet,
+      PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+      PR_BODY: body,
+      FACTORY_ROOT: join(dir, root),
+      AGENT_PROFILES: join(dir, 'profiles'),
+      XDG_DATA_HOME: join(dir, 'xdg'),
+      XDG_CONFIG_HOME: join(dir, 'xdg-config'),
+    });
+  return { dir, fac, body, onboard, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 describe('the kit pull request', () => {
   test('carries the evidence, and opens only from a factory commit on main whose kit has no change outside it', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'onboard-evidence-'));
+    const w = prWorld();
     try {
-      // A copy of this factory, committed, so the test holds whatever the working tree has in it.
-      const fac = join(dir, 'factory');
-      const files = git(factory, 'ls-files', '--cached', '--others', '--exclude-standard').split('\n');
-      for (const f of files.filter((f) => f && existsSync(join(factory, f)))) {
-        mkdirSync(dirname(join(fac, f)), { recursive: true });
-        copyFileSync(join(factory, f), join(fac, f));
-        chmodSync(join(fac, f), statSync(join(factory, f)).mode);
-      }
-      git(fac, 'init', '-q', '-b', 'main');
-      const facHead = commit(fac, {}, 'factory');
-      git(fac, 'update-ref', 'refs/remotes/origin/main', facHead);
-      const seed = join(dir, 'seed');
-      mkdirSync(seed);
-      git(seed, 'init', '-q', '-b', 'main');
-      commit(seed, APP, 'start');
-      const url = join(dir, 'remote/tuannd9288/app.git');
-      git(dir, 'clone', '-q', '--bare', seed, url);
-      mkdirSync(join(dir, 'bin'));
-      writeFileSync(join(dir, 'bin/gh'), ONBOARD_GH);
-      chmodSync(join(dir, 'bin/gh'), 0o755);
-      const body = join(dir, 'body.md');
-      const onboard = (root) =>
-        run(dir, join(fac, 'bin/onboard'), [url], {
-          ...quiet,
-          PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
-          PR_BODY: body,
-          FACTORY_ROOT: join(dir, root),
-          AGENT_PROFILES: join(dir, 'profiles'),
-          XDG_DATA_HOME: join(dir, 'xdg'),
-          XDG_CONFIG_HOME: join(dir, 'xdg-config'),
-        });
-
+      const { dir, fac, body, onboard } = w;
       appendFileSync(join(fac, 'kit/scripts/verify'), '# not committed\n');
       let out = onboard('dirty');
       assert.equal(out.code, 2, out.out);
@@ -201,8 +280,25 @@ describe('the kit pull request', () => {
       // The Human's next step, ready to copy: the repository's own id, not a placeholder.
       assert.match(text, /`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/);
       assert.match(text, new RegExp(`bin/kit-evidence --factory <factory> --commit ${ahead} --repo <clone> --base [0-9a-f]{40} --head ${head} --slug tuannd9288/app --id 1234`));
+      assert.match(text, /^## File repo đã có, kit đã thay\n {2}- không có$/m);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      w.cleanup();
+    }
+  });
+
+  test("says in its body and its evidence which of the repository's files the kit replaced, and where the old hook's commands go", () => {
+    const w = prWorld({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n' });
+    try {
+      writeFileSync(join(w.dir, 'own.md'), '## Layout\n\n`src/` holds the app.\n\n## Facts the code cannot tell\n\n- Ships on Fridays.\n');
+      const out = w.onboard('root', '--own', join(w.dir, 'own.md'));
+      assert.equal(out.code, 0, out.out);
+      const text = readFileSync(w.body, 'utf8');
+      assert.match(text, /^## File repo đã có, kit đã thay\n {2}- `\.githooks\/pre-commit`\n {2}- `AGENTS\.md`\n/m);
+      assert.match(text, /`gate_fast` trong `\.gate\/config\.sh`/);
+      assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}\.githooks\/pre-commit \(was [0-9a-f]{12}\)\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
+      assert.match(text, /^ {2}AGENTS\.md:\d+: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app\.$/m);
+    } finally {
+      w.cleanup();
     }
   });
 });
