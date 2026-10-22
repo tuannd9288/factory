@@ -746,4 +746,28 @@ describe('deny rules', () => {
     ])
       assert.ok(!refused(command), `refused: ${command}`);
   });
+
+  /** Whether a Read deny rule anchored at the home directory refuses a path, in the gitignore syntax the docs give:
+   * `*` within one path segment, `**` across segments. */
+  const unreadable = (path) =>
+    deny.some((rule) => {
+      const pattern = /^Read\(~\/(.*)\)$/.exec(rule)?.[1];
+      const glob = (part) => part.split('*').map(escape).join('[^/]*');
+      return pattern !== undefined && new RegExp(`^~/${pattern.split('**').map(glob).join('.*')}$`).test(path);
+    });
+
+  test('refuse a read of the Human\'s own Claude Code and Cursor profiles, where an adapted transcript reader would look', () => {
+    for (const path of [
+      '~/.claude/projects/-Users-h-app/1.jsonl',
+      '~/.claude/settings.json',
+      '~/.claude-acc2/projects/-Users-h-app/2.jsonl',
+      '~/.claude-profiles/active',
+      '~/.claude.json',
+      '~/.claude.json.bak',
+      '~/.cursor/projects/Users-h-app/agent-transcripts/a/a.jsonl',
+    ])
+      assert.ok(unreadable(path), `readable: ${path}`);
+    for (const path of ['~/.agent-profiles/o/app/claude/projects/-x/1.jsonl', '~/Desktop/workspaces/app/src/a.js'])
+      assert.ok(!unreadable(path), `unreadable: ${path}`);
+  });
 });

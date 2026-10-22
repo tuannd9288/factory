@@ -18,7 +18,12 @@
       "Bash(gh repo delete:*)",
       "Bash(gh ruleset:*)",
       "Read(./.env*)",
-      "Read(~/.ssh/**)"
+      "Read(~/.ssh/**)",
+      "Read(~/.claude/**)",
+      "Read(~/.claude-acc*/**)",
+      "Read(~/.claude-profiles/**)",
+      "Read(~/.claude.json*)",
+      "Read(~/.cursor/**)"
     ]
   }
 }
