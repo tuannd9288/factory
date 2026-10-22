@@ -789,3 +789,14 @@ describe('deny rules', () => {
       assert.ok(!unreadable(path), `unreadable: ${path}`);
   });
 });
+
+describe('the kit\'s AGENTS.md', () => {
+  const text = () => readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
+
+  test('says where pstack yields: six rules, each with its reason and the pstack line it departs from', () => {
+    const section = /^## Where pstack yields\n([\s\S]*?)(?=^## )/m.exec(text())?.[1] ?? '';
+    const rules = section.split('\n- ').slice(1);
+    assert.equal(rules.length, 6, section);
+    for (const rule of rules) assert.match(rule, /\(pstack `[\w./-]+:\d+(-\d+)?`/, rule);
+  });
+});

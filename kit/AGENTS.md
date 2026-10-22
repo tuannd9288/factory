@@ -31,8 +31,9 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    module: import the module (`import * as m from`), not the missing name. A new file: load it inside the
    test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR
    body: `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
-4. Open the pull request with the template, in Vietnamese, and enable auto-merge (`gh pr merge --auto --merge`).
-   Then release the branch and move on; do not wait for CI.
+4. Once `scripts/verify` and `red-check` pass locally, open the pull request with the template, in Vietnamese,
+   and, when its base is `main`, enable auto-merge (`gh pr merge --auto --merge`). Then release the branch and
+   move on; do not wait for CI.
 5. The gate decides, from `main`'s scripts. Every pull request needs four checks green on its head commit:
    `verify` (`gate.yml`: main's verify, rules and red-check on your code), then `review` and `verdict`
    (`gate-trusted.yml`: the reviewer reads your change as data once `verify` passed; `verdict` passes at once on
@@ -42,6 +43,27 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
 6. A blocking finding is fixed by a new commit. A finding you dispute goes to the Human: label the pull request
    `needs-human` and put your recommended answer in it. At the third head commit judged red, `rounds` labels the
    pull request `needs-human`, which makes it tier 3: the Human decides.
+
+## Where pstack yields
+
+pstack's playbooks run here, except at these six points, where the gate's rule wins:
+
+- Never rewrite a pushed commit: no rebase or amend of a pushed branch, no force-push. Bring `main` in by merging
+  it (`git pull --no-rebase`). The round count and the Human's tier-3 approval live on the pushed commits.
+  (pstack `autopilot-full.md:12`, `babysit.md:10`, `opening-a-pr.md:7`)
+- Land only by `gh pr merge --auto --merge`; never squash, never a direct merge. The ruleset takes merge commits
+  only, and a direct merge counts as the Human's touch. (pstack `shipping.md:8`)
+- Arm auto-merge only on a pull request whose base is `main`. A stacked child waits until its parent lands and
+  is retargeted to `main`: no ruleset guards a branch, so an armed child lands in its parent unjudged.
+  (pstack `shipping.md:8`)
+- Open the pull request only after `scripts/verify` and `red-check` pass locally; push the branch as often as you
+  like before that. Every head the gate judges red is a round, and the third makes the change tier 3.
+  (pstack `autopilot-full.md:10`)
+- A red `tier` whose log says it waits for the Human is his wait, not a failure: never re-run it, never push to
+  clear it; the queue re-runs it after he approves. On `needs-human`, stop pushing and put your recommended answer
+  in the pull request. (pstack `babysit.md:19`)
+- A pause commit says what it holds (`Pause the parser split, tests red`), without `wip`, which the commit-msg hook
+  refuses: with merge commits, the branch's subjects reach `main`. (pstack `pause-safely.md:7`)
 
 ## What the Human keeps
 
@@ -66,7 +88,9 @@ answer; a reversible question never blocks the work.
 | Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `scripts/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
 | Tier-3 paths are one list, and CODEOWNERS ends with exactly it | `.gate/protected`; `verify` (`policy`) |
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
-| Commit subject present, at most 72 characters | `.githooks/commit-msg` |
+| Commit subject present, at most 72 characters, never `wip` or a placeholder | `.githooks/commit-msg` |
+| Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
+| Auto-merge only on a base of `main`; a pull request opens only after a local pass; a waiting `tier` or `needs-human` stops your pushes | prose |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
 | Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
 | No force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | `.claude/settings.json` deny rules, in Claude Code only; nothing on GitHub refuses one to a branch other than `main` |
