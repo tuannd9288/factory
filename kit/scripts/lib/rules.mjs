@@ -3,10 +3,12 @@
 //   scripts/rules                 lines added since the merge-base with origin/main, committed or not
 //   scripts/rules --base <rev>    lines added since <rev>
 //   scripts/rules --staged        lines the index adds (the pre-commit hook)
-// Exit 0 clean, 1 on a block finding, 2 when it could not run.
+// Exit 0 clean, 1 on a block finding, 2 when it could not run. A deleted test file and lost assertions have no line to
+// allow; the proof for a dropped test (scripts/lib/proofs.mjs), on any added line, allows them.
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { FORM, proofOf, why } from './proofs.mjs';
 
 const MAX_FILE = 1024 * 1024;
 const ALLOW = /gate-allow ([a-z-]+): (.{20,})/;
@@ -271,7 +273,7 @@ function assertionsDropped(change) {
       path: change.path,
       line: 0,
       text: `${removed} assertions removed, ${added} added`,
-      hint: 'A test that checks less hides breakage; keep the assertions or acknowledge why they went.',
+      hint: `A test that checks less hides breakage; keep the assertions, or prove the test kept in their place: ${FORM.replace('<rule>', 'assertions-removed')}.`,
     },
   ];
 }
@@ -280,7 +282,7 @@ function inspect(change) {
   const isTest = isTestPath(change.path);
   if (change.deleted)
     return isTest
-      ? [{ rule: 'test-deleted', level: 'block', path: change.path, line: 0, text: change.path, hint: 'A test file was deleted; restore it or acknowledge why.' }]
+      ? [{ rule: 'test-deleted', level: 'block', path: change.path, line: 0, text: change.path, hint: `A test file was deleted; restore it, or prove the test kept in its place: ${FORM.replace('<rule>', 'test-deleted')}.` }]
       : [];
   const text = change.text();
   if (text.includes('\0')) return [];
@@ -332,12 +334,21 @@ try {
 const findings = changes.flatMap(inspect);
 findings.push(...failingTestFindings(base ?? defaultBase(), args.staged));
 
+// A dropped test, or lost assertions, is allowed by a proof that holds in the tree read; one that does not says why.
+const proofs = changes.flatMap((c) => c.added.map(([, line]) => proofOf(line)).filter(Boolean));
+const read = (path) => (args.staged ? readIndex(path) : readWorkTree(path));
+for (const f of findings.filter((f) => f.rule === 'test-deleted' || f.rule === 'assertions-removed')) {
+  const reasons = proofs.filter((p) => p.rule === f.rule && p.path === f.path).map((p) => why(p, { isTest: isTestPath, read }));
+  if (reasons.includes('')) f.allowed = true;
+  else if (reasons.length) f.hint += ` The proof does not hold: ${reasons.join('; ')}.`;
+}
+
 let blocking = 0;
 let warnings = 0;
 let allowed = 0;
 for (const f of findings) {
   const ack = ALLOW.exec(f.text);
-  const level = f.level === 'block' && ack && ack[1] === f.rule ? 'allowed' : f.level;
+  const level = f.allowed || (f.level === 'block' && ack && ack[1] === f.rule) ? 'allowed' : f.level;
   if (level === 'block') blocking += 1;
   else if (level === 'warn') warnings += 1;
   else allowed += 1;

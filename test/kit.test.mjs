@@ -11,6 +11,16 @@ const RED_AT_BASE =
   "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport * as m from '../src/math.js';\n\ntest('multiplies', () => {\n  assert.equal(m.mul(2, 3), 6);\n});\n";
 const MUL = 'export function add(a, b) {\n  return a + b;\n}\n\nexport function mul(a, b) {\n  return a * b;\n}\n';
 
+// A test kept in the place of test/math.test.js, and the proof that lets a change drop that file: the kept test, and
+// a break of the code that turns it red (kit AGENTS.md, Hand-in rule exceptions).
+const KEPT = (line) =>
+  `import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport { add } from '../src/math.js';\n\n${line}\ntest('adds two numbers', () => {\n  assert.equal(add(2, 3), 5);\n});\n`;
+const PROOF = '// gate-allow test-deleted: test/math.test.js; kept: test/add.test.js "adds two numbers"; red: src/math.js "a + b" -> "a - b"';
+// test/math.test.js with its one assertion turned into a plain check, and the proof for it.
+const WEAKENED = (line) =>
+  `import { test } from 'node:test';\nimport { add } from '../src/math.js';\n\n${line}\ntest('adds', () => {\n  if (add(2, 3) !== 5) throw new Error('add');\n});\n`;
+const LOST = '// gate-allow assertions-removed: test/math.test.js; kept: test/math.test.js "adds"; red: src/math.js "a + b" -> "a - b"';
+
 describe('rules', () => {
   let r;
   before(() => (r = repoWithKit()));
@@ -65,6 +75,55 @@ describe('rules', () => {
     out = script(r.repo, 'rules', ['--base', 'origin/main']);
     assert.equal(out.code, 1, out.out);
     write(r.repo, { 'test/skip.test.js': null });
+  });
+
+  test("allows a deleted test only with the proof: the test kept in its place and a break that turns it red", () => {
+    try {
+      git(r.repo, 'rm', '-q', 'test/math.test.js');
+      // The Human's case: a gate-allow with a reason and no proof stays blocking.
+      write(r.repo, { 'test/add.test.js': KEPT('// gate-allow test-deleted: test/add.test.js covers addition from now on') });
+      let out = script(r.repo, 'rules', ['--base', 'origin/main']);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /test-deleted \(block\) .*kept: <test file> "<test name>"; red: <source file> "<from>" -> "<to>"/);
+      write(r.repo, { 'test/add.test.js': KEPT(PROOF) });
+      out = script(r.repo, 'rules', ['--base', 'origin/main']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /test\/math\.test\.js:0: test-deleted \(allowed\)/);
+      // The pre-commit hook reads the index: the proof holds there too.
+      git(r.repo, 'add', '-A');
+      out = script(r.repo, 'rules', ['--staged']);
+      assert.equal(out.code, 0, out.out);
+      // A proof whose kept test is not in its file, or whose break edits a test, or whose text is not in the code.
+      for (const [bad, why] of [
+        [PROOF.replace('"adds two numbers"', '"subtracts"'), /test\/add\.test\.js does not hold the test "subtracts"/],
+        [PROOF.replace('red: src/math.js', 'red: test/add.test.js'), /the break edits test\/add\.test\.js, a test/],
+        [PROOF.replace('"a + b"', '"a * b"'), /src\/math\.js holds "a \* b" 0 times, not once/],
+        [PROOF.replace('kept: test/add.test.js', 'kept: test/math.test.js'), /the kept test is the one dropped/],
+      ]) {
+        write(r.repo, { 'test/add.test.js': KEPT(bad) });
+        out = script(r.repo, 'rules', ['--base', 'origin/main']);
+        assert.equal(out.code, 1, out.out);
+        assert.match(out.out, why);
+      }
+    } finally {
+      git(r.repo, 'reset', '-q', '--hard', 'HEAD');
+      write(r.repo, { 'test/add.test.js': null });
+    }
+  });
+
+  test('allows lost assertions only with the same proof', () => {
+    try {
+      write(r.repo, { 'test/math.test.js': WEAKENED('// gate-allow assertions-removed: the plain check says the same thing') });
+      let out = script(r.repo, 'rules', ['--base', 'origin/main']);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /assertions-removed \(block\)/);
+      write(r.repo, { 'test/math.test.js': WEAKENED(LOST) });
+      out = script(r.repo, 'rules', ['--base', 'origin/main']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /test\/math\.test\.js:0: assertions-removed \(allowed\)/);
+    } finally {
+      git(r.repo, 'checkout', '-q', 'HEAD', '--', 'test/math.test.js');
+    }
   });
 
   test('blocks an edit to a line a Failing-test commit added', () => {
@@ -176,6 +235,18 @@ describe('red-check', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /source changed with no new or changed test:\n {2}src\/old\.js/);
   });
+  test('proves a dropped test: the kept test red under the break and green without it, before any source change', () => {
+    let out = branch('drop', { 'test/math.test.js': null, 'test/add.test.js': KEPT(PROOF) });
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^red-check: test\/math\.test\.js dropped: test\/add\.test\.js "adds two numbers" is red under src\/math\.js "a \+ b" -> "a - b" \(1 of 1 failed\), green without it$/m);
+    // A break the kept test does not see proves nothing: addition is commutative.
+    out = branch('drop-green', { 'test/math.test.js': null, 'test/add.test.js': KEPT(PROOF.replace('"a + b" -> "a - b"', '"a + b" -> "b + a"')) });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /test\/add\.test\.js "adds two numbers" stays green under src\/math\.js "a \+ b" -> "b \+ a"/);
+    out = branch('drop-weak', { 'test/math.test.js': WEAKENED(LOST) });
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /test\/math\.test\.js dropped: test\/math\.test\.js "adds" is red under/);
+  });
   test('fails when the tests do not pass at the head', () => {
     const out = branch('broken', { 'src/math.js': MUL.replace('a * b', 'a + b'), 'test/mul.test.js': RED_AT_BASE });
     assert.equal(out.code, 1, out.out);
@@ -224,6 +295,10 @@ describe('tier', () => {
     rmSync(empty, { recursive: true });
     out = script(r.repo, 'tier', ['--base', 'no-such-commit']);
     assert.equal(out.code, 2, out.out);
+  });
+  test('tier 2 for a dropped test: a deleted test file, or the proof that lets it go', () => {
+    assert.match(tierOf({ 'test/math.test.js': null }).out, /^tier 2\n {2}test\/math\.test\.js \(test deleted\)/);
+    assert.match(tierOf({ 'test/math.test.js': WEAKENED(LOST) }).out, /^tier 2\n {2}test\/math\.test\.js \(proof for a dropped test\)/);
   });
   test('a needs-human label makes the pull request the Human\'s: tier 3', () => {
     assert.match(tierOf({ 'src/math.js': MUL }, ['--labels', 'needs-human']).out, /^tier 3\n {2}label needs-human/);

@@ -2,7 +2,9 @@
 # Requires the change's new or changed tests to fail at the base and pass at the head, judged on JUnit reports:
 # at the base tests > 0, failures > 0 and errors == 0 (a test that cannot load there proves nothing); at the head
 # every one passes. Passes without a source change, or on a "No-red: <reason of 20 or more characters>" line in the
-# PR body, which the reviewer must accept for `review` to pass; the ledger counts it.
+# PR body, which the reviewer must accept for `review` to pass; the ledger counts it. First, for each proof the change
+# adds for a dropped test (scripts/lib/proofs.mjs), it makes the proof's break in a copy of the head and requires the
+# kept test green without it and red under it, as a test: a change that only drops a test has no source change.
 #   scripts/red-check [--base <rev>] [--body <file>]
 set -uo pipefail
 top=$(git rev-parse --show-toplevel) || exit 2
@@ -20,6 +22,56 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$base" ] || base=$(git merge-base HEAD origin/main 2>/dev/null) || { echo "red-check: no merge-base with origin/main; pass --base"; exit 2; }
 base=$(git rev-parse --verify "$base^{commit}") || { echo "red-check: $base is not a commit"; exit 2; }
+
+work=$(mktemp -d) || exit 2
+cleanup() {
+  git worktree remove --force "$work/base" >/dev/null 2>&1
+  git worktree remove --force "$work/head" >/dev/null 2>&1
+  rm -rf "$work"
+}
+trap cleanup EXIT
+count() { printf '%s\n' "$1" | head -1 | tr ' ' '\n' | sed -n "s/^$2=//p"; }
+
+proofs=$(node scripts/lib/proofs.mjs list "$base") || { echo "red-check: the proofs for dropped tests could not be read: $proofs"; exit 2; }
+if [ -n "$proofs" ]; then
+  git worktree add --detach --quiet "$work/head" HEAD || { echo "red-check: could not check out the head"; exit 2; }
+  (cd "$work/head" && gate_prepare "$work/head" >/dev/null 2>&1)
+  dropped=0
+  # fd 3: a test runner reading stdin would eat the list.
+  while IFS=$'\t' read -r -u 3 n path kept name said; do
+    git -C "$work/head" checkout --quiet -- .
+    (cd "$work/head" && GATE_REPORT="$work/green.xml" gate_tests "$kept" >/dev/null 2>&1)
+    green=$(node scripts/lib/junit.mjs --failures "$work/green.xml")
+    if [ "$(count "$green" tests)" -eq 0 ] || [ "$(count "$green" failures)" -gt 0 ] || [ "$(count "$green" errors)" -gt 0 ]; then
+      echo "red-check: $path dropped: $kept does not pass at the head ($(printf '%s\n' "$green" | head -1))"
+      dropped=1
+      continue
+    fi
+    if ! broke=$(node scripts/lib/proofs.mjs break "$base" "$n" "$work/head"); then
+      echo "red-check: $path dropped: the break cannot be made: $broke"
+      dropped=1
+      continue
+    fi
+    (cd "$work/head" && GATE_REPORT="$work/red.xml" gate_tests "$kept" >/dev/null 2>&1)
+    red=$(node scripts/lib/junit.mjs --failures "$work/red.xml")
+    rt=$(count "$red" tests) rf=$(count "$red" failures) re=$(count "$red" errors)
+    if [ "$re" -gt 0 ]; then
+      echo "red-check: ${said/ is red under / cannot run under } ($(printf '%s\n' "$red" | head -1)); an error is not a red"
+      dropped=1
+    elif [ "$rf" -eq 0 ]; then
+      echo "red-check: ${said/ is red under / stays green under }, so it does not show the code it guards"
+      dropped=1
+    elif ! printf '%s\n' "$red" | grep -F '  failed: ' | grep -qF -- "$name"; then
+      echo "red-check: ${said/ is red under / is not among the tests red under }:"
+      printf '%s\n' "$red" | tail -n +2
+      dropped=1
+    else
+      echo "red-check: $said ($rf of $rt failed), green without it"
+    fi
+  done 3<<<"$proofs"
+  git worktree remove --force "$work/head" >/dev/null 2>&1
+  [ "$dropped" -eq 0 ] || exit 1
+fi
 
 # A deleted source file is a source change; a test is one the head still holds.
 kinds() { git -c core.quotePath=false diff --name-only --no-renames --diff-filter="$1" "$base" HEAD | node scripts/lib/paths.mjs; }
@@ -43,12 +95,6 @@ if [ -z "$tests" ]; then
   exit 1
 fi
 
-work=$(mktemp -d) || exit 2
-cleanup() {
-  git worktree remove --force "$work/base" >/dev/null 2>&1
-  rm -rf "$work"
-}
-trap cleanup EXIT
 git worktree add --detach --quiet "$work/base" "$base" || { echo "red-check: could not check out the base $base"; exit 2; }
 printf '%s\n' "$tests" | while IFS= read -r t; do
   mkdir -p "$work/base/$(dirname "$t")" && git show "HEAD:$t" >"$work/base/$t"
@@ -63,7 +109,6 @@ head_code=$?
 set +f
 at_head=$(node scripts/lib/junit.mjs --failures "$work/head.xml")
 
-count() { printf '%s\n' "$1" | head -1 | tr ' ' '\n' | sed -n "s/^$2=//p"; }
 bt=$(count "$at_base" tests) bf=$(count "$at_base" failures) be=$(count "$at_base" errors)
 ht=$(count "$at_head" tests) hf=$(count "$at_head" failures) he=$(count "$at_head" errors)
 

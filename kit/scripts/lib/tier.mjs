@@ -1,11 +1,13 @@
 // The tier of a change, from the paths it touches: 3 for a path or a manifest line .gate/protected names, 2 for a
-// .gate/load-bearing path or a dependency manifest, 1 otherwise. A policy file or a diff that cannot be read is an
+// .gate/load-bearing path, a dependency manifest or a dropped test (a deleted test file, or the proof that lets a test
+// or its assertions go, scripts/lib/proofs.mjs), 1 otherwise. A policy file or a diff that cannot be read is an
 // error (exit 2), never a tier.
 //   node tier.mjs --rules <dir> --repo <dir> --base <rev> [--head <rev>] [--labels "tier-2,..."]
 // <dir> of --rules holds the policy that decides (CI passes main's checkout); --repo is where the diff is read. The
 // labels are every label the pull request ever had: tier-N only raises the result, so a tier never drops within a
 // pull request, and needs-human (stuck after three rounds) makes it the Human's, tier 3.
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { patternsOf, protectedOf } from './policy.mjs';
 
@@ -20,11 +22,17 @@ const git = (args) => execFileSync('git', ['-C', opts.repo, '-c', 'core.quotePat
 
 let policy;
 let loadBearing;
+let tests;
 let paths;
+let deleted;
+let diff;
 try {
   policy = protectedOf(opts.rules);
   loadBearing = patternsOf(join(opts.rules, '.gate/load-bearing'));
+  tests = JSON.parse(readFileSync(join(opts.rules, '.gate/handin.json'), 'utf8')).tests.map((p) => new RegExp(p));
   paths = git(['diff', '--name-only', '--no-renames', opts.base, opts.head]).split('\n').filter(Boolean);
+  deleted = git(['diff', '--name-only', '--no-renames', '--diff-filter=D', opts.base, opts.head]).split('\n').filter(Boolean);
+  diff = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U0', '--no-renames', opts.base, opts.head]);
 } catch (error) {
   console.log(`tier: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
   process.exit(2);
@@ -62,6 +70,13 @@ for (const path of paths) {
   const bearing = loadBearing.find((p) => p.re.test(path));
   if (bearing) raise(2, `${path} (load-bearing: ${bearing.glob})`);
   else if (DEPENDENCIES.test(path)) raise(2, `${path} (dependency manifest)`);
+}
+// A dropped test is the reviewer's to judge: whether the test kept in its place covers what the dropped one did.
+for (const path of deleted) if (tests.some((t) => t.test(path))) raise(2, `${path} (test deleted)`);
+let file = '';
+for (const line of diff.split('\n')) {
+  if (line.startsWith('+++ ')) file = line.replace(/^\+\+\+ (b\/)?/, '');
+  else if (line.startsWith('+') && /gate-allow (test-deleted|assertions-removed):/.test(line)) raise(2, `${file} (proof for a dropped test)`);
 }
 for (const label of opts.labels.split(',').map((l) => l.trim())) {
   const m = /^tier-([123])$/.exec(label);

@@ -101,7 +101,7 @@ answer; a reversible question never blocks the work.
 |---|---|
 | Never push or force-push `main`, never delete it | ruleset on `main` |
 | Checks green on the exact head commit before merge | ruleset: `verify`, `review`, `verdict`, `tier` pinned to GitHub Actions, branch up to date |
-| No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `scripts/rules` (seatwork's hand-in rules) in pre-commit and in `verify` |
+| No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `scripts/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
 | A new test fails at the base and passes at the head | `red-check`, inside `verify` |
 | A failing test committed first is not weakened later | `scripts/rules` (`failing-test-edited`) |
 | Every check is shown failing on a fixture | `scripts/prove-check` in `verify` and `verify-trusted` |
@@ -126,6 +126,10 @@ A rule with no enforcer goes here as `prose` and gets one, or is deleted, within
 
 A block finding that is wrong for one line is allowed on that line only, in a comment:
 `gate-allow <rule-id>: <why, 20 characters or more>`. The reviewer sees the line in the diff and judges it.
+A deleted test file or lost assertions need one added line naming the test kept in their place and a break that
+turns it red: `gate-allow test-deleted: <path>; kept: <test file> "<test name>"; red: <source file> "<from>" -> "<to>"`
+(or `assertions-removed`; JSON strings). `red-check` needs the kept test red under the break and green without it,
+for step 2's failing test; the change is tier 2, and the reviewer judges whether the kept test covers what went.
 
 ## Layout
 
