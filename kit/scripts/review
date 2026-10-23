@@ -243,13 +243,13 @@ if [ -n "${GATE_BODY_FILE:-}" ] && line=$(grep -E -m1 '^No-red: .{20,}' "$GATE_B
   nored=$(printf '%s' "$line" | node -e 'process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(0)).digest("hex").slice(0, 16))')
 fi
 if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
-  if prior=$(node scripts/lib/history.mjs reuse --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork" --nored "$nored" 2>&1); then
+  if prior=$(node scripts/lib/history.mjs reuse --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork" --nored "$nored" --reviewer "${GATE_REVIEWER:-}" 2>&1); then
     case "$prior" in
       "reuse "*)
         read -r _ pv rid rest <<<"$prior"
         if [ "$rest" = none ]; then echo "::notice title=review-result::none"; else why=${rest#raise }; echo "::notice title=review-result::raise: ${why//%/%25}"; fi
         echo "review: reused the review of run $rid for this head, base and No-red line; no call made (one call per head)"
-        echo "::notice title=review-verdict::head=$head base=$fork nored=$nored $pv"
+        echo "::notice title=review-verdict::head=$head base=$fork nored=$nored reviewer=${GATE_REVIEWER:-} $pv"
         [ "$pv" = pass ] && exit 0
         echo "review blocks ${head:0:8} (reused; its findings are in the log of run $rid)"
         exit 1
@@ -290,6 +290,6 @@ code=$?
 [ "$code" -eq 2 ] && { echo "::notice title=review-result::unavailable: malformed"; echo "$job: reviewer unavailable (malformed); the reviewer's result does not count, so this check fails closed"; }
 printf '%s\n' "$checked"
 # review's verdict for verdict to read: fixed text, the SHAs it judged, the No-red line (by hash) and whether it blocks.
-[ "$code" -le 1 ] && echo "::notice title=review-verdict::head=$head base=$fork nored=$nored $([ "$code" -eq 0 ] && echo pass || echo block)"
+[ "$code" -le 1 ] && echo "::notice title=review-verdict::head=$head base=$fork nored=$nored reviewer=${GATE_REVIEWER:-} $([ "$code" -eq 0 ] && echo pass || echo block)"
 cat "$notes"
 [ "$code" -eq 0 ] || exit 1

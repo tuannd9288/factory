@@ -16,9 +16,9 @@
 //     `pending` while the `review` job of that run has not completed; then `ok` or `red` and `pass`, `block`, `mismatch`
 //     (its review-verdict annotation names another head or base), `absent` (it left none) or `unavailable <class>`.
 //     `verdict` passes only on `ok pass`: it makes no reviewer call of its own.
-//   node scripts/lib/history.mjs reuse --repo <owner/name> --run <id> --head <sha> --base <sha> --nored <hash|none>
-//     `reuse pass|block <run> <result>` when a completed review of any gate-trusted run on the head already judged this head,
-//     base and No-red line (its review-verdict annotation names all three), `none` otherwise: one reviewer call per head.
+//   node scripts/lib/history.mjs reuse --repo <owner/name> --run <id> --head <sha> --base <sha> --nored <hash|none> --reviewer <name>
+//     `reuse pass|block <run> <result>` when a completed review of a gate-trusted run on the head already judged this head,
+//     base and No-red line as this reviewer (its review-verdict annotation names all four), `none` otherwise: one call per head.
 //     Only runs of the event pull_request_target are read.
 // Exit 2 when GitHub cannot be read or the history does not fit one page: a history half read decides nothing. One page
 // is decided by pageInfo, not totalCount: totalCount ignores the itemTypes filter (factory-pack-scratch#3, 2026-10-23).
@@ -132,7 +132,7 @@ try {
       if (result.startsWith('unavailable ')) console.log(`${state} ${result}`);
       else if (verdict === null) console.log(`${state} absent`);
       else {
-        const m = /^head=([0-9a-f]{40}) base=([0-9a-f]{40})(?: nored=(?:[0-9a-f]+|none))? (pass|block)$/.exec(verdict);
+        const m = /^head=([0-9a-f]{40}) base=([0-9a-f]{40})(?: nored=(?:[0-9a-f]+|none))?(?: reviewer=[a-z-]*)? (pass|block)$/.exec(verdict);
         if (!m) throw new Error('the review verdict annotation is not head=<sha> base=<sha> [nored=<hash>] pass|block');
         console.log(m[1] !== opt('--head') || m[2] !== opt('--base') ? `${state} mismatch` : `${state} ${m[3]}`);
       }
@@ -146,10 +146,10 @@ try {
     // of the branch it is built from, which can print any annotation (the raise union above only ever raises, so it may read them).
     for (const run of runs.workflow_runs.filter((r) => r.event === 'pull_request_target'))
       for (const job of reviewsOf(run.id).filter((j) => j.status === 'completed')) {
-        const m = /^head=([0-9a-f]{40}) base=([0-9a-f]{40}) nored=([0-9a-f]+|none) (pass|block)$/.exec(verdictOf(job) ?? '');
-        if (!m || m[1] !== opt('--head') || m[2] !== opt('--base') || m[3] !== opt('--nored')) continue;
+        const m = /^head=([0-9a-f]{40}) base=([0-9a-f]{40}) nored=([0-9a-f]+|none) reviewer=([a-z-]+) (pass|block)$/.exec(verdictOf(job) ?? '');
+        if (!m || m[1] !== opt('--head') || m[2] !== opt('--base') || m[3] !== opt('--nored') || m[4] !== opt('--reviewer')) continue;
         const result = resultOf(job);
-        if (!result.startsWith('unavailable ') && result !== 'absent') found.push({ at: String(job.completed_at ?? ''), line: `reuse ${m[4]} ${run.id} ${result}` });
+        if (!result.startsWith('unavailable ') && result !== 'absent') found.push({ at: String(job.completed_at ?? ''), line: `reuse ${m[5]} ${run.id} ${result}` });
       }
     console.log(found.sort((a, b) => a.at.localeCompare(b.at)).at(-1)?.line ?? 'none');
   } else if (args[0] === 'labels') {
