@@ -456,8 +456,9 @@ describe('review, verdict, tier and rounds', () => {
         '#!/bin/sh',
         'case "$*" in',
         '  *check-runs*) cat "$FAKE/verify.json" ;;',
-        '  *LABELED_EVENT*) cat "$FAKE/labels.json" ;;',
-        '  *checkSuites*) cat "$FAKE/rounds.json" ;;',
+        // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
+        '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) cat "$FAKE/labels.json" ;;',
+        '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
         '  *reviews*) cat "$FAKE/reviews.json" ;;',
         '  "pr edit"*) echo "$*" >>"$FAKE/edits" ;;',
         '  *) echo "fake gh: $*" >&2; exit 1 ;;',
@@ -473,7 +474,7 @@ describe('review, verdict, tier and rounds', () => {
   const verify = (state) =>
     write(fake, { 'verify.json': JSON.stringify({ check_runs: [{ name: 'verify', app: { slug: 'github-actions' }, started_at: '2026-10-21T10:00:00Z', status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state }] }) });
   const labels = (...names) =>
-    write(fake, { 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { totalCount: names.length, pageInfo: { hasNextPage: false }, nodes: names.map((name) => ({ label: { name } })) } } } } }) });
+    write(fake, { 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: names.map((name) => ({ label: { name } })) } } } } }) });
   const reviews = (list) => write(fake, { 'reviews.json': JSON.stringify([list]) });
   /** Runs one job in the trusted checkout on a head already fetched there, as a re-run does. */
   const again = (kind, head, env = {}) => {
@@ -563,22 +564,22 @@ describe('review, verdict, tier and rounds', () => {
     assert.match(out.out, /^tier 2\n {2}label tier-2/);
   });
   test('the tier fails closed when the pull request\'s labels cannot be read', () => {
-    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"totalCount":500,"pageInfo":{"hasNextPage":true},"nodes":[]}}}}}' });
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}}}' });
     const out = job('tier', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /fails closed/);
     assert.match(out.out, /more than one page/);
   });
-  test('the labels pass when totalCount counts events the filter left out, and no next page exists', () => {
-    // Seen on factory-pack-scratch#3: totalCount 3, no label, no next page. totalCount does not follow itemTypes.
-    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"totalCount":3,"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}' });
+  test('the labels pass with no label node and no next page', () => {
+    // Seen on factory-pack-scratch#3: a pull request with no label. totalCount said 3 there and no longer matters.
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}' });
     const out = job('tier', { 'src/auth/t.js': 'export const t = 1;\n' }, pr);
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^tier 2\n {2}src\/auth\/t\.js \(load-bearing/);
     assert.doesNotMatch(out.out, /label /);
   });
   test('the labels fail closed without pageInfo, for nothing then says the history fits one page', () => {
-    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"totalCount":0,"nodes":[]}}}}}' });
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}' });
     const out = job('tier', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /fails closed/);
@@ -617,7 +618,7 @@ describe('review, verdict, tier and rounds', () => {
   });
   test('rounds labels the pull request needs-human at its third head commit judged red', () => {
     const red = (oid, name = 'verify', conclusion = 'FAILURE') => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion }] } }] } } });
-    const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { totalCount: nodes.length, pageInfo: { hasPreviousPage: false }, nodes } } } } }) });
+    const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes } } } } }) });
     rounds(red('a'), red('b', 'review'), red('c', 'verify', 'SUCCESS'), red('d', 'tier'));
     let out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 0, out.out);
@@ -627,10 +628,10 @@ describe('review, verdict, tier and rounds', () => {
     out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.match(out.edits, /--add-label needs-human/);
   });
-  test('rounds counts through a totalCount above the nodes when no earlier page exists, and fails when one does', () => {
+  test('rounds counts the nodes it got when no earlier page exists, and fails when one does', () => {
     const red = (oid) => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name: 'verify', conclusion: 'FAILURE' }] } }] } } });
     const rounds = (hasPreviousPage) =>
-      write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { totalCount: 7, pageInfo: { hasPreviousPage }, nodes: [red('a')] } } } } }) });
+      write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage }, nodes: [red('a')] } } } } }) });
     rounds(false);
     let out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 0, out.out);
@@ -639,7 +640,7 @@ describe('review, verdict, tier and rounds', () => {
     out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /rounds: the pull request's rounds could not be read: history: .*more than one page/);
-    write(fake, { 'rounds.json': '{"data":{"repository":{"pullRequest":{"commits":{"totalCount":1,"nodes":[]}}}}}' });
+    write(fake, { 'rounds.json': '{"data":{"repository":{"pullRequest":{"commits":{"nodes":[]}}}}}' });
     out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 1, out.out);
   });
