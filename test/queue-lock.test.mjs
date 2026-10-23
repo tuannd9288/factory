@@ -28,7 +28,7 @@ function world() {
       '  *rules/branches*) echo "[]" ;;',
       '  *graphql*)',
       '    if [ -f "$Q/exclusive" ]; then mkdir "$Q/inside" 2>/dev/null || touch "$Q/overlap"; sleep 0.3; rmdir "$Q/inside" 2>/dev/null; fi',
-      '    if [ -f "$Q/block" ]; then touch "$Q/in"; while [ ! -f "$Q/go" ]; do sleep 0.05; done; fi',
+      '    if [ -f "$Q/block" ]; then touch "$Q/in"; while [ ! -f "$Q/go" ]; do [ -d "$Q" ] || exit 1; sleep 0.05; done; fi',
       '    echo \'{"data":{"repository":{"pullRequests":{"nodes":[]}}}}\' ;;',
       '  *) exit 1 ;;',
       'esac',
@@ -51,9 +51,11 @@ function world() {
       return run;
     },
     calls: () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8') : ''),
-    // Whatever the test did, no sweep outlives it: release the fake gh, kill each child, await it, then remove.
+    // Whatever the test did, no sweep outlives it: release the fake gh, give each sweep about 2 s to finish and take its
+    // gh with it, kill what is left, await it, then remove.
     cleanup: async () => {
       writeFileSync(join(dir, 'go'), '');
+      await Promise.all(children.map((c) => Promise.race([c.done, new Promise((r) => setTimeout(r, 2000))])));
       for (const { child } of children) child.kill('SIGKILL');
       await Promise.all(children.map((c) => c.done));
       rmSync(dir, { recursive: true, force: true });
