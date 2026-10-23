@@ -117,3 +117,12 @@ test('an empty .ok file is no record, and every .ok file found is listed beside 
     assert.ok(!existsSync(join(state, 'none')));
   });
 });
+
+test('with the state folder missing, the digest says only that it could not check, with no per-repository lines', () => {
+  withDir((dir) => {
+    const text = ledger.digest([], { since: 'a', until: 'b', queue: ledger.queueState(join(dir, 'none'), ['o/app', 'o/new']) });
+    assert.match(text, /Không kiểm tra được hàng đợi/);
+    assert.doesNotMatch(text, /chưa ghi nhận lần quét thành công/);
+    assert.doesNotMatch(text, /Lần quét thành công gần nhất/);
+  });
+});
