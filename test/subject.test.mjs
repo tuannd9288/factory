@@ -176,7 +176,7 @@ describe('what the subject is, and when the script runs', () => {
     const text = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
     assert.match(text, /`verify: 6 passed in 12s`/);
     assert.match(text, /`prove-check: 7 checks fail on their fixtures`/);
-    assert.ok(text.split('\n').length - 1 <= 142, 'kit/AGENTS.md grew past main\'s 142 lines');
+    assert.ok(text.split('\n').length - 1 <= 143, 'kit/AGENTS.md grew past main\'s 142 lines and the one line of PR 31');
     assert.match(text, /fixup!` or `squash!`/);
   });
   test('the factory\'s verify fails at once when it runs on a pull request with no base, even with the guard missing it ends in seconds', () => {

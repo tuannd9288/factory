@@ -1,5 +1,5 @@
 // The kit's checks, each shown failing on a bad input and passing on a good one.
-import { test, describe, before, after } from 'node:test';
+import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, symlinkSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -454,11 +454,14 @@ describe('review, verdict, tier and rounds', () => {
     write(fake, {
       'bin/gh': [
         '#!/bin/sh',
+        // A runs listing is asked for a head: any other head lists nothing, as GitHub would for a head that is not the run's.
+        'case "$*" in *head_sha=*) h=${2#*head_sha=}; h=${h%%&*}; if [ "$h" != "$(cat "$FAKE/head")" ]; then echo \'{"total_count":0,"workflow_runs":[]}\'; exit 0; fi ;; esac',
         'case "$*" in',
         // The review job is found through the run (99) and its annotations through the job's id (501), never by name.
         '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; cat "$FAKE/jobs.json" ;;',
         '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
         '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
+        '  *check-runs/777/annotations*) cat "$FAKE/ann777.json" 2>/dev/null || echo "[]" ;;',
         '  *actions/runs/98/jobs?filter=all*) cat "$FAKE/jobs98.json" ;;',
         '  *actions/workflows/gate-trusted.yml/runs?head_sha=*) echo runs >>"$FAKE/calls"; cat "$FAKE/runs.json" ;;',
         '  *check-runs*) cat "$FAKE/verify.json" ;;',
@@ -502,6 +505,7 @@ describe('review, verdict, tier and rounds', () => {
   /** Runs one job in the trusted checkout on a head already fetched there, as a re-run does. */
   const again = (kind, head, env = {}) => {
     write(fake, { edits: '', calls: '' });
+    write(fake, { head });
     const out = run(trusted, join(trusted, 'scripts/review'), [kind, '--base', git(trusted, 'rev-parse', 'origin/main'), '--head', head], {
       PATH: `${join(fake, 'bin')}:${process.env.PATH}`,
       FAKE: fake,
@@ -521,6 +525,15 @@ describe('review, verdict, tier and rounds', () => {
     return again(kind, head, env);
   };
   const pr = { GATE_PR: '7', GATE_PR_AUTHOR: 'agent-bot', GITHUB_RUN_ID: '99' };
+  // Every test starts from the same fake GitHub: a test that fails before its last line restores nothing.
+  beforeEach(() => {
+    verify('success');
+    reviewJob('success');
+    annotations();
+    labels();
+    reviews([]);
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null });
+  });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
 
   test('review fails closed with no reviewer configured, and reads the candidate with no work tree', () => {
@@ -750,6 +763,7 @@ describe('review, verdict, tier and rounds', () => {
   test('tier follows a review that ended red or cancelled: it fails, so a re-run of failed jobs re-runs it too', () => {
     labels();
     reviews([]);
+    annotations();
     for (const state of ['failure', 'cancelled']) {
       reviewJob(state);
       const out = job('tier', { 'src/math.js': MUL }, pr);
@@ -774,7 +788,7 @@ describe('review, verdict, tier and rounds', () => {
   test('a review that ended and left no result annotation fails tier closed after a bounded number of reads', () => {
     labels();
     reviews([]);
-    for (const state of ['success', 'failure']) {
+    for (const state of ['success']) {
       reviewJob(state);
       write(fake, { 'annotations.json': '[]' });
       const out = job('tier', { 'src/math.js': MUL }, { ...pr, GATE_RESULT_TRIES: '3' });
@@ -952,6 +966,75 @@ describe('review, verdict, tier and rounds', () => {
     const out = run(factory, 'node', [join(factory, 'kit/scripts/lib/history.mjs'), 'raise']);
     assert.equal(out.code, 2);
     assert.match(out.out, /--pr, --head or --run are needed/);
+  });
+  test('a red review with no result annotation fails tier at once, with one read; only a green one is read again', () => {
+    reviewJob('failure');
+    write(fake, { 'annotations.json': '[]' });
+    const out = job('tier', { 'src/math.js': MUL }, { ...pr, GATE_RESULT_TRIES: '3' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier: review is red; tier follows it/);
+    assert.doesNotMatch(out.out, /left no result annotation/);
+    assert.equal(out.calls.split('\n').filter((l) => l === 'annotations').length, 1);
+  });
+  test('a raise on an earlier attempt of this run\'s own review is read after "Re-run all jobs"', () => {
+    write(fake, {
+      'jobs.json': JSON.stringify({
+        total_count: 2,
+        jobs: [
+          { id: 501, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(501), status: 'completed', conclusion: 'success' },
+          { id: 601, name: 'review', run_attempt: 2, check_run_url: CHECK_RUN(601), status: 'completed', conclusion: 'success' },
+        ],
+      }),
+      'ann601.json': JSON.stringify([result('none')]),
+    });
+    annotations('deletes a sign-in var');
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^tier 3\n {2}raised by the reviewer: deletes a sign-in var\n/);
+    assert.match(out.edits, /--add-label raised --add-label tier-3\n/);
+  });
+  test('the runs listed for the head must hold this run, or the union fails closed and says so', () => {
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 0, workflow_runs: [] }) });
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /do not include run 99, so the union of raises cannot be trusted/);
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }) });
+    const wrong = run(trusted, 'node', [join(trusted, 'scripts/lib/history.mjs'), 'raise', '--repo', 'o/app', '--run', '99', '--head', 'f'.repeat(40)], { PATH: `${join(fake, 'bin')}:${process.env.PATH}`, FAKE: fake });
+    assert.equal(wrong.code, 2, wrong.out);
+    assert.match(wrong.out, /do not include run 99/);
+  });
+  test('only a raised label the Actions bot added sets the time an approval must follow; the earliest of them', () => {
+    const ev = (name, createdAt, login) => ({ label: { name }, createdAt, actor: { login } });
+    const set = (...nodes) =>
+      write(fake, { 'labels2.json': null, 'labels.n': null, 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes } } } } }) });
+    set(ev('raised', '2026-10-21T08:00:00Z', 'tuan9288-agent'), ev('tier-3', '2026-10-21T12:00:00Z', 'github-actions'), ev('raised', '2026-10-21T12:00:00Z', 'github-actions'));
+    const first = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(first.code, 1, first.out);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T10:00:00Z')]);
+    let out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    set(ev('raised', '2026-10-21T09:00:00Z', 'github-actions'), ev('raised', '2026-10-21T12:00:00Z', 'github-actions'), ev('tier-3', '2026-10-21T09:00:00Z', 'github-actions'));
+    out = again('tier', first.head, pr);
+    assert.equal(out.code, 0, out.out);
+    set({ label: { name: 'raised' }, actor: { login: 'github-actions' } }, ev('tier-3', '2026-10-21T09:00:00Z', 'github-actions'));
+    out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /when the pull request was raised could not be read \(history: a raised label event has no createdAt\)/);
+  });
+  test('when the label events cannot be read for the approval time, tier fails closed', () => {
+    labels('tier-3');
+    write(fake, { 'labels2.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}' });
+    const first = job('tier', { 'src/math.js': MUL }, pr);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T10:00:00Z')]);
+    write(fake, { 'labels.n': null });
+    const out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /when the pull request was raised could not be read/);
+    assert.doesNotMatch(out.out, /approved/);
+  });
+  test('kit/AGENTS.md tells a writer to re-run the failed jobs when tier follows a red review', () => {
+    assert.match(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /`review is red; tier follows it` is not his wait: re-run the failed jobs, never `review` alone/);
   });
   test('tier 3 waits for a code owner other than the author to approve the head commit', () => {
     labels();
