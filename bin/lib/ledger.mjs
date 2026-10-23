@@ -433,7 +433,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     if (queue.missing) lines.push(`- Không kiểm tra được hàng đợi: thư mục trạng thái ${queue.dir} không có (hàng đợi chưa chạy, hoặc FACTORY_STATE sai).`);
     else if (queue.failed.length) for (const f of queue.failed) lines.push(`- ${f.file}: ${f.text}`);
     else lines.push('- Không có file .failed.');
-    for (const { label, at } of queue.ok) lines.push(`- Lần quét thành công gần nhất, ${label}: ${at ?? 'chưa ghi nhận lần quét thành công'}`);
+    if (!queue.missing) for (const { label, at } of queue.ok) lines.push(`- Lần quét thành công gần nhất, ${label}: ${at ?? 'chưa ghi nhận lần quét thành công'}`);
   }
   if (secrets.size) {
     lines.push('', '## Secret cấp repo (phải là 0: job của mọi nhánh đều đọc được)', '');
