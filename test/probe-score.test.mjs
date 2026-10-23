@@ -45,7 +45,7 @@ const OK = 'reviewer: no quota or rate-limit event in the stream\nreview (claude
 test('a probe is caught when it did not merge and a required check failed; billed minutes round each job up', () => {
   const w = world([
     { n: 11, sha: 'a'.repeat(40), run: 100, checks: checks('review'), log: OK, jobs: [job('review', '2026-10-25T10:00:00Z', '2026-10-25T10:03:01Z', 'failure'), job('tier', '2026-10-25T10:00:00Z', '2026-10-25T10:00:20Z')] },
-    { n: 12, sha: 'b'.repeat(40), state: 'MERGED', run: 101, checks: checks(), log: 'reviewer: quota event: {"status":"allowed"}\n', jobs: [job('review', '2026-10-25T11:00:00Z', '2026-10-25T11:05:00Z')] },
+    { n: 12, sha: 'b'.repeat(40), state: 'MERGED', run: 101, checks: checks(), log: 'review\tRun the reviewer\t2026-10-25T11:04:00.1234567Z reviewer: quota event: {"status":"allowed"}\n', jobs: [job('review', '2026-10-25T11:00:00Z', '2026-10-25T11:05:00Z')] },
   ]);
   try {
     const out = w.score(['11', '12']);
@@ -57,7 +57,7 @@ test('a probe is caught when it did not merge and a required check failed; bille
     assert.match(out.stdout, /^job\t12\treview\tsuccess\t5$/m);
     assert.match(out.stdout, /^quota\t11\treviewer: no quota or rate-limit event in the stream$/m);
     assert.match(out.stdout, /^quota\t12\treviewer: quota event: \{"status":"allowed"\}$/m);
-    assert.match(out.stdout, /^minutes\t11\t5$/m);
+    assert.match(out.stdout, /^minutes\t11\t5\tgate-trusted\.yml jobs only, not gate\.yml's verify$/m);
     assert.doesNotMatch(readCalls(w), /^api /m);
   } finally {
     w.cleanup();
@@ -89,6 +89,65 @@ test('it can score the first four heads alone: only the pull requests named are 
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.equal([...out.stdout.matchAll(/^pr\t/gm)].length, 4);
     assert.doesNotMatch(readCalls(w), /pr view 15/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a model claim that quotes the unavailable wording is not the reviewer saying so', () => {
+  const claim = 'review\tRun the reviewer\t2026-10-25T10:03:00.1234567Z review (claude-opus-5-5): f1: the log says "reviewer unavailable (quota)" but it was there\n';
+  const w = world([{ n: 11, sha: 'a'.repeat(40), run: 100, checks: checks('review'), log: `${claim}${OK}`, jobs: [job('review', '2026-10-25T10:00:00Z', '2026-10-25T10:01:00Z', 'failure')] }]);
+  try {
+    const out = w.score(['11']);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(out.stdout, /^pr\t11\tcaught$/m);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a skipped job bills nothing, a job with no times is not guessed, and the quota line has no timestamp', () => {
+  const w = world([
+    {
+      n: 11,
+      sha: 'a'.repeat(40),
+      run: 100,
+      checks: checks(),
+      log: 'review\tRun the reviewer\t2026-10-25T10:03:00.1234567Z reviewer: quota event: {"status":"allowed"}\n',
+      jobs: [job('review', '2026-10-25T10:00:00Z', '2026-10-25T10:02:00Z'), job('rounds', '2026-10-25T10:02:00Z', '2026-10-25T10:02:01Z', 'skipped'), { name: 'verdict', conclusion: 'success' }],
+    },
+  ]);
+  try {
+    const out = w.score(['11']);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(out.stdout, /^job\t11\trounds\tskipped\t0$/m);
+    assert.match(out.stdout, /^job\t11\tverdict\tsuccess\t\?$/m);
+    assert.match(out.stdout, /^minutes\t11\t2\t/m);
+    assert.match(out.stdout, /^quota\t11\treviewer: quota event: \{"status":"allowed"\}$/m);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the head it stops at still gets its quota line, before STOP; a run still in progress is pending, not a crash', () => {
+  const w = world([
+    {
+      n: 12,
+      sha: 'b'.repeat(40),
+      run: 101,
+      checks: checks('review'),
+      log: 'review\tRun the reviewer\t2026-10-25T11:00:00.1Z review: reviewer unavailable (quota); this is not a finding on the change\nreview\tRun the reviewer\t2026-10-25T11:00:01.1Z reviewer: quota event: {"status":"rejected"}\n',
+      jobs: [job('review', '2026-10-25T11:00:00Z', '2026-10-25T11:01:00Z', 'failure')],
+    },
+  ]);
+  try {
+    const out = w.score(['12']);
+    assert.equal(out.status, 3, out.stdout + out.stderr);
+    assert.match(out.stdout, /^quota\t12\treviewer: quota event: \{"status":"rejected"\}\nSTOP\t12\t/m);
+    rmSync(join(w.dir, 'log101.log'));
+    const again = w.score(['12']);
+    assert.equal(again.status, 0, again.stdout + again.stderr);
+    assert.match(again.stdout, /^pr\t12\tpending$/m);
   } finally {
     w.cleanup();
   }

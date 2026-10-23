@@ -1173,7 +1173,8 @@ if (process.argv[2] === '--version') { console.log('2.1.308 (Claude Code)'); pro
 fs.readFileSync(0, 'utf8');
 fs.appendFileSync(${JSON.stringify(join(f, 'claude-calls'))}, 'call\\n');
 const e = (x) => console.log(JSON.stringify(x));
-e({ type: 'system', subtype: 'init', tools: ['Read', 'Grep', 'Glob'], mcp_servers: [], plugins: [], skills: [], slash_commands: [] });
+e({ type: 'system', subtype: 'init', tools: ['Read', 'Grep', 'Glob', 'StructuredOutput'], mcp_servers: [], plugins: [], skills: [], slash_commands: [] });
+if (conf.mode === 'crash') process.exit(7);
 if (conf.mode === 'quota') { e({ type: 'result', is_error: true, api_error_status: 429, result: 'Claude AI usage limit reached|1761300000' }); process.exit(1); }
 e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(conf.output), structured_output: conf.output });
 `;
@@ -1197,11 +1198,11 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     const base = git(trusted, 'rev-parse', 'origin/main');
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^::notice title=review-result::none\n/);
-    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} pass\n`), out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none pass\n`), out.out);
     claude({ output: { blocking: [{ id: 'f1', claim: 'off by one in add' }], noRed: 'unjudged' } });
     out = job('review', { 'src/math.js': MUL }, reviewEnv);
     assert.equal(out.code, 1, out.out);
-    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} block\n`), out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none block\n`), out.out);
     assert.match(out.out, /f1: off by one in add/);
   });
   test('a quota failure of the Claude reviewer reads as unavailable: it fails the check, and leaves no verdict annotation', () => {
@@ -1269,15 +1270,70 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     reviewJob('success');
     annotations();
   });
-  test('rounds does not count a head whose review or verdict was only unavailable', () => {
-    const node = (oid, name, conclusion, message) => ({
-      commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion, annotations: { nodes: message ? [{ title: 'review-result', message }] : [] } }] } }] } },
+  test('rounds does not count a head whose review or verdict was only unavailable, read by REST for red runs only', () => {
+    const node = (oid, name, conclusion, databaseId) => ({
+      commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion, databaseId }] } }] } },
     });
     const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes } } } } }) });
-    rounds(node('a', 'review', 'FAILURE', 'unavailable: quota'), node('b', 'verdict', 'FAILURE', 'unavailable: quota'), node('c', 'review', 'FAILURE', 'none'), node('d', 'verify', 'FAILURE'));
+    const unavailable = JSON.stringify([NOTE('review-result', 'unavailable: quota')]);
+    write(fake, { 'ann601.json': unavailable, 'ann777.json': unavailable });
+    // 601 and 777 were unavailable; 501 is a review that judged (its annotations read none); verify's are never read.
+    rounds(node('a', 'review', 'FAILURE', 601), node('b', 'verdict', 'FAILURE', 777), node('c', 'review', 'FAILURE', 501), node('d', 'verify', 'FAILURE', 900), node('e', 'review', 'SUCCESS', 902));
     const out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.match(out.out, /2 head commits judged red/);
     assert.equal(out.edits, '');
+  });
+  test('an unset or unknown reviewer, a refused result and a crashed reviewer are unavailable, not red rounds; a leak stays red', () => {
+    claude({ output: { blocking: [], noRed: 'unjudged' } });
+    let out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: '', ...pr });
+    assert.match(out.out, /^::notice title=review-result::unavailable: no-reviewer\n/);
+    out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'gpt', ...pr });
+    assert.match(out.out, /^::notice title=review-result::unavailable: no-reviewer\n/);
+    claude({ output: { blocking: [{ id: 'f1', claim: '' }], noRed: 'unjudged' } });
+    out = job('review', { 'src/math.js': MUL }, reviewEnv);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^::notice title=review-result::unavailable: malformed\n/);
+    claude({ mode: 'crash' });
+    out = job('review', { 'src/math.js': MUL }, reviewEnv);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^::notice title=review-result::unavailable: (crash|no-result)\n/);
+    claude({ output: { blocking: [{ id: 'f1', claim: 'see tok-secret-12345' }], noRed: 'unjudged' } });
+    out = job('review', { 'src/math.js': MUL }, { ...reviewEnv, CLAUDE_CODE_OAUTH_TOKEN: 'tok-secret-12345' });
+    assert.equal(out.code, 1, out.out);
+    assert.doesNotMatch(out.out, /unavailable/);
+    assert.ok(!out.out.includes('tok-secret-12345'));
+  });
+  test('review reuses the result of an earlier run for the same head, base and No-red line: one call per head', () => {
+    claude({ output: { blocking: [], noRed: 'accepted' } });
+    const { head, base } = candidate();
+    const earlier = (nored, verdict = 'pass') => write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=${nored} ${verdict}`)]) });
+    earlier('none');
+    let out = again('review', head, reviewEnv);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^::notice title=review-result::none\n/);
+    assert.match(out.out, /review: reused the review of run 99 for this head, base and No-red line; no call made/);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${head} base=${base} nored=none pass\n`), out.out);
+    assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8'), '', 'a call was made');
+    earlier('none', 'block');
+    out = again('review', head, reviewEnv);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /review blocks .*reused/);
+    assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8'), '');
+    // A changed No-red line, another base or head, and an unavailable earlier run are each a new call.
+    earlier('none');
+    write(r.dir, { 'body.txt': 'Tóm tắt\nNo-red: renames a local variable, nothing to fail\n' });
+    out = again('review', head, { ...reviewEnv, GATE_BODY_FILE: join(r.dir, 'body.txt') });
+    assert.equal(out.code, 0, out.out);
+    assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'a changed No-red line was not judged');
+    write(fake, { 'claude-calls': '' });
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${'a'.repeat(40)} base=${base} nored=none pass`)]) });
+    again('review', head, reviewEnv);
+    assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'another head was reused');
+    write(fake, { 'claude-calls': '' });
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'unavailable: quota')]) });
+    again('review', head, reviewEnv);
+    assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'an unavailable run was reused');
+    annotations();
   });
 });
 
@@ -1286,7 +1342,7 @@ describe('gate-trusted.yml permissions', () => {
   // Apps": checks for check runs and suites, pull requests for reviews, labels on a pull request and its timeline).
   const NEEDS = {
     review: { checks: 'read' },
-    verdict: { checks: 'read', 'pull-requests': 'read' },
+    verdict: { actions: 'read', checks: 'read', 'pull-requests': 'read' },
     tier: { actions: 'read', checks: 'read', 'pull-requests': 'write' },
     rounds: { checks: 'read', 'pull-requests': 'write' },
   };
