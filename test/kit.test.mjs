@@ -1198,11 +1198,11 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     const base = git(trusted, 'rev-parse', 'origin/main');
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^::notice title=review-result::none\n/);
-    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none pass\n`), out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none reviewer=claude pass\n`), out.out);
     claude({ output: { blocking: [{ id: 'f1', claim: 'off by one in add' }], noRed: 'unjudged' } });
     out = job('review', { 'src/math.js': MUL }, reviewEnv);
     assert.equal(out.code, 1, out.out);
-    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none block\n`), out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none reviewer=claude block\n`), out.out);
     assert.match(out.out, /f1: off by one in add/);
   });
   test('a quota failure of the Claude reviewer reads as unavailable: it fails the check, and leaves no verdict annotation', () => {
@@ -1310,7 +1310,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
   test('review reuses nothing from a run that is not of pull_request_target, or names no event: a branch can write its own pull_request workflow', () => {
     claude({ output: { blocking: [], noRed: 'accepted' } });
     const { head, base } = candidate();
-    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=none pass`)]) });
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=none reviewer=claude pass`)]) });
     for (const run of [{ id: 99, event: 'pull_request' }, { id: 99 }, { id: 99, event: 'push' }]) {
       write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [run] }), 'claude-calls': '' });
       const out = again('review', head, reviewEnv);
@@ -1319,17 +1319,30 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     }
     annotations();
   });
+  test('the reuse key names the reviewer: a stub verdict, or one naming none, is not reused as the Claude review', () => {
+    claude({ output: { blocking: [], noRed: 'accepted' } });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99, event: 'pull_request_target' }] }) });
+    const { head, base } = candidate();
+    const same = `head=${head} base=${base} nored=none`;
+    for (const [what, verdict, calls] of [['a stub verdict', `${same} reviewer=stub pass`, 1], ['one naming no reviewer', `${same} pass`, 1], ['a claude verdict', `${same} reviewer=claude pass`, 0]]) {
+      write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', verdict)]), 'claude-calls': '' });
+      const out = again('review', head, reviewEnv);
+      assert.equal(out.code, 0, out.out);
+      assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, calls, `${what}: ${out.out}`);
+    }
+    annotations();
+  });
   test('review reuses the result of an earlier run for the same head, base and No-red line: one call per head', () => {
     claude({ output: { blocking: [], noRed: 'accepted' } });
     write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99, event: 'pull_request_target' }] }) });
     const { head, base } = candidate();
-    const earlier = (nored, verdict = 'pass') => write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=${nored} ${verdict}`)]) });
+    const earlier = (nored, verdict = 'pass') => write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=${nored} reviewer=claude ${verdict}`)]) });
     earlier('none');
     let out = again('review', head, reviewEnv);
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^::notice title=review-result::none\n/);
     assert.match(out.out, /review: reused the review of run 99 for this head, base and No-red line; no call made/);
-    assert.ok(out.out.includes(`::notice title=review-verdict::head=${head} base=${base} nored=none pass\n`), out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${head} base=${base} nored=none reviewer=claude pass\n`), out.out);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8'), '', 'a call was made');
     earlier('none', 'block');
     out = again('review', head, reviewEnv);
@@ -1343,7 +1356,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     assert.equal(out.code, 0, out.out);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'a changed No-red line was not judged');
     write(fake, { 'claude-calls': '' });
-    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${'a'.repeat(40)} base=${base} nored=none pass`)]) });
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${'a'.repeat(40)} base=${base} nored=none reviewer=claude pass`)]) });
     again('review', head, reviewEnv);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'another head was reused');
     write(fake, { 'claude-calls': '' });
