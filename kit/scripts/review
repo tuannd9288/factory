@@ -110,6 +110,8 @@ case "$job" in
     if [ "$n" != 3 ] && [ -n "${GATE_PR:-}" ]; then
       wait_review || exit 1
       if [ -n "$did_raise" ]; then
+        # Adding a label a pull request already has makes no event, and the approval must follow this one's: remove first.
+        gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label raised >/dev/null 2>&1
         gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label raised --add-label tier-3 >/dev/null ||
           { echo "tier: the reviewer raised this change, and the labels raised and tier-3 could not be added; if raised does not exist, create it: gh label create raised --repo ${GITHUB_REPOSITORY:-}"; exit 1; }
       fi

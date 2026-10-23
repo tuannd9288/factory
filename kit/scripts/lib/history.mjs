@@ -111,8 +111,8 @@ try {
     const items = pull(LABELS).timelineItems;
     if (items.pageInfo?.hasNextPage !== false) throw new Error('the label events are more than one page, or GitHub sent no pageInfo');
     // Only the Actions bot's raise counts: a raised label another account added early would let an earlier approval
-    // stand. An event whose actor GitHub did not send (a deleted account) is counted; a known other account is not.
-    const times = items.nodes.filter((n) => n.label?.name === 'raised' && (n.actor?.login ?? 'github-actions') === 'github-actions').map((n) => n.createdAt);
+    // stand. tier removes the label before it adds it, so its own event always exists; an event with no actor does not count.
+    const times = items.nodes.filter((n) => n.label?.name === 'raised' && n.actor?.login === 'github-actions').map((n) => n.createdAt);
     if (times.some((t) => typeof t !== 'string' || !t)) throw new Error('a raised label event has no createdAt');
     console.log(times.sort()[0] ?? '');
   } else if (args[0] === 'rounds') {
