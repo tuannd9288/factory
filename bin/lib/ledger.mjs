@@ -352,10 +352,24 @@ export function taskRow(repo, issue, prRows) {
   };
 }
 
+/** What the queue left in its state folder: every `queue-*.failed` file's first line, and for each repository the
+ * time of its last clean sweep (`queue-<owner>-<name>.ok`), null when none was recorded. */
+export function queueState(dir, repos) {
+  const names = existsSync(dir) ? readdirSync(dir).sort() : [];
+  const first = (file) => readFileSync(join(dir, file), 'utf8').split('\n')[0].trim();
+  return {
+    failed: names.filter((f) => /^queue-.*\.failed$/.test(f)).map((f) => ({ file: f, text: first(f) })),
+    ok: new Map(repos.map((repo) => {
+      const file = `queue-${repo.replace('/', '-')}.ok`;
+      return [repo, names.includes(file) ? first(file) : null];
+    })),
+  };
+}
+
 const STATE = { landed: 'đã merge', open: 'đang mở', abandoned: 'bỏ' };
 
 /** The weekly digest, in Vietnamese markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -410,6 +424,12 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     lines.push(
       `| ${r.repo.split('/')[1]} | [#${r.number}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `có (${r.touchedWhy})` : 'không'} | ${STATE[r.state]} |`,
     );
+  }
+  if (queue) {
+    lines.push('', '## Hàng đợi merge (bin/factory-queue)', '');
+    if (queue.failed.length) for (const f of queue.failed) lines.push(`- ${f.file}: ${f.text}`);
+    else lines.push('- Không có file .failed.');
+    for (const [repo, at] of queue.ok) lines.push(`- Lần quét thành công gần nhất, ${repo}: ${at ?? 'chưa ghi nhận lần quét thành công'}`);
   }
   if (secrets.size) {
     lines.push('', '## Secret cấp repo (phải là 0: job của mọi nhánh đều đọc được)', '');
@@ -578,7 +598,7 @@ function main(argv) {
     }
   }
   const report = inspect(profileFolders(profilesDir, opts.profileDirs), { latest: opts.latest });
-  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), unplaced: unplaced(opts.profileDirs) });
+  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), opts.repos), unplaced: unplaced(opts.profileDirs) });
   if (!opts.post) {
     process.stdout.write(text);
     return;
@@ -586,7 +606,12 @@ function main(argv) {
   const file = join(mkdtempSync(join(tmpdir(), 'digest-')), 'digest.md');
   writeFileSync(file, text);
   gh(['label', 'create', 'digest', '--repo', opts.post, '--force']);
-  console.log(gh(['issue', 'create', '--repo', opts.post, '--title', `Bản tin xưởng ${opts.since} → ${opts.until}`, '--label', 'digest', '--body-file', file]).trim());
+  const title = `Bản tin xưởng ${opts.since} → ${opts.until}`;
+  // GitHub's search is fuzzy: it only narrows the list, and the titles are compared here.
+  const found = JSON.parse(gh(['issue', 'list', '--repo', opts.post, '--state', 'all', '--search', `"${title}" in:title`, '--limit', '100', '--json', 'number,title'])).filter((i) => i.title === title);
+  if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}": ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
+  if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--body-file', file]).trim());
+  else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
