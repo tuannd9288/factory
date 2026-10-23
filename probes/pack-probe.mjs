@@ -162,6 +162,16 @@ export const format = (items) => items.map((i) => `${i.inconclusive ? 'INCONCLUS
 /** 0 only when no item failed and none was inconclusive; a skipped item (--no-pr) is neither. */
 export const exitCodeOf = (items) => (items.some((i) => i.ok === false || i.inconclusive) ? 1 : 0);
 
+/** The login `ssh -T git@github.com` authenticated as, from its "Hi <login>!" line (it exits 1 even then), else `none`. */
+export const parseSshLogin = (out) => /^Hi ([A-Za-z0-9][A-Za-z0-9-]*)!/m.exec(out ?? '')?.[1] ?? 'none';
+
+/** The login `gh config get -h github.com user` printed: its first line, only if it is shaped like a login. Nothing
+ * else it prints is ever repeated. */
+export const parseGhLogin = (out) => {
+  const first = String(out ?? '').split('\n')[0].trim();
+  return /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(first) ? first : 'none';
+};
+
 /** The ledger's --rows output: the row whose pull requests include n, as {column: value}. */
 export function ledgerRow(tsv, n) {
   const [head, ...rows] = tsv.split('\n').filter(Boolean).map((l) => l.split('\t'));
@@ -294,6 +304,14 @@ function main(argv) {
   try {
     const lines = readFileSync(join(dir, 'AGENTS.md'), 'utf8').split('\n');
     const marker = pickMarker(lines);
+    // #24's identity lines: from the environment the sessions are launched with (the same cd and direnv), not through the
+    // model. They show; they are never a PASS or FAIL of #6. ssh exits 1 even when it authenticates.
+    const launch = o.claude.replace(/ claude$/, '');
+    const ssh = sh(`cd ${q(dir)} && ${launch} ssh -T -o BatchMode=yes -o ConnectTimeout=10 git@github.com`, dir, 30_000);
+    const ghUser = sh(`cd ${q(dir)} && ${launch} gh config get -h github.com user`, dir, 30_000);
+    const who = [`#24 identity ssh: ${parseSshLogin(ssh.out)}`, `#24 identity gh: ${parseGhLogin(ghUser.out)}`];
+    log('identity.log', 'ssh -T … ; gh config get -h github.com user', who.join('\n'));
+    console.log(who.join('\n'));
     const secret = `PROBE_SECRET=${Math.random().toString(36).slice(2, 10)}`;
     writeFileSync(envFile, `${secret}\n`);
     st.sentinel = true;

@@ -42,6 +42,29 @@ the gate cannot see stay with the checks that already carry them.
 |---|---|
 | The session's files land where `bin/factory-ledger` reads them (the repository's profile, `projects/`), or the pack supplies another cost source the ledger reads | `bin/factory-ledger shows the session with a cost above 0` (`--rows`: the pull request's row, found through the probe branch the session ran on, has `cost_usd` above 0) |
 
+## Start, next step, one session per issue
+
+Added 2026-10-23 (#6, from the mattpocock choice, `final.md` §2 row 4). The pack answers three questions. For pstack
+today each answer is a person acting (the table): nothing in the factory dispatches a session on its own, and root
+`AGENTS.md` says only how an unattended run starts.
+
+| Clause | pstack's answer | Check |
+|---|---|---|
+| What launches a session on an issue | the Human or a Lead, by hand | `prose` |
+| What the session calls next when it stops or finishes | the Human or a Lead, by hand | `prose` |
+| What stops two sessions from working on one issue | the Human or a Lead, by hand | `prose` |
+
+A machine check comes only with automatic dispatch: a lease taken by a push GitHub accepts once
+(agent-desk@0cd59d55 `AGENTS.md:113`). The factory builds nothing for it here.
+
+## The #24 identity lines
+
+Before its sessions the probe prints `#24 identity ssh: <login|none>` (`ssh -T -o BatchMode=yes -o ConnectTimeout=10
+git@github.com`, which exits 1 even when it authenticates; the login comes from its "Hi <login>!" line) and
+`#24 identity gh: <login>` (`gh config get -h github.com user`), both run as `cd <root>/<repo> && direnv exec . …`, the
+environment the sessions are launched with, not through the model. They are #24's to judge, never #6's PASS or FAIL: today
+SSH should answer `tuannd9288`, and the probe goes on. No token and nothing else from `hosts.yml` is printed.
+
 ## Running the probe
 
 ```
