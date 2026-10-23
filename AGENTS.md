@@ -71,8 +71,9 @@ Everything else that can be undone, agents decide and report after.
 Two halves, the Human's first. From this clone, logged into `gh` as the repository's owner, he runs
 `bin/onboard-owner <owner/repo> --id <id>`, reads the changes it prints, and runs it again with `--apply`. The id is
 the repository's own (`gh api repos/<owner/repo> --jq .id`), so a typo or a renamed repository is refused. It invites
-the agents' account (write), sets `factory-branches` (every branch: no rewrite) and `factory-bootstrap` (`main`: a
-pull request, one approval of the last push, merge commits only), creates the `reviewer` environment for `main`, and
+the agents' account (write), sets `factory-branches` (every branch: no rewrite), `factory-tags` (every tag: no create,
+update or delete, but for a repository admin) and `factory-bootstrap` (`main`: a pull request, one approval of the
+last push, merge commits only), creates the `reviewer` environment for `main`, and
 reads it all back; it calls only `gh api`, never `git` and nothing the repository holds. Once the agents' account
 has accepted the invitation, an agent runs `bin/onboard <repo-url>` from this root, logged into `gh` as that account.
 It refuses any other login, and a `main` without the bootstrap pull request rule:
