@@ -112,7 +112,9 @@ pane opened in the repository (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
 Run `bin/factory-queue sweep --repo <owner/repo>...` from launchd every minute, logged into `gh` as the agents'
 account (it refuses the Human's): the ruleset requires a branch to be up to date, GitHub updates none by itself, and
 without the queue every auto-merge pull request strands when another lands. Each run is one sweep under a lock; a
-repository whose sweep failed keeps `~/.local/state/factory/queue-<owner>-<repo>.failed` until one succeeds. A
+repository whose sweep failed keeps `~/.local/state/factory/queue-<owner>-<repo>.failed` until one succeeds; a run that
+fails before its repository loop keeps `queue-run.failed` until a run gets past it; a clean sweep writes
+`queue-<owner>-<repo>.ok`, and the weekly digest lists every such file. A
 rollback is a revert pull request through the gate. Only when the gate itself is broken does the Human turn the
 ruleset off, after taking auto-merge off every open pull request, since with the ruleset off each would land unjudged.
 The queue leaves a tier-3 pull request behind `main` until the Human approved it, then updates it once; his approval
