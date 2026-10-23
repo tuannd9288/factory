@@ -456,6 +456,8 @@ describe('review, verdict, tier and rounds', () => {
         '#!/bin/sh',
         // A runs listing is asked for a head: any other head lists nothing, as GitHub would for a head that is not the run's.
         'case "$*" in *head_sha=*) h=${2#*head_sha=}; h=${h%%&*}; if [ "$h" != "$(cat "$FAKE/head")" ]; then echo \'{"total_count":0,"workflow_runs":[]}\'; exit 0; fi ;; esac',
+        // The label query is answered only when it asks who added each label: the approval time follows the bot's own event.
+        'case "$*" in *itemTypes:*LABELED_EVENT*) case "$*" in *"actor{login}"*) ;; *) echo "fake gh: the label query does not ask for actor{login}" >&2; exit 1 ;; esac ;; esac',
         'case "$*" in',
         // The review job is found through the run (99) and its annotations through the job's id (501), never by name.
         '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; cat "$FAKE/jobs.json" ;;',
@@ -882,7 +884,7 @@ describe('review, verdict, tier and rounds', () => {
     annotations();
   });
   test('a raised pull request needs an approval given after the raise', () => {
-    const at = (name, createdAt) => ({ label: { name }, createdAt });
+    const at = (name, createdAt) => ({ label: { name }, createdAt, actor: { login: 'github-actions' } });
     const labelsAt = (...nodes) =>
       write(fake, { 'labels2.json': null, 'labels.n': null, 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes } } } } }) });
     labelsAt(at('tier-3', '2026-10-21T12:00:00Z'), at('raised', '2026-10-21T12:00:00Z'));
@@ -921,7 +923,8 @@ describe('review, verdict, tier and rounds', () => {
     const out = job('tier', { 'src/math.js': MUL }, { ...pr, GATE_WAIT: '0', GATE_REVIEW_WAIT: '2', GATE_POLL: '1' });
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /review did not finish in time/);
-    assert.ok(Date.now() - start >= 1500, 'tier gave up before GATE_REVIEW_WAIT');
+    // bash's SECONDS ticks on whole seconds, so a 2-second wait lasts between 1 and 2 seconds; GATE_WAIT=0 would end it at once.
+    assert.ok(Date.now() - start >= 1000, 'tier gave up before GATE_REVIEW_WAIT');
     reviewJob('success');
   });
   test('the stub raises on a review only: the marker in a verdict job changes nothing', () => {
@@ -1035,6 +1038,42 @@ describe('review, verdict, tier and rounds', () => {
   });
   test('kit/AGENTS.md tells a writer to re-run the failed jobs when tier follows a red review', () => {
     assert.match(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /`review is red; tier follows it` is not his wait: re-run the failed jobs, never `review` alone/);
+  });
+  test('a raise removes raised before it adds it, so the bot\'s own event holds an earlier approval back, now and on a re-run', () => {
+    const ev = (name, createdAt, login) => ({ label: { name }, createdAt, actor: { login } });
+    const timeline = (...nodes) => JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes } } } } });
+    // What GitHub lists: another account added raised at 08:00, the bot removed it and added it again at 12:00.
+    const events = timeline(ev('raised', '2026-10-21T08:00:00Z', 'tuan9288-agent'), ev('raised', '2026-10-21T12:00:00Z', 'github-actions'), ev('tier-3', '2026-10-21T12:00:00Z', 'github-actions'));
+    write(fake, { 'labels.json': timeline(), 'labels2.json': events, 'labels.n': null });
+    annotations('why');
+    const first = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(first.code, 1, first.out);
+    assert.match(first.edits, /--remove-label raised\n(?:.*\n)*pr edit 7 --repo o\/app --add-label raised --add-label tier-3\n/);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T10:00:00Z')]);
+    write(fake, { 'labels.n': null });
+    let out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    // A later re-run: the labels give tier 3, no wait, and the bot's event still holds the approval back.
+    write(fake, { 'labels.json': events, 'labels2.json': null, 'labels.n': null });
+    out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T13:00:00Z')]);
+    assert.equal(again('tier', first.head, pr).code, 0);
+  });
+  test('a raised event with no actor is not the bot\'s: it does not set the time an approval must follow', () => {
+    const ev = (name, createdAt, actor) => ({ label: { name }, createdAt, actor });
+    write(fake, {
+      'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: [ev('raised', '2026-10-21T11:00:00Z', null), ev('raised', '2026-10-21T12:00:00Z', { login: 'github-actions' }), ev('tier-3', '2026-10-21T12:00:00Z', { login: 'github-actions' })] } } } } }),
+      'labels2.json': null,
+      'labels.n': null,
+    });
+    const first = job('tier', { 'src/math.js': MUL }, pr);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T11:30:00Z')]);
+    const out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
   });
   test('tier 3 waits for a code owner other than the author to approve the head commit', () => {
     labels();
