@@ -458,9 +458,13 @@ describe('review, verdict, tier and rounds', () => {
         // The review job is found through the run (99) and its annotations through the job's id (501), never by name.
         '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; cat "$FAKE/jobs.json" ;;',
         '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
+        '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
+        '  *actions/runs/98/jobs?filter=all*) cat "$FAKE/jobs98.json" ;;',
+        '  *actions/workflows/gate-trusted.yml/runs?head_sha=*) echo runs >>"$FAKE/calls"; cat "$FAKE/runs.json" ;;',
         '  *check-runs*) cat "$FAKE/verify.json" ;;',
         // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
-        '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) cat "$FAKE/labels.json" ;;',
+        // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
+        '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
         '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
         '  *reviews*) cat "$FAKE/reviews.json" ;;',
         '  "pr edit"*raised*) [ -e "$FAKE/nolabel" ] && { echo "Could not resolve to a Label with the name raised" >&2; exit 1; }; echo "$*" >>"$FAKE/edits" ;;',
@@ -474,23 +478,26 @@ describe('review, verdict, tier and rounds', () => {
     verify('success');
     reviewJob('success');
     annotations();
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }) });
   });
   after(() => r.cleanup());
   /** The verify check run gate.yml reports on every head: success, failure, or in_progress. */
   const verify = (state) =>
     write(fake, { 'verify.json': JSON.stringify({ check_runs: [{ name: 'verify', app: { slug: 'github-actions' }, started_at: '2026-10-21T10:00:00Z', status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state }] }) });
   const labels = (...names) =>
-    write(fake, { 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: names.map((name) => ({ label: { name } })) } } } } }) });
+    write(fake, { 'labels2.json': null, 'labels.n': null, 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: names.map((name) => ({ label: { name }, createdAt: '2026-10-21T09:00:00Z' })) } } } } }) });
   /** The jobs of run 99, as `filter=all` lists them: the review job (check run 501) and the tier jobs, per attempt. */
   const reviewJob = (state, ...more) =>
     write(fake, {
       'jobs.json': JSON.stringify({
-        jobs: [{ id: 501, name: 'review', run_attempt: 1, status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state }, ...more],
+        jobs: [{ id: 501, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(501), status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state }, ...more],
         total_count: 1 + more.length,
       }),
     });
-  /** The annotations of check run 501: `raise` ones carry the reviewer's reason. */
-  const annotations = (...messages) => write(fake, { 'annotations.json': JSON.stringify(messages.map((message) => ({ title: 'raise', message, annotation_level: 'notice' }))) });
+  const CHECK_RUN = (id) => `https://api.github.com/repos/o/app/check-runs/${id}`;
+  /** The annotations of check run 501: the result of a review that reached it is `none`, or `raise: <why>` for a reason. */
+  const result = (message, extra = {}) => ({ title: 'review-result', message, annotation_level: 'notice', ...extra });
+  const annotations = (...messages) => write(fake, { 'annotations.json': JSON.stringify(messages.length ? messages.map((message) => result(`raise: ${message}`)) : [result('none')]) });
   const reviews = (list) => write(fake, { 'reviews.json': JSON.stringify([list]) });
   /** Runs one job in the trusted checkout on a head already fetched there, as a re-run does. */
   const again = (kind, head, env = {}) => {
@@ -500,6 +507,8 @@ describe('review, verdict, tier and rounds', () => {
       FAKE: fake,
       GITHUB_REPOSITORY: 'o/app',
       GATE_HEAD: head,
+      GATE_REVIEW_WAIT: '0',
+      GATE_RESULT_POLL: '0',
       ...env,
     });
     return { ...out, head, edits: readFileSync(join(fake, 'edits'), 'utf8'), calls: readFileSync(join(fake, 'calls'), 'utf8') };
@@ -621,13 +630,6 @@ describe('review, verdict, tier and rounds', () => {
     reviewJob('success');
     assert.equal(again('tier', out.head, pr).code, 0);
   });
-  test('a review that is red does not hold tier: it blocks the merge by itself', () => {
-    labels();
-    reviewJob('failure');
-    const out = job('tier', { 'src/math.js': MUL }, pr);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.edits, /--add-label tier-1/);
-  });
   test('a raise from a review that passed makes tier 3: tier labels raised and tier-3 and waits for the Human', () => {
     labels();
     reviews([]);
@@ -661,8 +663,8 @@ describe('review, verdict, tier and rounds', () => {
     write(fake, {
       'jobs.json': JSON.stringify({
         jobs: [
-          { id: 777, name: 'review', run_attempt: 1, status: 'completed', conclusion: 'failure' },
-          { id: 501, name: 'review', run_attempt: 2, status: 'completed', conclusion: 'success' },
+          { id: 777, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(777), status: 'completed', conclusion: 'failure' },
+          { id: 501, name: 'review', run_attempt: 2, check_run_url: CHECK_RUN(501), status: 'completed', conclusion: 'success' },
         ],
         total_count: 2,
       }),
@@ -715,7 +717,7 @@ describe('review, verdict, tier and rounds', () => {
   test('the stub raises on its marker; a raise leaves review green, and rounds, which runs only after a red job, has nothing to count', () => {
     let out = job('review', { 'src/math.js': `${MUL}// GATE-STUB-RAISE deletes a sign-in var\n` }, { GATE_REVIEWER: 'stub' });
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /review \(stub\): raises to tier 3: deletes a sign-in var\n::notice title=raise::deletes a sign-in var\nreview \(stub\): passes/);
+    assert.match(out.out, /^::notice title=review-result::raise: deletes a sign-in var\nreview \(stub\): raises to tier 3: deletes a sign-in var\nreview \(stub\): passes/);
     out = job('review', { 'src/math.js': `${MUL}// GATE-STUB-RAISE ::error::x\n// GATE-STUB-FINDING off by one\n` }, { GATE_REVIEWER: 'stub' });
     assert.equal(out.code, 1, out.out);
     const wf = readFileSync(join(factory, 'kit/.github/workflows/gate-trusted.yml'), 'utf8');
@@ -727,7 +729,7 @@ describe('review, verdict, tier and rounds', () => {
     const good = { reviewer: 'x', job: 'review', base: 'b'.repeat(40), head: 'h'.repeat(40), blocking: [], noRed: 'unjudged' };
     const ok = check({ ...good, raise: { tier: 3, why: 'a sign-in var' } });
     assert.equal(ok.status, 0, ok.stdout);
-    assert.match(ok.stdout, /review \(x\): raises to tier 3: a sign-in var\n::notice title=raise::a sign-in var\n/);
+    assert.match(ok.stdout, /^::notice title=review-result::raise: a sign-in var\nreview \(x\): raises to tier 3: a sign-in var\n/);
     for (const raise of [{ tier: 1, why: 'w' }, { tier: 2, why: 'w' }, { tier: 4, why: 'w' }, { tier: '3', why: 'w' }, { tier: 3 }, { tier: 3, why: ' ' }, { tier: 3, why: 'w'.repeat(501) }, { tier: 3, why: 'w', lower: 1 }, null, 3, []])
       assert.equal(check({ ...good, raise }).status, 2, JSON.stringify(raise));
     assert.equal(check({ ...good, job: 'verdict', raise: { tier: 3, why: 'w' } }, 'verdict').status, 2);
@@ -741,9 +743,215 @@ describe('review, verdict, tier and rounds', () => {
       assert.equal(r.status, 0, r.stdout);
       const commands = r.stdout.split('\n').filter((l) => l.startsWith('::'));
       assert.equal(commands.length, 1, r.stdout);
-      assert.match(commands[0], /^::notice title=raise::[^\n]*$/);
+      assert.match(commands[0], /^::notice title=review-result::raise: [^\n]*$/);
       assert.ok(!commands[0].includes('%0A'), 'a literal %0A in the reason must be escaped, or the runner turns it into a newline');
     }
+  });
+  test('tier follows a review that ended red or cancelled: it fails, so a re-run of failed jobs re-runs it too', () => {
+    labels();
+    reviews([]);
+    for (const state of ['failure', 'cancelled']) {
+      reviewJob(state);
+      const out = job('tier', { 'src/math.js': MUL }, pr);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /tier: review is red; tier follows it/);
+      assert.doesNotMatch(out.edits, /--add-label tier-1/);
+    }
+    reviewJob('success');
+  });
+  test('a raise on a review that also blocks still labels the pull request, and tier fails', () => {
+    labels();
+    reviews([]);
+    reviewJob('failure');
+    annotations('deletes a sign-in var in wrangler.jsonc');
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.edits, /pr edit 7 --repo o\/app --add-label raised --add-label tier-3\n/);
+    assert.match(out.out, /raised by the reviewer: deletes a sign-in var in wrangler\.jsonc[\s\S]*review is red; tier follows it/);
+    reviewJob('success');
+    annotations();
+  });
+  test('a review that ended and left no result annotation fails tier closed after a bounded number of reads', () => {
+    labels();
+    reviews([]);
+    for (const state of ['success', 'failure']) {
+      reviewJob(state);
+      write(fake, { 'annotations.json': '[]' });
+      const out = job('tier', { 'src/math.js': MUL }, { ...pr, GATE_RESULT_TRIES: '3' });
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /left no result annotation after 3 reads/);
+      assert.equal(out.calls.split('\n').filter((l) => l === 'annotations').length, 3);
+    }
+    reviewJob('success');
+    annotations();
+  });
+  test('only the annotation titled review-result at level notice counts, whatever else the job printed', () => {
+    labels();
+    reviews([]);
+    write(fake, {
+      'annotations.json': JSON.stringify([
+        { title: 'raise', message: 'x', annotation_level: 'notice' },
+        { title: 'review-result', message: 'raise: x', annotation_level: 'warning' },
+        { title: 'other', message: 'none', annotation_level: 'notice' },
+      ]),
+    });
+    let out = job('tier', { 'src/math.js': MUL }, { ...pr, GATE_RESULT_TRIES: '1' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /left no result annotation/);
+    assert.equal(out.edits, '');
+    write(fake, { 'annotations.json': JSON.stringify([result('none'), result('none')]) });
+    out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /more than one result annotation/);
+    write(fake, { 'annotations.json': JSON.stringify([result('maybe')]) });
+    out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.match(out.out, /neither none nor raise/);
+    annotations();
+  });
+  test('a raise found in a cancelled earlier run on this head is labelled although this run\'s review found none', () => {
+    labels();
+    reviews([]);
+    write(fake, {
+      'runs.json': JSON.stringify({ total_count: 2, workflow_runs: [{ id: 99 }, { id: 98 }] }),
+      'jobs98.json': JSON.stringify({ total_count: 1, jobs: [{ id: 601, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(601), status: 'completed', conclusion: 'cancelled' }] }),
+      'ann601.json': JSON.stringify([result('raise: deletes a sign-in var')]),
+    });
+    reviewJob('success');
+    annotations();
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^tier 3\n {2}raised by the reviewer: deletes a sign-in var\n/);
+    assert.match(out.edits, /--add-label raised --add-label tier-3\n/);
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }) });
+  });
+  test('tier re-run below tier 3 reads the listing, then the annotations, of attempt 1\'s review', () => {
+    labels();
+    reviews([]);
+    reviewJob('success', { id: 502, name: 'tier', run_attempt: 1, check_run_url: CHECK_RUN(502), status: 'completed', conclusion: 'failure' }, { id: 503, name: 'tier', run_attempt: 2, check_run_url: CHECK_RUN(503), status: 'in_progress', conclusion: null });
+    annotations('a reason');
+    const out = job('tier', { 'src/math.js': MUL }, { ...pr, GITHUB_RUN_ATTEMPT: '2' });
+    assert.match(out.out, /raised by the reviewer: a reason/, out.out);
+    assert.match(out.calls, /^jobs\nannotations\n/);
+  });
+  test('the listings fail closed when they may hold more than one page, or are not lists', () => {
+    labels();
+    reviews([]);
+    write(fake, { 'jobs.json': JSON.stringify({ total_count: 2, jobs: [{ id: 501, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(501), status: 'completed', conclusion: 'success' }] }) });
+    let out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /jobs of run 99 are more than one page/);
+    write(fake, { 'jobs.json': JSON.stringify({ total_count: 0 }) });
+    out = again('tier', out.head, pr);
+    assert.match(out.out, /jobs of run 99 are more than one page, or unreadable/);
+    reviewJob('success');
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 3, workflow_runs: [{ id: 99 }] }) });
+    out = again('tier', out.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /runs on this head are more than one page/);
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }) });
+  });
+  test('the review job is taken from check_run_url, and a listing without it or without run_attempt fails closed', () => {
+    labels();
+    reviews([]);
+    annotations('why');
+    write(fake, { 'jobs.json': JSON.stringify({ total_count: 1, jobs: [{ id: 999, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(501), status: 'completed', conclusion: 'success' }] }) });
+    let out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.match(out.out, /raised by the reviewer: why/, out.out);
+    write(fake, { 'jobs.json': JSON.stringify({ total_count: 1, jobs: [{ id: 501, name: 'review', run_attempt: 1, status: 'completed', conclusion: 'success' }] }) });
+    out = again('tier', out.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /lacks its check_run_url or run_attempt/);
+    write(fake, { 'jobs.json': JSON.stringify({ total_count: 1, jobs: [{ id: 501, name: 'review', check_run_url: CHECK_RUN(501), status: 'completed', conclusion: 'success' }] }) });
+    out = again('tier', out.head, pr);
+    assert.match(out.out, /lacks its check_run_url or run_attempt/);
+    reviewJob('success');
+    annotations();
+  });
+  test('a raised pull request needs an approval given after the raise', () => {
+    const at = (name, createdAt) => ({ label: { name }, createdAt });
+    const labelsAt = (...nodes) =>
+      write(fake, { 'labels2.json': null, 'labels.n': null, 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes } } } } }) });
+    labelsAt(at('tier-3', '2026-10-21T12:00:00Z'), at('raised', '2026-10-21T12:00:00Z'));
+    reviews([]);
+    const first = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(first.code, 1, first.out);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T11:00:00Z')]);
+    let out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T13:00:00Z')]);
+    out = again('tier', first.head, pr);
+    assert.equal(out.code, 0, out.out);
+    // Raised in this very run: an approval of the head given earlier does not stand for it either.
+    labels();
+    annotations('why');
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T13:00:00Z')]);
+    out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    annotations();
+  });
+  test('the labels are read again after the wait: one added meanwhile counts', () => {
+    labels();
+    write(fake, { 'labels2.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: [{ label: { name: 'needs-human' } }] } } } } }) });
+    reviews([]);
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^tier 3\n {2}label needs-human/);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+  });
+  test('the review wait is GATE_REVIEW_WAIT, which GATE_WAIT for verify does not shorten', () => {
+    labels();
+    reviewJob('in_progress');
+    const start = Date.now();
+    const out = job('tier', { 'src/math.js': MUL }, { ...pr, GATE_WAIT: '0', GATE_REVIEW_WAIT: '2', GATE_POLL: '1' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /review did not finish in time/);
+    assert.ok(Date.now() - start >= 1500, 'tier gave up before GATE_REVIEW_WAIT');
+    reviewJob('success');
+  });
+  test('the stub raises on a review only: the marker in a verdict job changes nothing', () => {
+    labels();
+    const out = job('verdict', { 'src/auth/t.js': 'export const t = 1;\n// GATE-STUB-RAISE x\n' }, { GATE_REVIEWER: 'stub', ...pr });
+    assert.equal(out.code, 0, out.out);
+    assert.doesNotMatch(out.out, /raises/);
+    assert.match(out.out, /^::notice title=review-result::none\n/m);
+  });
+  test('whatever the reviewer writes, the runner finds one command: the result annotation, which comes first', () => {
+    // The runner reads `##[name]` anywhere in a line, `::name::` at the start of one, and ends a line at \r too.
+    const commandsOf = (stdout) =>
+      stdout.split(/\r\n|\r|\n/).flatMap((line) => [...(line.trimStart().startsWith('::') ? [line.trim()] : []), ...(line.includes('##[') ? [line] : [])]);
+    const send = (result) =>
+      spawnSync('node', [join(factory, 'kit/scripts/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], { input: JSON.stringify(result), encoding: 'utf8' });
+    const good = { reviewer: 'x', job: 'review', base: 'b'.repeat(40), head: 'h'.repeat(40), blocking: [], noRed: 'unjudged' };
+    for (const why of ['##[stop-commands]x', '##[error]x', 'a\r::add-mask::z', 'sets a var ("A": false, // ##[stop-commands]zq7x)']) {
+      const r = send({ ...good, raise: { tier: 3, why } });
+      assert.equal(r.status, 0, r.stdout);
+      assert.equal(commandsOf(r.stdout).length, 1, r.stdout);
+      assert.match(r.stdout.split(/\r\n|\r|\n/)[0], /^::notice title=review-result::raise: /);
+    }
+    const r = send({ ...good, reviewer: 'r\n::stop-commands::q', blocking: [{ id: 'f\r::warning::1', claim: 'one\n::stop-commands::t\n##[stop-commands]u' }], raise: { tier: 3, why: 'w' } });
+    assert.equal(r.status, 1, r.stdout);
+    assert.equal(commandsOf(r.stdout).length, 1, r.stdout);
+    assert.match(r.stdout.split('\n')[0], /^::notice title=review-result::raise: w$/);
+    const none = send(good);
+    assert.equal(none.stdout.split('\n')[0], '::notice title=review-result::none');
+    assert.equal(send({ ...good, job: 'verdict', raise: { tier: 3, why: 'w' } }).stdout.includes('::notice'), false);
+  });
+  test('tier prints the reviewer\'s reason on one line with ##[ broken', () => {
+    labels();
+    reviews([]);
+    annotations('##[stop-commands]x then ##[error]y');
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.match(out.out, /^tier 3\n {2}raised by the reviewer: ## \[stop-commands\]x then ## \[error\]y\n/);
+    assert.ok(!out.out.includes('##['), out.out);
+    annotations();
+  });
+  test('kit/AGENTS.md says tier waits for review below tier 3 only; the history usage names --run', () => {
+    assert.match(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /`tier`, which below tier 3 waits for `review`/);
+    const out = run(factory, 'node', [join(factory, 'kit/scripts/lib/history.mjs'), 'raise']);
+    assert.equal(out.code, 2);
+    assert.match(out.out, /--pr, --head or --run are needed/);
   });
   test('tier 3 waits for a code owner other than the author to approve the head commit', () => {
     labels();

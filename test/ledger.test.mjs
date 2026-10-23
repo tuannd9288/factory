@@ -286,3 +286,13 @@ test('the digest counts the pull requests the reviewer raised, per repository', 
   assert.match(text, /- Reviewer nâng lên bậc 3 \(nhãn raised\), theo repo: o\/r 2, o\/s 0\n/);
   assert.match(digest([], { since: 'a', until: 'b' }), /theo repo: không có việc\n/);
 });
+
+test('the digest counts raised on task rows, the rows it is made of', () => {
+  const opts = { human: 'boss', costs: null, profile: false };
+  const raised = rowOf('o/r', pr({ number: 8, labels: { nodes: [{ name: 'raised' }] } }), opts);
+  const plain = rowOf('o/r', pr({ number: 9 }), opts);
+  const task = ledger.taskRow('o/r', issue({}), [raised, plain]);
+  assert.equal(task.raised, true);
+  assert.equal(ledger.taskRow('o/r', issue({ number: 4 }), [plain]).raised, false);
+  assert.match(digest([task, ledger.taskRow('o/s', issue({ number: 5 }), [])], { since: 'a', until: 'b' }), /theo repo: o\/r 1, o\/s 0\n/);
+});
