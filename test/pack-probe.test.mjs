@@ -232,6 +232,9 @@ process.exit(mode === 'ok' ? 1 : 255);
 const FAKE_GH = String.raw`#!/usr/bin/env node
 const fs = require('fs');
 const a = process.argv.slice(2);
+// MOCK_CLOSING: the issue the pull request closes, whatever the canned JSON below says.
+const realLog = console.log;
+console.log = (t) => realLog(process.env.MOCK_CLOSING ? String(t).split('"closingIssuesReferences":[{"number":3}]').join('"closingIssuesReferences":[{"number":' + Number(process.env.MOCK_CLOSING) + '}]') : t);
 fs.appendFileSync(process.env.MOCK_CALLS, 'gh ' + a.join(' ') + '\n');
 const account = process.env.MOCK_ACCOUNT || 'tuan9288-agent';
 if (a[0] === 'auth') { console.log('github.com\n  ✓ Logged in to github.com account ' + account + ' (keyring)\n  - Active account: true'); process.exit(0); }
@@ -239,19 +242,19 @@ if (a[0] === 'config' && a[1] === 'get') { console.log(process.env.MOCK_GH_LOGIN
 if (a[0] === 'issue' && a[1] === 'view') { console.log(process.env.MOCK_ISSUE_LABELS ?? JSON.stringify({ labels: [{ name: 'task' }] })); process.exit(0); }
 if (a[0] === 'issue' && a[1] === 'list') { console.log(JSON.stringify([{ number: 3, title: 'Pack probe 0' }])); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'list' && process.env.MOCK_NO_PR) { console.log('[]'); process.exit(0); }
-if (a[0] === 'pr' && a[1] === 'list') { const h = a[a.indexOf('--head') + 1] || ''; fs.writeFileSync(process.env.MOCK_CALLS + '.head', h); console.log(JSON.stringify([{ number: 7, headRefName: process.env.MOCK_HEADREF ?? h, closingIssuesReferences: [{ number: Number(process.env.MOCK_CLOSING || 3) }] }])); process.exit(0); }
+if (a[0] === 'pr' && a[1] === 'list') { const h = a[a.indexOf('--head') + 1] || ''; fs.writeFileSync(process.env.MOCK_CALLS + '.head', h); console.log(JSON.stringify([{ number: 7, headRefName: process.env.MOCK_HEADREF ?? h, closingIssuesReferences: [{ number: 3 }] }])); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'view') {
   const counter = process.env.MOCK_CALLS + '.views';
   const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
   fs.writeFileSync(counter, String(n + 1));
   if (process.env.MOCK_CANCELLED_FIRST && n < Number(process.env.MOCK_CANCELLED_FIRST)) {
     const cancelled = JSON.parse(process.env.MOCK_ROLLUP).map((c) => (c.name === 'review' ? { name: 'review', status: 'COMPLETED', conclusion: 'CANCELLED' } : c));
-    console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: cancelled, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: Number(process.env.MOCK_CLOSING || 3) }] }));
+    console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: cancelled, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
     process.exit(0);
   }
   const pending = process.env.MOCK_PENDING_FIRST && n < Number(process.env.MOCK_PENDING_FIRST);
   const rollup = JSON.parse(process.env.MOCK_ROLLUP).map((c) => (pending ? { name: c.name, status: 'IN_PROGRESS', conclusion: '' } : c));
-  console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: rollup, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: Number(process.env.MOCK_CLOSING || 3) }] }));
+  console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: rollup, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
   process.exit(0);
 }
 process.exit(0);
