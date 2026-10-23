@@ -101,7 +101,7 @@ function sweep(repo) {
 /** A process's start time as ps prints it, or null: with the pid it names one process, so a reused pid differs. */
 const startOf = (pid) => {
   try {
-    return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+    return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
   } catch {
     return null;
   }
@@ -117,15 +117,16 @@ function holderOf(path) {
   }
 }
 
-/** Whether a holder is gone. Another host's is never judged dead: pids mean something on one machine. EPERM from
- * kill(pid, 0) means the process exists. A live pid with another start time is a reused pid. When ps cannot say,
- * the holder counts as alive: a held lock is the safe mistake. */
+/** Whether a holder is gone. The state folder is single-machine (AGENTS.md), so the recorded host decides nothing:
+ * hostname() is not stable. ESRCH is gone. EPERM means a process of another user has the pid, which may be a reused
+ * one, so the start time decides, as for a live pid. Any other error is alive. A pid with another start time is a
+ * reused pid. When ps cannot say, the holder counts as alive: a held lock is the safe mistake. */
 function gone(h) {
-  if (h.host !== hostname()) return false;
   try {
     process.kill(h.pid, 0);
   } catch (error) {
-    return error.code === 'ESRCH';
+    if (error.code === 'ESRCH') return true;
+    if (error.code !== 'EPERM') return false;
   }
   const now = startOf(h.pid);
   return Boolean(h.start) && now !== null && now !== h.start;
