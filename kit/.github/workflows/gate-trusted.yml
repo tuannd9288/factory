@@ -1,10 +1,17 @@
 # The jobs that read the pull request as data. On pull_request_target GitHub runs main's copy of this file, and every
 # job runs main's scripts from ./trusted, whatever the pull request changes. None runs the candidate's code, which
 # runs only in gate.yml on pull_request, and none restores an Actions cache, which this event shares with main.
-#   review, verdict
-#            read the candidate as data: its commits are fetched into main's checkout with no work tree. They wait
-#            for gate.yml's verify on the head and run the reviewer only once it passed. The reviewer's credentials
-#            come from the environment "reviewer", whose branch policy admits main alone.
+#   review   reads the candidate as data: its commits are fetched into main's checkout with no work tree. It waits for
+#            gate.yml's verify on the head and runs the reviewer, once per head (a push is a new head; an edit that leaves
+#            head, base and the No-red line alone reuses the earlier result), only after it passed. It is told when the
+#            job started and how long it may run (GATE_JOB_START, GATE_JOB_MINUTES), so a call is sized to the time left. The
+#            reviewer's credential (CLAUDE_CODE_OAUTH_TOKEN for GATE_REVIEWER=claude) comes from the environment "reviewer",
+#            whose branch policy admits main alone; Claude Code is the pinned one of scripts/reviewer, installed with
+#            `npm ci --ignore-scripts`, whose `claude` is the platform package's binary (the .bin link is a placeholder
+#            until a postinstall script, which does not run, replaces it) and which the install step runs for its version.
+#   verdict  makes no reviewer call: from tier 2 it waits for `review` of its own run and passes with its result for the
+#            same head and base (`actions: read` lists the run's jobs and `checks: read` their annotations). It holds no
+#            environment and no secret.
 #   tier     the tier, and on tier 3 the Human's approval of the head, or of a commit whose patch the head carries
 #            unchanged. Below tier 3 by paths and labels it waits for `review` of its own run (GITHUB_RUN_ID, through
 #            the run's jobs, so it holds `actions: read` and `checks: read`), so it is never green before the reviewer
@@ -43,9 +50,12 @@ jobs:
     environment: reviewer
     timeout-minutes: 60
     permissions:
+      actions: read
       contents: read
       checks: read
     steps:
+      - name: Note when the job started
+        run: echo "GATE_JOB_START=$(date +%s)" >>"$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: trusted
@@ -59,21 +69,35 @@ jobs:
         working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Install the pinned Claude Code
+        if: vars.GATE_REVIEWER == 'claude'
+        run: |
+          # A failed install is the reviewer being unavailable, not a finding on the change, and no red round.
+          down() { echo "::notice title=review-result::unavailable: not-installed"; echo "review: reviewer unavailable (not-installed); $1"; exit 1; }
+          npm ci --ignore-scripts --prefix scripts/reviewer --no-audit --no-fund || down "npm ci failed"
+          bin="$PWD/scripts/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64"
+          want=$(node -p "require('./scripts/lib/reviewer.json').version")
+          got=$(PATH="$bin:$PATH" claude --version) || down "the installed claude does not run"
+          case "$got" in "$want "*) ;; *) down "the installed claude is '$got', not $want" ;; esac
+          echo "$bin" >>"$GITHUB_PATH"
+        working-directory: trusted
       - run: |
           printf '%s\n' "$BODY" >"$RUNNER_TEMP/pr-body.txt"
           GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" scripts/review review --base "$BASE" --head "$HEAD"
         working-directory: trusted
         env:
           GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
+          GATE_JOB_MINUTES: '60'
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           BODY: ${{ github.event.pull_request.body }}
           GH_TOKEN: ${{ github.token }}
 
   verdict:
     name: verdict
     runs-on: ubuntu-latest
-    environment: reviewer
     timeout-minutes: 70
     permissions:
+      actions: read
       contents: read
       checks: read
       pull-requests: read
@@ -94,7 +118,6 @@ jobs:
       - run: scripts/review verdict --base "$BASE" --head "$HEAD"
         working-directory: trusted
         env:
-          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
           GH_TOKEN: ${{ github.token }}
 
   tier:

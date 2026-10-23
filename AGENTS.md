@@ -64,7 +64,7 @@ Everything else that can be undone, agents decide and report after.
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
-| `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results; `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
+| `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
 | `NOTICE` | What was taken from other projects, with the commit |
