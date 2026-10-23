@@ -1287,24 +1287,41 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     claude({ output: { blocking: [], noRed: 'unjudged' } });
     let out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: '', ...pr });
     assert.match(out.out, /^::notice title=review-result::unavailable: no-reviewer\n/);
+    assert.match(out.out, /^review: reviewer unavailable \(no-reviewer\)/m, 'probes/score.mjs stops on this line');
     out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'gpt', ...pr });
     assert.match(out.out, /^::notice title=review-result::unavailable: no-reviewer\n/);
+    assert.match(out.out, /^review: reviewer unavailable \(no-reviewer\)/m);
     claude({ output: { blocking: [{ id: 'f1', claim: '' }], noRed: 'unjudged' } });
     out = job('review', { 'src/math.js': MUL }, reviewEnv);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^::notice title=review-result::unavailable: malformed\n/);
+    assert.match(out.out, /^review: reviewer unavailable \(malformed\)/m);
     claude({ mode: 'crash' });
     out = job('review', { 'src/math.js': MUL }, reviewEnv);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^::notice title=review-result::unavailable: (crash|no-result)\n/);
+    assert.match(out.out, /^review: reviewer unavailable \((crash|no-result)\)/m);
     claude({ output: { blocking: [{ id: 'f1', claim: 'see tok-secret-12345' }], noRed: 'unjudged' } });
     out = job('review', { 'src/math.js': MUL }, { ...reviewEnv, CLAUDE_CODE_OAUTH_TOKEN: 'tok-secret-12345' });
     assert.equal(out.code, 1, out.out);
     assert.doesNotMatch(out.out, /unavailable/);
     assert.ok(!out.out.includes('tok-secret-12345'));
   });
+  test('review reuses nothing from a run that is not of pull_request_target, or names no event: a branch can write its own pull_request workflow', () => {
+    claude({ output: { blocking: [], noRed: 'accepted' } });
+    const { head, base } = candidate();
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=none pass`)]) });
+    for (const run of [{ id: 99, event: 'pull_request' }, { id: 99 }, { id: 99, event: 'push' }]) {
+      write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [run] }), 'claude-calls': '' });
+      const out = again('review', head, reviewEnv);
+      assert.doesNotMatch(out.out, /reused/, JSON.stringify(run));
+      assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, `a ${JSON.stringify(run)} run was reused`);
+    }
+    annotations();
+  });
   test('review reuses the result of an earlier run for the same head, base and No-red line: one call per head', () => {
     claude({ output: { blocking: [], noRed: 'accepted' } });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99, event: 'pull_request_target' }] }) });
     const { head, base } = candidate();
     const earlier = (nored, verdict = 'pass') => write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=${nored} ${verdict}`)]) });
     earlier('none');
@@ -1341,7 +1358,7 @@ describe('gate-trusted.yml permissions', () => {
   // What each job's scripts call, and the scope GitHub asks for it (docs.github.com, "Permissions required for GitHub
   // Apps": checks for check runs and suites, pull requests for reviews, labels on a pull request and its timeline).
   const NEEDS = {
-    review: { checks: 'read' },
+    review: { actions: 'read', checks: 'read' },
     verdict: { actions: 'read', checks: 'read', 'pull-requests': 'read' },
     tier: { actions: 'read', checks: 'read', 'pull-requests': 'write' },
     rounds: { checks: 'read', 'pull-requests': 'write' },

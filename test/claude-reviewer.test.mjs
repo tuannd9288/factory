@@ -204,6 +204,19 @@ describe('claude-reviewer', () => {
     }
   });
 
+  test('the leak scan finds a 40-character token as `echo | base64` prints it, and at random places in longer text', () => {
+    const token = 'sk-ant-oat01-AbCdEf0123456789AbCdEf01234';
+    assert.equal(token.length, 40);
+    const forms = [Buffer.from(`${token}\n`).toString('base64')];
+    let seed = 7;
+    const rnd = (n) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n);
+    for (let i = 0; i < 24; i += 1) forms.push(Buffer.from('abcdefgh'.slice(0, rnd(6)) + token + 'xyz\n'.slice(0, rnd(4))).toString('base64'));
+    for (const form of forms) {
+      const out = review({ output: { blocking: [{ id: 'f1', claim: `see ${form}` }], noRed: 'unjudged' } }, { CLAUDE_CODE_OAUTH_TOKEN: token });
+      assert.equal(out.code, 4, `${form}: ${out.out}`);
+    }
+  });
+
   test('a quota or rate-limit event in the stream is recorded; its absence is said', () => {
     assert.match(review({ quotaEvent: true }).out, /^reviewer: quota event: .*"resetsAt":1761300000/m);
     assert.match(review({}).out, /^reviewer: no quota or rate-limit event in the stream$/m);
@@ -304,6 +317,54 @@ describe('the pinned install and the workflow', () => {
     assert.match(review, /GATE_JOB_START=\$\(date \+%s\)" >>"\$GITHUB_ENV"/);
     const minutes = /timeout-minutes: (\d+)/.exec(review)[1];
     assert.match(review, new RegExp(`GATE_JOB_MINUTES: '?${minutes}'?`));
+  });
+
+  test('a failed install prints unavailable: not-installed before it exits, so it is no red round; a good one puts the binary on the PATH', () => {
+    const yml = read('kit/.github/workflows/gate-trusted.yml');
+    const step = yml.slice(yml.indexOf('name: Install the pinned Claude Code'));
+    const script = step.slice(step.indexOf('run: |\n') + 7, step.indexOf('working-directory')).split('\n').map((l) => l.replace(/^ {10}/, '')).join('\n');
+    const dir = mkdtempSync(join(tmpdir(), 'install-'));
+    try {
+      mkdirSync(join(dir, 'bin'));
+      mkdirSync(join(dir, 'scripts/lib'), { recursive: true });
+      const pkg = join(dir, 'scripts/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64');
+      writeFileSync(join(dir, 'scripts/lib/reviewer.json'), JSON.stringify({ version: '2.1.308' }));
+      const fake = (name, body) => {
+        writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
+        chmodSync(join(dir, name), 0o755);
+      };
+      const go = (npm, claude) => {
+        fake('bin/npm', npm);
+        rmSync(join(dir, 'scripts/reviewer'), { recursive: true, force: true });
+        if (claude !== null) {
+          mkdirSync(pkg, { recursive: true });
+          writeFileSync(join(pkg, 'claude'), `#!/bin/sh\n${claude}\n`);
+          chmodSync(join(pkg, 'claude'), 0o755);
+        }
+        writeFileSync(join(dir, 'path'), '');
+        return run(dir, 'bash', ['-ec', script], { PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GITHUB_PATH: join(dir, 'path') });
+      };
+      const notice = /^::notice title=review-result::unavailable: not-installed$/m;
+      let out = go('exit 1', 'echo "2.1.308 (Claude Code)"');
+      assert.notEqual(out.code, 0);
+      assert.match(out.out, notice, 'npm failed');
+      out = go('exit 0', null);
+      assert.notEqual(out.code, 0);
+      assert.match(out.out, notice, 'no binary');
+      out = go('exit 0', 'echo "2.1.309 (Claude Code)"');
+      assert.notEqual(out.code, 0);
+      assert.match(out.out, notice, 'another version');
+      out = go('exit 0', 'echo "2.1.308 (Claude Code)"');
+      assert.equal(out.code, 0, out.out);
+      assert.doesNotMatch(out.out, /unavailable/);
+      assert.match(readFileSync(join(dir, 'path'), 'utf8'), /claude-code-linux-x64\n$/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('review holds actions: read, which the runs listing behind a reused result needs on a private repository', () => {
+    assert.match(job('review'), /permissions:[\s\S]*actions: read/);
   });
 
   test('review installs it with npm ci --ignore-scripts and holds the token; verdict calls no reviewer and holds neither', () => {
