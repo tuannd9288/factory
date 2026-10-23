@@ -8,7 +8,9 @@
 // queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
 // See bin/factory-queue for the arguments.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -96,17 +98,95 @@ function sweep(repo) {
   console.log(`queue: updated ${repo}#${pr.number} to its base`);
 }
 
-/** Takes the lock, or returns false while another sweep holds it; a lock older than ten minutes is a dead sweep's. */
-function lock(dir) {
-  mkdirSync(dirname(dir), { recursive: true });
+/** A process's start time as ps prints it, or null: with the pid it names one process, so a reused pid differs. */
+const startOf = (pid) => {
   try {
-    mkdirSync(dir);
-    return true;
+    return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
   } catch {
-    if (Date.now() - statSync(dir).mtimeMs < 10 * 60_000) return false;
-    rmSync(dir, { recursive: true, force: true });
-    return lock(dir);
+    return null;
   }
+};
+
+/** The holder a lock file records, or null when it is not one (a legacy directory lock, a torn or foreign file). */
+function holderOf(path) {
+  try {
+    const h = JSON.parse(readFileSync(path, 'utf8'));
+    return typeof h?.pid === 'number' && h.token ? h : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a holder is gone. Another host's is never judged dead: pids mean something on one machine. EPERM from
+ * kill(pid, 0) means the process exists. A live pid with another start time is a reused pid. When ps cannot say,
+ * the holder counts as alive: a held lock is the safe mistake. */
+function gone(h) {
+  if (h.host !== hostname()) return false;
+  try {
+    process.kill(h.pid, 0);
+  } catch (error) {
+    return error.code === 'ESRCH';
+  }
+  const now = startOf(h.pid);
+  return Boolean(h.start) && now !== null && now !== h.start;
+}
+
+/** Takes the lock at path and returns what it recorded ({pid, start, host, token}), or null while another sweep holds
+ * it. The record is written to a file of its own and link()ed into place: link fails with EEXIST like O_EXCL, and the
+ * content is there from the first instant. A holder that is gone is displaced by renaming its lock to a name of ours:
+ * of several sweeps that found it dead, one rename succeeds. We then read what we moved; if it is not the lock we
+ * judged dead, a third sweep took over meanwhile, and we link it back and give up. An unreadable lock (the old
+ * directory, a torn file) is a dead sweep's after ten minutes. afterRead is for tests: it runs between the read and
+ * the rename. */
+export function takeLock(path, { afterRead } = {}) {
+  mkdirSync(dirname(path), { recursive: true });
+  const mine = { pid: process.pid, start: startOf(process.pid), host: hostname(), token: randomBytes(8).toString('hex') };
+  const tmp = `${path}.${mine.token}.tmp`;
+  writeFileSync(tmp, JSON.stringify(mine));
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        linkSync(tmp, path);
+        return mine;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+      const held = holderOf(path);
+      afterRead?.(held);
+      let dead;
+      try {
+        dead = held ? gone(held) : Date.now() - statSync(path).mtimeMs >= 10 * 60_000;
+      } catch {
+        continue;
+      }
+      if (!dead) return null;
+      const aside = `${path}.dead.${mine.token}`;
+      try {
+        renameSync(path, aside);
+      } catch (error) {
+        if (error.code === 'ENOENT') continue;
+        throw error;
+      }
+      const moved = holderOf(aside);
+      if ((moved?.token ?? null) !== (held?.token ?? null)) {
+        try {
+          linkSync(aside, path);
+        } catch {}
+        rmSync(aside, { recursive: true, force: true });
+        return null;
+      }
+      rmSync(aside, { recursive: true, force: true });
+    }
+    return null;
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+}
+
+/** Removes the lock only if it is the one we made. Between the read and the unlink another sweep can only take it
+ * if it judged us gone, and we are running. */
+export function releaseLock(path, token) {
+  if (holderOf(path)?.token === token) rmSync(path, { force: true });
 }
 
 /** The checks before the repository loop. Their failure leaves $state/queue-run.failed (a name no repository's
@@ -141,7 +221,11 @@ function main(argv) {
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
   const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
   const held = join(state, 'queue.lock');
-  if (!lock(held)) return console.log('queue: another sweep is running; nothing done');
+  const mine = takeLock(held);
+  if (!mine) {
+    const other = holderOf(held);
+    return console.log(`queue: another sweep is running${other ? ` (pid ${other.pid}, started ${other.start})` : ''}; nothing done`);
+  }
   try {
     const refused = preflight(state, human);
     if (refused) return refused;
@@ -161,7 +245,7 @@ function main(argv) {
     }
     return failed ? 1 : 0;
   } finally {
-    rmSync(held, { recursive: true, force: true });
+    releaseLock(held, mine.token);
   }
 }
 
