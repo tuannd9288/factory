@@ -1,12 +1,13 @@
 // Whether a tier-3 pull request has the Human's approval of its change, read from the reviews JSON on stdin (GitHub's
 // list of a pull request's reviews; pages from `gh api --paginate --slurp` are flattened). Run in a checkout holding
 // the commits.
-//   node scripts/lib/approval.mjs --owners <CODEOWNERS> --author <login> --head <sha> [--base <sha>]
+//   node scripts/lib/approval.mjs --owners <CODEOWNERS> --author <login> --head <sha> [--base <sha>] [--after <time>]
 // Approved means: a user named in CODEOWNERS who is not the author, whose latest approving or blocking review is an
 // approval of the head commit, or, with --base, of a commit whose own patch the head carries unchanged: the same
 // `git patch-id --verbatim` of the change from its merge-base with the base, as after the queue merged main into the
 // branch. Any change to the patch needs a new approval. GitHub's own code-owner rule is not enough: it asks nothing of
-// an author who owns the code. Teams (@org/team) are not read. Exit 0 approved, 1 not approved, 2 could not judge.
+// an author who owns the code. With --after, an approval counts only when submitted after that time: the Human reads the
+// reviewer's reason when the pull request is raised, so an approval given before the raise does not stand for it. Teams (@org/team) are not read. Exit 0 approved, 1 not approved, 2 could not judge.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -52,11 +53,12 @@ const patchOf = (commit) => {
 const own = base ? patchOf(head) : '';
 const carried = (commit) => commit === head || (own !== '' && patchOf(commit) === own);
 
+const after = opt('--after') ?? '';
 const latest = new Map();
 for (const r of [...reviews].sort((a, b) => String(a.submitted_at).localeCompare(String(b.submitted_at)))) {
   if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) latest.set(r.user?.login?.toLowerCase(), r);
 }
-const approvals = [...latest.entries()].filter(([login, r]) => owners.has(login) && login !== author && r.state === 'APPROVED' && carried(r.commit_id));
+const approvals = [...latest.entries()].filter(([login, r]) => owners.has(login) && login !== author && r.state === 'APPROVED' && String(r.submitted_at) > after && carried(r.commit_id));
 const eligible = [...owners].filter((o) => o !== author);
 if (approvals.length) {
   for (const [login, r] of approvals)

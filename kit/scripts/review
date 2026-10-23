@@ -10,9 +10,14 @@
 # The reviewer runs only once `verify` (gate.yml, on pull_request) passed on the head: the cheaper judge first, and a
 # red head needs a new commit anyway. The job waits for it up to GATE_WAIT seconds (default 1800, verify's own
 # timeout), then fails closed.
-#   tier     labels the tier; on tier 3 it requires a code owner who is not the author to have approved the head
-#            commit, or a commit whose own patch the head carries unchanged (scripts/lib/approval.mjs); the queue
-#            re-runs it after that approval, so the reviewer never runs again for a click
+#   tier     labels the tier; below tier 3 by paths and labels it waits for `review` of its own workflow run (GITHUB_RUN_ID,
+#            up to GATE_REVIEW_WAIT, default 4200 s), so it is never green before the reviewer ended, and follows it: a
+#            red or cancelled `review` fails it. It reads the review's result annotation whatever the conclusion; a raise
+#            there (or in any review on this head) labels the pull request raised and tier-3, and a result left absent
+#            fails it. A raise needs an approval given after it. On tier 3 it requires a code owner who is not the
+#            author to have approved the head commit, or a commit whose own patch the head carries unchanged
+#            (scripts/lib/approval.mjs); the queue re-runs it after that approval, so the reviewer never runs again for a
+#            click
 #   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3)
 # The tier is main's policy on the diff from the merge-base, raised by every label the pull request ever had (GATE_PR
 # and GITHUB_REPOSITORY, read with gh). GATE_HEAD, the pull request's head, must be the head judged.
@@ -62,11 +67,75 @@ tier_of() {
   [ "$code" -eq 0 ] || { echo "$job: the tier could not be computed, so this check fails closed"; return 1; }
 }
 
+# Waits for the `review` job of this workflow run and reads its result annotation, whatever its conclusion: sets
+# $review_red when it ended red or cancelled, and $did_raise and $raised (one line) when it reported a raise. A review
+# that ended green and left no result annotation is read again GATE_RESULT_TRIES times (the listing may lag the job), then
+# fails closed: absence is never "no raise". Fails closed on a timeout, GATE_REVIEW_WAIT (default 4200 s), which is not
+# GATE_WAIT, the wait for verify.
+wait_review() {
+  local deadline=$((SECONDS + ${GATE_REVIEW_WAIT:-4200})) state tries=0
+  raised="" did_raise="" review_red=""
+  [ -n "${GITHUB_RUN_ID:-}" ] || { echo "tier: GITHUB_RUN_ID is unset, so the review of this run cannot be found, and this check fails closed"; return 1; }
+  while :; do
+    state=$(node scripts/lib/history.mjs raise --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head") ||
+      { echo "tier: the review of run $GITHUB_RUN_ID could not be read ($state), so this check fails closed"; return 1; }
+    case "$state" in
+      pending)
+        [ "$SECONDS" -lt "$deadline" ] || { echo "tier: review did not finish in time, so this check fails closed"; return 1; }
+        sleep "${GATE_POLL:-20}"
+        continue
+        ;;
+      "ok none" | "red none") ;;
+      "red absent") ;;
+      "ok absent")
+        tries=$((tries + 1))
+        [ "$tries" -lt "${GATE_RESULT_TRIES:-6}" ] || { echo "tier: the review ended and left no result annotation after $tries reads, so this check fails closed"; return 1; }
+        sleep "${GATE_RESULT_POLL:-10}"
+        continue
+        ;;
+      "ok raise "* | "red raise "*) did_raise=1; raised=${state#* raise }; [ -n "$raised" ] || raised="(no reason given)" ;;
+      *) echo "tier: the review of run $GITHUB_RUN_ID gave an answer this check does not know, so it fails closed"; return 1 ;;
+    esac
+    [ "${state%% *}" = red ] && review_red=1
+    return 0
+  done
+}
+
 case "$job" in
   tier)
     out=$(tier_of) || { echo "$out"; exit 1; }
-    echo "$out"
     n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
+    # Paths and labels already giving tier 3, a raise adds nothing: the wait is for the other tiers only. Every line that
+    # prints the reviewer's reason starts with a fixed prefix and holds it on one line with `##[` broken.
+    if [ "$n" != 3 ] && [ -n "${GATE_PR:-}" ]; then
+      wait_review || exit 1
+      if [ -n "$did_raise" ]; then
+        # Adding a label a pull request already has makes no event, and the approval must follow this one's: remove first.
+        if ! gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label raised >/dev/null 2>&1; then
+          # A failed remove is fine when raised is not there. When another account's raised is, tier would add nothing new
+          # and leave no event of its own, so it fails closed.
+          have=$(node scripts/lib/history.mjs labels --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") ||
+            { echo "tier: the label raised could not be removed, and the labels could not be read ($have), so this check fails closed"; exit 1; }
+          case ",$have," in *,raised,*) echo "tier: the label raised is on the pull request and could not be removed, so tier cannot make its own event for the raise, and this check fails closed"; exit 1 ;; esac
+        fi
+        gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label raised --add-label tier-3 >/dev/null ||
+          { echo "tier: the reviewer raised this change, and the labels raised and tier-3 could not be added; if raised does not exist, create it: gh label create raised --repo ${GITHUB_REPOSITORY:-}"; exit 1; }
+      fi
+      # The labels are read again: a label added during the wait counts.
+      out=$(tier_of) || { echo "$out"; exit 1; }
+      n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
+      if [ -n "$did_raise" ]; then
+        out="tier 3
+  raised by the reviewer: $raised"
+        n=3
+      fi
+      if [ -n "$review_red" ]; then
+        echo "$out"
+        echo "tier: review is red; tier follows it, so this check fails"
+        exit 1
+      fi
+    fi
+    echo "$out"
     if [ -n "${GATE_PR:-}" ]; then
       gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label "tier-$n" >/dev/null || echo "tier: could not add the label tier-$n, which only shows the tier"
       for k in 1 2 3; do
@@ -75,7 +144,13 @@ case "$job" in
     fi
     [ "$n" = 3 ] || exit 0
     reviews=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/pulls/${GATE_PR:-}/reviews") || { echo "tier: tier 3 needs the Human's approval, and the reviews could not be read"; exit 1; }
-    printf '%s' "$reviews" | node scripts/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" --base "$base" || exit 1
+    # A raised pull request needs an approval given after the raise: the Human reads the reason, not an earlier head.
+    after=""
+    if [ -n "${GATE_PR:-}" ]; then
+      after=$(node scripts/lib/history.mjs raised-at --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") || { echo "tier: when the pull request was raised could not be read ($after), so this check fails closed"; exit 1; }
+      [ -n "$after" ] || [ -z "${did_raise:-}" ] || after=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    fi
+    printf '%s' "$reviews" | node scripts/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" --base "$base" ${after:+--after "$after"} || exit 1
     exit 0
     ;;
   verdict)

@@ -275,3 +275,24 @@ test('the digest lists every merged pull request no live verdict covered, and Co
   assert.match(text, /- Chưa xác định \(không tính được patch-id trong bản clone\): o\/r#3\n/);
   assert.match(text, /- Lượt chạy Codex: 3 \(thuê bao Codex của người kiểm, trả theo tháng; không có giá API, không chia theo việc\)/);
 });
+
+test('the digest counts the pull requests the reviewer raised, per repository', () => {
+  const opts = { human: 'boss', costs: null, profile: false };
+  const raised = rowOf('o/r', pr({ number: 5, timelineItems: { nodes: [{ __typename: 'LabeledEvent', label: { name: 'raised' } }] } }), opts);
+  const kept = rowOf('o/r', pr({ number: 6, labels: { nodes: [{ name: 'raised' }, { name: 'tier-3' }] } }), opts);
+  const plain = rowOf('o/s', pr({ number: 7 }), opts);
+  assert.deepEqual([raised.raised, kept.raised, plain.raised], [true, true, false]);
+  const text = digest([raised, kept, plain], { since: '2026-10-14', until: '2026-10-21' });
+  assert.match(text, /- Reviewer nâng lên bậc 3 \(nhãn raised\), theo repo: o\/r 2, o\/s 0\n/);
+  assert.match(digest([], { since: 'a', until: 'b' }), /theo repo: không có việc\n/);
+});
+
+test('the digest counts raised on task rows, the rows it is made of', () => {
+  const opts = { human: 'boss', costs: null, profile: false };
+  const raised = rowOf('o/r', pr({ number: 8, labels: { nodes: [{ name: 'raised' }] } }), opts);
+  const plain = rowOf('o/r', pr({ number: 9 }), opts);
+  const task = ledger.taskRow('o/r', issue({}), [raised, plain]);
+  assert.equal(task.raised, true);
+  assert.equal(ledger.taskRow('o/r', issue({ number: 4 }), [plain]).raised, false);
+  assert.match(digest([task, ledger.taskRow('o/s', issue({ number: 5 }), [])], { since: 'a', until: 'b' }), /theo repo: o\/r 1, o\/s 0\n/);
+});
