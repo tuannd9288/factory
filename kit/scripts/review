@@ -267,7 +267,7 @@ case "${GATE_REVIEWER:-}" in
     if [ "$code" -ne 0 ]; then
       if [ "$code" -ne 3 ] && [ "$code" -ne 4 ]; then
         echo "::notice title=review-result::unavailable: crash"
-        echo "$job: the Claude reviewer failed (exit $code); this is not a finding on the change, so this check fails closed"
+        echo "$job: reviewer unavailable (crash); the Claude reviewer failed (exit $code), which is not a finding on the change, so this check fails closed"
       fi
       cat "$notes"
       exit 1
@@ -275,19 +275,19 @@ case "${GATE_REVIEWER:-}" in
     ;;
   "")
     echo "::notice title=review-result::unavailable: no-reviewer"
-    echo "$job: no reviewer is configured (repository variable GATE_REVIEWER is unset), so this check fails closed"
+    echo "$job: reviewer unavailable (no-reviewer); no reviewer is configured (repository variable GATE_REVIEWER is unset), so this check fails closed"
     exit 1
     ;;
   *)
     echo "::notice title=review-result::unavailable: no-reviewer"
-    echo "$job: unknown reviewer '$GATE_REVIEWER' (known: stub, claude), so this check fails closed"
+    echo "$job: reviewer unavailable (no-reviewer); unknown reviewer '$GATE_REVIEWER' (known: stub, claude), so this check fails closed"
     exit 1
     ;;
 esac
 checked=$(node scripts/lib/result.mjs --job "$job" --base "$fork" --head "$head" $claim <"$result")
 code=$?
 # A result result.mjs refuses says nothing about the change: unavailable, not a red round.
-[ "$code" -eq 2 ] && echo "::notice title=review-result::unavailable: malformed"
+[ "$code" -eq 2 ] && { echo "::notice title=review-result::unavailable: malformed"; echo "$job: reviewer unavailable (malformed); the reviewer's result does not count, so this check fails closed"; }
 printf '%s\n' "$checked"
 # review's verdict for verdict to read: fixed text, the SHAs it judged, the No-red line (by hash) and whether it blocks.
 [ "$code" -le 1 ] && echo "::notice title=review-verdict::head=$head base=$fork nored=$nored $([ "$code" -eq 0 ] && echo pass || echo block)"

@@ -193,8 +193,11 @@ const final = events.findLast((e) => e.type === 'result');
 const answer = final.structured_output;
 if (!answer || typeof answer !== 'object' || Array.isArray(answer)) unavailable('no-result', [quotaLine]);
 const written = JSON.stringify({ reviewer: pin.name, job, base, head, blocking: answer.blocking, noRed: answer.noRed, ...(answer.raise !== undefined ? { raise: answer.raise } : {}) });
-// The forms a secret could take in text: as it is, base64, hex, and base64 after one or two other bytes (the stable middle).
-const formsOf = (secret) => [secret, Buffer.from(secret).toString('base64'), Buffer.from(secret).toString('hex'), ...['x', 'xy'].map((p) => Buffer.from(p + secret).toString('base64').slice(4, -2))];
+// The forms a secret could take in text: as it is, hex, and base64 after none, one or two other bytes. Of those the group
+// that holds the other bytes is dropped, and so is the last, whose end depends on the byte after the secret: what is
+// left is whole groups of base64 that only the secret decides.
+const b64 = (text) => Buffer.from(text).toString('base64');
+const formsOf = (secret) => [secret, Buffer.from(secret).toString('hex'), ...['', 'x', 'xy'].map((p) => b64(p + secret).slice(p ? 4 : 0, Math.floor((p.length + secret.length) / 3) * 4))];
 for (const secret of [TOKEN, GH].filter((s) => s.length >= 8))
   if ([run.stdout, run.stderr, written].some((h) => formsOf(secret).some((form) => String(h).includes(form)))) {
     console.log("review: the reviewer's output held a secret value; its result is discarded, so this check fails closed");

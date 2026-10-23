@@ -197,7 +197,8 @@ describe('claude-reviewer', () => {
   });
 
   test('the leak scan also finds the token hex-encoded and base64-encoded after one or two other bytes', () => {
-    const forms = [Buffer.from(TOKEN).toString('hex'), Buffer.from(`x${TOKEN}`).toString('base64').slice(4, -2), Buffer.from(`xy${TOKEN}`).toString('base64').slice(4, -2)];
+    const b64 = (text) => Buffer.from(text).toString('base64');
+    const forms = [Buffer.from(TOKEN).toString('hex'), ...['x', 'xy'].map((p) => b64(p + TOKEN).slice(4, Math.floor((p.length + TOKEN.length) / 3) * 4))];
     for (const form of forms) {
       const out = review({ output: { blocking: [{ id: 'f1', claim: `see ${form}` }], noRed: 'unjudged' } });
       assert.equal(out.code, 4, `${form}: ${out.out}`);

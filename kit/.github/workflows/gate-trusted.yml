@@ -50,6 +50,7 @@ jobs:
     environment: reviewer
     timeout-minutes: 60
     permissions:
+      actions: read
       contents: read
       checks: read
     steps:
@@ -71,11 +72,13 @@ jobs:
       - name: Install the pinned Claude Code
         if: vars.GATE_REVIEWER == 'claude'
         run: |
-          npm ci --ignore-scripts --prefix scripts/reviewer --no-audit --no-fund
+          # A failed install is the reviewer being unavailable, not a finding on the change, and no red round.
+          down() { echo "::notice title=review-result::unavailable: not-installed"; echo "review: reviewer unavailable (not-installed); $1"; exit 1; }
+          npm ci --ignore-scripts --prefix scripts/reviewer --no-audit --no-fund || down "npm ci failed"
           bin="$PWD/scripts/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64"
           want=$(node -p "require('./scripts/lib/reviewer.json').version")
-          got=$(PATH="$bin:$PATH" claude --version) || { echo "the installed claude does not run"; exit 1; }
-          case "$got" in "$want "*) ;; *) echo "the installed claude is '$got', not $want"; exit 1 ;; esac
+          got=$(PATH="$bin:$PATH" claude --version) || down "the installed claude does not run"
+          case "$got" in "$want "*) ;; *) down "the installed claude is '$got', not $want" ;; esac
           echo "$bin" >>"$GITHUB_PATH"
         working-directory: trusted
       - run: |
