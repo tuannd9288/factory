@@ -126,3 +126,32 @@ of both unattended runs, with no `.envrc` and no `direnv exec`.
   starts with its slash. pstack can run unattended, so choice (a): unattended prompts start the skill with
   `/pstack:<skill>` at the prompt's start. pstack's two agents have no such guard (`init` lists `pstack:poteto-agent`
   and `pstack:comment-sicko`); #8 decides whether to forbid them in unattended runs.
+
+## Issue #4: the tag ruleset and attack 22, 2026-10-22
+
+On `tuannd9288/factory-scratch`, cloned over HTTPS only, as `tuan9288-agent` (`gh auth status` showed it active before
+every push). Rulesets imported by the Human: `factory-branches` (id 25631764), `factory-tags` (id 25631767, only bypass
+`RepositoryRole` 5). Logs: `~/factory-runs/issue-4/`.
+
+- **Tag push, refused.** `git tag probe-agent-tag && git push origin probe-agent-tag`: `GH013: Repository rule violations
+  found for refs/tags/probe-agent-tag ... Cannot create ref due to creations being restricted`.
+- **Release that creates a tag, refused.** `gh release create probe-agent-release --target main --notes probe -R tuannd9288/factory-scratch`:
+  `HTTP 422 ... Cannot create ref due to creations being restricted. Published releases must have a valid tag`.
+- **Draft release, accepted.** `gh release create probe-agent-draft --draft --notes probe -R tuannd9288/factory-scratch`
+  created an untagged draft (`.../releases/tag/untagged-ad55...`), so `factory-tags` refuses a release only when it would
+  create a tag ref; a draft, a release on an existing tag, an edit and a delete are not covered (only the draft was
+  probed). I deleted it at once with `gh release delete probe-agent-draft --yes` (listing empty after). Logs
+  `probe5-draft.log` starts with the date, identity (`tuan9288-agent` active), remote and command;
+  `probe5-draft-delete.log` has the date, identity and command, but no remote line.
+- `probe2-release.log` holds no identity line; the run shows `tuan9288-agent` active in `probe1-tag.log` lines 4-5.
+- **The Human's half (the Lead's comment on #4, which makes his release the bypass evidence):** as admin
+  `tuannd9288` he created the release `probe-human-tag` (`--target main`) and deleted it with `--cleanup-tag`; both succeeded, so `RepositoryRole` 5 resolves and bypasses.
+  A `git push` of a tag by him was not run; his release stands as the bypass evidence.
+- **Attack 22, passes.** `probe-22` cut from `main~1` plus one commit (`59ec9a5`), pull request #55, behind `main`.
+  `gh pr update-branch 55`: `PR branch updated` (merge commit `0297d7b`). Then `git reset --hard 59ec9a5` and
+  `git push --force-with-lease origin probe-22`: `GH013 ... Cannot force-push to this branch`; the remote stayed at
+  `0297d7b`. `gh pr close 55 --delete-branch` closed it and deleted the branch (`non_fast_forward` does not refuse a
+  deletion). So `factory-branches` on `~ALL` holds with the queue's update-by-merge.
+- **Change:** `bin/rulesets/tags.json` is `factory-tags` as imported; `bin/onboard-owner` wants it before and after the
+  kit lands, and its tests cover the file, the dry run, `--apply`, the read-back and a changed bypass list. Its live dry
+  run and apply on a fresh repository happen at #6's sitting, as the Human's step.

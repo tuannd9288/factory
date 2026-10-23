@@ -53,7 +53,10 @@ if (one) {
   if (method === 'DELETE') { state.rulesets.splice(i, 1); done(); }
   // GitHub answers with defaults the request did not set; a read-back compares only what was asked for.
   const r = state.rulesets[i];
-  done({ ...r, rules: r.rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { required_reviewers: [], ...x.parameters } } : x)) });
+  const read = { ...r, rules: r.rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { required_reviewers: [], ...x.parameters } } : x)) };
+  // So does the tag ruleset: a bypass actor with a field of its own, a parameter on the update rule, a top-level field.
+  if (r.target === 'tag') done({ ...read, current_user_can_bypass: 'never', bypass_actors: read.bypass_actors.map((b) => ({ ...b, actor_name: 'admin' })), rules: read.rules.map((x) => (x.type === 'update' ? { ...x, parameters: { update_allows_fetch_and_merge: false } } : x)) });
+  done(read);
 }
 const env = repo + '/environments/reviewer';
 if (path === env) {
@@ -140,6 +143,7 @@ test('the owner script shows every change it would make, and makes none without 
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /PUT repos\/tuannd9288\/app\/collaborators\/tuan9288-agent \{"permission":"push"\}/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-branches".*"~ALL".*"non_fast_forward"/);
+    assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-tags","target":"tag".*"~ALL".*"creation".*"update".*"deletion"/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-bootstrap"/);
     assert.match(out.out, /PUT repos\/tuannd9288\/app\/environments\/reviewer \{"deployment_branch_policy":\{"protected_branches":false,"custom_branch_policies":true\}\}/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/environments\/reviewer\/deployment-branch-policies \{"name":"main","type":"branch"\}/);
@@ -158,7 +162,7 @@ test('the owner script applies, reads back what it set, and on a second run chan
     assert.match(out.out, /read back: every setting as planned/);
     assert.match(out.out, /waiting: tuan9288-agent accepts the invitation/);
     const s = w.state();
-    assert.deepEqual(s.rulesets.map((r) => r.name).sort(), ['factory-bootstrap', 'factory-branches']);
+    assert.deepEqual(s.rulesets.map((r) => r.name).sort(), ['factory-bootstrap', 'factory-branches', 'factory-tags']);
     assert.deepEqual(s.environment.policies.map((p) => p.name), ['main']);
     w.set({ collaborator: 'write', invitations: [] });
     w.clear();
@@ -184,7 +188,7 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     const gate = writes.findIndex((l) => / -X POST repos\/tuannd9288\/app\/rulesets /.test(l));
     const drop = writes.findIndex((l) => / -X DELETE repos\/tuannd9288\/app\/rulesets\/\d+/.test(l));
     assert.ok(gate >= 0 && drop > gate, writes.join('\n'));
-    assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-gate']);
+    assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-gate', 'factory-tags']);
   } finally {
     w.cleanup();
   }
@@ -202,12 +206,53 @@ test('on the first run GitHub may answer 404 for the permission of an account no
   }
 });
 
+test('a tag ruleset whose bypass actor was changed is put back, and one that reads back as set is left alone', () => {
+  const w = world();
+  try {
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    w.set({ collaborator: 'write', invitations: [] });
+    const rulesets = w.state().rulesets.map((r) => (r.name === 'factory-tags' ? { ...r, bypass_actors: [] } : r));
+    w.set({ rulesets });
+    w.clear();
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const tagsId = w.state().rulesets.find((r) => r.name === 'factory-tags').id;
+    const writes = w.writes();
+    assert.equal(writes.length, 1, writes.join('\n'));
+    assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${tagsId} `));
+    assert.deepEqual(w.state().rulesets.find((r) => r.name === 'factory-tags').bypass_actors, [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' }]);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a second bypass actor on the live tag ruleset is taken out: exactly one PUT, to the factory-tags id', () => {
+  const w = world();
+  try {
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    w.set({ collaborator: 'write', invitations: [] });
+    const admin = { actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' };
+    w.set({ rulesets: w.state().rulesets.map((r) => (r.name === 'factory-tags' ? { ...r, bypass_actors: [admin, { actor_id: 6, actor_type: 'RepositoryRole', bypass_mode: 'always' }] } : r)) });
+    w.clear();
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const tagsId = w.state().rulesets.find((r) => r.name === 'factory-tags').id;
+    const writes = w.writes();
+    assert.equal(writes.length, 1, writes.join('\n'));
+    assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${tagsId} `));
+    assert.deepEqual(w.state().rulesets.find((r) => r.name === 'factory-tags').bypass_actors, [admin]);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('a setting that does not read back as set leaves the onboarding incomplete', () => {
   const w = world({ ignore: 'rulesets' });
   try {
     const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /incomplete: .*factory-branches/);
+    assert.match(out.out, /incomplete: .*factory-tags/);
   } finally {
     w.cleanup();
   }
@@ -219,6 +264,12 @@ test('the factory\'s rulesets: no rewrite on any branch, and one approval of the
   assert.deepEqual(branches.conditions.ref_name.include, ['~ALL']);
   assert.deepEqual(branches.rules, [{ type: 'non_fast_forward' }]);
   assert.deepEqual(branches.bypass_actors, []);
+  const tags = read('tags.json');
+  assert.equal(tags.target, 'tag');
+  assert.equal(tags.enforcement, 'active');
+  assert.deepEqual(tags.conditions.ref_name, { include: ['~ALL'], exclude: [] });
+  assert.deepEqual(tags.rules, [{ type: 'creation' }, { type: 'update' }, { type: 'deletion' }]);
+  assert.deepEqual(tags.bypass_actors, [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' }], 'only a repository admin');
   const bootstrap = read('bootstrap.json');
   assert.deepEqual(bootstrap.conditions.ref_name.include, ['~DEFAULT_BRANCH']);
   assert.deepEqual(bootstrap.bypass_actors, []);
