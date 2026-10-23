@@ -93,7 +93,7 @@ test('a second --post for one period updates the issue it finds, open or closed,
     const { out, calls } = ledgerRun(dir, [{ number: 3, title: 'Bản tin xưởng 2026-10-10 → 2026-10-17', state: 'OPEN' }, { number: 7, title: TITLE, state: 'CLOSED' }]);
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.match(calls, /issue list .*--state all/);
-    assert.match(calls, /issue edit 7 --repo o\/factory --body-file \S+/);
+    assert.match(calls, /issue edit 7 --repo o\/factory --add-label digest --body-file \S+/);
     assert.doesNotMatch(calls, /issue create/);
     assert.match(out.stdout, /issues\/7/);
   });

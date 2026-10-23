@@ -352,17 +352,20 @@ export function taskRow(repo, issue, prRows) {
   };
 }
 
-/** What the queue left in its state folder: every `queue-*.failed` file's first line, and for each repository the
- * time of its last clean sweep (`queue-<owner>-<name>.ok`), null when none was recorded. */
+/** What the queue left in its state folder: every `queue-*.failed` file's first line, and the time of the last clean
+ * sweep in every `queue-*.ok` file, with a null for each of the ledger's repositories that has no such record (an
+ * empty file is none). `missing` is true when the folder itself is not there, so nothing could be checked. */
 export function queueState(dir, repos) {
-  const names = existsSync(dir) ? readdirSync(dir).sort() : [];
+  const missing = !existsSync(dir);
+  const names = missing ? [] : readdirSync(dir).sort();
   const first = (file) => readFileSync(join(dir, file), 'utf8').split('\n')[0].trim();
+  const ok = names.filter((f) => /^queue-.*\.ok$/.test(f)).map((f) => ({ label: f, at: first(f) })).filter((x) => x.at);
+  const known = new Set(ok.map((x) => x.label));
   return {
+    dir,
+    missing,
     failed: names.filter((f) => /^queue-.*\.failed$/.test(f)).map((f) => ({ file: f, text: first(f) })),
-    ok: new Map(repos.map((repo) => {
-      const file = `queue-${repo.replace('/', '-')}.ok`;
-      return [repo, names.includes(file) ? first(file) : null];
-    })),
+    ok: [...ok, ...repos.filter((repo) => !known.has(`queue-${repo.replace('/', '-')}.ok`)).map((repo) => ({ label: repo, at: null }))],
   };
 }
 
@@ -427,9 +430,10 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
   }
   if (queue) {
     lines.push('', '## Hàng đợi merge (bin/factory-queue)', '');
-    if (queue.failed.length) for (const f of queue.failed) lines.push(`- ${f.file}: ${f.text}`);
+    if (queue.missing) lines.push(`- Không kiểm tra được hàng đợi: thư mục trạng thái ${queue.dir} không có (hàng đợi chưa chạy, hoặc FACTORY_STATE sai).`);
+    else if (queue.failed.length) for (const f of queue.failed) lines.push(`- ${f.file}: ${f.text}`);
     else lines.push('- Không có file .failed.');
-    for (const [repo, at] of queue.ok) lines.push(`- Lần quét thành công gần nhất, ${repo}: ${at ?? 'chưa ghi nhận lần quét thành công'}`);
+    for (const { label, at } of queue.ok) lines.push(`- Lần quét thành công gần nhất, ${label}: ${at ?? 'chưa ghi nhận lần quét thành công'}`);
   }
   if (secrets.size) {
     lines.push('', '## Secret cấp repo (phải là 0: job của mọi nhánh đều đọc được)', '');
@@ -607,10 +611,13 @@ function main(argv) {
   writeFileSync(file, text);
   gh(['label', 'create', 'digest', '--repo', opts.post, '--force']);
   const title = `Bản tin xưởng ${opts.since} → ${opts.until}`;
-  // GitHub's search is fuzzy: it only narrows the list, and the titles are compared here.
-  const found = JSON.parse(gh(['issue', 'list', '--repo', opts.post, '--state', 'all', '--search', `"${title}" in:title`, '--limit', '100', '--json', 'number,title'])).filter((i) => i.title === title);
+  // Neither --search nor --label: both go through GitHub's search index, which lags behind a new issue. A plain list
+  // reads the repository, and the titles are compared here.
+  const all = JSON.parse(gh(['issue', 'list', '--repo', opts.post, '--state', 'all', '--limit', '1000', '--json', 'number,title']));
+  if (all.length >= 1000) throw new Error(`${opts.post} has 1000 issues or more, so the list may be cut short and a digest could be posted twice; nothing posted`);
+  const found = all.filter((i) => i.title === title);
   if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}": ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
-  if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--body-file', file]).trim());
+  if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
 }
 

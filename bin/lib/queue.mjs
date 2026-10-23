@@ -170,7 +170,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     process.exitCode = main(process.argv.slice(2)) ?? 0;
   } catch (error) {
-    console.error(`factory-queue: ${String(error.stderr || error.message).trim()}`);
+    const why = String(error.stderr || error.message).trim();
+    console.error(`factory-queue: ${why}`);
     process.exitCode = 2;
+    // Best effort: the digest should show a failure before the repository loop, a plist typo among them.
+    try {
+      const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+      mkdirSync(state, { recursive: true });
+      writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
+    } catch {}
   }
 }
