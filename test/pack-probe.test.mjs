@@ -221,12 +221,21 @@ if (prompt.includes('gh issue create')) {
   console.log(s.a.split('__CTL__').join(ctl));
 }
 `;
+const FAKE_SSH = String.raw`#!/usr/bin/env node
+require('fs').appendFileSync(process.env.MOCK_CALLS, 'ssh ' + process.argv.slice(2).join(' ') + ' @' + process.cwd() + '\n');
+const mode = process.env.MOCK_SSH || 'ok';
+if (mode === 'ok') console.error("Hi tuannd9288! You've successfully authenticated, but GitHub does not provide shell access.");
+else if (mode === 'denied') console.error('git@github.com: Permission denied (publickey).');
+else console.error('ssh: connect to host github.com port 22: Operation timed out');
+process.exit(mode === 'ok' ? 1 : 255);
+`;
 const FAKE_GH = String.raw`#!/usr/bin/env node
 const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.MOCK_CALLS, 'gh ' + a.join(' ') + '\n');
 const account = process.env.MOCK_ACCOUNT || 'tuan9288-agent';
 if (a[0] === 'auth') { console.log('github.com\n  ✓ Logged in to github.com account ' + account + ' (keyring)\n  - Active account: true'); process.exit(0); }
+if (a[0] === 'config' && a[1] === 'get') { console.log(process.env.MOCK_GH_LOGIN ?? 'tuan9288-agent'); process.exit(0); }
 if (a[0] === 'issue' && a[1] === 'list') { console.log(JSON.stringify([{ number: 3, title: 'Pack probe 0' }])); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'list' && process.env.MOCK_NO_PR) { console.log('[]'); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'list') { console.log(JSON.stringify([{ number: 7, closingIssuesReferences: [{ number: 3 }] }])); process.exit(0); }
@@ -255,6 +264,7 @@ async function world(over = {}) {
   const put = (name, text) => (writeFileSync(join(bin, name), text), chmodSync(join(bin, name), 0o755));
   put('claude', FAKE_CLAUDE);
   put('gh', FAKE_GH);
+  put('ssh', FAKE_SSH);
   put('direnv', '#!/bin/sh\nshift\nshift\nexec "$@"\n'); // direnv exec . <command>
   put('ledger', `#!/bin/sh\nprintf 'repo\\ttask\\tprs\\tcost_usd\\tcost_note\\n'\nprintf 'tuannd9288/app\\t3\\t7\\t${over.cost ?? '0.4100'}\\t\\n'\n`);
   const seed = join(dir, 'seed');
@@ -680,5 +690,73 @@ test('the seed script makes a small Node repository whose tests pass, and refuse
     assert.notEqual(spawnSync(join(factory, 'probes/pack-seed.sh'), [seed], { encoding: 'utf8' }).status, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- additions: the contract's start / next step / one session per issue, and the #24 identity step ---
+
+test('the contract carries start, next step and one session per issue: pstack answers by hand, each checked by prose, the lease cited', () => {
+  const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
+  const section = contract.slice(contract.indexOf('## Start, next step, one session per issue'), contract.indexOf('## Running the probe'));
+  assert.ok(section.length > 100, 'no section Start, next step, one session per issue');
+  for (const q of [/what launches a session on an issue/i, /what the session calls next/i, /what stops two sessions from working on one issue/i]) assert.match(section, q);
+  assert.equal((section.match(/the Human or a Lead, by hand/g) ?? []).length, 3);
+  assert.ok((section.match(/`prose`/g) ?? []).length >= 3, 'each clause names prose as its check');
+  assert.match(section, /agent-desk@0cd59d55 `AGENTS\.md:113`/);
+  assert.match(section, /lease[^.]*push GitHub accepts once/);
+  assert.match(section, /builds? nothing|nothing is built/i);
+  assert.ok(readFileSync(join(factory, 'AGENTS.md'), 'utf8').split('\n').length - 1 <= 167, "the root AGENTS.md grew past its line budget");
+});
+
+test('ssh -T output: authenticated gives the login, denied and timed out give none', async () => {
+  const { parseSshLogin } = await probeModule();
+  assert.equal(parseSshLogin("Hi tuannd9288! You've successfully authenticated, but GitHub does not provide shell access.\n"), 'tuannd9288');
+  assert.equal(parseSshLogin("Hi tuan9288-agent! You've successfully authenticated, but GitHub does not provide shell access.\n"), 'tuan9288-agent');
+  assert.equal(parseSshLogin('git@github.com: Permission denied (publickey).\n'), 'none');
+  assert.equal(parseSshLogin('ssh: connect to host github.com port 22: Operation timed out\n'), 'none');
+  assert.equal(parseSshLogin(''), 'none');
+  assert.equal(parseSshLogin('Hi ! nonsense'), 'none');
+});
+
+test('the gh login is the first line when it is a login, and nothing else is ever repeated', async () => {
+  const { parseGhLogin } = await probeModule();
+  assert.equal(parseGhLogin('tuan9288-agent\n'), 'tuan9288-agent');
+  assert.equal(parseGhLogin('tuan9288-agent\noauth_token: gho_SECRET\n'), 'tuan9288-agent');
+  assert.equal(parseGhLogin(''), 'none');
+  assert.equal(parseGhLogin('gho_SECRETTOKEN with spaces\n'), 'none');
+  assert.equal(parseGhLogin('error: could not read hosts.yml\n'), 'none');
+});
+
+test('the probe prints "#24 identity" for ssh and gh from the launcher\'s own environment, before the sessions, and it never counts', async () => {
+  const w = await world();
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /^#24 identity ssh: tuannd9288$/m);
+    assert.match(r.out, /^#24 identity gh: tuan9288-agent$/m);
+    assert.doesNotMatch(r.out, /(PASS|FAIL|INCONCLUSIVE) .*identity/i);
+    const calls = w.calls().split('\n');
+    const ssh = calls.findIndex((l) => l.startsWith('ssh '));
+    assert.ok(ssh >= 0, 'ssh -T never ran');
+    assert.ok(ssh < calls.findIndex((l) => l.startsWith('claude -p')), 'ssh ran after a session');
+    assert.match(calls[ssh], /^ssh -T -o BatchMode=yes -o ConnectTimeout=10 git@github\.com @.*\/app$/);
+    assert.ok(calls.some((l) => l.startsWith('gh config get -h github.com user')), 'the gh login was not read with gh config get');
+    assert.ok(existsSync(join(w.dir, 'logs/identity.log')));
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('an ssh that does not authenticate prints none and the probe goes on; a gh login that is not the agent only shows', async () => {
+  const w = await world({ env: { MOCK_SSH: 'timeout', MOCK_GH_LOGIN: 'tuannd9288' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /^#24 identity ssh: none$/m);
+    assert.match(r.out, /^#24 identity gh: tuannd9288$/m);
+    w.clean();
+  } finally {
+    w.cleanup();
   }
 });
