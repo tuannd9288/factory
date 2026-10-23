@@ -455,6 +455,8 @@ describe('review, verdict, tier and rounds', () => {
       'bin/gh': [
         '#!/bin/sh',
         // A runs listing is asked for a head: any other head lists nothing, as GitHub would for a head that is not the run's.
+        // A remove of the label raised fails while noremove exists.
+        'case "$*" in *"--remove-label raised"*) if [ -e "$FAKE/noremove" ]; then echo boom >&2; exit 1; fi ;; esac',
         'case "$*" in *head_sha=*) h=${2#*head_sha=}; h=${h%%&*}; if [ "$h" != "$(cat "$FAKE/head")" ]; then echo \'{"total_count":0,"workflow_runs":[]}\'; exit 0; fi ;; esac',
         // The label query is answered only when it asks who added each label: the approval time follows the bot's own event.
         'case "$*" in *itemTypes:*LABELED_EVENT*) case "$*" in *"actor{login}"*) ;; *) echo "fake gh: the label query does not ask for actor{login}" >&2; exit 1 ;; esac ;; esac',
@@ -527,6 +529,8 @@ describe('review, verdict, tier and rounds', () => {
     return again(kind, head, env);
   };
   const pr = { GATE_PR: '7', GATE_PR_AUTHOR: 'agent-bot', GITHUB_RUN_ID: '99' };
+  const beforeNoRemove = () => write(fake, { noremove: null });
+  beforeEach(beforeNoRemove);
   // Every test starts from the same fake GitHub: a test that fails before its last line restores nothing.
   beforeEach(() => {
     verify('success');
@@ -1074,6 +1078,22 @@ describe('review, verdict, tier and rounds', () => {
     const out = again('tier', first.head, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+  });
+  test('tier fails closed when it cannot remove a raised label that is on the pull request, and goes on when none is', () => {
+    beforeNoRemove();
+    const timeline = (...names) =>
+      JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: names.map((name) => ({ label: { name }, createdAt: '2026-10-21T08:00:00Z', actor: { login: 'tuan9288-agent' } })) } } } } });
+    annotations('why');
+    write(fake, { 'labels.json': timeline(), 'labels2.json': timeline('raised'), 'labels.n': null, noremove: '' });
+    let out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /raised is on the pull request and could not be removed/);
+    assert.doesNotMatch(out.edits, /--add-label/);
+    write(fake, { 'labels2.json': timeline('bug'), 'labels.n': null });
+    out = again('tier', out.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.edits, /--add-label raised --add-label tier-3\n/);
+    write(fake, { noremove: null });
   });
   test('tier 3 waits for a code owner other than the author to approve the head commit', () => {
     labels();
