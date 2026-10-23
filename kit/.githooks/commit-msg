@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# The subject line is what the ledger, the digest and git log show: present, at most 72 characters, not a placeholder.
-subject=$(sed -n '/^[^#]/{p;q;}' "$1")
-if [ -z "$subject" ]; then
-  echo "commit-msg: the subject line is empty"
-  exit 1
-fi
-if [ "${#subject}" -gt 72 ]; then
-  echo "commit-msg: the subject has ${#subject} characters; at most 72"
-  exit 1
-fi
-case "$subject" in
-  WIP* | wip* | "fix" | "update" | "changes" | "." )
-    echo "commit-msg: say what the commit changes, not '$subject'"
-    exit 1
-    ;;
-esac
-exit 0
+# The subject line is what the ledger, the digest and git log show. The rules live in scripts/lib/subject.mjs, which
+# `scripts/verify` reads too; this is the fast local copy, so a bad subject is refused before it is pushed.
+exec node "$(dirname "$0")/../scripts/lib/subject.mjs" "$1"

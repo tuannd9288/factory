@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # The factory's ledger and weekly digest, read from GitHub and the repositories' Claude Code profiles; no model runs.
 #   bin/factory-ledger [--repo owner/name]... [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--rows | --digest]
-#                      [--post owner/name]
+#                      [--post owner/name] [--profile-dir <dir>]...
+#   bin/factory-ledger --check [--latest N] [--profile-dir <dir>]...
 # --rows prints one tab-separated row per task (one pull request opened in the window); --digest (the default) prints
 # the Vietnamese digest; --post files it as an issue labelled "digest" in the named repository (the factory's own).
+# --check is the canary: over the latest N assistant entries of every profile under AGENT_PROFILES plus the --profile-dir
+# folders it lists the key paths with their types (opening only message and message.usage) and names the fields the
+# ledger reads that are missing, or stale (absent from the newest session file or the newest 10 entries); it prints no
+# value, counts the entries of the extra folders that record no cwd, and exits 1 on a missing or stale field.
 # Without --repo it reads every repository under FACTORY_ROOT (default: this clone) that has joined.
 exec node "$(dirname "$0")/lib/ledger.mjs" "$@"

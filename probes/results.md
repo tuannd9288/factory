@@ -75,3 +75,83 @@ already holding main, six of six required checks green on that head.
 | C18 | #52 | tier-1 | landed | - |
 | C19 | #53 | tier-1 | landed | - |
 | C20 | #54 | tier-1 | landed | - |
+
+## Attack 23 and the pin trial (issue #3), Claude Code 2.1.308, 2026-10-22
+
+Folders on the Mac mini under `~/factory-probes/attack-23`: `case2/{a,b}` (names `pstack-f713f14`, `pstack-1e5c90a`),
+`case1/{a,b}` (name `pstack-pin` in both, pins f713f14 and 1e5c90a). Each holds one commit with its settings file.
+Logs: `~/factory-runs/issue-3/`.
+
+**Registry half, unlogged scratch profile (`CLAUDE_CONFIG_DIR=$T/registry`): no login asked, but it fails.**
+`claude plugin install pstack@pstack-f713f14 --scope project` printed `Plugin "pstack" not found in marketplace
+"pstack-f713f14"`, likewise for `pstack-1e5c90a` and `pstack-pin`; `plugin list --json` was `[]` and no `plugins/`
+directory appeared. That profile was fresh, never logged in and had trusted nothing, all at once. The same install
+on the writer profile, which trusted `case2/a`, succeeded. Control (`fix-3a-control.log`): on the writer profile, logged
+in, in `case1/a`, which it has not trusted, `claude plugin install pstack@pstack-pin --scope project` failed with the
+same `not found` error. So an untrusted folder fails even on a logged-in profile.
+
+**Case 2 (two names, one writer profile, installs without cache override): each folder loads its own pin; `git status`
+failed before the reorder and is empty after; the registry checks were not run.**
+- `plugin list --json` run from `a` showed `pstack@pstack-f713f14` 0.15.25 `enabled: true` and `pstack@pstack-1e5c90a`
+  `enabled: false`; run from `b` the reverse. `claude -p --max-turns 1 --output-format stream-json --verbose "reply ok"`:
+  the `init` event's `plugins[]` for `a` held `pstack` at `.../plugins/cache/pstack-f713f14/pstack/0.15.25` and for `b`
+  `.../cache/pstack-1e5c90a/pstack/0.15.24`; 54 pstack skills listed in each. Both marketplaces are in
+  `plugin marketplace list --json`.
+- `git status --porcelain` before the reorder: ` M .claude/settings.json` after the install (22 lines moved, same
+  content). After shipping the file in the installer's order (`jq --indent 2 '{permissions, enabledPlugins,
+  extraKnownMarketplaces}'`, `cmp`-identical to what the installer wrote), committed as the baseline in `case2/a`:
+  uninstall left ` M` with one change, `"enabledPlugins": {}` in place of `{"pstack@pstack-f713f14": true}`
+  (`fix-2-proof.log`); after the install again, `git status --porcelain` was empty.
+- With `CLAUDE_CODE_PLUGIN_CACHE_DIR=$C/plugins` (the plan's session half) an empty override made the install fail with
+  the same `not found` error, and a session loaded no pstack (`init` lists only the three builtin plugins). An empty
+  override loads nothing; a filled one was not tried.
+- Not run: `.orphaned_at` and `known_marketplaces.json` stability across the third listing sit in the profile, which an
+  agent does not open. The three `plugin list` outputs above were stable.
+
+**Case 1 (one name, two pins), and the registry checks, move to #9, the shared writer profile.** Not run here: the
+`case1` folders are untrusted by the writer profile.
+
+**#3 proper, `case2/a`, writer profile, no override.** The profile was set by `CLAUDE_CONFIG_DIR` in the environment
+of both unattended runs, with no `.envrc` and no `direnv exec`.
+- Interactive (Herdr sibling pane, `claude` v2.1.308): typed `/pstack:poteto-mode say which skill you are running and
+  stop`; output `I'm running the pstack:poteto-mode skill. I've stopped there as you asked.` The typed form resolves.
+- Unattended, typed form: `claude -p --max-turns 2 --output-format stream-json --verbose "/pstack:poteto-mode say
+  which skill you are running and stop"` answered `I'm running the **poteto-mode** skill from the pstack plugin,
+  version 0.15.25.` The skill ran.
+- Unattended, skill named in prose, prompt `Run the pstack poteto-mode skill (Skill tool, skill name
+  pstack:poteto-mode) with the task: say which skill you are running and stop.`: the model called the Skill tool and
+  got `Skill pstack:poteto-mode cannot be used with Skill tool due to disable-model-invocation. Ask the user to run
+  /pstack:poteto-mode themselves`. It did not run.
+- Answer to the open question: `disable-model-invocation: true` stops a skill the prompt only names, not one the prompt
+  starts with its slash. pstack can run unattended, so choice (a): unattended prompts start the skill with
+  `/pstack:<skill>` at the prompt's start. pstack's two agents have no such guard (`init` lists `pstack:poteto-agent`
+  and `pstack:comment-sicko`); #8 decides whether to forbid them in unattended runs.
+
+## Issue #4: the tag ruleset and attack 22, 2026-10-22
+
+On `tuannd9288/factory-scratch`, cloned over HTTPS only, as `tuan9288-agent` (`gh auth status` showed it active before
+every push). Rulesets imported by the Human: `factory-branches` (id 25631764), `factory-tags` (id 25631767, only bypass
+`RepositoryRole` 5). Logs: `~/factory-runs/issue-4/`.
+
+- **Tag push, refused.** `git tag probe-agent-tag && git push origin probe-agent-tag`: `GH013: Repository rule violations
+  found for refs/tags/probe-agent-tag ... Cannot create ref due to creations being restricted`.
+- **Release that creates a tag, refused.** `gh release create probe-agent-release --target main --notes probe -R tuannd9288/factory-scratch`:
+  `HTTP 422 ... Cannot create ref due to creations being restricted. Published releases must have a valid tag`.
+- **Draft release, accepted.** `gh release create probe-agent-draft --draft --notes probe -R tuannd9288/factory-scratch`
+  created an untagged draft (`.../releases/tag/untagged-ad55...`), so `factory-tags` refuses a release only when it would
+  create a tag ref; a draft, a release on an existing tag, an edit and a delete are not covered (only the draft was
+  probed). I deleted it at once with `gh release delete probe-agent-draft --yes` (listing empty after). Logs
+  `probe5-draft.log` starts with the date, identity (`tuan9288-agent` active), remote and command;
+  `probe5-draft-delete.log` has the date, identity and command, but no remote line.
+- `probe2-release.log` holds no identity line; the run shows `tuan9288-agent` active in `probe1-tag.log` lines 4-5.
+- **The Human's half (the Lead's comment on #4, which makes his release the bypass evidence):** as admin
+  `tuannd9288` he created the release `probe-human-tag` (`--target main`) and deleted it with `--cleanup-tag`; both succeeded, so `RepositoryRole` 5 resolves and bypasses.
+  A `git push` of a tag by him was not run; his release stands as the bypass evidence.
+- **Attack 22, passes.** `probe-22` cut from `main~1` plus one commit (`59ec9a5`), pull request #55, behind `main`.
+  `gh pr update-branch 55`: `PR branch updated` (merge commit `0297d7b`). Then `git reset --hard 59ec9a5` and
+  `git push --force-with-lease origin probe-22`: `GH013 ... Cannot force-push to this branch`; the remote stayed at
+  `0297d7b`. `gh pr close 55 --delete-branch` closed it and deleted the branch (`non_fast_forward` does not refuse a
+  deletion). So `factory-branches` on `~ALL` holds with the queue's update-by-merge.
+- **Change:** `bin/rulesets/tags.json` is `factory-tags` as imported; `bin/onboard-owner` wants it before and after the
+  kit lands, and its tests cover the file, the dry run, `--apply`, the read-back and a changed bypass list. Its live dry
+  run and apply on a fresh repository happen at #6's sitting, as the Human's step.

@@ -51,6 +51,9 @@ Everything else that can be undone, agents decide and report after.
 - This folder stays out of every sync between the Macs. Code moves only through GitHub.
 - `.gitignore` admits only the factory's own files, so every repository folder is ignored.
 - A change to `kit/` changes every repository's gate at its next kit pull request: it is tier 3 here.
+- The weekly digest is `bin/factory-ledger --post tuannd9288/factory`: it posts even when the canary (`--check`) finds a
+  field missing or stale, saying so in one line. No job runs it yet; its schedule (launchd, as the agents' account) is
+  the Human's to set up.
 
 | Path | What it is |
 |---|---|
@@ -59,7 +62,7 @@ Everything else that can be undone, agents decide and report after.
 | `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
-| `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest |
+| `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results; `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/` |
@@ -71,8 +74,9 @@ Everything else that can be undone, agents decide and report after.
 Two halves, the Human's first. From this clone, logged into `gh` as the repository's owner, he runs
 `bin/onboard-owner <owner/repo> --id <id>`, reads the changes it prints, and runs it again with `--apply`. The id is
 the repository's own (`gh api repos/<owner/repo> --jq .id`), so a typo or a renamed repository is refused. It invites
-the agents' account (write), sets `factory-branches` (every branch: no rewrite) and `factory-bootstrap` (`main`: a
-pull request, one approval of the last push, merge commits only), creates the `reviewer` environment for `main`, and
+the agents' account (write), sets `factory-branches` (every branch: no rewrite), `factory-tags` (every tag: no create,
+update or delete, but for a repository admin) and `factory-bootstrap` (`main`: a pull request, one approval of the
+last push, merge commits only), creates the `reviewer` environment for `main`, and
 reads it all back; it calls only `gh api`, never `git` and nothing the repository holds. Once the agents' account
 has accepted the invitation, an agent runs `bin/onboard <repo-url>` from this root, logged into `gh` as that account.
 It refuses any other login, and a `main` without the bootstrap pull request rule:
@@ -136,7 +140,19 @@ and profile, after the Human has opened `claude` in the repository and trusted t
 repository root with `claude plugin install pstack@pstack-f713f14 --scope project`. Never at user scope: no install
 without `--scope project`, and never the `--marketplace` form, which declares the marketplace in the profile's user
 settings. A new pin is a new marketplace name, in a tier-3 pull request per repository; attack 23 checks that two
-pins share one profile without clashing.
+pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-22 (`probes/results.md`, attack 23):
+
+- The install fails with `Plugin "pstack" not found in marketplace` in a folder the profile has not trusted (logged-in
+  writer profile, untrusted `case1/a`). The kit ships `.claude/settings.json` in the order the installer writes: uninstalling
+  and installing again in `case2/a` on the same profile left `git status` empty (a first install on a new profile was
+  not tried). An uninstall rewrites `enabledPlugins` to `{}`.
+- 53 of 54 pstack skills carry `disable-model-invocation`, so the model's own Skill call is refused; `setup-pstack`
+  does not. The agents `pstack:poteto-agent` and `pstack:comment-sicko` have no guard: a model may spawn them, and with
+  poteto-agent poteto-mode's playbook, in a run nobody typed (#8 decides whether to forbid that).
+- `claude -p "/pstack:poteto-mode …"` starts the skill; a prompt that only names it does not. So an unattended prompt
+  starts a skill explicitly with `/pstack:<skill>` at its start; without that the run follows the kit's `AGENTS.md`
+  and whatever the model spawns.
+- Two pins under two marketplace names share one profile, each folder loading its own.
 
 pstack is a Cursor plugin; in Claude Code its texts run, and these parts do not, so the factory does not use them:
 

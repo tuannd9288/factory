@@ -10,12 +10,12 @@ This repository is in the factory (`tuannd9288/factory`). Its gate lives here, i
 | Command | Healthy output |
 |---|---|
 | `scripts/setup` | `setup: hooks from .githooks` |
-| `scripts/verify` | `verify: 5 passed in 12s` (prints only failures and this line) |
+| `scripts/verify` | `verify: 6 passed in 12s` (prints only failures and this line) |
 | `scripts/verify --fast` | `verify: 2 passed in 1s` (the pre-commit hook runs it) |
 | `scripts/verify --tests <files>` | `verify: 1 passed in 2s`; JUnit in `.gate/report.xml` |
 | `scripts/tier` | `tier 1` (2: load-bearing path or dependency; 3: a path in `.gate/protected`, or label `needs-human`) |
 | `scripts/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
-| `scripts/prove-check --all` | `prove-check: 6 checks fail on their fixtures` |
+| `scripts/prove-check --all` | `prove-check: 7 checks fail on their fixtures` |
 | `scripts/live-verify <pr>` | `live-verify: PASS on #12 (head 1a2b3c4, patch 5d6e7f8)`, posted on the pull request |
 
 Run `scripts/setup` once per clone. Run `scripts/verify` and `scripts/red-check --base origin/main` before every
@@ -66,7 +66,9 @@ merged pull request, whether a verdict covered its head, and the weekly digest l
 
 ## Where pstack yields
 
-pstack's playbooks run here, except at these six points, where the gate's rule wins:
+pstack's playbooks run here when a session types `/pstack:<skill>`, at the prompt's start in `claude -p` too. Its
+skills but `setup-pstack` refuse the model's own call; its agents `poteto-agent` and `comment-sicko` do not. They
+yield at these six points, where the gate's rule wins:
 
 - Never rewrite a pushed commit: no rebase or amend of a pushed branch, no force-push. Bring `main` in by merging
   it (`git pull --no-rebase`). The round count and the Human's tier-3 approval live on the pushed commits.
@@ -108,14 +110,14 @@ answer; a reversible question never blocks the work.
 | Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `scripts/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
 | Tier-3 paths are one list, and CODEOWNERS ends with exactly it | `.gate/protected`; `verify` (`policy`) |
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
-| Commit subject present, at most 72 characters, never `wip` or a placeholder | `.githooks/commit-msg` |
+| Commit subject present, at most 72 characters, never `wip`, a placeholder, `fixup!` or `squash!` | `verify` (`subjects`, every commit of the change); `.githooks/commit-msg` is the local copy |
 | Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
 | Auto-merge only on a base of `main`; a pull request opens only after a local pass; a waiting `tier` or `needs-human` stops your pushes | prose |
 | Auto-merge armed only while a live PASS or PASS+NOTES covers the head or its patch; disarmed before a new patch is pushed | `scripts/live-verify --covered`; the ledger lists each merged pull request no verdict covered |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
 | Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
 | No force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`), and `.claude/settings.json` deny rules |
-| No `--no-verify`, tags, releases; no reads of `.env` or of the Human's own Claude Code and Cursor profiles (`~/.claude*`, `~/.cursor/`), whose transcripts are his, or of the verifier's Codex profile, which holds its login | `.claude/settings.json` deny rules, in Claude Code only; nothing on GitHub refuses a tag or a release |
+| No `--no-verify`, tags, releases; no reads of `.env` or of the Human's own Claude Code and Cursor profiles (`~/.claude*`, `~/.cursor/`), whose transcripts are his, or of the verifier's Codex profile, which holds its login | `.claude/settings.json` deny rules, in Claude Code only; for tags, and for a release that would create one, also the ruleset `factory-tags`; a draft is not refused |
 | Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
 | A candidate's code runs only in `gate.yml`'s `verify`: on `pull_request`, which cannot write `main`'s Actions cache, never under `pull_request_target`; on a GitHub-hosted runner, never on a self-hosted one that also runs `main`'s or a deploy's jobs; with no secret and a read-only token | the factory's tests check the kit's workflows. A pull request that changes `gate.yml` runs its own copy for its `verify`; it is tier 3, and the Human reads that file before approving |
 | `AGENTS.md` at most 150 lines; `CLAUDE.md` is `@AGENTS.md` | `scripts/verify` (`instructions`) |

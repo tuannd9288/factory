@@ -1,0 +1,63 @@
+{
+  "advisorModel": "synthetic",
+  "apiBlockIndex": 1,
+  "attributionPlugin": "synthetic",
+  "attributionSkill": "synthetic",
+  "cwd": "/work/app",
+  "effort": "synthetic",
+  "entrypoint": "synthetic",
+  "gitBranch": "work",
+  "isSidechain": false,
+  "message": {
+    "container": null,
+    "content": [],
+    "context_management": null,
+    "diagnostics": null,
+    "id": "msg_synthetic",
+    "input_transformations": [],
+    "model": "claude-sonnet-5-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "synthetic",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 100000,
+        "ephemeral_5m_input_tokens": 200000
+      },
+      "cache_creation_input_tokens": 300000,
+      "cache_read_input_tokens": 2000000,
+      "fallback_credit": null,
+      "inference_geo": "synthetic",
+      "input_tokens": 1000000,
+      "iterations": [],
+      "output_tokens": 100000,
+      "output_tokens_details": {
+        "thinking_tokens": 1
+      },
+      "server_tool_use": {
+        "web_fetch_requests": 1,
+        "web_search_requests": 1
+      },
+      "service_tier": "synthetic",
+      "speed": "synthetic"
+    }
+  },
+  "parentUuid": "synthetic",
+  "perTurnEffort": "synthetic",
+  "requestedModel": "synthetic",
+  "requestId": "req_synthetic",
+  "requestRef": "synthetic",
+  "serverClassifierRequest": "synthetic",
+  "session_id": "synthetic",
+  "sessionId": "synthetic",
+  "thinkingDisplay": "synthetic",
+  "thinkingDurationMs": 1,
+  "timestamp": "synthetic",
+  "type": "assistant",
+  "userType": "synthetic",
+  "uuid": "uuid-synthetic",
+  "version": "2.1.308",
+  "wireToolInputs": {}
+}

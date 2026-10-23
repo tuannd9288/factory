@@ -18,9 +18,9 @@ export const quiet = {
   GIT_CONFIG_VALUE_2: '/dev/null',
 };
 
-export function run(cwd, command, args = [], env = {}) {
+export function run(cwd, command, args = [], env = {}, timeout = undefined) {
   const { NODE_TEST_CONTEXT, ...outer } = process.env;
-  const r = spawnSync(command, args, { cwd, encoding: 'utf8', env: { ...outer, ...env } });
+  const r = spawnSync(command, args, { cwd, encoding: 'utf8', env: { ...outer, ...env }, timeout });
   return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
