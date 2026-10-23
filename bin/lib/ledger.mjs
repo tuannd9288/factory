@@ -260,6 +260,7 @@ export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null })
   const reasons = [];
   if (pr.reviews.nodes.some((r) => r.author?.login === human && ['APPROVED', 'CHANGES_REQUESTED'].includes(r.state))) reasons.push('duyệt');
   if (events.some((e) => e.__typename === 'LabeledEvent' && e.label?.name === 'needs-human') || labels.includes('needs-human')) reasons.push('needs-human');
+  const raised = events.some((e) => e.__typename === 'LabeledEvent' && e.label?.name === 'raised') || labels.includes('raised');
   let byRule = false;
   if (pr.mergedAt) {
     for (const e of events) {
@@ -306,6 +307,7 @@ export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null })
     rounds: judged.length,
     firstPass,
     noRed: /^No-red: .{20,}/m.test(pr.body ?? ''),
+    raised,
     touched: reasons.length > 0,
     touchedWhy: reasons.join(', '),
     cost,
@@ -339,6 +341,7 @@ export function taskRow(repo, issue, prRows) {
     rounds: prs.reduce((sum, r) => sum + r.rounds, 0),
     firstPass: prs.find((r) => r.firstPass !== null)?.firstPass ?? null,
     noRed: prs.some((r) => r.noRed),
+    raised: prs.some((r) => r.raised),
     touched: why.length > 0,
     touchedWhy: why.join(', '),
     cost: !prs.length || unknown ? null : prs.reduce((sum, r) => sum + r.cost, 0),
@@ -378,6 +381,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     `- Việc đã merge mà anh phải chạm: ${rate(landed.filter((r) => r.touched).length, landed.length)}`,
     `- Xanh ngay ở commit đầu tiên được chấm: ${rate(judged.filter((r) => r.firstPass).length, judged.length)}`,
     `- Dùng No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
+    `- Reviewer nâng lên bậc 3 (nhãn raised), theo repo: ${[...new Set(rows.map((r) => r.repo))].sort().map((repo) => `${repo} ${rows.filter((r) => r.repo === repo && r.raised).length}`).join(', ') || 'không có việc'}`,
     `- Có chi phí đo được: ${rate(costed.length, n)}`,
     ...(lost?.entries ? [`- ${lost.entries} entry ($${lost.dollars.toFixed(2)} theo giá API) ở thư mục profile phụ không ghi cwd, không tính cho repo nào, nên "không có phiên trên nhánh" có thể che chúng`] : []),
     `- Số vòng trung bình (commit được cổng chấm): ${rounds.length ? (rounds.reduce((s, r) => s + r.rounds, 0) / rounds.length).toFixed(2).replace('.', ',') : '–'} (n=${rounds.length})`,

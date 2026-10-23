@@ -6,7 +6,12 @@
 #            for gate.yml's verify on the head and run the reviewer only once it passed. The reviewer's credentials
 #            come from the environment "reviewer", whose branch policy admits main alone.
 #   tier     the tier, and on tier 3 the Human's approval of the head, or of a commit whose patch the head carries
-#            unchanged; it waits on nothing, so after his approval the queue re-runs it alone.
+#            unchanged. Below tier 3 by paths and labels it waits for `review` of its own run (GITHUB_RUN_ID, through
+#            the run's jobs, so it holds `actions: read` and `checks: read`), so it is never green before the reviewer
+#            ended; a review that passed with a raise (the annotation `raise`) makes it label the pull request raised
+#            and tier-3 (`pull-requests: write`) and wait for the Human. After his approval the queue re-runs it alone,
+#            as a new attempt of the same run: it finds attempt 1's `review` and runs no reviewer. It waits up to 70
+#            minutes, so its timeout is 75.
 # The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json). No required job here has
 # `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
 # review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
@@ -93,8 +98,10 @@ jobs:
   tier:
     name: tier
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 75
     permissions:
+      actions: read
+      checks: read
       contents: read
       pull-requests: write
     steps:

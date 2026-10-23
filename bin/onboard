@@ -158,7 +158,7 @@ if ! evidence=$("$factory/bin/kit-evidence" --factory "$factory" --commit "$kit_
   echo "onboard: the kit evidence fails; factory/kit is committed, not pushed, and no pull request is open"
   exit 1
 fi
-for label in tier-1 tier-2 tier-3 needs-human task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
+for label in tier-1 tier-2 tier-3 needs-human raised task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
 git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 replaced=$(sed 's/^/  - `/; s/$/`/' "$lists/replaced")

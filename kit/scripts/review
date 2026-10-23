@@ -10,7 +10,10 @@
 # The reviewer runs only once `verify` (gate.yml, on pull_request) passed on the head: the cheaper judge first, and a
 # red head needs a new commit anyway. The job waits for it up to GATE_WAIT seconds (default 1800, verify's own
 # timeout), then fails closed.
-#   tier     labels the tier; on tier 3 it requires a code owner who is not the author to have approved the head
+#   tier     labels the tier; below tier 3 by paths and labels it waits for `review` of its own workflow run (GITHUB_RUN_ID,
+#            up to GATE_WAIT, default 4200 s), so it is never green before the reviewer ended: when `review` passed with a
+#            raise, it labels the pull request raised and tier-3 and goes on as tier 3, and a reviewer can only raise. On
+#            tier 3 it requires a code owner who is not the author to have approved the head
 #            commit, or a commit whose own patch the head carries unchanged (scripts/lib/approval.mjs); the queue
 #            re-runs it after that approval, so the reviewer never runs again for a click
 #   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3)
@@ -62,11 +65,44 @@ tier_of() {
   [ "$code" -eq 0 ] || { echo "$job: the tier could not be computed, so this check fails closed"; return 1; }
 }
 
+# Waits for the `review` job of this workflow run; sets $raised to the reviewer's reason (one line) when it passed with a
+# raise. A review that is red or cancelled is not waited for: it blocks the merge by itself. Fails closed on a timeout.
+wait_review() {
+  local deadline=$((SECONDS + ${GATE_WAIT:-4200})) state
+  raised=""
+  [ -n "${GITHUB_RUN_ID:-}" ] || { echo "tier: GITHUB_RUN_ID is unset, so the review of this run cannot be found, and this check fails closed"; return 1; }
+  while :; do
+    state=$(node scripts/lib/history.mjs raise --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID") ||
+      { echo "tier: the review of run $GITHUB_RUN_ID could not be read ($state), so this check fails closed"; return 1; }
+    case "$state" in
+      pending)
+        [ "$SECONDS" -lt "$deadline" ] || { echo "tier: review did not finish in time, so this check fails closed"; return 1; }
+        sleep "${GATE_POLL:-20}"
+        ;;
+      none | red) return 0 ;;
+      raise*) raised=${state#raise}; [ -n "$raised" ] || raised=" (no reason given)"; return 0 ;;
+      *) echo "tier: the review of run $GITHUB_RUN_ID gave an answer this check does not know, so it fails closed"; return 1 ;;
+    esac
+  done
+}
+
 case "$job" in
   tier)
     out=$(tier_of) || { echo "$out"; exit 1; }
-    echo "$out"
     n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
+    # Paths and labels already giving tier 3, a raise adds nothing: the wait is for the other tiers only. Every line that
+    # prints the reviewer's reason starts with a fixed prefix, so no log line can begin with a workflow command.
+    if [ "$n" != 3 ] && [ -n "${GATE_PR:-}" ]; then
+      wait_review || exit 1
+      if [ -n "$raised" ]; then
+        gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label raised --add-label tier-3 >/dev/null ||
+          { echo "tier: the reviewer raised this change, and the labels raised and tier-3 could not be added; if raised does not exist, create it: gh label create raised --repo ${GITHUB_REPOSITORY:-}"; exit 1; }
+        out="tier 3
+  raised by the reviewer: ${raised# }"
+        n=3
+      fi
+    fi
+    echo "$out"
     if [ -n "${GATE_PR:-}" ]; then
       gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label "tier-$n" >/dev/null || echo "tier: could not add the label tier-$n, which only shows the tier"
       for k in 1 2 3; do
