@@ -91,7 +91,7 @@ describe('claude-reviewer', () => {
     const a = calls.argv.join('\u0000');
     for (const pair of [['--model', 'claude-opus-5-5'], ['--effort', 'max'], ['--tools', 'Read,Grep,Glob'], ['--output-format', 'stream-json']])
       assert.ok(a.includes(pair.join('\u0000')), `missing ${pair.join(' ')}: ${calls.argv.join(' ')}`);
-    for (const flag of ['-p', '--restricted', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--verbose', '--json-schema', '--system-prompt', '--max-turns'])
+    for (const flag of ['-p', '--restricted', '--add-dir', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--verbose', '--json-schema', '--system-prompt', '--max-turns'])
       assert.ok(calls.argv.includes(flag), `missing ${flag}`);
     assert.match(calls.argv[calls.argv.indexOf('--max-turns') + 1], /^\d+$/);
     assert.equal(calls.argv[calls.argv.indexOf('--permission-prompts') + 1], 'none');
@@ -102,13 +102,15 @@ describe('claude-reviewer', () => {
   });
 
   test('the process gets the allow-listed environment only, and an empty HOME', () => {
-    assert.deepEqual(Object.keys(calls.env).sort(), ['CLAUDE_CODE_OAUTH_TOKEN', 'HOME', 'LANG', 'PATH', 'TMPDIR']);
+    // macOS adds __CF_USER_TEXT_ENCODING to every process it starts.
+    assert.deepEqual(Object.keys(calls.env).filter((k) => k !== '__CF_USER_TEXT_ENCODING').sort(), ['CLAUDE_CODE_OAUTH_TOKEN', 'HOME', 'LANG', 'PATH', 'TMPDIR']);
     assert.equal(calls.env.CLAUDE_CODE_OAUTH_TOKEN, TOKEN);
     assert.deepEqual(calls.home, []);
   });
 
   test('the candidate is extracted without links, away from the cwd Claude Code loads instructions from', () => {
-    assert.ok(calls.files.includes('CLAUDE.md') && calls.files.includes('src/a.js') && calls.files.includes('.claude/settings.json'), calls.files.join(','));
+    assert.ok(calls.files.includes('CLAUDE.md.candidate') && calls.files.includes('src/a.js') && calls.files.includes('.claude.candidate/settings.json'), calls.files.join(','));
+    assert.ok(!calls.files.includes('CLAUDE.md') && !calls.files.some((f) => f.startsWith('.claude/')), 'an instruction file kept its name');
     assert.ok(!calls.files.some((f) => f.startsWith('evil')), 'a symlink reached the extraction');
     assert.deepEqual(calls.cwdFiles, []);
     assert.ok(!calls.cwd.startsWith(repo));

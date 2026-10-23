@@ -1,12 +1,12 @@
 // The stub reviewer, for scratch repositories only: no model runs. It writes a result (see result.mjs) with one
-// blocking finding per added line holding GATE-STUB-FINDING (review) or GATE-STUB-VERDICT (verdict), and judges no
+// blocking finding per added line holding GATE-STUB-FINDING, and judges no
 // No-red claim, since only a reviewer can. On review, an added line holding GATE-STUB-RAISE <why> raises the change to
 // tier 3: a marker anyone may write is safe, since a raise only sends the Human a change to read.
-//   node scripts/lib/stub-reviewer.mjs <review|verdict> <base> <head>
+//   node scripts/lib/stub-reviewer.mjs review <base> <head>   (verdict reads review's result and calls no reviewer)
 import { execFileSync } from 'node:child_process';
 
 const [job, base, head] = process.argv.slice(2);
-const marker = job === 'verdict' ? 'GATE-STUB-VERDICT' : 'GATE-STUB-FINDING';
+const marker = 'GATE-STUB-FINDING';
 const added = (diff) => diff.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++ '));
 const diff = execFileSync('git', ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U0', base, head], { encoding: 'utf8', maxBuffer: 64 << 20 });
 const blocking = added(diff)
