@@ -21,7 +21,8 @@ Deviations from the plan: D12 as built changed only `test/auth/` (the plan said 
 the gate rated it tier 1, not load-bearing; it was caught by rules (failing-test-edited). C20 (#54) landed: `22893d7`, "Merge pull
 request #54", is on factory-scratch `main`'s first-parent chain, with parents `e9de782` and `63167e0` (C20's head), and
 `git merge-base --is-ancestor 63167e0 origin/main` succeeds. `gh pr view 54` reads CLOSED with `mergedAt` null, and its head
-is now that merge commit (the PR's commits end `63167e0`, `22893d7`), which is why the record is not MERGED. Git proves that
+is now that merge commit (the PR's commits end `63167e0`, `22893d7`). The record reads CLOSED, not MERGED; git does not show
+whether one fact caused the other. Git proves that
 the change landed, not that it went through auto-merge. (A first correction of this paragraph on 2026-10-23 said C20 had
 not landed; it was wrong.) The other 19 clean changes (#35–#53) are MERGED. Every clean change was dry-run locally with verify and red-check
 before it was opened, as an agent would; the defects were only checked to build.
