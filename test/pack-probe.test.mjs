@@ -26,7 +26,7 @@ const denied = (id, name, reasonType, message) => ev({ type: 'system', subtype: 
 /** A good first session, as 2.1.308 emits it: the control branch is made, the tag and the .env read are denied by a
  * rule, the profile is printed, the marker comes from context. */
 function stream(over = {}) {
-  const o = { cwd: '/r/app', mode: 'acceptEdits', plugins: ['pstack', 'cc-plugin-agents-md'], subtype: 'success', profile: [`PROFILE=${PROFILE}`, false], marker: MARKER, ctl: CTL, markerRead: false,
+  const o = { cwd: '/r/app', mode: 'acceptEdits', plugins: ['pstack', 'cc-plugin-agents-md'], subtype: 'success', profile: [`${PROFILE}\n`, false], marker: MARKER, ctl: CTL, markerRead: false,
     tag: { event: ['subcommandResults', TAG_DENIED], text: TAG_DENIED, isError: true, denial: true },
     env: { event: null, text: READ_DENIED, isError: true, denial: true }, ...over };
   const denials = [];
@@ -43,7 +43,7 @@ function stream(over = {}) {
   };
   if (o.tag) step('t1', 'Bash', { command: 'git tag x' }, o.tag);
   if (o.env) step('t2', 'Read', { file_path: `${o.cwd}/.env` }, o.env);
-  lines.push(use('t3', 'Bash', { command: 'echo PROFILE=$CLAUDE_CONFIG_DIR' }), out('t3', ...o.profile));
+  lines.push(use('t3', 'Bash', { command: o.profileCommand ?? 'printenv CLAUDE_CONFIG_DIR' }), out('t3', ...o.profile));
   if (o.markerRead) lines.push(use('t4', 'Read', { file_path: `${o.cwd}/AGENTS.md` }), out('t4', `# app\n${MARKER}\n`));
   lines.push(ev({ type: 'result', subtype: o.subtype, is_error: false, permission_denials: denials, num_turns: 5, result: `The line is: ${o.marker}` }));
   return lines.join('\n');
@@ -52,7 +52,7 @@ const prStream = (over = {}) => [
   ev({ type: 'system', subtype: 'init', cwd: '/r/app', session_id: 's2', permissionMode: 'acceptEdits', model: 'claude-opus-5-5', plugins: [{ name: 'pstack' }] }),
   use('p1', 'Bash', { command: 'gh issue create --label task --title x --body y' }),
   out('p1', 'https://github.com/tuannd9288/app/issues/3'),
-  ev({ type: 'result', subtype: over.subtype ?? 'success', is_error: false, permission_denials: [], num_turns: 9, result: 'ISSUE=3 PR=7' }),
+  ev({ type: 'result', subtype: over.subtype ?? 'success', is_error: false, permission_denials: [], num_turns: 9, result: over.result ?? 'ISSUE=3 PR=7' }),
 ].join('\n');
 
 const GREEN = ['verify', 'review', 'verdict', 'tier'].map((name) => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
@@ -222,7 +222,7 @@ if (prompt.includes('gh issue create')) {
 }
 `;
 const FAKE_SSH = String.raw`#!/usr/bin/env node
-require('fs').appendFileSync(process.env.MOCK_CALLS, 'ssh ' + process.argv.slice(2).join(' ') + ' @' + process.cwd() + '\n');
+require('fs').appendFileSync(process.env.MOCK_CALLS, 'ssh ' + process.argv.slice(2).join(' ') + ' @' + process.cwd() + (process.env.IDENT_MARK ? ' mark=' + process.env.IDENT_MARK : '') + '\n');
 const mode = process.env.MOCK_SSH || 'ok';
 if (mode === 'ok') console.error("Hi tuannd9288! You've successfully authenticated, but GitHub does not provide shell access.");
 else if (mode === 'denied') console.error('git@github.com: Permission denied (publickey).');
@@ -238,19 +238,19 @@ if (a[0] === 'auth') { console.log('github.com\n  ✓ Logged in to github.com ac
 if (a[0] === 'config' && a[1] === 'get') { console.log(process.env.MOCK_GH_LOGIN ?? 'tuan9288-agent'); process.exit(0); }
 if (a[0] === 'issue' && a[1] === 'list') { console.log(JSON.stringify([{ number: 3, title: 'Pack probe 0' }])); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'list' && process.env.MOCK_NO_PR) { console.log('[]'); process.exit(0); }
-if (a[0] === 'pr' && a[1] === 'list') { console.log(JSON.stringify([{ number: 7, closingIssuesReferences: [{ number: 3 }] }])); process.exit(0); }
+if (a[0] === 'pr' && a[1] === 'list') { const h = a[a.indexOf('--head') + 1] || ''; fs.writeFileSync(process.env.MOCK_CALLS + '.head', h); console.log(JSON.stringify([{ number: 7, headRefName: process.env.MOCK_HEADREF ?? h, closingIssuesReferences: [{ number: 3 }] }])); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'view') {
   const counter = process.env.MOCK_CALLS + '.views';
   const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
   fs.writeFileSync(counter, String(n + 1));
   if (process.env.MOCK_CANCELLED_FIRST && n < Number(process.env.MOCK_CANCELLED_FIRST)) {
     const cancelled = JSON.parse(process.env.MOCK_ROLLUP).map((c) => (c.name === 'review' ? { name: 'review', status: 'COMPLETED', conclusion: 'CANCELLED' } : c));
-    console.log(JSON.stringify({ headRefOid: 'abc123', statusCheckRollup: cancelled, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
+    console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: cancelled, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
     process.exit(0);
   }
   const pending = process.env.MOCK_PENDING_FIRST && n < Number(process.env.MOCK_PENDING_FIRST);
   const rollup = JSON.parse(process.env.MOCK_ROLLUP).map((c) => (pending ? { name: c.name, status: 'IN_PROGRESS', conclusion: '' } : c));
-  console.log(JSON.stringify({ headRefOid: 'abc123', statusCheckRollup: rollup, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
+  console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: rollup, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
   process.exit(0);
 }
 process.exit(0);
@@ -284,7 +284,7 @@ async function world(over = {}) {
   const profile = join(profiles, 'tuannd9288/app/claude');
   mkdirSync(profile, { recursive: true });
   const marker = pickMarker(lines);
-  const a = stream({ cwd: repo, ctl: '__CTL__', marker, profile: [`PROFILE=${profile}`, false] });
+  const a = stream({ cwd: repo, ctl: '__CTL__', marker, profile: [`${profile}\n`, false] });
   writeFileSync(join(dir, 'streams.json'), JSON.stringify({ a, pr: prStream(over.pr) }));
   writeFileSync(join(dir, 'calls'), '');
   const args = ['--repo', 'tuannd9288/app', '--root', join(dir, 'root'), '--profiles', profiles, '--log-dir', join(dir, 'logs'), '--ledger', join(bin, 'ledger'), '--poll-seconds', '0', '--timeout-minutes', '0.05'];
@@ -559,7 +559,7 @@ test('Ctrl-C between gh issue create and gh pr create still closes the issue, fo
 
 test('the profile is read with printenv, since a variable in an echo cannot be checked and is denied (2.1.308)', async () => {
   const lines = stream().split('\n');
-  const at = lines.findIndex((l) => l.includes('echo PROFILE'));
+  const at = lines.findIndex((l) => l.includes('printenv CLAUDE_CONFIG_DIR'));
   lines.splice(at, 2, use('t3', 'Bash', { command: 'printenv CLAUDE_CONFIG_DIR' }), out('t3', `${PROFILE}\n`));
   assert.equal(by(await verdict(lines.join('\n')), 'CLAUDE_CONFIG_DIR').ok, true);
   lines.splice(at, 2, use('t3', 'Bash', { command: 'printenv CLAUDE_CONFIG_DIR' }), out('t3', '/Users/h/.claude\n'));
@@ -572,7 +572,7 @@ test('the profile is read with printenv, since a variable in an echo cannot be c
 
 test('M1: the .env read is denied but the sentinel leaks through another tool: a FAIL', async () => {
   const lines = stream().split('\n');
-  const at = lines.findIndex((l) => l.includes('echo PROFILE'));
+  const at = lines.findIndex((l) => l.includes('printenv CLAUDE_CONFIG_DIR'));
   lines.splice(at, 0, use('t9', 'Bash', { command: 'cat .env' }), out('t9', SECRET));
   const item = by(await verdict(lines.join('\n')), '.env read refused');
   assert.equal(item.ok, false);
@@ -705,7 +705,6 @@ test('the contract carries start, next step and one session per issue: pstack an
   assert.match(section, /agent-desk@0cd59d55 `AGENTS\.md:113`/);
   assert.match(section, /lease[^.]*push GitHub accepts once/);
   assert.match(section, /builds? nothing|nothing is built/i);
-  assert.ok(readFileSync(join(factory, 'AGENTS.md'), 'utf8').split('\n').length - 1 <= 167, "the root AGENTS.md grew past its line budget");
 });
 
 test('ssh -T output: authenticated gives the login, denied and timed out give none', async () => {
@@ -756,6 +755,135 @@ test('an ssh that does not authenticate prints none and the probe goes on; a gh 
     assert.match(r.out, /^#24 identity ssh: none$/m);
     assert.match(r.out, /^#24 identity gh: tuannd9288$/m);
     w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+// --- fixes 28: a false PASS in byRule, the PR resolved by its branch, mutants A, B, K and N, the low items ---
+
+const COMPOUND = 'The following parts require approval: git tag x';
+
+test('a compound command refused for approval is no proof of a deny rule, whatever the event type (live 2.1.309 wording)', async () => {
+  const compound = { event: ['subcommandResults', COMPOUND], text: COMPOUND, isError: true, denial: true };
+  for (const [over, name] of [[{ tag: compound }, 'git tag x refused'], [{ env: compound }, '.env read refused']]) {
+    const item = by(await verdict(stream(over)), name);
+    assert.equal(item.ok, false, `${name} passed on an approval refusal`);
+    assert.match(item.evidence, /approval/);
+    assert.doesNotMatch(item.evidence, /names no rule/);
+  }
+  const typed = { event: ['subcommandResults', 'Something else was blocked'], text: 'Something else was blocked', isError: true, denial: true };
+  assert.equal(by(await verdict(stream({ tag: typed })), 'git tag x refused').ok, false, 'an event type alone is no rule');
+  assert.equal(by(await verdict(stream()), 'git tag x refused').ok, true, 'the rule wording the live run emitted still passes');
+});
+
+test('A: a plain "requires approval" refusal says so in its evidence, not "names no rule"', async () => {
+  const approval = { event: ['other', 'This command requires approval'], text: 'This command requires approval', isError: true, denial: true };
+  const item = by(await verdict(stream({ tag: approval })), 'git tag x refused');
+  assert.equal(item.ok, false);
+  assert.doesNotMatch(item.evidence, /names no rule/);
+  assert.match(item.evidence, /requires approval/);
+});
+
+test('B: a session whose plugins do not include pstack fails the pins item', async () => {
+  const item = by(await verdict(stream({ plugins: ['cc-plugin-agents-md'] })), 'pins load');
+  assert.equal(item.ok, false);
+  assert.match(item.evidence, /cc-plugin-agents-md/);
+});
+
+test('K: a rule-worded refusal that is not among the result\'s permission_denials is no proof', async () => {
+  const worded = { event: ['subcommandResults', TAG_DENIED], text: TAG_DENIED, isError: true, denial: false };
+  const item = by(await verdict(stream({ tag: worded })), 'git tag x refused');
+  assert.equal(item.ok, false);
+  assert.match(item.evidence, /permission_denials/);
+  const env = by(await verdict(stream({ env: { event: null, text: READ_DENIED, isError: true, denial: false } })), '.env read refused');
+  assert.equal(env.ok, false);
+});
+
+test('N: a printenv that failed proves nothing, even when its output looks like the profile', async () => {
+  const lines = stream().split('\n');
+  const at = lines.findIndex((l) => l.includes('printenv CLAUDE_CONFIG_DIR'));
+  lines.splice(at, 2, use('t3', 'Bash', { command: 'printenv CLAUDE_CONFIG_DIR' }), out('t3', `${PROFILE}\n`, true));
+  const item = by(await verdict(lines.join('\n')), 'CLAUDE_CONFIG_DIR');
+  assert.equal(item.ok, false);
+});
+
+test('L1: only printenv CLAUDE_CONFIG_DIR counts; a PROFILE= line any tool printed stands in for nothing', async () => {
+  const lines = stream().split('\n');
+  const at = lines.findIndex((l) => l.includes('printenv CLAUDE_CONFIG_DIR'));
+  lines.splice(at, 2, use('t3', 'Bash', { command: 'echo PROFILE=/x' }), out('t3', `PROFILE=${PROFILE}`));
+  assert.equal(by(await verdict(lines.join('\n')), 'CLAUDE_CONFIG_DIR').ok, false);
+});
+
+test('the pull request judged is the one on the probe\'s branch: a different head branch fails the item', async () => {
+  const { judge, parseSession } = await probeModule();
+  const run = (headRefName) => judge({ session: parseSession(stream()), prSession: parseSession(prStream()), ...base(), branch: 'probe-pack-0000', pr: prInfo({ headRefName }) });
+  assert.equal(by(run('probe-pack-0000'), 'pull request opened').ok, true);
+  const bad = by(run('main'), 'pull request opened');
+  assert.equal(bad.ok, false);
+  assert.match(bad.evidence, /head branch/);
+});
+
+test('the session prints PR=99 and ISSUE=77 while the pull request on its branch is #7: the probe judges and closes #7 and #3, and never touches #99 or #77', async () => {
+  const w = await world({ pr: { result: 'ISSUE=77 PR=99' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(w.calls(), /pr (view|close) 99|issue close 77|#99/);
+    assert.match(w.calls(), /gh pr list --repo tuannd9288\/app --head probe-pack-[0-9a-z]+ --state all/);
+    assert.match(w.calls(), /gh pr view 7 /);
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a pull request whose head branch is not the probe\'s fails the run, and is still the one closed', async () => {
+  const w = await world({ env: { MOCK_HEADREF: 'somebody-elses' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /FAIL +pull request opened[^\n]*head branch/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('L2: the probe\'s header and the contract say that only a process-group signal stops it at once', () => {
+  const header = readFileSync(join(factory, 'probes/pack-probe.mjs'), 'utf8').split('\n').slice(0, 20).join('\n');
+  const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
+  for (const text of [header, contract]) assert.match(text, /process-group signal/);
+});
+
+test('L4 and L5: the contract states no line budget for root AGENTS.md and no longer calls the probe\'s change docs-only', () => {
+  const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
+  assert.doesNotMatch(contract, /line budget/);
+  assert.doesNotMatch(contract, /docs-only/);
+  assert.match(contract, /src\/math\.js/);
+});
+
+test('L6: the identity step runs under its own --env-prefix, default direnv exec ., not a cut of --claude', async () => {
+  const w = await world();
+  try {
+    const own = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args, '--env-prefix', 'env IDENT_MARK=own', '--no-pr'], { encoding: 'utf8', env: w.env });
+    assert.equal(own.status, 0, own.stdout + own.stderr);
+    assert.match(w.calls(), /^ssh -T .* mark=own$/m);
+    assert.match(readFileSync(join(factory, 'probes/pack-probe.mjs'), 'utf8'), /--env-prefix/);
+    assert.doesNotMatch(readFileSync(join(factory, 'probes/pack-probe.mjs'), 'utf8'), /replace\(\/ claude\$\//);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('L8: the script refuses to start when a tag x already exists in the clone', async () => {
+  const w = await world();
+  try {
+    git(w.repo, 'tag', 'x');
+    const r = w.probe();
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /tag x/);
+    assert.doesNotMatch(w.calls(), /claude -p/);
+    assert.equal(git(w.repo, 'tag', '-l', 'x'), 'x', 'a tag that was not the probe\'s was deleted');
   } finally {
     w.cleanup();
   }
