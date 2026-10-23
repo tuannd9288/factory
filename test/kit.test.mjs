@@ -456,8 +456,9 @@ describe('review, verdict, tier and rounds', () => {
         '#!/bin/sh',
         'case "$*" in',
         '  *check-runs*) cat "$FAKE/verify.json" ;;',
-        '  *LABELED_EVENT*) cat "$FAKE/labels.json" ;;',
-        '  *checkSuites*) cat "$FAKE/rounds.json" ;;',
+        // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
+        '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) cat "$FAKE/labels.json" ;;',
+        '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
         '  *reviews*) cat "$FAKE/reviews.json" ;;',
         '  "pr edit"*) echo "$*" >>"$FAKE/edits" ;;',
         '  *) echo "fake gh: $*" >&2; exit 1 ;;',
@@ -473,7 +474,7 @@ describe('review, verdict, tier and rounds', () => {
   const verify = (state) =>
     write(fake, { 'verify.json': JSON.stringify({ check_runs: [{ name: 'verify', app: { slug: 'github-actions' }, started_at: '2026-10-21T10:00:00Z', status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state }] }) });
   const labels = (...names) =>
-    write(fake, { 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { totalCount: names.length, nodes: names.map((name) => ({ label: { name } })) } } } } }) });
+    write(fake, { 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: names.map((name) => ({ label: { name } })) } } } } }) });
   const reviews = (list) => write(fake, { 'reviews.json': JSON.stringify([list]) });
   /** Runs one job in the trusted checkout on a head already fetched there, as a re-run does. */
   const again = (kind, head, env = {}) => {
@@ -563,7 +564,22 @@ describe('review, verdict, tier and rounds', () => {
     assert.match(out.out, /^tier 2\n {2}label tier-2/);
   });
   test('the tier fails closed when the pull request\'s labels cannot be read', () => {
-    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"totalCount":500,"nodes":[]}}}}}' });
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}}}' });
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /fails closed/);
+    assert.match(out.out, /more than one page/);
+  });
+  test('the labels pass with no label node and no next page', () => {
+    // Seen on factory-pack-scratch#3: a pull request with no label. totalCount said 3 there and no longer matters.
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}' });
+    const out = job('tier', { 'src/auth/t.js': 'export const t = 1;\n' }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^tier 2\n {2}src\/auth\/t\.js \(load-bearing/);
+    assert.doesNotMatch(out.out, /label /);
+  });
+  test('the labels fail closed without pageInfo, for nothing then says the history fits one page', () => {
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}' });
     const out = job('tier', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /fails closed/);
@@ -602,7 +618,7 @@ describe('review, verdict, tier and rounds', () => {
   });
   test('rounds labels the pull request needs-human at its third head commit judged red', () => {
     const red = (oid, name = 'verify', conclusion = 'FAILURE') => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion }] } }] } } });
-    const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { totalCount: nodes.length, nodes } } } } }) });
+    const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes } } } } }) });
     rounds(red('a'), red('b', 'review'), red('c', 'verify', 'SUCCESS'), red('d', 'tier'));
     let out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 0, out.out);
@@ -611,6 +627,22 @@ describe('review, verdict, tier and rounds', () => {
     rounds(red('a'), red('b', 'review'), red('c', 'verdict', 'TIMED_OUT'));
     out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.match(out.edits, /--add-label needs-human/);
+  });
+  test('rounds counts the nodes it got when no earlier page exists, and fails when one does', () => {
+    const red = (oid) => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name: 'verify', conclusion: 'FAILURE' }] } }] } } });
+    const rounds = (hasPreviousPage) =>
+      write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage }, nodes: [red('a')] } } } } }) });
+    rounds(false);
+    let out = job('rounds', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /1 head commits judged red/);
+    rounds(true);
+    out = job('rounds', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /rounds: the pull request's rounds could not be read: history: .*more than one page/);
+    write(fake, { 'rounds.json': '{"data":{"repository":{"pullRequest":{"commits":{"nodes":[]}}}}}' });
+    out = job('rounds', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 1, out.out);
   });
   test('a tier-3 approval holds on a head that only took main in, and not once the patch changes', () => {
     labels();
@@ -634,6 +666,28 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
   });
+});
+
+describe('gate-trusted.yml permissions', () => {
+  // What each job's scripts call, and the scope GitHub asks for it (docs.github.com, "Permissions required for GitHub
+  // Apps": checks for check runs and suites, pull requests for reviews, labels on a pull request and its timeline).
+  const NEEDS = {
+    review: { checks: 'read' },
+    verdict: { checks: 'read', 'pull-requests': 'read' },
+    tier: { 'pull-requests': 'write' },
+    rounds: { checks: 'read', 'pull-requests': 'write' },
+  };
+  const jobs = readFileSync(join(factory, 'kit/.github/workflows/gate-trusted.yml'), 'utf8').split(/^ {2}(?=\w+:\n {4}name:)/m).slice(1);
+  for (const [name, scopes] of Object.entries(NEEDS)) {
+    test(`the ${name} job holds the scopes its scripts call`, () => {
+      const block = jobs.find((j) => j.startsWith(`${name}:`));
+      assert.ok(block, `no job ${name}`);
+      const held = Object.fromEntries([...block.matchAll(/^ {6}([a-z-]+): (read|write)$/gm)].map((m) => [m[1], m[2]]));
+      for (const [scope, level] of Object.entries(scopes)) {
+        assert.ok(held[scope] === level || (level === 'read' && held[scope] === 'write'), `${name} needs ${scope}: ${level}, holds ${held[scope]}`);
+      }
+    });
+  }
 });
 
 describe('hooks', () => {
