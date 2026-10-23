@@ -69,7 +69,7 @@ tier_of() {
 
 # Waits for the `review` job of this workflow run and reads its result annotation, whatever its conclusion: sets
 # $review_red when it ended red or cancelled, and $did_raise and $raised (one line) when it reported a raise. A review
-# that ended and left no result annotation is read again GATE_RESULT_TRIES times (the listing may lag the job), then
+# that ended green and left no result annotation is read again GATE_RESULT_TRIES times (the listing may lag the job), then
 # fails closed: absence is never "no raise". Fails closed on a timeout, GATE_REVIEW_WAIT (default 4200 s), which is not
 # GATE_WAIT, the wait for verify.
 wait_review() {
@@ -86,7 +86,8 @@ wait_review() {
         continue
         ;;
       "ok none" | "red none") ;;
-      "ok absent" | "red absent")
+      "red absent") ;;
+      "ok absent")
         tries=$((tries + 1))
         [ "$tries" -lt "${GATE_RESULT_TRIES:-6}" ] || { echo "tier: the review ended and left no result annotation after $tries reads, so this check fails closed"; return 1; }
         sleep "${GATE_RESULT_POLL:-10}"

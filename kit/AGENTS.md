@@ -44,6 +44,7 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    tier 1), and `tier`, which below tier 3 waits for `review` to end, and on tier 3 for the Human's approval of your
    change. The reviewer may raise a change to tier 3 (label `raised`), never lower one. His approval holds while the
    patch is unchanged, as when the queue merges `main` in; a new patch needs a new one. A label never lowers a tier.
+   A red `tier` that says `review is red; tier follows it` is not his wait: re-run the failed jobs, never `review` alone.
 6. A blocking finding is fixed by a new commit. A finding you dispute goes to the Human: label the pull request
    `needs-human` and put your recommended answer in it. At the third head commit judged red, `rounds` labels the
    pull request `needs-human`, which makes it tier 3: the Human decides.

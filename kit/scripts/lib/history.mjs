@@ -4,13 +4,14 @@
 //   node scripts/lib/history.mjs rounds --repo <owner/name> --pr <n> --checks <a,b>   commits a named check failed on
 //   node scripts/lib/history.mjs check --repo <owner/name> --head <sha> --name <check>
 //     the latest GitHub Actions run of that check on the commit: its conclusion, or pending before it completes
-//   node scripts/lib/history.mjs raised-at --repo <owner/name> --pr <n>     when the label raised was first added, or nothing
+//   node scripts/lib/history.mjs raised-at --repo <owner/name> --pr <n>     when the Actions bot first added the label raised, or nothing
 //   node scripts/lib/history.mjs raise --repo <owner/name> --run <id> --head <sha>
 //     `pending` while the `review` job of that run has not completed; then `ok` or `red` (its latest attempt's
 //     conclusion) and `none`, `absent` (it left no result annotation) or `raise <why>`, from its annotation titled
 //     review-result. The job is found through the run, its check run through check_run_url, never by name on the head,
 //     where a candidate's own job may carry the name too. A raise in any completed review of any gate-trusted run on the
-//     head also counts, since an edited event cancels the run whose tier had not labelled yet.
+//     head, this run's earlier attempts included, also counts, since an edited event cancels the run whose tier had not
+//     labelled yet; the runs listed for the head must hold this run, or it fails closed.
 // Exit 2 when GitHub cannot be read or the history does not fit one page: a history half read decides nothing. One page
 // is decided by pageInfo, not totalCount: totalCount ignores the itemTypes filter (factory-pack-scratch#3, 2026-10-23).
 import { execFileSync } from 'node:child_process';
@@ -18,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 // Not documented: whether pageInfo.hasNextPage counts the itemTypes-filtered list or all timeline items. If all, a pull
 // request with more than 100 timeline items of any kind fails closed here: a liveness risk only, never a wrong pass.
 const LABELS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
-timelineItems(first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes{... on LabeledEvent{createdAt label{name}}}}}}}`;
+timelineItems(first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes{... on LabeledEvent{createdAt actor{login} label{name}}}}}}}`;
 const ROUNDS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
 commits(last:100){pageInfo{hasPreviousPage} nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{name conclusion}}}}}}}}}}`;
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE']);
@@ -80,17 +81,23 @@ try {
       if (message.startsWith('raise: ')) return `raise ${clean(message.slice(7))}`;
       throw new Error('the review result annotation is neither none nor raise: <why>');
     };
-    const own = reviewsOf(opt('--run')).at(-1);
+    const ownAll = reviewsOf(opt('--run'));
+    const own = ownAll.at(-1);
     if (!own) throw new Error(`run ${opt('--run')} has no review job`);
     if (own.status !== 'completed') console.log('pending');
     else {
       let found = resultOf(own);
-      // A raise found in any completed review of any gate-trusted run on this head counts: an edited event starts a run
-      // that cancels the one whose tier had not labelled yet, and a raise found anywhere only raises.
+      // A raise found in any completed review, of any attempt, of any gate-trusted run on this head counts, this run's
+      // earlier attempts too: an edited event starts a run that cancels the one whose tier had not labelled yet, and
+      // "Re-run all jobs" asks the reviewer again. A raise found anywhere only raises. The listing must hold this run:
+      // if GitHub did not report the pull request's head as the run's head_sha, it would be empty and the union a
+      // silent no-op, so this check fails closed instead.
       const runs = api(`${base}/actions/workflows/gate-trusted.yml/runs?head_sha=${opt('--head')}&per_page=100`);
       if (!Array.isArray(runs.workflow_runs) || runs.total_count !== runs.workflow_runs.length) throw new Error('the runs on this head are more than one page, or unreadable');
-      for (const run of runs.workflow_runs.filter((r) => String(r.id) !== String(opt('--run'))))
-        for (const job of reviewsOf(run.id).filter((j) => j.status === 'completed')) {
+      if (!runs.workflow_runs.some((r) => String(r.id) === String(opt('--run'))))
+        throw new Error(`the runs listed for head ${String(opt('--head')).slice(0, 8)} do not include run ${opt('--run')}, so the union of raises cannot be trusted and this check fails closed`);
+      for (const run of runs.workflow_runs)
+        for (const job of (String(run.id) === String(opt('--run')) ? ownAll : reviewsOf(run.id)).filter((j) => j.status === 'completed' && j !== own)) {
           const other = resultOf(job);
           if (other.startsWith('raise ') && !found.startsWith('raise ')) found = other;
         }
@@ -103,7 +110,9 @@ try {
   } else if (args[0] === 'raised-at') {
     const items = pull(LABELS).timelineItems;
     if (items.pageInfo?.hasNextPage !== false) throw new Error('the label events are more than one page, or GitHub sent no pageInfo');
-    const times = items.nodes.filter((n) => n.label?.name === 'raised').map((n) => n.createdAt);
+    // Only the Actions bot's raise counts: a raised label another account added early would let an earlier approval
+    // stand. An event whose actor GitHub did not send (a deleted account) is counted; a known other account is not.
+    const times = items.nodes.filter((n) => n.label?.name === 'raised' && (n.actor?.login ?? 'github-actions') === 'github-actions').map((n) => n.createdAt);
     if (times.some((t) => typeof t !== 'string' || !t)) throw new Error('a raised label event has no createdAt');
     console.log(times.sort()[0] ?? '');
   } else if (args[0] === 'rounds') {
