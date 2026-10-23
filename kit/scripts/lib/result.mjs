@@ -9,7 +9,8 @@
 // about another commit: a reviewer that said nothing usable has not passed the change.
 // A raise only ever raises: any tier but 3, a second key, an empty or long reason, or a raise in a verdict is
 // malformed (exit 2). It does not block. The reason is printed after a fixed prefix on one line, and once as the
-// annotation `raise` on the review job, which the tier job of the same run reads (scripts/lib/history.mjs raise).
+// annotation `review-result` (message `none`, or `raise: <why>`) on the review job, always the first line printed, which
+// the tier job reads (scripts/lib/history.mjs raise); a review that reached its result and left none is read as absent.
 import { readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -43,21 +44,23 @@ if (raise !== undefined) {
   if (typeof raise.why !== 'string' || !raise.why.trim() || raise.why.length > 500) unusable('"raise.why" is not a reason of 1 to 500 characters');
 }
 
-const who = `${want.job} (${result.reviewer ?? 'unnamed reviewer'})`;
+// Everything the reviewer wrote is printed as one line with its control characters collapsed and `##[` broken: the
+// runner finds the legacy command `##[name]` anywhere in a line, the `::name::` form at the start of one, and splits
+// lines at `\r` too. The result annotation comes first, before any model text, so no later line can stop commands.
+const clean = (text) => String(text).replace(/[\u0000-\u001f\u007f\u2028\u2029\s]+/g, ' ').replace(/##\[/g, '## [').trim();
+const why = raise ? clean(raise.why) : '';
+console.log(`::notice title=review-result::${raise ? `raise: ${why}`.replace(/%/g, '%25') : 'none'}`);
+
+const who = `${want.job} (${clean(result.reviewer ?? 'unnamed reviewer')})`;
 let blocked = false;
 for (const f of result.blocking) {
-  console.log(`${who}: ${f.id}: ${f.claim}`);
+  console.log(`${who}: ${clean(f.id)}: ${clean(f.claim)}`);
   blocked = true;
 }
 if (args.includes('--no-red') && result.noRed !== 'accepted') {
   console.log(`${who}: the PR body's No-red line is not accepted (${result.noRed}); add a test that fails first, or a reviewer must accept the reason`);
   blocked = true;
 }
-if (raise) {
-  // One line, so no line of the log can start with `::` because of the model's text; `%` is escaped for the command.
-  const why = raise.why.replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim();
-  console.log(`${who}: raises to tier 3: ${why}`);
-  console.log(`::notice title=raise::${why.replace(/%/g, '%25')}`);
-}
+if (raise) console.log(`${who}: raises to tier 3: ${why}`);
 console.log(`${who}: ${blocked ? 'blocks' : 'passes'} ${want.head.slice(0, 8)}`);
 process.exit(blocked ? 1 : 0);
