@@ -288,6 +288,18 @@ describe('the kit pull request', () => {
     }
   });
 
+  test('tells the Human that the gate check verify is red on this pull request, and why it does not block', () => {
+    const w = prWorld();
+    try {
+      const out = w.onboard('root');
+      assert.equal(out.code, 0, out.out);
+      const text = readFileSync(w.body, 'utf8');
+      assert.match(text, /^Lưu ý: check `verify` của PR này đỏ \(`scripts\/verify-trusted: No such file`, mã 127\) vì `main` chưa có kit; nó không chặn merge, vì `factory-bootstrap` không đòi check nào\.$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
   test("says in its body and its evidence which of the repository's files the kit replaced, and where the old hook's commands go", () => {
     const w = prWorld({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n' });
     try {

@@ -64,7 +64,7 @@ Everything else that can be undone, agents decide and report after.
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
-| `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results |
+| `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results; `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
 | `NOTICE` | What was taken from other projects, with the commit |
@@ -123,9 +123,16 @@ the Human logs in: `mkdir -p ~/.agent-profiles/verifier/codex`, then `CODEX_HOME
 before Codex's own login command. Until he has, every live verdict is BLOCKED and nothing auto-merges.
 
 Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
-`cd <root>/<repo> && direnv exec . claude -p "…"`. `direnv exec DIR` loads DIR's `.envrc` but keeps the caller's
-directory (from `/` it printed `/`, 2026-10-22), so without the `cd` Claude starts outside the repository: on the
-right profile, but without its deny rules and its `AGENTS.md`.
+`cd <root>/<repo> && direnv exec . claude -p "…" --permission-mode acceptEdits --allowedTools "Bash(git branch work-*)" "Bash(git add *)" …`.
+`direnv exec DIR` loads DIR's `.envrc` but keeps the caller's directory (from `/` it printed `/`, 2026-10-22), so
+without the `cd` Claude starts outside the repository: on the right profile, but without its deny rules and its
+`AGENTS.md`. With no permission mode `claude -p` starts in `default` and denies every call that needs approval
+(2.1.308, 2026-10-22: `git branch x` gave "This command requires approval"); name the mode and the exact commands the
+run may use (code.claude.com/docs/en/permissions, fetched 2026-10-22). A rule matches the text before its first `*`
+as written, so a blanket `git` or `gh` grant also allows `git -C . tag y` and `gh -R x pr merge`, and a
+trailing `*` admits any arguments, a refspec included (`git push origin b:refs/tags/y`): grant a push with no `*`. A
+deny rule still wins over a grant; a command holding a variable or `$(…)` is denied even under a matching grant
+(2.1.308, grants-check): use `--body-file`, a plain `-m '…'`.
 
 pstack, per repository: the kit's `.claude/settings.json` pins it through a `settings` marketplace named for the
 commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository

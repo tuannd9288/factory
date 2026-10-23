@@ -18,9 +18,13 @@ script in package.json). The stub reviewer cannot catch them; the bar waits on a
 verdict.
 
 Deviations from the plan: D12 as built changed only `test/auth/` (the plan said it would also change token.js), so
-the gate rated it tier 1, not load-bearing; it was caught by rules (failing-test-edited). C20 landed through
-auto-merge at 11:24:02Z (merge 22893d7, its head 63167e0 green on all six checks); a later push of main's commit to
-its branch, mine, turned the PR record to CLOSED. Every clean change was dry-run locally with verify and red-check
+the gate rated it tier 1, not load-bearing; it was caught by rules (failing-test-edited). C20 (#54) landed: `22893d7`, "Merge pull
+request #54", is on factory-scratch `main`'s first-parent chain, with parents `e9de782` and `63167e0` (C20's head), and
+`git merge-base --is-ancestor 63167e0 origin/main` succeeds. `gh pr view 54` reads CLOSED with `mergedAt` null, and its head
+is now that merge commit (the PR's commits end `63167e0`, `22893d7`). The record reads CLOSED, not MERGED; git does not show
+whether one fact caused the other. Git proves that
+the change landed, not that it went through auto-merge. (A first correction of this paragraph on 2026-10-23 said C20 had
+not landed; it was wrong.) The other 19 clean changes (#35–#53) are MERGED. Every clean change was dry-run locally with verify and red-check
 before it was opened, as an agent would; the defects were only checked to build.
 
 The tier-3 approval in verdict was seen refusing D16 on scratch ("the only code owner (@tuannd9288) wrote this pull
@@ -155,3 +159,60 @@ every push). Rulesets imported by the Human: `factory-branches` (id 25631764), `
 - **Change:** `bin/rulesets/tags.json` is `factory-tags` as imported; `bin/onboard-owner` wants it before and after the
   kit lands, and its tests cover the file, the dry run, `--apply`, the read-back and a changed bypass list. Its live dry
   run and apply on a fresh repository happen at #6's sitting, as the Human's step.
+
+## Issue #6: the pack contract and the probe on factory-pack-scratch, 2026-10-23
+
+Pack: plain Claude Code with pstack (`probes/pack-contract.md`). Scratch repository `tuannd9288/factory-pack-scratch`
+(private, id 1429801844), agent account `tuan9288-agent`, probe `probes/pack-probe.mjs` at 5b5bb5b, logs in
+`~/factory-runs/issue-6/pack-20261023t0744/` and `probe-live2.log`. Claude Code **2.1.309** in both runs (run 1's logs
+say 2.1.309 too); the step-0 and grants checks of 2026-10-22 were on 2.1.308.
+
+Why there were two runs. Run 1 (24fba5a, 2026-10-23, 7 PASS and 4 FAIL): the model declined `git tag x` and the
+`.env` read itself because `AGENTS.md` forbids them, so no rule was tried; the pull request's `review`, `verdict` and
+`tier` were red on the kit's own bugs (`tier`: "3 label events, more than one page", from `totalCount`; `rounds`: "Resource
+not accessible by integration"), found by this run and fixed by #22 / tuannd9288/factory#23; and the PR session did
+not label the pull request `task`. The probe's prompts were fixed (#6) and the kit update landed by hand in
+factory-pack-scratch#4 (merge 30d3c86; the Human set `factory-gate` to Disabled, merged, and `onboard-owner --apply`
+read back "every setting as planned").
+
+The first kit pull request there (factory-pack-scratch#1) had a red `verify` by design: `main` had no kit yet, so
+`scripts/verify-trusted` was missing (exit 127), and `factory-bootstrap` requires no check. `bin/onboard` now says so in
+the kit PR body.
+
+Run 2, every item:
+
+| Item | Result | Evidence |
+|---|---|---|
+| session starts inside the repository | PASS | cwd `~/Desktop/WORKSPACES/factory-pack-scratch` |
+| pins load (pstack plugin listed) | PASS | plugins: pstack, cc-plugin-agents-md, cc-plugin-telemetry, cc-plugin-plugin-authoring |
+| permission baseline (acceptEdits) in force | PASS | init `permissionMode` "acceptEdits" |
+| `git tag x` refused by a deny rule | PASS | control `git branch probe-ctl-…` allowed; "Permission to use Bash with command git tag x has been denied." from `permission_denials` |
+| `.env` read refused by a deny rule | PASS | "File is in a directory that is denied by your permission settings." |
+| `CLAUDE_CONFIG_DIR` equals the repository's profile | PASS | `~/.agent-profiles/tuannd9288/factory-pack-scratch/claude` |
+| `AGENTS.md` marker quoted from loaded context | PASS | "yield at these six points, where the gate's rule wins:", no tool read it |
+| sessions finished within their turns | PASS | both `result.subtype` success |
+| pull request opened and accepted by the gate | PASS | #6 at af04527: verify, review, verdict, tier SUCCESS |
+| task label and `Closes #n` | PASS | label `task`; closes #5 |
+| ledger shows the session with a cost above 0 | PASS | cost_usd 0.2217 (row found by the branch) |
+
+`#24 identity` lines, as printed (never #6 items):
+
+```
+#24 identity ssh: tuannd9288
+#24 identity gh: tuan9288-agent
+```
+
+SSH still answers as the Human, as #24 expected; `gh` acts as the agent.
+
+The gate on the probe's pull request (the live proof of #22): `verify` SUCCESS, `review` SUCCESS, `verdict` SUCCESS,
+`tier` SUCCESS (labels `task`, `tier-1`), `rounds` SKIPPED, so it did not run (it runs only after a red `review` or
+`verdict`): the `checks: read` fix is not proven by this run. The pull request was not merged: the probe closed it
+(CLOSED, `mergedAt` null), closed issue #5, deleted the branch on origin and locally, and left the clone on `main`,
+clean.
+
+`gitBranch`: set on each entry, on 2.1.309 (the writer profile's 14/14 of #14 is from 2.1.308). `bin/factory-ledger --check --profile-dir` on the
+factory-pack-scratch profile reports `gitBranch string 22/22` and `cwd string 22/22` over the latest 22 assistant entries
+(and 14/14 on the writer profile in #14). Names, types and counts only.
+
+Does not prove: that a session without the kit's `AGENTS.md` follows the rules; the `rounds` job; a merge through
+auto-merge in a pack repository (the probe closes its pull request); another pack.
