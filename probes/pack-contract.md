@@ -3,7 +3,7 @@
 A pack is a way of working: the launcher that starts a session, the instructions it carries, the tools it adds. Today's
 pack is plain Claude Code with pstack, started as `cd <root>/<repo> && direnv exec . claude -p "…"` (root `AGENTS.md`).
 No standard covers this seam, so the contract is the factory's own. It lives here, beside the probe that proves it,
-and root `AGENTS.md` links it with one line: that file is at its line budget, and the contract changes with the probe,
+and root `AGENTS.md` links it with one line: the contract changes with the probe,
 not with the factory's rules. The decision is #6's (2026-10-22). The session agent is Claude Code; the live verifier
 runs Codex and is outside this contract.
 
@@ -26,7 +26,7 @@ after every item passes, with the Claude Code version and the date in `probes/re
 
 The pack follows `kit/AGENTS.md` § How a change lands: one branch per task, an issue labelled `task`, `Closes #<n>`, a
 `Failing-test:` trailer where a source change needs one, no rewrite of a pushed commit, and a merge commit through
-auto-merge after a live PASS. The probe's session opens a docs-only pull request and the gate judges it; the clauses
+auto-merge after a live PASS. The probe's session opens a pull request that adds a function to `src/math.js` with its test first (two commits), and the gate judges it; the clauses
 the gate cannot see stay with the checks that already carry them.
 
 | Clause | Check that proves it |
@@ -66,6 +66,8 @@ environment the sessions are launched with, not through the model. They are #24'
 SSH should answer `tuannd9288`, and the probe goes on. No token and nothing else from `hosts.yml` is printed.
 
 ## Running the probe
+
+A SIGTERM sent to the probe alone waits until every `spawnSync` returns; only a process-group signal stops it at once.
 
 ```
 node probes/pack-probe.mjs --repo <owner>/<name>      # from the factory root, as the agents' account
