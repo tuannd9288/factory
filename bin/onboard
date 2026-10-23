@@ -188,6 +188,8 @@ $evidence
 \`\`\`
 Kiểm lại từ bản clone của factory: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
 
+Lưu ý: check \`verify\` của PR này đỏ (\`scripts/verify-trusted: No such file\`, mã 127) vì \`main\` chưa có kit; nó không chặn merge, vì \`factory-bootstrap\` không đòi check nào.
+
 ## Việc của anh sau khi merge
 1. Từ bản clone của factory, chạy lại \`bin/onboard-owner $slug --id $id --apply\`: nó thay ruleset tạm của \`main\` bằng \`factory-gate\` của kit và đọc lại những gì đã đặt.
 2. Đặt secret của reviewer vào environment \`reviewer\` (chỉ nhánh \`main\`; không đặt secret ở mức repo: job \`pull_request\` của mọi nhánh đọc được).
