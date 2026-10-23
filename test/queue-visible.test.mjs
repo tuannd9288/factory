@@ -50,10 +50,13 @@ test('the digest lists every .failed file with its time and cause, and each repo
     const text = ledger.digest([], { since: '2026-10-17', until: '2026-10-24', queue: q });
     assert.match(text, /queue-run\.failed: 2026-10-24T01:00:00\.000Z gh: not logged in/);
     assert.match(text, /queue-o-app\.failed: 2026-10-24T02:00:00\.000Z o\/app: HTTP 502/);
-    assert.match(text, /o\/app: 2026-10-23T23:00:00\.000Z/);
+    assert.match(text, /queue-o-app\.ok: 2026-10-23T23:00:00\.000Z/);
     assert.match(text, /o\/new: chưa ghi nhận lần quét thành công/);
     const clean = ledger.digest([], { since: 'a', until: 'b', queue: ledger.queueState(join(state, 'none'), ['o/new']) });
-    assert.match(clean, /Không có file \.failed/);
+    assert.match(clean, /Không kiểm tra được hàng đợi.*none/);
+    assert.doesNotMatch(clean, /Không có file \.failed/);
+    mkdirSync(join(state, 'empty'));
+    assert.match(ledger.digest([], { since: 'a', until: 'b', queue: ledger.queueState(join(state, 'empty'), []) }), /Không có file \.failed/);
   });
 });
 
