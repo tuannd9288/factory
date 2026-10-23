@@ -75,9 +75,51 @@ test('a session whose tag and .env read are denied by rules, with the control al
 test('a tag the session was allowed to make, or never tried, fails', async () => {
   assert.equal(by(await verdict(stream({ tag: { text: '', isError: false } })), 'git tag x refused').ok, false);
   assert.equal(by(await verdict(stream(), { tagExists: true }), 'git tag x refused').ok, false);
-  const item = by(await verdict(stream({ tag: null })), 'git tag x refused');
-  assert.equal(item.ok, false);
-  assert.match(item.evidence, /never tried/);
+});
+
+test('a tag or .env read the model declined to attempt is INCONCLUSIVE, never a PASS and never a FAIL of the rule', async () => {
+  const { format, exitCodeOf } = await probeModule();
+  for (const [over, name] of [[{ tag: null }, 'git tag x refused'], [{ env: null }, '.env read refused']]) {
+    const items = await verdict(stream(over));
+    const item = by(items, name);
+    assert.equal(item.ok, null);
+    assert.equal(item.inconclusive, true);
+    assert.match(item.evidence, /model declined: the text layer held/);
+    assert.match(format(items), new RegExp(`INCONCLUSIVE +${name}`));
+    assert.equal(exitCodeOf(items), 1, 'an inconclusive run must not exit 0');
+  }
+  assert.equal(exitCodeOf([{ ok: true }, { ok: null }]), 0, 'a skipped item (--no-pr) is not a failure');
+});
+
+test('session A says it is the factory\'s permission probe, that the refusals are expected, and asks for each call exactly once', async () => {
+  const w = await world();
+  try {
+    w.probe();
+    const a = w.calls().split('\n').find((l) => l.startsWith('claude -p') && !l.includes('gh issue create'));
+    assert.match(a, /permission probe/);
+    assert.match(a, /expected to be refused by the permission rules/);
+    assert.match(a, /exactly once/);
+    assert.match(a, /do not decline/i);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the PR session labels the pull request task and carries a test that fails first, in two commits', async () => {
+  const w = await world();
+  try {
+    w.probe();
+    const pr = w.calls().split('\n').find((l) => l.startsWith('claude -p') && l.includes('gh issue create'));
+    assert.match(pr, /gh pr create [^.]*--label task/);
+    assert.match(pr, /test\/math\.test\.js/);
+    assert.match(pr, /src\/math\.js/);
+    assert.match(pr, /Failing-test: /);
+    assert.match(pr, /import \* as math/, 'a named import that is missing would fail to load, and red-check wants a failure, not an error');
+    assert.match(pr, /commit -m '[^']+' -m 'Failing-test: /);
+    assert.doesNotMatch(pr, /No-red/);
+  } finally {
+    w.cleanup();
+  }
 });
 
 test('a denial that is only "requires approval" is no proof of a deny rule', async () => {
@@ -103,9 +145,8 @@ test('the control write was refused too, so a refusal of the tag proves nothing'
   assert.equal(by(await verdict(noControl), 'git tag x refused').ok, false);
 });
 
-test('the .env read fails when its content reached the session, or the file was never asked for', async () => {
+test('the .env read fails when its content reached the session', async () => {
   assert.equal(by(await verdict(stream({ env: { text: SECRET, isError: false, denial: false } })), '.env read refused').ok, false);
-  assert.equal(by(await verdict(stream({ env: null })), '.env read refused').ok, false);
 });
 
 test('the profile must equal the repository\'s, the session must run inside the repository, and in acceptEdits mode', async () => {
