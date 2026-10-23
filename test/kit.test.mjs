@@ -931,13 +931,6 @@ describe('review, verdict, tier and rounds', () => {
     assert.ok(Date.now() - start >= 1000, 'tier gave up before GATE_REVIEW_WAIT');
     reviewJob('success');
   });
-  test('the stub raises on a review only: the marker in a verdict job changes nothing', () => {
-    labels();
-    const out = job('verdict', { 'src/auth/t.js': 'export const t = 1;\n// GATE-STUB-RAISE x\n' }, { GATE_REVIEWER: 'stub', ...pr });
-    assert.equal(out.code, 0, out.out);
-    assert.doesNotMatch(out.out, /raises/);
-    assert.match(out.out, /^::notice title=review-result::none\n/m);
-  });
   test('whatever the reviewer writes, the runner finds one command: the result annotation, which comes first', () => {
     // The runner reads `##[name]` anywhere in a line, `::name::` at the start of one, and ends a line at \r too.
     const commandsOf = (stdout) =>
@@ -1170,6 +1163,121 @@ describe('review, verdict, tier and rounds', () => {
     out = again('tier', changed, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+  });
+
+  // The Claude Code reviewer through scripts/review, and verdict reading review's result: one reviewer call per pull request.
+  const FAKE_CLAUDE = (f) => `#!/usr/bin/env node
+const fs = require('fs');
+const conf = JSON.parse(fs.readFileSync(${JSON.stringify(join(f, 'claude.json'))}, 'utf8'));
+if (process.argv[2] === '--version') { console.log('2.1.308 (Claude Code)'); process.exit(0); }
+fs.readFileSync(0, 'utf8');
+fs.appendFileSync(${JSON.stringify(join(f, 'claude-calls'))}, 'call\\n');
+const e = (x) => console.log(JSON.stringify(x));
+e({ type: 'system', subtype: 'init', tools: ['Read', 'Grep', 'Glob'], mcp_servers: [], plugins: [], skills: [], slash_commands: [] });
+if (conf.mode === 'quota') { e({ type: 'result', is_error: true, api_error_status: 429, result: 'Claude AI usage limit reached|1761300000' }); process.exit(1); }
+e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(conf.output), structured_output: conf.output });
+`;
+  const claude = (conf) => {
+    write(fake, { 'bin/claude': FAKE_CLAUDE(fake), 'claude.json': JSON.stringify(conf), 'claude-calls': '' });
+    run(fake, 'chmod', ['+x', 'bin/claude']);
+  };
+  const reviewEnv = { GATE_REVIEWER: 'claude', CLAUDE_CODE_OAUTH_TOKEN: 'tok', ...pr };
+  const NOTE = (title, message) => ({ title, message, annotation_level: 'notice' });
+  /** Commits a tier 2 candidate (a load-bearing path) and fetches it; returns its head and the base the jobs get. */
+  const candidate = (files = { 'src/auth/t.js': 'export const t = 1;\n' }) => {
+    git(r.repo, 'switch', '-q', '-C', 'rv', 'origin/main');
+    const head = commit(r.repo, files, 'rv');
+    git(trusted, 'fetch', '-q', r.repo, 'rv');
+    return { head, base: git(trusted, 'rev-parse', 'origin/main') };
+  };
+
+  test('review with the Claude reviewer prints the result, then which head and base it judged, and its verdict', () => {
+    claude({ output: { blocking: [], noRed: 'unjudged' } });
+    let out = job('review', { 'src/math.js': MUL }, reviewEnv);
+    const base = git(trusted, 'rev-parse', 'origin/main');
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^::notice title=review-result::none\n/);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} pass\n`), out.out);
+    claude({ output: { blocking: [{ id: 'f1', claim: 'off by one in add' }], noRed: 'unjudged' } });
+    out = job('review', { 'src/math.js': MUL }, reviewEnv);
+    assert.equal(out.code, 1, out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} block\n`), out.out);
+    assert.match(out.out, /f1: off by one in add/);
+  });
+  test('a quota failure of the Claude reviewer reads as unavailable: it fails the check, and leaves no verdict annotation', () => {
+    claude({ mode: 'quota' });
+    const out = job('review', { 'src/math.js': MUL }, reviewEnv);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^::notice title=review-result::unavailable: quota\nreview: reviewer unavailable \(quota\)/);
+    assert.doesNotMatch(out.out, /review-verdict/);
+  });
+  test('an unknown reviewer name still fails closed', () => {
+    const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'gpt', ...pr });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /unknown reviewer 'gpt'/);
+  });
+  test('verdict waits for review of its run and passes with it, naming the same head and base, with no reviewer call', () => {
+    claude({ output: { blocking: [], noRed: 'unjudged' } });
+    const { head, base } = candidate();
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} pass`)]) });
+    const out = again('verdict', head, { GATE_REVIEWER: '', ...pr });
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /verdict: review passed/);
+    assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8'), '');
+    annotations();
+  });
+  test('verdict fails closed on a result for another head or base, a blocking one, an absent one, and one still running', () => {
+    const { head, base } = candidate();
+    const with_ = (verdict) => write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), ...(verdict ? [NOTE('review-verdict', verdict)] : [])]) });
+    with_(`head=${'a'.repeat(40)} base=${base} pass`);
+    let out = again('verdict', head, { ...pr, GATE_RESULT_TRIES: '1' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /names another head or base/);
+    with_(`head=${head} base=${'b'.repeat(40)} pass`);
+    assert.match(again('verdict', head, pr).out, /names another head or base/);
+    with_(`head=${head} base=${base} block`);
+    out = again('verdict', head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /verdict: review blocks/);
+    with_(null);
+    out = again('verdict', head, { ...pr, GATE_RESULT_TRIES: '2' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /left no verdict annotation after 2 reads/);
+    reviewJob('failure');
+    out = again('verdict', head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /review ended without a result/);
+    reviewJob('in_progress');
+    out = again('verdict', head, { ...pr, GATE_REVIEW_WAIT: '0' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /review did not finish in time/);
+    reviewJob('success');
+    annotations();
+  });
+  test('verdict and tier say the reviewer was unavailable, not that review is red', () => {
+    const { head } = candidate();
+    reviewJob('failure');
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'unavailable: quota')]) });
+    let out = again('verdict', head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^::notice title=review-result::unavailable: quota\n/);
+    assert.match(out.out, /verdict: reviewer unavailable \(quota\); this is not a finding on the change/);
+    out = again('tier', head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier: reviewer unavailable \(quota\)/);
+    assert.doesNotMatch(out.out, /review is red; tier follows it/);
+    reviewJob('success');
+    annotations();
+  });
+  test('rounds does not count a head whose review or verdict was only unavailable', () => {
+    const node = (oid, name, conclusion, message) => ({
+      commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion, annotations: { nodes: message ? [{ title: 'review-result', message }] : [] } }] } }] } },
+    });
+    const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes } } } } }) });
+    rounds(node('a', 'review', 'FAILURE', 'unavailable: quota'), node('b', 'verdict', 'FAILURE', 'unavailable: quota'), node('c', 'review', 'FAILURE', 'none'), node('d', 'verify', 'FAILURE'));
+    const out = job('rounds', { 'src/math.js': MUL }, pr);
+    assert.match(out.out, /2 head commits judged red/);
+    assert.equal(out.edits, '');
   });
 });
 
