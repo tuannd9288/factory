@@ -321,7 +321,7 @@ describe('verify and prove-check', () => {
   test('passes quietly on a good tree: one summary line', () => {
     const out = script(r.repo, 'verify', [], { GATE_BASE: 'origin/main' });
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out.trim(), /^verify: 5 passed in \d+s$/);
+    assert.match(out.out.trim(), /^verify: 6 passed in \d+s$/);
   });
   test('fails when CODEOWNERS does not end with every protected path', () => {
     const owners = readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8');
