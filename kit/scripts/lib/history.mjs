@@ -16,6 +16,9 @@
 //     `pending` while the `review` job of that run has not completed; then `ok` or `red` and `pass`, `block`, `mismatch`
 //     (its review-verdict annotation names another head or base), `absent` (it left none) or `unavailable <class>`.
 //     `verdict` passes only on `ok pass`: it makes no reviewer call of its own.
+//   node scripts/lib/history.mjs reuse --repo <owner/name> --run <id> --head <sha> --base <sha> --nored <hash|none>
+//     `reuse pass|block <run> <result>` when a completed review of any gate-trusted run on the head already judged this head,
+//     base and No-red line (its review-verdict annotation names all three), `none` otherwise: one reviewer call per head.
 // Exit 2 when GitHub cannot be read or the history does not fit one page: a history half read decides nothing. One page
 // is decided by pageInfo, not totalCount: totalCount ignores the itemTypes filter (factory-pack-scratch#3, 2026-10-23).
 import { execFileSync } from 'node:child_process';
@@ -25,7 +28,7 @@ import { execFileSync } from 'node:child_process';
 const LABELS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
 timelineItems(first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes{... on LabeledEvent{createdAt actor{login} label{name}}}}}}}`;
 const ROUNDS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
-commits(last:100){pageInfo{hasPreviousPage} nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{name conclusion annotations(first:10){nodes{title message}}}}}}}}}}}}`;
+commits(last:100){pageInfo{hasPreviousPage} nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{databaseId name conclusion}}}}}}}}}}`;
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE']);
 
 const args = process.argv.slice(2);
@@ -128,11 +131,24 @@ try {
       if (result.startsWith('unavailable ')) console.log(`${state} ${result}`);
       else if (verdict === null) console.log(`${state} absent`);
       else {
-        const m = /^head=([0-9a-f]{40}) base=([0-9a-f]{40}) (pass|block)$/.exec(verdict);
-        if (!m) throw new Error('the review verdict annotation is not head=<sha> base=<sha> pass|block');
+        const m = /^head=([0-9a-f]{40}) base=([0-9a-f]{40})(?: nored=(?:[0-9a-f]+|none))? (pass|block)$/.exec(verdict);
+        if (!m) throw new Error('the review verdict annotation is not head=<sha> base=<sha> [nored=<hash>] pass|block');
         console.log(m[1] !== opt('--head') || m[2] !== opt('--base') ? `${state} mismatch` : `${state} ${m[3]}`);
       }
     }
+  } else if (args[0] === 'reuse') {
+    // The latest completed review of any gate-trusted run on this head whose verdict names this head, base and No-red line.
+    const runs = api(`${base}/actions/workflows/gate-trusted.yml/runs?head_sha=${opt('--head')}&per_page=100`);
+    if (!Array.isArray(runs.workflow_runs) || runs.total_count !== runs.workflow_runs.length) throw new Error('the runs on this head are more than one page, or unreadable');
+    const found = [];
+    for (const run of runs.workflow_runs)
+      for (const job of reviewsOf(run.id).filter((j) => j.status === 'completed')) {
+        const m = /^head=([0-9a-f]{40}) base=([0-9a-f]{40}) nored=([0-9a-f]+|none) (pass|block)$/.exec(verdictOf(job) ?? '');
+        if (!m || m[1] !== opt('--head') || m[2] !== opt('--base') || m[3] !== opt('--nored')) continue;
+        const result = resultOf(job);
+        if (!result.startsWith('unavailable ') && result !== 'absent') found.push({ at: String(job.completed_at ?? ''), line: `reuse ${m[4]} ${run.id} ${result}` });
+      }
+    console.log(found.sort((a, b) => a.at.localeCompare(b.at)).at(-1)?.line ?? 'none');
   } else if (args[0] === 'labels') {
     const items = pull(LABELS).timelineItems;
     if (items.pageInfo?.hasNextPage !== false) throw new Error('the label events are more than one page, or GitHub sent no pageInfo');
@@ -147,15 +163,19 @@ try {
     console.log(times.sort()[0] ?? '');
   } else if (args[0] === 'rounds') {
     const checks = new Set(opt('--checks').split(',').filter(Boolean));
-    // A review or verdict that ended because the reviewer was unavailable judged nothing: it is no round.
-    const onlyUnavailable = (c) => (c.annotations?.nodes ?? []).some((n) => n.title === 'review-result' && /^unavailable: /.test(String(n.message)));
+    // A review or verdict that ended because the reviewer was unavailable judged nothing: it is no round. Its annotations are
+    // read by REST (asking for them in the query would cost 1,021 points of the 1,000 an hour), for red runs of those two only.
+    const onlyUnavailable = (c) =>
+      (c.name === 'review' || c.name === 'verdict') &&
+      Number.isInteger(c.databaseId) &&
+      api(`${base}/check-runs/${c.databaseId}/annotations?per_page=100`).some((n) => n.title === 'review-result' && n.annotation_level === 'notice' && /^unavailable: /.test(String(n.message)));
     const commits = pull(ROUNDS).commits;
     if (commits.pageInfo?.hasPreviousPage !== false) throw new Error('the commits are more than one page, or GitHub sent no pageInfo');
     const red = commits.nodes.filter(({ commit }) =>
       commit.checkSuites.nodes.some((s) => s.app?.slug === 'github-actions' && s.checkRuns.nodes.some((c) => checks.has(c.name) && RED.has(c.conclusion) && !onlyUnavailable(c))),
     );
     console.log(red.length);
-  } else throw new Error('usage: history.mjs labels|raised-at|rounds|check|raise|verdict --repo owner/name --pr n|--head sha|--run id [--checks a,b] [--name c]');
+  } else throw new Error('usage: history.mjs labels|raised-at|rounds|check|raise|verdict|reuse --repo owner/name --pr n|--head sha|--run id [--checks a,b] [--name c]');
 } catch (error) {
   console.log(`history: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
   process.exit(2);

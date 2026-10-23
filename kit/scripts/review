@@ -24,12 +24,14 @@
 # and GITHUB_REPOSITORY, read with gh). GATE_HEAD, the pull request's head, must be the head judged.
 # GATE_REVIEWER picks the reviewer; it is a repository variable, which only an admin sets:
 #   stub    scratch repositories only: scripts/lib/stub-reviewer.mjs, no model
-#   claude  scripts/lib/claude-reviewer.mjs: Claude Code, Opus at max effort, read-only tools, once per pull request, in `review`
+#   claude  scripts/lib/claude-reviewer.mjs: Claude Code, Opus at max effort, read-only tools, in `review` only, once per head:
+#           an earlier review of this head, base and No-red line (any run of this workflow) is reused, not asked again
 #   unset   fails closed: no reviewer is configured, so nothing merges on this gate
 # A reviewer's result counts only through scripts/lib/result.mjs: a missing, malformed or unbound one fails. After it, `review`
 # prints the annotation `review-verdict` (head=<sha> base=<sha> pass|block) that `verdict` reads. A reviewer that gave no
-# verdict at all (a usage limit, a bad token, a timeout) leaves `review-result: unavailable: <class>` instead and fails: the
-# check is red, `rounds` does not count the head, and `tier` says the reviewer was unavailable.
+# verdict at all (a usage limit, a bad token, a timeout, a result result.mjs refuses, a reviewer that crashed or is not
+# configured) leaves `review-result: unavailable: <class>` instead and fails: the check is red, `rounds` does not count the
+# head, and `tier` says the reviewer was unavailable. A reviewer output that held a token (exit 4) stays an ordinary red.
 set -uo pipefail
 trusted=$(git rev-parse --show-toplevel) || exit 2
 cd "$trusted" || exit 2
@@ -235,29 +237,59 @@ result=$(mktemp) || exit 2
 trap 'rm -f "$result"' EXIT
 notes=$(mktemp) || exit 2
 trap 'rm -f "$result" "$notes"' EXIT
+# The No-red line the review judged, by hash: an edit that changes it is a new question for the reviewer.
+nored=none
+if [ -n "${GATE_BODY_FILE:-}" ] && line=$(grep -E -m1 '^No-red: .{20,}' "$GATE_BODY_FILE"); then
+  nored=$(printf '%s' "$line" | node -e 'process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(0)).digest("hex").slice(0, 16))')
+fi
+if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
+  if prior=$(node scripts/lib/history.mjs reuse --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork" --nored "$nored" 2>&1); then
+    case "$prior" in
+      "reuse "*)
+        read -r _ pv rid rest <<<"$prior"
+        if [ "$rest" = none ]; then echo "::notice title=review-result::none"; else why=${rest#raise }; echo "::notice title=review-result::raise: ${why//%/%25}"; fi
+        echo "review: reused the review of run $rid for this head, base and No-red line; no call made (one call per head)"
+        echo "::notice title=review-verdict::head=$head base=$fork nored=$nored $pv"
+        [ "$pv" = pass ] && exit 0
+        echo "review blocks ${head:0:8} (reused; its findings are in the log of run $rid)"
+        exit 1
+        ;;
+    esac
+  else
+    echo "$job: earlier reviews of this head could not be read ($prior), so the reviewer is asked again"
+  fi
+fi
 case "${GATE_REVIEWER:-}" in
   stub) node scripts/lib/stub-reviewer.mjs "$job" "$fork" "$head" >"$result" ;;
   claude)
     node scripts/lib/claude-reviewer.mjs "$job" "$fork" "$head" --out "$result" >"$notes"
     code=$?
     if [ "$code" -ne 0 ]; then
+      if [ "$code" -ne 3 ] && [ "$code" -ne 4 ]; then
+        echo "::notice title=review-result::unavailable: crash"
+        echo "$job: the Claude reviewer failed (exit $code); this is not a finding on the change, so this check fails closed"
+      fi
       cat "$notes"
-      [ "$code" -eq 3 ] || echo "$job: the Claude reviewer failed (exit $code), so this check fails closed"
       exit 1
     fi
     ;;
   "")
+    echo "::notice title=review-result::unavailable: no-reviewer"
     echo "$job: no reviewer is configured (repository variable GATE_REVIEWER is unset), so this check fails closed"
     exit 1
     ;;
   *)
+    echo "::notice title=review-result::unavailable: no-reviewer"
     echo "$job: unknown reviewer '$GATE_REVIEWER' (known: stub, claude), so this check fails closed"
     exit 1
     ;;
 esac
-node scripts/lib/result.mjs --job "$job" --base "$fork" --head "$head" $claim <"$result"
+checked=$(node scripts/lib/result.mjs --job "$job" --base "$fork" --head "$head" $claim <"$result")
 code=$?
-# review's verdict for verdict to read: fixed text, the two SHAs it judged and whether it blocks (exit 1), never model text.
-[ "$code" -le 1 ] && echo "::notice title=review-verdict::head=$head base=$fork $([ "$code" -eq 0 ] && echo pass || echo block)"
+# A result result.mjs refuses says nothing about the change: unavailable, not a red round.
+[ "$code" -eq 2 ] && echo "::notice title=review-result::unavailable: malformed"
+printf '%s\n' "$checked"
+# review's verdict for verdict to read: fixed text, the SHAs it judged, the No-red line (by hash) and whether it blocks.
+[ "$code" -le 1 ] && echo "::notice title=review-verdict::head=$head base=$fork nored=$nored $([ "$code" -eq 0 ] && echo pass || echo block)"
 cat "$notes"
 [ "$code" -eq 0 ] || exit 1
