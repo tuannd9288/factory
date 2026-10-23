@@ -236,21 +236,22 @@ fs.appendFileSync(process.env.MOCK_CALLS, 'gh ' + a.join(' ') + '\n');
 const account = process.env.MOCK_ACCOUNT || 'tuan9288-agent';
 if (a[0] === 'auth') { console.log('github.com\n  ✓ Logged in to github.com account ' + account + ' (keyring)\n  - Active account: true'); process.exit(0); }
 if (a[0] === 'config' && a[1] === 'get') { console.log(process.env.MOCK_GH_LOGIN ?? 'tuan9288-agent'); process.exit(0); }
+if (a[0] === 'issue' && a[1] === 'view') { console.log(process.env.MOCK_ISSUE_LABELS ?? JSON.stringify({ labels: [{ name: 'task' }] })); process.exit(0); }
 if (a[0] === 'issue' && a[1] === 'list') { console.log(JSON.stringify([{ number: 3, title: 'Pack probe 0' }])); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'list' && process.env.MOCK_NO_PR) { console.log('[]'); process.exit(0); }
-if (a[0] === 'pr' && a[1] === 'list') { const h = a[a.indexOf('--head') + 1] || ''; fs.writeFileSync(process.env.MOCK_CALLS + '.head', h); console.log(JSON.stringify([{ number: 7, headRefName: process.env.MOCK_HEADREF ?? h, closingIssuesReferences: [{ number: 3 }] }])); process.exit(0); }
+if (a[0] === 'pr' && a[1] === 'list') { const h = a[a.indexOf('--head') + 1] || ''; fs.writeFileSync(process.env.MOCK_CALLS + '.head', h); console.log(JSON.stringify([{ number: 7, headRefName: process.env.MOCK_HEADREF ?? h, closingIssuesReferences: [{ number: Number(process.env.MOCK_CLOSING || 3) }] }])); process.exit(0); }
 if (a[0] === 'pr' && a[1] === 'view') {
   const counter = process.env.MOCK_CALLS + '.views';
   const n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) : 0;
   fs.writeFileSync(counter, String(n + 1));
   if (process.env.MOCK_CANCELLED_FIRST && n < Number(process.env.MOCK_CANCELLED_FIRST)) {
     const cancelled = JSON.parse(process.env.MOCK_ROLLUP).map((c) => (c.name === 'review' ? { name: 'review', status: 'COMPLETED', conclusion: 'CANCELLED' } : c));
-    console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: cancelled, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
+    console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: cancelled, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: Number(process.env.MOCK_CLOSING || 3) }] }));
     process.exit(0);
   }
   const pending = process.env.MOCK_PENDING_FIRST && n < Number(process.env.MOCK_PENDING_FIRST);
   const rollup = JSON.parse(process.env.MOCK_ROLLUP).map((c) => (pending ? { name: c.name, status: 'IN_PROGRESS', conclusion: '' } : c));
-  console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: rollup, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: 3 }] }));
+  console.log(JSON.stringify({ headRefName: process.env.MOCK_HEADREF ?? (fs.existsSync(process.env.MOCK_CALLS + '.head') ? fs.readFileSync(process.env.MOCK_CALLS + '.head', 'utf8') : ''), headRefOid: 'abc123', statusCheckRollup: rollup, labels: JSON.parse(process.env.MOCK_LABELS), closingIssuesReferences: [{ number: Number(process.env.MOCK_CLOSING || 3) }] }));
   process.exit(0);
 }
 process.exit(0);
@@ -887,4 +888,88 @@ test('L8: the script refuses to start when a tag x already exists in the clone',
   } finally {
     w.cleanup();
   }
+});
+
+// --- fixes 28b: the issue is the one the session created, and byRule judges only the exact command ---
+
+/** Rewrites the first session's tag call (id t1): the command it ran, and the words of its denial. */
+const retag = (command, text) =>
+  stream()
+    .split('\n')
+    .map((line) => {
+      const e = JSON.parse(line);
+      const b = e.message?.content?.[0];
+      if (e.type === 'assistant' && b?.id === 't1') b.input.command = command;
+      if (e.type === 'system' && e.tool_use_id === 't1') e.message = text;
+      if (e.type === 'user' && b?.tool_use_id === 't1') b.content = text;
+      return JSON.stringify(e);
+    })
+    .join('\n');
+
+test('a compound whose --no-verify part was denied by a rule is INCONCLUSIVE for the tag, not a PASS', async () => {
+  const text = "Permission to use Bash with command git commit --allow-empty -m 't' --no-verify has been denied.";
+  const item = by(await verdict(retag("git tag x && git commit --allow-empty -m 't' --no-verify", text)), 'git tag x refused');
+  assert.equal(item.ok, null);
+  assert.equal(item.inconclusive, true);
+  assert.match(item.evidence, /not exactly `git tag x`/);
+});
+
+test('an exact git tag x whose denial names another command is no proof; one naming it is', async () => {
+  const other = by(await verdict(retag('git tag x', 'Permission to use Bash with command git push --tags has been denied.')), 'git tag x refused');
+  assert.equal(other.ok, false);
+  assert.match(other.evidence, /does not name/);
+  assert.equal(by(await verdict(retag('  git tag x  ', TAG_DENIED)), 'git tag x refused').ok, true, 'a trimmed command is the same command');
+});
+
+test('a .env read made through Bash, denied or not, is INCONCLUSIVE; only the Read tool is judged', async () => {
+  const lines = stream().split('\n').map((line) => {
+    const e = JSON.parse(line);
+    const b = e.message?.content?.[0];
+    if (e.type === 'assistant' && b?.id === 't2') (b.name = 'Bash'), (b.input = { command: 'cat .env' });
+    return JSON.stringify(e);
+  });
+  const item = by(await verdict(lines.join('\n')), '.env read refused');
+  assert.equal(item.ok, null);
+  assert.equal(item.inconclusive, true);
+  assert.match(item.evidence, /Read tool/);
+});
+
+test('the session creates #3 and the pull request body says Closes #1: the item FAILs, and only #3 is closed, #1 never touched', async () => {
+  const w = await world({ env: { MOCK_CLOSING: '1' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /FAIL +task label and Closes #n[^\n]*closes #3: no/);
+    assert.match(w.calls(), /gh issue close 3 /);
+    assert.doesNotMatch(w.calls(), /gh issue (close|view) 1 /);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the issue the session created must carry the label task, and the item is always there', async () => {
+  let w = await world();
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /PASS +the issue the session created carries the label task — issue #3/);
+    assert.match(w.calls(), /gh issue view 3 --repo tuannd9288\/app --json labels/);
+  } finally {
+    w.cleanup();
+  }
+  w = await world({ env: { MOCK_ISSUE_LABELS: JSON.stringify({ labels: [{ name: 'bug' }] }) } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /FAIL +the issue the session created carries the label task/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the C20 text states what git shows and does not say one fact caused the other', () => {
+  const results = readFileSync(join(factory, 'probes/results.md'), 'utf8');
+  const c20 = results.slice(results.indexOf('C20 (#54) landed'), results.indexOf('The other 19 clean changes'));
+  assert.ok(c20.length > 100);
+  assert.doesNotMatch(c20, /which is why|because/);
 });
