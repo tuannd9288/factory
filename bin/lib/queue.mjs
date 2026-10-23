@@ -3,7 +3,9 @@
 // updates one waiting pull request per repository, the oldest first, so the update triggers the gate, and re-runs a
 // tier check that failed before the Human approved the head. It runs once and exits: launchd repeats it. It reads
 // GitHub afresh each time, holds a lock so two sweeps never overlap, bounds every gh call, refuses the Human's login,
-// and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds.
+// and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds; a run that fails
+// before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
+// queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
 // See bin/factory-queue for the arguments.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -107,6 +109,27 @@ function lock(dir) {
   }
 }
 
+/** The checks before the repository loop. Their failure leaves $state/queue-run.failed (a name no repository's
+ * `queue-<owner>-<name>.failed` can take) with the time and the cause, so the digest shows it; a run that gets past
+ * them removes it. Returns the exit code on failure, null to go on. */
+function preflight(state, human) {
+  const report = join(state, 'queue-run.failed');
+  let why;
+  try {
+    const login = gh(['api', 'user', '--jq', '.login']).trim();
+    if (login.toLowerCase() !== human.toLowerCase()) {
+      rmSync(report, { force: true });
+      return null;
+    }
+    why = `runs as the agents' account, not the Human's (${human}); log gh in as the agents' account`;
+  } catch (error) {
+    why = String(error.stderr || error.message).trim();
+  }
+  writeFileSync(report, `${new Date().toISOString()} ${why}\n`);
+  console.error(`factory-queue: ${why}`);
+  return 2;
+}
+
 function main(argv) {
   const [command, ...rest] = argv;
   const repos = [];
@@ -120,17 +143,15 @@ function main(argv) {
   const held = join(state, 'queue.lock');
   if (!lock(held)) return console.log('queue: another sweep is running; nothing done');
   try {
-    const login = gh(['api', 'user', '--jq', '.login']).trim();
-    if (login.toLowerCase() === human.toLowerCase()) {
-      console.error(`factory-queue: runs as the agents' account, not the Human's (${human}); log gh in as the agents' account`);
-      return 2;
-    }
+    const refused = preflight(state, human);
+    if (refused) return refused;
     let failed = 0;
     for (const repo of repos) {
       const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
         sweep(repo);
         rmSync(report, { force: true });
+        writeFileSync(join(state, `queue-${repo.replace('/', '-')}.ok`), `${new Date().toISOString()}\n`);
       } catch (error) {
         const why = String(error.stderr || error.message).trim();
         writeFileSync(report, `${new Date().toISOString()} ${repo}: ${why}\n`);
