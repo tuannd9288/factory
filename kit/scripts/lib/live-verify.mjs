@@ -125,15 +125,15 @@ function verify(pr) {
     return blocked(`the verifier's Codex profile (CODEX_HOME=${shown}) is not logged in. The Human logs it in; an agent never does.`);
 
   const root = realpathSync('.');
-  const wt = join(root, '.claude/worktrees', `live-verify-${pr}`);
+  // Its own tree: mkdtemp creates the folder atomically under a random suffix, so two runs on one pull request never
+  // share a path, and drop() removes this run's tree only. A killed run leaves its tree for a hand cleanup.
+  mkdirSync(join(root, '.claude/worktrees'), { recursive: true });
+  const wt = mkdtempSync(join(root, '.claude/worktrees', `live-verify-${pr}-`));
   const log = `${wt}.log`;
   const drop = () => {
     for (const side of ['parent', 'head']) spawnSync('git', ['worktree', 'remove', '--force', join(wt, side)], { stdio: 'ignore' });
     rmSync(wt, { recursive: true, force: true });
-    spawnSync('git', ['worktree', 'prune'], { stdio: 'ignore' });
   };
-  drop();
-  mkdirSync(wt, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'live-verify-'));
   try {
     const worktrees = { parent: join(wt, 'parent'), head: join(wt, 'head') };

@@ -1,7 +1,7 @@
 // scripts/live-verify: the live verifier on Codex, against a fake gh and a fake codex on PATH, in a copy of the kit.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +43,11 @@ const prompt = fs.readFileSync(0, 'utf8');
 fs.writeFileSync(lv + '/prompt', prompt);
 const sha = (k) => new RegExp('^' + k + ': ([0-9a-f]{40})$', 'm').exec(prompt)?.[1];
 const mode = conf.mode;
+// 'wait': say where the head tree is, then hold until the test releases this process, so runs overlap.
+if (mode === 'wait') {
+  fs.writeFileSync(lv + '/started.' + process.pid, a[a.indexOf('-C') + 1]);
+  while (!fs.existsSync(lv + '/go.' + process.pid)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+}
 if (mode === 'exit1') { process.stderr.write('stream error\n'); process.exit(1); }
 const live = [{ at: 'parent', command: 'node cli.js add 2 3', observed: '5' }, { at: 'head', command: 'node cli.js add 2 3', observed: '5' }];
 const result = {
@@ -79,6 +84,7 @@ function world({ driver = DRIVER } = {}) {
   const lv = join(dir, 'lv');
   mkdirSync(join(dir, 'bin'), { recursive: true });
   mkdirSync(lv);
+  mkdirSync(join(dir, 'tmp'));
   writeFileSync(join(dir, 'bin/gh'), FAKE_GH);
   writeFileSync(join(dir, 'bin/codex'), FAKE_CODEX(lv));
   chmodSync(join(dir, 'bin/gh'), 0o755);
@@ -104,19 +110,33 @@ function world({ driver = DRIVER } = {}) {
     );
   pr();
   writeFileSync(join(lv, 'issue.json'), JSON.stringify({ number: 3, title: 'CLI đặt tên phép tính', body: '`node cli.js add 2 3` in ra 5.' }));
+  const envOf = (env = {}) => ({
+    ...quiet,
+    GH_TOKEN: 'not-a-token',
+    CLAUDE_CONFIG_DIR: join(dir, 'claude'),
+    PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+    TMPDIR: join(dir, 'tmp'),
+    LV: lv,
+    GH_LOGIN: 'tuan9288-agent',
+    GATE_VERIFIER_HOME: join(dir, 'verifier/codex'),
+    ...env,
+  });
   const verify = (args = ['7'], env = {}) => {
     writeFileSync(join(lv, 'codex.json'), JSON.stringify({ loggedIn: env.CODEX_LOGGED_IN ?? '1', mode: env.CODEX_MODE ?? 'pass' }));
-    return run(repo, join(repo, 'scripts/live-verify'), args, {
-      ...quiet,
-      GH_TOKEN: 'not-a-token',
-      CLAUDE_CONFIG_DIR: join(dir, 'claude'),
-      PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
-      LV: lv,
-      GH_LOGIN: 'tuan9288-agent',
-      GATE_VERIFIER_HOME: join(dir, 'verifier/codex'),
-      ...env,
-    });
+    return run(repo, join(repo, 'scripts/live-verify'), args, envOf(env));
   };
+  // A run in the background whose Codex waits for release(): the fake's pid names its started.<pid> and go.<pid>.
+  const start = () => {
+    writeFileSync(join(lv, 'codex.json'), JSON.stringify({ loggedIn: '1', mode: 'wait' }));
+    const { NODE_TEST_CONTEXT, ...outer } = process.env;
+    const child = spawn(join(repo, 'scripts/live-verify'), ['7'], { cwd: repo, env: { ...outer, ...envOf({ GATE_VERIFY_MINUTES: '1' }) }, stdio: 'ignore' });
+    const run = { child, done: new Promise((resolve) => child.on('exit', (code, signal) => resolve({ code, signal }))) };
+    runs.push(run);
+    return run;
+  };
+  const runs = [];
+  const started = () => readdirSync(lv).filter((f) => f.startsWith('started.')).map((f) => ({ pid: f.slice(8), head: readFileSync(join(lv, f), 'utf8') }));
+  const release = (pid) => writeFileSync(join(lv, `go.${pid}`), '');
   const read = (name) => (existsSync(join(lv, name)) ? readFileSync(join(lv, name), 'utf8') : '');
   const execs = () => read('codex-calls').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((c) => c.args[0] === 'exec');
   const patchOf = (b, h) => {
@@ -124,7 +144,20 @@ function world({ driver = DRIVER } = {}) {
     const diff = execFileSync('git', ['-C', repo, 'diff', '--binary', '--no-renames', fork, h], { encoding: 'utf8' });
     return execFileSync('git', ['-C', repo, 'patch-id', '--verbatim'], { input: diff, encoding: 'utf8' }).split(' ')[0];
   };
-  return { dir, repo, base, head, lv, pr, verify, read, execs, patchOf, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, repo, base, head, lv, pr, verify, start, started, release, read, execs, patchOf,
+    // No run outlives its test: release every started Codex, kill each run, await it, then remove the folder.
+    cleanup: async () => {
+      for (const { pid } of started()) {
+        release(pid);
+        try {
+          process.kill(Number(pid), 'SIGKILL');
+        } catch {}
+      }
+      for (const { child } of runs) child.kill('SIGKILL');
+      await Promise.all(runs.map((r) => r.done));
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
 
 describe('live-verify', () => {
@@ -146,10 +179,74 @@ describe('live-verify', () => {
       assert.match(prompt, /`node cli\.js add 2 3` in ra 5/);
       assert.match(prompt, /node cli\.js add <a> <b>, as a user types it/);
       // The log of Codex's runs stays, for the BLOCKED comment that points at it; the worktrees go.
-      assert.deepEqual(readdirSync(join(w.repo, '.claude/worktrees')), ['live-verify-7.log']);
+      assert.match(readdirSync(join(w.repo, '.claude/worktrees')).join(' '), /^live-verify-7-[A-Za-z0-9]{6}\.log$/);
       assert.match(git(w.repo, 'worktree', 'list'), /^\S+\s+[0-9a-f]+ \[main\]$/);
     } finally {
       w.cleanup();
+    }
+  });
+
+  const until = async (ok, what) => {
+    for (let i = 0; i < 400; i += 1) {
+      if (ok()) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.fail(`timed out waiting for ${what}`);
+  };
+
+  test('two runs on one pull request each get their own tree, and both finish', async () => {
+    const w = world();
+    try {
+      const a = w.start();
+      const b = w.start();
+      await until(() => w.started().length === 2, 'both runs to reach Codex');
+      const [x, y] = w.started();
+      assert.notEqual(x.head, y.head, 'the two runs share a tree');
+      assert.ok(existsSync(x.head) && existsSync(y.head), 'one run removed the other\'s tree');
+      for (const { pid } of w.started()) w.release(pid);
+      assert.equal((await a.done).code, 0);
+      assert.equal((await b.done).code, 0);
+    } finally {
+      await w.cleanup();
+    }
+  });
+
+  test('the run that finishes first removes only its own tree', async () => {
+    const w = world();
+    try {
+      const a = w.start();
+      const b = w.start();
+      await until(() => w.started().length === 2, 'both runs to reach Codex');
+      const [slow, fast] = w.started();
+      w.release(fast.pid);
+      await Promise.race([a.done, b.done]);
+      await until(() => !existsSync(fast.head) || fast.head === slow.head, 'the first run to clean up');
+      assert.ok(existsSync(slow.head), 'the slow run\'s tree went with the fast run\'s');
+      w.release(slow.pid);
+      await Promise.all([a.done, b.done]);
+    } finally {
+      await w.cleanup();
+    }
+  });
+
+  test('a run killed with SIGKILL leaves its tree, and the next run on the pull request does not remove it', async () => {
+    const w = world();
+    try {
+      const a = w.start();
+      await until(() => w.started().length === 1, 'the first run to reach Codex');
+      const [dead] = w.started();
+      a.child.kill('SIGKILL');
+      await a.done;
+      w.release(dead.pid);
+      const b = w.start();
+      await until(() => w.started().length === 2, 'the second run to reach Codex');
+      const next = w.started().find((s) => s.pid !== dead.pid);
+      assert.ok(existsSync(dead.head), 'the second run removed the killed run\'s tree');
+      w.release(next.pid);
+      assert.equal((await b.done).code, 0);
+      assert.ok(existsSync(dead.head), 'the killed run\'s tree is left for a hand cleanup');
+    } finally {
+      await w.cleanup();
     }
   });
 
@@ -162,8 +259,8 @@ describe('live-verify', () => {
       assert.equal(call.home, join(w.dir, 'verifier/codex'));
       // What the verifier runs sees no credential and no profile of the agent that called it.
       assert.deepEqual(call.env.filter((k) => /TOKEN|SECRET|^GH_|^GITHUB_|^CLAUDE|^ANTHROPIC/.test(k)), []);
-      assert.match(args, new RegExp(`-C ${w.repo}/\\.claude/worktrees/live-verify-7/head `));
-      assert.match(args, new RegExp(`--add-dir ${w.repo}/\\.claude/worktrees/live-verify-7/parent `));
+      assert.match(args, new RegExp(`-C ${w.repo}/\\.claude/worktrees/live-verify-7-[A-Za-z0-9]{6}/head `));
+      assert.match(args, new RegExp(`--add-dir ${w.repo}/\\.claude/worktrees/live-verify-7-[A-Za-z0-9]{6}/parent `));
       assert.match(args, /-s workspace-write /);
       assert.match(args, /-c approval_policy="never" /);
       // The candidate's AGENTS.md is the change under test, not the verifier's instructions.
