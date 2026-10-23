@@ -147,7 +147,12 @@ function world({ driver = DRIVER } = {}) {
   return { dir, repo, base, head, lv, pr, verify, start, started, release, read, execs, patchOf,
     // No run outlives its test: release every started Codex, kill each run, await it, then remove the folder.
     cleanup: async () => {
-      for (const { pid } of started()) release(pid);
+      for (const { pid } of started()) {
+        release(pid);
+        try {
+          process.kill(Number(pid), 'SIGKILL');
+        } catch {}
+      }
       for (const { child } of runs) child.kill('SIGKILL');
       await Promise.all(runs.map((r) => r.done));
       rmSync(dir, { recursive: true, force: true });
