@@ -4,13 +4,16 @@
 //   node scripts/lib/history.mjs rounds --repo <owner/name> --pr <n> --checks <a,b>   commits a named check failed on
 //   node scripts/lib/history.mjs check --repo <owner/name> --head <sha> --name <check>
 //     the latest GitHub Actions run of that check on the commit: its conclusion, or pending before it completes
-// Exit 2 when GitHub cannot be read or the history does not fit one page: a history half read decides nothing.
+// Exit 2 when GitHub cannot be read or the history does not fit one page: a history half read decides nothing. One page
+// is decided by pageInfo, not totalCount: totalCount ignores the itemTypes filter (factory-pack-scratch#3, 2026-10-23).
 import { execFileSync } from 'node:child_process';
 
+// Not documented: whether pageInfo.hasNextPage counts the itemTypes-filtered list or all timeline items. If all, a pull
+// request with more than 100 timeline items of any kind fails closed here: a liveness risk only, never a wrong pass.
 const LABELS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
-timelineItems(first:100,itemTypes:[LABELED_EVENT]){totalCount nodes{... on LabeledEvent{label{name}}}}}}}`;
+timelineItems(first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes{... on LabeledEvent{label{name}}}}}}}`;
 const ROUNDS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
-commits(last:100){totalCount nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{name conclusion}}}}}}}}}}`;
+commits(last:100){pageInfo{hasPreviousPage} nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{name conclusion}}}}}}}}}}`;
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE']);
 
 const args = process.argv.slice(2);
@@ -42,12 +45,12 @@ try {
     console.log(last?.status === 'completed' ? last.conclusion : 'pending');
   } else if (args[0] === 'labels') {
     const items = pull(LABELS).timelineItems;
-    if (items.totalCount > items.nodes.length) throw new Error(`${items.totalCount} label events, more than one page`);
+    if (items.pageInfo?.hasNextPage !== false) throw new Error('the label events are more than one page, or GitHub sent no pageInfo');
     console.log([...new Set(items.nodes.map((n) => n.label?.name).filter(Boolean))].join(','));
   } else if (args[0] === 'rounds') {
     const checks = new Set(opt('--checks').split(',').filter(Boolean));
     const commits = pull(ROUNDS).commits;
-    if (commits.totalCount > commits.nodes.length) throw new Error(`${commits.totalCount} commits, more than one page`);
+    if (commits.pageInfo?.hasPreviousPage !== false) throw new Error('the commits are more than one page, or GitHub sent no pageInfo');
     const red = commits.nodes.filter(({ commit }) =>
       commit.checkSuites.nodes.some((s) => s.app?.slug === 'github-actions' && s.checkRuns.nodes.some((c) => checks.has(c.name) && RED.has(c.conclusion))),
     );
