@@ -84,6 +84,7 @@ function world({ driver = DRIVER } = {}) {
   const lv = join(dir, 'lv');
   mkdirSync(join(dir, 'bin'), { recursive: true });
   mkdirSync(lv);
+  mkdirSync(join(dir, 'tmp'));
   writeFileSync(join(dir, 'bin/gh'), FAKE_GH);
   writeFileSync(join(dir, 'bin/codex'), FAKE_CODEX(lv));
   chmodSync(join(dir, 'bin/gh'), 0o755);
@@ -114,6 +115,7 @@ function world({ driver = DRIVER } = {}) {
     GH_TOKEN: 'not-a-token',
     CLAUDE_CONFIG_DIR: join(dir, 'claude'),
     PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+    TMPDIR: join(dir, 'tmp'),
     LV: lv,
     GH_LOGIN: 'tuan9288-agent',
     GATE_VERIFIER_HOME: join(dir, 'verifier/codex'),
@@ -127,9 +129,12 @@ function world({ driver = DRIVER } = {}) {
   const start = () => {
     writeFileSync(join(lv, 'codex.json'), JSON.stringify({ loggedIn: '1', mode: 'wait' }));
     const { NODE_TEST_CONTEXT, ...outer } = process.env;
-    const child = spawn(join(repo, 'scripts/live-verify'), ['7'], { cwd: repo, env: { ...outer, ...envOf() }, stdio: 'ignore' });
-    return { child, done: new Promise((resolve) => child.on('exit', (code, signal) => resolve({ code, signal }))) };
+    const child = spawn(join(repo, 'scripts/live-verify'), ['7'], { cwd: repo, env: { ...outer, ...envOf({ GATE_VERIFY_MINUTES: '1' }) }, stdio: 'ignore' });
+    const run = { child, done: new Promise((resolve) => child.on('exit', (code, signal) => resolve({ code, signal }))) };
+    runs.push(run);
+    return run;
   };
+  const runs = [];
   const started = () => readdirSync(lv).filter((f) => f.startsWith('started.')).map((f) => ({ pid: f.slice(8), head: readFileSync(join(lv, f), 'utf8') }));
   const release = (pid) => writeFileSync(join(lv, `go.${pid}`), '');
   const read = (name) => (existsSync(join(lv, name)) ? readFileSync(join(lv, name), 'utf8') : '');
@@ -139,7 +144,15 @@ function world({ driver = DRIVER } = {}) {
     const diff = execFileSync('git', ['-C', repo, 'diff', '--binary', '--no-renames', fork, h], { encoding: 'utf8' });
     return execFileSync('git', ['-C', repo, 'patch-id', '--verbatim'], { input: diff, encoding: 'utf8' }).split(' ')[0];
   };
-  return { dir, repo, base, head, lv, pr, verify, start, started, release, read, execs, patchOf, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, repo, base, head, lv, pr, verify, start, started, release, read, execs, patchOf,
+    // No run outlives its test: release every started Codex, kill each run, await it, then remove the folder.
+    cleanup: async () => {
+      for (const { pid } of started()) release(pid);
+      for (const { child } of runs) child.kill('SIGKILL');
+      await Promise.all(runs.map((r) => r.done));
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
 
 describe('live-verify', () => {
@@ -189,7 +202,7 @@ describe('live-verify', () => {
       assert.equal((await a.done).code, 0);
       assert.equal((await b.done).code, 0);
     } finally {
-      w.cleanup();
+      await w.cleanup();
     }
   });
 
@@ -207,7 +220,7 @@ describe('live-verify', () => {
       w.release(slow.pid);
       await Promise.all([a.done, b.done]);
     } finally {
-      w.cleanup();
+      await w.cleanup();
     }
   });
 
@@ -228,7 +241,7 @@ describe('live-verify', () => {
       assert.equal((await b.done).code, 0);
       assert.ok(existsSync(dead.head), 'the killed run\'s tree is left for a hand cleanup');
     } finally {
-      w.cleanup();
+      await w.cleanup();
     }
   });
 

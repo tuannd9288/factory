@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import * as queue from '../bin/lib/queue.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
-const startOf = (pid) => execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim();
+const startOf = (pid) => execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }).trim();
 const holder = (over = {}) => ({ pid: process.pid, start: startOf(process.pid), host: hostname(), token: 'other', ...over });
 
 /** A state folder, and a fake gh: no pull request is open. While $Q/block exists, the graphql call holds until $Q/go
@@ -38,17 +38,26 @@ function world() {
   chmodSync(join(dir, 'gh'), 0o755);
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state };
   const lockFile = join(state, 'queue.lock');
+  const children = [];
   return {
     dir,
     state,
     lockFile,
-    sweep: () => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env }),
+    sweep: (extra = {}) => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...env, ...extra } }),
     start: () => {
       const child = spawn(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { env, stdio: 'ignore' });
-      return { child, done: new Promise((resolve) => child.on('exit', (code) => resolve(code))) };
+      const run = { child, done: new Promise((resolve) => child.on('exit', (code) => resolve(code))) };
+      children.push(run);
+      return run;
     },
     calls: () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8') : ''),
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    // Whatever the test did, no sweep outlives it: release the fake gh, kill each child, await it, then remove.
+    cleanup: async () => {
+      writeFileSync(join(dir, 'go'), '');
+      for (const { child } of children) child.kill('SIGKILL');
+      await Promise.all(children.map((c) => c.done));
+      rmSync(dir, { recursive: true, force: true });
+    },
   };
 }
 
@@ -75,11 +84,11 @@ test('the lock records its holder: pid, start, host and a token', async () => {
     assert.equal(await s.done, 0);
     assert.ok(!existsSync(w.lockFile), 'the sweep left its lock');
   } finally {
-    w.cleanup();
+    await w.cleanup();
   }
 });
 
-test('a lock whose holder is alive is not taken, however old', () => {
+test('a lock whose holder is alive is not taken, however old', async () => {
   const w = world();
   try {
     writeFileSync(w.lockFile, JSON.stringify(holder()));
@@ -91,11 +100,11 @@ test('a lock whose holder is alive is not taken, however old', () => {
     assert.equal(w.calls(), '');
     assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).token, 'other');
   } finally {
-    w.cleanup();
+    await w.cleanup();
   }
 });
 
-test('a lock whose holder is gone is taken, though it is fresh', () => {
+test('a lock whose holder is gone is taken, though it is fresh', async () => {
   const w = world();
   try {
     const gone = spawnSync('true').pid;
@@ -106,11 +115,11 @@ test('a lock whose holder is gone is taken, though it is fresh', () => {
     assert.match(w.calls(), /api user/);
     assert.ok(!existsSync(w.lockFile));
   } finally {
-    w.cleanup();
+    await w.cleanup();
   }
 });
 
-test('a pid reused by another process (a different start) is a dead holder', () => {
+test('a pid reused by another process (a different start) is a dead holder', async () => {
   const w = world();
   try {
     writeFileSync(w.lockFile, JSON.stringify(holder({ start: 'Mon Jan  1 00:00:00 2001' })));
@@ -118,19 +127,46 @@ test('a pid reused by another process (a different start) is a dead holder', () 
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.match(w.calls(), /api user/);
   } finally {
-    w.cleanup();
+    await w.cleanup();
   }
 });
 
-test('a lock from another host is never judged dead', () => {
+test('a dead holder is taken whatever host it recorded, or none', async () => {
   const w = world();
   try {
     writeFileSync(w.lockFile, JSON.stringify(holder({ host: 'elsewhere.example', pid: spawnSync('true').pid })));
-    const out = w.sweep();
+    assert.equal(w.sweep().status, 0);
+    assert.match(w.calls(), /api user/);
+    const { host, ...noHost } = holder({ pid: spawnSync('true').pid });
+    writeFileSync(w.lockFile, JSON.stringify(noHost));
+    writeFileSync(join(w.dir, 'calls'), '');
+    assert.equal(w.sweep().status, 0);
+    assert.match(w.calls(), /api user/);
+  } finally {
+    await w.cleanup();
+  }
+});
+
+test('a holder whose pid is another user\'s process with another start is taken (EPERM falls through to start)', async () => {
+  const w = world();
+  try {
+    writeFileSync(w.lockFile, JSON.stringify(holder({ pid: 1, start: 'Mon Jan  1 00:00:00 2001' })));
+    assert.equal(w.sweep().status, 0);
+    assert.match(w.calls(), /api user/);
+  } finally {
+    await w.cleanup();
+  }
+});
+
+test('a sweep in another time zone does not take a lock the live test process holds', async () => {
+  const w = world();
+  try {
+    writeFileSync(w.lockFile, JSON.stringify(holder()));
+    const out = w.sweep({ TZ: 'Asia/Ho_Chi_Minh' });
     assert.match(out.stdout, /another sweep is running/);
     assert.equal(w.calls(), '');
   } finally {
-    w.cleanup();
+    await w.cleanup();
   }
 });
 
@@ -140,16 +176,18 @@ test('a sweep removes the lock only if it made it', async () => {
     writeFileSync(join(w.dir, 'block'), '');
     const s = w.start();
     await until(() => existsSync(join(w.dir, 'in')), 'the sweep to reach gh');
+    rmSync(w.lockFile, { recursive: true, force: true });
     writeFileSync(w.lockFile, JSON.stringify(holder({ token: 'newer' })));
     writeFileSync(join(w.dir, 'go'), '');
     assert.equal(await s.done, 0);
-    assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).token, 'newer', 'the sweep removed a lock it did not make');
+    assert.ok(existsSync(w.lockFile), 'the sweep removed a lock it did not make');
+    assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).token, 'newer');
   } finally {
-    w.cleanup();
+    await w.cleanup();
   }
 });
 
-test('a sweep that judged a holder dead, then finds another sweep took the lock first, gives the lock back', () => {
+test('a sweep that judged a holder dead, then finds another sweep took the lock first, gives the lock back', async () => {
   const w = world();
   try {
     const gone = spawnSync('true').pid;
@@ -165,7 +203,7 @@ test('a sweep that judged a holder dead, then finds another sweep took the lock 
     assert.equal(b, null, 'both sweeps took over');
     assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).token, a.token, 'the live lock was not put back');
   } finally {
-    w.cleanup();
+    await w.cleanup();
   }
 });
 
@@ -180,6 +218,6 @@ test('six sweeps started together on a dead lock never run at once (a smoke test
     assert.ok(!existsSync(join(w.dir, 'overlap')), 'two sweeps ran at once');
     assert.match(w.calls(), /api user/);
   } finally {
-    w.cleanup();
+    await w.cleanup();
   }
 });
