@@ -15,7 +15,7 @@ for pack in none $(ls packs 2>/dev/null); do
     echo "verify: the AGENTS.md of pack $pack has $n lines; at most 150"; failed=1
   fi
 done
-for f in kit/scripts/* kit/.githooks/* bin/onboard bin/onboard-owner bin/kit-evidence bin/factory-ledger bin/factory-queue bin/claude-canary bin/factory-alerts scripts/verify; do
+for f in kit/scripts/* kit/.githooks/* bin/onboard bin/onboard-owner bin/kit-update bin/kit-evidence bin/factory-ledger bin/factory-queue bin/claude-canary bin/factory-alerts scripts/verify; do
   [ -f "$f" ] || continue
   head -1 "$f" | grep -q bash || continue
   bash -n "$f" 2>/dev/null || { echo "verify: $f does not parse"; failed=1; }

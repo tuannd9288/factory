@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# Brings an onboarded repository up to the factory's main: the counterpart of bin/onboard for a repository that already
+# has the kit. It works on the clone onboard made, $FACTORY_ROOT/<name>, and opens "Bring the kit up to factory main
+# <sha7>" from the branch factory/kit-<sha7>.
+#   bin/kit-update <repo-url|name> [--no-pr]
+# From a fresh branch off origin/main, for every path of kit/ at this clone's HEAD (bin/lib/kitupdate.mjs):
+#   - the rendered files (AGENTS.md, CODEOWNERS, .claude/settings.json) are rendered as onboard does; AGENTS.md keeps the
+#     two sections of the repository's own that the base carries, and uses the pack the base's .gate/pack names, else pstack;
+#   - a kit file the repository lacks is added; one it holds as an older kit had it is replaced by the kit's;
+#   - a kit file the repository changed is kept and named, but where the kit replaces whole (CLAUDE.md, .githooks/*) or
+#     in AGENTS.md it is a conflict, and kit-update stops before it does anything;
+#   - a file the base lists in .gate/kit-files that kit/ no longer has is removed when it is an older kit file, else kept.
+# Then .gate/kit-files and .gate/pack as onboard writes them, the repository's own scripts/setup and scripts/verify, the
+# commit, and bin/kit-evidence, which must pass. Without --no-pr it then creates the labels, pushes the branch and
+# opens the pull request. A failing verify or evidence leaves the branch committed and nothing pushed.
+# It refuses, doing nothing, when the clone is missing or dirty, origin/main has no .gate/kit-files, the factory's kit/
+# or packs/ has changes no commit holds or its HEAD is not on origin/main, or the branch exists here or on origin; and,
+# without --no-pr, when gh's login is not the agents' account or main has no pull request rule. It never uses gh api.
+# FACTORY_ROOT (default: this clone) is where repositories live; FACTORY_HUMAN (default: tuannd9288) is the code owner
+# of tier 3; FACTORY_AGENT (default: tuan9288-agent) the agents' account.
+set -euo pipefail
+factory=$(cd "$(dirname "$0")/.." && pwd)
+root=${FACTORY_ROOT:-$factory}
+human=${FACTORY_HUMAN:-tuannd9288}
+agent=${FACTORY_AGENT:-tuan9288-agent}
+open_pr=1
+target=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --no-pr) open_pr=0; shift ;;
+    -*) echo "kit-update: unknown argument $1; nothing done"; exit 2 ;;
+    *) [ -z "$target" ] || { echo "kit-update: unknown argument $1; nothing done"; exit 2; }; target=$1; shift ;;
+  esac
+done
+[ -n "$target" ] || { echo "usage: bin/kit-update <repo-url|name> [--no-pr]"; exit 2; }
+path=${target%/}
+path=${path%.git}
+name=$(basename "$path")
+dest=$root/$name
+refuse() { echo "kit-update: $*; nothing done"; exit 2; }
+
+{ [ -d "$dest" ] && [ "$(git -C "$dest" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$dest" && pwd -P)" ]; } || refuse "$dest is not a git clone; bin/onboard makes it"
+[ -z "$(git -C "$dest" status --porcelain --untracked-files=all)" ] || refuse "$dest has uncommitted changes"
+# The kit is laid from this clone's tree, and its evidence names a commit: the two must be one, on main.
+if git -C "$factory" status --porcelain --ignored --untracked-files=all -- kit packs | grep -v '\.DS_Store$' | grep -q .; then
+  refuse "the factory's kit has changes no commit holds (kit/ and packs/); commit and push them first"
+fi
+kit_commit=$(git -C "$factory" rev-parse HEAD)
+sha7=${kit_commit:0:7}
+git -C "$factory" merge-base --is-ancestor "$kit_commit" refs/remotes/origin/main 2>/dev/null || refuse "the factory's commit $sha7 is not on its origin/main; push it first"
+branch=factory/kit-$sha7
+
+git -C "$dest" fetch --quiet origin main 2>/dev/null || refuse "could not fetch origin/main of $name"
+git -C "$dest" cat-file -e origin/main:.gate/kit-files 2>/dev/null || refuse "origin/main has no .gate/kit-files, so $name was never onboarded; bin/onboard does that"
+! git -C "$dest" show-ref --verify --quiet "refs/heads/$branch" || refuse "branch $branch already exists here"
+remote=$(git -C "$dest" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null) || refuse "could not check origin for branch $branch"
+[ -z "$remote" ] || refuse "branch $branch already exists on origin"
+
+slug=""
+id=""
+if [ "$open_pr" -eq 1 ]; then
+  login=$(gh auth status --active --json hosts --jq '.hosts["github.com"][0].login') || refuse "could not read gh's login"
+  lc() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
+  [ "$(lc "$login")" = "$(lc "$agent")" ] || refuse "opens the kit pull request as the agents' account ($agent), not as $login"
+  slug=$(cd "$dest" && gh repo view --json nameWithOwner --jq .nameWithOwner) || refuse "could not read the repository's name from gh"
+  rules=$(gh ruleset check main --repo "$slug") || refuse "could not read the rules on main of $slug"
+  grep -Eq '^- pull_request(:|$)' <<<"$rules" || refuse "main has no pull request rule: the Human runs bin/onboard-owner first"
+  # The node id (R_kg...), which gh repo view gives; the numeric id would take gh api.
+  id=$(cd "$dest" && gh repo view --json id --jq .id) || refuse "could not read the repository's id from gh"
+else
+  origin=$(git -C "$dest" remote get-url origin)
+  origin=${origin%/}
+  origin=${origin%.git}
+  owner=$(basename "$(dirname "$origin")")
+  slug=${owner##*:}/$(basename "$origin")
+  id=unchecked
+fi
+
+# The pack is the repository's own choice, else pstack, as in onboard.
+pack=pstack
+if git -C "$dest" cat-file -e origin/main:.gate/pack 2>/dev/null; then
+  pack=$(git -C "$dest" show origin/main:.gate/pack | head -n 1 | tr -d '[:space:]')
+fi
+why=$(node "$factory/bin/lib/pack.mjs" agents "$factory" "$pack" 2>&1 >/dev/null) || refuse ".gate/pack: $why"
+
+lists=$(mktemp -d)
+trap 'rm -rf "$lists"' EXIT
+args=(--factory "$factory" --commit "$kit_commit" --repo "$dest" --base origin/main --name "$name" --human "$human" --pack "$pack")
+if ! plan=$(node "$factory/bin/lib/kitupdate.mjs" plan "${args[@]}"); then
+  printf '%s\n' "$plan"
+  echo "kit-update: nothing done"
+  exit 2
+fi
+
+cd "$dest"
+base=$(git rev-parse origin/main)
+before=$(git rev-parse --abbrev-ref HEAD)
+git switch --quiet --no-track -c "$branch" origin/main
+node "$factory/bin/lib/kitupdate.mjs" lay "${args[@]}" --out "$lists"
+# .gate/pack and .gate/kit-files, as onboard writes them: removed first, so a link the repository holds there cannot
+# take the write outside the clone.
+rm -f .gate/pack .gate/kit-files
+printf '%s\n' "$pack" >.gate/pack
+{ git -C "$factory" ls-tree -r --name-only "$kit_commit" kit/ | sed 's#^kit/##'; echo .gate/kit-files; echo .gate/pack; } | LC_ALL=C sort -u >.gate/kit-files
+scripts/setup
+git add -A
+if git diff --cached --quiet; then
+  git switch --quiet "$before"
+  git branch --quiet -D "$branch"
+  echo "kit-update: $name already holds the kit at factory $sha7; nothing to do"
+  exit 0
+fi
+n() { wc -l <"$lists/$1" | tr -d ' '; }
+joined() { paste -sd, "$lists/$1" | sed 's/,/, /g'; }
+git commit --quiet -m "Bring the kit up to factory main $sha7" \
+  -m "From tuannd9288/factory $kit_commit. Added: $(n added). Updated: $(n updated)$([ "$(n updated)" -eq 0 ] || echo " ($(joined updated))"). Removed: $(n removed). Kept as the repository had them: $(n kept)."
+# The repository's own gate must pass on the result; if it does not, the branch stays committed and unpushed.
+if ! GATE_BASE=$base scripts/verify; then
+  echo "kit-update: $branch is committed, not pushed: scripts/verify fails. Fix it there or revert the files it names, then push and open the pull request yourself."
+  exit 1
+fi
+head=$(git rev-parse HEAD)
+if ! evidence=$("$factory/bin/kit-evidence" --factory "$factory" --commit "$kit_commit" --repo "$dest" --base "$base" \
+  --head "$head" --slug "$slug" --id "$id" --human "$human") || ! grep -qx 'kit-evidence: PASS' <<<"$evidence"; then
+  printf '%s\n' "$evidence"
+  echo "kit-update: the kit evidence fails; $branch is committed, not pushed, and no pull request is open"
+  exit 1
+fi
+printf '%s\n' "$evidence"
+echo "kit-update: kit committed on $branch ($(n added) added, $(n updated) updated, $(n removed) removed, $(n kept) kept as they were)"
+[ "$open_pr" -eq 1 ] || { echo "kit-update: --no-pr; push $branch and open the pull request yourself"; exit 0; }
+
+for label in tier-1 tier-2 tier-3 needs-human raised task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
+git push --quiet -u origin "$branch"
+list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
+gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
+**Đổi gì:** Đưa kit của $name lên factory \`$sha7\`: $(n added) file thêm, $(n updated) file cập nhật, $(n removed) file bỏ; $(n kept) file của repo giữ nguyên.
+**Ảnh hưởng:** Gói \`$pack\` (ghi ở \`.gate/pack\`); \`.gate/kit-files\` viết lại theo kit mới; file kit mà repo đã sửa riêng được giữ, tên ở dưới, và \`AGENTS.md\` giữ hai mục Layout, Facts của repo.
+**Bằng chứng:** \`bin/kit-evidence\` PASS cho commit \`$sha7\` của factory; \`scripts/verify\` đầy đủ xanh trước khi đẩy.
+
+---
+
+Source: tuannd9288/factory \`$kit_commit\`. Made by \`bin/kit-update\`, not by hand.
+
+Added (the repository lacked them):
+$(list added)
+
+Updated (the repository held an older kit version, or an older rendering of the kit's; now the kit's):
+$(list updated)
+
+Removed (the kit dropped them; the repository held the last kit version unchanged):
+$(list removed)
+
+Kept (the repository's own versions of kit files; the session merges by hand if the kit's matters):
+$(list kept)
+
+Dropped from the kit and kept, because the repository changed them:
+$(list dropped-kept)
+
+## Bằng chứng kit (bin/kit-evidence, mã của factory, chỉ đọc object git)
+\`\`\`text
+$evidence
+\`\`\`
+Kiểm lại từ bản clone của factory: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
+BODY
+)"

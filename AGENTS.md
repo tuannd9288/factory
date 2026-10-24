@@ -65,6 +65,7 @@ Everything else that can be undone, agents decide and report after.
 | `packs/` | A way of working, one folder each (`packs/pstack/`): its `settings.json` keys, its `AGENTS.md` section, its NOTICE, tests and attacks; `bin/lib/pack.mjs` composes it with the core |
 | `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
 | `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
+| `bin/kit-update` | The onboarded repository's counterpart of onboard: brings its clone up to a factory commit, with evidence, in a pull request from `factory/kit-<sha7>` |
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
@@ -110,6 +111,16 @@ It refuses any other login, and a `main` without the bootstrap pull request rule
    kit replaced with the blob each had, the files the repository kept, and nothing else changed, bound to that commit, the kit's tree, the repository's id, base and head. Onboard opens it only from a
    factory commit on `origin/main` whose `kit/` has no uncommitted, untracked or ignored file, since it lays the kit
    from the working tree.
+
+Use `bin/onboard` once, for a repository that has no kit yet. Use `bin/kit-update <repo-url|name> [--no-pr]` for every
+later move of an onboarded repository to a newer factory commit; onboard keeps every file the repository has, so it
+cannot bring a stale kit file up to date. Kit-update works on the clone onboard made, under the same refusals
+(a clean factory commit on `origin/main`, the agents' login, the pull request rule) and the same verify and evidence,
+and does nothing when the clone is dirty or `factory/kit-<sha7>` exists. It adds a missing kit file, replaces a kit file
+the repository holds as an older kit had it, renders `AGENTS.md`, `CODEOWNERS` and settings anew, removes a file the kit
+dropped when it is unchanged, and keeps and names what the repository changed. A repository's own `CLAUDE.md`, hook or
+`AGENTS.md` text outside the two sections stops it, to merge by hand. Its evidence names each updated file with the blob
+it had.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (the bootstrap rule asks
