@@ -1202,3 +1202,28 @@ test('#29: the bypass session has only Bash and Read, four turns, deny rules for
     w.cleanup();
   }
 });
+
+// The Human rules on the bypassPermissions session before it runs (2026-10-24): until then, --no-bypass asks the first
+// question alone, and the second answers that it was not asked.
+test('#29: --no-bypass asks only the first question, never starts a bypassPermissions session, and says so', async () => {
+  const w = await world({ q1: qStream({ calls: [[...CAT, CAT_DENIED, 'rule']] }), q2: qStream({ mode: 'bypassPermissions', calls: goodQ2('__CTL__') }) });
+  try {
+    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args, '--no-pr', '--questions', '--no-bypass'], { encoding: 'utf8', env: w.env });
+    const text = `${r.stdout}${r.stderr}`;
+    assert.equal(r.status, 0, text);
+    const claude = w.calls().split('\n').filter((l) => l.startsWith('claude -p'));
+    assert.equal(claude.length, 2, claude.join('\n'));
+    assert.ok(!claude.some((l) => l.includes('bypassPermissions')), 'a bypassPermissions session ran');
+    assert.match(text, /^ANSWER +Does Read\(\.\/\.env\*\) also stop Bash\(cat \.env\)\? — yes: /m);
+    assert.match(text, /^ANSWER +Do the deny rules hold under --permission-mode bypassPermissions\? — not asked: --no-bypass$/m);
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('#29: --no-bypass without --questions is refused, for it would ask nothing', () => {
+  const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), '--repo', 'o/app', '--no-bypass'], { encoding: 'utf8' });
+  assert.equal(r.status, 2, `${r.stdout}${r.stderr}`);
+  assert.match(`${r.stdout}${r.stderr}`, /--no-bypass needs --questions/);
+});
