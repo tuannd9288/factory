@@ -228,6 +228,9 @@ auto-merge in a pack repository (the probe closes its pull request); another pac
 
 The results were scored with `score.mjs` at factory 06ffa32, which includes #40 and #42.
 
+**The gate met all four bars with the real reviewer:** 20/20 seeded caught, 7/7 load-bearing caught, 0/20 clean
+blocked and 16/16 class M caught. The Human recorded this on 2026-10-24.
+
 | Measure | Result | 95% Wilson | Bar | Met |
 |---|---|---|---|---|
 | Seeded defects caught | 20/20 | 83.9–100% | at least 18/20 | yes |
@@ -269,5 +272,8 @@ The 16 class-M defects were all red at `verify`, which made no reviewer call. No
 - **Time:** a review job that made a call took 2–6 minutes.
 - **Quota:** the five-hour utilization of the token's account rose by about 0.2% per call.
 - **Actions:** a head red at `verify` still billed about 4 gate-trusted minutes (#39).
+
+**Cleanup.** By the Human's decision, every probe pull request on factory-probe was closed with `gh pr close`, and its
+branch stays.
 
 The evidence is in the comments of #25.
