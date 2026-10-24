@@ -448,6 +448,13 @@ describe('red-check: an export that may run code at load', () => {
     assert.match(out.out, new RegExp(`check 1: src/x\\.js removes ${name}, whose initialisation may run code at load; a pure deletion cannot prove it`));
     assert.match(out.out, HINT);
   };
+  /** The file holds a backtick or a slash in code: it gets no machine proof, before its initialiser is read. */
+  const unreadable = (name, declaration, why) => {
+    const out = removing(name, declaration);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, why);
+    assert.doesNotMatch(out.out, /passed as a pure deletion/);
+  };
   const harmless = (name, declaration) => {
     const out = removing(name, declaration);
     assert.equal(out.code, 0, out.out);
@@ -461,8 +468,8 @@ describe('red-check: an export that may run code at load', () => {
     runsCode('unusedN', 'export const unusedN = new Registry();');
     runsCode('unusedW', 'export const unusedW = await load;');
     runsCode('unusedG', 'export let unusedG = (x = 1);');
-    runsCode('unusedT', 'export const unusedT = tag`x`;');
-    runsCode('unusedX', 'export const unusedX = <p />;');
+    unreadable('unusedT', 'export const unusedT = tag`x`;', /line 2 holds a backtick/);
+    unreadable('unusedX', 'export const unusedX = <p />;', /line 2 holds a "\/" outside a comment or string/);
   });
   test('a class with a static block', () => runsCode('UnusedK', 'export class UnusedK {\n  static {\n    registry.add(this);\n  }\n}'));
   test('a class that extends a call', () => runsCode('UnusedK', 'export class UnusedK extends mixin(B) {}'));
@@ -538,18 +545,21 @@ describe('red-check: regex literals do not desync the scanner', () => {
   });
   test('a regex that does not close on its line taints the rows after it, and the refusal names the line', () => {
     const base = 'export function a() {\n  return /abc\n}\nexport const unusedZ = 1;\n';
-    refuses(run({ 'src/z.js': base }, { 'src/z.js': 'export function a() {\n  return /abc\n}\n' }, report(listsExports('src/z.js', 'unusedZ'))), /check 1: src\/z\.js .*: return \/abc/);
+    refuses(run({ 'src/z.js': base }, { 'src/z.js': 'export function a() {\n  return /abc\n}\n' }, report(listsExports('src/z.js', 'unusedZ'))), /check 1: src\/z\.js: line 2 holds a "\/" outside a comment or string/);
   });
-  test('plain division inside a removed unused export still passes', () => {
+  test('plain division inside a removed unused export is refused: no machine proof', () => {
     const base = 'export const keep = 1;\nexport function unusedDiv(a, b, c) {\n  return a / b / c;\n}\nexport const unusedRatio = keep / 2 / 3;\n';
     const out = run({ 'src/d.js': base }, { 'src/d.js': 'export const keep = 1;\n' }, report(listsExports('src/d.js', 'unusedDiv', 'unusedRatio')));
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, PASSED);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 1: src\/d\.js: line 3 holds a "\/" outside a comment or string/);
+    assert.doesNotMatch(out.out, /passed as a pure deletion/);
   });
-  test('a regex literal inside a removed unused export still passes', () => {
+  test('a regex literal inside a removed unused export is refused: no machine proof', () => {
     const base = 'export const keep = 1;\nexport function unusedRe(s) {\n  return /[/{]\\/x/g.test(s);\n}\n';
     const out = run({ 'src/d.js': base }, { 'src/d.js': 'export const keep = 1;\n' }, report(listsExports('src/d.js', 'unusedRe')));
-    assert.equal(out.code, 0, out.out);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 1: src\/d\.js: line 3 holds a "\/" outside a comment or string/);
+    assert.doesNotMatch(out.out, /passed as a pure deletion/);
   });
   test('a spread in an initialiser may call an iterator', () => {
     const base = 'export const keep = 1;\nexport const unusedSp = [...registry];\n';
@@ -678,16 +688,18 @@ describe('red-check: a slash after ) or } may start a regex', () => {
     refuses(run({ 'src/m.js': base }, { 'src/m.js': 'export const keep = 1;\n' }, report(listsExports('src/m.js', 'unusedMix'))));
   });
 
-  test('(a + b) / 2 inside a removed unused export still passes', () => {
+  test('(a + b) / 2 inside a removed unused export is refused: no machine proof', () => {
     const base = 'export const keep = 1;\nexport function unusedAvg(a, b) {\n  return (a + b) / 2;\n}\n';
     const out = run({ 'src/m.js': base }, { 'src/m.js': 'export const keep = 1;\n' }, report(listsExports('src/m.js', 'unusedAvg')));
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, PASSED);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 1: src\/m\.js: line 3 holds a "\/" outside a comment or string/);
+    assert.doesNotMatch(out.out, /passed as a pure deletion/);
   });
-  test('arr[i] / 2 inside a removed unused export still passes', () => {
+  test('arr[i] / 2 inside a removed unused export is refused: no machine proof', () => {
     const base = 'export const keep = 1;\nexport function unusedAt(arr, i) {\n  return arr[i] / 2;\n}\n';
     const out = run({ 'src/m.js': base }, { 'src/m.js': 'export const keep = 1;\n' }, report(listsExports('src/m.js', 'unusedAt')));
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, PASSED);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 1: src\/m\.js: line 3 holds a "\/" outside a comment or string/);
+    assert.doesNotMatch(out.out, /passed as a pure deletion/);
   });
 });
