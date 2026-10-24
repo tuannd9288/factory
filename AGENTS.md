@@ -121,6 +121,13 @@ ruleset off, after taking auto-merge off every open pull request, since with the
 The queue leaves a tier-3 pull request behind `main` until the Human approved it, then updates it once; his approval
 holds on the updated head, whose patch is unchanged (`git patch-id`), so he is asked once.
 
+`bin/factory-queue plist --repo <owner/repo>...` prints that job, `com.tuanhub.factory.queue`: every 60 s from this
+clone, with the `gh` and `node` the shell finds, logging to `~/Library/Logs/factory/queue.log`. `bin/factory-queue
+check` with the same repositories runs one sweep in the job's environment and says whether it is ready. The Human saves
+the plist in `~/Library/LaunchAgents/`, loads it with `launchctl bootstrap gui/$(id -u) <plist>` and stops it with
+`launchctl bootout gui/$(id -u)/com.tuanhub.factory.queue`, under the account #24 settles. `tuannd9288/factory` itself
+is not swept: its ruleset dismisses an approval on any push, so an update would ask the Human twice.
+
 The live verifier runs on one Codex profile for every repository, `~/.agent-profiles/verifier/codex`, which only
 the Human logs in: `mkdir -p ~/.agent-profiles/verifier/codex`, then `CODEX_HOME=~/.agent-profiles/verifier/codex`
 before Codex's own login command. Until he has, every live verdict is BLOCKED and nothing auto-merges.
