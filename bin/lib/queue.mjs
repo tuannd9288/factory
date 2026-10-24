@@ -10,7 +10,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { hostname } from 'node:os';
+import { hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -228,7 +228,7 @@ function which(name, path) {
  * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
  * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
  * link's folder, which an upgrade does not remove. */
-export function job(repos, env = process.env) {
+export function job(repos, env = process.env, daemon = false) {
   const gh = which('gh', env.PATH);
   if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
   const node = which('node', env.PATH) ?? process.execPath;
@@ -242,12 +242,15 @@ export function job(repos, env = process.env) {
     label: LABEL,
     program: [join(factory, 'bin/factory-queue'), 'sweep', ...repos.flatMap((repo) => ['--repo', repo])],
     cwd: factory,
-    env: { PATH: path, ...kept },
+    env: { PATH: path, ...kept, ...(daemon ? { HOME: env.HOME } : {}) },
     log: join(env.HOME, 'Library/Logs/factory/queue.log'),
+    // #24: a LaunchDaemon runs as the account that printed it, the agents' own, with that account's HOME.
+    user: daemon ? userInfo().username : null,
   };
 }
 
-/** The job as a property list, for ~/Library/LaunchAgents/com.tuanhub.factory.queue.plist. */
+/** The job as a property list, for ~/Library/LaunchAgents/com.tuanhub.factory.queue.plist, or with a user for
+ * /Library/LaunchDaemons/, which the Human loads with sudo. Never KeepAlive: a sweep exits after each run. */
 export function plist(j) {
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const str = (s) => `<string>${esc(s)}</string>`;
@@ -257,7 +260,7 @@ export function plist(j) {
 <dict>
   <key>Label</key>
   ${str(j.label)}
-  <key>ProgramArguments</key>
+${j.user ? `  <key>UserName</key>\n  ${str(j.user)}\n` : ''}  <key>ProgramArguments</key>
   <array>
 ${j.program.map((a) => `    ${str(a)}`).join('\n')}
   </array>
@@ -315,14 +318,20 @@ function check(repos, human) {
 function main(argv) {
   const [command, ...rest] = argv;
   const repos = [];
+  let daemon = false;
   for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] === '--daemon') {
+      if (command !== 'plist') throw new Error('--daemon is for plist alone');
+      daemon = true;
+      continue;
+    }
     if (rest[i] !== '--repo') throw new Error(`unknown argument ${rest[i]}`);
     if (!/^[\w.-]+\/[\w.-]+$/.test(rest[i + 1] ?? '')) throw new Error(`--repo needs owner/name, not ${JSON.stringify(rest[i + 1] ?? '')}`);
     repos.push(rest[++i]);
   }
   if (!['sweep', 'plist', 'check'].includes(command) || !repos.length) throw new Error('usage: factory-queue sweep|plist|check --repo owner/name...');
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
-  if (command === 'plist') return void process.stdout.write(plist(job(repos)));
+  if (command === 'plist') return void process.stdout.write(plist(job(repos, process.env, daemon)));
   if (command === 'check') return check(repos, human);
   const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
   const held = join(state, 'queue.lock');

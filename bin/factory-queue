@@ -4,6 +4,7 @@
 #   bin/factory-queue sweep --repo owner/name...   update the oldest auto-merge PR left behind main, and re-run a
 #                                                  tier check after the Human approved its head
 #   bin/factory-queue plist --repo owner/name...   print the launchd job that runs that sweep every minute
+#     [--daemon]                                   as a LaunchDaemon run by this account (#24), for the Human to load
 #   bin/factory-queue check --repo owner/name...   run one sweep in that job's environment, before the Human loads it
 # A rollback is a revert pull request through the gate. Turning the ruleset off is the Human's emergency step alone,
 # with auto-merge off on every open pull request first: with the ruleset off, every one of them would land unjudged.

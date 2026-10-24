@@ -3,6 +3,7 @@
 //   node probes/pack-probe.mjs --repo owner/name [--root <factory root>] [--profiles <dir>] [--log-dir <dir>]
 //     [--claude "direnv exec . claude"] [--ledger bin/factory-ledger] [--max-turns 8] [--max-turns-pr 25] [--no-pr]
 //     [--poll-seconds 20] [--timeout-minutes 20] [--agent tuan9288-agent] [--env-prefix "direnv exec ."]
+//     [--human-home /Users/<the Human>]
 // Two short `claude -p` sessions run from <root>/<name>, no benchmark: one for session start and the two refusals, one
 // that opens a pull request. Both run in acceptEdits mode with only the grants they need (`claude -p` with no mode
 // denies every call that needs approval, so a refusal would prove nothing), and may not merge or run live-verify.
@@ -13,7 +14,7 @@
 // passes, 1 when one fails, 2 when it would not start, 130 when interrupted (Ctrl-C reaches the session too).
 // A SIGTERM sent to the probe alone waits until every spawnSync returns; only a process-group signal stops it at once.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -210,6 +211,20 @@ export const parseGhLogin = (out) => {
   return /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(first) ? first : 'none';
 };
 
+/** Every login `gh auth status` names, a failed one included, by name only; nothing else it prints is repeated. */
+export const parseGhLogins = (out) => [...new Set([...String(out ?? '').matchAll(/(?:Logged in to|Failed to log in to) \S+ account ([A-Za-z0-9][A-Za-z0-9-]*)/g)].map((m) => m[1]))];
+
+/** #24: whether this account may open `path` for reading. It opens and closes the file and reads nothing. Under a
+ * closed home the open is refused at the home folder, so EACCES comes whether the file exists or not. */
+export function openable(path) {
+  try {
+    closeSync(openSync(path, 'r'));
+    return 'READABLE';
+  } catch (error) {
+    return error.code === 'EACCES' ? 'refused (EACCES)' : `not proven: ${error.code ?? error.message}`;
+  }
+}
+
 /** The ledger's --rows output: the row whose pull requests include n, as {column: value}. */
 export function ledgerRow(tsv, n) {
   const [head, ...rows] = tsv.split('\n').filter(Boolean).map((l) => l.split('\t'));
@@ -247,6 +262,7 @@ function parseArgs(argv) {
     else if (a === '--timeout-minutes') o.timeoutMinutes = Number(next());
     else if (a === '--env-prefix') o.envPrefix = next();
     else if (a === '--no-pr') o.pr = false;
+    else if (a === '--human-home') o.humanHome = next();
     else throw new Error(`unknown argument ${a}`);
   }
   if (!/^[\w.-]+\/[\w.-]+$/.test(o.repo ?? '')) throw new Error('usage: node probes/pack-probe.mjs --repo owner/name [options]');
@@ -349,8 +365,15 @@ function main(argv) {
     const launch = o.envPrefix;
     const ssh = sh(`cd ${q(dir)} && ${launch} ssh -T -o BatchMode=yes -o ConnectTimeout=10 git@github.com`, dir, 30_000);
     const ghUser = sh(`cd ${q(dir)} && ${launch} gh config get -h github.com user`, dir, 30_000);
-    const who = [`#24 identity ssh: ${parseSshLogin(ssh.out)}`, `#24 identity gh: ${parseGhLogin(ghUser.out)}`];
-    log('identity.log', 'ssh -T … ; gh config get -h github.com user', who.join('\n'));
+    const ghAll = sh(`cd ${q(dir)} && ${launch} gh auth status -h github.com`, dir, 30_000);
+    const who = [
+      `#24 identity ssh: ${parseSshLogin(ssh.out)}`,
+      `#24 identity gh: ${parseGhLogin(ghUser.out)}`,
+      `#24 gh logins: ${parseGhLogins(ghAll.out).join(', ') || 'none'}`,
+      // Only on --human-home: run from the agents' own macOS account, the Human's files must be refused by permission.
+      ...(o.humanHome ? ['.ssh/config', '.claude/settings.json'].map((f) => `#24 file ${join(o.humanHome, f)}: ${openable(join(o.humanHome, f))}`) : []),
+    ];
+    log('identity.log', 'ssh -T … ; gh config get -h github.com user ; gh auth status (names only) ; open, read nothing', who.join('\n'));
     console.log(who.join('\n'));
     const secret = `PROBE_SECRET=${Math.random().toString(36).slice(2, 10)}`;
     writeFileSync(envFile, `${secret}\n`);
