@@ -310,9 +310,11 @@ test('the factory\'s tools run the same started through a symlinked directory, a
   const dir = mkdtempSync(join(tmpdir(), 'linked-'));
   try {
     symlinkSync(join(factory, 'bin'), join(dir, 'bin'));
+    // factory-queue records a run that fails before its repository loop, a usage error among them (#35).
+    const env = { ...process.env, FACTORY_STATE: join(dir, 'state') };
     for (const tool of ['factory-ledger', 'factory-queue', 'onboard-owner', 'kit-evidence']) {
-      const direct = spawnSync(join(factory, 'bin', tool), ['bogus'], { encoding: 'utf8' });
-      const linked = spawnSync(join(dir, 'bin', tool), ['bogus'], { encoding: 'utf8' });
+      const direct = spawnSync(join(factory, 'bin', tool), ['bogus'], { encoding: 'utf8', env });
+      const linked = spawnSync(join(dir, 'bin', tool), ['bogus'], { encoding: 'utf8', env });
       assert.notEqual(direct.status, 0, tool);
       assert.equal(linked.status, direct.status, `${tool}: ${linked.stdout}${linked.stderr}`);
     }
