@@ -226,12 +226,17 @@ function which(name, path) {
 
 /** The launchd job that sweeps `repos` once a minute (#48): this clone's bin/factory-queue, with the gh and the node
  * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
- * a bare PATH and does not make its log's folder. */
+ * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
+ * link's folder, which an upgrade does not remove. */
 export function job(repos, env = process.env) {
   const gh = which('gh', env.PATH);
   if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
+  const node = which('node', env.PATH) ?? process.execPath;
   const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const path = [...new Set([dirname(gh), dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
+  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
+  const found = which('node', path);
+  if (!found || realpathSync(found) !== realpathSync(node))
+    throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);
   const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN'].filter((k) => env[k]).map((k) => [k, env[k]]));
   return {
     label: LABEL,
@@ -291,9 +296,18 @@ function check(repos, human) {
   say(`state folder ${env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')}`);
   say(`log ${j.log}`);
   const run = spawnSync(j.program[0], j.program.slice(1), { cwd: j.cwd, env, encoding: 'utf8', timeout: 10 * CALL_MS });
-  for (const line of `${run.stdout ?? ''}${run.stderr ?? ''}`.trim().split('\n').filter(Boolean).slice(-10)) say(`  ${line}`);
+  const out = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+  for (const line of out.trim().split('\n').filter(Boolean).slice(-10)) say(`  ${line}`);
   say(`one sweep exited ${run.status}`);
-  const why = !login ? 'gh is not logged in' : login.toLowerCase() === human.toLowerCase() ? "gh is the Human's login; the job must run as the agents' account" : run.status !== 0 ? 'the sweep failed' : null;
+  const why = !login
+    ? 'gh is not logged in'
+    : login.toLowerCase() === human.toLowerCase()
+      ? "gh is the Human's login; the job must run as the agents' account"
+      : run.status !== 0
+        ? 'the sweep failed'
+        : /another sweep is running/.test(out)
+          ? 'another sweep holds the lock, so this one did nothing; run check again once it ends'
+          : null;
   say(why ? `not ready: ${why}` : 'ready; the Human loads the job');
   return why ? 1 : 0;
 }
@@ -302,8 +316,9 @@ function main(argv) {
   const [command, ...rest] = argv;
   const repos = [];
   for (let i = 0; i < rest.length; i += 1) {
-    if (rest[i] === '--repo') repos.push(rest[++i]);
-    else throw new Error(`unknown argument ${rest[i]}`);
+    if (rest[i] !== '--repo') throw new Error(`unknown argument ${rest[i]}`);
+    if (!/^[\w.-]+\/[\w.-]+$/.test(rest[i + 1] ?? '')) throw new Error(`--repo needs owner/name, not ${JSON.stringify(rest[i + 1] ?? '')}`);
+    repos.push(rest[++i]);
   }
   if (!['sweep', 'plist', 'check'].includes(command) || !repos.length) throw new Error('usage: factory-queue sweep|plist|check --repo owner/name...');
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
@@ -347,11 +362,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const why = String(error.stderr || error.message).trim();
     console.error(`factory-queue: ${why}`);
     process.exitCode = 2;
-    // Best effort: the digest should show a failure before the repository loop, a plist typo among them.
-    try {
-      const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-      mkdirSync(state, { recursive: true });
-      writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
-    } catch {}
+    // Best effort: the digest should show a failure before the repository loop, a plist typo among them. plist and
+    // check are the Human's, run by hand, and keep no queue state.
+    if (!['plist', 'check'].includes(process.argv[2])) {
+      try {
+        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+        mkdirSync(state, { recursive: true });
+        writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
+      } catch {}
+    }
   }
 }

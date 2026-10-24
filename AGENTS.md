@@ -122,9 +122,10 @@ The queue leaves a tier-3 pull request behind `main` until the Human approved it
 holds on the updated head, whose patch is unchanged (`git patch-id`), so he is asked once.
 
 `bin/factory-queue plist --repo <owner/repo>...` prints that job, `com.tuanhub.factory.queue`: every 60 s from this
-clone, with the `gh` and `node` the shell finds, logging to `~/Library/Logs/factory/queue.log`. `bin/factory-queue
-check` with the same repositories runs one sweep in the job's environment and says whether it is ready. The Human saves
-the plist in `~/Library/LaunchAgents/`, loads it with `launchctl bootstrap gui/$(id -u) <plist>` and stops it with
+clone, with the `gh` and `node` the shell finds, logging to `~/Library/Logs/factory/queue.log`. Before loading it, run
+`bin/factory-queue check` with the same repositories from the same shell, in a terminal on that machine (over SSH `gh`
+cannot read the keychain): it runs one sweep in the job's environment, makes the log's folder, which launchd does not,
+and says whether the job is ready. The Human saves the plist in `~/Library/LaunchAgents/`, loads it with `launchctl bootstrap gui/$(id -u) <plist>` and stops it with
 `launchctl bootout gui/$(id -u)/com.tuanhub.factory.queue`, under the account #24 settles. `tuannd9288/factory` itself
 is not swept: its ruleset dismisses an approval on any push, so an update would ask the Human twice.
 
