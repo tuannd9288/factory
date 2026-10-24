@@ -1,5 +1,6 @@
 // The machine proof that a change only deletes unused code, for red-check (#17). Three checks, all needed:
-//   1. the diff adds no source line (removing only a leading `export ` from a line adds none);
+//   1. the diff adds no source line (removing only a leading `export ` from a line adds none), and every line it removes
+//      from a file that stays is that keyword or part of a removed run of whole top-level declarations of exports;
 //   2. no tracked file at the head still names a removed file or a removed export;
 //   3. knip, run at the base commit with the repository's own config, listed each removed file and export as unused.
 //   node scripts/lib/deletion.mjs config <base>
@@ -57,6 +58,56 @@ function exported(line) {
   return m ? [m[1]] : null;
 }
 
+// Walks removed lines with a rough strip of strings and comments (regex literals are not understood, so a surprise
+// shows as an unbalanced hunk and fails closed). Returns each line's depth at its start, whether it began inside a
+// block comment or template literal, and the stripped text; plus the final depth, the lowest depth, and the end state.
+function scan(lines) {
+  let depth = 0;
+  let low = 0;
+  let block = false;
+  let template = false;
+  const rows = lines.map((line) => {
+    const row = { start: depth, inBlock: block, inTemplate: template, text: '' };
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (block) {
+        if (c === '*' && line[i + 1] === '/') (block = false), i++;
+      } else if (template) {
+        if (c === '\\') i++;
+        else if (c === '`') template = false;
+      } else if (c === '/' && line[i + 1] === '/') break;
+      else if (c === '/' && line[i + 1] === '*') (block = true), i++;
+      else if (c === '`') template = true;
+      else if (c === '"' || c === "'") {
+        for (i++; i < line.length && line[i] !== c; i++) if (line[i] === '\\') i++;
+      } else {
+        row.text += c;
+        if ('{(['.includes(c)) depth++;
+        else if ('})]'.includes(c)) low = Math.min(low, --depth);
+      }
+    }
+    return row;
+  });
+  return { rows, depth, low, open: block || template };
+}
+
+// Why a block of removed lines (those no keyword-only edit paid for) is not whole top-level declarations of exports:
+// null when it is, else the line to name. Every line at depth 0 must be an export declaration, a comment or a blank
+// line; a line inside a declaration may be anything. Names of the exports declared go to `names`.
+function wholeExports(lines, names) {
+  const { rows, depth, low, open } = scan(lines);
+  if (depth !== 0 || low < 0 || open) return lines[0];
+  for (const [i, row] of rows.entries()) {
+    const line = lines[i];
+    const t = line.trim();
+    if (row.start > 0 || row.inBlock || row.inTemplate || !t || t.startsWith('//') || t.startsWith('/*')) continue;
+    const declared = exported(line);
+    if (!declared?.length) return line;
+    names.push(...declared);
+  }
+  return null;
+}
+
 // The removed and added lines of each hunk of one modified file.
 function hunks(base, path) {
   const out = [];
@@ -90,7 +141,8 @@ if (mode === 'claims') {
   const added = [];
   const files = [];
   const exports = [];
-  const unreadable = [];
+  const strays = [];
+  let anyExport = false;
   for (const path of paths) {
     const kind = status.get(path);
     if (kind === 'D') {
@@ -102,20 +154,32 @@ if (mode === 'claims') {
       for (const { minus, plus } of hunks(base, path)) {
         // An added line is allowed when it is a removed line less its leading `export `; each removed line pays for one.
         const unpaid = [...minus];
+        const kept = [];
         for (const p of plus) {
           const i = unpaid.indexOf(`export ${p}`);
-          if (i >= 0) unpaid.splice(i, 1);
-          else added.push(`check 1: ${path} adds a source line: ${short(p)}`);
+          if (i >= 0) {
+            const names = exported(unpaid[i]);
+            if (names?.length) kept.push(...names);
+            else strays.push(`check 1: ${path} removes a line that is not part of an unused export: ${short(unpaid[i])}`);
+            unpaid.splice(i, 1);
+          } else added.push(`check 1: ${path} adds a source line: ${short(p)}`);
         }
-        for (const m of minus) {
-          const names = exported(m);
-          if (names === null) unreadable.push(`check 2: ${path} removes an export line that cannot be read: ${short(m)}`);
-          else for (const name of names) if (!exports.some((e) => e.file === path && e.name === name)) exports.push({ file: path, name });
-        }
+        anyExport ||= minus.some((m) => /^export(?![\w$])/.test(m.trim()));
+        const names = [];
+        const stray = unpaid.length ? wholeExports(unpaid, names) : null;
+        if (stray !== null) strays.push(`check 1: ${path} removes a line that is not part of an unused export: ${short(stray)}`);
+        for (const [list, keyword] of [[kept, true], [names, false]])
+          for (const name of list) {
+            const known = exports.find((e) => e.file === path && e.name === name);
+            if (known) known.keyword &&= keyword;
+            else exports.push({ file: path, name, keyword });
+          }
       }
     }
   }
   if (added.length) fail(added);
+  if (!files.length && !anyExport) fail(['check 3: the change removes no file and no export, so knip has nothing to have listed']);
+  if (strays.length) fail(strays);
 
   const named = [];
   for (const path of files) {
@@ -127,12 +191,12 @@ if (mode === 'claims') {
       }
     }
   }
-  for (const { file, name } of exports) {
-    const hit = holders(name, { whole: true, except: file })[0];
+  for (const { file, name, keyword } of exports) {
+    // Only a keyword-only removal leaves the declaration in its file, where the name stays; a whole removal must not.
+    const hit = holders(name, { whole: true, except: keyword ? file : null })[0];
     if (hit) named.push(`check 2: ${name}, exported by ${file}, is still named in ${hit}`);
   }
-  if (unreadable.length || named.length) fail([...unreadable, ...named]);
-  if (!files.length && !exports.length) fail(['check 3: the change removes no file and no export, so knip has nothing to have listed']);
+  if (named.length) fail(named);
   writeFileSync(opt('--out'), JSON.stringify({ files, exports }));
   process.exit(0);
 }
