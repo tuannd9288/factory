@@ -155,6 +155,8 @@ done <"$lists/kit"
 while IFS= read -r path; do git diff --quiet HEAD -- "$path" || echo "$path"; done <"$lists/replaced" >"$lists/changed"
 mv "$lists/changed" "$lists/replaced"
 # .gate/pack is the repository's choice and .gate/kit-files its inventory: both generated here, not files of the kit.
+# Removed first, as AGENTS.md is above: a link the repository holds there would take the write outside the clone.
+rm -f .gate/pack .gate/kit-files
 printf '%s\n' "$pack" >.gate/pack
 { cat "$lists/kit"; echo .gate/kit-files; echo .gate/pack; } | LC_ALL=C sort -u >.gate/kit-files
 scripts/setup
