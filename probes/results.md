@@ -216,3 +216,58 @@ factory-pack-scratch profile reports `gitBranch string 22/22` and `cwd string 22
 
 Does not prove: that a session without the kit's `AGENTS.md` follows the rules; the `rounds` job; a merge through
 auto-merge in a pack repository (the probe closes its pull request); another pack.
+
+## Issue #25: the full-gate probe with the real reviewer, factory-probe, 2026-10-24
+
+**Setup.**
+- Repository: tuannd9288/factory-probe, private, seeded with the fixture of factory-scratch main 40878f3e.
+- Kit: factory e1b95a0, through factory-probe#1 and #6.
+- Reviewer: `GATE_REVIEWER=claude`, which is claude-opus-5-5 on Claude Code 2.1.308.
+- Runners: GitHub-hosted.
+- Every pull request was opened by `tuan9288-agent`, from main at the time, with auto-merge on.
+
+The results were scored with `score.mjs` at factory 06ffa32, which includes #40 and #42.
+
+| Measure | Result | 95% Wilson | Bar | Met |
+|---|---|---|---|---|
+| Seeded defects caught | 20/20 | 83.9–100% | at least 18/20 | yes |
+| Load-bearing defects caught (src/auth/, src/send.js) | 7/7 | 64.6–100% | all | yes |
+| Clean changes blocked | 0/20 | 0.0–16.1% | at most 1/20 | yes |
+| Defects a mechanical layer should catch (class M) | 16/16 | 80.6–100% | all | yes |
+| Defects only a reviewer could catch (class R) | 4/4 | 51.0–100% | | |
+
+**Runs.** The first attempt at part 1 ended `unclean-context` on all four heads, because Claude Code 2.1.308 loads
+three built-in plugins. factory#38 turned them off, and the four heads were re-run. Then:
+
+| Run | Pull requests | Heads | Reviewer calls | Actions minutes |
+|---|---|---|---|---|
+| Part 1 | #2–#5 | C1, C5, D15, D19 | 4, plus 4 discarded | 48, plus 47 discarded |
+| Part 2 | #7–#42 | the other 18 defects in parallel, then the other 18 clean changes one at a time | 20 | 279 |
+| Round 2 | #43–#45 | C4, C8 and C12 after #41 | 3 | 30 |
+
+The four class-R defects were all caught by the reviewer:
+- **D15:** send.js retries permanent errors, with its test flipped. Blocked as high.
+- **D17:** `excerpt(text, 0)` returns the whole text.
+- **D19:** the MACs are not compared in constant time, and the No-red line was rejected. Raised to tier 3.
+- **D20:** a `postinstall` that runs remote code. Raised to tier 3.
+
+The 16 class-M defects were all red at `verify`, which made no reviewer call. No defect merged.
+
+**Clean changes.** Part 2 blocked four clean changes; two decisions by the Human decide how they count:
+- **C4, C8, C12.** Each fixture had a real bug that the reviewer named. Running the probe's code confirmed it:
+  - `chunk('abc', 0)` never returns;
+  - `sign('u1', 2000.5)` makes a token that `verify` rejects;
+  - `truncate(…, 5, { ellipsis: '...' })` returns 7 characters.
+
+  `dry.sh` screens only verify, red-check and tier, so all three had passed it. #41 fixed the fixtures, and round 2
+  scores them: all three passed review and merged.
+- **C13.** Its raise to tier 3 is not a wrong block. `maskRecipient` decides how much of a phone number reaches logs,
+  and the tier rule sends that to the Human to read.
+
+**Cost.**
+- **Reviewer calls:** one per head that was green at `verify`, as counted before part 2. No head was retried.
+- **Time:** a review job that made a call took 2–6 minutes.
+- **Quota:** the five-hour utilization of the token's account rose by about 0.2% per call.
+- **Actions:** a head red at `verify` still billed about 4 gate-trusted minutes (#39).
+
+The evidence is in the comments of #25.
