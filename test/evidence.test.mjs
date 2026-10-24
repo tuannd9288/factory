@@ -1,6 +1,7 @@
 // bin/kit-evidence: the kit pull request's files against a factory commit, over git objects only, on fixtures.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -637,5 +638,59 @@ describe('evidence over a base that is a rendering', () => {
     const gate = pastBlobs(factory, 'HEAD', 'kit/.github/workflows/gate.yml');
     assert.ok(main.size > 0 && gate.size > 0);
     assert.deepEqual([...main].filter((oid) => gate.has(oid)), []);
+  });
+});
+
+// Round 2 of the review of #53.
+describe('evidence, round 2', () => {
+  test('prints nothing on stderr when the factory history spans the core/packs split', () => {
+    // The first factory commit has no packs/pstack/: looking its pack file up must not leak git's fatal.
+    const w = world({ packs: {}, had: RENDERED_BASE });
+    try {
+      const fac = join(w.dir, 'factory');
+      const second = commit(fac, PACKS, 'the packs arrive');
+      const r = spawnSync(join(factory, 'bin/kit-evidence'), ['--factory', fac, '--commit', second, '--repo', w.repo, '--base', w.base, '--head', 'HEAD', '--slug', 'tuannd9288/app', '--id', '1234'], { encoding: 'utf8', env: { ...process.env, NODE_TEST_CONTEXT: '' } });
+      assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+      assert.match(r.stdout, /^kit-evidence: PASS$/m);
+      assert.equal(r.stderr, '');
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('counts a blob that only a merge resolution made as a past blob of the kit file', async () => {
+    const { pastBlobs } = await import('../bin/lib/evidence.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'merge-blobs-'));
+    try {
+      git(dir, 'init', '-q', '-b', 'main');
+      commit(dir, { 'kit/lib/x.txt': 'v0\n' }, 'v0');
+      git(dir, 'switch', '-q', '-c', 'side');
+      commit(dir, { 'kit/lib/x.txt': 'v1\n' }, 'side');
+      git(dir, 'switch', '-q', 'main');
+      commit(dir, { 'kit/lib/x.txt': 'v2\n' }, 'main');
+      run(dir, 'git', ['merge', '--no-commit', '--no-ff', 'side'], quiet);
+      write(dir, { 'kit/lib/x.txt': 'v3\n' });
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-qm', 'merge, resolved');
+      commit(dir, { 'kit/lib/x.txt': 'v4\n' }, 'v4');
+      const resolved = git(dir, 'rev-parse', 'HEAD~1:kit/lib/x.txt');
+      assert.ok(pastBlobs(dir, 'HEAD', 'kit/lib/x.txt').has(resolved), 'the merge resolution is not among the past blobs');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed when the repository\'s own parts of a rendered base cannot be read', () => {
+    // A Layout section that holds a heading: the base is the kit's rendering to the letter, yet ownOf cannot parse it.
+    const odd = `# <repo>\n\nRules for <repo>.\n\n${KEEPS}\n## Layout\n\n## Sub\n\ntext\n\n## Facts the code cannot tell\n\n<Decisions.>\n`;
+    const rendered = `# app\n\nRules for app.\n\n${SECTION}${KEEPS}\n## Layout\n\n## Sub\n\ntext\n\n## Facts the code cannot tell\n\n<Decisions.>\n`;
+    const w = world({ kit: { 'kit/AGENTS.md': odd }, had: { 'AGENTS.md': rendered }, laid: { 'AGENTS.md': rendered } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: AGENTS\.md \(the repository's own parts cannot be read\)$/m);
+    } finally {
+      w.cleanup();
+    }
   });
 });
