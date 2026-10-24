@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The SessionStart hook of the agents' Claude profiles (#24): tells the Human, at once, about every *.failed file in
+# $FACTORY_STATE (default ~/.local/state/factory), as the JSON a hook prints; --text prints the plain lines for a
+# shell. Prints nothing when none exists or FACTORY_NO_ALERTS=1 is set (the pack probe's sessions). Always exits 0.
+exec node "$(dirname "$0")/lib/alerts.mjs" "$@"

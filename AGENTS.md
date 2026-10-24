@@ -88,8 +88,9 @@ It refuses any other login, and a `main` without the bootstrap pull request rule
 
 1. clones the repository into `<root>/<repo>`;
 2. creates its profile `~/.agent-profiles/<owner>/<repo>/claude`, only now, and writes there a `settings.json` that
-   turns off claude.ai's connectors and synced skills and plugins (a repository's settings cannot turn the syncs off);
-   a profile that exists is kept, and onboard prints the three keys for the Human to add. Nothing else edits the
+   turns off claude.ai's connectors and synced skills and plugins (a repository's settings cannot turn the syncs off),
+   stays on the stable update channel and runs `bin/factory-alerts` at session start; a profile that exists is kept,
+   and onboard prints every key for the Human to add. Nothing else edits the
    profile, which beyond that holds Claude Code's state only (a Codex profile joins when Codex does);
 3. writes `.envrc` (`CLAUDE_CONFIG_DIR` pointing at the profile), adds it to `.git/info/exclude` and runs
    `direnv allow`; an `.envrc` the repository has is kept, and onboard prints the line to add to it. Either way
@@ -139,6 +140,18 @@ plist with `sudo install -o root -g wheel -m 644 <plist> /Library/LaunchDaemons/
 loads it with `sudo launchctl bootstrap system <that path>` and stops it with
 `sudo launchctl bootout system/com.tuanhub.factory.queue`. `tuannd9288/factory` itself
 is not swept: its ruleset dismisses an approval on any push, so an update would ask the Human twice.
+
+Claude Code updates itself on the stable channel, and a new version runs only after the pack probe passes on it
+(#24). `bin/claude-canary run --repo <owner/repo>` finds the newest version in `~/.local/share/claude/versions`, runs
+`probes/pack-probe.mjs --no-pr` on it, and only on a pass writes the launcher `~/.local/bin/claude` (a script that
+`exec`s that version; Claude Code leaves a launcher of ours in place and keeps every installed version, per
+code.claude.com/docs/en/setup), then removes versions older than the previous one. A failed version is rejected
+(`claude-rejected`) until a newer one arrives and the launcher stays. `bin/claude-canary plist --daemon --repo
+<owner/repo>` prints its LaunchDaemon, `com.tuanhub.factory.claude-canary`, every six hours, loaded like the queue's. Every
+`*.failed` file in the state folder (`claude-canary.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
+the Human at once, at the start of each Claude session in this account, by `bin/factory-alerts`, the SessionStart hook
+in each profile's `settings.json`; `FACTORY_NO_ALERTS=1` silences it, and the probe and the canary set it. The hook in
+the Supervisor's own settings on the MacBook is installed by Colly, not here.
 
 The live verifier runs on one Codex profile for every repository, `~/.agent-profiles/verifier/codex`, which only
 the Human logs in: `mkdir -p ~/.agent-profiles/verifier/codex`, then `CODEX_HOME=~/.agent-profiles/verifier/codex`

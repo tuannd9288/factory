@@ -227,23 +227,28 @@ function which(name, path) {
 /** The launchd job that sweeps `repos` once a minute (#48): this clone's bin/factory-queue, with the gh and the node
  * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
  * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
- * link's folder, which an upgrade does not remove. */
-export function job(repos, env = process.env, daemon = false) {
+ * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (#24's claude-canary):
+ * its label, tool, verb, log name and interval, more variables to keep and more tools to find on the PATH; the
+ * defaults are the queue's own. */
+export function job(repos, env = process.env, daemon = false, as = {}) {
   const gh = which('gh', env.PATH);
   if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
   const node = which('node', env.PATH) ?? process.execPath;
   const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
+  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, keep = [], tools = [] } = as;
+  const extra = tools.map((name) => which(name, env.PATH)).filter(Boolean).map((p) => dirname(p));
+  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), ...extra, '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
   const found = which('node', path);
   if (!found || realpathSync(found) !== realpathSync(node))
     throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);
-  const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN'].filter((k) => env[k]).map((k) => [k, env[k]]));
+  const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN', ...keep].filter((k) => env[k]).map((k) => [k, env[k]]));
   return {
-    label: LABEL,
-    program: [join(factory, 'bin/factory-queue'), 'sweep', ...repos.flatMap((repo) => ['--repo', repo])],
+    label,
+    interval,
+    program: [join(factory, tool), verb, ...repos.flatMap((repo) => ['--repo', repo])],
     cwd: factory,
     env: { PATH: path, ...kept, ...(daemon ? { HOME: env.HOME } : {}) },
-    log: join(env.HOME, 'Library/Logs/factory/queue.log'),
+    log: join(env.HOME, 'Library/Logs/factory', log),
     // #24: a LaunchDaemon runs as the account that printed it, the agents' own, with that account's HOME.
     user: daemon ? userInfo().username : null,
   };
@@ -271,7 +276,7 @@ ${j.program.map((a) => `    ${str(a)}`).join('\n')}
 ${Object.entries(j.env).map(([k, v]) => `    <key>${esc(k)}</key>\n    ${str(v)}`).join('\n')}
   </dict>
   <key>StartInterval</key>
-  <integer>60</integer>
+  <integer>${j.interval ?? 60}</integer>
   <key>RunAtLoad</key>
   <true/>
   <key>ProcessType</key>

@@ -245,8 +245,8 @@ const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 let interrupted = false;
 class Interrupted extends Error {}
 /** Runs a shell command with a timeout; a Ctrl-C that reached the child ends the probe, and the cleanup runs. */
-function sh(command, cwd, timeout = 120_000) {
-  const r = spawnSync('bash', ['-c', command], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 << 20, timeout, killSignal: 'SIGKILL' });
+function sh(command, cwd, timeout = 120_000, env = process.env) {
+  const r = spawnSync('bash', ['-c', command], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 << 20, timeout, killSignal: 'SIGKILL' });
   if (r.signal === 'SIGINT' || r.signal === 'SIGTERM' || interrupted) throw new Interrupted('interrupted');
   return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
@@ -319,7 +319,8 @@ function main(argv) {
   const log = (file, command, body) => writeFileSync(join(logDir, file), `${identity}\n# command: ${command}\n${body}\n`);
   const session = (file, prompt, turns, allowed) => {
     const command = `cd ${q(dir)} && ${o.claude} -p ${q(prompt)} --max-turns ${turns} --permission-mode acceptEdits --allowedTools ${allowed.map(q).join(' ')} --disallowedTools ${DISALLOWED.map(q).join(' ')} --output-format stream-json --verbose`;
-    const r = sh(command, dir, 15 * 60_000);
+    // FACTORY_NO_ALERTS=1 (#24): the profile's SessionStart hook would otherwise print the Human's alerts into a measured session.
+    const r = sh(command, dir, 15 * 60_000, { ...process.env, FACTORY_NO_ALERTS: '1' });
     log(file, command, r.out);
     return parseSession(r.out);
   };
