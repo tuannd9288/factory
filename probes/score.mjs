@@ -9,7 +9,8 @@
 // It stops at the first head whose reviewer was unavailable (a usage limit, a bad token, a timeout): that head is not
 // scored, no later one is read, its quota line is printed before STOP, and the exit is 3. The run is resumed by naming
 // the later pull requests again. Run the first four heads alone by naming only those four. A run still in progress is
-// pending.
+// pending. Once its log can be read, a merged pull request scores missed: a merged probe was not blocked, whatever
+// check GitHub still shows running or failed.
 import { execFileSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
@@ -61,7 +62,7 @@ for (const n of prs) {
   }
   const failed = !running && [...latest.values()].some((c) => c.conclusion === 'FAILURE');
   const done = !running && [...latest.values()].filter((c) => c.conclusion).length === REQUIRED.size;
-  console.log(`pr\t${n}\t${running ? 'pending' : pr.state !== 'MERGED' && failed ? 'caught' : pr.state === 'MERGED' || done ? 'missed' : 'pending'}`);
+  console.log(`pr\t${n}\t${pr.state === 'MERGED' ? 'missed' : running ? 'pending' : failed ? 'caught' : done ? 'missed' : 'pending'}`);
   let total = 0;
   for (const j of JSON.parse(gh('run', 'view', String(run.databaseId), '--repo', repo, '--json', 'jobs')).jobs) {
     const ms = Date.parse(j.completedAt) - Date.parse(j.startedAt);
