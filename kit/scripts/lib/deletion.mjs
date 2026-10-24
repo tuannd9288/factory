@@ -27,19 +27,24 @@ const git = (...args) => execFileSync('git', ['-c', 'core.quotePath=false', ...a
 const short = (text) => (text.trim().length > 120 ? `${text.trim().slice(0, 117)}...` : text.trim());
 
 // The names knip 6.42.1 looks for, by default: https://knip.dev/overview/configuration#location
-const CONFIG_FILES = ['knip.json', 'knip.jsonc', '.knip.json', '.knip.jsonc', 'knip.ts', 'knip.js', 'knip.config.ts', 'knip.config.js'];
+// Only the JSON ones give a machine proof: a JS or TS config can import files the gate does not protect, and the
+// "knip" key of package.json cannot be protected line by line (tier would see only the changed line).
+const JSON_CONFIGS = ['knip.json', 'knip.jsonc', '.knip.json', '.knip.jsonc'];
+const CODE_CONFIGS = ['knip.ts', 'knip.js', 'knip.config.ts', 'knip.config.js'];
 
 if (mode === 'config') {
   const base = rest[0];
   const at = (path) => spawnSync('git', ['cat-file', '-e', `${base}:${path}`], { stdio: 'ignore' }).status === 0;
-  let found = CONFIG_FILES.some(at);
-  if (!found && at('package.json')) {
+  if (JSON_CONFIGS.some(at)) process.exit(0);
+  if (CODE_CONFIGS.some(at)) fail([`a JS or TS knip config can import files the gate does not protect, so no deletion can be proved unused`]);
+  let inPackage = false;
+  if (at('package.json')) {
     try {
-      found = 'knip' in JSON.parse(git('show', `${base}:package.json`));
+      inPackage = 'knip' in JSON.parse(git('show', `${base}:package.json`));
     } catch {}
   }
-  if (found) process.exit(0);
-  fail([`knip has no config in this repository (none of ${CONFIG_FILES.join(', ')}, and no "knip" key in package.json, at the base), so no deletion can be proved unused`]);
+  if (inPackage) fail(['the knip config is in package.json; move it to knip.json for a machine proof']);
+  fail([`knip has no config in this repository (none of ${JSON_CONFIGS.join(', ')} at the base), so no deletion can be proved unused`]);
 }
 
 // What an `export` line exports, as knip names it; null when the line cannot be read.
@@ -58,20 +63,25 @@ function exported(line) {
   return m ? [m[1]] : null;
 }
 
-// Reads a whole file once, line by line, with a rough strip of strings, comments and template literals (regex literals
-// are not understood; a surprise shows as a state that fails a check, never one that passes it). Per line:
+// Reads a whole file once, line by line, lexing strings, comments, template literals and regex literals. A `/` after an
+// identifier, number, `)`, `]` or `}` divides; after anything else, or a keyword such as `return`, it starts a regex. A regex
+// that does not close on its line cannot be told from a division: that line and every later one is `taint`, and nothing
+// removed from a tainted row is trusted. Per line:
 //   start     { depth, block, template } at the start of the line: bracket depth, inside a block comment or a template
 //   code      the line with comments cut out and strings kept; exec the same with the text of quoted strings emptied
 //   comma0    a comma at depth 0
 //   badTail   code after a statement ended on the line: after a `}` returns depth to 0 only `;` may follow, after a `;` at
 //             depth 0 nothing may, after a `)` or `]` only what continues a signature (`{`, `=>`, `:`) or `;` (a string or
 //             template counts as code)
+const KEYWORDS = new Set(['return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'yield', 'await', 'instanceof']);
 function scanFile(text) {
   let depth = 0;
   let block = false;
   let template = false;
-  return text.split('\n').map((line) => {
-    const row = { start: { depth, block, template }, code: '', exec: '', comma0: false, badTail: false };
+  let value = false; // the last significant token ends a value, so a following `/` divides; otherwise it starts a regex
+  let taint = null; // the first line with a regex that does not close on its line: from there on nothing is trusted
+  return text.split('\n').map((line, index) => {
+    const row = { start: { depth, block, template }, code: '', exec: '', comma0: false, badTail: false, taint: null };
     const events = [];
     let bare = '';
     for (let i = 0; i < line.length; i++) {
@@ -88,7 +98,27 @@ function scanFile(text) {
         }
       } else if (c === '/' && line[i + 1] === '/') break;
       else if (c === '/' && line[i + 1] === '*') (block = true), i++;
-      else if (c === '`') (template = true), (row.code += c), (row.exec += c), (bare += 'S');
+      else if (c === '/' && !value) {
+        // A regex literal: up to the closing `/` outside a [...] class, honouring `\`, then its flags.
+        let j = i + 1;
+        let inClass = false;
+        while (j < line.length && (inClass || line[j] !== '/')) {
+          if (line[j] === '\\') j++;
+          else if (line[j] === '[') inClass = true;
+          else if (line[j] === ']') inClass = false;
+          j++;
+        }
+        if (j >= line.length) {
+          taint ??= { n: index + 1, text: line };
+          break;
+        }
+        while (/[A-Za-z]/.test(line[j + 1] ?? '')) j++;
+        row.code += line.slice(i, j + 1);
+        row.exec += 'R';
+        bare += 'S';
+        i = j;
+        value = true;
+      } else if (c === '`') (template = true), (value = true), (row.code += c), (row.exec += c), (bare += 'S');
       else if (c === '"' || c === "'") {
         let j = i + 1;
         while (j < line.length && line[j] !== c) j += line[j] === '\\' ? 2 : 1;
@@ -96,10 +126,25 @@ function scanFile(text) {
         row.exec += c + c;
         bare += 'S';
         i = j;
+        value = true;
+      } else if (/\s/.test(c)) {
+        row.code += c;
+        row.exec += c;
+        bare += c;
+      } else if (/[\w$]/.test(c)) {
+        let j = i;
+        while (j + 1 < line.length && /[\w$]/.test(line[j + 1])) j++;
+        const word = line.slice(i, j + 1);
+        row.code += word;
+        row.exec += word;
+        bare += word;
+        value = !KEYWORDS.has(word);
+        i = j;
       } else {
         row.code += c;
         row.exec += c;
         bare += c;
+        value = c === ')' || c === ']' || c === '}';
         if ('{(['.includes(c)) depth++;
         else if ('})]'.includes(c)) {
           if (--depth === 0) events.push({ pos: bare.length, kind: c === '}' ? 'brace' : 'paren' });
@@ -110,6 +155,7 @@ function scanFile(text) {
     const allowed = { brace: /^\s*;?\s*$/, semi: /^\s*$/, paren: /^\s*(?:;?\s*$|=>|:|\{)/ };
     row.badTail = events.some((e) => !allowed[e.kind].test(bare.slice(e.pos)));
     row.end = { depth, block, template };
+    row.taint = taint;
     return row;
   });
 }
@@ -157,7 +203,7 @@ function variableRuns(rest) {
   if (eq < 0) return false;
   const init = rest.slice(eq + 1).replace(/;\s*$/, '').trim();
   if (isFunctionInit(init)) return false;
-  if (/\(|\bnew\b|\$\{|\bawait\b|\byield\b|\bimport\b|\+\+|--|\bdelete\b|<[A-Za-z>/]/.test(init) || /[\w$)\]]\s*`/.test(init)) return true;
+  if (/\(|\bnew\b|\$\{|\bawait\b|\byield\b|\bimport\b|\+\+|--|\bdelete\b|\.\.\.|<[A-Za-z>/]/.test(init) || /[\w$)\]]\s*`/.test(init)) return true;
   return init.replace(/=>|===|!==|==|!=|<=|>=/g, '').includes('=');
 }
 function classRuns(text) {
@@ -200,6 +246,7 @@ function wholeExports(rows, texts, names) {
   let pending = [];
   let declarations = 0;
   for (const [i, row] of rows.entries()) {
+    if (row.taint) return { line: texts[i], why: `removes a line after one the gate cannot read (line ${row.taint.n}: ${short(row.taint.text)})` };
     if (row.start.depth < 0) return { line: texts[i] };
     if (row.start.depth > 0 || row.start.template) {
       if (row.badTail) return { line: texts[i] };
@@ -295,7 +342,8 @@ if (mode === 'claims') {
           paid.add(j);
           const names = exported(minus[j]);
           const row = rows[start - 1 + j];
-          if (!names?.length || !row || !startsClean(row) || (declaresVariables(row.code) && row.comma0)) stray(minus[j]);
+          if (row?.taint) stray(minus[j], `removes a line after one the gate cannot read (line ${row.taint.n}: ${short(row.taint.text)})`);
+          else if (!names?.length || !row || !startsClean(row) || (declaresVariables(row.code) && row.comma0)) stray(minus[j]);
           else for (const name of names) claim(path, name, true);
         }
         for (let j = 0; j < minus.length; j++) {
