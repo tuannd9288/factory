@@ -30,7 +30,7 @@ function world(prs) {
   chmodSync(join(dir, 'gh'), 0o755);
   for (const p of prs) {
     writeFileSync(join(dir, `pr${p.n}.json`), JSON.stringify({ state: p.state ?? 'OPEN', headRefOid: p.sha, statusCheckRollup: p.checks }));
-    writeFileSync(join(dir, `list-${p.sha}.json`), JSON.stringify([{ databaseId: p.run }]));
+    writeFileSync(join(dir, `list-${p.sha}.json`), JSON.stringify([...(p.olderRuns ?? []), { databaseId: p.run, createdAt: '2026-10-25T12:00:00Z' }]));
     writeFileSync(join(dir, `jobs${p.run}.json`), JSON.stringify({ jobs: p.jobs }));
     writeFileSync(join(dir, `log${p.run}.log`), p.log);
   }
@@ -148,6 +148,38 @@ test('the head it stops at still gets its quota line, before STOP; a run still i
     const again = w.score(['12']);
     assert.equal(again.status, 0, again.stdout + again.stderr);
     assert.match(again.stdout, /^pr\t12\tpending$/m);
+  } finally {
+    w.cleanup();
+  }
+});
+
+const at = (name, conclusion, completedAt) => ({ name, conclusion, completedAt });
+const rollup = (review) => [at('verify', 'SUCCESS', '2026-10-25T10:00:00Z'), ...review, at('verdict', 'SUCCESS', '2026-10-25T12:02:00Z'), at('tier', 'SUCCESS', '2026-10-25T12:03:00Z')];
+
+test('only the latest entry of each required check counts: an old FAILURE under a newer SUCCESS is not caught', () => {
+  const w = world([
+    { n: 11, sha: 'a'.repeat(40), run: 100, checks: rollup([at('review', 'FAILURE', '2026-10-25T10:05:00Z'), at('review', 'SUCCESS', '2026-10-25T12:01:00Z')]), log: OK, jobs: [job('review', '2026-10-25T12:00:00Z', '2026-10-25T12:01:00Z')] },
+    { n: 12, sha: 'b'.repeat(40), run: 101, checks: rollup([at('review', 'SUCCESS', '2026-10-25T10:05:00Z'), at('review', 'FAILURE', '2026-10-25T12:01:00Z')]), log: OK, jobs: [job('review', '2026-10-25T12:00:00Z', '2026-10-25T12:01:00Z', 'failure')] },
+    { n: 13, sha: 'c'.repeat(40), run: 102, checks: [{ name: 'verify', conclusion: 'SUCCESS', startedAt: '2026-10-25T10:00:00Z' }, { name: 'review', conclusion: 'FAILURE', startedAt: '2026-10-25T09:00:00Z' }, { name: 'review', conclusion: 'SUCCESS', startedAt: '2026-10-25T11:00:00Z' }, ...checks().slice(2)], log: OK, jobs: [] },
+  ]);
+  try {
+    const out = w.score(['11', '12', '13']);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(out.stdout, /^pr\t11\tmissed$/m);
+    assert.match(out.stdout, /^pr\t12\tcaught$/m);
+    assert.match(out.stdout, /^pr\t13\tmissed$/m, 'startedAt orders entries with no completedAt');
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the jobs it prints are the latest gate-trusted run on the head, whatever order gh lists them in', () => {
+  const w = world([{ n: 11, sha: 'a'.repeat(40), run: 101, olderRuns: [{ databaseId: 100, createdAt: '2026-10-25T09:00:00Z' }], checks: checks(), log: OK, jobs: [job('review', '2026-10-25T12:00:00Z', '2026-10-25T12:01:00Z')] }]);
+  try {
+    const out = w.score(['11']);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.doesNotMatch(readCalls(w), /run view 100/);
+    assert.match(readCalls(w), /run view 101/);
   } finally {
     w.cleanup();
   }
