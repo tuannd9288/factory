@@ -175,7 +175,7 @@ describe('what the subject is, and when the script runs', () => {
   test('kit/AGENTS.md shows the counts verify and prove-check now print, and has not grown', () => {
     const text = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
     assert.match(text, /`verify: 6 passed in 12s`/);
-    assert.match(text, /`prove-check: 7 checks fail on their fixtures`/);
+    assert.match(text, /`prove-check: 10 checks fail on their fixtures`/);
     assert.ok(text.split('\n').length - 1 <= 143, 'kit/AGENTS.md grew past main\'s 142 lines and the one line of PR 31');
     assert.match(text, /fixup!` or `squash!`/);
   });
