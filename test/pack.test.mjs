@@ -307,3 +307,33 @@ describe('onboard with a pack the repository already names', () => {
     }
   });
 });
+
+// Found by #7's review: .gate/pack and .gate/kit-files were written through a link the repository holds, so a link to a
+// file outside the clone had that file overwritten.
+import { mkdirSync, symlinkSync } from 'node:fs';
+
+test('onboard replaces a .gate/pack or .gate/kit-files the repository holds as a link, never writing through it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'factory-pack-link-'));
+  try {
+    const seed = join(dir, 'seed');
+    git(dir, 'init', '-q', '-b', 'main', seed);
+    write(seed, APP);
+    mkdirSync(join(seed, '.gate'), { recursive: true });
+    for (const name of ['pack', 'kit-files']) {
+      writeFileSync(join(dir, `outside-${name}`), 'theirs\n');
+      symlinkSync(join(dir, `outside-${name}`), join(seed, '.gate', name));
+    }
+    commit(seed, {}, 'start');
+    git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
+    const env = { ...quiet, FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), XDG_DATA_HOME: join(dir, 'xdg'), XDG_CONFIG_HOME: join(dir, 'xdg-config') };
+    const out = run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr', '--pack', 'pstack'], env);
+    assert.equal(out.code, 0, out.out);
+    for (const name of ['pack', 'kit-files']) {
+      assert.equal(readFileSync(join(dir, `outside-${name}`), 'utf8'), 'theirs\n', `onboard wrote through .gate/${name}`);
+      assert.ok(!lstatSync(join(dir, 'root/app/.gate', name)).isSymbolicLink(), `.gate/${name} is still a link`);
+    }
+    assert.equal(readFileSync(join(dir, 'root/app/.gate/pack'), 'utf8'), 'pstack\n');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
