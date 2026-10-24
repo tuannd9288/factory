@@ -269,3 +269,41 @@ describe('onboard --pack', () => {
     }
   });
 });
+
+describe('onboard with a pack the repository already names', () => {
+  const seededWith = (pack) => {
+    const dir = mkdtempSync(join(tmpdir(), 'factory-pack-'));
+    const seed = join(dir, 'seed');
+    git(dir, 'init', '-q', '-b', 'main', seed);
+    write(seed, { ...APP, '.gate/pack': pack });
+    commit(seed, {}, 'start');
+    git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
+    const env = { ...quiet, FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), XDG_DATA_HOME: join(dir, 'xdg'), XDG_CONFIG_HOME: join(dir, 'xdg-config') };
+    return { dir, onboard: (...args) => run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr', ...args], env), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+
+  test('refuses a .gate/pack that names a pack the factory lacks, and removes the clone it made', () => {
+    const s = seededWith('nope\n');
+    try {
+      const out = s.onboard();
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /^onboard: \.gate\/pack: no pack nope in .*\/packs; there are: pstack; the clone is removed and nothing else was done$/m);
+      assert.ok(!existsSync(join(s.dir, 'root/app')), 'the clone is left behind');
+      assert.ok(!existsSync(join(s.dir, 'profiles')), 'a profile was made');
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  test('--pack over the repository\'s own .gate/pack wins, and the file is rewritten to it', () => {
+    const s = seededWith('none\n');
+    try {
+      const out = s.onboard('--pack', 'pstack');
+      assert.equal(out.code, 0, out.out);
+      assert.equal(readFileSync(join(s.dir, 'root/app/.gate/pack'), 'utf8'), 'pstack\n');
+      assert.match(readFileSync(join(s.dir, 'root/app/AGENTS.md'), 'utf8'), /^## Where pstack yields$/m);
+    } finally {
+      s.cleanup();
+    }
+  });
+});

@@ -7,7 +7,7 @@ start=$SECONDS
 failed=0
 
 # The AGENTS.md a repository gets is the kit's with one pack's section (or none); each must leave room for its own parts.
-for pack in none $(ls packs); do
+for pack in none $(ls packs 2>/dev/null); do
   [ "$pack" = none ] || [ -d "packs/$pack" ] || continue
   if ! n=$(node bin/lib/pack.mjs agents . "$pack" | wc -l | tr -d ' ') || [ "${n:-0}" -eq 0 ]; then
     echo "verify: the AGENTS.md of pack $pack cannot be composed"; failed=1
