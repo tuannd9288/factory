@@ -621,3 +621,73 @@ describe('red-check: only a JSON knip config gives a machine proof', () => {
     assert.match(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /next\.config/);
   });
 });
+
+// A `/` after `)` or `}` is ambiguous: `if (x) /re/.test(y)` starts a regex, `(a + b) / 2` divides. When both readings
+// agree on structure the file reads as before; when a closing `/` on the line encloses a quote, bracket or backtick, the
+// two disagree and the row and every later one are tainted.
+describe('red-check: a slash after ) or } may start a regex', () => {
+  let r;
+  let bin;
+  let n = 0;
+  before(() => {
+    r = repoWithKit({ 'knip.json': '{}\n' });
+    bin = join(r.dir, 'fake-bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npx'), '#!/bin/sh\ncat "$FAKE_KNIP_REPORT"\nexit 1\n');
+    chmodSync(join(bin, 'npx'), 0o755);
+  });
+  after(() => r.cleanup());
+
+  const run = (baseFiles, headFiles, knip) => {
+    n++;
+    git(r.repo, 'switch', '-q', '-C', `amb${n}`, 'origin/main');
+    commit(r.repo, baseFiles, `base ${n}`);
+    const base = git(r.repo, 'rev-parse', 'HEAD');
+    commit(r.repo, headFiles, `head ${n}`);
+    writeFileSync(join(r.dir, 'knip.json'), knip);
+    return script(r.repo, 'red-check', ['--base', base], { PATH: `${bin}:${process.env.PATH}`, FAKE_KNIP_REPORT: join(r.dir, 'knip.json') });
+  };
+  const refuses = (out) => {
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 1: /);
+    assert.doesNotMatch(out.out, /passed as a pure deletion/);
+  };
+  /** Two exports around a top-level call, each hiding a brace in a regex after `)` or `}`; the second closes what the first opened. */
+  const sandwich = (open, close) => ({
+    base: {
+      'src/r.js': `import { app, auth } from './server.js';\nexport function unusedRf(x) { ${open} }\napp.use(auth);\nexport function usedRg(y) { ${close} }\nexport const keep = 1;\n`,
+      'src/u.js': "import { usedRg } from './r.js';\nexport const v = usedRg;\n",
+    },
+    head: { 'src/r.js': "import { app, auth } from './server.js';\nexport const keep = 1;\n" },
+  });
+
+  test('R2 again: a kept `if (ok) /`/.test(s);` does not open a template over a real one', () => {
+    const gen = (inner) => `export const unusedTc = 1;\nif (ok) /\`/.test(s);\nexport function banner() { return \`\n${inner}\n\`; }\n`;
+    refuses(run({ 'src/gen.js': gen('export const unusedTc = 1;') }, { 'src/gen.js': gen('const unusedTc = 1;') }, report(listsExports('src/gen.js', 'unusedTc'))));
+  });
+  test('a `{ } /{/.test(x)` shifts the depth, and a top-level call is removed between two exports', () => {
+    const { base, head } = sandwich('if (x) { } /{/.test(x);', 'if (y) { } /}/.test(y);');
+    refuses(run(base, head, report(listsExports('src/r.js', 'unusedRf'))));
+  });
+  test('while (x) /}/.test(y) shifts the depth the same way', () => {
+    const { base, head } = sandwich('while (x) /{/.test(x);', 'while (y) /}/.test(y);');
+    refuses(run(base, head, report(listsExports('src/r.js', 'unusedRf'))));
+  });
+  test('f(x) / g(x) / 2 reads both ways and disagrees on parentheses: it fails closed', () => {
+    const base = 'export const keep = 1;\nexport function unusedMix(x) {\n  return f(x) / g(x) / 2;\n}\n';
+    refuses(run({ 'src/m.js': base }, { 'src/m.js': 'export const keep = 1;\n' }, report(listsExports('src/m.js', 'unusedMix'))));
+  });
+
+  test('(a + b) / 2 inside a removed unused export still passes', () => {
+    const base = 'export const keep = 1;\nexport function unusedAvg(a, b) {\n  return (a + b) / 2;\n}\n';
+    const out = run({ 'src/m.js': base }, { 'src/m.js': 'export const keep = 1;\n' }, report(listsExports('src/m.js', 'unusedAvg')));
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, PASSED);
+  });
+  test('arr[i] / 2 inside a removed unused export still passes', () => {
+    const base = 'export const keep = 1;\nexport function unusedAt(arr, i) {\n  return arr[i] / 2;\n}\n';
+    const out = run({ 'src/m.js': base }, { 'src/m.js': 'export const keep = 1;\n' }, report(listsExports('src/m.js', 'unusedAt')));
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, PASSED);
+  });
+});
