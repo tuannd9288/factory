@@ -226,7 +226,7 @@ auto-merge in a pack repository (the probe closes its pull request); another pac
 - Runners: GitHub-hosted.
 - Every pull request was opened by `tuan9288-agent`, from main at the time, with auto-merge on.
 
-The results were scored with `score.mjs` at factory 06ffa32, which includes #40 and #42.
+The results were scored with `score.mjs` at factory 06ffa32, which includes factory#40 and factory#42.
 
 **The gate met all four bars with the real reviewer:** 20/20 seeded caught, 7/7 load-bearing caught, 0/20 clean
 blocked and 16/16 class M caught. The Human recorded this on 2026-10-24.
@@ -246,7 +246,7 @@ three built-in plugins. factory#38 turned them off, and the four heads were re-r
 |---|---|---|---|---|
 | Part 1 | #2–#5 | C1, C5, D15, D19 | 4, plus 4 discarded | 48, plus 47 discarded |
 | Part 2 | #7–#42 | the other 18 defects in parallel, then the other 18 clean changes one at a time | 20 | 279 |
-| Round 2 | #43–#45 | C4, C8 and C12 after #41 | 3 | 30 |
+| Round 2 | #43–#45 | C4, C8 and C12 after factory#41 | 3 | 30 |
 
 The four class-R defects were all caught by the reviewer:
 - **D15:** send.js retries permanent errors, with its test flipped. Blocked as high.
@@ -259,21 +259,22 @@ The 16 class-M defects were all red at `verify`, which made no reviewer call. No
 **Clean changes.** Part 2 blocked four clean changes; two decisions by the Human decide how they count:
 - **C4, C8, C12.** Each fixture had a real bug that the reviewer named. Running the probe's code confirmed it:
   - `chunk('abc', 0)` never returns;
-  - `sign('u1', 2000.5)` makes a token that `verify` rejects;
+  - `sign('u1', 2000.5, 'k')` makes a token that `verify` rejects;
   - `truncate(…, 5, { ellipsis: '...' })` returns 7 characters.
 
-  `dry.sh` screens only verify, red-check and tier, so all three had passed it. #41 fixed the fixtures, and round 2
+  `dry.sh` screens only verify, red-check and tier, so all three had passed it. factory#41 fixed the fixtures, and round 2
   scores them: all three passed review and merged.
 - **C13.** Its raise to tier 3 is not a wrong block. `maskRecipient` decides how much of a phone number reaches logs,
   and the tier rule sends that to the Human to read.
 
 **Cost.**
-- **Reviewer calls:** one per head that was green at `verify`, as counted before part 2. No head was retried.
+- **Reviewer calls:** one per head that was green at `verify`, as counted before part 2. No API retry fired. Part 1's four discarded
+  calls were the earlier runs of the same heads.
 - **Time:** a review job that made a call took 2–6 minutes.
 - **Quota:** the five-hour utilization of the token's account rose by about 0.2% per call.
-- **Actions:** a head red at `verify` still billed about 4 gate-trusted minutes (#39).
+- **Actions:** a head red at `verify` still billed about 4 gate-trusted minutes: four jobs, each at the 1-minute minimum.
 
-**Cleanup.** By the Human's decision, every probe pull request on factory-probe was closed with `gh pr close`, and its
-branch stays.
+**Cleanup.** 17 probe pull requests merged. By the Human's decision, the other 26 were closed with `gh pr close`. Every
+probe branch stays.
 
-The evidence is in the comments of #25.
+The evidence is in the comments of factory#25.
