@@ -1474,7 +1474,12 @@ describe('onboard', () => {
       git(dir, 'init', '-q', '-b', 'main', seed);
       commit(seed, { 'test/broken.test.js': "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\ntest('broken', () => assert.equal(1, 2));\n" }, 'start');
       git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
-      const out = run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr'], { FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles') });
+      const out = run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr'], {
+        FACTORY_ROOT: join(dir, 'root'),
+        AGENT_PROFILES: join(dir, 'profiles'),
+        XDG_DATA_HOME: join(dir, 'xdg'),
+        XDG_CONFIG_HOME: join(dir, 'xdg-config'),
+      });
       assert.equal(out.code, 1, out.out);
       assert.match(out.out, /verify: failed: tests[\s\S]*the kit is staged on factory\/kit, not committed/);
       const repo = join(dir, 'root/app');
@@ -1505,6 +1510,8 @@ describe('onboard', () => {
         ...quiet,
         FACTORY_ROOT: join(dir, 'root'),
         AGENT_PROFILES: join(dir, 'profiles'),
+        XDG_DATA_HOME: join(dir, 'xdg'),
+        XDG_CONFIG_HOME: join(dir, 'xdg-config'),
       });
     const own = (text) => {
       writeFileSync(join(dir, 'own.md'), text);
