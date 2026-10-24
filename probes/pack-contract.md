@@ -72,7 +72,15 @@ A SIGTERM sent to the probe alone waits until every `spawnSync` returns; only a 
 
 ```
 node probes/pack-probe.mjs --repo <owner>/<name>      # from the factory root, as the agents' account
+node probes/pack-probe.mjs --repo <owner>/<name> --no-pr --questions   # #29's two questions, without the pull request
 ```
+
+`--questions` adds two short sessions, each with the sentinel `.env` planted:
+- one in `acceptEdits` with only `Bash(cat .env)` granted, to see whether `Read(./.env*)` also stops it;
+- one in `bypassPermissions` with no grant, to see whether the deny rules hold there.
+
+Their answers print as `ANSWER` lines and go into `answers.txt`. They are findings about Claude Code, not items of
+this contract, so they never change the exit code, and no answer repeats what a call returned.
 
 It needs, in order: the repository taken in (`bin/onboard`: clone, profile, `.envrc`, kit) and the kit pull request
 **merged** (`gate-trusted.yml` runs from `main`; without it `review`, `verdict` and `tier` never appear); the
