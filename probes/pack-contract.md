@@ -82,12 +82,13 @@ node probes/pack-probe.mjs --repo <owner>/<name> --no-pr --questions   # #29's t
 Bypass runs every call without asking, so that session is bounded by limits that do not depend on its answer:
 - only the Bash and Read tools (`--tools Bash,Read`);
 - four turns;
-- a `GH_CONFIG_DIR` that is an empty folder, so its `gh` has no login, and the folder is removed afterwards.
+- a `GH_CONFIG_DIR` that is an empty folder, removed afterwards, so a plain `gh` finds no login.
 
 It also gets deny rules for `gh`, `git push`, `ssh` and `security`, but those hold only if deny rules hold under bypass,
 which is the question. What it can still reach, if the model strays from its three calls: any Bash command for four
-turns, git's own credential helpers, and the machine's SSH key, which is the Human's (#24). Run it on a scratch
-repository only.
+turns, git's own credential helpers, the agents' gh token through a command that names another config folder or
+reads the keychain, and the machine's SSH key, which is the Human's (#24). Whatever it reads lands in
+`session-q2.log`. Run it on a scratch repository only.
 
 Their answers print as `ANSWER` lines and go into `answers.txt`. They are findings about Claude Code, not items of
 this contract, so they never change the exit code, and no answer repeats what a call returned.
