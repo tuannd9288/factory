@@ -976,3 +976,61 @@ test('the C20 text states what git shows and does not say one fact caused the ot
   assert.ok(c20.length > 100);
   assert.doesNotMatch(c20, /which is why|because/);
 });
+
+// #30: what the logged-in claude.ai account loads into a writer session, read from each session's init event. The
+// fixture is the pull request session's init event from #6's run 2 (Claude Code 2.1.309, 2026-10-23), unchanged.
+const RUN2_INIT = readFileSync(join(factory, 'test/fixtures/init-2.1.309-run2-pr.json'), 'utf8').trim();
+const ACCOUNT = 'nothing from the claude.ai account loads';
+const initOf = (o) => ev({ type: 'system', subtype: 'init', cwd: '/r/app', session_id: 's2', permissionMode: 'acceptEdits', model: 'claude-opus-5-5', plugins: [{ name: 'pstack', source: 'pstack@pstack-f713f14' }], ...o });
+const withInit = (text, init) => [init, ...text.split('\n').slice(1)].join('\n');
+const accountItem = async (prText, first = stream()) => {
+  const { parseSession, judge } = await probeModule();
+  return by(judge({ session: parseSession(first), prSession: parseSession(prText), pr: prInfo(), ...base() }), ACCOUNT);
+};
+
+test("#30: run 2's pull request session, with claude.ai's connectors, their tools and its synced skills, fails", async () => {
+  const item = await accountItem(withInit(prStream(), RUN2_INIT));
+  assert.equal(item.ok, false, item.evidence);
+  for (const part of ['claude.ai Claude Docs (connected)', 'claude.ai Zalo (needs-auth)', 'claude.ai Vercel (needs-auth)', 'mcp__claude_ai_Claude_Docs__batch', 'anthropic-skills:docs', 'anthropic-skills:xlsx'])
+    assert.ok(item.evidence.includes(part), `${part} is missing from: ${item.evidence}`);
+  assert.doesNotMatch(item.evidence, /pstack:tdd|cc-plugin-agents-md/);
+});
+
+test('#30: a claude.ai connector in any state fails, and so do its tools, a synced plugin or a synced skill, in either session', async () => {
+  for (const o of [
+    { mcp_servers: [{ name: 'claude.ai Zalo', status: 'pending', source: 'claudeai' }] },
+    { tools: ['Bash', 'mcp__claude_ai_Vercel__deploy'] },
+    { plugins: [{ name: 'pstack', source: 'pstack@pstack-f713f14' }, { name: 'notes', source: 'notes@synced' }] },
+    { skills: ['pstack:tdd', 'anthropic-skills:pdf'] },
+  ]) {
+    assert.equal((await accountItem(withInit(prStream(), initOf(o)))).ok, false, `pull request session: ${JSON.stringify(o)}`);
+    assert.equal((await accountItem(prStream(), withInit(stream(), initOf(o)))).ok, false, `first session: ${JSON.stringify(o)}`);
+  }
+});
+
+test("#30: a session with only the repository's own and the built-in parts passes", async () => {
+  // An invented project server: a repository's .mcp.json still reaches a session, and this item is not about it.
+  const init = initOf({
+    mcp_servers: [{ name: 'repo-db', status: 'connected', source: 'project' }],
+    tools: ['Bash', 'Read', 'mcp__repo-db__query'],
+    plugins: [{ name: 'pstack', source: 'pstack@pstack-f713f14' }, { name: 'cc-plugin-agents-md', source: 'cc-plugin-agents-md@builtin' }],
+    skills: ['pstack:tdd', 'code-review'],
+  });
+  const item = await accountItem(withInit(prStream(), init), withInit(stream(), init));
+  assert.equal(item.ok, true, item.evidence);
+});
+
+// Found by #47's review: the item reads init events, so a session without one is not a pass, and under --no-pr only
+// the first session is judged.
+test('#30: a session with no init event fails the claude.ai item, for nothing was there to judge', async () => {
+  const item = await accountItem(prStream().split('\n').slice(1).join('\n'));
+  assert.equal(item.ok, false, item.evidence);
+  assert.match(item.evidence, /^no init event in the pull request session/);
+});
+
+test("#30: under --no-pr the claude.ai item's evidence names only the first session", async () => {
+  const { parseSession, judge } = await probeModule();
+  const item = by(judge({ session: parseSession(stream()), skipPr: true, ...base() }), ACCOUNT);
+  assert.equal(item.ok, true, item.evidence);
+  assert.match(item.evidence, /in the first session's init event$/);
+});

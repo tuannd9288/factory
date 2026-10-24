@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Takes a repository into the factory: clones it under the factory root, creates its Claude Code profile (only now),
-# writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
+# Takes a repository into the factory: clones it under the factory root, creates its Claude Code profile (only now)
+# with a settings.json that keeps out what the logged-in claude.ai account would load, writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
 # the Human's.
 #   bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>]
 # This is the agents' half. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
@@ -102,8 +102,21 @@ if [ -n "$theirs" ] && [ -z "$own" ]; then
 fi
 
 profile=$profiles/$owner/$name/claude
-mkdir -p "$profile"
-echo "onboard: profile $profile"
+# The profile's settings.json is the one place that turns off what the claude.ai account loads into every session: its
+# connectors, and the skills and plugins it syncs, which a repository's .claude/settings.json cannot turn off (#30).
+keys='{
+  "disableClaudeAiConnectors": true,
+  "syncClaudeAiSkills": false,
+  "syncClaudeAiPlugins": false
+}'
+if [ -e "$profile" ]; then
+  echo "onboard: profile $profile exists and is kept; only the Human edits it, and its settings.json needs these three keys:"
+  printf '%s\n' "$keys"
+else
+  mkdir -p "$profile"
+  printf '%s\n' "$keys" >"$profile/settings.json"
+  echo "onboard: profile $profile, with a settings.json that turns off claude.ai's connectors and synced skills and plugins"
+fi
 shown=$profile
 [ "$profiles" = "$HOME/.agent-profiles" ] && shown="\$HOME/.agent-profiles/$owner/$name/claude"
 line="export CLAUDE_CONFIG_DIR=\"$shown\""
