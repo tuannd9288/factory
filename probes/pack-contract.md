@@ -79,6 +79,16 @@ node probes/pack-probe.mjs --repo <owner>/<name> --no-pr --questions   # #29's t
 - one in `acceptEdits` with only `Bash(cat .env)` granted, to see whether `Read(./.env*)` also stops it;
 - one in `bypassPermissions` with no grant, to see whether the deny rules hold there.
 
+Bypass runs every call without asking, so that session is bounded by limits that do not depend on its answer:
+- only the Bash and Read tools (`--tools Bash,Read`);
+- four turns;
+- a `GH_CONFIG_DIR` that is an empty folder, so its `gh` has no login, and the folder is removed afterwards.
+
+It also gets deny rules for `gh`, `git push`, `ssh` and `security`, but those hold only if deny rules hold under bypass,
+which is the question. What it can still reach, if the model strays from its three calls: any Bash command for four
+turns, git's own credential helpers, and the machine's SSH key, which is the Human's (#24). Run it on a scratch
+repository only.
+
 Their answers print as `ANSWER` lines and go into `answers.txt`. They are findings about Claude Code, not items of
 this contract, so they never change the exit code, and no answer repeats what a call returned.
 
