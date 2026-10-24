@@ -38,6 +38,9 @@ function verify(tests) {
     }
     mkdirSync(join(copy, 'scripts'));
     copyFileSync(join(factory, 'scripts/verify'), join(copy, 'scripts/verify'));
+    // The line cap on the composed AGENTS.md runs bin/lib/pack.mjs, which reads the kit's AGENTS.md and imports own.mjs.
+    mkdirSync(join(copy, 'bin/lib'), { recursive: true });
+    for (const lib of ['pack.mjs', 'own.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
     const caller = Object.fromEntries(FOLDERS.map((name) => [name, join(dir, 'caller', name)]));
     for (const path of Object.values(caller)) mkdirSync(path, { recursive: true });
     const { NODE_TEST_CONTEXT, GATE_BASE, GITHUB_EVENT_NAME, ...outer } = process.env;

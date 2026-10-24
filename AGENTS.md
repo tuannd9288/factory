@@ -57,7 +57,8 @@ Everything else that can be undone, agents decide and report after.
 
 | Path | What it is |
 |---|---|
-| `kit/` | What every repository receives through one pull request when it joins |
+| `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, `AGENTS.md` without any way of working |
+| `packs/` | A way of working, one folder each (`packs/pstack/`): its `settings.json` keys, its `AGENTS.md` section, its NOTICE, tests and attacks; `bin/lib/pack.mjs` composes it with the core |
 | `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
 | `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
@@ -65,7 +66,7 @@ Everything else that can be undone, agents decide and report after.
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly Vietnamese digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
-| `scripts/verify` | This repository's own checks: the kit's tests in `test/` |
+| `scripts/verify` | This repository's own checks: the kit's tests in `test/`, each pack's in `packs/*/test/`, and the 150-line cap on every composed `AGENTS.md` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
 | `NOTICE` | What was taken from other projects, with the commit |
 
@@ -147,7 +148,12 @@ trailing `*` admits any arguments, a refspec included (`git push origin b:refs/t
 deny rule still wins over a grant; a command holding a variable or `$(…)` is denied even under a matching grant
 (2.1.308, grants-check): use `--body-file`, a plain `-m '…'`.
 
-pstack, per repository: the kit's `.claude/settings.json` pins it through a `settings` marketplace named for the
+A pack is what the kit holds only for one way of working. The repository names its pack in one line of `.gate/pack` (a
+tier-3 path), and `bin/onboard --pack <name>` chooses it (`none` for the core alone; the default is the repository's
+`.gate/pack`, else `pstack`). `bin/onboard` and `bin/kit-evidence` build `AGENTS.md` and `.claude/settings.json` from the
+core and that pack; the deny rules stay in the core.
+
+pstack, per repository: the pstack pack's `packs/pstack/settings.json` pins it through a `settings` marketplace named for the
 commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository
 and profile, after the Human has opened `claude` in the repository and trusted the folder, install it from the
 repository root with `claude plugin install pstack@pstack-f713f14 --scope project`. Never at user scope: no install
