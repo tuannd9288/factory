@@ -1123,3 +1123,58 @@ test('#24: without --human-home the probe opens none of the Human\'s files and s
     w.cleanup();
   }
 });
+
+// Found by #24's review: gh 2.102 also prints "Timeout trying to log in to … account X", and exits 1 when a login
+// fails; a FIFO at a probed path blocked the open; --human-home must be an absolute path.
+const STATUS_TIMEOUT = [
+  'github.com',
+  '  ✓ Logged in to github.com account tuan9288-agent (/Users/factory/.config/gh/hosts.yml)',
+  '  - Active account: true',
+  '',
+  '  X Timeout trying to log in to github.com account tuannd9288 (keyring)',
+  '  - Active account: false',
+  '',
+].join('\n');
+
+test('#24: a login whose check timed out is still named', async () => {
+  const { parseGhLogins } = await probeModule();
+  assert.deepEqual(parseGhLogins(STATUS_TIMEOUT), ['tuan9288-agent', 'tuannd9288']);
+});
+
+test('#24: the probe names a timed-out login when gh auth status exits 1', async () => {
+  const w = await world();
+  try {
+    const bin = join(w.dir, 'bin24t');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'gh'), `#!/bin/sh\nif [ "$1 $2" = "auth status" ]; then printf '%s' "$MOCK_AUTH_STATUS"; exit 1; fi\nexec '${join(w.bin, 'gh')}' "$@"\n`);
+    chmodSync(join(bin, 'gh'), 0o755);
+    const env = { ...w.env, PATH: `${bin}:${w.env.PATH}`, MOCK_AUTH_STATUS: STATUS_TIMEOUT };
+    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args], { encoding: 'utf8', env });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.match(out, /^#24 gh logins: tuan9288-agent, tuannd9288$/m);
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('#24: opening a FIFO at a probed path does not wait for a writer', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'probe-24-fifo-'));
+  try {
+    assert.equal(spawnSync('mkfifo', [join(dir, 'config')]).status, 0);
+    const code = `import(${JSON.stringify(join(factory, 'probes/pack-probe.mjs'))}).then((m) => console.log(m.openable(${JSON.stringify(join(dir, 'config'))})))`;
+    const r = spawnSync('node', ['-e', code], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(r.signal, null, 'the open blocked');
+    assert.equal(r.stdout.trim(), 'READABLE');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#24: --human-home is refused unless it is an absolute path', () => {
+  for (const value of ['', 'Users/tuannguyen', './home']) {
+    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), '--repo', 'o/app', '--human-home', value], { encoding: 'utf8' });
+    assert.equal(r.status, 2, `${JSON.stringify(value)}: ${r.stdout}${r.stderr}`);
+    assert.match(`${r.stdout}${r.stderr}`, /--human-home needs an absolute path/);
+  }
+});
