@@ -60,6 +60,7 @@ probe_commit "Let the limiter reset one recipient"; T="Limiter: reset theo ngư�
 p_C4() { cat > src/chunk.js <<'EOF'
 // Splits text into pieces of at most `size` user-visible characters, never inside an emoji.
 export function chunk(text, size) {
+  if (typeof text !== 'string') throw new TypeError('text must be a string');
   if (!Number.isInteger(size) || size < 1) throw new RangeError('size must be a whole number of at least 1');
   const chars = [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(text)].map((s) => s.segment);
   const out = [];
@@ -75,8 +76,9 @@ printf '%s\n\n%s\n' "$TEST_HEAD" "test('splits text into pieces without breaking
 test('refuses a size that would never move on', async () => {
   const { chunk } = await import('../src/chunk.js');
   for (const size of [0, -1, 1.5, '2']) assert.throws(() => chunk('abc', size), RangeError);
+  for (const text of [undefined, null, 42]) assert.throws(() => chunk(text, 2), TypeError);
 });" > test/chunk.test.js
-probe_commit "Add chunk"; T="Thêm chunk"; B="Chia văn bản thành từng đoạn, không cắt emoji; từ chối size không phải số nguyên từ 1 trở lên."; }
+probe_commit "Add chunk"; T="Thêm chunk"; B="Chia văn bản thành từng đoạn, không cắt emoji; từ chối text không phải chuỗi và size không phải số nguyên từ 1 trở lên."; }
 
 p_C5() { edit src/ratelimit.js "  const sent = new Map();
   return {" "  const sent = new Map();

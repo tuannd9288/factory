@@ -66,7 +66,7 @@ D19 caught only by that rule; the full-gate bar waits on the real reviewer.
 | C1 | new `capitalizeWords` + test (namespace import) | 1 | lands |
 | C2 | new `wordCount` + test | 1 | lands |
 | C3 | limiter `reset(recipient)` + test | 1 | lands |
-| C4 | new src/chunk.js `chunk(text, size)` by grapheme, never inside an emoji, refusing a size that is not a whole number of at least 1 + test with `await import()` | 1 | lands |
+| C4 | new src/chunk.js `chunk(text, size)` by grapheme, never inside an emoji, refusing text that is not a string and a size that is not a whole number of at least 1 + test with `await import()` | 1 | lands |
 | C5 | limiter: the duplicated window filter becomes one helper; No-red | 1 | lands (real reviewer); blocked under the stub |
 | C6 | README section on tokens | 1 | lands (no source change) |
 | C7 | send.js refuses whitespace-only text: failing test first (Failing-test:), then the code | 2 | lands |
