@@ -2,12 +2,14 @@
 # Takes a repository into the factory: clones it under the factory root, creates its Claude Code profile (only now),
 # writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
 # the Human's.
-#   bin/onboard <repo-url> [--no-pr] [--own <file>]
+#   bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>]
 # This is the agents' half. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
 # The kit replaces the repository's own AGENTS.md, CLAUDE.md and hooks; its own parts the Human approved come in through
 # --own <file>, which holds the two sections the kit's AGENTS.md ends with (bin/lib/own.mjs), and a repository with its
 # own AGENTS.md or CLAUDE.md is refused without it. Every other file the repository already has is kept.
+# --pack <name> chooses the way of working the kit is composed with (packs/<name>/, bin/lib/pack.mjs), or `none` for the
+# core alone; the default is the repository's own .gate/pack, else pstack. The choice is written to .gate/pack.
 # FACTORY_ROOT (default: this clone) is where repositories live; AGENT_PROFILES (default: ~/.agent-profiles) where
 # profiles live, as <owner>/<repo>/claude so two owners' repositories of one name never share one; FACTORY_HUMAN
 # (default: tuannd9288) is the code owner of tier 3; FACTORY_AGENT (default: tuan9288-agent) the agents' account.
@@ -17,14 +19,16 @@ root=${FACTORY_ROOT:-$factory}
 profiles=${AGENT_PROFILES:-$HOME/.agent-profiles}
 human=${FACTORY_HUMAN:-tuannd9288}
 agent=${FACTORY_AGENT:-tuan9288-agent}
-url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>]}
+url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>]}
 shift
 open_pr=1
 own=""
+pack=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --no-pr) open_pr=0; shift ;;
     --own) own=${2:?onboard: --own needs a file}; shift 2 ;;
+    --pack) pack=${2:?onboard: --pack needs a name}; shift 2 ;;
     *) echo "onboard: unknown argument $1; nothing done"; exit 2 ;;
   esac
 done
@@ -35,10 +39,15 @@ owner=$(basename "$(dirname "$path")")
 owner=${owner##*:}
 dest=$root/$name
 [ -e "$dest" ] && { echo "onboard: $dest exists; nothing done"; exit 1; }
+# The AGENTS.md the repository gets is the kit's, the pack's section and its own parts: the 150 lines count all three.
+# Without --pack the repository's own choice is known only after the clone; pstack, the usual one, stands in until then.
+composed=$(mktemp)
+trap 'rm -f "$composed"' EXIT
+why=$(node "$factory/bin/lib/pack.mjs" agents "$factory" "${pack:-pstack}" 2>&1 >"$composed") || { echo "onboard: $why; nothing done"; exit 2; }
 if [ -n "$own" ]; then
   [ -f "$own" ] || { echo "onboard: --own $own is not a file; nothing done"; exit 2; }
   own=$(cd "$(dirname "$own")" && pwd)/$(basename "$own")
-  why=$(node "$factory/bin/lib/own.mjs" check "$own" "$factory/kit/AGENTS.md") || { echo "onboard: $why; nothing done"; exit 2; }
+  why=$(node "$factory/bin/lib/own.mjs" check "$own" "$composed") || { echo "onboard: $why; nothing done"; exit 2; }
 fi
 if [ "$open_pr" -eq 1 ]; then
   login=$(gh api user --jq .login)
@@ -52,8 +61,8 @@ if [ "$open_pr" -eq 1 ]; then
     exit 2
   fi
   # The kit is laid from this clone's working tree, and its evidence names a commit: the two must be one, on main.
-  if git -C "$factory" status --porcelain --ignored --untracked-files=all -- kit | grep -v '\.DS_Store$' | grep -q .; then
-    echo "onboard: the factory's kit has changes no commit holds; commit and push them first; nothing done"
+  if git -C "$factory" status --porcelain --ignored --untracked-files=all -- kit packs | grep -v '\.DS_Store$' | grep -q .; then
+    echo "onboard: the factory's kit has changes no commit holds (kit/ and packs/); commit and push them first; nothing done"
     exit 2
   fi
   kit_commit=$(git -C "$factory" rev-parse HEAD)
@@ -65,6 +74,18 @@ fi
 
 echo "onboard: cloning $url into $dest"
 git clone --quiet "$url" "$dest"
+# The repository's own choice is the default; one it names that the factory lacks, or one that leaves no room for --own,
+# is refused like a --pack given, and the clone, which this run made, is removed.
+if [ -z "$pack" ]; then
+  pack=pstack
+  if [ -f "$dest/.gate/pack" ]; then
+    pack=$(head -n 1 "$dest/.gate/pack" | tr -d '[:space:]')
+    why=$(node "$factory/bin/lib/pack.mjs" agents "$factory" "$pack" 2>&1 >"$composed") || { rm -rf "$dest"; echo "onboard: .gate/pack: $why; the clone is removed and nothing else was done"; exit 2; }
+    if [ -n "$own" ]; then
+      why=$(node "$factory/bin/lib/own.mjs" check "$own" "$composed") || { rm -rf "$dest"; echo "onboard: $why; the clone is removed and nothing else was done"; exit 2; }
+    fi
+  fi
+fi
 # The kit replaces the repository's own instructions; without the parts of them the Human approved, they would be lost.
 # $dest did not exist before this run (checked above), so the clone is this run's own to remove.
 theirs=""
@@ -100,7 +121,7 @@ cd "$dest"
 base=$(git rev-parse HEAD)
 git switch --quiet -c factory/kit
 lists=$(mktemp -d)
-trap 'rm -rf "$lists"' EXIT
+trap 'rm -rf "$lists" "$composed"' EXIT
 (cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
 : >"$lists/kept"
 : >"$lists/replaced"
@@ -122,7 +143,9 @@ while IFS= read -r path; do
   cp -p "$factory/kit/$path" "$path"
   case "$path" in
     .github/CODEOWNERS) sed -i.bak "s/@OWNER/@$human/" "$path" && rm -f "$path.bak" ;;
+    .claude/settings.json) node "$factory/bin/lib/pack.mjs" settings "$factory" "$pack" >"$path" ;;
     AGENTS.md)
+      cat "$composed" >"$path"
       sed -i.bak "s/<repo>/$name/" "$path" && rm -f "$path.bak"
       [ -z "$own" ] || node "$factory/bin/lib/own.mjs" fill "$own" "$path"
       ;;
@@ -131,7 +154,9 @@ done <"$lists/kit"
 # A file the repository had exactly as the kit's was not replaced: git sees no change in it.
 while IFS= read -r path; do git diff --quiet HEAD -- "$path" || echo "$path"; done <"$lists/replaced" >"$lists/changed"
 mv "$lists/changed" "$lists/replaced"
-{ cat "$lists/kit"; echo .gate/kit-files; } | LC_ALL=C sort -u >.gate/kit-files
+# .gate/pack is the repository's choice and .gate/kit-files its inventory: both generated here, not files of the kit.
+printf '%s\n' "$pack" >.gate/pack
+{ cat "$lists/kit"; echo .gate/kit-files; echo .gate/pack; } | LC_ALL=C sort -u >.gate/kit-files
 scripts/setup
 git add -A
 # The kit lands only on a repository where the whole gate passes: a commit nobody verified is not a kit pull request.
@@ -168,7 +193,7 @@ grep -q '^\.githooks/' "$lists/replaced" && moved="${moved:+$moved }Lệnh của
 gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng: cổng, hook, luật nộp bài và mẫu" --body "$(cat <<EOF
 ## Tóm tắt cho người quyết định
 - Mục đích: đưa $name vào xưởng bằng bộ kit của tuannd9288/factory.
-- Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (có \`protected\`: các đường dẫn bậc 3), \`.githooks/\`, ba workflow (gate, gate-trusted, main), mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`.
+- Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (có \`protected\`: các đường dẫn bậc 3), \`.githooks/\`, ba workflow (gate, gate-trusted, main), mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`; gói cách làm việc \`$pack\` (ghi ở \`.gate/pack\`) ghép vào \`AGENTS.md\` và \`.claude/settings.json\`.
 - Bằng chứng: \`scripts/verify\` đầy đủ xanh trước khi commit; file của kit khớp commit \`${kit_commit:0:7}\` của factory (bên dưới).
 - Bậc: 3 (chạm \`.github/\`, \`scripts/\`, \`.gate/\`).
 - Hoàn tác: revert PR này.

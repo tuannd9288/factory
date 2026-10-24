@@ -6,8 +6,15 @@ cd "$(dirname "$0")/.." || exit 2
 start=$SECONDS
 failed=0
 
-n=$(wc -l <kit/AGENTS.md | tr -d ' ')
-[ "$n" -le 150 ] || { echo "verify: kit/AGENTS.md has $n lines; at most 150"; failed=1; }
+# The AGENTS.md a repository gets is the kit's with one pack's section (or none); each must leave room for its own parts.
+for pack in none $(ls packs); do
+  [ "$pack" = none ] || [ -d "packs/$pack" ] || continue
+  if ! n=$(node bin/lib/pack.mjs agents . "$pack" | wc -l | tr -d ' ') || [ "${n:-0}" -eq 0 ]; then
+    echo "verify: the AGENTS.md of pack $pack cannot be composed"; failed=1
+  elif [ "$n" -gt 150 ]; then
+    echo "verify: the AGENTS.md of pack $pack has $n lines; at most 150"; failed=1
+  fi
+done
 for f in kit/scripts/* kit/.githooks/* bin/onboard bin/onboard-owner bin/kit-evidence bin/factory-ledger bin/factory-queue scripts/verify; do
   [ -f "$f" ] || continue
   head -1 "$f" | grep -q bash || continue
@@ -36,7 +43,7 @@ trap 'rm -rf "$sandbox"' EXIT
 for v in $folders; do mkdir "$sandbox/$v"; done
 out=$(env -u NODE_TEST_CONTEXT FACTORY_STATE="$sandbox/FACTORY_STATE" AGENT_PROFILES="$sandbox/AGENT_PROFILES" \
   FACTORY_ROOT="$sandbox/FACTORY_ROOT" XDG_DATA_HOME="$sandbox/XDG_DATA_HOME" \
-  node --test --test-reporter=spec --test-concurrency=4 'test/*.test.mjs' 2>&1)
+  node --test --test-reporter=spec --test-concurrency=4 'test/*.test.mjs' 'packs/*/test/*.test.mjs' 2>&1)
 code=$?
 summary=$(printf '%s\n' "$out" | grep -E '^ℹ (tests|fail) [0-9]+$' | sed 's/^ℹ //' | tr '\n' ' ')
 tests=$(printf '%s\n' "$out" | sed -n 's/^ℹ tests \([0-9][0-9]*\)$/\1/p')

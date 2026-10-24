@@ -1520,7 +1520,9 @@ describe('onboard', () => {
     return { dir, repo: join(dir, 'root/app'), onboard, own, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
   };
   const OWN = '## Layout\n\n`src/` holds the app; `test/` its tests.\n\n## Facts the code cannot tell\n\n- 2026-10-01, the Human: the app ships on Fridays.\n';
-  const kitLines = () => readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8').split('\n').length - 1;
+  // The AGENTS.md a repository gets by default: the kit's with the pstack pack's section, before its own parts.
+  const composedAgents = () => run(factory, 'node', [join(factory, 'bin/lib/pack.mjs'), 'agents', factory, 'pstack']).out;
+  const kitLines = () => composedAgents().split('\n').length - 1;
 
   test("replaces the repository's own AGENTS.md, CLAUDE.md and hooks with the kit's, its approved parts in Layout and Facts", () => {
     const s = seeded({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n', '.githooks/commit-msg': '#!/bin/sh\nexit 0\n' }, { link: true });
@@ -1529,7 +1531,7 @@ describe('onboard', () => {
       assert.equal(out.code, 0, out.out);
       assert.match(out.out, /0 kept as they were, 4 replaced by the kit's/);
       const agents = readFileSync(join(s.repo, 'AGENTS.md'), 'utf8');
-      const kit = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8').replace('<repo>', 'app');
+      const kit = composedAgents().replace('<repo>', 'app');
       assert.equal(agents, `${kit.slice(0, kit.indexOf('## Layout'))}${OWN}`);
       assert.ok(!lstatSync(join(s.repo, 'CLAUDE.md')).isSymbolicLink(), 'CLAUDE.md is still a link');
       assert.equal(readFileSync(join(s.repo, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
@@ -1731,47 +1733,5 @@ describe('deny rules', () => {
       assert.ok(unreadable(path), `readable: ${path}`);
     // A deny covers Edit and Write too: one over all of ~/.agent-profiles/ would stop the agent's own auto memory.
     assert.ok(!unreadable('~/.agent-profiles/o/app/claude/projects/-x/memory/MEMORY.md'));
-  });
-});
-
-describe('the pstack pin', () => {
-  const settings = JSON.parse(readFileSync(join(factory, 'kit/.claude/settings.json'), 'utf8'));
-
-  test('pins pstack at one full commit, under a marketplace named for it, enabled for the project only', () => {
-    const names = Object.keys(settings.extraKnownMarketplaces ?? {});
-    assert.equal(names.length, 1, 'one pin');
-    const [name] = names;
-    const { source } = settings.extraKnownMarketplaces[name];
-    assert.equal(source.source, 'settings');
-    assert.equal(source.name, name);
-    assert.equal(source.plugins.length, 1);
-    const [plugin] = source.plugins;
-    assert.equal(plugin.name, 'pstack');
-    assert.equal(plugin.source.source, 'git-subdir');
-    assert.equal(plugin.source.path, 'pstack');
-    assert.match(plugin.source.url, /^(https:\/\/github\.com\/)?cursor\/plugins(\.git)?$/);
-    assert.match(plugin.source.sha, /^[0-9a-f]{40}$/);
-    assert.equal(plugin.source.ref, undefined, 'a branch or tag would move');
-    // One marketplace name per pin: two repositories pinning two commits never share one record in a profile.
-    assert.equal(name, `pstack-${plugin.source.sha.slice(0, 7)}`);
-    assert.deepEqual(settings.enabledPlugins, { [`pstack@${name}`]: true });
-  });
-
-  test('AGENTS.md installs the kit\'s pin at project scope, never at user scope', () => {
-    const [name] = Object.keys(settings.extraKnownMarketplaces ?? {});
-    const installs = [...readFileSync(join(factory, 'AGENTS.md'), 'utf8').matchAll(/`(claude plugin install [^`]*)`/g)].map((m) => m[1]);
-    assert.ok(installs.length, 'AGENTS.md gives no install command');
-    for (const line of installs) assert.equal(line, `claude plugin install pstack@${name} --scope project`);
-  });
-});
-
-describe('the kit\'s AGENTS.md', () => {
-  const text = () => readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
-
-  test('says where pstack yields: six rules, each with its reason and the pstack line it departs from', () => {
-    const section = /^## Where pstack yields\n([\s\S]*?)(?=^## )/m.exec(text())?.[1] ?? '';
-    const rules = section.split('\n- ').slice(1);
-    assert.equal(rules.length, 6, section);
-    for (const rule of rules) assert.match(rule, /\(pstack `[\w./-]+:\d+(-\d+)?`/, rule);
   });
 });

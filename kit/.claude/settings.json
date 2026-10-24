@@ -26,27 +26,5 @@
       "Read(~/.cursor/**)",
       "Read(~/.agent-profiles/verifier/**)"
     ]
-  },
-  "enabledPlugins": {
-    "pstack@pstack-f713f14": true
-  },
-  "extraKnownMarketplaces": {
-    "pstack-f713f14": {
-      "source": {
-        "source": "settings",
-        "name": "pstack-f713f14",
-        "plugins": [
-          {
-            "name": "pstack",
-            "source": {
-              "source": "git-subdir",
-              "url": "https://github.com/cursor/plugins.git",
-              "path": "pstack",
-              "sha": "f713f14203cd6420cec13cd7c55c32d598dbab68"
-            }
-          }
-        ]
-      }
-    }
   }
 }
