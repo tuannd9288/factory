@@ -490,3 +490,134 @@ describe('red-check: an export that may run code at load', () => {
   });
   test('an enum of constants is harmless', () => harmless('Unused', 'export enum Unused {\n  A,\n  B = 2,\n}'));
 });
+
+// Round 2 of the review of #17: regex literals (R), the knip config in package.json (P), JS and TS configs (N10), and a
+// spread in an initialiser (rule C).
+describe('red-check: regex literals do not desync the scanner', () => {
+  let r;
+  let bin;
+  let log;
+  let n = 0;
+  before(() => {
+    r = repoWithKit({ 'knip.json': '{}\n' });
+    bin = join(r.dir, 'fake-bin');
+    log = join(r.dir, 'npx.log');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npx'), '#!/bin/sh\necho ran >>"$FAKE_NPX_LOG"\ncat "$FAKE_KNIP_REPORT"\nexit 1\n');
+    chmodSync(join(bin, 'npx'), 0o755);
+  });
+  after(() => r.cleanup());
+
+  const run = (baseFiles, headFiles, knip) => {
+    n++;
+    git(r.repo, 'switch', '-q', '-C', `rx${n}`, 'origin/main');
+    commit(r.repo, baseFiles, `base ${n}`);
+    const base = git(r.repo, 'rev-parse', 'HEAD');
+    commit(r.repo, headFiles, `head ${n}`);
+    writeFileSync(join(r.dir, 'knip.json'), knip);
+    return script(r.repo, 'red-check', ['--base', base], { PATH: `${bin}:${process.env.PATH}`, FAKE_NPX_LOG: log, FAKE_KNIP_REPORT: join(r.dir, 'knip.json') });
+  };
+  const refuses = (out, reason = /check 1: /) => {
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, reason);
+    assert.doesNotMatch(out.out, /passed as a pure deletion/);
+  };
+
+  test('R1: /{/ and /}/ hide a top-level call and a used export between two removed lines', () => {
+    const base = "import { app, auth } from './server.js';\nexport function unusedRf() { return /{/; }\napp.use(auth);\nexport function usedRg() { return /}/; }\nexport const keep = 1;\n";
+    const files = { 'src/r.js': base, 'src/u.js': "import { usedRg } from './r.js';\nexport const v = usedRg;\n" };
+    refuses(run(files, { 'src/r.js': "import { app, auth } from './server.js';\nexport const keep = 1;\n" }, report(listsExports('src/r.js', 'unusedRf'))));
+  });
+  test('R2: a regex with a backtick does not open a template over a real one', () => {
+    const gen = (inner) => `export const unusedTc = 1;\nconst re = /\`/; export function banner() { return re && \`\n${inner}\n\`; }\n`;
+    refuses(run({ 'src/gen.js': gen('export const unusedTc = 1;') }, { 'src/gen.js': gen('const unusedTc = 1;') }, report(listsExports('src/gen.js', 'unusedTc'))));
+  });
+  test('R3: /x\\/*/ does not open a block comment over a top-level call', () => {
+    const base = "import { app, auth } from './server.js';\nexport function unusedRf() { return /x\\/*/; }\napp.use(auth);\n/* end */ export function unusedRg() { return /}/; }\nexport const keep = 1;\n";
+    refuses(run({ 'src/r.js': base }, { 'src/r.js': "import { app, auth } from './server.js';\nexport const keep = 1;\n" }, report(listsExports('src/r.js', 'unusedRf', 'unusedRg'))));
+  });
+  test('a regex that does not close on its line taints the rows after it, and the refusal names the line', () => {
+    const base = 'export function a() {\n  return /abc\n}\nexport const unusedZ = 1;\n';
+    refuses(run({ 'src/z.js': base }, { 'src/z.js': 'export function a() {\n  return /abc\n}\n' }, report(listsExports('src/z.js', 'unusedZ'))), /check 1: src\/z\.js .*: return \/abc/);
+  });
+  test('plain division inside a removed unused export still passes', () => {
+    const base = 'export const keep = 1;\nexport function unusedDiv(a, b, c) {\n  return a / b / c;\n}\nexport const unusedRatio = keep / 2 / 3;\n';
+    const out = run({ 'src/d.js': base }, { 'src/d.js': 'export const keep = 1;\n' }, report(listsExports('src/d.js', 'unusedDiv', 'unusedRatio')));
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, PASSED);
+  });
+  test('a regex literal inside a removed unused export still passes', () => {
+    const base = 'export const keep = 1;\nexport function unusedRe(s) {\n  return /[/{]\\/x/g.test(s);\n}\n';
+    const out = run({ 'src/d.js': base }, { 'src/d.js': 'export const keep = 1;\n' }, report(listsExports('src/d.js', 'unusedRe')));
+    assert.equal(out.code, 0, out.out);
+  });
+  test('a spread in an initialiser may call an iterator', () => {
+    const base = 'export const keep = 1;\nexport const unusedSp = [...registry];\n';
+    refuses(run({ 'src/s.js': base }, { 'src/s.js': 'export const keep = 1;\n' }, report(listsExports('src/s.js', 'unusedSp'))), /check 1: src\/s\.js removes unusedSp, whose initialisation may run code at load/);
+  });
+  test('a member read stays harmless', () => {
+    const base = 'export const keep = 1;\nexport const unusedM = Foo.BAR;\n';
+    const out = run({ 'src/s.js': base }, { 'src/s.js': 'export const keep = 1;\n' }, report(listsExports('src/s.js', 'unusedM')));
+    assert.equal(out.code, 0, out.out);
+  });
+});
+
+describe('red-check: only a JSON knip config gives a machine proof', () => {
+  const OLD = { 'src/old.js': 'export const old = 1;\n' };
+  let dir;
+  let bin;
+  let log;
+  before(() => {
+    dir = repoWithKit();
+    bin = join(dir.dir, 'fake-bin');
+    log = join(dir.dir, 'npx.log');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npx'), '#!/bin/sh\necho ran >>"$FAKE_NPX_LOG"\ncat "$FAKE_KNIP_REPORT"\nexit 1\n');
+    chmodSync(join(bin, 'npx'), 0o755);
+  });
+  after(() => dir.cleanup());
+
+  let n = 0;
+  const attempt = (config) => {
+    n++;
+    rmSync(log, { force: true });
+    git(dir.repo, 'switch', '-q', '-C', `cfg${n}`, 'origin/main');
+    commit(dir.repo, { ...OLD, ...config }, `base ${n}`);
+    const base = git(dir.repo, 'rev-parse', 'HEAD');
+    commit(dir.repo, { 'src/old.js': null }, `head ${n}`);
+    writeFileSync(join(dir.dir, 'knip.json'), report(listsFile('src/old.js')));
+    const out = script(dir.repo, 'red-check', ['--base', base], { PATH: `${bin}:${process.env.PATH}`, FAKE_NPX_LOG: log, FAKE_KNIP_REPORT: join(dir.dir, 'knip.json') });
+    return { ...out, ran: existsSync(log) };
+  };
+
+  test('a "knip" key in package.json is no usable config: it says to move it, and knip does not run', () => {
+    const out = attempt({ 'package.json': '{ "name": "app", "private": true, "type": "module", "knip": { "entry": [] } }\n' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /the knip config is in package\.json; move it to knip\.json for a machine proof/);
+    assert.match(out.out, HINT);
+    assert.equal(out.ran, false);
+  });
+  for (const file of ['knip.js', 'knip.ts', 'knip.config.js', 'knip.config.ts']) {
+    test(`${file} is no usable config: it says why, and knip does not run`, () => {
+      const out = attempt({ [file]: 'export default {};\n' });
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /a JS or TS knip config can import files the gate does not protect/);
+      assert.equal(out.ran, false);
+    });
+  }
+  for (const file of ['knip.json', 'knip.jsonc', '.knip.json', '.knip.jsonc']) {
+    test(`${file} is a usable config`, () => {
+      const out = attempt({ [file]: '{}\n' });
+      assert.equal(out.code, 0, out.out);
+      assert.equal(out.ran, true);
+    });
+  }
+  test('the protected list keeps all eight config names', () => {
+    const protectedText = readFileSync(join(factory, 'kit/.gate/protected'), 'utf8');
+    for (const file of ['knip.json', 'knip.jsonc', '.knip.json', '.knip.jsonc', 'knip.ts', 'knip.js', 'knip.config.ts', 'knip.config.js'])
+      assert.ok(protectedText.split('\n').includes(file), `${file} is not protected`);
+  });
+  test('kit/AGENTS.md says that knip plugins read other tools\' configs, protected only when listed', () => {
+    assert.match(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /next\.config/);
+  });
+});
