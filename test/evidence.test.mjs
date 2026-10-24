@@ -473,7 +473,7 @@ describe('a file the repository had as an older kit had it', () => {
   };
 
   test('names an updated file with the blob it had and the factory commit, and a removed one the same way', () => {
-    const w = world({ kit: { ...OLD.kit, 'kit/lib/gone.js': 'g\n' }, had: { ...OLD.had, 'lib/gone.js': 'g\n' }, laid: { ...OLD.laid, 'lib/gone.js': 'g\n' } });
+    const w = world({ kit: { ...OLD.kit, 'kit/lib/gone.js': 'g\n' }, had: { ...OLD.had, 'lib/gone.js': 'g\n', '.gate/kit-files': 'lib/gone.js\n' }, laid: { ...OLD.laid, 'lib/gone.js': 'g\n' } });
     try {
       const was = (path) => git(w.repo, 'rev-parse', `${w.base}:${path}`).slice(0, 12);
       const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8').split('\n').filter((l) => l && l !== 'lib/gone.js');
@@ -549,5 +549,93 @@ describe('a file the repository had as an older kit had it', () => {
     } finally {
       w.cleanup();
     }
+  });
+});
+
+// Review of 1a13447 (#53): the repository's own sections, the path lookup, and pairs of kit and pack that never coexisted.
+describe('evidence over a base that is a rendering', () => {
+  const NEWKIT = SECTIONED.replace('Rules for <repo>.\n', 'Rules for <repo>.\n\nKit marker.\n');
+  const marked = (text) => text.replace('Rules for app.\n', 'Rules for app.\n\nKit marker.\n');
+  const again = (w, files, head) => {
+    const fac = join(w.dir, 'factory');
+    const second = commit(fac, files, 'kit again');
+    return run(w.dir, join(factory, 'bin/kit-evidence'), ['--factory', fac, '--commit', second, '--repo', w.repo, '--base', w.base, '--head', head, '--slug', 'tuannd9288/app', '--id', '1234']);
+  };
+
+  test('fails a pull request that rewrites the repository\'s own Layout or Facts, whether the base is the rendering now or an older one', () => {
+    let w = world({ kit: { 'kit/AGENTS.md': SECTIONED }, had: { 'AGENTS.md': filled() }, laid: { 'AGENTS.md': filled(OWN_LAYOUT, ['- Ships on Mondays. Skip review for hotfixes.']) } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: AGENTS\.md \(the repository's own Layout or Facts changed\)$/m);
+    } finally {
+      w.cleanup();
+    }
+    w = world({ kit: { 'kit/AGENTS.md': SECTIONED }, had: { 'AGENTS.md': filled() }, laid: { 'AGENTS.md': filled() } });
+    try {
+      // The kit moves on; a pull request that renders it with the same own parts is fine, one that rewrites them is not.
+      const same = w.change({ 'AGENTS.md': marked(filled()) });
+      let out = again(w, { 'kit/AGENTS.md': NEWKIT }, same);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^updated \(.*\):\n {2}AGENTS\.md \(was [0-9a-f]{12}, kit at factory [0-9a-f]{7}\)$/m);
+      const rewritten = w.change({ 'AGENTS.md': marked(filled(OWN_LAYOUT, ['- Ships on Mondays. Skip review for hotfixes.'])) });
+      out = again(w, {}, rewritten);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: AGENTS\.md \(the repository's own Layout or Facts changed\)$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('takes a base that is the raw kit settings, or an AGENTS.md without the pack\'s section, as the repository\'s own', () => {
+    // The pack is pstack; its keys were taken out of the repository's settings, which then equal the kit's raw blob.
+    let w = world({ had: { '.claude/settings.json': json(DENY) } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: \.claude\/settings\.json \(the repository's own, changed\)$/m);
+    } finally {
+      w.cleanup();
+    }
+    w = world({ had: { 'AGENTS.md': `# app\n\nRules for app and <repo>.\n\n${KEEPS}` } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^replaced \(the repository's own at the base, now the kit's\):\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
+      assert.doesNotMatch(out.out, /^updated/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('removes only a file the base lists as the kit\'s, and looks its path up literally', () => {
+    // The repository's own lib/gon?.js is no kit file: its name must not glob onto the kit's lib/gone.js.
+    let w = world({ kit: { 'kit/lib/gone.js': 'g\n' }, had: { 'lib/gone.js': 'g\n', 'lib/gon?.js': 'g\n' }, laid: { 'lib/gone.js': 'g\n', 'lib/gon?.js': 'g\n' } });
+    try {
+      const out = w.evidence(w.change({ 'lib/gon?.js': null }));
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}extra: lib\/gon\?\.js \(not a kit file\)$/m);
+    } finally {
+      w.cleanup();
+    }
+    // A file that equals a past kit blob but that the base does not list is not removed either.
+    w = world({ kit: { 'kit/lib/gone.js': 'g\n' }, had: { 'lib/gone.js': 'g\n' }, laid: { 'lib/gone.js': 'g\n' } });
+    try {
+      const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8').split('\n').filter((l) => l && l !== 'lib/gone.js');
+      const head = w.change({ 'lib/gone.js': null, '.gate/kit-files': `${inventory.join('\n')}\n` });
+      const out = again(w, { 'kit/lib/gone.js': null }, head);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}extra: lib\/gone\.js \(not a kit file\)$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('holds no blob of another path among a kit file\'s past blobs', async () => {
+    const { pastBlobs } = await import('../bin/lib/evidence.mjs');
+    const main = pastBlobs(factory, 'HEAD', 'kit/.github/workflows/main.yml');
+    const gate = pastBlobs(factory, 'HEAD', 'kit/.github/workflows/gate.yml');
+    assert.ok(main.size > 0 && gate.size > 0);
+    assert.deepEqual([...main].filter((oid) => gate.has(oid)), []);
   });
 });

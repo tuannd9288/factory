@@ -316,3 +316,135 @@ describe('bin/kit-update', () => {
     }
   });
 });
+
+// Review of 1a13447 (#53).
+describe('bin/kit-update, after review', () => {
+  const touch = (w) => {
+    const file = join(w.fac, 'kit/scripts/lib/reviewer-prompt.md');
+    w.facCommit({ 'kit/scripts/lib/reviewer-prompt.md': `${readFileSync(file, 'utf8')}\nA new line.\n` });
+  };
+
+  test('goes back to a detached HEAD, and leaves no branch, when there is nothing to do', () => {
+    const w = world();
+    try {
+      git(w.repo, 'switch', '-q', '--detach', 'main');
+      const heads = () => git(w.repo, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads');
+      const before = { head: w.state().head, heads: heads() };
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /nothing to do/);
+      assert.deepEqual({ head: w.state().head, heads: heads() }, before);
+      assert.equal(git(w.repo, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD');
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('leaves the branch committed and nothing pushed when the kit evidence fails', () => {
+    const w = world();
+    try {
+      touch(w);
+      writeFileSync(join(w.fac, 'bin/kit-evidence'), '#!/usr/bin/env bash\necho "kit-evidence: FAIL"\nexit 1\n');
+      const before = w.state();
+      const out = w.update(['app']);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /kit evidence fails/);
+      assert.equal(git(w.repo, 'log', '-1', '--format=%s', `factory/kit-${w.sha7()}`), `Bring the kit up to factory main ${w.sha7()}`);
+      assert.equal(w.state().remote, before.remote);
+      assert.ok(!w.calls().some((c) => c.startsWith('pr create') || c.startsWith('label create')), w.calls().join('\n'));
+      assert.ok(!existsSync(w.body));
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('refuses when gh\'s active login does not authenticate', () => {
+    const w = world();
+    try {
+      // gh auth status exits 0 under --json whatever the token is; only the plain form tells.
+      mkdirSync(join(w.dir, 'bin2'));
+      writeFileSync(join(w.dir, 'bin2/gh'), `#!/bin/sh\ncase "$*" in\n  "auth status --active --hostname github.com") echo "token invalid" >&2; exit 1 ;;\nesac\nexec ${join(w.dir, 'bin/gh')} "$@"\n`);
+      chmodSync(join(w.dir, 'bin2/gh'), 0o755);
+      const before = w.state();
+      const out = w.update(['app'], { PATH: `${join(w.dir, 'bin2')}:${join(w.dir, 'bin')}:${process.env.PATH}` });
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /does not authenticate/);
+      assert.match(out.out, /nothing done/);
+      assert.deepEqual(w.state(), before);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('names a kept settings.json in the Vietnamese lines, words the removed heading for any past version, and fences evidence that holds a fence', () => {
+    const w = world({ kit: { 'kit/.gate/old-a.txt': 'old a\n' } });
+    try {
+      const settings = JSON.parse(readFileSync(join(w.repo, '.claude/settings.json'), 'utf8'));
+      settings.permissions.deny.push('Read(./secrets/**)');
+      writeFileSync(join(w.dir, 'own.md'), '## Layout\n\n```text\nsrc/\n```\n\n## Facts the code cannot tell\n\n- Ships on Fridays.\n');
+      assert.equal(run(w.repo, 'node', [join(w.fac, 'bin/lib/own.mjs'), 'fill', join(w.dir, 'own.md'), join(w.repo, 'AGENTS.md')]).code, 0);
+      w.repoCommit({ '.claude/settings.json': `${JSON.stringify(settings, null, 2)}\n` });
+      touch(w);
+      w.facCommit({ 'kit/.gate/old-a.txt': null });
+      const out = w.update(['app']);
+      assert.equal(out.code, 0, out.out);
+      const lines = readFileSync(w.body, 'utf8').split('\n');
+      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*(deny|giữ)/);
+      assert.equal(lines.filter((l) => /^```(?!`)/.test(l)).length, 0, 'a 3-backtick fence opens the evidence');
+      assert.equal(lines.filter((l) => l === '````text').length, 1);
+      assert.equal(lines.filter((l) => l === '````').length, 1);
+      assert.ok(lines.includes('Removed (the kit dropped them; the repository held a past kit version unchanged):'), lines.join('\n'));
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('says a merge by hand is needed when an older AGENTS.md has no Layout section', () => {
+    const real = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
+    const w = world({ kit: { 'kit/AGENTS.md': `${real.split('\n## Layout')[0]}\n` } });
+    try {
+      w.facCommit({ 'kit/AGENTS.md': real });
+      const before = w.state();
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /AGENTS\.md.*## Layout.*by hand|by hand.*AGENTS\.md/s);
+      assert.match(out.out, /nothing done/);
+      assert.deepEqual(w.state(), before);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('takes a settings.json equal to the raw kit blob, and an AGENTS.md without the pack\'s section, as the repository\'s own; reads inventory paths literally', () => {
+    const w = world();
+    try {
+      touch(w);
+      const section = readFileSync(join(w.fac, 'packs/pstack/AGENTS.md'), 'utf8').replace(/\n+$/, '');
+      const agents = readFileSync(join(w.repo, 'AGENTS.md'), 'utf8');
+      assert.ok(agents.includes(`${section}\n\n`));
+      w.repoCommit({ 'AGENTS.md': agents.replace(`${section}\n\n`, '') });
+      let before = w.state();
+      let out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /AGENTS\.md/);
+      assert.match(out.out, /nothing done/);
+      assert.deepEqual(w.state(), before);
+      git(w.repo, 'revert', '--no-edit', 'HEAD');
+      git(w.repo, 'push', '-q', 'origin', 'main');
+      // The pack's keys are out of settings.json, which then equals the kit's raw blob; and the repository lists a file
+      // by a name that globs onto a kit file.
+      const raw = readFileSync(join(w.fac, 'kit/.claude/settings.json'), 'utf8');
+      const config = readFileSync(join(w.repo, '.gate/config.sh'), 'utf8');
+      const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8');
+      w.repoCommit({ '.claude/settings.json': raw, '.gate/config?sh': config, '.gate/kit-files': `${inventory}.gate/config?sh\n` });
+      before = w.state();
+      out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 0, out.out);
+      assert.equal(w.show('HEAD', '.claude/settings.json'), raw.trim());
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n(?: {2}.*\n)* {2}\.claude\/settings\.json$/m);
+      assert.equal(w.show('HEAD', '.gate/config?sh'), config.trim());
+    } finally {
+      w.cleanup();
+    }
+  });
+});
