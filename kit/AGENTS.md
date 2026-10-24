@@ -31,14 +31,15 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    the base commit and requires them to fail there as tests, not as load errors. A new name in an existing
    module: import the module (`import * as m from`), not the missing name. A new file: load it inside the
    test with `await import()`. A change that only deletes unused code needs no test or `No-red:`: `red-check` passes
-   it when it adds no source line (dropping only a leading `export ` adds none), every line it removes from a file
-   that stays belongs to a whole export knip listed (a guard in a used function never does), that export runs no code
-   at load (a call, `new`, a static block, a decorator, a spread take `No-red:`), no tracked file at the head names a
-   removed path, file name or export, and knip (`npx --yes knip@6.42.1`, run at the base) listed each as unused. It
-   needs a JSON knip config (`knip.json`, `knip.jsonc`, dot forms); knip's plugins also read other tools' configs
-   (`next.config.*`), protected only if `.gate/protected` lists them. Otherwise `review` still reads the change, and
-   when no test can fail first (a pure refactor, a rename), put one line in the PR body:
-   `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
+   it when it adds no source line (a dropped leading `export ` adds none), each removed line belongs to a whole export
+   knip listed, that export runs no code at load (a call, `new`, a static block, a decorator, a spread take `No-red:`;
+   member reads like `Foo.BAR` are not caught: look for getters), no tracked file at the head names what went, and knip
+   (`npx --yes knip@6.42.1`, at the base) listed each. Only .js/.mjs/.cjs/.ts/.mts/.cts files with no backtick, no `/`
+   outside a comment or string and no `\`-continued string are read; `.jsx`, `.tsx` and the rest take `No-red:`. The knip
+   config must be JSON (`knip.json`, `knip.jsonc`, dot forms) of data keys: `preprocessor`, `reporter`, plugin sections and
+   unknown keys can load code the gate does not protect. Plugins read other tools' configs (`next.config.*`), protected
+   only if `.gate/protected` lists them. Otherwise `review` still reads the change; when no test can fail first, put one
+   line in the PR body: `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
 4. Once `scripts/verify` and `red-check` pass locally, open the pull request with the template, in Vietnamese,
    and run `scripts/live-verify <pr>`. On PASS or PASS+NOTES, and when its base is `main`, enable auto-merge
    (`gh pr merge --auto --merge`). FAIL: fix forward with a red test, then run it again. BLOCKED: stop, and put
@@ -52,9 +53,8 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    change. The reviewer may raise a change to tier 3 (label `raised`), never lower one. His approval holds while the
    patch is unchanged, as when the queue merges `main` in; a new patch needs a new one. A label never lowers a tier.
    A red `tier` that says `review is red; tier follows it` is not his wait: re-run the failed jobs, never `review` alone.
-6. A blocking finding is fixed by a new commit. A finding you dispute goes to the Human: label the pull request
-   `needs-human` and put your recommended answer in it. At the third head commit judged red, `rounds` labels the
-   pull request `needs-human`, which makes it tier 3: the Human decides.
+6. A blocking finding is fixed by a new commit. One you dispute goes to the Human: label the pull request
+   `needs-human` with your recommended answer. At the third head commit judged red, `rounds` does it: tier 3, the Human decides.
 
 ## The live verifier
 

@@ -18,7 +18,7 @@ const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 // The composed AGENTS.md and .claude/settings.json a repository on pstack gets, pinned by hash: the core plus packs/pstack
 // must build them byte for byte. settings.json is as of factory@8ca0e7a, before the split; AGENTS.md is repinned whenever
 // kit/AGENTS.md changes (last in #17).
-const TODAY_AGENTS = '490f1c71377e61f5b713e953cae9c56e85427a1d1c6ad7ce2230f93cba2d56e2';
+const TODAY_AGENTS = '09b56d57b4ec8134817c93b887c2b518be2be0f8f69a46f783276b591073f99d';
 const TODAY_SETTINGS = '4feee66d1a5a26fe2db0213f00c254e13e0382a9390d96f42f1b72653f53171f';
 // The sha256 of JSON.stringify(deny) for the kit's deny list at 8ca0e7a: the rules stay in the core, unchanged.
 const TODAY_DENY = '21e727537fca50e0e30cb774e2c072d42cf17b9755c291617875d02b585fae5e';

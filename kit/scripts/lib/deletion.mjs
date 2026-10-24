@@ -10,7 +10,7 @@
 // to run at all. Sources is the list of changed source paths (red-check sorts them with paths.mjs), one per line.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, extname } from 'node:path';
 
 const [mode, ...rest] = process.argv.slice(2);
 const opt = (name) => {
@@ -32,10 +32,46 @@ const short = (text) => (text.trim().length > 120 ? `${text.trim().slice(0, 117)
 const JSON_CONFIGS = ['knip.json', 'knip.jsonc', '.knip.json', '.knip.jsonc'];
 const CODE_CONFIGS = ['knip.ts', 'knip.js', 'knip.config.ts', 'knip.config.js'];
 
+// The keys of a knip 6.42.1 JSON config that are plain data: globs, lists of names, rules (schema.json, and
+// schema/configuration.js in the package). Every other key is refused: `preprocessor`, `preprocessorOptions`, `compilers`,
+// `asyncCompilers` and each reporter name a file or a function knip loads and runs, and so does a plugin's section, whose
+// `config` is a tool's config file that may be JS or TS. A key not listed here is refused too, whatever it is.
+const WORKSPACE_KEYS = new Set(['entry', 'project', 'paths', 'ignore', 'ignoreFiles', 'ignoreBinaries', 'ignoreGlobalBinaries', 'ignoreDependencies', 'ignoreMembers', 'ignoreUnresolved', 'ignoreExportsUsedInFile', 'ignoreIssues', 'includeEntryExports']);
+const DATA_KEYS = new Set([...WORKSPACE_KEYS, '$schema', 'rules', 'cycles', 'ignoreWorkspaces', 'tags', 'include', 'exclude', 'treatConfigHintsAsErrors', 'treatTagHintsAsErrors', 'workspaces']);
+const unknownKey = (value, allowed) => (value !== null && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).find((k) => !allowed.has(k)) : '(not an object)');
+const codeKey = (config) => unknownKey(config, DATA_KEYS) ?? (config.workspaces && Object.values(config.workspaces).map((w) => unknownKey(w, WORKSPACE_KEYS)).find(Boolean));
+
+// JSONC to a value: comments and trailing commas out, strings kept.
+function parseJsonc(text) {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (c === '/' && text[i + 1] === '/') while (i + 1 < text.length && text[i + 1] !== '\n') i++;
+    else if (c === '/' && text[i + 1] === '*') i = text.indexOf('*/', i + 2) < 0 ? text.length : text.indexOf('*/', i + 2) + 1;
+    else out += c;
+  }
+  return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1'));
+}
+
 if (mode === 'config') {
   const base = rest[0];
   const at = (path) => spawnSync('git', ['cat-file', '-e', `${base}:${path}`], { stdio: 'ignore' }).status === 0;
-  if (JSON_CONFIGS.some(at)) process.exit(0);
+  const present = JSON_CONFIGS.filter(at);
+  for (const file of present) {
+    let key;
+    try {
+      key = codeKey(parseJsonc(git('show', `${base}:${file}`)));
+    } catch {
+      fail([`${file} could not be read as JSON, so no deletion can be proved unused`]);
+    }
+    if (key) fail([`${file} holds the key "${key}": a knip config key can load code the gate does not protect`]);
+  }
+  if (present.length) process.exit(0);
   if (CODE_CONFIGS.some(at)) fail([`a JS or TS knip config can import files the gate does not protect, so no deletion can be proved unused`]);
   let inPackage = false;
   if (at('package.json')) {
@@ -63,109 +99,58 @@ function exported(line) {
   return m ? [m[1]] : null;
 }
 
-// Reads a whole file once, line by line, lexing strings, comments, template literals and regex literals. A `/` after an
-// identifier, number or `]` divides; after anything else, or a keyword such as `return`, it starts a regex; after `)` or
-// `}` it is read as a regex, and counts as division only when both readings agree on structure. A regex
-// that does not close on its line cannot be told from a division: that line and every later one is `taint`, and nothing
-// removed from a tainted row is trusted. Per line:
-//   start     { depth, block, template } at the start of the line: bracket depth, inside a block comment or a template
+const READABLE = /\.[cm]?[jt]s$/;
+
+// Reads a whole file once, line by line, lexing only `'` and `"` strings (with escapes) and `//` and `/* */` comments. A
+// file the gate cannot read this way gets no machine proof: it must be .js, .mjs, .cjs, .ts, .mts or .cts (never JSX), and
+// hold no backtick, no `/` in code (a regex cannot be told from a division) and no string continued by a trailing `\`.
+// Returns { rows, bad }: `bad` says why the file is unreadable, naming the first line that makes it so. Per line:
+//   start     { depth, block } at the start of the line: bracket depth, inside a block comment
 //   code      the line with comments cut out and strings kept; exec the same with the text of quoted strings emptied
 //   comma0    a comma at depth 0
 //   badTail   code after a statement ended on the line: after a `}` returns depth to 0 only `;` may follow, after a `;` at
-//             depth 0 nothing may, after a `)` or `]` only what continues a signature (`{`, `=>`, `:`) or `;` (a string or
-//             template counts as code)
-const KEYWORDS = new Set(['return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'yield', 'await', 'instanceof']);
-function scanFile(text) {
+//             depth 0 nothing may, after a `)` or `]` only what continues a signature (`{`, `=>`, `:`) or `;`
+function scanFile(path, text) {
+  const rows = [];
+  const ext = extname(path);
+  if (!READABLE.test(path)) return { rows, bad: `a ${ext || 'extensionless'} file may hold JSX or syntax the gate cannot read; only .js, .mjs, .cjs, .ts, .mts and .cts get a machine proof` };
   let depth = 0;
   let block = false;
-  let template = false;
-  let closer = false; // that token is `)` or `}`
-  let value = false; // the last significant token ends a value, so a following `/` divides; otherwise it starts a regex
-  let taint = null; // the first line with a regex that does not close on its line: from there on nothing is trusted
-  return text.split('\n').map((line, index) => {
-    const row = { start: { depth, block, template }, code: '', exec: '', comma0: false, badTail: false, taint: null };
+  for (const [index, line] of text.split('\n').entries()) {
+    const refuse = (why) => ({ rows, bad: `line ${index + 1} ${why}` });
+    if (line.includes('`')) return refuse('holds a backtick; the gate does not read template literals');
+    if (/\r(?!$)|[\u2028\u2029]/.test(line)) return refuse('holds a line terminator other than LF or CRLF, which ends a // comment for node but not for the gate');
+    const row = { start: { depth, block }, code: '', exec: '', comma0: false, badTail: false };
     const events = [];
     let bare = '';
     for (let i = 0; i < line.length; i++) {
       const c = line[i];
       if (block) {
         if (c === '*' && line[i + 1] === '/') (block = false), i++;
-      } else if (template) {
-        row.code += c;
-        row.exec += c;
-        if (c === '\\') (row.code += line[i + 1] ?? ''), (row.exec += line[i + 1] ?? ''), i++;
-        else if (c === '`') {
-          template = false;
-          if (row.start.template && depth === 0) events.push({ pos: bare.length, kind: 'brace' });
-        }
       } else if (c === '/' && line[i + 1] === '/') break;
       else if (c === '/' && line[i + 1] === '*') (block = true), i++;
-      else if (c === '/' && (!value || closer)) {
-        // A regex literal: up to the closing `/` outside a [...] class, honouring `\\`, then its flags. After `)` or `}` a
-        // `/` is ambiguous (`if (x) /re/.test(y)` against `(a + b) / 2`): read it as a regex, and if the line closes it
-        // around a quote, bracket or backtick the two readings disagree on structure, so the file is tainted from here.
-        let j = i + 1;
-        let inClass = false;
-        while (j < line.length && (inClass || line[j] !== '/')) {
-          if (line[j] === '\\') j++;
-          else if (line[j] === '[') inClass = true;
-          else if (line[j] === ']') inClass = false;
-          j++;
-        }
-        const closed = j < line.length;
-        if (!closed && !value) {
-          taint ??= { n: index + 1, text: line };
-          break;
-        }
-        if (value && (!closed || !/[`'"{}()[\]]/.test(line.slice(i + 1, j)))) {
-          row.code += c;
-          row.exec += c;
-          bare += c;
-          value = false;
-          closer = false;
-          continue;
-        }
-        if (value) {
-          taint ??= { n: index + 1, text: line };
-          break;
-        }
-        while (/[A-Za-z]/.test(line[j + 1] ?? '')) j++;
-        row.code += line.slice(i, j + 1);
-        row.exec += 'R';
-        bare += 'S';
-        i = j;
-        value = true;
-        closer = false;
-      } else if (c === '`') (template = true), (value = true), (closer = false), (row.code += c), (row.exec += c), (bare += 'S');
+      else if (c === '/') return refuse('holds a "/" outside a comment or string; the gate cannot tell a regex from a division');
       else if (c === '"' || c === "'") {
         let j = i + 1;
-        while (j < line.length && line[j] !== c) j += line[j] === '\\' ? 2 : 1;
+        while (j < line.length && line[j] !== c) {
+          if (line[j] === '\\' && (j + 1 >= line.length || (line[j + 1] === '\r' && j + 2 >= line.length))) return refuse('continues a string onto the next line with a trailing "\\"');
+          j += line[j] === '\\' ? 2 : 1;
+        }
         row.code += line.slice(i, j + 1);
         row.exec += c + c;
         bare += 'S';
         i = j;
-        value = true;
-        closer = false;
-      } else if (/\s/.test(c)) {
-        row.code += c;
-        row.exec += c;
-        bare += c;
       } else if (/[\w$]/.test(c)) {
         let j = i;
         while (j + 1 < line.length && /[\w$]/.test(line[j + 1])) j++;
-        const word = line.slice(i, j + 1);
-        row.code += word;
-        row.exec += word;
-        bare += word;
-        value = !KEYWORDS.has(word);
-        closer = false;
+        row.code += line.slice(i, j + 1);
+        row.exec += line.slice(i, j + 1);
+        bare += line.slice(i, j + 1);
         i = j;
       } else {
         row.code += c;
         row.exec += c;
         bare += c;
-        value = c === ')' || c === ']' || c === '}';
-        closer = c === ')' || c === '}';
         if ('{(['.includes(c)) depth++;
         else if ('})]'.includes(c)) {
           if (--depth === 0) events.push({ pos: bare.length, kind: c === '}' ? 'brace' : 'paren' });
@@ -175,18 +160,18 @@ function scanFile(text) {
     }
     const allowed = { brace: /^\s*;?\s*$/, semi: /^\s*$/, paren: /^\s*(?:;?\s*$|=>|:|\{)/ };
     row.badTail = events.some((e) => !allowed[e.kind].test(bare.slice(e.pos)));
-    row.end = { depth, block, template };
-    row.taint = taint;
-    return row;
-  });
+    row.end = { depth, block };
+    rows.push(row);
+  }
+  return { rows, bad: null };
 }
 
 // A comment above a removed declaration that changes how the code is read or built is not removable by a machine.
 const PRAGMA = /@jsx|@ts-|\/\/\/|eslint|prettier|@flow|istanbul|c8\b|webpack|@vite|__PURE__|@license|@preserve|@refresh|sourceMappingURL|v8 ignore|@vitest|@jest|@babel|#__/i;
 // What may follow `export ` when only that keyword goes: a declaration, never `{ a }`, `default` or `* from`.
 const DECLARATION = /^(?:declare\b|(?:async\s+)?function\b|(?:abstract\s+)?class\b|const\b|let\b|var\b|enum\b|interface\b|type\b)/;
-const startsClean = (row) => row.start.depth === 0 && !row.start.block && !row.start.template;
-const endsClean = (row) => row.end.depth === 0 && !row.end.block && !row.end.template;
+const startsClean = (row) => row.start.depth === 0 && !row.start.block;
+const endsClean = (row) => row.end.depth === 0 && !row.end.block;
 const declaresVariables = (code) => /^export\s+(?:declare\s+)?(?:const|let|var)\b/.test(code.trim());
 
 // Whether removing this export declaration (its rows joined, strings emptied) may drop code that runs when the module
@@ -259,7 +244,7 @@ function runsAtLoad(text) {
 
 // Why a run of removed base lines (consecutive, none paid for by a keyword-only edit) is not whole top-level declarations
 // of exports: null when it is, else the line to name and, for a default export, its reason. Names go to `names`.
-// The run starts and ends at depth 0 outside any comment or template. Each line that starts at depth 0 is blank, a comment,
+// The run starts and ends at depth 0 outside any comment. Each line that starts at depth 0 is blank, a comment,
 // or an export declaration with nothing after it; comments are allowed only directly above a declaration of the run, and
 // none holds a pragma. A run with no declaration is not one.
 function wholeExports(rows, texts, names) {
@@ -267,9 +252,8 @@ function wholeExports(rows, texts, names) {
   let pending = [];
   let declarations = 0;
   for (const [i, row] of rows.entries()) {
-    if (row.taint) return { line: texts[i], why: `removes a line after one the gate cannot read (line ${row.taint.n}: ${short(row.taint.text)})` };
     if (row.start.depth < 0) return { line: texts[i] };
-    if (row.start.depth > 0 || row.start.template) {
+    if (row.start.depth > 0) {
       if (row.badTail) return { line: texts[i] };
       continue;
     }
@@ -282,7 +266,7 @@ function wholeExports(rows, texts, names) {
     if (!declared?.length || (declaresVariables(code) && row.comma0)) return { line: texts[i] };
     if (declared.includes('default')) return { line: texts[i], why: 'removes a default export, which can never be proved unused' };
     let last = i;
-    while (last + 1 < rows.length && !(rows[last].end.depth === 0 && !rows[last].end.block && !rows[last].end.template)) last++;
+    while (last + 1 < rows.length && !endsClean(rows[last])) last++;
     if (runsAtLoad(rows.slice(i, last + 1).map((r) => r.exec.trim()).join('\n')))
       return { message: `removes ${declared[0]}, whose initialisation may run code at load; a pure deletion cannot prove it` };
     if (row.badTail) return { line: texts[i] };
@@ -331,6 +315,7 @@ if (mode === 'claims') {
   const files = [];
   const exports = [];
   const strays = [];
+  const unreadables = [];
   let anyExport = false;
   const claim = (file, name, keyword) => {
     const known = exports.find((e) => e.file === file && e.name === name);
@@ -345,12 +330,16 @@ if (mode === 'claims') {
       const first = git('show', `HEAD:${path}`).split('\n').find((l) => l.trim()) ?? '';
       added.push(`check 1: ${path} adds a source line: ${short(first)}`);
     } else if (kind === 'M') {
-      const rows = scanFile(git('show', `${base}:${path}`));
+      const { rows, bad: unreadable } = scanFile(path, git('show', `${base}:${path}`));
+      if (unreadable) {
+        unreadables.push(`check 1: ${path}: ${unreadable}`);
+        continue;
+      }
       const stray = (line, why = 'removes a line that is not part of an unused export') => strays.push(`check 1: ${path} ${why}: ${short(line)}`);
       for (const { start, minus, plus } of hunks(base, path)) {
         anyExport ||= minus.some((m) => /^export(?![\w$])/.test(m.trim()));
         // Each added line must be a removed line less its leading `export `, one to one and in order, and the rest
-        // must start with a declaration; that removed line must itself start at depth 0 outside a comment and a template.
+        // must start with a declaration; that removed line must itself start at depth 0 outside a comment.
         const paid = new Set();
         let cursor = 0;
         for (const p of plus) {
@@ -363,8 +352,7 @@ if (mode === 'claims') {
           paid.add(j);
           const names = exported(minus[j]);
           const row = rows[start - 1 + j];
-          if (row?.taint) stray(minus[j], `removes a line after one the gate cannot read (line ${row.taint.n}: ${short(row.taint.text)})`);
-          else if (!names?.length || !row || !startsClean(row) || (declaresVariables(row.code) && row.comma0)) stray(minus[j]);
+          if (!names?.length || !row || !startsClean(row) || (declaresVariables(row.code) && row.comma0)) stray(minus[j]);
           else for (const name of names) claim(path, name, true);
         }
         for (let j = 0; j < minus.length; j++) {
@@ -382,6 +370,7 @@ if (mode === 'claims') {
     }
   }
   if (added.length) fail(added);
+  if (unreadables.length) fail(unreadables);
   if (!files.length && !anyExport) fail(['check 3: the change removes no file and no export, so knip has nothing to have listed']);
   if (strays.length) fail(strays);
 
