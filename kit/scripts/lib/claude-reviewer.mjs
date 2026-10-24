@@ -156,7 +156,7 @@ const args = [
 function uncleanInit(init) {
   const listed = (v) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === 'string' || (x !== null && typeof x === 'object')));
   if (!Array.isArray(init.tools) || !listed(init.tools) || init.tools.some((t) => typeof t !== 'string') || !listed(init.mcp_servers) || !listed(init.plugins) || !listed(init.skills)) return 'malformed init';
-  const named = (list) => (list ?? []).map((x) => String(typeof x === 'string' ? x : (x.name ?? x.source ?? x.path ?? 'unnamed')));
+  const named = (list) => (list ?? []).map((x) => String(typeof x === 'string' ? x : (typeof x.name === 'string' ? x.name : 'unnamed')));
   const want = ['Glob', 'Grep', 'Read'];
   const tools = init.tools.filter((t) => t !== 'StructuredOutput').sort();
   const parts = [];
