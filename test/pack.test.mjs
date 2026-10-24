@@ -17,7 +17,8 @@ const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 
 // kit/AGENTS.md and kit/.claude/settings.json at factory@8ca0e7a, before the split: the core plus packs/pstack must
 // build them again byte for byte, or a repository on pstack would see a different kit.
-const TODAY_AGENTS = '33343fc1794b15d83fbf394a027ee104ce693ff9180edf026e549f2a56c15952';
+// TODAY_AGENTS is the hash of kit/AGENTS.md composed with pstack as of #17, which added the pure-deletion rule to it.
+const TODAY_AGENTS = '176d1512d7a97a0863329598132c0b408297c774ef0972d08de81c0481672657';
 const TODAY_SETTINGS = '4feee66d1a5a26fe2db0213f00c254e13e0382a9390d96f42f1b72653f53171f';
 // The sha256 of JSON.stringify(deny) for the kit's deny list at 8ca0e7a: the rules stay in the core, unchanged.
 const TODAY_DENY = '21e727537fca50e0e30cb774e2c072d42cf17b9755c291617875d02b585fae5e';
