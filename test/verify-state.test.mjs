@@ -64,3 +64,42 @@ test('scripts/verify passes a run in which no test wrote into a state folder', (
   assert.match(r.out, /^verify: 1 tests passed/m);
   assert.deepEqual(r.left, []);
 });
+
+// Found by #46's review: direnv, which bin/onboard runs, records each folder it allows under XDG_DATA_HOME
+// (~/.local/share/direnv/allow by default), and a test can also remove a folder it was given.
+const DIRENV = String.raw`import { test } from 'node:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+test('allows a folder the way direnv allow does', () => {
+  mkdirSync(join(process.env.XDG_DATA_HOME, 'direnv/allow'), { recursive: true });
+  writeFileSync(join(process.env.XDG_DATA_HOME, 'direnv/allow/0123abcd'), '/tmp/factory-own-x/root/app/.envrc\n');
+});
+`;
+const REMOVES = String.raw`import { test } from 'node:test';
+import { rmSync } from 'node:fs';
+test('removes the state folder it was given', () => {
+  rmSync(process.env.FACTORY_STATE, { recursive: true });
+});
+`;
+
+test('scripts/verify fails a run in which a test wrote into XDG_DATA_HOME, where direnv allow records a folder', () => {
+  const caller = mkdtempSync(join(tmpdir(), 'verify-xdg-'));
+  const was = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = caller;
+  try {
+    const r = verify({ 'test/direnv.test.mjs': DIRENV });
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /^ {2}XDG_DATA_HOME\/direnv\/allow\/0123abcd$/m);
+    assert.deepEqual(readdirSync(caller), [], 'the run wrote into the XDG_DATA_HOME its caller named');
+  } finally {
+    if (was === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = was;
+    rmSync(caller, { recursive: true, force: true });
+  }
+});
+
+test('scripts/verify fails a run in which a test removed a state folder it was given', () => {
+  const r = verify({ 'test/removes.test.mjs': REMOVES });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /^verify: a test removed or replaced the FACTORY_STATE folder it was given$/m);
+});
