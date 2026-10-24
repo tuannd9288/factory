@@ -1019,3 +1019,18 @@ test("#30: a session with only the repository's own and the built-in parts passe
   const item = await accountItem(withInit(prStream(), init), withInit(stream(), init));
   assert.equal(item.ok, true, item.evidence);
 });
+
+// Found by #47's review: the item reads init events, so a session without one is not a pass, and under --no-pr only
+// the first session is judged.
+test('#30: a session with no init event fails the claude.ai item, for nothing was there to judge', async () => {
+  const item = await accountItem(prStream().split('\n').slice(1).join('\n'));
+  assert.equal(item.ok, false, item.evidence);
+  assert.match(item.evidence, /^no init event in the pull request session/);
+});
+
+test("#30: under --no-pr the claude.ai item's evidence names only the first session", async () => {
+  const { parseSession, judge } = await probeModule();
+  const item = by(judge({ session: parseSession(stream()), skipPr: true, ...base() }), ACCOUNT);
+  assert.equal(item.ok, true, item.evidence);
+  assert.match(item.evidence, /in the first session's init event$/);
+});
