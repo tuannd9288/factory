@@ -58,61 +58,182 @@ function exported(line) {
   return m ? [m[1]] : null;
 }
 
-// Walks removed lines with a rough strip of strings and comments (regex literals are not understood, so a surprise
-// shows as an unbalanced hunk and fails closed). Returns each line's depth at its start, whether it began inside a
-// block comment or template literal, and the stripped text; plus the final depth, the lowest depth, and the end state.
-function scan(lines) {
+// Reads a whole file once, line by line, with a rough strip of strings, comments and template literals (regex literals
+// are not understood; a surprise shows as a state that fails a check, never one that passes it). Per line:
+//   start     { depth, block, template } at the start of the line: bracket depth, inside a block comment or a template
+//   code      the line with comments cut out and strings kept; exec the same with the text of quoted strings emptied
+//   comma0    a comma at depth 0
+//   badTail   code after a statement ended on the line: after a `}` returns depth to 0 only `;` may follow, after a `;` at
+//             depth 0 nothing may, after a `)` or `]` only what continues a signature (`{`, `=>`, `:`) or `;` (a string or
+//             template counts as code)
+function scanFile(text) {
   let depth = 0;
-  let low = 0;
   let block = false;
   let template = false;
-  const rows = lines.map((line) => {
-    const row = { start: depth, inBlock: block, inTemplate: template, text: '' };
+  return text.split('\n').map((line) => {
+    const row = { start: { depth, block, template }, code: '', exec: '', comma0: false, badTail: false };
+    const events = [];
+    let bare = '';
     for (let i = 0; i < line.length; i++) {
       const c = line[i];
       if (block) {
         if (c === '*' && line[i + 1] === '/') (block = false), i++;
       } else if (template) {
-        if (c === '\\') i++;
-        else if (c === '`') template = false;
+        row.code += c;
+        row.exec += c;
+        if (c === '\\') (row.code += line[i + 1] ?? ''), (row.exec += line[i + 1] ?? ''), i++;
+        else if (c === '`') {
+          template = false;
+          if (row.start.template && depth === 0) events.push({ pos: bare.length, kind: 'brace' });
+        }
       } else if (c === '/' && line[i + 1] === '/') break;
       else if (c === '/' && line[i + 1] === '*') (block = true), i++;
-      else if (c === '`') template = true;
+      else if (c === '`') (template = true), (row.code += c), (row.exec += c), (bare += 'S');
       else if (c === '"' || c === "'") {
-        for (i++; i < line.length && line[i] !== c; i++) if (line[i] === '\\') i++;
+        let j = i + 1;
+        while (j < line.length && line[j] !== c) j += line[j] === '\\' ? 2 : 1;
+        row.code += line.slice(i, j + 1);
+        row.exec += c + c;
+        bare += 'S';
+        i = j;
       } else {
-        row.text += c;
+        row.code += c;
+        row.exec += c;
+        bare += c;
         if ('{(['.includes(c)) depth++;
-        else if ('})]'.includes(c)) low = Math.min(low, --depth);
+        else if ('})]'.includes(c)) {
+          if (--depth === 0) events.push({ pos: bare.length, kind: c === '}' ? 'brace' : 'paren' });
+        } else if (c === ';' && depth === 0) events.push({ pos: bare.length, kind: 'semi' });
+        else if (c === ',' && depth === 0) row.comma0 = true;
       }
     }
+    const allowed = { brace: /^\s*;?\s*$/, semi: /^\s*$/, paren: /^\s*(?:;?\s*$|=>|:|\{)/ };
+    row.badTail = events.some((e) => !allowed[e.kind].test(bare.slice(e.pos)));
+    row.end = { depth, block, template };
     return row;
   });
-  return { rows, depth, low, open: block || template };
 }
 
-// Why a block of removed lines (those no keyword-only edit paid for) is not whole top-level declarations of exports:
-// null when it is, else the line to name. Every line at depth 0 must be an export declaration, a comment or a blank
-// line; a line inside a declaration may be anything. Names of the exports declared go to `names`.
-function wholeExports(lines, names) {
-  const { rows, depth, low, open } = scan(lines);
-  if (depth !== 0 || low < 0 || open) return lines[0];
+// A comment above a removed declaration that changes how the code is read or built is not removable by a machine.
+const PRAGMA = /@jsx|@ts-|\/\/\/|eslint|prettier|@flow|istanbul|c8\b|webpack|@vite|__PURE__|@license|@preserve|@refresh|sourceMappingURL|v8 ignore|@vitest|@jest|@babel|#__/i;
+// What may follow `export ` when only that keyword goes: a declaration, never `{ a }`, `default` or `* from`.
+const DECLARATION = /^(?:declare\b|(?:async\s+)?function\b|(?:abstract\s+)?class\b|const\b|let\b|var\b|enum\b|interface\b|type\b)/;
+const startsClean = (row) => row.start.depth === 0 && !row.start.block && !row.start.template;
+const endsClean = (row) => row.end.depth === 0 && !row.end.block && !row.end.template;
+const declaresVariables = (code) => /^export\s+(?:declare\s+)?(?:const|let|var)\b/.test(code.trim());
+
+// Whether removing this export declaration (its rows joined, strings emptied) may drop code that runs when the module
+// loads: true unless it is a function, a type, an interface, a declare form, a name list, a variable initialised by an
+// arrow, a function or a literal, a class with no call in its head, no decorator, no static member and no computed key,
+// or an enum with no call. Fails closed: whatever is not recognised may run code.
+function matching(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if ('{(['.includes(text[i])) depth++;
+    else if ('})]'.includes(text[i]) && --depth === 0) return i;
+  }
+  return -1;
+}
+function isFunctionInit(init) {
+  if (/^(?:async\s+)?function\b/.test(init)) return true;
+  const rest = init.replace(/^async\s+(?=[(\w$])/, '');
+  if (rest[0] === '(') {
+    const close = matching(rest, 0);
+    return close > 0 && /^\s*(?::[^=]*)?=>/.test(rest.slice(close + 1));
+  }
+  return /^[A-Za-z_$][\w$]*\s*=>/.test(rest);
+}
+function variableRuns(rest) {
+  const name = rest.match(/^(?:const|let|var)\s+[A-Za-z_$][\w$]*/);
+  if (!name) return true;
+  let depth = 0;
+  let eq = -1;
+  for (let i = name[0].length; i < rest.length && eq < 0; i++) {
+    const c = rest[i];
+    if ('{(['.includes(c)) depth++;
+    else if ('})]'.includes(c)) depth--;
+    else if (c === '=' && depth === 0 && rest[i + 1] !== '>' && rest[i + 1] !== '=' && !'=!<>'.includes(rest[i - 1])) eq = i;
+  }
+  if (eq < 0) return false;
+  const init = rest.slice(eq + 1).replace(/;\s*$/, '').trim();
+  if (isFunctionInit(init)) return false;
+  if (/\(|\bnew\b|\$\{|\bawait\b|\byield\b|\bimport\b|\+\+|--|\bdelete\b|<[A-Za-z>/]/.test(init) || /[\w$)\]]\s*`/.test(init)) return true;
+  return init.replace(/=>|===|!==|==|!=|<=|>=/g, '').includes('=');
+}
+function classRuns(text) {
+  const open = text.indexOf('{');
+  if (open < 0 || text.slice(0, open).includes('(') || text.includes('@')) return true;
+  let depth = 0;
+  let own = '';
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if ('{(['.includes(c)) {
+      if (depth === 1 && c === '[') return true;
+      depth++;
+      own += ' ';
+    } else if ('})]'.includes(c)) {
+      depth--;
+      own += ' ';
+    } else if (depth === 1) own += c;
+  }
+  return /\bstatic\b/.test(own);
+}
+function runsAtLoad(text) {
+  const t = text.trim();
+  if (/^export\s+declare\b/.test(t)) return false;
+  const rest = t.replace(/^export\s+/, '');
+  if (/^(?:async\s+)?function\b/.test(rest) || /^(?:type|interface)\b/.test(rest)) return false;
+  if (/^(?:const\s+)?enum\b/.test(rest)) return /\(|\bnew\b|\$\{/.test(rest.slice(Math.max(0, rest.indexOf('{'))));
+  if (/^(?:const|let|var)\b/.test(rest)) return variableRuns(rest);
+  if (/^(?:abstract\s+)?class\b/.test(rest)) return classRuns(rest);
+  if (rest.startsWith('{')) return /\bfrom\b/.test(rest);
+  return true;
+}
+
+// Why a run of removed base lines (consecutive, none paid for by a keyword-only edit) is not whole top-level declarations
+// of exports: null when it is, else the line to name and, for a default export, its reason. Names go to `names`.
+// The run starts and ends at depth 0 outside any comment or template. Each line that starts at depth 0 is blank, a comment,
+// or an export declaration with nothing after it; comments are allowed only directly above a declaration of the run, and
+// none holds a pragma. A run with no declaration is not one.
+function wholeExports(rows, texts, names) {
+  if (!startsClean(rows[0]) || !endsClean(rows.at(-1))) return { line: texts[0] };
+  let pending = [];
+  let declarations = 0;
   for (const [i, row] of rows.entries()) {
-    const line = lines[i];
-    const t = line.trim();
-    if (row.start > 0 || row.inBlock || row.inTemplate || !t || t.startsWith('//') || t.startsWith('/*')) continue;
-    const declared = exported(line);
-    if (!declared?.length) return line;
+    if (row.start.depth < 0) return { line: texts[i] };
+    if (row.start.depth > 0 || row.start.template) {
+      if (row.badTail) return { line: texts[i] };
+      continue;
+    }
+    const code = row.code.trim();
+    if (!code) {
+      if (texts[i].trim()) pending.push(texts[i]);
+      continue;
+    }
+    const declared = /^export(?![\w$])/.test(code) ? exported(code) : null;
+    if (!declared?.length || (declaresVariables(code) && row.comma0)) return { line: texts[i] };
+    if (declared.includes('default')) return { line: texts[i], why: 'removes a default export, which can never be proved unused' };
+    let last = i;
+    while (last + 1 < rows.length && !(rows[last].end.depth === 0 && !rows[last].end.block && !rows[last].end.template)) last++;
+    if (runsAtLoad(rows.slice(i, last + 1).map((r) => r.exec.trim()).join('\n')))
+      return { message: `removes ${declared[0]}, whose initialisation may run code at load; a pure deletion cannot prove it` };
+    if (row.badTail) return { line: texts[i] };
+    const pragma = pending.find((c) => PRAGMA.test(c));
+    if (pragma) return { line: pragma };
+    pending = [];
+    declarations++;
     names.push(...declared);
   }
-  return null;
+  if (pending.length) return { line: pending[0] };
+  return declarations ? null : { line: texts[0] };
 }
 
-// The removed and added lines of each hunk of one modified file.
+// The hunks of one modified file, with the base line each starts at.
 function hunks(base, path) {
   const out = [];
   for (const line of git('diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '-U0', base, 'HEAD', '--', path).split('\n')) {
-    if (line.startsWith('@@')) out.push({ minus: [], plus: [] });
+    const h = line.match(/^@@ -(\d+)(?:,(\d+))? /);
+    if (h) out.push({ start: Number(h[1]), minus: [], plus: [] });
     else if (out.length && line.startsWith('-')) out.at(-1).minus.push(line.slice(1));
     else if (out.length && line.startsWith('+')) out.at(-1).plus.push(line.slice(1));
   }
@@ -143,6 +264,11 @@ if (mode === 'claims') {
   const exports = [];
   const strays = [];
   let anyExport = false;
+  const claim = (file, name, keyword) => {
+    const known = exports.find((e) => e.file === file && e.name === name);
+    if (known) known.keyword &&= keyword;
+    else exports.push({ file, name, keyword });
+  };
   for (const path of paths) {
     const kind = status.get(path);
     if (kind === 'D') {
@@ -151,29 +277,38 @@ if (mode === 'claims') {
       const first = git('show', `HEAD:${path}`).split('\n').find((l) => l.trim()) ?? '';
       added.push(`check 1: ${path} adds a source line: ${short(first)}`);
     } else if (kind === 'M') {
-      for (const { minus, plus } of hunks(base, path)) {
-        // An added line is allowed when it is a removed line less its leading `export `; each removed line pays for one.
-        const unpaid = [...minus];
-        const kept = [];
-        for (const p of plus) {
-          const i = unpaid.indexOf(`export ${p}`);
-          if (i >= 0) {
-            const names = exported(unpaid[i]);
-            if (names?.length) kept.push(...names);
-            else strays.push(`check 1: ${path} removes a line that is not part of an unused export: ${short(unpaid[i])}`);
-            unpaid.splice(i, 1);
-          } else added.push(`check 1: ${path} adds a source line: ${short(p)}`);
-        }
+      const rows = scanFile(git('show', `${base}:${path}`));
+      const stray = (line, why = 'removes a line that is not part of an unused export') => strays.push(`check 1: ${path} ${why}: ${short(line)}`);
+      for (const { start, minus, plus } of hunks(base, path)) {
         anyExport ||= minus.some((m) => /^export(?![\w$])/.test(m.trim()));
-        const names = [];
-        const stray = unpaid.length ? wholeExports(unpaid, names) : null;
-        if (stray !== null) strays.push(`check 1: ${path} removes a line that is not part of an unused export: ${short(stray)}`);
-        for (const [list, keyword] of [[kept, true], [names, false]])
-          for (const name of list) {
-            const known = exports.find((e) => e.file === path && e.name === name);
-            if (known) known.keyword &&= keyword;
-            else exports.push({ file: path, name, keyword });
+        // Each added line must be a removed line less its leading `export `, one to one and in order, and the rest
+        // must start with a declaration; that removed line must itself start at depth 0 outside a comment and a template.
+        const paid = new Set();
+        let cursor = 0;
+        for (const p of plus) {
+          const j = DECLARATION.test(p) ? minus.indexOf(`export ${p}`, cursor) : -1;
+          if (j < 0) {
+            added.push(`check 1: ${path} adds a source line: ${short(p)}`);
+            continue;
           }
+          cursor = j + 1;
+          paid.add(j);
+          const names = exported(minus[j]);
+          const row = rows[start - 1 + j];
+          if (!names?.length || !row || !startsClean(row) || (declaresVariables(row.code) && row.comma0)) stray(minus[j]);
+          else for (const name of names) claim(path, name, true);
+        }
+        for (let j = 0; j < minus.length; j++) {
+          if (paid.has(j)) continue;
+          let k = j;
+          while (k + 1 < minus.length && !paid.has(k + 1)) k++;
+          const names = [];
+          const bad = wholeExports(rows.slice(start - 1 + j, start + k), minus.slice(j, k + 1), names);
+          if (bad?.message) strays.push(`check 1: ${path} ${bad.message}`);
+          else if (bad) stray(bad.line, bad.why);
+          else for (const name of names) claim(path, name, false);
+          j = k;
+        }
       }
     }
   }
@@ -228,7 +363,7 @@ if (mode === 'listed') {
   for (const path of claims.files)
     if (!issues.some((i) => i?.file === path && items(i, 'files').some((f) => f?.name === path))) missing.push(`check 3: knip did not list ${path} as unused at the base`);
   for (const { file, name } of claims.exports)
-    if (!issues.some((i) => i?.file === file && ['exports', 'types'].some((key) => items(i, key).some((e) => e?.name === name))))
+    if (!issues.some((i) => i?.file === file && ['exports', 'types'].some((key) => items(i, key).some((e) => e?.name === name && !e.namespace))))
       missing.push(`check 3: knip did not list ${name} of ${file} as unused at the base`);
   if (missing.length) fail(missing);
   process.exit(0);

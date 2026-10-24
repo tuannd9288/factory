@@ -32,7 +32,8 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    module: import the module (`import * as m from`), not the missing name. A new file: load it inside the
    test with `await import()`. A change that only deletes unused code needs no test or `No-red:`: `red-check`
    passes it when it adds no source line (dropping only a leading `export ` adds none), every line it removes from a
-   file that stays belongs to a whole export knip listed (a guard inside a used function never does), no tracked file at the head
+   file that stays belongs to a whole export knip listed (a guard inside a used function never does), the export's
+   initialisation runs no code at load (a call, `new`, a static block, a decorator: those take `No-red:`), no tracked file at the head
    names a removed path, file name or exported name, and knip (`npx --yes knip@6.42.1`, the repository's own config,
    run at the base) listed each as unused. With no knip config, or on any miss, the rule below applies; `review`
    still reads the change. When no test can fail first (a pure refactor, a rename), put one line in the PR

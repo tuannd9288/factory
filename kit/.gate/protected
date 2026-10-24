@@ -46,5 +46,14 @@ Jenkinsfile
 .husky/
 .pre-commit-config.y*ml
 lefthook.y*ml
+knip.json
+knip.jsonc
+.knip.json
+.knip.jsonc
+knip.ts
+knip.js
+knip.config.ts
+knip.config.js
 key package.json "(pre|post)?(test|lint|check|typecheck|verify)([:-][\w:-]*)?"\s*:
 key pyproject.toml ^\s*\[tool\.(pytest|mypy|ruff|coverage|pyright)|^\s*(addopts|testpaths|python_files|omit|strict|deselect|ignore_missing_imports)\s*=
+key package.json "knip"\s*:

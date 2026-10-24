@@ -15,10 +15,10 @@ const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 const packs = () => readdirSync(join(factory, 'packs')).filter((n) => lstatSync(join(factory, 'packs', n)).isDirectory()).sort();
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 
-// kit/AGENTS.md and kit/.claude/settings.json at factory@8ca0e7a, before the split: the core plus packs/pstack must
-// build them again byte for byte, or a repository on pstack would see a different kit.
-// TODAY_AGENTS is the hash of kit/AGENTS.md composed with pstack as of #17, which added the pure-deletion rule to it.
-const TODAY_AGENTS = 'fa66b932cb46e60825ca9d0899d4bedabe705dcd6f3e363f3b4ddb7dee43b981';
+// The composed AGENTS.md and .claude/settings.json a repository on pstack gets, pinned by hash: the core plus packs/pstack
+// must build them byte for byte. settings.json is as of factory@8ca0e7a, before the split; AGENTS.md is repinned whenever
+// kit/AGENTS.md changes (last in #17).
+const TODAY_AGENTS = 'da37466c9e058bfc74bbb9022ef3e5e4e5190585022188d3ac29859255ca474c';
 const TODAY_SETTINGS = '4feee66d1a5a26fe2db0213f00c254e13e0382a9390d96f42f1b72653f53171f';
 // The sha256 of JSON.stringify(deny) for the kit's deny list at 8ca0e7a: the rules stay in the core, unchanged.
 const TODAY_DENY = '21e727537fca50e0e30cb774e2c072d42cf17b9755c291617875d02b585fae5e';

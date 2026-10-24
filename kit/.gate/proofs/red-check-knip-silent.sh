@@ -5,7 +5,7 @@
 # The paths are built from parts: a tracked file that names a path is what check 2 looks for, and this file is tracked.
 d=gate-proof n=used
 mkdir -p $d .gate-proof-bin
-printf '#!/bin/sh\ncat <<'"'"'JSON'"'"'\n%s\nJSON\nexit 1\n' "$(printf '{"issues":[]}' "$d" "$n")" >.gate-proof-bin/npx
+printf '#!/bin/sh\ncat <<'"'"'JSON'"'"'\n%s\nJSON\nexit 1\n' '{"issues":[]}' >.gate-proof-bin/npx
 chmod +x .gate-proof-bin/npx
 echo '{}' >knip.json
 printf 'export const used = 1;\n' >$d/$n.js

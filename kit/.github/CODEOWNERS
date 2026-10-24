@@ -41,3 +41,11 @@ Jenkinsfile              @OWNER
 .husky/                  @OWNER
 .pre-commit-config.y*ml  @OWNER
 lefthook.y*ml            @OWNER
+knip.json                @OWNER
+knip.jsonc               @OWNER
+.knip.json               @OWNER
+.knip.jsonc              @OWNER
+knip.ts                  @OWNER
+knip.js                  @OWNER
+knip.config.ts           @OWNER
+knip.config.js           @OWNER
