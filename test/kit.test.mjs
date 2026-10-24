@@ -573,6 +573,17 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /the pull request's head is 0{40}/);
   });
+  test('a deletion that red-check passed on machine proof goes to review, which needs no No-red acceptance', () => {
+    // No No-red line: the proof replaced the step where the reviewer accepts one, so the stub has nothing to judge.
+    const out = job('review', { 'src/math.js': null }, { GATE_REVIEWER: 'stub' });
+    assert.equal(out.code, 0, out.out);
+    assert.doesNotMatch(out.out, /No-red/);
+  });
+  test('review still blocks a finding on a deletion', () => {
+    const out = job('review', { 'src/math.js': null, 'src/note.js': '// GATE-STUB-FINDING a deleted guard\n' }, { GATE_REVIEWER: 'stub' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /stub-1: .*GATE-STUB-FINDING a deleted guard/);
+  });
   test('a No-red line needs the reviewer\'s explicit acceptance, which the stub never gives', () => {
     write(r.dir, { 'body.txt': 'Tóm tắt\nNo-red: renames a local variable, nothing to fail\n' });
     const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'stub', GATE_BODY_FILE: join(r.dir, 'body.txt') });
