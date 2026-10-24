@@ -9,10 +9,11 @@
 //           context that is not the pinned one, a turn bound, no result); stdout starts with the review-result notice `unavailable: <class>`
 //   exit 4  the output held one of the two tokens; nothing of it is kept
 //   exit 2  usage
+// The init event is judged when it arrives: a context that is not the sealed one stops claude before it makes a request.
 // What it reaches: its environment is an allow-list (no GH_TOKEN, nothing of the runner), its HOME is empty, its cwd is
 // an empty folder, and the candidate's files, extracted from git with no link in them and its instruction files renamed
 // to `*.candidate`, are the one added directory. Claude Code's own flags and the init event it prints seal the rest.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -123,6 +124,9 @@ const settings = {
   disableClaudeAiConnectors: true,
   syncClaudeAiSkills: false,
   syncClaudeAiPlugins: false,
+  // Claude Code 2.1.308 lists three built-in plugins in every init, whatever the flags; with these set to false init lists none,
+  // and the check below stays strict: any plugin that is still there fails it.
+  enabledPlugins: { 'cc-plugin-agents-md@builtin': false, 'cc-plugin-telemetry@builtin': false, 'cc-plugin-plugin-authoring@builtin': false },
   // A deny rule wins over every allowance, so none may cover where the candidate is extracted: RUNNER_TEMP is under /home on
   // a hosted runner and /Users or /var on a Mac. --restricted already confines the file tools to the empty cwd and the extract.
   permissions: { allow: ['Read', 'Grep', 'Glob'], deny: ['Read(//proc/**)', 'Read(//etc/**)', 'Read(//root/**)'] },
@@ -146,48 +150,113 @@ const args = [
   '--system-prompt', readFileSync(join(here, 'reviewer-prompt.md'), 'utf8'),
 ];
 
-const lines = (text) => String(text ?? '').split('\n').filter((l) => l.startsWith('{')).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+/** What is wrong with an init event, by name only (tool names, MCP server names, plugin names, anthropic-skills: names), or ''.
+ * --json-schema adds the StructuredOutput tool to the session (Claude Code 2.1.308's bundle); any other extra tool fails.
+ * A field that is not a list, or a list holding a null or a scalar of the wrong kind, is a malformed init, and unclean. */
+function uncleanInit(init) {
+  const listed = (v) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === 'string' || (x !== null && typeof x === 'object')));
+  if (!Array.isArray(init.tools) || !listed(init.tools) || init.tools.some((t) => typeof t !== 'string') || !listed(init.mcp_servers) || !listed(init.plugins) || !listed(init.skills)) return 'malformed init';
+  const named = (list) => (list ?? []).map((x) => String(typeof x === 'string' ? x : (typeof x.name === 'string' ? x.name : 'unnamed')));
+  const want = ['Glob', 'Grep', 'Read'];
+  const tools = init.tools.filter((t) => t !== 'StructuredOutput').sort();
+  const parts = [];
+  if (tools.join(',') !== want.join(',')) {
+    const seen = new Set();
+    const extra = tools.filter((t) => !want.includes(t) || seen.has(t) || !seen.add(t)).map((t) => `+${t}`);
+    parts.push(`tools=${[...extra, ...want.filter((t) => !tools.includes(t)).map((t) => `-${t}`)].join(',')}`);
+  }
+  for (const [label, names] of [['mcp', named(init.mcp_servers)], ['plugins', named(init.plugins)], ['skills', named(init.skills).filter((n) => n.startsWith('anthropic-skills:'))]])
+    if (names.length) parts.push(`${label}=${names.join(',')}`);
+  return parts.join('; ');
+}
 
-/** One call, for at most `minutes`. Returns { events, run, why }: why is the unavailable class, or '' for a clean result. */
-function call(minutes) {
-  const run = spawnSync('claude', args, { env, cwd, input: brief, encoding: 'utf8', maxBuffer: 1 << 28, timeout: minutes * 60_000 });
-  const events = lines(run.stdout);
-  if (run.error?.code === 'ETIMEDOUT') return { run, events, why: 'timeout' };
+/** One call, for at most `minutes`. The init event is judged when it arrives: a bad one stops claude (TERM, then KILL) before
+ * it has made a request, so it costs no quota. Returns { events, run, why, detail }: why is the unavailable class, or '' for a
+ * clean result; detail names what made the init unclean. */
+async function call(minutes) {
+  const child = spawn('claude', args, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  let pending = '';
+  let stopped = '';
+  let detail = '';
+  const events = [];
+  const stop = () => {
+    child.kill('SIGTERM');
+    setTimeout(() => child.kill('SIGKILL'), 2000).unref();
+  };
+  child.stdin.on('error', () => {});
+  child.stdin.end(brief);
+  // utf8 decoding per stream, not per chunk: a character split across two chunks stays whole.
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (d) => (stderr += d));
+  // One line of the stream. Whatever throws while judging it is a malformed init: claude is stopped, never left running.
+  const handle = (text) => {
+    if (!text.startsWith('{')) return;
+    let event;
+    try {
+      event = JSON.parse(text);
+    } catch {
+      return;
+    }
+    events.push(event);
+    try {
+      if (event.type === 'system' && event.subtype === 'init' && !stopped && (detail = uncleanInit(event))) {
+        stopped = 'unclean-context';
+        stop();
+      }
+    } catch {
+      detail = 'malformed init';
+      stopped ||= 'unclean-context';
+      stop();
+    }
+  };
+  child.stdout.on('data', (d) => {
+    stdout += d;
+    pending += d;
+    const complete = pending.split('\n');
+    pending = complete.pop();
+    complete.forEach(handle);
+  });
+  const timer = setTimeout(() => {
+    stopped ||= 'timeout';
+    stop();
+  }, minutes * 60_000);
+  const status = await new Promise((resolve) => {
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => resolve(code));
+  });
+  clearTimeout(timer);
+  handle(pending); // a last line with no newline
+  const run = { stdout, stderr, status };
+  if (stopped) return { run, events, why: stopped, detail };
   const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
   const result = events.findLast((e) => e.type === 'result');
-  const ok = Boolean(result) && !result.is_error && run.status === 0;
+  const ok = Boolean(result) && !result.is_error && status === 0;
   // Without the init event nothing says what the session holds, so a result is not to be trusted (an error needs no init).
-  if (!init && ok) return { run, events, why: 'unclean-context' };
-  // --json-schema adds the StructuredOutput tool to the session (Claude Code 2.1.308's bundle); any other extra tool fails.
-  const tools = [...(init?.tools ?? [])].filter((t) => t !== 'StructuredOutput').sort().join(',');
-  const bad =
-    Boolean(init) &&
-    (tools !== 'Glob,Grep,Read' ||
-    (init.mcp_servers ?? []).length > 0 ||
-    (init.plugins ?? []).length > 0 ||
-    (init.plugins ?? []).some((p) => String(p.name ?? p).endsWith('@synced')) ||
-    (init.skills ?? []).some((s) => String(s.name ?? s).startsWith('anthropic-skills:')));
-  if (bad) return { run, events, why: 'unclean-context' };
+  // The init must come before the first result: a result with no earlier init is not to be trusted, a late init included.
+  if (ok && (!init || events.findIndex((e) => e.type === 'result') < events.indexOf(init))) return { run, events, why: 'unclean-context', detail: init ? 'init after the result' : 'no init event' };
   if (result?.subtype === 'error_max_turns') return { run, events, why: 'max-turns' };
-  const text = `${result?.result ?? ''}\n${run.stderr ?? ''}`;
+  const text = `${result?.result ?? ''}\n${stderr}`;
   if (ok) return { run, events, why: '' };
-  const status = Number(result?.api_error_status);
-  if (status === 401 || status === 403 || /invalid api key|authentication|please run \/login|oauth token/i.test(text)) return { run, events, why: 'bad-token' };
-  if (status === 429 || /usage limit|rate limit|quota/i.test(text)) return { run, events, why: 'quota' };
-  if (status >= 500 || /overloaded/i.test(text)) return { run, events, why: 'overloaded' };
+  const code = Number(result?.api_error_status);
+  if (code === 401 || code === 403 || /invalid api key|authentication|please run \/login|oauth token/i.test(text)) return { run, events, why: 'bad-token' };
+  if (code === 429 || /usage limit|rate limit|quota/i.test(text)) return { run, events, why: 'quota' };
+  if (code >= 500 || /overloaded/i.test(text)) return { run, events, why: 'overloaded' };
   return { run, events, why: 'crash' };
 }
 
-let last = call(budget().minutes);
+let last = await call(budget().minutes);
 if (last.why === 'overloaded') {
   sleep(Number(process.env.GATE_RETRY_SECONDS ?? 60));
   const again = budget();
-  if (again?.retry) last = call(again.minutes);
+  if (again?.retry) last = await call(again.minutes);
 }
-const { run, events, why } = last;
+const { run, events, why, detail } = last;
 const rate = events.find((e) => /rate_limit/i.test(String(e.type)) || e.rate_limit_info);
 const quotaLine = rate ? `reviewer: quota event: ${clean(JSON.stringify(rate)).slice(0, 300)}` : 'reviewer: no quota or rate-limit event in the stream';
-if (why) unavailable(why, [quotaLine]);
+if (why) unavailable(why, [...(why === 'unclean-context' ? [`reviewer: unclean init: ${clean(detail)}`.slice(0, 300)] : []), quotaLine]);
 
 const final = events.findLast((e) => e.type === 'result');
 const answer = final.structured_output;

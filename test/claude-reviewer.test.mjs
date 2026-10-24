@@ -21,8 +21,13 @@ const dirOf = /CANDIDATE_DIR=(\S+)/.exec(brief)?.[1];
 const walk = (d, out = []) => { for (const n of fs.readdirSync(d)) { const p = d + '/' + n; const s = fs.lstatSync(p); out.push(p.slice(dirOf.length + 1) + (s.isSymbolicLink() ? ' -> link' : '')); if (s.isDirectory()) walk(p, out); } return out; };
 fs.appendFileSync(dir + '/calls.jsonl', JSON.stringify({ argv: a, env: process.env, cwd: process.cwd(), brief, files: dirOf ? walk(dirOf) : [], cwdFiles: fs.readdirSync(process.cwd()), home: process.env.HOME && fs.readdirSync(process.env.HOME) }) + '\n');
 const n = fs.readFileSync(dir + '/calls.jsonl', 'utf8').split('\n').filter(Boolean).length;
-const emit = (e) => console.log(JSON.stringify(e));
-const init = { type: 'system', subtype: 'init', tools: conf.tools ?? ['Read', 'Grep', 'Glob', 'StructuredOutput'], mcp_servers: conf.mcp ?? [], plugins: [], skills: [], slash_commands: ['compact'] };
+fs.writeFileSync(dir + '/pid', String(process.pid));
+if (conf.ignoreTerm) process.on('SIGTERM', () => {});
+const emit = (e) => fs.writeSync(1, JSON.stringify(e) + '\n');
+const settings = JSON.parse(a[a.indexOf('--settings') + 1] ?? '{}');
+const BUILTIN = ['cc-plugin-agents-md@builtin', 'cc-plugin-telemetry@builtin', 'cc-plugin-plugin-authoring@builtin'];
+const plugins = conf.plugins ?? BUILTIN.filter((p) => settings.enabledPlugins?.[p] !== false).map((name) => ({ name }));
+const init = { type: 'system', subtype: 'init', tools: conf.tools ?? ['Read', 'Grep', 'Glob', 'StructuredOutput'], mcp_servers: conf.mcp ?? [], plugins, skills: conf.skills ?? [], slash_commands: ['compact'] };
 const fail = (status, text) => { if (!conf.noInit) emit(init); emit({ type: 'result', subtype: 'error_during_execution', is_error: true, api_error_status: status, result: text }); process.exit(1); };
 if (conf.mode === 'sleep') { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20000); process.exit(0); }
 if (conf.mode === 'quota') fail(429, 'Claude AI usage limit reached|1761300000');
@@ -31,11 +36,23 @@ if (conf.mode === 'overloaded') fail(529, 'Overloaded');
 if (conf.mode === 'overloaded-once' && n === 1) fail(529, 'Overloaded');
 if (conf.mode === 'maxturns') { emit(init); emit({ type: 'result', subtype: 'error_max_turns', is_error: true, result: '' }); process.exit(1); }
 if (conf.mode === 'crash') { process.stderr.write('boom\n'); process.exit(7); }
-if (!conf.noInit) emit(init);
+if (!conf.noInit && !conf.initAfter) emit(init);
+if (conf.sleepAfterInit) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, conf.sleepAfterInit * 1000);
+if (conf.marker) fs.writeFileSync(dir + '/marker', 'result about to be written');
 if (conf.quotaEvent) emit({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1761300000 } });
 const out = conf.output ?? { blocking: [], noRed: 'unjudged' };
 const text = conf.text ?? JSON.stringify(out);
-emit({ type: 'result', subtype: 'success', is_error: false, result: text, ...(conf.text ? {} : { structured_output: out }) });
+const resultEvent = { type: 'result', subtype: 'success', is_error: false, result: text, ...(conf.text ? {} : { structured_output: out }) };
+if (conf.bigResult) {
+  // Over 64 KB, written in two pieces with the cut inside the three bytes of the arrow.
+  const buf = Buffer.from(JSON.stringify({ ...resultEvent, pad: 'a'.repeat(70000) }) + '\n');
+  const cut = buf.lastIndexOf('→') + 1;
+  fs.writeSync(1, buf.subarray(0, cut));
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+  fs.writeSync(1, buf.subarray(cut));
+} else if (conf.noNewline) fs.writeSync(1, JSON.stringify(resultEvent));
+else emit(resultEvent);
+if (conf.initAfter) emit(init);
 `;
 
 describe('claude-reviewer', () => {
@@ -108,6 +125,11 @@ describe('claude-reviewer', () => {
     assert.ok(!calls.argv.includes('--bare'), '--bare reads no OAuth token');
   });
 
+  test('the settings turn off the three built-in plugins Claude Code 2.1.308 lists in every init', () => {
+    const settings = JSON.parse(calls.argv[calls.argv.indexOf('--settings') + 1]);
+    assert.deepEqual(settings.enabledPlugins, { 'cc-plugin-agents-md@builtin': false, 'cc-plugin-telemetry@builtin': false, 'cc-plugin-plugin-authoring@builtin': false });
+  });
+
   test('the schema holds what result.mjs holds: a claim to read, a reason of 1 to 500 characters', () => {
     const schema = JSON.parse(calls.argv[calls.argv.indexOf('--json-schema') + 1]);
     assert.equal(schema.properties.blocking.items.properties.claim.minLength, 1);
@@ -171,6 +193,99 @@ describe('claude-reviewer', () => {
       assert.equal(out.result, null);
     });
   }
+
+  test('an unclean init is judged when it arrives: claude is stopped before it answers, and the unclean line names the plugin', () => {
+    const started = Date.now();
+    const out = review({ plugins: [{ name: 'evil@builtin' }], sleepAfterInit: 20, marker: true });
+    assert.ok(Date.now() - started < 10_000, `waited ${Date.now() - started} ms for a result`);
+    assert.equal(out.code, 3, out.out);
+    assert.match(out.out, /^::notice title=review-result::unavailable: unclean-context\n/);
+    assert.match(out.out, /^reviewer: unclean init: plugins=evil@builtin$/m);
+    assert.ok(!existsSync(join(dir, 'marker')), 'claude ran on to its result');
+  });
+
+  test('the unclean line names extra tools, connector servers and synced skills, by name only', () => {
+    assert.match(review({ tools: ['Read', 'Grep', 'Glob', 'StructuredOutput', 'Bash'] }).out, /^reviewer: unclean init: tools=\+Bash$/m);
+    assert.match(review({ tools: ['Read', 'Glob'] }).out, /^reviewer: unclean init: tools=-Grep$/m);
+    assert.match(review({ mcp: [{ name: 'claude.ai Gmail', status: 'connected', source: 'claudeai' }] }).out, /^reviewer: unclean init: mcp=claude\.ai Gmail$/m);
+    const long = review({ plugins: Array.from({ length: 60 }, (_, i) => ({ name: `p${i}-with-a-long-name@builtin` })) }).out;
+    assert.ok(long.split('\n').find((l) => l.startsWith('reviewer: unclean init:')).length <= 300);
+  });
+
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const gone = () => {
+    const pid = Number(readFileSync(join(dir, 'pid'), 'utf8'));
+    for (let i = 0; i < 30 && alive(pid); i += 1) run(dir, 'sleep', ['0.1']);
+    return !alive(pid);
+  };
+
+  for (const [what, extra] of [['tools that is no list', { tools: 'Read' }], ['a null MCP server', { mcp: [null] }], ['a null skill', { skills: [null] }]]) {
+    test(`an init with ${what} is unclean, claude is stopped, and nothing is left running`, () => {
+      const started = Date.now();
+      const out = review({ ...extra, sleepAfterInit: 20, marker: true });
+      assert.ok(Date.now() - started < 10_000, `waited ${Date.now() - started} ms`);
+      assert.equal(out.code, 3, out.out);
+      assert.match(out.out, /^::notice title=review-result::unavailable: unclean-context\n/);
+      assert.ok(!existsSync(join(dir, 'marker')), 'claude ran on to its result');
+      assert.ok(gone(), 'claude is still running');
+    });
+  }
+
+  test('a multibyte character split across two chunks of a long result line survives', () => {
+    const claim = 'Lỗi tiếng Việt → sai ở dòng 3, ký tự đặc biệt: ế ờ ữ';
+    const out = review({ bigResult: true, output: { blocking: [{ id: 'f1', claim }], noRed: 'unjudged' } });
+    assert.equal(out.code, 0, out.out);
+    assert.ok(!out.result.includes('\uFFFD'), 'a replacement character reached the result');
+    assert.equal(JSON.parse(out.result).blocking[0].claim, claim);
+  });
+
+  test('a result on the last line with no newline is used', () => {
+    const out = review({ noNewline: true, output: { blocking: [], noRed: 'unjudged' } });
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(JSON.parse(out.result).blocking, []);
+  });
+
+  test('a duplicated tool is unclean: the tools, without StructuredOutput and sorted, are exactly Glob,Grep,Read', () => {
+    assert.equal(review({ tools: ['Read', 'Read', 'Grep', 'Glob', 'StructuredOutput'] }).code, 3);
+  });
+
+  test('a claude that ignores TERM is killed within a few seconds, and the run is unclean', () => {
+    const started = Date.now();
+    const out = review({ plugins: [{ name: 'evil@builtin' }], ignoreTerm: true, sleepAfterInit: 20 });
+    assert.ok(Date.now() - started < 6000, `waited ${Date.now() - started} ms`);
+    assert.equal(out.code, 3, out.out);
+    assert.match(out.out, /unavailable: unclean-context/);
+    assert.ok(gone(), 'claude survived TERM');
+  });
+
+  test('an anthropic-skills: skill in the init is unclean, and named', () => {
+    const out = review({ skills: [{ name: 'anthropic-skills:docx' }, { name: 'ordinary' }] });
+    assert.equal(out.code, 3, out.out);
+    assert.match(out.out, /^reviewer: unclean init: skills=anthropic-skills:docx$/m);
+  });
+
+  test('a result before the init is unclean even when a clean init follows', () => {
+    const out = review({ initAfter: true });
+    assert.equal(out.code, 3, out.out);
+    assert.match(out.out, /unavailable: unclean-context/);
+  });
+
+  test('an entry with no string name is printed as unnamed: never its source, path, URL or command', () => {
+    const out = review({
+      plugins: [{ source: '/p/q', path: '/Users/x/.claude/plugins/cache/x' }, { name: 7 }, {}],
+      mcp: [{ url: 'https://u:pw@example.com/mcp' }, { command: 'node /Users/x/serve.js' }],
+    }).out;
+    const line = out.split('\n').find((l) => l.startsWith('reviewer: unclean init:'));
+    assert.equal(line, 'reviewer: unclean init: mcp=unnamed,unnamed; plugins=unnamed,unnamed,unnamed');
+    for (const secret of ['/p/q', '/Users/', 'https://', 'pw', 'serve.js']) assert.ok(!out.includes(secret), `the output holds ${secret}`);
+  });
 
   test('an overloaded API is tried twice; one that recovers gives a result; a limit or a bad token is never retried', () => {
     assert.equal(review({ mode: 'overloaded-once' }).code, 0);
