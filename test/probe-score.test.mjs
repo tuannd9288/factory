@@ -40,12 +40,12 @@ function world(prs) {
 
 const job = (name, start, end, conclusion = 'success') => ({ databaseId: 1, name, startedAt: start, completedAt: end, conclusion });
 const checks = (...failed) => ['verify', 'review', 'verdict', 'tier'].map((name) => ({ name, conclusion: failed.includes(name) ? 'FAILURE' : 'SUCCESS' }));
-const OK = 'reviewer: no quota or rate-limit event in the stream\nreview (claude-opus-5-5): passes\n';
+const OK = 'reviewer: usage: no result event\nreview (claude-opus-5-5): passes\n';
 
 test('a probe is caught when it did not merge and a required check failed; billed minutes round each job up', () => {
   const w = world([
     { n: 11, sha: 'a'.repeat(40), run: 100, checks: checks('review'), log: OK, jobs: [job('review', '2026-10-25T10:00:00Z', '2026-10-25T10:03:01Z', 'failure'), job('tier', '2026-10-25T10:00:00Z', '2026-10-25T10:00:20Z')] },
-    { n: 12, sha: 'b'.repeat(40), state: 'MERGED', run: 101, checks: checks(), log: 'review\tRun the reviewer\t2026-10-25T11:04:00.1234567Z reviewer: quota event: {"status":"allowed"}\n', jobs: [job('review', '2026-10-25T11:00:00Z', '2026-10-25T11:05:00Z')] },
+    { n: 12, sha: 'b'.repeat(40), state: 'MERGED', run: 101, checks: checks(), log: 'review\tRun the reviewer\t2026-10-25T11:04:00.1234567Z reviewer: usage: input 10, cache write 20, cache read 30, output 40 tokens; cost $0.5\n', jobs: [job('review', '2026-10-25T11:00:00Z', '2026-10-25T11:05:00Z')] },
   ]);
   try {
     const out = w.score(['11', '12']);
@@ -55,8 +55,8 @@ test('a probe is caught when it did not merge and a required check failed; bille
     assert.match(out.stdout, /^job\t11\ttier\tsuccess\t1$/m);
     assert.match(out.stdout, /^pr\t12\tmissed$/m);
     assert.match(out.stdout, /^job\t12\treview\tsuccess\t5$/m);
-    assert.match(out.stdout, /^quota\t11\treviewer: no quota or rate-limit event in the stream$/m);
-    assert.match(out.stdout, /^quota\t12\treviewer: quota event: \{"status":"allowed"\}$/m);
+    assert.match(out.stdout, /^usage\t11\treviewer: usage: no result event$/m);
+    assert.match(out.stdout, /^usage\t12\treviewer: usage: input 10, cache write 20, cache read 30, output 40 tokens; cost \$0\.5$/m);
     assert.match(out.stdout, /^minutes\t11\t5\tgate-trusted\.yml jobs only, not gate\.yml's verify$/m);
     assert.doesNotMatch(readCalls(w), /^api /m);
   } finally {
@@ -106,14 +106,14 @@ test('a model claim that quotes the unavailable wording is not the reviewer sayi
   }
 });
 
-test('a skipped job bills nothing, a job with no times is not guessed, and the quota line has no timestamp', () => {
+test('a skipped job bills nothing, a job with no times is not guessed, and the usage line has no timestamp', () => {
   const w = world([
     {
       n: 11,
       sha: 'a'.repeat(40),
       run: 100,
       checks: checks(),
-      log: 'review\tRun the reviewer\t2026-10-25T10:03:00.1234567Z reviewer: quota event: {"status":"allowed"}\n',
+      log: 'review\tRun the reviewer\t2026-10-25T10:03:00.1234567Z reviewer: usage: input 10, cache write 20, cache read 30, output 40 tokens; cost $0.5\n',
       jobs: [job('review', '2026-10-25T10:00:00Z', '2026-10-25T10:02:00Z'), job('rounds', '2026-10-25T10:02:00Z', '2026-10-25T10:02:01Z', 'skipped'), { name: 'verdict', conclusion: 'success' }],
     },
   ]);
@@ -123,27 +123,27 @@ test('a skipped job bills nothing, a job with no times is not guessed, and the q
     assert.match(out.stdout, /^job\t11\trounds\tskipped\t0$/m);
     assert.match(out.stdout, /^job\t11\tverdict\tsuccess\t\?$/m);
     assert.match(out.stdout, /^minutes\t11\t2\t/m);
-    assert.match(out.stdout, /^quota\t11\treviewer: quota event: \{"status":"allowed"\}$/m);
+    assert.match(out.stdout, /^usage\t11\treviewer: usage: input 10, cache write 20, cache read 30, output 40 tokens; cost \$0\.5$/m);
   } finally {
     w.cleanup();
   }
 });
 
-test('the head it stops at still gets its quota line, before STOP; a run still in progress is pending, not a crash', () => {
+test('the head it stops at still gets its usage line, before STOP; a run still in progress is pending, not a crash', () => {
   const w = world([
     {
       n: 12,
       sha: 'b'.repeat(40),
       run: 101,
       checks: checks('review'),
-      log: 'review\tRun the reviewer\t2026-10-25T11:00:00.1Z review: reviewer unavailable (quota); this is not a finding on the change\nreview\tRun the reviewer\t2026-10-25T11:00:01.1Z reviewer: quota event: {"status":"rejected"}\n',
+      log: 'review\tRun the reviewer\t2026-10-25T11:00:00.1Z review: reviewer unavailable (quota); this is not a finding on the change\nreview\tRun the reviewer\t2026-10-25T11:00:01.1Z reviewer: usage: input 10, cache write 20, cache read 30, output 40 tokens; cost $0.5\n',
       jobs: [job('review', '2026-10-25T11:00:00Z', '2026-10-25T11:01:00Z', 'failure')],
     },
   ]);
   try {
     const out = w.score(['12']);
     assert.equal(out.status, 3, out.stdout + out.stderr);
-    assert.match(out.stdout, /^quota\t12\treviewer: quota event: \{"status":"rejected"\}\nSTOP\t12\t/m);
+    assert.match(out.stdout, /^usage\t12\treviewer: usage: input 10, cache write 20, cache read 30, output 40 tokens; cost \$0\.5\nSTOP\t12\t/m);
     rmSync(join(w.dir, 'log101.log'));
     const again = w.score(['12']);
     assert.equal(again.status, 0, again.stdout + again.stderr);
