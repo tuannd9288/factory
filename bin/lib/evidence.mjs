@@ -1,9 +1,13 @@
 // The kit pull request's evidence: its files against the kit at one factory commit, over the whole inventory, with
 // contents, modes and symlinks compared by git object, never by running anything the repository holds. It reads both
-// sides with ls-tree and cat-file only. A managed file is one of four kinds: as in the kit (same mode, same blob);
+// sides with ls-tree and cat-file only. A managed file is one of five kinds: as in the kit (same mode, same blob);
 // rendered (CODEOWNERS and AGENTS.md, which bin/onboard fills in, shown line by line, and .claude/settings.json, which
-// it composes); kept (the repository had the path, and onboard left its file as it was); generated (.gate/kit-files,
-// the sorted inventory, and .gate/pack, the repository's choice of pack). The pack is the one the head's .gate/pack
+// it composes); kept (the repository had the path, and the pull request left its file as it was); updated (the base
+// held a past blob of kit/<path>, or a past rendering of it, and the head holds the kit's now: only bin/kit-update's
+// pull requests make one, and a file the kit dropped that the base held as a past blob is removed the same way);
+// generated (.gate/kit-files, the sorted inventory, and .gate/pack, the repository's choice of pack). A rendered path
+// is the repository's own only when its base differs from the rendering at this factory commit (for AGENTS.md, with
+// the own parts the base itself carries), so a base that already holds the kit's rendering is shown as rendered (#53). The pack is the one the head's .gate/pack
 // names, read from packs/<name>/ in the factory commit: AGENTS.md is the kit's with the pack's section, then filled in
 // (bin/lib/pack.mjs), and .claude/settings.json the kit's with the pack's keys. A missing or unknown pack fails the
 // evidence, and the files built from it are not compared. Where the repository
@@ -18,17 +22,17 @@ import { fileURLToPath } from 'node:url';
 import { LAYOUT, fill, parseOwn } from './own.mjs';
 import { NAME, PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
 
-const INVENTORY = '.gate/kit-files';
-const SETTINGS = '.claude/settings.json';
-const FILLED = { '.github/CODEOWNERS': (v) => ['@OWNER', `@${v.human}`], 'AGENTS.md': (v) => ['<repo>', v.name] };
+export const INVENTORY = '.gate/kit-files';
+export const SETTINGS = '.claude/settings.json';
+export const FILLED = { '.github/CODEOWNERS': (v) => ['@OWNER', `@${v.human}`], 'AGENTS.md': (v) => ['<repo>', v.name] };
 // What the kit replaces when the repository has its own (bin/onboard's REPLACE): its instructions and its hooks.
-const REPLACES = (path) => path === 'AGENTS.md' || path === 'CLAUDE.md' || path.startsWith('.githooks/');
+export const REPLACES = (path) => path === 'AGENTS.md' || path === 'CLAUDE.md' || path.startsWith('.githooks/');
 const GIT_MS = 60_000;
 
-const git = (dir, args, encoding = 'utf8') => execFileSync('git', ['-C', dir, ...args], { encoding, maxBuffer: 64 << 20, timeout: GIT_MS });
+export const git = (dir, args, encoding = 'utf8') => execFileSync('git', ['-C', dir, ...args], { encoding, maxBuffer: 64 << 20, timeout: GIT_MS });
 
 /** Every entry of rev's tree under prefix, by path relative to it: { mode, oid }. */
-function tree(dir, rev, prefix = '') {
+export function tree(dir, rev, prefix = '') {
   const out = git(dir, ['ls-tree', '-r', '-z', '--full-tree', rev, ...(prefix ? ['--', prefix] : [])]);
   const entries = new Map();
   for (const record of out.split('\0').filter(Boolean)) {
@@ -90,6 +94,52 @@ function packOf(factory, fac, repo, now) {
   }
 }
 
+const pastCache = new Map();
+
+/** Every blob the factory's history (from rev) held at path, renames followed: before and after each change to it. A
+ * path the history never held has none. The blob of a file as an older kit had it. */
+export function pastBlobs(factory, rev, path) {
+  const key = `${factory}\0${rev}\0${path}`;
+  if (!pastCache.has(key)) {
+    const oids = new Set();
+    for (const line of git(factory, ['log', '--follow', '--raw', '--no-abbrev', '--format=', rev, '--', path]).split('\n')) {
+      if (!line.startsWith(':')) continue;
+      const [, , before, after] = line.slice(1).split('\t')[0].split(' ');
+      for (const oid of [before, after]) if (oid && !/^0+$/.test(oid)) oids.add(oid);
+    }
+    pastCache.set(key, oids);
+  }
+  return pastCache.get(key);
+}
+
+/** The pack's file as the factory's history held it: its text in each past version, then null for none. */
+function packTexts(factory, fac, name, file, now) {
+  if (name === 'none' || !name) return [null];
+  return [now, ...[...pastBlobs(factory, fac, `packs/${name}/${file}`)].map((oid) => git(factory, ['cat-file', 'blob', oid])), null];
+}
+
+/** Whether text is the rendering of a rendered kit file (CODEOWNERS, AGENTS.md with the repository's own parts it
+ * carries, .claude/settings.json) at this factory commit ('now'), or as an older kit and pack rendered it ('past'), or
+ * neither (null). The older renderings are the past blobs of the kit file with each past version of the pack's file. */
+export function renderedAs({ factory, fac, path, text, name, human, pack, packName }) {
+  const kitNow = git(factory, ['cat-file', 'blob', `${fac}:kit/${path}`]);
+  const kits = [kitNow, ...[...pastBlobs(factory, fac, `kit/${path}`)].map((oid) => git(factory, ['cat-file', 'blob', oid]))];
+  const agents = path === 'AGENTS.md';
+  const settings = path === SETTINGS;
+  const packs = agents ? packTexts(factory, fac, packName, 'AGENTS.md', pack?.section ?? null) : settings ? packTexts(factory, fac, packName, 'settings.json', pack?.settings ?? null) : [null];
+  const matches = (kit, section) => {
+    try {
+      if (settings) return composeSettings(kit, section) === text;
+      const to = render(path, agents ? composeAgents(kit, section) : kit, { name, human });
+      return text === to || (agents && ownParts(path, to, text).ok);
+    } catch {
+      return false;
+    }
+  };
+  if (matches(kitNow, packs[0])) return 'now';
+  return kits.some((kit) => packs.some((section) => matches(kit, section))) ? 'past' : null;
+}
+
 export function evidence({ factory, commit, repo, base, head, slug, id, human }) {
   const name = slug.split('/')[1];
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
@@ -107,25 +157,41 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   const filled = new Set();
   const kept = [];
   const replaced = [];
+  const updated = [];
+  const removed = [];
+  const was = (path, oid, why) => `${path} (was ${oid.slice(0, 12)}, ${why} at factory ${fac.slice(0, 7)})`;
   let exact = 0;
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const have = now.get(path);
     const had = at.get(path);
-    const own = had && (had.mode !== want.mode || had.oid !== want.oid);
+    let own = had && (had.mode !== want.mode || had.oid !== want.oid);
+    let older = false;
+    // A path the kit renders never equals its raw blob: the base is the repository's own only when it is not the rendering.
+    if (own && (FILLED[path] || path === SETTINGS) && !chosen.why && had.mode === want.mode) {
+      const as = renderedAs({ factory, fac, path, text: blob(repo, had.oid), name, human, pack: chosen.pack, packName: chosen.name });
+      if (as === 'now') own = false;
+      else older = as === 'past';
+    }
     const same = own && have && have.mode === had.mode && have.oid === had.oid;
+    // A file as an older kit had it, not the repository's own, when the pull request brings it to the kit's.
+    if (own && !same && !older && !FILLED[path] && path !== SETTINGS) older = pastBlobs(factory, fac, `kit/${path}`).has(had.oid);
     if (!have) fails.push(`missing: ${path}`);
     else if (same && REPLACES(path)) fails.push(`differs: ${path} (the repository's own, which the kit replaces)`);
     else if (same) kept.push(path);
-    else if (own && !REPLACES(path)) fails.push(`differs: ${path} (the repository's own, changed)`);
+    else if (own && !REPLACES(path) && !older) fails.push(`differs: ${path} (the repository's own, changed)`);
     else if (have.mode !== want.mode) fails.push(`differs: ${path} (mode ${have.mode}, the kit's ${want.mode})`);
     else if (path === SETTINGS || (path === 'AGENTS.md' && chosen.why)) {
       // Built from the kit and the pack; with no pack to build from, the failure above says why and nothing is compared.
       if (!chosen.why && blob(repo, have.oid) !== composeSettings(blob(factory, want.oid), chosen.pack?.settings ?? null)) fails.push(`differs: ${path} (content)`);
-      else if (!chosen.why) filled.add(path);
+      else if (!chosen.why) {
+        filled.add(path);
+        if (own && older) updated.push(was(path, had.oid, 'kit'));
+      }
     } else if (!FILLED[path] && have.oid !== want.oid) fails.push(`differs: ${path} (content)`);
     else if (!FILLED[path]) {
       exact++;
-      if (own) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
+      if (own && older) updated.push(was(path, had.oid, 'kit'));
+      else if (own) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
     } else {
       const kitText = blob(factory, want.oid);
       const from = path === 'AGENTS.md' ? composeAgents(kitText, chosen.pack?.section ?? null) : kitText;
@@ -135,7 +201,8 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
       if (!parts.ok) fails.push(`differs: ${path} (${parts.why ?? 'content'})`);
       else {
         filled.add(path);
-        if (own) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
+        if (own && older) updated.push(was(path, had.oid, 'kit'));
+        else if (own) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
         const before = from.split('\n');
         to.split('\n').forEach((line, i) => i < (parts.upTo ?? Infinity) && line !== before[i] && rendered.push(`${path}:${i + 1}: \`${before[i]}\` → \`${line}\``));
         if (parts.filled) rendered.push(...parts.filled);
@@ -148,7 +215,13 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   else if (inventory.mode !== '100644' || blob(repo, inventory.oid) !== `${list.join('\n')}\n`) fails.push(`differs: ${INVENTORY} (not the kit's inventory)`);
   if (!chosen.why && now.get(PACK_FILE).mode !== '100644') fails.push(`differs: ${PACK_FILE} (mode ${now.get(PACK_FILE).mode})`);
   const changed = git(repo, ['diff', '--name-only', '-z', '--no-renames', baseSha, headSha]).split('\0').filter(Boolean);
-  for (const path of changed) if (!kit.has(path) && path !== INVENTORY && path !== PACK_FILE) fails.push(`extra: ${path} (not a kit file)`);
+  for (const path of changed) {
+    if (kit.has(path) || path === INVENTORY || path === PACK_FILE) continue;
+    const had = at.get(path);
+    // A file the kit dropped, which the base held as the kit once had it, may go; the repository's own may not.
+    if (had && !now.has(path) && pastBlobs(factory, fac, `kit/${path}`).has(had.oid)) removed.push(was(path, had.oid, 'no longer in the kit'));
+    else fails.push(`extra: ${path} (not a kit file)`);
+  }
   const lines = [
     `kit-evidence: ${fails.length ? 'FAIL' : 'PASS'}`,
     `factory commit: ${fac}, kit tree ${kitTree}`,
@@ -162,6 +235,9 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   lines.push('rendered (bin/onboard fills these in):', ...(rendered.length ? rendered.map((l) => `  ${l}`) : ['  none']));
   lines.push("replaced (the repository's own at the base, now the kit's):", ...(replaced.length ? replaced.map((p) => `  ${p}`) : ['  none']));
   lines.push("kept (the repository's own, unchanged):", ...(kept.length ? kept.map((p) => `  ${p}`) : ['  none']));
+  // Only bin/kit-update's pull requests make these two; a first onboarding's evidence has neither.
+  if (updated.length) lines.push("updated (the base held an older kit file or rendering, now the kit's):", ...updated.map((p) => `  ${p}`));
+  if (removed.length) lines.push('removed (the base held an older kit file that the kit no longer has):', ...removed.map((p) => `  ${p}`));
   return { pass: !fails.length, text: lines.join('\n') };
 }
 
@@ -169,7 +245,7 @@ function main(argv) {
   const opt = {};
   for (let i = 0; i < argv.length; i += 2) opt[argv[i].replace(/^--/, '')] = argv[i + 1];
   const need = ['factory', 'commit', 'repo', 'base', 'head', 'slug', 'id'];
-  if (need.some((k) => !opt[k]) || !/^\d+$/.test(opt.id) || !/^[\w.-]+\/[\w.-]+$/.test(opt.slug)) {
+  if (need.some((k) => !opt[k]) || !/^[A-Za-z0-9_=-]+$/.test(opt.id) || !/^[\w.-]+\/[\w.-]+$/.test(opt.slug)) {
     console.error('usage: bin/kit-evidence --factory <dir> --commit <rev> --repo <dir> --base <rev> --head <rev> --slug <owner/name> --id <repository id> [--human <login>]');
     return 2;
   }

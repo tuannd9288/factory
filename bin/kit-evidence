@@ -2,7 +2,8 @@
 # The kit pull request's evidence, from the factory's own code: its files against the kit at one factory commit.
 #   bin/kit-evidence --factory <factory clone> --commit <rev> --repo <repository clone> --base <rev> --head <rev> \
 #     --slug <owner/name> --id <repository id> [--human <login>]
-# Exit 0 when every managed file is the kit's, rendered, kept or the inventory, and nothing else changed; 1 otherwise.
+# Exit 0 when every managed file is the kit's, rendered, kept, updated or the inventory, and nothing else changed (but a
+# file the kit dropped, removed); 1 otherwise.
 # It reads git objects only (ls-tree, cat-file, diff), so nothing the repository holds runs. bin/onboard puts its output
 # in the kit pull request; anyone can run it again on the same commits.
 exec node "$(dirname "$0")/lib/evidence.mjs" "$@"
