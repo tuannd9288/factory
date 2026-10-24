@@ -3,7 +3,7 @@
 # with a settings.json that keeps out what the logged-in claude.ai account would load, writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
 # the Human's.
 #   bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>]
-# This is the agents' half. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
+# This is the agents' half; a repository that already has the kit is brought up to date with bin/kit-update. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
 # The kit replaces the repository's own AGENTS.md, CLAUDE.md and hooks; its own parts the Human approved come in through
 # --own <file>, which holds the two sections the kit's AGENTS.md ends with (bin/lib/own.mjs), and a repository with its
