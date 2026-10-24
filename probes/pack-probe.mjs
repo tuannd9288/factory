@@ -14,7 +14,7 @@
 // passes, 1 when one fails, 2 when it would not start, 130 when interrupted (Ctrl-C reaches the session too).
 // A SIGTERM sent to the probe alone waits until every spawnSync returns; only a process-group signal stops it at once.
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -211,14 +211,15 @@ export const parseGhLogin = (out) => {
   return /^[A-Za-z0-9][A-Za-z0-9-]*$/.test(first) ? first : 'none';
 };
 
-/** Every login `gh auth status` names, a failed one included, by name only; nothing else it prints is repeated. */
-export const parseGhLogins = (out) => [...new Set([...String(out ?? '').matchAll(/(?:Logged in to|Failed to log in to) \S+ account ([A-Za-z0-9][A-Za-z0-9-]*)/g)].map((m) => m[1]))];
+/** Every login `gh auth status` names, by name only; nothing else it prints is repeated. Any verb counts ("Logged in
+ * to", "Failed to log in to", "Timeout trying to log in to" in gh 2.102): each line ends "account <login> (<source>)". */
+export const parseGhLogins = (out) => [...new Set([...String(out ?? '').matchAll(/ account ([A-Za-z0-9][A-Za-z0-9-]*) \(/g)].map((m) => m[1]))];
 
 /** #24: whether this account may open `path` for reading. It opens and closes the file and reads nothing. Under a
  * closed home the open is refused at the home folder, so EACCES comes whether the file exists or not. */
 export function openable(path) {
   try {
-    closeSync(openSync(path, 'r'));
+    closeSync(openSync(path, constants.O_RDONLY | constants.O_NONBLOCK)); // a FIFO would wait for a writer
     return 'READABLE';
   } catch (error) {
     return error.code === 'EACCES' ? 'refused (EACCES)' : `not proven: ${error.code ?? error.message}`;
@@ -266,6 +267,7 @@ function parseArgs(argv) {
     else throw new Error(`unknown argument ${a}`);
   }
   if (!/^[\w.-]+\/[\w.-]+$/.test(o.repo ?? '')) throw new Error('usage: node probes/pack-probe.mjs --repo owner/name [options]');
+  if (o.humanHome !== undefined && !String(o.humanHome).startsWith('/')) throw new Error('--human-home needs an absolute path');
   return o;
 }
 

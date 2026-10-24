@@ -4,8 +4,9 @@ This repository (`tuannd9288/factory`) is the root of the Human's software facto
 in the agents' own macOS account, `factory` (#24), as `~/WORKSPACES`; each repository in the factory is a subfolder
 there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`tuan9288-agent`
 alone), their profiles and their Herdr; the Human reaches it with `ssh factory@<the Mac mini>`. His own account keeps
-his SSH keys and gh login behind its `drwx------` home, which the probe's `#24 file` lines show refused. The clone is
-outside `~/Desktop`, which macOS keeps from a LaunchDaemon's programs. This file covers the factory's rules and taking a repository in. Inside a repository, that
+his SSH keys and gh login behind its home, `drwx------` on the Mac mini (Colly's measure, 2026-10-24); the probe's
+`#24 file` lines must show both files refused. The clone is outside `~/Desktop`, which macOS privacy controls (TCC)
+close to launchd jobs that were not granted access; not tested here. This file covers the factory's rules and taking a repository in. Inside a repository, that
 repository's own `AGENTS.md` governs.
 
 ## Decisions
