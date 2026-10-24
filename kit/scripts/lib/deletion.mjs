@@ -64,7 +64,8 @@ function exported(line) {
 }
 
 // Reads a whole file once, line by line, lexing strings, comments, template literals and regex literals. A `/` after an
-// identifier, number, `)`, `]` or `}` divides; after anything else, or a keyword such as `return`, it starts a regex. A regex
+// identifier, number or `]` divides; after anything else, or a keyword such as `return`, it starts a regex; after `)` or
+// `}` it is read as a regex, and counts as division only when both readings agree on structure. A regex
 // that does not close on its line cannot be told from a division: that line and every later one is `taint`, and nothing
 // removed from a tainted row is trusted. Per line:
 //   start     { depth, block, template } at the start of the line: bracket depth, inside a block comment or a template
@@ -78,6 +79,7 @@ function scanFile(text) {
   let depth = 0;
   let block = false;
   let template = false;
+  let closer = false; // that token is `)` or `}`
   let value = false; // the last significant token ends a value, so a following `/` divides; otherwise it starts a regex
   let taint = null; // the first line with a regex that does not close on its line: from there on nothing is trusted
   return text.split('\n').map((line, index) => {
@@ -98,8 +100,10 @@ function scanFile(text) {
         }
       } else if (c === '/' && line[i + 1] === '/') break;
       else if (c === '/' && line[i + 1] === '*') (block = true), i++;
-      else if (c === '/' && !value) {
-        // A regex literal: up to the closing `/` outside a [...] class, honouring `\`, then its flags.
+      else if (c === '/' && (!value || closer)) {
+        // A regex literal: up to the closing `/` outside a [...] class, honouring `\\`, then its flags. After `)` or `}` a
+        // `/` is ambiguous (`if (x) /re/.test(y)` against `(a + b) / 2`): read it as a regex, and if the line closes it
+        // around a quote, bracket or backtick the two readings disagree on structure, so the file is tainted from here.
         let j = i + 1;
         let inClass = false;
         while (j < line.length && (inClass || line[j] !== '/')) {
@@ -108,7 +112,20 @@ function scanFile(text) {
           else if (line[j] === ']') inClass = false;
           j++;
         }
-        if (j >= line.length) {
+        const closed = j < line.length;
+        if (!closed && !value) {
+          taint ??= { n: index + 1, text: line };
+          break;
+        }
+        if (value && (!closed || !/[`'"{}()[\]]/.test(line.slice(i + 1, j)))) {
+          row.code += c;
+          row.exec += c;
+          bare += c;
+          value = false;
+          closer = false;
+          continue;
+        }
+        if (value) {
           taint ??= { n: index + 1, text: line };
           break;
         }
@@ -118,7 +135,8 @@ function scanFile(text) {
         bare += 'S';
         i = j;
         value = true;
-      } else if (c === '`') (template = true), (value = true), (row.code += c), (row.exec += c), (bare += 'S');
+        closer = false;
+      } else if (c === '`') (template = true), (value = true), (closer = false), (row.code += c), (row.exec += c), (bare += 'S');
       else if (c === '"' || c === "'") {
         let j = i + 1;
         while (j < line.length && line[j] !== c) j += line[j] === '\\' ? 2 : 1;
@@ -127,6 +145,7 @@ function scanFile(text) {
         bare += 'S';
         i = j;
         value = true;
+        closer = false;
       } else if (/\s/.test(c)) {
         row.code += c;
         row.exec += c;
@@ -139,12 +158,14 @@ function scanFile(text) {
         row.exec += word;
         bare += word;
         value = !KEYWORDS.has(word);
+        closer = false;
         i = j;
       } else {
         row.code += c;
         row.exec += c;
         bare += c;
         value = c === ')' || c === ']' || c === '}';
+        closer = c === ')' || c === '}';
         if ('{(['.includes(c)) depth++;
         else if ('})]'.includes(c)) {
           if (--depth === 0) events.push({ pos: bare.length, kind: c === '}' ? 'brace' : 'paren' });
