@@ -2,7 +2,7 @@
 import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, symlinkSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { APP, commit, factory, git, quiet, repoWithKit, run, script, write } from './helpers.mjs';
@@ -1580,6 +1580,36 @@ describe('onboard', () => {
       assert.match(out.out, /exists; nothing done/);
     } finally {
       r.cleanup();
+    }
+  });
+  // #30: the profile's settings.json is the one place that turns off what the logged-in claude.ai account loads.
+  const SETTINGS = { disableClaudeAiConnectors: true, syncClaudeAiSkills: false, syncClaudeAiPlugins: false };
+  test("writes the profile it creates a settings.json with the three keys that keep claude.ai's connectors, skills and plugins out", () => {
+    const r = repoWithKit();
+    try {
+      const profile = join(r.dir, 'profiles', basename(r.dir), 'app/claude');
+      assert.deepEqual(readdirSync(profile), ['settings.json']);
+      assert.deepEqual(JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8')), SETTINGS);
+    } finally {
+      r.cleanup();
+    }
+  });
+  test('writes nothing into a profile that exists, and prints the three keys for the Human to add', () => {
+    for (const before of [{}, { 'settings.json': '{ "theme": "dark" }\n' }]) {
+      const s = seeded({});
+      try {
+        const profile = join(s.dir, 'profiles', basename(s.dir), 'app/claude');
+        mkdirSync(profile, { recursive: true });
+        write(profile, before);
+        const out = s.onboard();
+        assert.equal(out.code, 0, out.out);
+        assert.deepEqual(readdirSync(profile), Object.keys(before));
+        for (const [name, text] of Object.entries(before)) assert.equal(readFileSync(join(profile, name), 'utf8'), text);
+        assert.match(out.out, /^onboard: profile \S+\/app\/claude exists and is kept; only the Human edits it, and its settings\.json needs these three keys:$/m);
+        assert.ok(out.out.includes(`${JSON.stringify(SETTINGS, null, 2)}\n`), out.out);
+      } finally {
+        s.cleanup();
+      }
     }
   });
 });
