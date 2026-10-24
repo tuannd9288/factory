@@ -8,4 +8,4 @@ Closes #<issue có nhãn task>
 - Hoàn tác: revert PR này | có migration <tên>, hoàn tác bằng …
 - Cần anh quyết: không | có: <câu hỏi> — đề xuất: <trả lời>
 
-<!-- Không viết được test đỏ trước? Thêm một dòng riêng: No-red: <lý do, ít nhất 20 ký tự>. Reviewer phải chấp nhận lý do, nếu không `review` đỏ; sổ cái đếm dòng này. -->
+<!-- Không viết được test đỏ trước? Thêm một dòng riêng: No-red: <lý do, ít nhất 20 ký tự>. Reviewer phải chấp nhận lý do, nếu không `review` đỏ; sổ cái đếm dòng này. Chỉ xóa code không dùng thì `red-check` tự chứng minh bằng knip (không thêm dòng nào, không nơi nào còn nhắc tên, knip liệt kê là không dùng), không cần dòng này. -->

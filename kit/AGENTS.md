@@ -15,7 +15,7 @@ This repository is in the factory (`tuannd9288/factory`). Its gate lives here, i
 | `scripts/verify --tests <files>` | `verify: 1 passed in 2s`; JUnit in `.gate/report.xml` |
 | `scripts/tier` | `tier 1` (2: load-bearing path or dependency; 3: a path in `.gate/protected`, or label `needs-human`) |
 | `scripts/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
-| `scripts/prove-check --all` | `prove-check: 7 checks fail on their fixtures` |
+| `scripts/prove-check --all` | `prove-check: 10 checks fail on their fixtures` |
 | `scripts/live-verify <pr>` | `live-verify: PASS on #12 (head 1a2b3c4, patch 5d6e7f8)`, posted on the pull request |
 
 Run `scripts/setup` once per clone. Run `scripts/verify` and `scripts/red-check --base origin/main` before every
@@ -30,7 +30,11 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
 3. Every source change carries a test that fails without it: `red-check` lays the new or changed tests onto
    the base commit and requires them to fail there as tests, not as load errors. A new name in an existing
    module: import the module (`import * as m from`), not the missing name. A new file: load it inside the
-   test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR
+   test with `await import()`. A change that only deletes unused code needs no test or `No-red:`: `red-check`
+   passes it when it adds no source line (dropping only a leading `export ` adds none), no tracked file at the head
+   names a removed path, file name or exported name, and knip (`npx --yes knip@6.42.1`, the repository's own config,
+   run at the base) listed each as unused. With no knip config, or on any miss, the rule below applies; `review`
+   still reads the change. When no test can fail first (a pure refactor, a rename), put one line in the PR
    body: `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
 4. Once `scripts/verify` and `red-check` pass locally, open the pull request with the template, in Vietnamese,
    and run `scripts/live-verify <pr>`. On PASS or PASS+NOTES, and when its base is `main`, enable auto-merge
@@ -82,7 +86,7 @@ answer; a reversible question never blocks the work.
 | Never push or force-push `main`, never delete it | ruleset on `main` |
 | Checks green on the exact head commit before merge | ruleset: `verify`, `review`, `verdict`, `tier` pinned to GitHub Actions, branch up to date |
 | No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `scripts/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
-| A new test fails at the base and passes at the head | `red-check`, inside `verify` |
+| A new test fails at the base and passes at the head, or a deletion is proved unused by knip | `red-check`, inside `verify` |
 | A failing test committed first is not weakened later | `scripts/rules` (`failing-test-edited`) |
 | Every check is shown failing on a fixture | `scripts/prove-check` in `verify` and `verify-trusted` |
 | Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `scripts/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
