@@ -154,20 +154,39 @@ test('the head it stops at still gets its quota line, before STOP; a run still i
 });
 
 const at = (name, conclusion, completedAt) => ({ name, conclusion, completedAt });
+const running = (name, startedAt) => ({ name, status: 'IN_PROGRESS', conclusion: '', startedAt, completedAt: '0001-01-01T00:00:00Z' });
 const rollup = (review) => [at('verify', 'SUCCESS', '2026-10-25T10:00:00Z'), ...review, at('verdict', 'SUCCESS', '2026-10-25T12:02:00Z'), at('tier', 'SUCCESS', '2026-10-25T12:03:00Z')];
 
 test('only the latest entry of each required check counts: an old FAILURE under a newer SUCCESS is not caught', () => {
   const w = world([
     { n: 11, sha: 'a'.repeat(40), run: 100, checks: rollup([at('review', 'FAILURE', '2026-10-25T10:05:00Z'), at('review', 'SUCCESS', '2026-10-25T12:01:00Z')]), log: OK, jobs: [job('review', '2026-10-25T12:00:00Z', '2026-10-25T12:01:00Z')] },
     { n: 12, sha: 'b'.repeat(40), run: 101, checks: rollup([at('review', 'SUCCESS', '2026-10-25T10:05:00Z'), at('review', 'FAILURE', '2026-10-25T12:01:00Z')]), log: OK, jobs: [job('review', '2026-10-25T12:00:00Z', '2026-10-25T12:01:00Z', 'failure')] },
-    { n: 13, sha: 'c'.repeat(40), run: 102, checks: [{ name: 'verify', conclusion: 'SUCCESS', startedAt: '2026-10-25T10:00:00Z' }, { name: 'review', conclusion: 'FAILURE', startedAt: '2026-10-25T09:00:00Z' }, { name: 'review', conclusion: 'SUCCESS', startedAt: '2026-10-25T11:00:00Z' }, ...checks().slice(2)], log: OK, jobs: [] },
+    { n: 13, sha: 'c'.repeat(40), run: 102, checks: rollup([at('review', 'SUCCESS', '2026-10-25T10:05:00Z'), running('review', '2026-10-25T12:00:00Z')]), log: OK, jobs: [] },
+    { n: 14, sha: 'd'.repeat(40), run: 103, checks: rollup([at('review', 'FAILURE', '2026-10-25T10:05:00Z'), running('review', '2026-10-25T12:00:00Z')]), log: OK, jobs: [] },
   ]);
   try {
-    const out = w.score(['11', '12', '13']);
+    const out = w.score(['11', '12', '13', '14']);
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.match(out.stdout, /^pr\t11\tmissed$/m);
     assert.match(out.stdout, /^pr\t12\tcaught$/m);
-    assert.match(out.stdout, /^pr\t13\tmissed$/m, 'startedAt orders entries with no completedAt');
+    // gh's real shape for a running check: status IN_PROGRESS, conclusion "", completedAt the zero time. An older entry says nothing then.
+    assert.match(out.stdout, /^pr\t13\tpending$/m, 'an older SUCCESS decided a running check');
+    assert.match(out.stdout, /^pr\t14\tpending$/m, 'an older FAILURE decided a running check');
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('entries completed at the same time are ordered by startedAt, then by their place in the rollup', () => {
+  const done = (conclusion, startedAt) => ({ name: 'review', status: 'COMPLETED', conclusion, startedAt, completedAt: '2026-10-25T12:00:00Z' });
+  const w = world([
+    { n: 11, sha: 'a'.repeat(40), run: 100, checks: rollup([done('SUCCESS', '2026-10-25T11:30:00Z'), done('FAILURE', '2026-10-25T11:00:00Z')]), log: OK, jobs: [] },
+    { n: 12, sha: 'b'.repeat(40), run: 101, checks: rollup([done('SUCCESS', '2026-10-25T11:00:00Z'), done('FAILURE', '2026-10-25T11:00:00Z')]), log: OK, jobs: [] },
+  ]);
+  try {
+    const out = w.score(['11', '12']);
+    assert.match(out.stdout, /^pr\t11\tmissed$/m, 'the later startedAt did not win');
+    assert.match(out.stdout, /^pr\t12\tcaught$/m, 'the later place in the rollup did not win');
   } finally {
     w.cleanup();
   }
