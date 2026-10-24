@@ -236,8 +236,9 @@ pull request session (2.1.309, before the keys; `test/fixtures/init-2.1.309-run2
 | tools | 33, of which 8 `mcp__claude_ai_*` | 25, none `mcp__claude_ai_*` |
 | plugins | 4, none `@synced` | 4, none `@synced`: pstack and three `@builtin` |
 
-In 2.1.310, `init.skills` still names a synced skill by its full `anthropic-skills:<name>`. If a later version lists
-short names, the item can no longer see them, so check this on each new pin.
+Run 2 (2.1.309) named each synced skill by its full `anthropic-skills:<name>` in `init.skills`. This run cannot show
+how 2.1.310 names them, since none loaded; only the counts agree (73 = 82 − 9). If a later version lists short names,
+the item can no longer see them, so check the naming on each new pin with the sync on.
 
 **No other item ran.** The account logged into the writer profile was at its weekly limit (`rate_limit_event` status
 `rejected`, `seven_day`, open again 2026-10-26 03:00 +07). Each session ended on its first turn with cost 0 and "You've
