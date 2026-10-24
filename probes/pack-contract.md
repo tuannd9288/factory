@@ -8,7 +8,8 @@ not with the factory's rules. The decision is #6's (2026-10-22). The session age
 runs Codex and is outside this contract.
 
 Each clause names the item of `probes/pack-probe.mjs` that proves it. The probe runs two short sessions from the pack's
-launcher in a scratch repository the factory has taken in, and prints PASS or FAIL per item; a pack is in use only
+launcher in a scratch repository the factory has taken in, each with `FACTORY_NO_ALERTS=1` in its environment so the
+profile's SessionStart alert hook (`bin/factory-alerts`, #24) prints nothing into a measured session, and prints PASS or FAIL per item; a pack is in use only
 after every item passes, with the Claude Code version and the date in `probes/results.md`.
 
 ## S1, session start

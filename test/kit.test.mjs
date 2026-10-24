@@ -1592,8 +1592,15 @@ describe('onboard', () => {
     }
   });
   // #30: the profile's settings.json is the one place that turns off what the logged-in claude.ai account loads.
-  const SETTINGS = { disableClaudeAiConnectors: true, syncClaudeAiSkills: false, syncClaudeAiPlugins: false };
-  test("writes the profile it creates a settings.json with the three keys that keep claude.ai's connectors, skills and plugins out", () => {
+  // #24: and the stable update channel, and the SessionStart hook that tells the Human about every *.failed file.
+  const SETTINGS = {
+    disableClaudeAiConnectors: true,
+    syncClaudeAiSkills: false,
+    syncClaudeAiPlugins: false,
+    autoUpdatesChannel: 'stable',
+    hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: join(factory, 'bin/factory-alerts'), timeout: 10 }] }] },
+  };
+  test("writes the profile it creates a settings.json that keeps claude.ai's connectors, skills and plugins out, stays on the stable channel and runs factory-alerts at session start", () => {
     const r = repoWithKit();
     try {
       const profile = join(r.dir, 'profiles', basename(r.dir), 'app/claude');
@@ -1603,7 +1610,7 @@ describe('onboard', () => {
       r.cleanup();
     }
   });
-  test('writes nothing into a profile that exists, and prints the three keys for the Human to add', () => {
+  test('writes nothing into a profile that exists, and prints every key for the Human to add', () => {
     for (const before of [{}, { 'settings.json': '{ "theme": "dark" }\n' }]) {
       const s = seeded({});
       try {
@@ -1614,7 +1621,7 @@ describe('onboard', () => {
         assert.equal(out.code, 0, out.out);
         assert.deepEqual(readdirSync(profile), Object.keys(before));
         for (const [name, text] of Object.entries(before)) assert.equal(readFileSync(join(profile, name), 'utf8'), text);
-        assert.match(out.out, /^onboard: profile \S+\/app\/claude exists and is kept; only the Human edits it, and its settings\.json needs these three keys:$/m);
+        assert.match(out.out, /^onboard: profile \S+\/app\/claude exists and is kept; only the Human edits it, and its settings\.json needs these keys:$/m);
         assert.ok(out.out.includes(`${JSON.stringify(SETTINGS, null, 2)}\n`), out.out);
       } finally {
         s.cleanup();

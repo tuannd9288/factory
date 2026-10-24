@@ -104,18 +104,22 @@ fi
 profile=$profiles/$owner/$name/claude
 # The profile's settings.json is the one place that turns off what the claude.ai account loads into every session: its
 # connectors, and the skills and plugins it syncs, which a repository's .claude/settings.json cannot turn off (#30).
-keys='{
-  "disableClaudeAiConnectors": true,
-  "syncClaudeAiSkills": false,
-  "syncClaudeAiPlugins": false
-}'
+# It also keeps Claude Code on the stable update channel, and runs bin/factory-alerts when a session starts, so the
+# Human hears of every *.failed file in the state folder at once (#24). The hook's path is this clone's, absolute.
+keys=$(node -e 'console.log(JSON.stringify({
+  disableClaudeAiConnectors: true,
+  syncClaudeAiSkills: false,
+  syncClaudeAiPlugins: false,
+  autoUpdatesChannel: "stable",
+  hooks: { SessionStart: [{ matcher: "startup|resume", hooks: [{ type: "command", command: process.argv[1] + "/bin/factory-alerts", timeout: 10 }] }] },
+}, null, 2))' "$factory")
 if [ -e "$profile" ]; then
-  echo "onboard: profile $profile exists and is kept; only the Human edits it, and its settings.json needs these three keys:"
+  echo "onboard: profile $profile exists and is kept; only the Human edits it, and its settings.json needs these keys:"
   printf '%s\n' "$keys"
 else
   mkdir -p "$profile"
   printf '%s\n' "$keys" >"$profile/settings.json"
-  echo "onboard: profile $profile, with a settings.json that turns off claude.ai's connectors and synced skills and plugins"
+  echo "onboard: profile $profile, with a settings.json that turns off claude.ai's connectors and synced skills and plugins, stays on the stable channel and runs bin/factory-alerts at session start"
 fi
 shown=$profile
 [ "$profiles" = "$HOME/.agent-profiles" ] && shown="\$HOME/.agent-profiles/$owner/$name/claude"

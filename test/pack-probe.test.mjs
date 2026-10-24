@@ -203,6 +203,7 @@ const { execSync } = require('child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.MOCK_CALLS, 'claude ' + args.join(' ') + ' @' + process.cwd() + '\n');
 if (args.includes('--version')) { console.log('9.9.9 (Claude Code)'); process.exit(0); }
+fs.appendFileSync(process.env.MOCK_CALLS + '.env', 'alerts=' + process.env.FACTORY_NO_ALERTS + '\n');
 const prompt = args[args.indexOf('-p') + 1];
 const s = JSON.parse(fs.readFileSync(process.env.MOCK_STREAMS, 'utf8'));
 const sh = (c) => execSync(c, { stdio: 'ignore' });
@@ -1212,4 +1213,15 @@ test('#30 live run: a session that made its calls and then ended in an error sti
   assert.equal(by(items, '.env read refused').ok, true);
   assert.equal(by(items, 'sessions finished').ok, false);
   assert.match(by(items, 'sessions finished').evidence, /^first session: an error, The line is: /);
+});
+
+test('#24: every session is launched with FACTORY_NO_ALERTS=1, so a measured session never sees the Human\'s alerts', async () => {
+  const w = await world({ env: { FACTORY_NO_ALERTS: '0' } });
+  try {
+    const r = w.probe();
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(readFileSync(`${w.dir}/calls.env`, 'utf8').trim().split('\n'), ['alerts=1', 'alerts=1'], 'session a and the pull request session');
+  } finally {
+    w.cleanup();
+  }
 });
