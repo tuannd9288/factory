@@ -189,3 +189,76 @@ describe('prove-check: the fixtures of the deletion proof', () => {
     for (const name of Object.keys(fixtures)) assert.ok(text.includes(name), `${name} is not among the checks --all proves`);
   });
 });
+
+// Every removed line of a file that still exists is accounted for: a keyword-only `export ` removal, or part of a
+// removed hunk of whole top-level declarations of exports knip listed (#17, rule A). Whole removal also searches the
+// defining file for the name (rule B).
+describe('red-check: every removed source line is part of an unused export', () => {
+  const HANDLER = [
+    'export function handler(req) {',
+    '  if (!req.user) return 401;',
+    '  if (!authorized(req)) return 403;',
+    '  return 200;',
+    '}',
+    '',
+  ].join('\n');
+  const DOC_A = '/**\n * Not used anywhere.\n */\nexport function unusedA(x) {\n  return x + 1;\n}\n\n';
+  const B = 'export function unusedB() {\n  return unusedA(2);\n}\n';
+  const H = `${HANDLER}\n${DOC_A}${B}`;
+  const S = 'export function unusedC() {\n  return 1;\n}\ndoThing({\n  a: 1,\n});\n';
+  const CJS = 'export const unusedD = 1;\nconst x = 1;\nmodule.exports = {\n  x,\n};\n';
+  const M = 'const a = 1;\nconst b = 2;\nexport {\n  a,\n  b,\n};\nexport const unusedE = 1;\n';
+  let r;
+  let bin;
+  let log;
+  before(() => {
+    r = repoWithKit({ 'knip.json': '{}\n', 'src/h.js': H, 'src/s.js': S, 'src/cjs.js': CJS, 'src/m.js': M });
+    bin = join(r.dir, 'fake-bin');
+    log = join(r.dir, 'npx.log');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npx'), ['#!/bin/sh', 'echo "args=$*" >>"$FAKE_NPX_LOG"', 'cat "$FAKE_KNIP_REPORT"', 'exit 1', ''].join('\n'));
+    chmodSync(join(bin, 'npx'), 0o755);
+  });
+  after(() => r.cleanup());
+
+  const check = (name, files, knip) => {
+    rmSync(log, { force: true });
+    git(r.repo, 'switch', '-q', '-C', name, 'origin/main');
+    commit(r.repo, files, name);
+    writeFileSync(join(r.dir, 'knip.json'), knip);
+    return script(r.repo, 'red-check', ['--base', 'origin/main'], { PATH: `${bin}:${process.env.PATH}`, FAKE_NPX_LOG: log, FAKE_KNIP_REPORT: join(r.dir, 'knip.json') });
+  };
+  const NOT_PART = /check 1: src\/\w+\.js removes a line that is not part of an unused export: /;
+
+  test('a guard deleted in a used function, with an unused export removed in the same file, fails', () => {
+    const guarded = H.replace('  if (!authorized(req)) return 403;\n', '').replace(`${B}`, '');
+    const out = check('rule-a-guard', { 'src/h.js': guarded }, report(listsExports('src/h.js', 'unusedB')));
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 1: src\/h\.js removes a line that is not part of an unused export: if \(!authorized\(req\)\) return 403;/);
+  });
+  test('whole unused exports are deleted together with their JSDoc and pass', () => {
+    const out = check('rule-a-jsdoc', { 'src/h.js': HANDLER }, report(listsExports('src/h.js', 'unusedA', 'unusedB')));
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, PASSED);
+  });
+  test('a hunk that spans an unused export and the start of the next statement fails', () => {
+    const out = check('rule-a-span', { 'src/s.js': '  a: 1,\n});\n' }, report(listsExports('src/s.js', 'unusedC')));
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, NOT_PART);
+  });
+  test('a removed module.exports line fails', () => {
+    const out = check('rule-a-cjs', { 'src/cjs.js': 'const x = 1;\n' }, report(listsExports('src/cjs.js', 'unusedD')));
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 1: src\/cjs\.js removes a line that is not part of an unused export: module\.exports = \{/);
+  });
+  test('a removed multi-line export { a, b } fails closed', () => {
+    const out = check('rule-a-multiline', { 'src/m.js': 'const a = 1;\nconst b = 2;\nexport const unusedE = 1;\n' }, report(listsExports('src/m.js', 'a', 'b', 'unusedE')));
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 1: src\/m\.js removes a line that is not part of an unused export: export \{/);
+  });
+  test('an export removed whole is still named in its own file: check 2 searches the defining file', () => {
+    const out = check('rule-b-own-file', { 'src/h.js': H.replace(DOC_A, '') }, report(listsExports('src/h.js', 'unusedA')));
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /check 2: unusedA, exported by src\/h\.js, is still named in src\/h\.js/);
+  });
+});
