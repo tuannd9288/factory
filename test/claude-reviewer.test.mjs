@@ -277,9 +277,14 @@ describe('claude-reviewer', () => {
     assert.match(out.out, /unavailable: unclean-context/);
   });
 
-  test('a plugin with no name is named by its source or path, never as an object', () => {
-    const out = review({ plugins: [{ source: 'src-x' }, { path: '/p/q' }, {}] }).out;
-    assert.match(out, /^reviewer: unclean init: plugins=src-x,\/p\/q,unnamed$/m);
+  test('an entry with no string name is printed as unnamed: never its source, path, URL or command', () => {
+    const out = review({
+      plugins: [{ source: '/p/q', path: '/Users/x/.claude/plugins/cache/x' }, { name: 7 }, {}],
+      mcp: [{ url: 'https://u:pw@example.com/mcp' }, { command: 'node /Users/x/serve.js' }],
+    }).out;
+    const line = out.split('\n').find((l) => l.startsWith('reviewer: unclean init:'));
+    assert.equal(line, 'reviewer: unclean init: mcp=unnamed,unnamed; plugins=unnamed,unnamed,unnamed');
+    for (const secret of ['/p/q', '/Users/', 'https://', 'pw', 'serve.js']) assert.ok(!out.includes(secret), `the output holds ${secret}`);
   });
 
   test('an overloaded API is tried twice; one that recovers gives a result; a limit or a bad token is never retried', () => {
