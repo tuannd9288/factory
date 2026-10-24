@@ -177,6 +177,25 @@ test('only the latest entry of each required check counts: an old FAILURE under 
   }
 });
 
+test('a merged probe was not blocked, even while GitHub still shows a required check running', () => {
+  // factory-probe#32 (2026-10-24): merged, yet gh still gave its verdict status IN_PROGRESS with conclusion SUCCESS.
+  const stuck = { name: 'verdict', status: 'IN_PROGRESS', conclusion: 'SUCCESS', startedAt: '2026-10-25T12:00:00Z', completedAt: '2026-10-25T12:00:07Z' };
+  const w = world([
+    { n: 11, sha: 'a'.repeat(40), state: 'MERGED', run: 100, checks: [at('verify', 'SUCCESS', '2026-10-25T12:00:10Z'), at('review', 'SUCCESS', '2026-10-25T12:01:39Z'), stuck, at('tier', 'SUCCESS', '2026-10-25T12:02:04Z')], log: OK, jobs: [] },
+    { n: 12, sha: 'b'.repeat(40), state: 'MERGED', run: 101, checks: rollup([at('review', 'SUCCESS', '2026-10-25T10:05:00Z'), running('review', '2026-10-25T12:00:00Z')]), log: OK, jobs: [] },
+    { n: 13, sha: 'c'.repeat(40), run: 102, checks: rollup([at('review', 'SUCCESS', '2026-10-25T10:05:00Z'), running('review', '2026-10-25T12:00:00Z')]), log: OK, jobs: [] },
+  ]);
+  try {
+    const out = w.score(['11', '12', '13']);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(out.stdout, /^pr\t11\tmissed$/m, 'a stuck IN_PROGRESS entry outranked MERGED');
+    assert.match(out.stdout, /^pr\t12\tmissed$/m, 'a re-running check outranked MERGED');
+    assert.match(out.stdout, /^pr\t13\tpending$/m, 'an open head with a running check is still pending');
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('entries completed at the same time are ordered by startedAt, then by their place in the rollup', () => {
   const done = (conclusion, startedAt) => ({ name: 'review', status: 'COMPLETED', conclusion, startedAt, completedAt: '2026-10-25T12:00:00Z' });
   const w = world([
