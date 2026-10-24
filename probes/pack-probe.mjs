@@ -34,7 +34,7 @@ const DISALLOWED = ['Bash(gh pr merge:*)', 'Bash(scripts/live-verify:*)', 'Bash(
 /** A `claude -p --output-format stream-json` run (Claude Code 2.1.308): where it started, its mode and plugins, each
  * tool call with its result, the denials the result reports and the permission_denied events. */
 export function parseSession(text) {
-  const session = { cwd: null, plugins: [], permissionMode: null, model: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, text: '' };
+  const session = { cwd: null, plugins: [], permissionMode: null, model: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, text: '', loaded: { servers: [], tools: [], plugins: [], skills: [] } };
   const byId = new Map();
   for (const line of text.split('\n')) {
     let e;
@@ -45,6 +45,7 @@ export function parseSession(text) {
     }
     if (e.type === 'system' && e.subtype === 'init') {
       Object.assign(session, { cwd: e.cwd ?? null, permissionMode: e.permissionMode ?? null, model: e.model ?? null, sessionId: e.session_id ?? null, plugins: (e.plugins ?? []).map((p) => p.name) });
+      session.loaded = { servers: e.mcp_servers ?? [], tools: e.tools ?? [], plugins: e.plugins ?? [], skills: e.skills ?? [] };
     } else if (e.type === 'system' && e.subtype === 'permission_denied') {
       session.deniedEvents.set(e.tool_use_id, { type: e.decision_reason_type ?? null, message: e.message ?? e.decision_reason ?? '' });
     } else if (e.type === 'assistant') {
@@ -72,6 +73,18 @@ export function parseSession(text) {
 }
 
 const real = (p) => (p ?? '').replace(/^\/private(?=\/(var|tmp)\/)/, '');
+
+/** What the logged-in claude.ai account put into a session, from its init event: connectors in any state, their tools,
+ * synced plugins and synced skills (#30). The synced skills are named by the class #30 expects; the live run's
+ * difference against #6's run 2 is recorded in probes/results.md. */
+function fromAccount(loaded) {
+  return [
+    ...loaded.servers.filter((s) => s.source === 'claudeai').map((s) => `connector ${s.name} (${s.status})`),
+    ...loaded.tools.filter((t) => t.startsWith('mcp__claude_ai_')).map((t) => `tool ${t}`),
+    ...loaded.plugins.filter((p) => String(p.source ?? '').endsWith('@synced')).map((p) => `plugin ${p.source}`),
+    ...loaded.skills.filter((s) => s.startsWith('anthropic-skills:')).map((s) => `skill ${s}`),
+  ];
+}
 const commandOf = (t) => (t.name === 'Bash' ? String(t.input.command ?? '') : '');
 
 /** Whether a tool call was denied by a deny rule, and the words that show it. Only the result's permission_denials
@@ -112,6 +125,8 @@ export function judge({ session, prSession, profile, marker, secret, root, tagEx
   add('session starts inside the repository', session.cwd !== null && real(session.cwd).startsWith(real(root)), `cwd ${session.cwd ?? 'not reported'}`);
   add('pins load (pstack plugin listed)', session.plugins.includes('pstack'), `plugins: ${session.plugins.join(', ') || 'none'}`);
   add('permission baseline (acceptEdits) in force', session.permissionMode === 'acceptEdits', `init permissionMode ${JSON.stringify(session.permissionMode)}`);
+  const account = sessions.map((s, i) => [i ? 'pull request session' : 'first session', fromAccount(s.loaded)]).filter(([, found]) => found.length);
+  add('nothing from the claude.ai account loads (connectors, their tools, synced skills and plugins)', !account.length, account.length ? account.map(([name, found]) => `${name}: ${found.join(', ')}`).join('; ') : 'no claude.ai connector, tool, synced plugin or synced skill in either init event');
 
   const write = session.tools.find((t) => control && commandOf(t).includes(`git branch ${control}`));
   const tagCalls = session.tools.filter((t) => /\bgit\s+tag\s+x\b/.test(commandOf(t)));

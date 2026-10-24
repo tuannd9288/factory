@@ -82,8 +82,10 @@ has accepted the invitation, an agent runs `bin/onboard <repo-url>` from this ro
 It refuses any other login, and a `main` without the bootstrap pull request rule:
 
 1. clones the repository into `<root>/<repo>`;
-2. creates its profile `~/.agent-profiles/<owner>/<repo>/claude`, only now; it holds state only, never edit it (a
-   Codex profile joins when Codex does);
+2. creates its profile `~/.agent-profiles/<owner>/<repo>/claude`, only now, and writes there a `settings.json` that
+   turns off claude.ai's connectors and synced skills and plugins (a repository's settings cannot turn the syncs off);
+   a profile that exists is kept, and onboard prints the three keys for the Human to add. Nothing else edits the
+   profile; it holds state only (a Codex profile joins when Codex does);
 3. writes `.envrc` (`CLAUDE_CONFIG_DIR` pointing at the profile), adds it to `.git/info/exclude` and runs
    `direnv allow`; an `.envrc` the repository has is kept, and onboard prints the line to add to it. Either way
    `.claude/worktrees/` joins `.git/info/exclude`: Claude Code's worktrees go there, inside the repository, so they
