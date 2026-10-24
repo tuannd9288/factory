@@ -73,6 +73,7 @@ A SIGTERM sent to the probe alone waits until every `spawnSync` returns; only a 
 ```
 node probes/pack-probe.mjs --repo <owner>/<name>      # from the factory root, as the agents' account
 node probes/pack-probe.mjs --repo <owner>/<name> --no-pr --questions   # #29's two questions, without the pull request
+node probes/pack-probe.mjs --repo <owner>/<name> --no-pr --questions --no-bypass   # the first alone; the second waits for the Human's word
 ```
 
 `--questions` adds two short sessions, each with the sentinel `.env` planted:
