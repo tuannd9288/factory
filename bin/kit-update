@@ -59,6 +59,8 @@ remote=$(git -C "$dest" ls-remote --heads origin "refs/heads/$branch" 2>/dev/nul
 slug=""
 id=""
 if [ "$open_pr" -eq 1 ]; then
+  # --json exits 0 whatever the token is; the plain form exits 1 when the active account does not authenticate.
+  gh auth status --active --hostname github.com >/dev/null 2>&1 || refuse "gh's active login on github.com does not authenticate"
   login=$(gh auth status --active --json hosts --jq '.hosts["github.com"][0].login') || refuse "could not read gh's login"
   lc() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
   [ "$(lc "$login")" = "$(lc "$agent")" ] || refuse "opens the kit pull request as the agents' account ($agent), not as $login"
@@ -95,6 +97,7 @@ fi
 cd "$dest"
 base=$(git rev-parse origin/main)
 before=$(git rev-parse --abbrev-ref HEAD)
+before_sha=$(git rev-parse HEAD)
 git switch --quiet --no-track -c "$branch" origin/main
 node "$factory/bin/lib/kitupdate.mjs" lay "${args[@]}" --out "$lists"
 # .gate/pack and .gate/kit-files, as onboard writes them: removed first, so a link the repository holds there cannot
@@ -105,7 +108,7 @@ printf '%s\n' "$pack" >.gate/pack
 scripts/setup
 git add -A
 if git diff --cached --quiet; then
-  git switch --quiet "$before"
+  if [ "$before" = HEAD ]; then git switch --quiet --detach "$before_sha"; else git switch --quiet "$before"; fi
   git branch --quiet -D "$branch"
   echo "kit-update: $name already holds the kit at factory $sha7; nothing to do"
   exit 0
@@ -132,10 +135,17 @@ echo "kit-update: kit committed on $branch ($(n added) added, $(n updated) updat
 
 for label in tier-1 tier-2 tier-3 needs-human raised task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
 git push --quiet -u origin "$branch"
+# The evidence prints the repository's own sections in full: fence it with more backticks than any fence inside it.
+longest=$(printf '%s\n' "$evidence" | { grep -o '`\{3,\}' || true; } | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+fence=$(printf '`%.0s' $(seq 1 $((longest > 2 ? longest + 1 : 3))))
+# A settings.json or CODEOWNERS the repository changed is kept, so the kit's newer rules never reach it.
+note=""
+grep -qx '.claude/settings.json' "$lists/kept" && note=" \`.claude/settings.json\` của repo là bản riêng nên được giữ: quy tắc deny mới của kit không tới file này."
+grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note \`.github/CODEOWNERS\` của repo là bản riêng nên được giữ: dòng mới của kit không tới file này."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
 gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
 **Đổi gì:** Đưa kit của $name lên factory \`$sha7\`: $(n added) file thêm, $(n updated) file cập nhật, $(n removed) file bỏ; $(n kept) file của repo giữ nguyên.
-**Ảnh hưởng:** Gói \`$pack\` (ghi ở \`.gate/pack\`); \`.gate/kit-files\` viết lại theo kit mới; file kit mà repo đã sửa riêng được giữ, tên ở dưới, và \`AGENTS.md\` giữ hai mục Layout, Facts của repo.
+**Ảnh hưởng:** Gói \`$pack\` (ghi ở \`.gate/pack\`); \`.gate/kit-files\` viết lại theo kit mới; file kit mà repo đã sửa riêng được giữ, tên ở dưới, và \`AGENTS.md\` giữ hai mục Layout, Facts của repo.$note
 **Bằng chứng:** \`bin/kit-evidence\` PASS cho commit \`$sha7\` của factory; \`scripts/verify\` đầy đủ xanh trước khi đẩy.
 
 ---
@@ -148,7 +158,7 @@ $(list added)
 Updated (the repository held an older kit version, or an older rendering of the kit's; now the kit's):
 $(list updated)
 
-Removed (the kit dropped them; the repository held the last kit version unchanged):
+Removed (the kit dropped them; the repository held a past kit version unchanged):
 $(list removed)
 
 Kept (the repository's own versions of kit files; the session merges by hand if the kit's matters):
@@ -158,9 +168,9 @@ Dropped from the kit and kept, because the repository changed them:
 $(list dropped-kept)
 
 ## Bằng chứng kit (bin/kit-evidence, mã của factory, chỉ đọc object git)
-\`\`\`text
+${fence}text
 $evidence
-\`\`\`
+$fence
 Kiểm lại từ bản clone của factory: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
 BODY
 )"

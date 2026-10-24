@@ -119,8 +119,9 @@ cannot bring a stale kit file up to date. Kit-update works on the clone onboard 
 and does nothing when the clone is dirty or `factory/kit-<sha7>` exists. It adds a missing kit file, replaces a kit file
 the repository holds as an older kit had it, renders `AGENTS.md`, `CODEOWNERS` and settings anew, removes a file the kit
 dropped when it is unchanged, and keeps and names what the repository changed. A repository's own `CLAUDE.md`, hook or
-`AGENTS.md` text outside the two sections stops it, to merge by hand. Its evidence names each updated file with the blob
-it had.
+`AGENTS.md` text outside the two sections stops it, to merge by hand; a `settings.json` or `CODEOWNERS` the repository
+changed is kept (named in the pull request), so the kit's newer rules do not reach it. Its evidence names each updated
+file with the blob it had, and fails a pull request that rewrites the repository's own Layout or Facts.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (the bootstrap rule asks

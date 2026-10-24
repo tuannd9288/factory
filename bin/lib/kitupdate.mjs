@@ -16,19 +16,11 @@ import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:f
 import { dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { FACTS, LAYOUT, LIMIT, fill, parseOwn } from './own.mjs';
-import { FILLED, INVENTORY, REPLACES, SETTINGS, git, pastBlobs, render, renderedAs, tree } from './evidence.mjs';
+import { FACTS, LAYOUT, LIMIT, fill } from './own.mjs';
+import { FILLED, INVENTORY, REPLACES, SETTINGS, git, ownOf, pastBlobs, render, renderedAs, tree } from './evidence.mjs';
 import { PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
 
 const RENDERED = (path) => Boolean(FILLED[path]) || path === SETTINGS;
-
-/** The repository's own two sections out of an AGENTS.md: its text from the Layout line on, parsed. */
-function ownOf(text) {
-  const lines = text.split('\n');
-  const at = lines.findIndex((l) => l.trimEnd() === LAYOUT);
-  if (at < 0) throw new Error(`no section "${LAYOUT}"`);
-  return parseOwn(lines.slice(at).join('\n'));
-}
 
 export function plan({ factory, commit, repo, base, name, human, pack: packName }) {
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
@@ -57,7 +49,14 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName 
       else if (as === 'past') {
         let final = to;
         if (path === 'AGENTS.md') {
-          final = fill(to, ownOf(text(repo, had.oid))).text;
+          let own;
+          try {
+            own = ownOf(text(repo, had.oid));
+          } catch (error) {
+            out.conflicts.push(`${path}: the repository's ${error.message.startsWith('no section') ? `AGENTS.md has no "${LAYOUT}" section` : `own sections cannot be read (${error.message})`}; merge it by hand (put its own parts under "${LAYOUT}" and "${FACTS}")`);
+            continue;
+          }
+          final = fill(to, own).text;
           if (final.split('\n').length - 1 > LIMIT) {
             out.conflicts.push(`${path}: with the repository's own parts it would have ${final.split('\n').length - 1} lines; at most ${LIMIT}`);
             continue;
