@@ -47,15 +47,21 @@ for (const n of prs) {
     console.log(`STOP\t${n}\treviewer unavailable (${down[1]}); this head is not scored`);
     process.exit(3);
   }
-  // The rollup keeps the check runs of every earlier run on the head: only the latest entry of each required check counts.
+  // The rollup keeps the check runs of every earlier run on the head. gh gives a running check status IN_PROGRESS (or QUEUED),
+  // conclusion "" and completedAt 0001-01-01: such an entry makes the head pending, whatever older entries say. Of completed
+  // entries only the latest of each required check counts: by completedAt, then startedAt, then the later place in the rollup.
+  const time = (t) => (typeof t === 'string' && Date.parse(t) > Date.parse('0002-01-01T00:00:00Z') ? Date.parse(t) : 0);
+  const entries = (pr.statusCheckRollup ?? []).filter((c) => REQUIRED.has(c.name));
+  const running = entries.some((c) => (c.status !== undefined && c.status !== 'COMPLETED') || (c.completedAt !== undefined && !time(c.completedAt)));
   const latest = new Map();
-  for (const c of pr.statusCheckRollup ?? []) {
-    const at = String(c.completedAt ?? c.startedAt ?? '');
-    if (REQUIRED.has(c.name) && (!latest.has(c.name) || at >= latest.get(c.name).at)) latest.set(c.name, { at, conclusion: c.conclusion });
+  for (const c of entries) {
+    const key = [time(c.completedAt), time(c.startedAt)];
+    const old = latest.get(c.name);
+    if (!old || key[0] > old.key[0] || (key[0] === old.key[0] && key[1] >= old.key[1])) latest.set(c.name, { key, conclusion: c.conclusion });
   }
-  const failed = [...latest.values()].some((c) => c.conclusion === 'FAILURE');
-  const done = [...latest.values()].filter((c) => c.conclusion).length === REQUIRED.size;
-  console.log(`pr\t${n}\t${pr.state !== 'MERGED' && failed ? 'caught' : pr.state === 'MERGED' || done ? 'missed' : 'pending'}`);
+  const failed = !running && [...latest.values()].some((c) => c.conclusion === 'FAILURE');
+  const done = !running && [...latest.values()].filter((c) => c.conclusion).length === REQUIRED.size;
+  console.log(`pr\t${n}\t${running ? 'pending' : pr.state !== 'MERGED' && failed ? 'caught' : pr.state === 'MERGED' || done ? 'missed' : 'pending'}`);
   let total = 0;
   for (const j of JSON.parse(gh('run', 'view', String(run.databaseId), '--repo', repo, '--json', 'jobs')).jobs) {
     const ms = Date.parse(j.completedAt) - Date.parse(j.startedAt);
