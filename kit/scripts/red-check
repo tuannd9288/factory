@@ -4,7 +4,8 @@
 # every one passes. Passes without a source change, or on a "No-red: <reason of 20 or more characters>" line in the
 # PR body, which the reviewer must accept for `review` to pass; the ledger counts it. A source change with no test and no
 # No-red line passes as a pure deletion when scripts/lib/deletion.mjs proves it (no added source line; nothing tracked at
-# the head names what went; knip at the base listed it as unused), and `review` still reads it. First, for each proof the change
+# the head names what went; knip at the base listed it as unused; every line removed from a file that stays is part of a
+# whole listed export), and `review` still reads it. First, for each proof the change
 # adds for a dropped test (scripts/lib/proofs.mjs), it makes the proof's break in a copy of the head and requires the
 # kept test green without it and red under it, as a test: a change that only drops a test has no source change.
 #   scripts/red-check [--base <rev>] [--body <file>]
