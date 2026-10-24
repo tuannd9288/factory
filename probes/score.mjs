@@ -9,7 +9,8 @@
 // It stops at the first head whose reviewer was unavailable (a usage limit, a bad token, a timeout): that head is not
 // scored, no later one is read, its quota line is printed before STOP, and the exit is 3. The run is resumed by naming
 // the later pull requests again. Run the first four heads alone by naming only those four. A run still in progress is
-// pending, unless the pull request merged: a merged probe was not blocked, whatever GitHub still shows running.
+// pending. Once its log can be read, a merged pull request scores missed: a merged probe was not blocked, whatever
+// check GitHub still shows running or failed.
 import { execFileSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
