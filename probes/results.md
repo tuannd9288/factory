@@ -217,6 +217,45 @@ factory-pack-scratch profile reports `gitBranch string 22/22` and `cwd string 22
 Does not prove: that a session without the kit's `AGENTS.md` follows the rules; the `rounds` job; a merge through
 auto-merge in a pack repository (the probe closes its pull request); another pack.
 
+## Issue #30: nothing from the claude.ai account loads, factory-pack-scratch, 2026-10-24
+
+Probe `probes/pack-probe.mjs` at fcddde6 (factory#47's head, copied out with `git archive`), on factory-pack-scratch's
+`main` at 51cbaf8, from the writer profile, with `gh` as `tuan9288-agent`. Claude Code **2.1.310**. Started
+2026-10-24T13:05:50Z; logs in `~/factory-runs/issue-30/live-1/` on the Mac mini.
+
+The profile's `settings.json` has the three keys `bin/onboard` now writes. Colly added them on the Human's word
+(#30's comment of 2026-10-23T18:57Z).
+
+**The new item passed.** Both init events, the first session's and the pull request session's, compared with run 2's
+pull request session (2.1.309, before the keys; `test/fixtures/init-2.1.309-run2-pr.json`):
+
+| In the init event | Run 2, 2.1.309, no keys | This run, 2.1.310, three keys |
+|---|---|---|
+| skills | 82, of which 9 `anthropic-skills:*` | 73, none `anthropic-skills:*` |
+| MCP servers from claude.ai | 3 (connected or needs-auth) | none (`mcp_servers` empty) |
+| tools | 33, of which 8 `mcp__claude_ai_*` | 25, none `mcp__claude_ai_*` |
+| plugins | 4, none `@synced` | 4, none `@synced`: pstack and three `@builtin` |
+
+Run 2 (2.1.309) named each synced skill by its full `anthropic-skills:<name>` in `init.skills`. This run cannot show
+how 2.1.310 names them, since none loaded; only the counts agree (73 = 82 − 9). If a later version lists short names,
+the item can no longer see them, so check the naming on each new pin with the sync on.
+
+**No other item ran.** The account logged into the writer profile was at its weekly limit (`rate_limit_event` status
+`rejected`, `seven_day`, open again 2026-10-26 03:00 +07). Each session ended on its first turn with cost 0 and "You've
+hit your weekly limit · resets Oct 26 at 3am (Asia/Saigon)". No pull request or issue was opened.
+
+The probe misreported that run:
+- it called the two refusals "model declined";
+- it passed "sessions finished within their turns", because the result's subtype was `success` with `is_error` true.
+
+It now reads `is_error`: such a refusal says the session ended in an error before making the call, and the item fails
+with the error's words.
+
+`#24 identity` lines, as printed: ssh `tuannd9288`, gh `tuan9288-agent`.
+
+Does not prove: the rest of #6's contract on 2.1.310. It is re-run once the limit opens, together with #29's two
+questions.
+
 ## Issue #25: the full-gate probe with the real reviewer, factory-probe, 2026-10-24
 
 **Setup.**

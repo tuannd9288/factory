@@ -1034,3 +1034,38 @@ test("#30: under --no-pr the claude.ai item's evidence names only the first sess
   assert.equal(item.ok, true, item.evidence);
   assert.match(item.evidence, /in the first session's init event$/);
 });
+
+// Found by #30's live run (2026-10-24, Claude Code 2.1.310): on an account at its weekly limit, each session ends at
+// once with result.subtype success, is_error true and the limit's words. No call was made, so nothing was declined.
+const LIMITED = "You've hit your weekly limit · resets Oct 26 at 3am (Asia/Saigon)";
+const limited = (id) => [
+  ev({ type: 'system', subtype: 'init', cwd: '/r/app', session_id: id, permissionMode: 'acceptEdits', model: 'claude-opus-5-5', plugins: [{ name: 'pstack' }] }),
+  ev({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'seven_day' } }),
+  ev({ type: 'assistant', message: { content: [{ type: 'text', text: LIMITED }] } }),
+  ev({ type: 'result', subtype: 'success', is_error: true, permission_denials: [], num_turns: 1, result: LIMITED }),
+].join('\n');
+
+test('#30 live run: a session that ended in an error is no model declining a call, and it did not finish', async () => {
+  const { parseSession, judge, exitCodeOf } = await probeModule();
+  const items = judge({ session: parseSession(limited('s1')), prSession: parseSession(limited('s2')), pr: null, ...base() });
+  for (const name of ['git tag x refused', '.env read refused']) {
+    const item = by(items, name);
+    assert.equal(item.inconclusive, true, name);
+    assert.equal(item.evidence, `the session ended in an error before making the call: ${LIMITED}`, name);
+  }
+  const finished = by(items, 'sessions finished');
+  assert.equal(finished.ok, false);
+  assert.equal(finished.evidence, `first session: an error, ${LIMITED}; pull request session: an error, ${LIMITED}`);
+  assert.equal(exitCodeOf(items), 1);
+});
+
+test('#30 live run: a session that made its calls and then ended in an error still has those calls judged', async () => {
+  const { parseSession, judge } = await probeModule();
+  const text = stream().replace('{"type":"result","subtype":"success","is_error":false', '{"type":"result","subtype":"success","is_error":true');
+  assert.notEqual(text, stream());
+  const items = judge({ session: parseSession(text), prSession: parseSession(prStream()), pr: prInfo(), ...base() });
+  assert.equal(by(items, 'git tag x refused').ok, true);
+  assert.equal(by(items, '.env read refused').ok, true);
+  assert.equal(by(items, 'sessions finished').ok, false);
+  assert.match(by(items, 'sessions finished').evidence, /^first session: an error, The line is: /);
+});
