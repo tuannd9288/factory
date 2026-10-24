@@ -1307,6 +1307,17 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     assert.doesNotMatch(out.out, /unavailable/);
     assert.ok(!out.out.includes('tok-secret-12345'));
   });
+  test('an earlier review that was unavailable (unclean-context) and left no verdict is a new call, not a reuse', () => {
+    claude({ output: { blocking: [], noRed: 'accepted' } });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99, event: 'pull_request_target' }] }) });
+    const { head } = candidate();
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'unavailable: unclean-context')]), 'claude-calls': '' });
+    const out = again('review', head, reviewEnv);
+    assert.equal(out.code, 0, out.out);
+    assert.doesNotMatch(out.out, /reused/);
+    assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1);
+    annotations();
+  });
   test('review reuses nothing from a run that is not of pull_request_target, or names no event: a branch can write its own pull_request workflow', () => {
     claude({ output: { blocking: [], noRed: 'accepted' } });
     const { head, base } = candidate();

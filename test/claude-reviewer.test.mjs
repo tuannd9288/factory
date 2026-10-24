@@ -21,8 +21,11 @@ const dirOf = /CANDIDATE_DIR=(\S+)/.exec(brief)?.[1];
 const walk = (d, out = []) => { for (const n of fs.readdirSync(d)) { const p = d + '/' + n; const s = fs.lstatSync(p); out.push(p.slice(dirOf.length + 1) + (s.isSymbolicLink() ? ' -> link' : '')); if (s.isDirectory()) walk(p, out); } return out; };
 fs.appendFileSync(dir + '/calls.jsonl', JSON.stringify({ argv: a, env: process.env, cwd: process.cwd(), brief, files: dirOf ? walk(dirOf) : [], cwdFiles: fs.readdirSync(process.cwd()), home: process.env.HOME && fs.readdirSync(process.env.HOME) }) + '\n');
 const n = fs.readFileSync(dir + '/calls.jsonl', 'utf8').split('\n').filter(Boolean).length;
-const emit = (e) => console.log(JSON.stringify(e));
-const init = { type: 'system', subtype: 'init', tools: conf.tools ?? ['Read', 'Grep', 'Glob', 'StructuredOutput'], mcp_servers: conf.mcp ?? [], plugins: [], skills: [], slash_commands: ['compact'] };
+const emit = (e) => fs.writeSync(1, JSON.stringify(e) + '\n');
+const settings = JSON.parse(a[a.indexOf('--settings') + 1] ?? '{}');
+const BUILTIN = ['cc-plugin-agents-md@builtin', 'cc-plugin-telemetry@builtin', 'cc-plugin-plugin-authoring@builtin'];
+const plugins = conf.plugins ?? BUILTIN.filter((p) => settings.enabledPlugins?.[p] !== false).map((name) => ({ name }));
+const init = { type: 'system', subtype: 'init', tools: conf.tools ?? ['Read', 'Grep', 'Glob', 'StructuredOutput'], mcp_servers: conf.mcp ?? [], plugins, skills: [], slash_commands: ['compact'] };
 const fail = (status, text) => { if (!conf.noInit) emit(init); emit({ type: 'result', subtype: 'error_during_execution', is_error: true, api_error_status: status, result: text }); process.exit(1); };
 if (conf.mode === 'sleep') { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20000); process.exit(0); }
 if (conf.mode === 'quota') fail(429, 'Claude AI usage limit reached|1761300000');
@@ -32,6 +35,8 @@ if (conf.mode === 'overloaded-once' && n === 1) fail(529, 'Overloaded');
 if (conf.mode === 'maxturns') { emit(init); emit({ type: 'result', subtype: 'error_max_turns', is_error: true, result: '' }); process.exit(1); }
 if (conf.mode === 'crash') { process.stderr.write('boom\n'); process.exit(7); }
 if (!conf.noInit) emit(init);
+if (conf.sleepAfterInit) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, conf.sleepAfterInit * 1000);
+if (conf.marker) fs.writeFileSync(dir + '/marker', 'result about to be written');
 if (conf.quotaEvent) emit({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1761300000 } });
 const out = conf.output ?? { blocking: [], noRed: 'unjudged' };
 const text = conf.text ?? JSON.stringify(out);
@@ -108,6 +113,11 @@ describe('claude-reviewer', () => {
     assert.ok(!calls.argv.includes('--bare'), '--bare reads no OAuth token');
   });
 
+  test('the settings turn off the three built-in plugins Claude Code 2.1.308 lists in every init', () => {
+    const settings = JSON.parse(calls.argv[calls.argv.indexOf('--settings') + 1]);
+    assert.deepEqual(settings.enabledPlugins, { 'cc-plugin-agents-md@builtin': false, 'cc-plugin-telemetry@builtin': false, 'cc-plugin-plugin-authoring@builtin': false });
+  });
+
   test('the schema holds what result.mjs holds: a claim to read, a reason of 1 to 500 characters', () => {
     const schema = JSON.parse(calls.argv[calls.argv.indexOf('--json-schema') + 1]);
     assert.equal(schema.properties.blocking.items.properties.claim.minLength, 1);
@@ -171,6 +181,24 @@ describe('claude-reviewer', () => {
       assert.equal(out.result, null);
     });
   }
+
+  test('an unclean init is judged when it arrives: claude is stopped before it answers, and the unclean line names the plugin', () => {
+    const started = Date.now();
+    const out = review({ plugins: [{ name: 'evil@builtin' }], sleepAfterInit: 20, marker: true });
+    assert.ok(Date.now() - started < 10_000, `waited ${Date.now() - started} ms for a result`);
+    assert.equal(out.code, 3, out.out);
+    assert.match(out.out, /^::notice title=review-result::unavailable: unclean-context\n/);
+    assert.match(out.out, /^reviewer: unclean init: plugins=evil@builtin$/m);
+    assert.ok(!existsSync(join(dir, 'marker')), 'claude ran on to its result');
+  });
+
+  test('the unclean line names extra tools, connector servers and synced skills, by name only', () => {
+    assert.match(review({ tools: ['Read', 'Grep', 'Glob', 'StructuredOutput', 'Bash'] }).out, /^reviewer: unclean init: tools=\+Bash$/m);
+    assert.match(review({ tools: ['Read', 'Glob'] }).out, /^reviewer: unclean init: tools=-Grep$/m);
+    assert.match(review({ mcp: [{ name: 'claude.ai Gmail', status: 'connected', source: 'claudeai' }] }).out, /^reviewer: unclean init: mcp=claude\.ai Gmail$/m);
+    const long = review({ plugins: Array.from({ length: 60 }, (_, i) => ({ name: `p${i}-with-a-long-name@builtin` })) }).out;
+    assert.ok(long.split('\n').find((l) => l.startsWith('reviewer: unclean init:')).length <= 300);
+  });
 
   test('an overloaded API is tried twice; one that recovers gives a result; a limit or a bad token is never retried', () => {
     assert.equal(review({ mode: 'overloaded-once' }).code, 0);
