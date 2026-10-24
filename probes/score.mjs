@@ -5,9 +5,9 @@
 //   job <n> <name> <conclusion> <minutes>   the job's run time rounded up to a whole minute: what Actions bills for it;
 //        0 for a skipped job, ? when GitHub gave no times
 //   minutes <n> <total> gate-trusted.yml jobs only, not gate.yml's verify
-//   quota <n> <line>   the reviewer's own line about a quota or rate-limit event in its stream (or that there was none)
+//   usage <n> <line>   the reviewer's own line on what one call spent: its tokens and total_cost_usd (one per call)
 // It stops at the first head whose reviewer was unavailable (a usage limit, a bad token, a timeout): that head is not
-// scored, no later one is read, its quota line is printed before STOP, and the exit is 3. The run is resumed by naming
+// scored, no later one is read, its usage lines are printed before STOP, and the exit is 3. The run is resumed by naming
 // the later pull requests again. Run the first four heads alone by naming only those four. A run still in progress is
 // pending. Once its log can be read, a merged pull request scores missed: a merged probe was not blocked, whatever
 // check GitHub still shows running or failed.
@@ -41,10 +41,10 @@ for (const n of prs) {
     continue;
   }
   const messages = log.split('\n').map(messageOf);
-  const quota = messages.filter((m) => /^reviewer: (quota event|no quota or rate-limit event)/.test(m));
+  const usage = messages.filter((m) => /^reviewer: usage: /.test(m));
   const down = messages.map((m) => /^(?:review|verdict): reviewer unavailable \(([a-z-]+)\)/.exec(m)).find(Boolean);
   if (down) {
-    for (const line of quota) console.log(`quota\t${n}\t${line}`);
+    for (const line of usage) console.log(`usage\t${n}\t${line}`);
     console.log(`STOP\t${n}\treviewer unavailable (${down[1]}); this head is not scored`);
     process.exit(3);
   }
@@ -71,5 +71,5 @@ for (const n of prs) {
     console.log(`job\t${n}\t${j.name}\t${j.conclusion}\t${minutes}`);
   }
   console.log(`minutes\t${n}\t${total}\tgate-trusted.yml jobs only, not gate.yml's verify`);
-  for (const line of quota) console.log(`quota\t${n}\t${line}`);
+  for (const line of usage) console.log(`usage\t${n}\t${line}`);
 }
