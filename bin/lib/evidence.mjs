@@ -103,7 +103,7 @@ export function pastBlobs(factory, rev, path) {
   const key = `${factory}\0${rev}\0${path}`;
   if (!pastCache.has(key)) {
     const oids = new Set();
-    for (const line of git(factory, ['--literal-pathspecs', 'log', '--raw', '--no-abbrev', '--format=', rev, '--', path]).split('\n')) {
+    for (const line of git(factory, ['--literal-pathspecs', 'log', '-m', '--raw', '--no-abbrev', '--format=', rev, '--', path]).split('\n')) {
       if (!line.startsWith(':')) continue;
       const after = line.slice(1).split('\t')[0].split(' ')[3];
       if (after && !/^0+$/.test(after)) oids.add(after);
@@ -128,7 +128,8 @@ function renderStates(factory, fac, path, packName, packNow) {
   const packed = file && packName && packName !== 'none';
   const show = (rev, p) => {
     try {
-      return git(factory, ['cat-file', 'blob', `${rev}:${p}`]);
+      // The path is often absent from an older commit; git's own complaint about that is not output.
+      return execFileSync('git', ['-C', factory, 'cat-file', 'blob', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20, timeout: GIT_MS, stdio: ['ignore', 'pipe', 'ignore'] });
     } catch {
       return null;
     }
@@ -223,22 +224,21 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
       const parts = text === to ? { ok: true } : ownParts(path, to, text);
       // Where the base is a rendering, the repository's own Layout and Facts are the base's: a pull request that rewrites
       // them is not the kit's, whatever it says (bin/kit-update never changes them).
-      const baseOwn = (() => {
+      // A text with no Layout section has no own parts; one whose parts cannot be parsed is unreadable, and fails closed.
+      const ownKey = (t) => {
+        if (!t.split('\n').some((l) => l.trimEnd() === LAYOUT)) return 'none';
         try {
-          return path === 'AGENTS.md' && as ? JSON.stringify(ownOf(blob(repo, had.oid))) : null;
+          return JSON.stringify(ownOf(t));
         } catch {
           return null;
         }
-      })();
-      const headOwn = (() => {
-        try {
-          return JSON.stringify(ownOf(text));
-        } catch {
-          return null;
-        }
-      })();
+      };
+      const checkOwn = path === 'AGENTS.md' && as !== null;
+      const baseOwn = checkOwn ? ownKey(blob(repo, had.oid)) : undefined;
+      const headOwn = checkOwn ? ownKey(text) : undefined;
       if (!parts.ok) fails.push(`differs: ${path} (${parts.why ?? 'content'})`);
-      else if (baseOwn !== null && baseOwn !== headOwn) fails.push(`differs: ${path} (the repository's own Layout or Facts changed)`);
+      else if (checkOwn && (baseOwn === null || headOwn === null)) fails.push(`differs: ${path} (the repository's own parts cannot be read)`);
+      else if (checkOwn && baseOwn !== headOwn) fails.push(`differs: ${path} (the repository's own Layout or Facts changed)`);
       else {
         filled.add(path);
         if (own && older) updated.push(was(path, had.oid, 'kit'));
