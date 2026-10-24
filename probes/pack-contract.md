@@ -66,12 +66,21 @@ git@github.com`, which exits 1 even when it authenticates; the login comes from 
 environment the sessions are launched with, not through the model. They are #24's to judge, never #6's PASS or FAIL: today
 SSH should answer `tuannd9288`, and the probe goes on. No token and nothing else from `hosts.yml` is printed.
 
+`#24 gh logins: <login>, …|none` names every login `gh auth status -h github.com` holds, a failed or timed-out one included, by
+name only, in the same environment: `gh config get` shows only the active one, and a session could `gh auth switch`.
+With `--human-home <his home>`, run from the agents' own macOS account, the probe also prints
+`#24 file <home>/.ssh/config: …` and `#24 file <home>/.claude/settings.json: …`. It opens each file without blocking
+and closes it again without reading anything. It prints `refused (EACCES)` when the operating system refuses the open, `READABLE`
+when the open succeeds, and `not proven: <code>` for any other error. Under a `drwx------` home the open is refused at
+the home folder, so the file need not exist. #24 wants both refused, and `tuan9288-agent` the only login.
+
 ## Running the probe
 
 A SIGTERM sent to the probe alone waits until every `spawnSync` returns; only a process-group signal stops it at once.
 
 ```
 node probes/pack-probe.mjs --repo <owner>/<name>      # from the factory root, as the agents' account
+node probes/pack-probe.mjs --repo <owner>/<name> --human-home /Users/<the Human>   # #24, from the factory account
 ```
 
 It needs, in order: the repository taken in (`bin/onboard`: clone, profile, `.envrc`, kit) and the kit pull request

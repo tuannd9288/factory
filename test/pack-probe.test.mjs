@@ -1035,6 +1035,150 @@ test("#30: under --no-pr the claude.ai item's evidence names only the first sess
   assert.match(item.evidence, /in the first session's init event$/);
 });
 
+// --- #24: every login gh holds, by name, and the Human's two files refused by file permission ---
+
+const STATUS_TWO = [
+  'github.com',
+  '  ✓ Logged in to github.com account tuan9288-agent (keyring)',
+  '  - Active account: true',
+  '  - Token: gho_************************************',
+  '',
+  '  X Failed to log in to github.com account tuannd9288 (keyring)',
+  '  - Active account: false',
+  '  - The token in keyring is invalid.',
+  '',
+].join('\n');
+
+test('#24: gh auth status gives every login by name, a failed one included, and nothing else', async () => {
+  const { parseGhLogins } = await probeModule();
+  assert.deepEqual(parseGhLogins(STATUS_TWO), ['tuan9288-agent', 'tuannd9288']);
+  assert.deepEqual(parseGhLogins('You are not logged into any GitHub hosts. To log in, run: gh auth login\n'), []);
+  assert.deepEqual(parseGhLogins(''), []);
+});
+
+test('#24: a file this account may open is READABLE, one behind a closed folder refused (EACCES), a missing one not proven', async () => {
+  const { openable } = await probeModule();
+  const dir = mkdtempSync(join(tmpdir(), 'probe-24-'));
+  const home = join(dir, 'home');
+  try {
+    mkdirSync(join(home, '.ssh'), { recursive: true });
+    writeFileSync(join(home, '.ssh/config'), 'Host x\n');
+    assert.equal(openable(join(home, '.ssh/config')), 'READABLE');
+    assert.equal(openable(join(home, '.claude/settings.json')), 'not proven: ENOENT');
+    chmodSync(home, 0o000);
+    assert.equal(openable(join(home, '.ssh/config')), 'refused (EACCES)');
+    assert.equal(openable(join(home, '.claude/settings.json')), 'refused (EACCES)', 'a closed home refuses before the file is looked up');
+  } finally {
+    chmodSync(home, 0o755);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** The world's gh, with `gh auth status` answering `status`. */
+function withStatus(w, status) {
+  const bin = join(w.dir, 'bin24');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh\nif [ "$1 $2" = "auth status" ]; then printf '%s' "$MOCK_AUTH_STATUS"; exit 0; fi\nexec '${join(w.bin, 'gh')}' "$@"\n`);
+  chmodSync(join(bin, 'gh'), 0o755);
+  return { ...w.env, PATH: `${bin}:${w.env.PATH}`, MOCK_AUTH_STATUS: status };
+}
+
+test('#24: with --human-home the probe prints every gh login and both files refused, before the sessions, and never counts them', async () => {
+  const w = await world();
+  const home = join(w.dir, 'human');
+  try {
+    mkdirSync(join(home, '.ssh'), { recursive: true });
+    writeFileSync(join(home, '.ssh/config'), 'Host x\n');
+    mkdirSync(join(home, '.claude'));
+    writeFileSync(join(home, '.claude/settings.json'), '{}\n');
+    chmodSync(home, 0o000);
+    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args, '--human-home', home], { encoding: 'utf8', env: withStatus(w, STATUS_TWO) });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(r.status, 0, out);
+    const lines = out.split('\n');
+    const at = (re) => lines.findIndex((l) => re.test(l));
+    assert.ok(at(/^#24 gh logins: tuan9288-agent, tuannd9288$/) >= 0, out);
+    for (const file of ['.ssh/config', '.claude/settings.json']) assert.ok(at(new RegExp(`^#24 file ${join(home, file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: refused \\(EACCES\\)$`)) >= 0, `${file}:\n${out}`);
+    assert.ok(at(/^#24 file /) < at(/^(PASS|FAIL|INCONCLUSIVE) /), 'a file line came after a session');
+    assert.doesNotMatch(out, /gho_/);
+    assert.doesNotMatch(out, /(PASS|FAIL|INCONCLUSIVE) .*#24/);
+    assert.match(readFileSync(join(w.dir, 'logs/identity.log'), 'utf8'), /^#24 gh logins: tuan9288-agent, tuannd9288$/m);
+    w.clean();
+  } finally {
+    chmodSync(home, 0o755);
+    w.cleanup();
+  }
+});
+
+test('#24: without --human-home the probe opens none of the Human\'s files and still prints every gh login', async () => {
+  const w = await world();
+  try {
+    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args], { encoding: 'utf8', env: withStatus(w, STATUS_TWO.split('\n\n')[0]) });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(r.status, 0, out);
+    assert.match(out, /^#24 gh logins: tuan9288-agent$/m);
+    assert.doesNotMatch(out, /^#24 file /m);
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+// Found by #24's review: gh 2.102 also prints "Timeout trying to log in to … account X", and exits 1 when a login
+// fails; a FIFO at a probed path blocked the open; --human-home must be an absolute path.
+const STATUS_TIMEOUT = [
+  'github.com',
+  '  ✓ Logged in to github.com account tuan9288-agent (/Users/factory/.config/gh/hosts.yml)',
+  '  - Active account: true',
+  '',
+  '  X Timeout trying to log in to github.com account tuannd9288 (keyring)',
+  '  - Active account: false',
+  '',
+].join('\n');
+
+test('#24: a login whose check timed out is still named', async () => {
+  const { parseGhLogins } = await probeModule();
+  assert.deepEqual(parseGhLogins(STATUS_TIMEOUT), ['tuan9288-agent', 'tuannd9288']);
+});
+
+test('#24: the probe names a timed-out login when gh auth status exits 1', async () => {
+  const w = await world();
+  try {
+    const bin = join(w.dir, 'bin24t');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'gh'), `#!/bin/sh\nif [ "$1 $2" = "auth status" ]; then printf '%s' "$MOCK_AUTH_STATUS"; exit 1; fi\nexec '${join(w.bin, 'gh')}' "$@"\n`);
+    chmodSync(join(bin, 'gh'), 0o755);
+    const env = { ...w.env, PATH: `${bin}:${w.env.PATH}`, MOCK_AUTH_STATUS: STATUS_TIMEOUT };
+    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args], { encoding: 'utf8', env });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.match(out, /^#24 gh logins: tuan9288-agent, tuannd9288$/m);
+    w.clean();
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('#24: opening a FIFO at a probed path does not wait for a writer', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'probe-24-fifo-'));
+  try {
+    assert.equal(spawnSync('mkfifo', [join(dir, 'config')]).status, 0);
+    const code = `import(${JSON.stringify(join(factory, 'probes/pack-probe.mjs'))}).then((m) => console.log(m.openable(${JSON.stringify(join(dir, 'config'))})))`;
+    const r = spawnSync('node', ['-e', code], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(r.signal, null, 'the open blocked');
+    assert.equal(r.stdout.trim(), 'READABLE');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#24: --human-home is refused unless it is an absolute path', () => {
+  for (const value of ['', 'Users/tuannguyen', './home']) {
+    const r = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), '--repo', 'o/app', '--human-home', value], { encoding: 'utf8' });
+    assert.equal(r.status, 2, `${JSON.stringify(value)}: ${r.stdout}${r.stderr}`);
+    assert.match(`${r.stdout}${r.stderr}`, /--human-home needs an absolute path/);
+  }
+});
+
 // Found by #30's live run (2026-10-24, Claude Code 2.1.310): on an account at its weekly limit, each session ends at
 // once with result.subtype success, is_error true and the limit's words. No call was made, so nothing was declined.
 const LIMITED = "You've hit your weekly limit · resets Oct 26 at 3am (Asia/Saigon)";

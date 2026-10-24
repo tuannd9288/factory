@@ -166,3 +166,36 @@ test('check is not ready while another sweep holds the lock, for its own sweep d
     }
   });
 });
+
+// #24: the job as a LaunchDaemon in /Library/LaunchDaemons, run as the agents' own macOS account. A sweep exits after
+// each run, so the job starts every minute and is never kept alive, which would restart it at once, in a loop.
+import { userInfo } from 'node:os';
+
+test('plist --daemon prints the job as the account that printed it, with its HOME, every minute, never kept alive', () => {
+  withMachine('agent-bot', ({ dir, home, queue }) => {
+    const r = queue('plist', '--daemon', '--repo', 'o/app');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const job = parse(r.stdout, dir);
+    assert.equal(job.UserName, userInfo().username);
+    assert.equal(job.EnvironmentVariables.HOME, home);
+    assert.deepEqual(job.ProgramArguments, [join(factory, 'bin/factory-queue'), 'sweep', '--repo', 'o/app']);
+    assert.equal(job.StartInterval, 60);
+    assert.equal(job.RunAtLoad, true);
+    assert.equal(job.KeepAlive, undefined);
+    assert.equal(job.StandardOutPath, join(home, 'Library/Logs/factory/queue.log'));
+    assert.deepEqual(readdirSync(home), [], 'plist made a folder');
+  });
+});
+
+test('plist without --daemon has no UserName, and --daemon belongs to plist alone', () => {
+  withMachine('agent-bot', ({ dir, queue }) => {
+    const r = queue('plist', '--repo', 'o/app');
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(parse(r.stdout, dir).UserName, undefined);
+    for (const command of ['sweep', 'check']) {
+      const s = queue(command, '--daemon', '--repo', 'o/app');
+      assert.equal(s.status, 2, `${command}: ${s.stdout}${s.stderr}`);
+      assert.match(s.stderr, /--daemon is for plist alone/);
+    }
+  });
+});
