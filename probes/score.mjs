@@ -27,7 +27,8 @@ const messageOf = (line) => line.replace(/^[^\t]*\t[^\t]*\t/, '').replace(/^\d{4
 
 for (const n of prs) {
   const pr = JSON.parse(gh('pr', 'view', n, '--repo', repo, '--json', 'state,headRefOid,statusCheckRollup'));
-  const [run] = JSON.parse(gh('run', 'list', '--repo', repo, '--workflow', 'gate-trusted.yml', '--commit', pr.headRefOid, '--json', 'databaseId', '--limit', '1'));
+  // The newest run on the head by createdAt, not the first gh lists.
+  const run = JSON.parse(gh('run', 'list', '--repo', repo, '--workflow', 'gate-trusted.yml', '--commit', pr.headRefOid, '--json', 'databaseId,createdAt', '--limit', '20')).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
   let log;
   try {
     log = run ? gh('run', 'view', String(run.databaseId), '--repo', repo, '--log') : null;
@@ -46,8 +47,14 @@ for (const n of prs) {
     console.log(`STOP\t${n}\treviewer unavailable (${down[1]}); this head is not scored`);
     process.exit(3);
   }
-  const failed = (pr.statusCheckRollup ?? []).some((c) => REQUIRED.has(c.name) && c.conclusion === 'FAILURE');
-  const done = (pr.statusCheckRollup ?? []).filter((c) => REQUIRED.has(c.name) && c.conclusion).length === REQUIRED.size;
+  // The rollup keeps the check runs of every earlier run on the head: only the latest entry of each required check counts.
+  const latest = new Map();
+  for (const c of pr.statusCheckRollup ?? []) {
+    const at = String(c.completedAt ?? c.startedAt ?? '');
+    if (REQUIRED.has(c.name) && (!latest.has(c.name) || at >= latest.get(c.name).at)) latest.set(c.name, { at, conclusion: c.conclusion });
+  }
+  const failed = [...latest.values()].some((c) => c.conclusion === 'FAILURE');
+  const done = [...latest.values()].filter((c) => c.conclusion).length === REQUIRED.size;
   console.log(`pr\t${n}\t${pr.state !== 'MERGED' && failed ? 'caught' : pr.state === 'MERGED' || done ? 'missed' : 'pending'}`);
   let total = 0;
   for (const j of JSON.parse(gh('run', 'view', String(run.databaseId), '--repo', repo, '--json', 'jobs')).jobs) {
