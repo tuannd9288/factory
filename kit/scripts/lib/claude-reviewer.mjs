@@ -247,20 +247,27 @@ async function call(minutes) {
   return { run, events, why: 'crash' };
 }
 
-let last = await call(budget().minutes);
-if (last.why === 'overloaded') {
+const calls = [await call(budget().minutes)];
+if (calls[0].why === 'overloaded') {
   sleep(Number(process.env.GATE_RETRY_SECONDS ?? 60));
   const again = budget();
-  if (again?.retry) last = await call(again.minutes);
+  if (again?.retry) calls.push(await call(again.minutes));
 }
-const { run, events, why, detail } = last;
-const rate = events.find((e) => /rate_limit/i.test(String(e.type)) || e.rate_limit_info);
-const quotaLine = rate ? `reviewer: quota event: ${clean(JSON.stringify(rate)).slice(0, 300)}` : 'reviewer: no quota or rate-limit event in the stream';
-if (why) unavailable(why, [...(why === 'unclean-context' ? [`reviewer: unclean init: ${clean(detail)}`.slice(0, 300)] : []), quotaLine]);
+const { run, events, why, detail } = calls.at(-1);
+// What each call spent, from its result event: the token counts and total_cost_usd that Claude Code reports. A field that
+// is not a number prints as ?, so the line carries no text from the stream.
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? String(v) : '?');
+const spent = calls.map(({ events: e }) => {
+  const result = e.findLast((x) => x.type === 'result');
+  if (!result) return 'reviewer: usage: no result event';
+  const u = result.usage ?? {};
+  return `reviewer: usage: input ${num(u.input_tokens)}, cache write ${num(u.cache_creation_input_tokens)}, cache read ${num(u.cache_read_input_tokens)}, output ${num(u.output_tokens)} tokens; cost $${num(result.total_cost_usd)}`;
+});
+if (why) unavailable(why, [...(why === 'unclean-context' ? [`reviewer: unclean init: ${clean(detail)}`.slice(0, 300)] : []), ...spent]);
 
 const final = events.findLast((e) => e.type === 'result');
 const answer = final.structured_output;
-if (!answer || typeof answer !== 'object' || Array.isArray(answer)) unavailable('no-result', [quotaLine]);
+if (!answer || typeof answer !== 'object' || Array.isArray(answer)) unavailable('no-result', spent);
 const written = JSON.stringify({ reviewer: pin.name, job, base, head, blocking: answer.blocking, noRed: answer.noRed, ...(answer.raise !== undefined ? { raise: answer.raise } : {}) });
 // The forms a secret could take in text: as it is, hex, and base64 after none, one or two other bytes. Of those the group
 // that holds the other bytes is dropped, and so is the last, whose end depends on the byte after the secret: what is
@@ -273,5 +280,5 @@ for (const secret of [TOKEN, GH].filter((s) => s.length >= 8))
     process.exit(4);
   }
 writeFileSync(outFile, written);
-console.log(quotaLine);
+for (const line of spent) console.log(line);
 console.log(`review: ${pin.name} read ${head.slice(0, 8)} in ${events.length} events`);
