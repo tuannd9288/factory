@@ -27,20 +27,17 @@ for f in kit/.github/workflows/*.yml .github/workflows/*.yml; do
   ruby -ryaml -e 'YAML.load_file(ARGV[0])' "$f" >/dev/null 2>&1 || { echo "verify: $f does not parse as YAML"; failed=1; }
 done
 
-# The tools keep state in the folders these three name, the machine's own by default. The tests get fresh empty ones,
-# so a test that gives a tool no folder of its own writes here rather than into the machine's, and the run fails (#35).
-sandbox=$(mktemp -d) || exit 2
+# The tools keep state in the folders these name, the machine's own by default; direnv, which bin/onboard runs, records
+# each folder it allows under XDG_DATA_HOME. The tests get fresh empty ones, so a test that gives a tool no folder of its
+# own writes here rather than into the machine's, and the run fails (#35).
+folders='FACTORY_STATE AGENT_PROFILES FACTORY_ROOT XDG_DATA_HOME'
+sandbox=$(mktemp -d) || { echo "verify: could not make a folder for the tests' state"; exit 2; }
 trap 'rm -rf "$sandbox"' EXIT
-mkdir "$sandbox/FACTORY_STATE" "$sandbox/AGENT_PROFILES" "$sandbox/FACTORY_ROOT"
+for v in $folders; do mkdir "$sandbox/$v"; done
 out=$(env -u NODE_TEST_CONTEXT FACTORY_STATE="$sandbox/FACTORY_STATE" AGENT_PROFILES="$sandbox/AGENT_PROFILES" \
-  FACTORY_ROOT="$sandbox/FACTORY_ROOT" node --test --test-reporter=spec --test-concurrency=4 'test/*.test.mjs' 2>&1)
+  FACTORY_ROOT="$sandbox/FACTORY_ROOT" XDG_DATA_HOME="$sandbox/XDG_DATA_HOME" \
+  node --test --test-reporter=spec --test-concurrency=4 'test/*.test.mjs' 2>&1)
 code=$?
-leaked=$(cd "$sandbox" && find FACTORY_STATE AGENT_PROFILES FACTORY_ROOT -mindepth 1 \( -type f -o -type l -o -type d -empty \) | sort)
-if [ -n "$leaked" ]; then
-  echo "verify: a test wrote outside its own folders; give the tool it starts a FACTORY_STATE, AGENT_PROFILES or FACTORY_ROOT of its own:"
-  printf '%s\n' "$leaked" | head -20 | sed 's/^/  /'
-  failed=1
-fi
 summary=$(printf '%s\n' "$out" | grep -E '^ℹ (tests|fail) [0-9]+$' | sed 's/^ℹ //' | tr '\n' ' ')
 tests=$(printf '%s\n' "$out" | sed -n 's/^ℹ tests \([0-9][0-9]*\)$/\1/p')
 if [ "$code" -ne 0 ]; then
@@ -49,6 +46,17 @@ if [ "$code" -ne 0 ]; then
   failed=1
 elif [ "${tests:-0}" -eq 0 ]; then
   echo "verify: no tests ran"
+  failed=1
+fi
+for v in $folders; do
+  { [ -d "$sandbox/$v" ] && [ ! -L "$sandbox/$v" ]; } || { echo "verify: a test removed or replaced the $v folder it was given"; failed=1; }
+done
+leaked=$(cd "$sandbox" && find $folders -mindepth 1 \( -type f -o -type l -o -type d -empty \) 2>/dev/null | sort)
+if [ -n "$leaked" ]; then
+  n=$(printf '%s\n' "$leaked" | wc -l | tr -d ' ')
+  echo "verify: a test wrote outside its own folders; give the tool it starts a FACTORY_STATE, AGENT_PROFILES, FACTORY_ROOT or XDG_DATA_HOME of its own:"
+  printf '%s\n' "$leaked" | head -20 | sed 's/^/  /'
+  [ "$n" -le 20 ] || echo "  and $((n - 20)) more"
   failed=1
 fi
 [ "$failed" -eq 0 ] || { echo "verify: failed in $((SECONDS - start))s"; exit 1; }
