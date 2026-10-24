@@ -66,15 +66,15 @@ D19 caught only by that rule; the full-gate bar waits on the real reviewer.
 | C1 | new `capitalizeWords` + test (namespace import) | 1 | lands |
 | C2 | new `wordCount` + test | 1 | lands |
 | C3 | limiter `reset(recipient)` + test | 1 | lands |
-| C4 | new src/chunk.js `chunk(text, size)` by grapheme, never inside an emoji + test with `await import()` | 1 | lands |
+| C4 | new src/chunk.js `chunk(text, size)` by grapheme, never inside an emoji, refusing a size that is not a whole number of at least 1 + test with `await import()` | 1 | lands |
 | C5 | limiter: the duplicated window filter becomes one helper; No-red | 1 | lands (real reviewer); blocked under the stub |
 | C6 | README section on tokens | 1 | lands (no source change) |
 | C7 | send.js refuses whitespace-only text: failing test first (Failing-test:), then the code | 2 | lands |
-| C8 | token.js `sign` refuses a recipient holding ".": failing test first, then the code | 2 | lands |
+| C8 | token.js `sign` refuses a recipient or an expiry holding ".": failing test first, then the code | 2 | lands |
 | C9 | package.json `engines.node >= 24` | 2 | lands (manifest) |
 | C10 | JSDoc comments on format.js, No-red | 1 | lands (real reviewer); blocked under the stub |
 | C11 | a new test for truncate with max 1 (test only) | 1 | lands |
-| C12 | truncate takes an `ellipsis` option + test | 1 | lands |
+| C12 | truncate takes an `ellipsis` option, which counts toward `max` + test | 1 | lands |
 | C13 | limiter `allow` throws TypeError on a non-string recipient + test | 1 | lands |
 | C14 | send.js renames `last` to `lastError`, No-red | 2 | lands (real reviewer); blocked under the stub |
 | C15 | new src/slug.js `slugify` (Vietnamese diacritics) + test with `await import()` | 1 | lands |
