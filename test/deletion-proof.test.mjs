@@ -417,3 +417,76 @@ describe('the knip config decides how strict the gate is: changing it is tier 3'
     assert.equal(out.code, 0, out.out);
   });
 });
+
+// Removing an unused export whose initialisation can run code at load is not a pure deletion (the Human, 2026-10-24).
+describe('red-check: an export that may run code at load', () => {
+  let r;
+  let bin;
+  let n = 0;
+  before(() => {
+    r = repoWithKit({ 'knip.json': '{}\n' });
+    bin = join(r.dir, 'fake-bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npx'), '#!/bin/sh\ncat "$FAKE_KNIP_REPORT"\nexit 1\n');
+    chmodSync(join(bin, 'npx'), 0o755);
+  });
+  after(() => r.cleanup());
+
+  /** Removes the whole of `declaration` (an export named `name`) from a file that keeps another export. */
+  const removing = (name, declaration) => {
+    n++;
+    git(r.repo, 'switch', '-q', '-C', `load${n}`, 'origin/main');
+    commit(r.repo, { 'src/x.js': `export const keep = 1;\n${declaration}\n` }, `base ${n}`);
+    const base = git(r.repo, 'rev-parse', 'HEAD');
+    commit(r.repo, { 'src/x.js': 'export const keep = 1;\n' }, `head ${n}`);
+    writeFileSync(join(r.dir, 'knip.json'), report(listsExports('src/x.js', name)));
+    return script(r.repo, 'red-check', ['--base', base], { PATH: `${bin}:${process.env.PATH}`, FAKE_KNIP_REPORT: join(r.dir, 'knip.json') });
+  };
+  const runsCode = (name, declaration) => {
+    const out = removing(name, declaration);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, new RegExp(`check 1: src/x\\.js removes ${name}, whose initialisation may run code at load; a pure deletion cannot prove it`));
+    assert.match(out.out, HINT);
+  };
+  const harmless = (name, declaration) => {
+    const out = removing(name, declaration);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, PASSED);
+  };
+
+  test('a call in the initialiser', () => runsCode('unusedC', 'export const unusedC = app.use(auth);'));
+  test('an immediately invoked function', () => runsCode('unusedC', 'export const unusedC = (() => f())();'));
+  test('an object holding an arrow', () => runsCode('unusedH', 'export const unusedH = { a: () => f() };'));
+  test('new, await, an assignment, a tagged template and JSX', () => {
+    runsCode('unusedN', 'export const unusedN = new Registry();');
+    runsCode('unusedW', 'export const unusedW = await load;');
+    runsCode('unusedG', 'export let unusedG = (x = 1);');
+    runsCode('unusedT', 'export const unusedT = tag`x`;');
+    runsCode('unusedX', 'export const unusedX = <p />;');
+  });
+  test('a class with a static block', () => runsCode('UnusedK', 'export class UnusedK {\n  static {\n    registry.add(this);\n  }\n}'));
+  test('a class that extends a call', () => runsCode('UnusedK', 'export class UnusedK extends mixin(B) {}'));
+  test('a class with a computed member key', () => runsCode('UnusedK', 'export class UnusedK {\n  [Symbol.iterator]() {}\n}'));
+  test('a class with a static field', () => runsCode('UnusedK', 'export class UnusedK {\n  static id = 1;\n}'));
+  test('a decorated class', () => runsCode('UnusedK', 'export class UnusedK {\n  @track value = 1;\n}'));
+  test('an enum member that calls', () => runsCode('Unused', 'export enum Unused {\n  A = f(),\n}'));
+  test('a namespace', () => runsCode('Unused', 'export namespace Unused {\n  export const x = 1;\n}'));
+  test('a re-export, which loads the other module', () => runsCode('other', "export { other } from './other.js';"));
+
+  test('numbers, strings and member reads are harmless', () => {
+    harmless('unusedK', 'export const unusedK = 42;');
+    harmless('unusedS', "export const unusedS = 'x';");
+    harmless('unusedM', 'export const unusedM = Foo.BAR;');
+  });
+  test('functions and arrows are harmless', () => {
+    harmless('unusedA', 'export const unusedA = () => f();');
+    harmless('unusedB', 'export const unusedB = async (x) => {\n  return f(x);\n};');
+    harmless('unusedC', 'export const unusedC = x => f(x);');
+    harmless('unusedF', 'export function unusedF() {\n  return f();\n}');
+    harmless('unusedG', 'export async function unusedG() {\n  return f();\n}');
+  });
+  test('a class with only methods and instance fields is harmless', () => {
+    harmless('UnusedK', 'export class UnusedK {\n  value = f();\n  method() {\n    return this.value;\n  }\n}');
+  });
+  test('an enum of constants is harmless', () => harmless('Unused', 'export enum Unused {\n  A,\n  B = 2,\n}'));
+});
