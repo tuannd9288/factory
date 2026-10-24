@@ -151,17 +151,23 @@ const args = [
 ];
 
 /** What is wrong with an init event, by name only (tool names, MCP server names, plugin names, anthropic-skills: names), or ''.
- * --json-schema adds the StructuredOutput tool to the session (Claude Code 2.1.308's bundle); any other extra tool fails. */
+ * --json-schema adds the StructuredOutput tool to the session (Claude Code 2.1.308's bundle); any other extra tool fails.
+ * A field that is not a list, or a list holding a null or a scalar of the wrong kind, is a malformed init, and unclean. */
 function uncleanInit(init) {
-  const tools = (init.tools ?? []).filter((t) => t !== 'StructuredOutput');
+  const listed = (v) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === 'string' || (x !== null && typeof x === 'object')));
+  if (!Array.isArray(init.tools) || !listed(init.tools) || init.tools.some((t) => typeof t !== 'string') || !listed(init.mcp_servers) || !listed(init.plugins) || !listed(init.skills)) return 'malformed init';
+  const named = (list) => (list ?? []).map((x) => String(typeof x === 'string' ? x : (x.name ?? x.source ?? x.path ?? 'unnamed')));
   const want = ['Glob', 'Grep', 'Read'];
-  const named = (list) => (list ?? []).map((x) => String(x.name ?? x));
-  const parts = [
-    [...tools.filter((t) => !want.includes(t)).map((t) => `+${t}`), ...want.filter((t) => !tools.includes(t)).map((t) => `-${t}`)].join(','),
-  ].map((v) => v && `tools=${v}`);
+  const tools = init.tools.filter((t) => t !== 'StructuredOutput').sort();
+  const parts = [];
+  if (tools.join(',') !== want.join(',')) {
+    const seen = new Set();
+    const extra = tools.filter((t) => !want.includes(t) || seen.has(t) || !seen.add(t)).map((t) => `+${t}`);
+    parts.push(`tools=${[...extra, ...want.filter((t) => !tools.includes(t)).map((t) => `-${t}`)].join(',')}`);
+  }
   for (const [label, names] of [['mcp', named(init.mcp_servers)], ['plugins', named(init.plugins)], ['skills', named(init.skills).filter((n) => n.startsWith('anthropic-skills:'))]])
     if (names.length) parts.push(`${label}=${names.join(',')}`);
-  return parts.filter(Boolean).join('; ');
+  return parts.join('; ');
 }
 
 /** One call, for at most `minutes`. The init event is judged when it arrives: a bad one stops claude (TERM, then KILL) before
@@ -181,26 +187,37 @@ async function call(minutes) {
   };
   child.stdin.on('error', () => {});
   child.stdin.end(brief);
+  // utf8 decoding per stream, not per chunk: a character split across two chunks stays whole.
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
   child.stderr.on('data', (d) => (stderr += d));
+  // One line of the stream. Whatever throws while judging it is a malformed init: claude is stopped, never left running.
+  const handle = (text) => {
+    if (!text.startsWith('{')) return;
+    let event;
+    try {
+      event = JSON.parse(text);
+    } catch {
+      return;
+    }
+    events.push(event);
+    try {
+      if (event.type === 'system' && event.subtype === 'init' && !stopped && (detail = uncleanInit(event))) {
+        stopped = 'unclean-context';
+        stop();
+      }
+    } catch {
+      detail = 'malformed init';
+      stopped ||= 'unclean-context';
+      stop();
+    }
+  };
   child.stdout.on('data', (d) => {
     stdout += d;
     pending += d;
     const complete = pending.split('\n');
     pending = complete.pop();
-    for (const text of complete) {
-      if (!text.startsWith('{')) continue;
-      let event;
-      try {
-        event = JSON.parse(text);
-      } catch {
-        continue;
-      }
-      events.push(event);
-      if (event.type === 'system' && event.subtype === 'init' && !stopped && (detail = uncleanInit(event))) {
-        stopped = 'unclean-context';
-        stop();
-      }
-    }
+    complete.forEach(handle);
   });
   const timer = setTimeout(() => {
     stopped ||= 'timeout';
@@ -211,13 +228,15 @@ async function call(minutes) {
     child.on('close', (code) => resolve(code));
   });
   clearTimeout(timer);
+  handle(pending); // a last line with no newline
   const run = { stdout, stderr, status };
   if (stopped) return { run, events, why: stopped, detail };
   const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
   const result = events.findLast((e) => e.type === 'result');
   const ok = Boolean(result) && !result.is_error && status === 0;
   // Without the init event nothing says what the session holds, so a result is not to be trusted (an error needs no init).
-  if (!init && ok) return { run, events, why: 'unclean-context', detail: 'no init event' };
+  // The init must come before the first result: a result with no earlier init is not to be trusted, a late init included.
+  if (ok && (!init || events.findIndex((e) => e.type === 'result') < events.indexOf(init))) return { run, events, why: 'unclean-context', detail: init ? 'init after the result' : 'no init event' };
   if (result?.subtype === 'error_max_turns') return { run, events, why: 'max-turns' };
   const text = `${result?.result ?? ''}\n${stderr}`;
   if (ok) return { run, events, why: '' };
