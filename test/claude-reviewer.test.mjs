@@ -28,7 +28,8 @@ const settings = JSON.parse(a[a.indexOf('--settings') + 1] ?? '{}');
 const BUILTIN = ['cc-plugin-agents-md@builtin', 'cc-plugin-telemetry@builtin', 'cc-plugin-plugin-authoring@builtin'];
 const plugins = conf.plugins ?? BUILTIN.filter((p) => settings.enabledPlugins?.[p] !== false).map((name) => ({ name }));
 const init = { type: 'system', subtype: 'init', tools: conf.tools ?? ['Read', 'Grep', 'Glob', 'StructuredOutput'], mcp_servers: conf.mcp ?? [], plugins, skills: conf.skills ?? [], slash_commands: ['compact'] };
-const fail = (status, text) => { if (!conf.noInit) emit(init); emit({ type: 'result', subtype: 'error_during_execution', is_error: true, api_error_status: status, result: text }); process.exit(1); };
+const spent = conf.usage ? { usage: conf.usage, total_cost_usd: conf.cost } : {};
+const fail = (status, text) => { if (!conf.noInit) emit(init); emit({ type: 'result', subtype: 'error_during_execution', is_error: true, api_error_status: status, result: text, ...spent }); process.exit(1); };
 if (conf.mode === 'sleep') { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20000); process.exit(0); }
 if (conf.mode === 'quota') fail(429, 'Claude AI usage limit reached|1761300000');
 if (conf.mode === 'auth') fail(401, 'Invalid API key · Please run /login');
@@ -42,7 +43,7 @@ if (conf.marker) fs.writeFileSync(dir + '/marker', 'result about to be written')
 if (conf.quotaEvent) emit({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1761300000 } });
 const out = conf.output ?? { blocking: [], noRed: 'unjudged' };
 const text = conf.text ?? JSON.stringify(out);
-const resultEvent = { type: 'result', subtype: 'success', is_error: false, result: text, ...(conf.text ? {} : { structured_output: out }) };
+const resultEvent = { type: 'result', subtype: 'success', is_error: false, result: text, ...spent, ...(conf.text ? {} : { structured_output: out }) };
 if (conf.bigResult) {
   // Over 64 KB, written in two pieces with the cut inside the three bytes of the arrow.
   const buf = Buffer.from(JSON.stringify({ ...resultEvent, pad: 'a'.repeat(70000) }) + '\n');
@@ -333,9 +334,27 @@ describe('claude-reviewer', () => {
     }
   });
 
-  test('a quota or rate-limit event in the stream is recorded; its absence is said', () => {
-    assert.match(review({ quotaEvent: true }).out, /^reviewer: quota event: .*"resetsAt":1761300000/m);
-    assert.match(review({}).out, /^reviewer: no quota or rate-limit event in the stream$/m);
+  const USAGE = { input_tokens: 1200, cache_creation_input_tokens: 300, cache_read_input_tokens: 4500, output_tokens: 800 };
+  const SPENT = 'reviewer: usage: input 1200, cache write 300, cache read 4500, output 800 tokens; cost $0.4321';
+
+  test("each call's tokens and cost come from its result event; the rate-limit event is no longer printed", () => {
+    const out = review({ usage: USAGE, cost: 0.4321, quotaEvent: true }).out;
+    assert.equal(out.split('\n').filter((l) => l === SPENT).length, 1, out);
+    assert.doesNotMatch(out, /quota event|rate_limit|resetsAt/);
+    assert.match(review({}).out, /^reviewer: usage: input \?, cache write \?, cache read \?, output \? tokens; cost \$\?$/m, 'a result with no usage');
+  });
+
+  test('a call that ends unavailable still says what it spent, and a retried call says it for each call', () => {
+    assert.match(review({ mode: 'quota', usage: USAGE, cost: 0.4321 }).out, new RegExp(`^${SPENT.replace(/[$.?]/g, '\\$&')}$`, 'm'));
+    assert.match(review({ mode: 'crash' }).out, /^reviewer: usage: no result event$/m);
+    const twice = review({ mode: 'overloaded-once', usage: USAGE, cost: 0.4321 }).out;
+    assert.equal(twice.split('\n').filter((l) => l === SPENT).length, 2, twice);
+  });
+
+  test('usage fields that are not numbers are printed as ?, never as their text', () => {
+    const out = review({ usage: { input_tokens: '9 ::error::x', output_tokens: -1 }, cost: 'free' }).out;
+    assert.match(out, /^reviewer: usage: input \?, cache write \?, cache read \?, output \? tokens; cost \$\?$/m);
+    assert.doesNotMatch(out, /::error::x|free/);
   });
 
   test('the working folders are removed, and the verdict job is refused', () => {
