@@ -402,3 +402,152 @@ describe('the kit pull request', () => {
     }
   });
 });
+
+// #53: a path the kit renders never equals its raw blob, so a base that already holds the rendering was counted as the
+// repository's own. Such a path is the repository's own only when its base differs from the rendering at this commit.
+const RENDERED_BASE = {
+  'AGENTS.md': `# app\n\nRules for app and <repo>.\n\n${SECTION}${KEEPS}`,
+  '.claude/settings.json': json({ ...DENY, ...PIN }),
+  '.github/CODEOWNERS': '* @tuannd9288\n/.gate/ @tuannd9288\n',
+};
+
+describe('a base that already holds the kit\'s rendering', () => {
+  test('passes a kit pull request that adds only what is missing, and reports the three paths as rendered', () => {
+    const w = world({ had: RENDERED_BASE });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kit-evidence: PASS$/m);
+      assert.match(out.out, /^managed files: 8: 2 as in the kit, 3 rendered, 1 kept, 2 generated$/m);
+      assert.match(out.out, /^ {2}AGENTS\.md:1: `# <repo>` → `# app`$/m);
+      assert.match(out.out, /^ {2}\.github\/CODEOWNERS:2: `\/\.gate\/ @OWNER` → `\/\.gate\/ @tuannd9288`$/m);
+      assert.match(out.out, /^replaced \(the repository's own at the base, now the kit's\):\n {2}none$/m);
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.github\/pull_request_template\.md$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('reports an AGENTS.md that already carries the repository\'s own parts as rendered, with the parts in full', () => {
+    const w = world({ kit: { 'kit/AGENTS.md': SECTIONED }, had: { 'AGENTS.md': filled() }, laid: { 'AGENTS.md': filled() } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^ {2}AGENTS\.md:15: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app; `test\/` its tests\.$/m);
+      assert.match(out.out, /^ {2}AGENTS\.md:19-20: the repository's own Facts the code cannot tell \(2 lines\):/m);
+      assert.match(out.out, /^replaced \(the repository's own at the base, now the kit's\):\n {2}none$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('still fails a truly own AGENTS.md left as it is, and still keeps a truly own CODEOWNERS and settings', () => {
+    let w = world({ had: { 'AGENTS.md': '# Our map\n\nOur rules.\n' }, laid: { 'AGENTS.md': '# Our map\n\nOur rules.\n' } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: AGENTS\.md \(the repository's own, which the kit replaces\)$/m);
+    } finally {
+      w.cleanup();
+    }
+    const own = { '.github/CODEOWNERS': '* @someone\n', '.claude/settings.json': json({ theirs: true }) };
+    w = world({ had: own, laid: own });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.claude\/settings\.json\n {2}\.github\/CODEOWNERS\n {2}\.github\/pull_request_template\.md$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+});
+
+describe('a file the repository had as an older kit had it', () => {
+  const OLD = { kit: { 'kit/lib/old.js': 'v1\n' }, had: { 'lib/old.js': 'v1\n' }, laid: { 'lib/old.js': 'v1\n' } };
+  /** The factory moves on to a second commit with `files` changed; evidence at it, over the repository's `head`. */
+  const again = (w, files, head = 'HEAD') => {
+    const fac = join(w.dir, 'factory');
+    const second = commit(fac, files, 'kit again');
+    const out = run(w.dir, join(factory, 'bin/kit-evidence'), ['--factory', fac, '--commit', second, '--repo', w.repo, '--base', w.base, '--head', head, '--slug', 'tuannd9288/app', '--id', '1234']);
+    return { out, second };
+  };
+
+  test('names an updated file with the blob it had and the factory commit, and a removed one the same way', () => {
+    const w = world({ kit: { ...OLD.kit, 'kit/lib/gone.js': 'g\n' }, had: { ...OLD.had, 'lib/gone.js': 'g\n' }, laid: { ...OLD.laid, 'lib/gone.js': 'g\n' } });
+    try {
+      const was = (path) => git(w.repo, 'rev-parse', `${w.base}:${path}`).slice(0, 12);
+      const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8').split('\n').filter((l) => l && l !== 'lib/gone.js');
+      const head = w.change({ 'lib/old.js': 'v2\n', 'lib/gone.js': null, '.gate/kit-files': `${inventory.join('\n')}\n` });
+      const { out, second } = again(w, { 'kit/lib/old.js': 'v2\n', 'kit/lib/gone.js': null }, head);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kit-evidence: PASS$/m);
+      assert.match(out.out, new RegExp(`^updated \\(.*\\):\\n {2}lib/old\\.js \\(was ${was('lib/old.js')}, kit at factory ${second.slice(0, 7)}\\)$`, 'm'));
+      assert.match(out.out, new RegExp(`^removed \\(.*\\):\\n {2}lib/gone\\.js \\(was ${was('lib/gone.js')}, no longer in the kit at factory ${second.slice(0, 7)}\\)$`, 'm'));
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('names a rendered file that was an older rendering as updated', () => {
+    const w = world({ had: { '.github/CODEOWNERS': '* @tuannd9288\n/.gate/ @tuannd9288\n' } });
+    try {
+      const head = w.change({ '.github/CODEOWNERS': '* @tuannd9288\n/.gate/ @tuannd9288\n/docs/ @tuannd9288\n' });
+      const { out } = again(w, { 'kit/.github/CODEOWNERS': '* @OWNER\n/.gate/ @OWNER\n/docs/ @OWNER\n' }, head);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^updated \(.*\):\n {2}\.github\/CODEOWNERS \(was [0-9a-f]{12}, kit at factory [0-9a-f]{7}\)$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('keeps a file that is no past kit blob, and fails a pull request that changes it', () => {
+    const own = { kit: OLD.kit, had: { 'lib/old.js': 'ours\n' }, laid: { 'lib/old.js': 'ours\n' } };
+    const w = world(own);
+    try {
+      let { out } = again(w, { 'kit/lib/old.js': 'v2\n' });
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n(?: {2}.*\n)* {2}lib\/old\.js$/m);
+      assert.doesNotMatch(out.out, /^updated/m);
+      ({ out } = again(w, {}, w.change({ 'lib/old.js': 'v2\n' })));
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: lib\/old\.js \(the repository's own, changed\)$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('keeps an older kit file the pull request leaves alone, and fails the removal of the repository\'s own', () => {
+    const w = world(OLD);
+    try {
+      let { out } = again(w, { 'kit/lib/old.js': 'v2\n' });
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n(?: {2}.*\n)* {2}lib\/old\.js$/m);
+      assert.doesNotMatch(out.out, /^updated/m);
+    } finally {
+      w.cleanup();
+    }
+    const gone = { kit: { 'kit/lib/gone.js': 'g\n' }, had: { 'lib/gone.js': 'ours\n' }, laid: { 'lib/gone.js': 'ours\n' } };
+    const x = world(gone);
+    try {
+      const inventory = readFileSync(join(x.repo, '.gate/kit-files'), 'utf8').split('\n').filter((l) => l && l !== 'lib/gone.js');
+      const head = x.change({ 'lib/gone.js': null, '.gate/kit-files': `${inventory.join('\n')}\n` });
+      const { out } = again(x, { 'kit/lib/gone.js': null }, head);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}extra: lib\/gone\.js \(not a kit file\)$/m);
+    } finally {
+      x.cleanup();
+    }
+  });
+
+  test('takes the repository id as its node id too', () => {
+    const w = world();
+    try {
+      const out = w.evidence('HEAD', ['--id', 'R_kgDOVVbONw']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^repository: tuannd9288\/app \(id R_kgDOVVbONw\)$/m);
+      assert.equal(w.evidence('HEAD', ['--id', 'not an id']).code, 2);
+    } finally {
+      w.cleanup();
+    }
+  });
+});
