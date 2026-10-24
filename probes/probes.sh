@@ -60,6 +60,8 @@ probe_commit "Let the limiter reset one recipient"; T="Limiter: reset theo ngư�
 p_C4() { cat > src/chunk.js <<'EOF'
 // Splits text into pieces of at most `size` user-visible characters, never inside an emoji.
 export function chunk(text, size) {
+  if (typeof text !== 'string') throw new TypeError('text must be a string');
+  if (!Number.isInteger(size) || size < 1) throw new RangeError('size must be a whole number of at least 1');
   const chars = [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(text)].map((s) => s.segment);
   const out = [];
   for (let i = 0; i < chars.length; i += size) out.push(chars.slice(i, i + size).join(''));
@@ -69,8 +71,14 @@ EOF
 printf '%s\n\n%s\n' "$TEST_HEAD" "test('splits text into pieces without breaking an emoji', async () => {
   const { chunk } = await import('../src/chunk.js');
   assert.deepEqual(chunk('ab👍🏽cde', 2), ['ab', '👍🏽c', 'de']);
+});
+
+test('refuses a size that would never move on', async () => {
+  const { chunk } = await import('../src/chunk.js');
+  for (const size of [0, -1, 1.5, '2']) assert.throws(() => chunk('abc', size), RangeError);
+  for (const text of [undefined, null, 42]) assert.throws(() => chunk(text, 2), TypeError);
 });" > test/chunk.test.js
-probe_commit "Add chunk"; T="Thêm chunk"; B="Chia văn bản thành từng đoạn, không cắt emoji."; }
+probe_commit "Add chunk"; T="Thêm chunk"; B="Chia văn bản thành từng đoạn, không cắt emoji; từ chối text không phải chuỗi và size không phải số nguyên từ 1 trở lên."; }
 
 p_C5() { edit src/ratelimit.js "  const sent = new Map();
   return {" "  const sent = new Map();
@@ -99,13 +107,14 @@ probe_commit "Test that send refuses blank text" "Failing-test: node --test test
 edit src/send.js "if (!message.to || !message.text) throw" "if (!message.to || !message.text?.trim()) throw"
 probe_commit "Refuse blank text in send"; T="send: từ chối tin chỉ có khoảng trắng"; B="Bậc 2 (src/send.js): test đỏ commit trước với Failing-test:, rồi mới sửa code."; }
 
-p_C8() { printf '%s\n%s\n\n%s\n' "$TEST_HEAD" "import { sign } from '../../src/auth/token.js';" "test('sign refuses a recipient holding a dot', () => {
+p_C8() { printf '%s\n%s\n\n%s\n' "$TEST_HEAD" "import { sign } from '../../src/auth/token.js';" "test('sign refuses a field holding a dot', () => {
   assert.throws(() => sign('a.b', 2000, 'k'), TypeError);
+  assert.throws(() => sign('u1', 2000.5, 'k'), TypeError);
 });" > test/auth/token-dot.test.js
-probe_commit "Test that sign refuses a dotted recipient" "Failing-test: node --test test/auth/token-dot.test.js"
-edit src/auth/token.js "  const body = \`\${recipient}.\${expiresAt}\`;" "  if (String(recipient).includes('.')) throw new TypeError('a recipient cannot hold a dot');
+probe_commit "Test that sign refuses a dotted field" "Failing-test: node --test test/auth/token-dot.test.js"
+edit src/auth/token.js "  const body = \`\${recipient}.\${expiresAt}\`;" "  if ([recipient, expiresAt].some((field) => String(field).includes('.'))) throw new TypeError('a token field cannot hold a dot');
   const body = \`\${recipient}.\${expiresAt}\`;"
-probe_commit "Refuse a dotted recipient in sign"; T="token: sign từ chối người nhận có dấu chấm"; B="Bậc 2 (src/auth/): dấu chấm làm hỏng định dạng token. Test đỏ commit trước, rồi mới sửa."; }
+probe_commit "Refuse a dotted field in sign"; T="token: sign từ chối trường có dấu chấm"; B="Bậc 2 (src/auth/): dấu chấm trong người nhận hoặc thời hạn làm hỏng định dạng token. Test đỏ commit trước, rồi mới sửa."; }
 
 p_C9() { edit package.json '  "type": "module",' '  "type": "module",
   "engines": { "node": ">=24" },'
@@ -125,12 +134,28 @@ p_C11() { printf '%s\n%s\n\n%s\n' "$TEST_HEAD" "import { truncate } from '../src
 });" > test/truncate-one.test.js
 probe_commit "Test truncate with a limit of one"; T="Test truncate với giới hạn 1"; B="Thêm test cho hành vi đã có."; }
 
-p_C12() { edit src/format.js "export function truncate(text, max) {" "export function truncate(text, max, { ellipsis = '…' } = {}) {"
-edit src/format.js "  return chars.slice(0, max - 1).join('') + '…';" "  return chars.slice(0, max - 1).join('') + ellipsis;"
-printf '%s\n%s\n\n%s\n' "$TEST_HEAD" "import { truncate } from '../src/format.js';" "test('takes another ellipsis', () => {
-  assert.equal(truncate('abcdefgh', 5, { ellipsis: '...' }), 'abcd...');
+p_C12() { edit src/format.js "// Cuts text to at most \`max\` user-visible characters without splitting an emoji.
+export function truncate(text, max) {
+  const chars = [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(text)].map((s) => s.segment);
+  if (chars.length <= max) return text;
+  if (max <= 1) return chars.slice(0, max).join('');
+  return chars.slice(0, max - 1).join('') + '…';
+}" "const graphemes = (text) => [...new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(text)].map((s) => s.segment);
+
+// Cuts text to at most \`max\` user-visible characters without splitting an emoji. The ellipsis counts toward \`max\`;
+// when it would take every place, the text is cut without one.
+export function truncate(text, max, { ellipsis = '…' } = {}) {
+  const chars = graphemes(text);
+  if (chars.length <= max) return text;
+  const room = max - graphemes(ellipsis).length;
+  if (room < 1) return chars.slice(0, max).join('');
+  return chars.slice(0, room).join('') + ellipsis;
+}"
+printf '%s\n%s\n\n%s\n' "$TEST_HEAD" "import { truncate } from '../src/format.js';" "test('takes another ellipsis and still keeps to max', () => {
+  assert.equal(truncate('abcdefgh', 5, { ellipsis: '...' }), 'ab...');
+  assert.equal(truncate('abcdefgh', 3, { ellipsis: '...' }), 'abc');
 });" > test/truncate-ellipsis.test.js
-probe_commit "Let truncate take another ellipsis"; T="truncate: tuỳ chọn ellipsis"; B="Cho phép đổi dấu ba chấm."; }
+probe_commit "Let truncate take another ellipsis"; T="truncate: tuỳ chọn ellipsis"; B="Cho phép đổi dấu ba chấm; dấu ba chấm tính vào max."; }
 
 p_C13() { cat > src/mask.js <<'EOF'
 // Hides the middle of a phone number for logs: "0912345678" gives "09******78".
