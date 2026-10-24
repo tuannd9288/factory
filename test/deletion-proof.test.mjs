@@ -262,3 +262,158 @@ describe('red-check: every removed source line is part of an unused export', () 
     assert.match(out.out, /check 2: unusedA, exported by src\/h\.js, is still named in src\/h\.js/);
   });
 });
+
+// The independent review of #17 (REVIEW.md, B1-B5, N1, N2, N7): each case is a change that must not pass as a pure
+// deletion, with the report the real knip would give. A base commit holds the old files, a head commit the new ones.
+describe('red-check: a deletion that is not one', () => {
+  let r;
+  let bin;
+  let n = 0;
+  before(() => {
+    r = repoWithKit({ 'knip.json': '{}\n' });
+    bin = join(r.dir, 'fake-bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'npx'), '#!/bin/sh\ncat "$FAKE_KNIP_REPORT"\nexit 1\n');
+    chmodSync(join(bin, 'npx'), 0o755);
+  });
+  after(() => r.cleanup());
+
+  const DEAD = { 'src/dead.js': 'export const dead = 1;\n' };
+  const GONE = { 'src/dead.js': null };
+  const run = (baseFiles, headFiles, knip) => {
+    n++;
+    git(r.repo, 'switch', '-q', '-C', `adv${n}`, 'origin/main');
+    commit(r.repo, baseFiles, `base ${n}`);
+    const base = git(r.repo, 'rev-parse', 'HEAD');
+    commit(r.repo, headFiles, `head ${n}`);
+    writeFileSync(join(r.dir, 'knip.json'), knip);
+    return script(r.repo, 'red-check', ['--base', base], { PATH: `${bin}:${process.env.PATH}`, FAKE_KNIP_REPORT: join(r.dir, 'knip.json') });
+  };
+  const refuses = (out, reason) => {
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, reason);
+    assert.doesNotMatch(out.out, /passed as a pure deletion/);
+  };
+  const CHECK1 = /check 1: /;
+  const HANDLER = (guard) => `export function handler(req) {\n  if (!req.user) return 401;\n${guard}  return 200;\n}\n`;
+
+  test('a guard that starts with a block comment, in a used function', () => {
+    const base = HANDLER('  /* authz */ if (!authorized(req)) return 403;\n');
+    refuses(run({ 'src/h.js': base, ...DEAD }, { 'src/h.js': HANDLER(''), ...GONE }, report(listsFile('src/dead.js'))), CHECK1);
+  });
+  test('the same guard as an opened block', () => {
+    const base = HANDLER('  /* authz */ if (!authorized(req)) {\n    return 403;\n  }\n');
+    refuses(run({ 'src/h.js': base, ...DEAD }, { 'src/h.js': HANDLER(''), ...GONE }, report(listsFile('src/dead.js'))), CHECK1);
+  });
+  test('the same guard on a line that ends a multi-line comment', () => {
+    const base = HANDLER('  /*\n   * authz */ if (!authorized(req)) return 403;\n');
+    refuses(run({ 'src/h.js': base, ...DEAD }, { 'src/h.js': HANDLER(''), ...GONE }, report(listsFile('src/dead.js'))), CHECK1);
+  });
+  test('a top-level call after a comment, removed with an unused export', () => {
+    const base = "import { app, auth } from './server.js';\n/* auth */ app.use(auth);\nexport const unusedC = 1;\n";
+    refuses(run({ 'src/app.js': base }, { 'src/app.js': "import { app, auth } from './server.js';\n" }, report(listsExports('src/app.js', 'unusedC'))), CHECK1);
+  });
+  test('a /** @jsx h */ pragma removed with an unused export', () => {
+    const base = "/** @jsx h */\nimport { h } from 'preact';\nexport const View = () => <p>hi</p>;\nexport const unusedC = 1;\n";
+    const head = "import { h } from 'preact';\nexport const View = () => <p>hi</p>;\n";
+    refuses(run({ 'src/view.jsx': base }, { 'src/view.jsx': head }, report(listsExports('src/view.jsx', 'unusedC'))), CHECK1);
+  });
+  test('a comment-only hunk inside a used function', () => {
+    const base = 'export function f() {\n  // istanbul ignore next\n  return 1;\n}\n';
+    refuses(run({ 'src/h.js': base, ...DEAD }, { 'src/h.js': 'export function f() {\n  return 1;\n}\n', ...GONE }, report(listsFile('src/dead.js'))), CHECK1);
+  });
+  test('another statement after the export on its line', () => {
+    const app = (line) => `import { app, auth } from './server.js';\n${line}`;
+    refuses(run({ 'src/app.js': app('export const unusedC = 1; app.use(auth);\n') }, { 'src/app.js': app('') }, report(listsExports('src/app.js', 'unusedC'))), CHECK1);
+  });
+  test('another statement after the closing brace of the export', () => {
+    const app = (text) => `import { app, auth } from './server.js';\n${text}`;
+    const base = app('export function unusedC() {\n  return 1;\n} app.use(auth);\n');
+    refuses(run({ 'src/app.js': base }, { 'src/app.js': app('') }, report(listsExports('src/app.js', 'unusedC'))), CHECK1);
+  });
+  test('export const unusedA = 1, usedB = 2 claims only the first name', () => {
+    const use = { 'src/use.js': "import { usedB } from './lib.js';\nexport const v = usedB;\n" };
+    const base = { 'src/lib.js': 'export const unusedA = 1, usedB = 2;\nexport const keep = 3;\n', ...use };
+    refuses(run(base, { 'src/lib.js': 'export const keep = 3;\n' }, report(listsExports('src/lib.js', 'unusedA'))), CHECK1);
+  });
+  test('two declarations on one line', () => {
+    const use = { 'src/use.js': "import { usedB } from './lib.js';\nexport const v = usedB;\n" };
+    const base = { 'src/lib.js': 'export function unusedA() {} export const usedB = 2;\nexport const keep = 3;\n', ...use };
+    refuses(run(base, { 'src/lib.js': 'export const keep = 3;\n' }, report(listsExports('src/lib.js', 'unusedA'))), CHECK1);
+  });
+  const BANNER = (inner) => `export function banner() {\n  return \`\n${inner}\n\`;\n}\n`;
+  test('an export line inside a template literal, removed with the real export', () => {
+    const base = `export const unusedC = 1;\n${BANNER('export const unusedC = 1;')}`;
+    refuses(run({ 'src/gen.js': base }, { 'src/gen.js': 'export function banner() {\n  return `\n`;\n}\n' }, report(listsExports('src/gen.js', 'unusedC'))), CHECK1);
+  });
+  test('the keyword of an export line inside a template literal', () => {
+    const base = `export const unusedC = 1;\n${BANNER('export const unusedC = 1;')}`;
+    const head = `export const unusedC = 1;\n${BANNER('const unusedC = 1;')}`;
+    refuses(run({ 'src/gen.js': base }, { 'src/gen.js': head }, report(listsExports('src/gen.js', 'unusedC'))), CHECK1);
+  });
+  test('two keyword-only removals in the other order', () => {
+    const base = 'export const sideAq = f();\nexport const sideBq = g();\n';
+    const head = 'const sideBq = g();\nconst sideAq = f();\n';
+    refuses(run({ 'src/side.js': base }, { 'src/side.js': head }, report(listsExports('src/side.js', 'sideAq', 'sideBq'))), CHECK1);
+  });
+  test('a default export can never be proved: check 1 says so', () => {
+    const base = 'export const keep = 1;\nexport default function () {\n  return 1;\n}\n';
+    refuses(run({ 'src/d.js': base }, { 'src/d.js': 'export const keep = 1;\n' }, report(listsExports('src/d.js', 'default'))), /check 1: src\/d\.js removes a default export/);
+  });
+  test('export { a }; becoming { a }; is a block statement, not a keyword removal', () => {
+    const base = 'const a = 1;\nexport { a };\n';
+    refuses(run({ 'src/b.js': base }, { 'src/b.js': 'const a = 1;\n{ a };\n' }, report(listsExports('src/b.js', 'a'))), CHECK1);
+  });
+  test('a knip item with a namespace is not the export of that name', () => {
+    const base = 'export const keep = 1;\nexport const shared = 2;\n';
+    const item = entry('src/ns.js', { exports: [{ name: 'shared', namespace: 'NS', line: 2 }] });
+    refuses(run({ 'src/ns.js': base }, { 'src/ns.js': 'export const keep = 1;\n' }, report(item)), /check 3: knip did not list shared of src\/ns\.js/);
+  });
+
+  // The cases the review found correct stay refused or accepted.
+  test('a top-level call removed with an unused export is refused', () => {
+    const base = "import { register } from './reg.js';\nregister('x');\nexport const unusedC = 1;\n";
+    refuses(run({ 'src/r.js': base }, { 'src/r.js': "import { register } from './reg.js';\n" }, report(listsExports('src/r.js', 'unusedC'))), CHECK1);
+  });
+  test('an object entry removed inside an export is refused', () => {
+    const base = 'export const cfg = {\n  a: 1,\n  strict: true,\n};\nexport const unusedC = 1;\n';
+    refuses(run({ 'src/o.js': base }, { 'src/o.js': 'export const cfg = {\n  a: 1,\n};\n' }, report(listsExports('src/o.js', 'unusedC'))), CHECK1);
+  });
+  test('a decorated class is refused', () => {
+    const base = "import { register } from './reg';\n@register\nexport class UnusedK {}\nexport const keep = 1;\n";
+    refuses(run({ 'src/k.ts': base }, { 'src/k.ts': "import { register } from './reg';\nexport const keep = 1;\n" }, report(listsExports('src/k.ts', 'UnusedK'))), CHECK1);
+  });
+  test('a whole unused TS enum is accepted', () => {
+    const out = run({ 'src/e.ts': 'export enum Unused {\n  A,\n  B,\n}\nexport const keep = 1;\n' }, { 'src/e.ts': 'export const keep = 1;\n' }, report(listsExports('src/e.ts', 'Unused')));
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, PASSED);
+  });
+  test('an unused export with a leading JSDoc and a trailing blank line is accepted', () => {
+    const base = 'export const keep = 1;\n\n/** Unused. */\nexport function retiredFn() {\n  return 2;\n}\n\nexport const tail = 3;\n';
+    const out = run({ 'src/j.js': base }, { 'src/j.js': 'export const keep = 1;\n\nexport const tail = 3;\n' }, report(listsExports('src/j.js', 'retiredFn')));
+    assert.equal(out.code, 0, out.out);
+  });
+});
+
+describe('the knip config decides how strict the gate is: changing it is tier 3', () => {
+  let r;
+  before(() => (r = repoWithKit()));
+  after(() => r.cleanup());
+  const tierOf = (files) => {
+    git(r.repo, 'switch', '-q', '-C', 'knip', 'origin/main');
+    commit(r.repo, files, 'knip');
+    return script(r.repo, 'tier', ['--base', 'origin/main']);
+  };
+
+  for (const file of ['knip.json', 'knip.jsonc', '.knip.json', '.knip.jsonc', 'knip.ts', 'knip.js', 'knip.config.ts', 'knip.config.js']) {
+    test(`${file}`, () => assert.match(tierOf({ [file]: '{ "entry": [] }\n' }).out, /^tier 3/));
+  }
+  test('the "knip" key of package.json', () => {
+    const out = tierOf({ 'package.json': '{ "name": "app", "private": true, "type": "module", "knip": { "entry": [] } }\n' });
+    assert.match(out.out, /^tier 3/);
+  });
+  test('.gate/protected and CODEOWNERS still agree', () => {
+    const out = script(r.repo, 'verify', ['--only', 'policy']);
+    assert.equal(out.code, 0, out.out);
+  });
+});
