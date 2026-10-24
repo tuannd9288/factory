@@ -34,7 +34,7 @@ const DISALLOWED = ['Bash(gh pr merge:*)', 'Bash(scripts/live-verify:*)', 'Bash(
 /** A `claude -p --output-format stream-json` run (Claude Code 2.1.308): where it started, its mode and plugins, each
  * tool call with its result, the denials the result reports and the permission_denied events. */
 export function parseSession(text) {
-  const session = { cwd: null, plugins: [], permissionMode: null, model: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, text: '', loaded: { servers: [], tools: [], plugins: [], skills: [] } };
+  const session = { cwd: null, plugins: [], permissionMode: null, model: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, text: '', loaded: null };
   const byId = new Map();
   for (const line of text.split('\n')) {
     let e;
@@ -125,8 +125,18 @@ export function judge({ session, prSession, profile, marker, secret, root, tagEx
   add('session starts inside the repository', session.cwd !== null && real(session.cwd).startsWith(real(root)), `cwd ${session.cwd ?? 'not reported'}`);
   add('pins load (pstack plugin listed)', session.plugins.includes('pstack'), `plugins: ${session.plugins.join(', ') || 'none'}`);
   add('permission baseline (acceptEdits) in force', session.permissionMode === 'acceptEdits', `init permissionMode ${JSON.stringify(session.permissionMode)}`);
-  const account = sessions.map((s, i) => [i ? 'pull request session' : 'first session', fromAccount(s.loaded)]).filter(([, found]) => found.length);
-  add('nothing from the claude.ai account loads (connectors, their tools, synced skills and plugins)', !account.length, account.length ? account.map(([name, found]) => `${name}: ${found.join(', ')}`).join('; ') : 'no claude.ai connector, tool, synced plugin or synced skill in either init event');
+  const named = sessions.map((s, i) => [i ? 'pull request session' : 'first session', s.loaded]);
+  const unread = named.filter(([, loaded]) => !loaded).map(([name]) => name);
+  const account = named.filter(([, loaded]) => loaded).map(([name, loaded]) => [name, fromAccount(loaded)]).filter(([, found]) => found.length);
+  add(
+    'nothing from the claude.ai account loads (connectors, their tools, synced skills and plugins)',
+    !unread.length && !account.length,
+    unread.length
+      ? `no init event in the ${unread.join(' or the ')}, so nothing was judged`
+      : account.length
+        ? account.map(([name, found]) => `${name}: ${found.join(', ')}`).join('; ')
+        : `no claude.ai connector, tool, synced plugin or synced skill in ${skipPr ? "the first session's init event" : 'either init event'}`,
+  );
 
   const write = session.tools.find((t) => control && commandOf(t).includes(`git branch ${control}`));
   const tagCalls = session.tools.filter((t) => /\bgit\s+tag\s+x\b/.test(commandOf(t)));
