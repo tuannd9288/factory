@@ -7,9 +7,9 @@
 // before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
 // queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
 // See bin/factory-queue for the arguments.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -211,15 +211,119 @@ function preflight(state, human) {
   return 2;
 }
 
+const LABEL = 'com.tuanhub.factory.queue';
+
+/** The first executable `name` on a PATH, or null. */
+function which(name, path) {
+  for (const dir of (path ?? '').split(':').filter(Boolean)) {
+    try {
+      accessSync(join(dir, name), constants.X_OK);
+      return join(dir, name);
+    } catch {}
+  }
+  return null;
+}
+
+/** The launchd job that sweeps `repos` once a minute (#48): this clone's bin/factory-queue, with the gh and the node
+ * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
+ * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
+ * link's folder, which an upgrade does not remove. */
+export function job(repos, env = process.env) {
+  const gh = which('gh', env.PATH);
+  if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
+  const node = which('node', env.PATH) ?? process.execPath;
+  const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
+  const found = which('node', path);
+  if (!found || realpathSync(found) !== realpathSync(node))
+    throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);
+  const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN'].filter((k) => env[k]).map((k) => [k, env[k]]));
+  return {
+    label: LABEL,
+    program: [join(factory, 'bin/factory-queue'), 'sweep', ...repos.flatMap((repo) => ['--repo', repo])],
+    cwd: factory,
+    env: { PATH: path, ...kept },
+    log: join(env.HOME, 'Library/Logs/factory/queue.log'),
+  };
+}
+
+/** The job as a property list, for ~/Library/LaunchAgents/com.tuanhub.factory.queue.plist. */
+export function plist(j) {
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const str = (s) => `<string>${esc(s)}</string>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  ${str(j.label)}
+  <key>ProgramArguments</key>
+  <array>
+${j.program.map((a) => `    ${str(a)}`).join('\n')}
+  </array>
+  <key>WorkingDirectory</key>
+  ${str(j.cwd)}
+  <key>EnvironmentVariables</key>
+  <dict>
+${Object.entries(j.env).map(([k, v]) => `    <key>${esc(k)}</key>\n    ${str(v)}`).join('\n')}
+  </dict>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  ${str(j.log)}
+  <key>StandardErrorPath</key>
+  ${str(j.log)}
+</dict>
+</plist>
+`;
+}
+
+/** Runs one sweep as the job would, before the Human loads it: the job's PATH and variables over what launchd gives
+ * every job (HOME, USER, TMPDIR), and nothing of this shell's. It makes the log's folder, which launchd needs. */
+function check(repos, human) {
+  const j = job(repos);
+  const env = { HOME: process.env.HOME, USER: process.env.USER ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', ...j.env };
+  const say = (line) => console.log(`check: ${line}`);
+  mkdirSync(dirname(j.log), { recursive: true });
+  const who = spawnSync('gh', ['api', 'user', '--jq', '.login'], { env, encoding: 'utf8', timeout: CALL_MS });
+  const login = who.status === 0 ? who.stdout.trim() : '';
+  say(`gh login ${login || `none: ${String(who.stderr || who.error?.message || '').trim()}`}`);
+  say(`node ${spawnSync('node', ['--version'], { env, encoding: 'utf8' }).stdout?.trim() || 'not found'}`);
+  say(`state folder ${env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')}`);
+  say(`log ${j.log}`);
+  const run = spawnSync(j.program[0], j.program.slice(1), { cwd: j.cwd, env, encoding: 'utf8', timeout: 10 * CALL_MS });
+  const out = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+  for (const line of out.trim().split('\n').filter(Boolean).slice(-10)) say(`  ${line}`);
+  say(`one sweep exited ${run.status}`);
+  const why = !login
+    ? 'gh is not logged in'
+    : login.toLowerCase() === human.toLowerCase()
+      ? "gh is the Human's login; the job must run as the agents' account"
+      : run.status !== 0
+        ? 'the sweep failed'
+        : /another sweep is running/.test(out)
+          ? 'another sweep holds the lock, so this one did nothing; run check again once it ends'
+          : null;
+  say(why ? `not ready: ${why}` : 'ready; the Human loads the job');
+  return why ? 1 : 0;
+}
+
 function main(argv) {
   const [command, ...rest] = argv;
   const repos = [];
   for (let i = 0; i < rest.length; i += 1) {
-    if (rest[i] === '--repo') repos.push(rest[++i]);
-    else throw new Error(`unknown argument ${rest[i]}`);
+    if (rest[i] !== '--repo') throw new Error(`unknown argument ${rest[i]}`);
+    if (!/^[\w.-]+\/[\w.-]+$/.test(rest[i + 1] ?? '')) throw new Error(`--repo needs owner/name, not ${JSON.stringify(rest[i + 1] ?? '')}`);
+    repos.push(rest[++i]);
   }
-  if (command !== 'sweep' || !repos.length) throw new Error('usage: factory-queue sweep --repo owner/name...');
+  if (!['sweep', 'plist', 'check'].includes(command) || !repos.length) throw new Error('usage: factory-queue sweep|plist|check --repo owner/name...');
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
+  if (command === 'plist') return void process.stdout.write(plist(job(repos)));
+  if (command === 'check') return check(repos, human);
   const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
   const held = join(state, 'queue.lock');
   const mine = takeLock(held);
@@ -258,11 +362,14 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const why = String(error.stderr || error.message).trim();
     console.error(`factory-queue: ${why}`);
     process.exitCode = 2;
-    // Best effort: the digest should show a failure before the repository loop, a plist typo among them.
-    try {
-      const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-      mkdirSync(state, { recursive: true });
-      writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
-    } catch {}
+    // Best effort: the digest should show a failure before the repository loop, a plist typo among them. plist and
+    // check are the Human's, run by hand, and keep no queue state.
+    if (!['plist', 'check'].includes(process.argv[2])) {
+      try {
+        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+        mkdirSync(state, { recursive: true });
+        writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
+      } catch {}
+    }
   }
 }
