@@ -102,9 +102,17 @@ esac
 
 took=$((SECONDS - start))
 if [ -z "$failed" ]; then
-  if [ -n "$full" ] && [ -z "$(git status --porcelain)" ]; then
-    stamps="$(git rev-parse --absolute-git-dir)/factory"
-    mkdir -p "$stamps" && : >"$stamps/verify-$(git rev-parse HEAD)"
+  if [ -n "$full" ]; then
+    dirt=$(git status --porcelain)
+    if [ -z "$dirt" ]; then
+      stamps="$(git rev-parse --absolute-git-dir)/factory"
+      mkdir -p "$stamps" && : >"$stamps/verify-$(git rev-parse HEAD)"
+    else
+      echo "verify: no stamp written, the work tree is not clean:"
+      printf '%s\n' "$dirt" | head -n 5 | sed 's/^/  /'
+      n=$(printf '%s\n' "$dirt" | wc -l | tr -d ' ')
+      [ "$n" -le 5 ] || echo "  … and $((n - 5)) more"
+    fi
   fi
   echo "verify: $ran passed in ${took}s"
   exit 0

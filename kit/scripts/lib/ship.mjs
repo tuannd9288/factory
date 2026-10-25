@@ -27,7 +27,11 @@ function behind(branch, head) {
 function open(branch, head, args) {
   const short = head.slice(0, 7);
   const stamps = join(git(['rev-parse', '--absolute-git-dir']), 'factory');
-  if (!existsSync(join(stamps, `verify-${head}`))) return say(1, `refused: HEAD ${short} has no verify stamp; run scripts/verify on it`);
+  const dirty = 'if the work tree is not clean, commit or remove what `git status` shows';
+  if (!existsSync(join(stamps, `verify-${head}`))) {
+    say(1, `refused: HEAD ${short} has no verify stamp; run scripts/verify on it`);
+    return say(1, dirty);
+  }
   let main;
   try {
     main = git(['rev-parse', '--verify', 'origin/main^{commit}']);
@@ -35,8 +39,10 @@ function open(branch, head, args) {
     return say(1, 'refused: there is no origin/main to judge the head against; fetch it');
   }
   const redStamp = join(stamps, `red-check-${head}-${main}`);
-  if (!existsSync(redStamp))
-    return say(1, `refused: HEAD ${short} has no red-check stamp against origin/main ${main.slice(0, 7)}; run scripts/red-check --base origin/main`);
+  if (!existsSync(redStamp)) {
+    say(1, `refused: HEAD ${short} has no red-check stamp against origin/main ${main.slice(0, 7)}; run scripts/red-check --base origin/main`);
+    return say(1, dirty);
+  }
   const noRed = readFileSync(redStamp, 'utf8').trim();
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);

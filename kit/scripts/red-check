@@ -27,9 +27,16 @@ base=$(git rev-parse --verify "$base^{commit}") || { echo "red-check: $base is n
 head=$(git rev-parse HEAD) || exit 2
 # passed [<No-red line>]: the stamp holds the line a pass by the PR body rests on, which ship holds its body to.
 passed() {
-  local stamps
+  local stamps dirt n
   # A tree with a change or an untracked file (a forgotten `git add`) is no pass of the head.
-  [ -z "$(git status --porcelain)" ] || return 0
+  dirt=$(git status --porcelain)
+  if [ -n "$dirt" ]; then
+    echo "red-check: no stamp written, the work tree is not clean:"
+    printf '%s\n' "$dirt" | head -n 5 | sed 's/^/  /'
+    n=$(printf '%s\n' "$dirt" | wc -l | tr -d ' ')
+    [ "$n" -le 5 ] || echo "  … and $((n - 5)) more"
+    return 0
+  fi
   stamps="$(git rev-parse --absolute-git-dir)/factory"
   mkdir -p "$stamps" || return 0
   if [ -n "${1:-}" ]; then printf '%s\n' "$1" >"$stamps/red-check-$head-$base"; else : >"$stamps/red-check-$head-$base"; fi
