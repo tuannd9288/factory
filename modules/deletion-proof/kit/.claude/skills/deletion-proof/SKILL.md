@@ -34,8 +34,9 @@ All of these, judged at the base (the merge-base with `origin/main`):
 3. **knip listed it.** knip 6.42.1, run at the base with the repository's own config, listed each deleted file as an
    unused file.
 4. **knip's config is trusted.** It is a JSON file (`knip.json`, `knip.jsonc`, `.knip.json`, `.knip.jsonc`) of plain
-   data keys, a regular file (not a link), and `.gate/protected` at the base names it; and
-   `package.json` has no `"knip"` key, because knip merges that key with the file and a manifest change is not tier 3.
+   data keys, a regular file (not a link), and `.gate/protected` at the base names it. And
+   `package.json` at the base is a regular file that reads as JSON or JSONC, and has no top-level `"knip"` key,
+   because knip merges that key with the file and a manifest change is not tier 3.
    So no tier-1 change can loosen what knip reports.
 
 `review` still runs on a proved deletion and can still block it; the proof replaces only the `No-red:` line.
