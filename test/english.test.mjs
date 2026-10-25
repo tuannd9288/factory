@@ -3,11 +3,12 @@
 // Vietnamese on purpose.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { VIETNAMESE } from './helpers.mjs';
+import { VIETNAMESE, VIETNAMESE_ONLY } from './helpers.mjs';
 import { canaryLine, digest, queueState, rate, rowOf, taskRow } from '../bin/lib/ledger.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -80,6 +81,48 @@ test('the pull request template is English, with the fields the kit pull request
   const fields = [...template.matchAll(/^- ([A-Za-z ]+): /gm)].map((m) => m[1]);
   assert.deepEqual(fields, ['Purpose', 'Change', 'Evidence', 'Tier', 'Rollback', 'Needs the Human']);
   assert.match(template, /No-red: <reason, at least 20 characters>/);
+});
+
+/** The places that keep Vietnamese on purpose: a quote of the Human, and test input. A line in `lines` is allowed when
+ * it starts with the text given; a file with `all` is allowed whole. */
+const KEEPS_VIETNAMESE = [
+  { file: 'AGENTS.md', lines: '- **K1, 2026-10-21 (the Human: "' },
+  { file: 'probes/probes.sh', all: true },
+  { file: 'test/claude-reviewer.test.mjs', lines: "    const claim = '" },
+];
+
+const tracked = () => execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
+const textOf = (file) => {
+  try {
+    return readFileSync(join(root, file), 'utf8');
+  } catch {
+    return null;
+  }
+};
+
+test('no tracked file holds a Vietnamese letter, apart from the three places that keep it on purpose', () => {
+  const found = [];
+  for (const file of tracked()) {
+    const keep = KEEPS_VIETNAMESE.find((k) => k.file === file);
+    if (keep?.all) continue;
+    const text = textOf(file);
+    if (text === null || text.includes('\0')) continue;
+    text.split('\n').forEach((line, i) => {
+      if (VIETNAMESE_ONLY.test(line) && !(keep && line.startsWith(keep.lines))) found.push(`${file}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(found, []);
+  // The allowlist is exact: each place it names still holds Vietnamese, so a stale entry is dropped.
+  for (const keep of KEEPS_VIETNAMESE) assert.match(textOf(keep.file), VIETNAMESE_ONLY, keep.file);
+});
+
+test('no rule or script of the factory asks for Vietnamese', () => {
+  const found = tracked().filter((file) => {
+    if (/^(test|probes)\//.test(file)) return false;
+    const text = textOf(file);
+    return text !== null && /Vietnamese/i.test(text);
+  });
+  assert.deepEqual(found, []);
 });
 
 test('the digest and the ledger name no language: neither the rules about them nor their code ask for Vietnamese', () => {
