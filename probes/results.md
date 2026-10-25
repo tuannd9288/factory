@@ -508,12 +508,14 @@ The Lead ran the drill from the factory account (`tuan9288-agent`), with porcela
 **How long it took.** From the decision to the revert's merge: 31 seconds. The checks took 11 seconds of it.
 
 **Who merged it.** `gh pr view` names `tuan9288-agent` as the merger of both pull requests. That it was auto-merge
-is an inference: #57 was armed before its checks ended, it merged 11 seconds after the last one, and the Lead ran no
-merge of its own.
+is an inference: each was armed before its checks ended, #56 merged 4 seconds after its last check and #57 11 seconds
+after its last, and the Lead ran no merge of its own.
 
 **What the ruleset requires.** factory-scratch's ruleset `factory-gate`, read with `gh ruleset view` after the drill,
 requires six of the seven checks: `verify`, `rules`, `red-check`, `verify-trusted`, `review` and `verdict`. It is
-strict, so a branch must be up to date with `main`, and it requires no approval.
+strict, so a branch must be up to date with `main`. It requires no count of approvals, but code-owner review is on:
+a change to a path `.github/CODEOWNERS` gives to `@tuannd9288`, such as `.gate/` or `scripts/`, needs his review.
+`README.md` has no code owner, so the drill needed no approval.
 
 **What Actions ran.** Four workflow runs: `gate` and `gate-trusted` for each pull request, each run 11 to 14
 seconds. The minutes billed were not read; GitHub rounds each job up to a whole minute.

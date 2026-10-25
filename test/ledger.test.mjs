@@ -385,7 +385,7 @@ test('the revert lines follow Tasks merged and its sub-rate, and name none when 
   assert.equal(k0[at(k0, '- PRs reverted') + 1], '- Reverted PRs: none');
 });
 
-// What the reviewer probed (REVIEW-1, item 6): these pin behaviour that already works.
+// Cases a reviewer of #83 probed by hand: these pin behaviour that already works.
 test('a pull request reverted twice counts once in k, and both reverts count in m', () => {
   const rows = revertRows(mergedPR(1, 'Add A', '2026-10-15T10:00:00Z'), mergedPR(2, 'Undo A', '2026-10-16T10:00:00Z', 'Reverts #1'), mergedPR(3, 'Undo A again', '2026-10-17T10:00:00Z', 'Reverts #1'));
   assert.deepEqual(countOf(rows), { n: 1, k: 1, m: 2, reverted: ['o/r#1'] });
