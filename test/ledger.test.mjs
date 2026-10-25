@@ -384,3 +384,46 @@ test('the revert lines follow Tasks merged and its sub-rate, and name none when 
   const k0 = lines(revertRows(mergedPR(1, 'Add A', '2026-10-15T10:00:00Z')));
   assert.equal(k0[at(k0, '- PRs reverted') + 1], '- Reverted PRs: none');
 });
+
+// What the reviewer probed (REVIEW-1, item 6): these pin behaviour that already works.
+test('a pull request reverted twice counts once in k, and both reverts count in m', () => {
+  const rows = revertRows(mergedPR(1, 'Add A', '2026-10-15T10:00:00Z'), mergedPR(2, 'Undo A', '2026-10-16T10:00:00Z', 'Reverts #1'), mergedPR(3, 'Undo A again', '2026-10-17T10:00:00Z', 'Reverts #1'));
+  assert.deepEqual(countOf(rows), { n: 1, k: 1, m: 2, reverted: ['o/r#1'] });
+});
+
+test('a revert of a revert is a revert, not a pull request in n; the first stays counted as reverted', () => {
+  const rows = revertRows(mergedPR(1, 'Add A', '2026-10-15T10:00:00Z'), mergedPR(2, 'Undo A', '2026-10-16T10:00:00Z', 'Reverts #1'), mergedPR(3, 'Land A again', '2026-10-17T10:00:00Z', 'Reverts #2'));
+  assert.deepEqual(countOf(rows), { n: 1, k: 1, m: 2, reverted: ['o/r#1'] });
+});
+
+test('the period holds its first and its last second, and not the second on either side', () => {
+  const at = (merged) => countOf(revertRows(mergedPR(1, 'Add A', merged)));
+  assert.equal(at('2026-10-14T00:00:00Z').n, 1);
+  assert.equal(at('2026-10-13T23:59:59Z').n, 0);
+  assert.equal(at('2026-10-21T23:59:59Z').n, 1);
+  assert.equal(at('2026-10-22T00:00:00Z').n, 0);
+  const revertAt = (merged) => countOf(revertRows(mergedPR(1, 'Add A', '2026-10-15T10:00:00Z'), mergedPR(2, 'Undo A', merged, 'Reverts #1')));
+  assert.deepEqual(revertAt('2026-10-21T23:59:59Z'), { n: 1, k: 1, m: 1, reverted: ['o/r#1'] });
+  assert.deepEqual(revertAt('2026-10-22T00:00:00Z'), { n: 1, k: 0, m: 0, reverted: [] });
+});
+
+test('a title revert reverts the latest merged pull request of that title merged before it', () => {
+  const rows = revertRows(
+    mergedPR(1, 'Add A', '2026-10-15T10:00:00Z'),
+    mergedPR(2, 'Add A', '2026-10-16T10:00:00Z'),
+    mergedPR(3, 'Revert "Add A"', '2026-10-17T10:00:00Z'),
+    mergedPR(4, 'Add A', '2026-10-18T10:00:00Z'),
+  );
+  assert.deepEqual(countOf(rows), { n: 3, k: 1, m: 1, reverted: ['o/r#2'] });
+});
+
+test('the drill of #83 as recorded: factory-scratch#57 reverts #56', () => {
+  const drill = (number, title, body, createdAt, mergedAt) => pr({ number, title, body, createdAt, mergedAt, state: 'MERGED', labels: { nodes: [{ name: 'tier-1' }] } });
+  const rows = [
+    drill(56, 'Add a README line for the revert drill (factory#83)', 'The change for the revert drill of tuannd9288/factory#83: one line in `README.md`. Its revert, the next pull request, is what the drill times.\n\nNo-red: a README line only; no behaviour changes, so no test can fail first.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n', '2026-10-25T20:44:12Z', '2026-10-25T20:44:32Z'),
+    drill(57, 'Revert the README line of the revert drill (factory#83)', 'Reverts #56.\n\nThe revert drill of tuannd9288/factory#83: `git revert -m 1` of #56\'s merge commit, through the gate like any change. The drill times it from the decision to revert to this merge.\n\nNo-red: a revert of a README line; no behaviour changes, so no test can fail first.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n', '2026-10-25T20:45:48Z', '2026-10-25T20:46:15Z'),
+  ].map((p) => rowOf('tuannd9288/factory-scratch', p, { human: 'boss', costs: null, profile: false }));
+  const c = ledger.revertCount(rows, { since: '2026-10-19', until: '2026-10-26' });
+  assert.deepEqual([c.n, c.k, c.m], [1, 1, 1]);
+  assert.deepEqual(c.reverted, [{ repo: 'tuannd9288/factory-scratch', number: 56 }]);
+});
