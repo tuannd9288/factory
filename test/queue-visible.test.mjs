@@ -78,9 +78,8 @@ function ledgerRun(dir, list) {
 }
 
 const TITLE = 'Weekly digest 2026-10-17 → 2026-10-24';
-// The title the digests posted before #98 carry (#1), built from code points so no Vietnamese letter sits in this file.
-const cp = (...codes) => String.fromCodePoint(...codes);
-const OLD_TITLE = (since, until) => `B${cp(0x1ea3)}n tin x${cp(0x1b0, 0x1edf)}ng ${since} → ${until}`;
+// The title the digests posted before #98 carry (#1).
+const OLD_TITLE = (since, until) => `Bản tin xưởng ${since} → ${until}`;
 
 test('--post creates the digest when no issue has its title, ignoring fuzzy near matches', () => {
   withDir((dir) => {

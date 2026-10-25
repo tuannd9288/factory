@@ -373,9 +373,9 @@ const STATE = { landed: 'merged', open: 'open', abandoned: 'abandoned' };
 
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
-/** The title the digests posted before #98 carry (#1), built from code points: no accented letter stays in the file. A period
- * posted under it is updated, not posted again. */
-export const oldDigestTitle = (since, until) => `B${String.fromCodePoint(0x1ea3)}n tin x${String.fromCodePoint(0x1b0, 0x1edf)}ng ${since} → ${until}`;
+/** The title of the digests posted before #98 (#1), which were Vietnamese. A period posted under it is updated, not
+ * posted again. */
+export const oldDigestTitle = (since, until) => `Bản tin xưởng ${since} → ${until}`;
 
 /** The weekly digest, in markdown. */
 export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null }) {
