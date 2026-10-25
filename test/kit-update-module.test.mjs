@@ -149,7 +149,7 @@ describe('bin/kit-update --module / --no-module', () => {
   test('refuses a module the factory lacks, a name in both flags, and a .gate/modules the base cannot read', () => {
     const w = world({ kit: DEMO, executable: EXEC });
     try {
-      refused(w, w.update(['app', '--no-pr', '--module', 'nosuch']), /no module nosuch.*there are: demo/);
+      refused(w, w.update(['app', '--no-pr', '--module', 'nosuch']), /no module nosuch.*there are: deletion-proof, demo/);
       refused(w, w.update(['app', '--no-pr', '--module', 'demo', '--no-module', 'demo']), /--module and --no-module both name demo/);
       w.repoCommit({ '.gate/modules': 'demo' });
       refused(w, w.update(['app', '--no-pr']), /\.gate\/modules: not a list of names/);

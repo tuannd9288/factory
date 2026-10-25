@@ -52,7 +52,7 @@ describe('the factory side', () => {
     const w = world({ kit: DEMO, executable: EXEC, onboardArgs: null });
     try {
       const fac = git(w.fac, 'rev-parse', 'HEAD');
-      assert.deepEqual(moduleNames(w.fac, fac), ['demo']);
+      assert.deepEqual(moduleNames(w.fac, fac), ['deletion-proof', 'demo']);
       const kitOnly = mergedTree(w.fac, fac, []);
       const both = mergedTree(w.fac, fac, ['demo']);
       assert.equal(both.size, kitOnly.size + DEMO_FILES.length);
@@ -62,7 +62,7 @@ describe('the factory side', () => {
       assert.equal(both.get('scripts/demo-run').src, 'modules/demo/kit/scripts/demo-run');
       assert.equal(both.get('scripts/demo-run').module, 'demo');
       assert.equal(both.get('scripts/demo-run').mode, '100755');
-      assert.throws(() => mergedTree(w.fac, fac, ['nosuch']), /no module nosuch.*there are: demo/);
+      assert.throws(() => mergedTree(w.fac, fac, ['nosuch']), /no module nosuch.*there are: deletion-proof, demo/);
     } finally {
       w.cleanup();
     }
@@ -119,7 +119,7 @@ describe('bin/onboard --module', () => {
   test('refuses, before it clones, a module the factory lacks or a name that is no module name', () => {
     const w = world({ kit: DEMO, executable: EXEC, onboardArgs: null });
     try {
-      for (const [name, re] of [['nosuch', /no module nosuch.*there are: demo/], ['Bad_Name', /no module Bad_Name/]]) {
+      for (const [name, re] of [['nosuch', /no module nosuch.*there are: deletion-proof, demo/], ['Bad_Name', /no module Bad_Name/]]) {
         const out = w.onboard(['--module', name], { FACTORY_ROOT: join(w.dir, `root-${name}`) });
         assert.equal(out.code, 2, out.out);
         assert.match(out.out, re);
