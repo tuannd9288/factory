@@ -47,15 +47,22 @@ function open(branch, head, args) {
   return say(0, `opened #${/(\d+)$/.exec(url)?.[1] ?? '?'} ${url}`);
 }
 
-/** A tier 3, by the label tier-3 or raised or by the kit's own scripts/tier on the paths, whose tier check has not ended. */
+/**
+ * Whether the pull request is a tier 3 that waits for the Human: the label tier-3 or raised, or the kit's scripts/tier on
+ * the paths, and a tier check that is anything but a SUCCESS (the kit's job fails at once on a tier 3 without his
+ * approval, so a red check is the wait). Returns a string when scripts/tier could not judge. The local scripts/tier is
+ * advisory: the branch can edit its own policy. GitHub's tier job runs main's copy and labels every pull request
+ * tier-<n>, so the labels are the main signal and GitHub still requires the approval.
+ */
 function tierWait(pr) {
   const names = pr.labels.map((l) => l.name);
   if (!names.includes('tier-3') && !names.includes('raised')) {
     const r = spawnSync('scripts/tier', ['--base', 'origin/main', '--head', 'HEAD', '--labels', names.join(',')], { encoding: 'utf8' });
-    if (r.status !== 0 || !/^tier 3$/m.test(r.stdout ?? '')) return false;
+    if (r.status !== 0) return `scripts/tier exited ${r.status ?? r.signal}`;
+    if (!/^tier 3$/m.test(r.stdout ?? '')) return false;
   }
   const tier = (pr.statusCheckRollup ?? []).find((c) => (c.name ?? c.context) === 'tier');
-  return !(tier && (tier.conclusion || ['SUCCESS', 'FAILURE', 'ERROR'].includes(tier.state)));
+  return !(tier && (tier.conclusion === 'SUCCESS' || tier.state === 'SUCCESS'));
 }
 
 function step(pr, head, branch) {
@@ -74,7 +81,9 @@ function step(pr, head, branch) {
   if (armed && !covered()) return disarm(`no live verdict covers HEAD ${short}; run ship again once it is pushed`);
 
   if (pr.labels.some((l) => l.name === 'needs-human')) return say(1, `stopped on #${n}: it carries needs-human; the Human decides`);
-  const stop = () => (tierWait(pr) ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval`) : 0);
+  const wait = tierWait(pr);
+  if (typeof wait === 'string') return say(2, `could not judge the tier (${wait})`);
+  const stop = () => (wait ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval`) : 0);
   if (armed) return stop() || say(0, `#${n} is armed and a live verdict covers it; nothing to do`);
   if (ahead) return say(1, `refused: HEAD ${short} has commits #${n} lacks; git push first`);
 
