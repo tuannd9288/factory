@@ -4,7 +4,7 @@
 #   scripts/verify --fast          the hand-in rules and gate_fast on the staged files (the pre-commit hook)
 #   scripts/verify --only <check>  one check, no proofs (prove-check runs this)
 #   scripts/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
-# A full run that passes with no uncommitted change to a tracked file leaves factory/verify-<head> in the git dir, which
+# A full run that passes on a clean work tree (no change, no untracked file) leaves factory/verify-<head> in the git dir, which
 # scripts/ship reads; no other form does, and the stamp is never in the work tree.
 # GATE_BASE names the commit the rules and subjects checks read from (default: the merge-base with origin/main).
 set -uo pipefail
@@ -102,7 +102,7 @@ esac
 
 took=$((SECONDS - start))
 if [ -z "$failed" ]; then
-  if [ -n "$full" ] && git diff --quiet HEAD 2>/dev/null; then
+  if [ -n "$full" ] && [ -z "$(git status --porcelain)" ]; then
     stamps="$(git rev-parse --absolute-git-dir)/factory"
     mkdir -p "$stamps" && : >"$stamps/verify-$(git rev-parse HEAD)"
   fi
