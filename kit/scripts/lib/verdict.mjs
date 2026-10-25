@@ -86,7 +86,7 @@ export function brief({ pr, issues, parent, head, driver, worktrees }) {
     'verdict ISSUES: you can prove a defect. List every issue you can prove, not only the first, each with the',
     'command that shows it.',
     'verdict BLOCKED: you could not run the change; say why in reason.',
-    "notes: what a reader should know that blocks nothing. Write audit, issues, notes, observed and reason in Vietnamese.",
+    "notes: what a reader should know that blocks nothing. Write audit, issues, notes, observed and reason in English.",
     '',
   ].join('\n');
 }
@@ -121,15 +121,15 @@ const inline = (s) => cut(s).replace(/\s*\n\s*/g, ' ').replace(/`/g, "'");
 /** The comment: a fixed header of six lines, which is what coverage reads, then what the verifier saw. */
 export function comment({ verdict, head, parent, patch, driver, codex, result, reason }) {
   const lines = [`live-verify: ${verdict}`, `head: ${head || '-'}`, `parent: ${parent || '-'}`, `patch: ${patch || '-'}`, `driver: ${driver || '-'}`, `codex: ${codex}`, ''];
-  if (reason) lines.push(`Lý do: ${cut(reason)}`, '');
+  if (reason) lines.push(`Reason: ${cut(reason)}`, '');
   if (result) {
-    lines.push('**Chạy như người dùng**', '', ...result.ran.map((r) => `- ${r.at} \`${inline(r.command)}\` → ${inline(r.observed)}`), '');
-    lines.push('**Gate chạy lại trên head**', '', ...result.gates.map((g) => `- \`${inline(g.command)}\` → ${inline(g.result)}`), '');
-    lines.push('**Đọc diff**', '', cut(result.audit) || '–', '');
-    if (result.issues.length) lines.push('**Lỗi**', '', ...result.issues.map((i) => `- ${inline(i)}`), '');
-    if (result.notes.length) lines.push('**Ghi chú**', '', ...result.notes.map((n) => `- ${inline(n)}`), '');
+    lines.push('**Run as a user**', '', ...result.ran.map((r) => `- ${r.at} \`${inline(r.command)}\` → ${inline(r.observed)}`), '');
+    lines.push('**Gates re-run on the head**', '', ...result.gates.map((g) => `- \`${inline(g.command)}\` → ${inline(g.result)}`), '');
+    lines.push('**Diff read**', '', cut(result.audit) || '–', '');
+    if (result.issues.length) lines.push('**Issues**', '', ...result.issues.map((i) => `- ${inline(i)}`), '');
+    if (result.notes.length) lines.push('**Notes**', '', ...result.notes.map((n) => `- ${inline(n)}`), '');
   }
-  lines.push('Verdict của người kiểm không phải đầu vào của cổng: nó không hạ bậc, không thay check bắt buộc nào.');
+  lines.push("The verifier's verdict is no input to the gate: it lowers no tier and replaces no required check.");
   return `${lines.join('\n')}\n`;
 }
 

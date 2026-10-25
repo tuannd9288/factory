@@ -32,7 +32,7 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    module: import the module (`import * as m from`), not the missing name. A new file: load it inside the
    test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR
    body: `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
-4. Once `scripts/verify` and `red-check` pass locally, open the pull request with the template, in Vietnamese,
+4. Once `scripts/verify` and `red-check` pass locally, open the pull request with the template, in English,
    and run `scripts/live-verify <pr>`. On PASS or PASS+NOTES, and when its base is `main`, enable auto-merge
    (`gh pr merge --auto --merge`). FAIL: fix forward with a red test, then run it again. BLOCKED: stop, and put
    the reason and your recommended answer in the pull request. Before pushing a new patch to an armed pull
