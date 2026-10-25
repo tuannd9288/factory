@@ -63,7 +63,7 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 
 - **0a Environment** [S2, OA1]: the `factory` account, `~/WORKSPACES`, the worktrees under `.claude/worktrees/`.
 - **0b Tools & permissions** [A5, A2]: the deny rules, the permission mode, the agents' `gh` login.
-- **0c Model configuration** [MODELCFG]: which model a role runs on; one profile for each repository.
+- **0c Model configuration** [MODELCFG]: which model a role runs on; one profile for each repository; the factory's own runs use one profile per seat, `~/.agent-profiles/seats/<n>/claude`, which the launcher picks.
 - **0d Harness & session** [A2]: the loop that runs Claude Code: `direnv exec`, `bin/claude-canary`.
 - **1a Issues** [GH2]: where work comes in: one issue labelled `task`.
 - **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger.
