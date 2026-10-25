@@ -21,13 +21,11 @@ const DEMO_FILES = ['.claude/skills/demo/SKILL.md', 'scripts/demo-run', 'scripts
 
 describe('.gate/modules', () => {
   test('is a sorted list of module names, one a line; absent or empty means none', async () => {
-    const { MODULES_FILE, modulesText, parseModules } = await lib();
+    const { MODULES_FILE, parseModules } = await lib();
     assert.equal(MODULES_FILE, '.gate/modules');
     assert.deepEqual(parseModules(null), []);
     assert.deepEqual(parseModules(''), []);
     assert.deepEqual(parseModules('alpha\nbeta-2\n'), ['alpha', 'beta-2']);
-    assert.equal(modulesText(['beta', 'alpha']), 'alpha\nbeta\n');
-    assert.equal(modulesText([]), null);
   });
   for (const [why, text] of [
     ['has no final newline', 'alpha'],

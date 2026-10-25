@@ -30,19 +30,6 @@ export function parseModules(text) {
   return names;
 }
 
-/** What .gate/modules holds for these modules (sorted, one a line), or null for none: the file is then absent. */
-export function modulesText(names) {
-  const sorted = [...new Set(names)].sort();
-  return sorted.length ? `${sorted.join('\n')}\n` : null;
-}
-
-/** The modules left on after --module and --no-module: the current ones, less `remove`, with `add`, sorted. */
-export function updateModules(current, add, remove) {
-  const both = add.filter((name) => remove.includes(name));
-  if (both.length) throw new Error(`--module and --no-module both name ${both[0]}`);
-  return [...new Set([...current.filter((name) => !remove.includes(name)), ...add])].sort();
-}
-
 /** The modules a base's .gate/modules text names (null: none). A text that does not parse names none; evidence and kit-update
  * judge the file itself. */
 export function baseModules(text) {

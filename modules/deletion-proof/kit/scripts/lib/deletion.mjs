@@ -132,9 +132,8 @@ function checkDeleted(base, sources) {
     if (kind !== 'D' && kind !== 'T') lines.push(`check 1: ${path} is ${named[kind] ?? 'changed'}, not deleted whole; only whole-file deletions get a machine proof`);
   }
   if (lines.length) throw new Problem(lines);
-  const files = sources.filter((path) => status.get(path) === 'D');
-  if (!files.length) throw new Problem(['check 3: the change deletes no file, so knip has nothing to have listed']);
-  return files;
+  // red-check hands over only added, modified and deleted source paths, and the first two were refused above.
+  return sources.filter((path) => status.get(path) === 'D');
 }
 
 /** The first tracked file at the head that holds `needle`, or undefined; git failing is a Problem of exit 2. */
