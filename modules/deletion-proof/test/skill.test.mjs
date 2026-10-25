@@ -72,11 +72,28 @@ describe('the skill follows the Agent Skills specification', () => {
     assert.match(body, /`review` still runs on a proved deletion/);
     assert.match(body, /The proof is the gate's/);
   });
-  test('every refusal the module can print has a row in the reference', () => {
+  test('every refusal the module can print has a row in the reference, and the one it cannot print has none', () => {
     const refusals = text('references/refusals.md');
+    const code = readFileSync(join(MODULE, 'kit/scripts/lib/deletion.mjs'), 'utf8');
     for (const line of ['config: <file> holds the key', 'config: knip has no config', 'is not in .gate/protected', 'check 1:', 'check 2:', 'check 3: knip did not list', 'check 3: the base could not be prepared', 'knip could not run']) {
       assert.ok(refusals.includes(line), line);
     }
+    // The lines of checkConfig and the report, each in the code and in the reference.
+    for (const line of ['config: the knip config is in package.json', 'is not a regular file', 'could not be read as JSON', 'is not a JSON object', 'a JS or TS knip config', 'changes type', 'is still named in', 'JSON report could not be read']) {
+      assert.ok(code.includes(line.replace(/^config: /, '')), `the code prints ${line}`);
+      assert.ok(refusals.includes(line), `a row for ${line}`);
+    }
+    assert.doesNotMatch(code, /deletes no file/);
+    assert.doesNotMatch(refusals, /deletes no file/);
+  });
+  test('the row for a package.json "knip" key says it is refused beside a knip.json too', () => {
+    const row = text('references/refusals.md').split('\n').find((l) => l.includes('config: the knip config is in package.json'));
+    assert.match(row, /beside a (protected )?`knip\.json`/);
+  });
+  test('SKILL.md says what check 2 is, a fixed-string search, and that a package.json "knip" key is refused', () => {
+    assert.match(body, /fixed-string `git grep`/);
+    assert.match(body, /not a full reference check/);
+    assert.match(body, /`package\.json` has no `"knip"` key/);
   });
 });
 
