@@ -5,7 +5,8 @@
 # 1. no pull request: opens it, only when HEAD has a verify stamp and a red-check stamp against origin/main (a full
 #    scripts/verify and scripts/red-check leave them in the git dir); the body is --body-file, with `Closes #<issue>` filled in.
 # 2. an armed pull request whose HEAD is past what was verified, or no longer covered: disarms it first.
-# 3. stops while the pull request carries needs-human, or tier 3 waits on its tier check.
+# 3. stops while the pull request carries needs-human; arms a tier 3 (labels, or scripts/tier on the paths) by the same
+#    rule, then stops with "tier 3 waits for the Human's approval" until its tier check ends.
 # 4. runs scripts/live-verify <pr>, and arms auto-merge (--auto --merge) only on PASS or PASS+NOTES and a base of main;
 #    when scripts/live-verify --covered already passes, it arms again without a new run.
 # Exit 0 a step taken or nothing to do, 1 refused or stopped, 2 could not run.

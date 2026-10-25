@@ -36,10 +36,13 @@ function open(branch, head, args) {
   return say(0, `opened #${/(\d+)$/.exec(url)?.[1] ?? '?'} ${url}`);
 }
 
-/** A tier 3 (the label tier-3 or raised) whose tier check has not ended: the Human's approval is awaited. */
+/** A tier 3, by the label tier-3 or raised or by the kit's own scripts/tier on the paths, whose tier check has not ended. */
 function tierWait(pr) {
-  const labels = new Set(pr.labels.map((l) => l.name));
-  if (!labels.has('tier-3') && !labels.has('raised')) return false;
+  const names = pr.labels.map((l) => l.name);
+  if (!names.includes('tier-3') && !names.includes('raised')) {
+    const r = spawnSync('scripts/tier', ['--base', 'origin/main', '--head', 'HEAD', '--labels', names.join(',')], { encoding: 'utf8' });
+    if (r.status !== 0 || !/^tier 3$/m.test(r.stdout ?? '')) return false;
+  }
   const tier = (pr.statusCheckRollup ?? []).find((c) => (c.name ?? c.context) === 'tier');
   return !(tier && (tier.conclusion || ['SUCCESS', 'FAILURE', 'ERROR'].includes(tier.state)));
 }
