@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
+import { APP, VIETNAMESE, commit, factory, git, quiet, run, write } from './helpers.mjs';
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const DENY = { permissions: { deny: ['Read(./.env*)'] } };
@@ -19,7 +19,7 @@ const KIT = {
   'kit/AGENTS.md': `# <repo>\n\nRules for <repo> and <repo>.\n\n${KEEPS}`,
   'kit/.claude/settings.json': json(DENY),
   'kit/.github/CODEOWNERS': '* @OWNER\n/.gate/ @OWNER\n',
-  'kit/.github/pull_request_template.md': '## Tóm tắt\n',
+  'kit/.github/pull_request_template.md': '## Summary\n',
   'kit/scripts/verify': '#!/usr/bin/env bash\necho ok\n',
 };
 
@@ -366,7 +366,10 @@ describe('the kit pull request', () => {
       // The Human's next step, ready to copy: the repository's own id, not a placeholder.
       assert.match(text, /`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/);
       assert.match(text, new RegExp(`bin/kit-evidence --factory <factory> --commit ${ahead} --repo <clone> --base [0-9a-f]{40} --head ${head} --slug tuannd9288/app --id 1234`));
-      assert.match(text, /^## File repo đã có, kit đã thay\n {2}- không có$/m);
+      assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- none$/m);
+      assert.match(text, /^## Summary for the Human\n- Purpose: bring app into the factory with the kit of tuannd9288\/factory\.$/m);
+      assert.match(text, /^## The Human's steps after the merge\n1\. From the factory's clone, run `bin\/onboard-owner tuannd9288\/app --id 1234 --apply` again/m);
+      assert.doesNotMatch(text, VIETNAMESE, 'a Vietnamese letter in the body');
       // Nothing replaced, no --own: nothing to say about own parts or an old hook.
       assert.doesNotMatch(text, /--own|gate_fast/);
     } finally {
@@ -380,7 +383,7 @@ describe('the kit pull request', () => {
       const out = w.onboard('root');
       assert.equal(out.code, 0, out.out);
       const text = readFileSync(w.body, 'utf8');
-      assert.match(text, /^Lưu ý: check `verify` của PR này đỏ \(`scripts\/verify-trusted: No such file`, mã 127\) vì `main` chưa có kit; nó không chặn merge, vì `factory-bootstrap` không đòi check nào\.$/m);
+      assert.match(text, /^Note: the `verify` check of this PR is red \(`scripts\/verify-trusted: No such file`, code 127\) because `main` has no kit yet; it does not block the merge, because `factory-bootstrap` requires no check\.$/m);
     } finally {
       w.cleanup();
     }
@@ -393,9 +396,10 @@ describe('the kit pull request', () => {
       const out = w.onboard('root', '--own', join(w.dir, 'own.md'));
       assert.equal(out.code, 0, out.out);
       const text = readFileSync(w.body, 'utf8');
-      assert.match(text, /^## File repo đã có, kit đã thay\n {2}- `\.githooks\/pre-commit`\n {2}- `AGENTS\.md`\n/m);
-      assert.match(text, /`gate_fast` trong `\.gate\/config\.sh`/);
-      assert.match(text, /Phần riêng của repo mà anh đã duyệt \(`--own`\)/);
+      assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- `\.githooks\/pre-commit`\n {2}- `AGENTS\.md`\n/m);
+      assert.match(text, /move into `gate_fast` in `\.gate\/config\.sh`/);
+      assert.match(text, /The repository's own parts that the Human approved \(`--own`\)/);
+      assert.doesNotMatch(text, VIETNAMESE, 'a Vietnamese letter in the body');
       assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}\.githooks\/pre-commit \(was [0-9a-f]{12}\)\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
       assert.match(text, /^ {2}AGENTS\.md:\d+: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app\.$/m);
     } finally {

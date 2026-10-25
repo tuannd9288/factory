@@ -401,7 +401,7 @@ describe('verify-trusted', () => {
   });
   test('hands the PR body to red-check, so a No-red line passes it there and review judges the reason', () => {
     assert.equal(candidate({ 'src/math.js': MUL }).code, 1);
-    write(r.dir, { 'body.txt': 'Tóm tắt\nNo-red: adds a helper nothing calls yet\n' });
+    write(r.dir, { 'body.txt': 'Summary\nNo-red: adds a helper nothing calls yet\n' });
     const out = candidate({ 'src/math.js': MUL }, { GATE_BODY_FILE: join(r.dir, 'body.txt') });
     assert.equal(out.code, 0, out.out);
   });
@@ -574,7 +574,7 @@ describe('review, verdict, tier and rounds', () => {
     assert.match(out.out, /the pull request's head is 0{40}/);
   });
   test('a No-red line needs the reviewer\'s explicit acceptance, which the stub never gives', () => {
-    write(r.dir, { 'body.txt': 'Tóm tắt\nNo-red: renames a local variable, nothing to fail\n' });
+    write(r.dir, { 'body.txt': 'Summary\nNo-red: renames a local variable, nothing to fail\n' });
     const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'stub', GATE_BODY_FILE: join(r.dir, 'body.txt') });
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /No-red .* not accepted \(unjudged\)/);
@@ -1362,7 +1362,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8'), '');
     // A changed No-red line, another base or head, and an unavailable earlier run are each a new call.
     earlier('none');
-    write(r.dir, { 'body.txt': 'Tóm tắt\nNo-red: renames a local variable, nothing to fail\n' });
+    write(r.dir, { 'body.txt': 'Summary\nNo-red: renames a local variable, nothing to fail\n' });
     out = again('review', head, { ...reviewEnv, GATE_BODY_FILE: join(r.dir, 'body.txt') });
     assert.equal(out.code, 0, out.out);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'a changed No-red line was not judged');

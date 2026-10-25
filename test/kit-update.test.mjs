@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
+import { APP, VIETNAMESE, commit, factory, git, quiet, run, write } from './helpers.mjs';
 
 import { world } from './world.mjs';
 
@@ -110,7 +110,8 @@ describe('bin/kit-update', () => {
       assert.match(git(w.repo, 'log', '-1', '--format=%b', rev), new RegExp(full));
       assert.equal(readFileSync(w.title, 'utf8'), `Bring the kit up to factory main ${sha7}`);
       const lines = text.split('\n');
-      for (const line of lines.slice(0, 3)) assert.match(line, /[À-ỹ]/, `not Vietnamese: ${line}`);
+      assert.deepEqual(lines.slice(0, 3).map((l) => l.split(':**')[0]), ['**What changed', '**Effect', '**Evidence']);
+      assert.doesNotMatch(text, VIETNAMESE, 'a Vietnamese letter in the body');
       // A blank line between, or the rule would turn the third line into a heading.
       assert.deepEqual(lines.slice(3, 5), ['', '---']);
       assert.match(text, new RegExp(`tuannd9288/factory.*${full.slice(0, 7)}`));
@@ -294,7 +295,7 @@ describe('bin/kit-update, after review', () => {
     }
   });
 
-  test('names a kept settings.json in the Vietnamese lines, words the removed heading for any past version, and fences evidence that holds a fence', () => {
+  test('names a kept settings.json in the summary lines, words the removed heading for any past version, and fences evidence that holds a fence', () => {
     const w = world({ kit: { 'kit/.gate/old-a.txt': 'old a\n' } });
     try {
       const settings = JSON.parse(readFileSync(join(w.repo, '.claude/settings.json'), 'utf8'));
@@ -306,8 +307,10 @@ describe('bin/kit-update, after review', () => {
       w.facCommit({ 'kit/.gate/old-a.txt': null });
       const out = w.update(['app']);
       assert.equal(out.code, 0, out.out);
-      const lines = readFileSync(w.body, 'utf8').split('\n');
-      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*(deny|giữ)/);
+      const body = readFileSync(w.body, 'utf8');
+      const lines = body.split('\n');
+      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept[^\n]*deny rules/);
+      assert.doesNotMatch(body, VIETNAMESE, 'a Vietnamese letter in the body');
       assert.equal(lines.filter((l) => /^```(?!`)/.test(l)).length, 0, 'a 3-backtick fence opens the evidence');
       assert.equal(lines.filter((l) => l === '````text').length, 1);
       assert.equal(lines.filter((l) => l === '````').length, 1);

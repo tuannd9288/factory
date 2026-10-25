@@ -73,6 +73,15 @@ test('the weekly digest holds no Vietnamese letter, in any section', () => {
   assert.doesNotMatch(rate(0, 0) + rate(1, 4), VIETNAMESE);
 });
 
+test('the pull request template is English, with the fields the kit pull request body also uses', () => {
+  const template = readFileSync(join(root, 'kit/.github/pull_request_template.md'), 'utf8');
+  assert.doesNotMatch(template, VIETNAMESE);
+  assert.match(template, /^## Summary for the Human$/m);
+  const fields = [...template.matchAll(/^- ([A-Za-z ]+): /gm)].map((m) => m[1]);
+  assert.deepEqual(fields, ['Purpose', 'Change', 'Evidence', 'Tier', 'Rollback', 'Needs the Human']);
+  assert.match(template, /No-red: <reason, at least 20 characters>/);
+});
+
 test('the digest and the ledger name no language: neither the rules about them nor their code ask for Vietnamese', () => {
   for (const file of ['AGENTS.md', 'bin/factory-ledger', 'bin/lib/ledger.mjs']) {
     assert.doesNotMatch(readFileSync(join(root, file), 'utf8'), /Vietnamese/i, file);
