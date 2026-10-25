@@ -195,7 +195,9 @@ tests. The repository lists its modules in `.gate/modules`, one name a line (a t
 "kept"), and removed when it is turned off; `bin/kit-evidence` judges them against the module at the factory commit and
 treats `.gate/modules` as generated. The kit's only part in a module is two hooks, both inert without it: `red-check` runs
 `scripts/lib/deletion.mjs` first on a source change with no test where the file exists, and `prove-check --all` also runs
-the `red-check-*` fixtures on disk. No `AGENTS.md` changes with a module: its guidance is its skill. The first module,
+the `red-check-*` fixtures on disk. No `AGENTS.md` changes with a module: its guidance is its skill. A session in this
+factory lists `deletion-proof` among its skills, because Claude Code finds `.claude/skills` nested under `modules/`;
+the skill's first step reports the proof as off here. The first module,
 `deletion-proof` (step 1 of #17), proves a pull request whose only source change deletes whole files knip 6.42.1 listed
 as unused; no repository turns it on until #72 (a repository's knip config must be in its `.gate/protected`) lands.
 
