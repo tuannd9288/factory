@@ -82,7 +82,11 @@ describe('the skill follows the Agent Skills specification', () => {
 
 describe('scripts/knip-at-base report', () => {
   let r;
-  before(() => (r = moduleRepo({ 'src/old.js': 'export const old = 1;\n', 'src/lib.js': 'export const lib = 1;\n' })));
+  before(() => {
+    r = moduleRepo({ 'src/old.js': 'export const old = 1;\n', 'src/lib.js': 'export const lib = 1;\n' });
+    // A branch off origin/main, as an agent would start one, so the gate_prepare main holds is the one knip-at-base runs.
+    git(r.repo, 'switch', '-q', '-C', 'skill', 'origin/main');
+  });
   after(() => r.cleanup());
   const knipAtBase = (args, env = r.env()) => run(r.repo, join(r.repo, '.claude/skills/deletion-proof/scripts/knip-at-base'), args, env);
 
