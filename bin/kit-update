@@ -167,7 +167,7 @@ grep -qx '.claude/settings.json' "$lists/kept" && note=" The repository's \`.cla
 grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.github/CODEOWNERS\` is its own, so it is kept: the kit's new lines do not reach this file."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
 gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
-**What changed:** Brings the kit of $name up to factory \`$sha7\`: $(n added) files added, $(n updated) updated, $(n removed) removed; $(n kept) of the repository's own files kept as they were.
+**What changed:** Brings the kit of $name up to factory \`$sha7\`: $(n added) $([ "$(n added)" -eq 1 ] && echo file || echo files) added, $(n updated) updated, $(n removed) removed; $(n kept) of the repository's own files kept as they were.
 **Effect:** Pack \`$pack\` (named in \`.gate/pack\`); \`.gate/kit-files\` is rewritten for the new kit; kit files the repository changed itself are kept, named below, and \`AGENTS.md\` keeps the repository's Layout and Facts sections.$note$modnote
 **Evidence:** \`bin/kit-evidence\` PASS for factory commit \`$sha7\`; the full \`scripts/verify\` was green before the push.
 
