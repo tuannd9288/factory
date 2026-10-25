@@ -141,6 +141,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
+| `bin/factory-sublayers` | The sublayer check (#82): the 17 `sublayer-<code>` labels exist with their descriptions, and every open issue carries exactly one; the list is `bin/lib/sublayers.mjs`, the template `.github/ISSUE_TEMPLATE/task.md` |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/`, each pack's in `packs/*/test/`, and the 150-line cap on every composed `AGENTS.md` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
