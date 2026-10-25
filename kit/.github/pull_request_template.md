@@ -1,11 +1,11 @@
-Closes #<issue có nhãn task>
+Closes #<issue labelled task>
 
-## Tóm tắt cho người quyết định
-- Mục đích: (1 câu)
-- Thay đổi: (≤ 3 gạch đầu dòng)
-- Bằng chứng: verify xanh tại <sha>; test mới đỏ ở base; review: n phát hiện, sửa m, reviewer rút k
-- Bậc: 1 | 2 | 3 (đường dẫn chạm: …)
-- Hoàn tác: revert PR này | có migration <tên>, hoàn tác bằng …
-- Cần anh quyết: không | có: <câu hỏi> — đề xuất: <trả lời>
+## Summary for the Human
+- Purpose: (1 sentence)
+- Change: (≤ 3 bullets)
+- Evidence: verify green at <sha>; new test red at base; review: n findings, fixed m, reviewer withdrew k
+- Tier: 1 | 2 | 3 (paths touched: …)
+- Rollback: revert this PR | has migration <name>, roll back with …
+- Needs the Human: no | yes: <question> — recommendation: <answer>
 
-<!-- Không viết được test đỏ trước? Thêm một dòng riêng: No-red: <lý do, ít nhất 20 ký tự>. Reviewer phải chấp nhận lý do, nếu không `review` đỏ; sổ cái đếm dòng này. -->
+<!-- Cannot write a failing test first? Add a line of its own: No-red: <reason, at least 20 characters>. The reviewer must accept the reason, or `review` fails; the ledger counts this line. -->

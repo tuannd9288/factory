@@ -241,38 +241,38 @@ git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 replaced=$(sed 's/^/  - `/; s/$/`/' "$lists/replaced")
 moved=""
-[ -n "$own" ] && moved='Phần riêng của repo mà anh đã duyệt (`--own`) nằm trong hai mục cuối của `AGENTS.md`, Layout và Facts the code cannot tell; bằng chứng bên dưới in đủ từng dòng.'
-grep -q '^\.githooks/' "$lists/replaced" && moved="${moved:+$moved }Lệnh của hook cũ (\`.githooks/\`) chuyển vào \`gate_fast\` trong \`.gate/config.sh\`, việc của phiên của repo."
-gh pr create --repo "$slug" --head factory/kit --title "Đưa repo vào xưởng: cổng, hook, luật nộp bài và mẫu" --body "$(cat <<EOF
-## Tóm tắt cho người quyết định
-- Mục đích: đưa $name vào xưởng bằng bộ kit của tuannd9288/factory.
-- Thay đổi: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (có \`protected\`: các đường dẫn bậc 3), \`.githooks/\`, ba workflow (gate, gate-trusted, main), mẫu PR, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`; gói cách làm việc \`$pack\` (ghi ở \`.gate/pack\`) ghép vào \`AGENTS.md\` và \`.claude/settings.json\`.
-- Bằng chứng: \`scripts/verify\` đầy đủ xanh trước khi commit; file của kit khớp commit \`${kit_commit:0:7}\` của factory (bên dưới).
-- Bậc: 3 (chạm \`.github/\`, \`scripts/\`, \`.gate/\`).
-- Hoàn tác: revert PR này.
-- Cần anh quyết: có — xác nhận \`.gate/load-bearing\` (bậc 2) và \`.gate/protected\` (bậc 3); đề xuất: duyệt sau khi phiên của repo điền hai danh sách này.
+[ -n "$own" ] && moved='The repository'"'"'s own parts that the Human approved (`--own`) sit in the last two sections of `AGENTS.md`, Layout and Facts the code cannot tell; the evidence below prints every line.'
+grep -q '^\.githooks/' "$lists/replaced" && moved="${moved:+$moved }The old hook's commands (\`.githooks/\`) move into \`gate_fast\` in \`.gate/config.sh\`, a job for the repository's session."
+gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, hooks, hand-in rules and templates" --body "$(cat <<EOF
+## Summary for the Human
+- Purpose: bring $name into the factory with the kit of tuannd9288/factory.
+- Change: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (with \`protected\`: the tier-3 paths), \`.githooks/\`, three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`; the pack \`$pack\` (named in \`.gate/pack\`) is composed into \`AGENTS.md\` and \`.claude/settings.json\`.
+- Evidence: the full \`scripts/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
+- Tier: 3 (touches \`.github/\`, \`scripts/\`, \`.gate/\`).
+- Rollback: revert this PR.
+- Needs the Human: yes — confirm \`.gate/load-bearing\` (tier 2) and \`.gate/protected\` (tier 3); recommendation: approve once the repository's session has filled both lists.
 
-## File repo đã có, kit giữ nguyên (phiên của repo hợp nhất tay)
-${kept:-  - không có}
+## Files the repository already had, kept by the kit (the repository's session merges them by hand)
+${kept:-  - none}
 
-## File repo đã có, kit đã thay
-${replaced:-  - không có}
+## Files the repository already had, replaced by the kit
+${replaced:-  - none}
 ${moved:+
 $moved
 }
-## Bằng chứng kit (bin/kit-evidence, mã của factory, chỉ đọc object git)
+## Kit evidence (bin/kit-evidence, the factory's code, reads only git objects)
 \`\`\`text
 $evidence
 \`\`\`
-Kiểm lại từ bản clone của factory: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
+Re-check from the factory's clone: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
 
-Lưu ý: check \`verify\` của PR này đỏ (\`scripts/verify-trusted: No such file\`, mã 127) vì \`main\` chưa có kit; nó không chặn merge, vì \`factory-bootstrap\` không đòi check nào.
+Note: the \`verify\` check of this PR is red (\`scripts/verify-trusted: No such file\`, code 127) because \`main\` has no kit yet; it does not block the merge, because \`factory-bootstrap\` requires no check.
 
-## Việc của anh sau khi merge
-1. Từ bản clone của factory, chạy lại \`bin/onboard-owner $slug --id $id --apply\`: nó thay ruleset tạm của \`main\` bằng \`factory-gate\` của kit và đọc lại những gì đã đặt.
-2. Đặt secret của reviewer vào environment \`reviewer\` (chỉ nhánh \`main\`; không đặt secret ở mức repo: job \`pull_request\` của mọi nhánh đọc được).
-3. Biến repo: \`GATE_RUNNER\` (ví dụ \`["self-hosted","factory"]\`; bỏ trống là runner GitHub), \`GATE_REVIEWER\` (chưa đặt thì \`review\` và \`verdict\` đỏ, không gì tự merge).
-4. Đăng nhập profile: mở pane mới trong repo, kiểm tra \`echo \$CLAUDE_CONFIG_DIR\`, chạy \`claude\`.
-5. Thêm repo vào lệnh \`bin/factory-queue sweep\` của launchd (chạy bằng tài khoản của agent).
+## The Human's steps after the merge
+1. From the factory's clone, run \`bin/onboard-owner $slug --id $id --apply\` again: it replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\` and reads back what it set.
+2. Set the reviewer's secrets in the environment \`reviewer\` (branch \`main\` only; set no repository-level secret: the \`pull_request\` jobs of every branch can read it).
+3. Repository variables: \`GATE_RUNNER\` (for example \`["self-hosted","factory"]\`; empty means GitHub's runner), \`GATE_REVIEWER\` (while unset, \`review\` and \`verdict\` are red and nothing merges itself).
+4. Log into the profile: open a new pane in the repository, check \`echo \$CLAUDE_CONFIG_DIR\`, run \`claude\`.
+5. Add the repository to the launchd \`bin/factory-queue sweep\` command (run as the agents' account).
 EOF
 )"

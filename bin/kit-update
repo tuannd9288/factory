@@ -162,14 +162,14 @@ fence=$(printf '`%.0s' $(seq 1 $((longest > 2 ? longest + 1 : 3))))
 # A settings.json or CODEOWNERS the repository changed is kept, so the kit's newer rules never reach it.
 note=""
 modnote=""
-[ -z "$modules" ] || modnote=" Module \`$(printf '%s' "$modules" | paste -sd, - | sed 's/,/, /g')\` (ghi ở \`.gate/modules\`): file của module chỉ có ở repo bật nó."
-grep -qx '.claude/settings.json' "$lists/kept" && note=" \`.claude/settings.json\` của repo là bản riêng nên được giữ: quy tắc deny mới của kit không tới file này."
-grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note \`.github/CODEOWNERS\` của repo là bản riêng nên được giữ: dòng mới của kit không tới file này."
+[ -z "$modules" ] || modnote=" Module \`$(printf '%s' "$modules" | paste -sd, - | sed 's/,/, /g')\` (named in \`.gate/modules\`): the module's files exist only in a repository that turns it on."
+grep -qx '.claude/settings.json' "$lists/kept" && note=" The repository's \`.claude/settings.json\` is its own, so it is kept: the kit's new deny rules do not reach this file."
+grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.github/CODEOWNERS\` is its own, so it is kept: the kit's new lines do not reach this file."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
 gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
-**Đổi gì:** Đưa kit của $name lên factory \`$sha7\`: $(n added) file thêm, $(n updated) file cập nhật, $(n removed) file bỏ; $(n kept) file của repo giữ nguyên.
-**Ảnh hưởng:** Gói \`$pack\` (ghi ở \`.gate/pack\`); \`.gate/kit-files\` viết lại theo kit mới; file kit mà repo đã sửa riêng được giữ, tên ở dưới, và \`AGENTS.md\` giữ hai mục Layout, Facts của repo.$note$modnote
-**Bằng chứng:** \`bin/kit-evidence\` PASS cho commit \`$sha7\` của factory; \`scripts/verify\` đầy đủ xanh trước khi đẩy.
+**What changed:** Brings the kit of $name up to factory \`$sha7\`: $(n added) files added, $(n updated) updated, $(n removed) removed; $(n kept) of the repository's own files kept as they were.
+**Effect:** Pack \`$pack\` (named in \`.gate/pack\`); \`.gate/kit-files\` is rewritten for the new kit; kit files the repository changed itself are kept, named below, and \`AGENTS.md\` keeps the repository's Layout and Facts sections.$note$modnote
+**Evidence:** \`bin/kit-evidence\` PASS for factory commit \`$sha7\`; the full \`scripts/verify\` was green before the push.
 
 ---
 
@@ -190,10 +190,10 @@ $(list kept)
 Dropped from the kit and kept, because the repository changed them:
 $(list dropped-kept)
 
-## Bằng chứng kit (bin/kit-evidence, mã của factory, chỉ đọc object git)
+## Kit evidence (bin/kit-evidence, the factory's code, reads only git objects)
 ${fence}text
 $evidence
 $fence
-Kiểm lại từ bản clone của factory: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
+Re-check from the factory's clone: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
 BODY
 )"
