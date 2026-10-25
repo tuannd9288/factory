@@ -389,3 +389,44 @@ describe('pushing', () => {
     assert.equal(git(w.repo, 'rev-parse', 'origin/work'), w.head());
   });
 });
+
+describe('the remote branch', () => {
+  test('is read from origin, and opening is refused while it is behind HEAD, or missing', () => {
+    const w = world();
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Not pushed');
+    w.passed();
+    let out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: refused: origin\/work is at [0-9a-f]{7}, not HEAD [0-9a-f]{7}; push HEAD first$/m);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr create')), w.calls().join('\n'));
+    git(w.repo, 'switch', '-q', '-c', 'fresh');
+    w.passed();
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: refused: origin has no branch fresh; push HEAD first$/m);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr create')));
+  });
+
+  test('lets the pull request open once HEAD is pushed', () => {
+    const w = world();
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Pushed');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^ship: opened #7/m);
+  });
+
+  test('is read again before arming: a pull request whose remote is behind HEAD is not armed', () => {
+    const w = world();
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Not pushed');
+    w.pr({ headRefOid: w.head() });
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: refused: origin\/work is at [0-9a-f]{7}, not HEAD [0-9a-f]{7}; push HEAD first$/m);
+    assert.equal(w.read('lv-calls'), '');
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
+  });
+});
