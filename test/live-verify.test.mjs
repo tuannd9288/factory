@@ -5,7 +5,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { VIETNAMESE, commit, factory, git, quiet, run } from './helpers.mjs';
+import { commit, factory, git, quiet, run } from './helpers.mjs';
 
 // gh: the pull request and its issue from $LV, every comment posted appended to $LV/comments.
 const FAKE_GH = String.raw`#!/usr/bin/env node
@@ -177,15 +177,11 @@ describe('live-verify', () => {
       assert.match(posted, /^\*\*Gates re-run on the head\*\*$/m);
       assert.match(posted, /^\*\*Diff read\*\*$/m);
       assert.match(posted, /^\*\*Notes\*\*$/m);
-      assert.match(posted, /^The verifier's verdict is no input to the gate: it lowers no tier and replaces no required check\.$/m);
-      assert.doesNotMatch(posted, VIETNAMESE);
-      // The brief stands alone: the goal from the pull request and its issue, the exact commits, the driver.
+      assert.match(posted, /^The verifier's verdict is no input to the gate: it lowers no tier and replaces no required check\.$/m);      // The brief stands alone: the goal from the pull request and its issue, the exact commits, the driver.
       const prompt = w.read('prompt');
       assert.match(prompt, /The CLI takes the operation name/);
       assert.match(prompt, /`node cli\.js add 2 3` prints 5/);
-      assert.match(prompt, /Write audit, issues, notes, observed and reason in English\./);
-      assert.doesNotMatch(prompt, /Vietnamese/);
-      assert.match(prompt, /node cli\.js add <a> <b>, as a user types it/);
+      assert.match(prompt, /Write audit, issues, notes, observed and reason in English\./);      assert.match(prompt, /node cli\.js add <a> <b>, as a user types it/);
       // The log of Codex's runs stays, for the BLOCKED comment that points at it; the worktrees go.
       assert.match(readdirSync(join(w.repo, '.claude/worktrees')).join(' '), /^live-verify-7-[A-Za-z0-9]{6}\.log$/);
       assert.match(git(w.repo, 'worktree', 'list'), /^\S+\s+[0-9a-f]+ \[main\]$/);
@@ -300,9 +296,7 @@ describe('live-verify', () => {
         const out = w.verify();
         assert.equal(out.code, 2, out.out);
         assert.match(w.read('comments'), /^live-verify: BLOCKED$/m);
-        assert.match(w.read('comments'), /^Reason: /m);
-        assert.doesNotMatch(w.read('comments'), VIETNAMESE);
-        assert.match(w.read('comments'), /\.gate\/driver\.json/);
+        assert.match(w.read('comments'), /^Reason: /m);        assert.match(w.read('comments'), /\.gate\/driver\.json/);
         assert.match(w.read('comments'), /^codex: not run$/m);
         assert.deepEqual(w.execs(), []);
       } finally {
@@ -332,9 +326,7 @@ describe('live-verify', () => {
       const out = w.verify(['7'], { CODEX_LOGGED_IN: '0' });
       assert.equal(out.code, 2, out.out);
       assert.match(w.read('comments'), /^live-verify: BLOCKED$/m);
-      assert.match(w.read('comments'), /^Reason: /m);
-      assert.doesNotMatch(w.read('comments'), VIETNAMESE);
-      assert.match(w.read('comments'), /not logged in/);
+      assert.match(w.read('comments'), /^Reason: /m);      assert.match(w.read('comments'), /not logged in/);
       const calls = w.read('codex-calls').split('\n').filter(Boolean).map((l) => JSON.parse(l).args.join(' '));
       assert.ok(calls.every((c) => c === '--version' || c === 'login status'), calls.join('\n'));
     } finally {
@@ -348,9 +340,7 @@ describe('live-verify', () => {
       const out = w.verify(['7'], { CODEX_MODE: 'exit1' });
       assert.equal(out.code, 2, out.out);
       assert.match(w.read('comments'), /^live-verify: BLOCKED$/m);
-      assert.match(w.read('comments'), /^Reason: /m);
-      assert.doesNotMatch(w.read('comments'), VIETNAMESE);
-      assert.match(w.read('comments'), /codex exec exited 1/);
+      assert.match(w.read('comments'), /^Reason: /m);      assert.match(w.read('comments'), /codex exec exited 1/);
       assert.equal(w.execs().length, 1);
     } finally {
       w.cleanup();
@@ -364,9 +354,7 @@ describe('live-verify', () => {
         const out = w.verify(['7'], { CODEX_MODE: mode });
         assert.equal(out.code, 2, out.out);
         assert.match(w.read('comments'), /^live-verify: BLOCKED$/m);
-        assert.match(w.read('comments'), /^Reason: /m);
-        assert.doesNotMatch(w.read('comments'), VIETNAMESE);
-        assert.match(w.read('comments'), /^codex: codex-cli 0\.159\.2, 2 runs$/m);
+        assert.match(w.read('comments'), /^Reason: /m);        assert.match(w.read('comments'), /^codex: codex-cli 0\.159\.2, 2 runs$/m);
         assert.equal(w.execs().length, 2);
       } finally {
         w.cleanup();

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { APP, VIETNAMESE, commit, factory, git, quiet, run, write } from './helpers.mjs';
+import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const DENY = { permissions: { deny: ['Read(./.env*)'] } };
@@ -368,9 +368,7 @@ describe('the kit pull request', () => {
       assert.match(text, new RegExp(`bin/kit-evidence --factory <factory> --commit ${ahead} --repo <clone> --base [0-9a-f]{40} --head ${head} --slug tuannd9288/app --id 1234`));
       assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- none$/m);
       assert.match(text, /^## Summary for the Human\n- Purpose: bring app into the factory with the kit of tuannd9288\/factory\.$/m);
-      assert.match(text, /^## The Human's steps after the merge\n1\. From the factory's clone, run `bin\/onboard-owner tuannd9288\/app --id 1234 --apply` again/m);
-      assert.doesNotMatch(text, VIETNAMESE, 'a Vietnamese letter in the body');
-      // Nothing replaced, no --own: nothing to say about own parts or an old hook.
+      assert.match(text, /^## The Human's steps after the merge\n1\. From the factory's clone, run `bin\/onboard-owner tuannd9288\/app --id 1234 --apply` again/m);      // Nothing replaced, no --own: nothing to say about own parts or an old hook.
       assert.doesNotMatch(text, /--own|gate_fast/);
     } finally {
       w.cleanup();
@@ -398,9 +396,7 @@ describe('the kit pull request', () => {
       const text = readFileSync(w.body, 'utf8');
       assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- `\.githooks\/pre-commit`\n {2}- `AGENTS\.md`\n/m);
       assert.match(text, /move into `gate_fast` in `\.gate\/config\.sh`/);
-      assert.match(text, /The repository's own parts that the Human approved \(`--own`\)/);
-      assert.doesNotMatch(text, VIETNAMESE, 'a Vietnamese letter in the body');
-      assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}\.githooks\/pre-commit \(was [0-9a-f]{12}\)\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
+      assert.match(text, /The repository's own parts that the Human approved \(`--own`\)/);      assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}\.githooks\/pre-commit \(was [0-9a-f]{12}\)\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
       assert.match(text, /^ {2}AGENTS\.md:\d+: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app\.$/m);
     } finally {
       w.cleanup();

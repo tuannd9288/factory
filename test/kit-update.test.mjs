@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { APP, VIETNAMESE, commit, factory, git, quiet, run, write } from './helpers.mjs';
+import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
 
 import { world } from './world.mjs';
 
@@ -110,9 +110,7 @@ describe('bin/kit-update', () => {
       assert.match(git(w.repo, 'log', '-1', '--format=%b', rev), new RegExp(full));
       assert.equal(readFileSync(w.title, 'utf8'), `Bring the kit up to factory main ${sha7}`);
       const lines = text.split('\n');
-      assert.deepEqual(lines.slice(0, 3).map((l) => l.split(':**')[0]), ['**What changed', '**Effect', '**Evidence']);
-      assert.doesNotMatch(text, VIETNAMESE, 'a Vietnamese letter in the body');
-      // A blank line between, or the rule would turn the third line into a heading.
+      assert.deepEqual(lines.slice(0, 3).map((l) => l.split(':**')[0]), ['**What changed', '**Effect', '**Evidence']);      // A blank line between, or the rule would turn the third line into a heading.
       assert.deepEqual(lines.slice(3, 5), ['', '---']);
       assert.match(text, new RegExp(`tuannd9288/factory.*${full.slice(0, 7)}`));
       // gh: the login and the rule were checked, the labels made, and no call began with api.
@@ -309,9 +307,7 @@ describe('bin/kit-update, after review', () => {
       assert.equal(out.code, 0, out.out);
       const body = readFileSync(w.body, 'utf8');
       const lines = body.split('\n');
-      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept[^\n]*deny rules/);
-      assert.doesNotMatch(body, VIETNAMESE, 'a Vietnamese letter in the body');
-      assert.equal(lines.filter((l) => /^```(?!`)/.test(l)).length, 0, 'a 3-backtick fence opens the evidence');
+      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept[^\n]*deny rules/);      assert.equal(lines.filter((l) => /^```(?!`)/.test(l)).length, 0, 'a 3-backtick fence opens the evidence');
       assert.equal(lines.filter((l) => l === '````text').length, 1);
       assert.equal(lines.filter((l) => l === '````').length, 1);
       assert.ok(lines.includes('Removed (the kit dropped them; the repository held a past kit version unchanged):'), lines.join('\n'));

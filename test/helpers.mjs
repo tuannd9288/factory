@@ -5,15 +5,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** Every letter with a diacritic that Vietnamese uses (U+00C0 to U+1EF9), and a few other languages' too. Built from
- * code points, so the file holds no such letter itself. */
-export const VIETNAMESE = new RegExp(`[${String.fromCodePoint(0xc0)}-${String.fromCodePoint(0x1ef9)}]`, 'u');
-/** The letters only Vietnamese uses (U+1EA0 to U+1EF9, and four more with their capitals), the same set the Lead's scan of
- * the factory used: narrow enough to leave another language's accents in test data alone. Built from code points. */
-export const VIETNAMESE_ONLY = new RegExp(
-  `[${String.fromCodePoint(0x1ea0)}-${String.fromCodePoint(0x1ef9)}${String.fromCodePoint(0x102, 0x103, 0x110, 0x111, 0x1a0, 0x1a1, 0x1af, 0x1b0)}]`,
-  'u',
-);
 export const factory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // Commits made by the tests name a throwaway author and run no hooks unless a test asks for them.

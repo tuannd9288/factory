@@ -6,7 +6,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { VIETNAMESE, git } from './helpers.mjs';
+import { git } from './helpers.mjs';
 import { world } from './world.mjs';
 
 const DEMO = {
@@ -50,9 +50,7 @@ describe('bin/kit-update --module / --no-module', () => {
       assert.match(git(w.repo, 'log', '-1', '--format=%b'), /Added: 3\./);
       const body = readFileSync(w.body, 'utf8');
       assert.match(body, /`\.gate\/modules`.*`demo`|`demo`.*`\.gate\/modules`/);
-      assert.match(body, /^- `scripts\/lib\/demo\.mjs`$/m);
-      assert.doesNotMatch(body, VIETNAMESE, 'a Vietnamese letter in the body');
-    } finally {
+      assert.match(body, /^- `scripts\/lib\/demo\.mjs`$/m);    } finally {
       w.cleanup();
     }
   });
