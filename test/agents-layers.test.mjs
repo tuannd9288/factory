@@ -70,6 +70,44 @@ describe('the layers-and-contracts section of the factory AGENTS.md', () => {
     assert.match(h9, /#76/);
   });
 
+  // Fix round 1 (#80): the IEEE clause was confirmed, the keys resolve from the repository, H9 gets its five rules,
+  // 1e lists what the Human decided, and H3 cites only a line that binds a commit. Every test above is unchanged.
+  test('cites IEEE as [IEEE], read in the draft amendment, with nothing left unconfirmed', () => {
+    const s = section();
+    assert.match(s, /IEEE 802\.3[^\n]*\[IEEE\]/);
+    assert.match(s, /P802\.3as\/D0\.1/);
+    assert.doesNotMatch(s, /Colly quoted|not confirmed/);
+  });
+
+  test('points the source keys to the table on #80, not to a file outside the repository', () => {
+    const s = section();
+    assert.ok(s.includes('https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150'));
+    assert.doesNotMatch(s, /report\.md/);
+  });
+
+  test('H9 states its five rules, has no check yet, and says what the check will be', () => {
+    const h9 = blocks(section()).find((b) => b.startsWith('- **H9**'));
+    assert.match(h9, /Checked by: none yet/);
+    for (const n of [1, 2, 3, 4, 5]) assert.ok(h9.includes(`(${n})`), `no rule (${n})`);
+    for (const word of ['0d', '1b', '#58', 'K3', 'herdr agent send-keys', 'herdr pane send-keys', 'rex send', 'rex send-key']) {
+      assert.ok(h9.includes(word), `H9 lacks ${word}`);
+    }
+    assert.match(h9, /stops every surface/);
+    assert.doesNotMatch(h9, /window/);
+  });
+
+  test('1e lists no Ghostty, and keeps the pending items marked', () => {
+    const line = items(section()).find((l) => label(l).startsWith('1e '));
+    assert.doesNotMatch(line, /Ghostty/);
+    assert.match(line, /pending/);
+  });
+
+  test('H3 does not cite the ruleset line that only requires an up-to-date branch', () => {
+    const h3 = blocks(section()).find((b) => b.startsWith('- **H3**'));
+    assert.doesNotMatch(h3, /ruleset\.json/);
+    assert.match(h3, /kit\/scripts\/lib\/approval\.mjs/);
+  });
+
   test('holds no Vietnamese letter', () => {
     assert.doesNotMatch(section(), /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i);
   });
