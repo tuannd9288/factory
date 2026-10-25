@@ -481,6 +481,23 @@ describe('a live-verify that exits 2 without a BLOCKED verdict', () => {
   });
 });
 
+describe('a missing stamp', () => {
+  const HINT = /^ship: if the work tree is not clean, commit or remove what `git status` shows$/m;
+
+  test('adds, to the refusal for a verify stamp and for a red-check stamp, what to do when the tree is not clean', () => {
+    const w = world();
+    let out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /has no verify stamp/);
+    assert.match(out.out, HINT);
+    w.stamp(`verify-${w.head()}`);
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /has no red-check stamp/);
+    assert.match(out.out, HINT);
+  });
+});
+
 describe('the remote branch', () => {
   test('is read from origin, and opening is refused while it is behind HEAD, or missing', () => {
     const w = world();
