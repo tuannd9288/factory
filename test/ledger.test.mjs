@@ -373,3 +373,14 @@ test('the digest prints a period with no merged pull request like the other zero
   assert.match(text, /\n- PRs reverted: none yet \(n=0\); reverts merged in the period: 0\n/);
   assert.doesNotMatch(text, /Reverted PRs:/);
 });
+
+test('the revert lines follow Tasks merged and its sub-rate, and name none when no pull request was reverted', () => {
+  const lines = (rows) => digest(rows, revertPeriod).split('\n');
+  const k1 = lines(revertRows(mergedPR(1, 'Add A', '2026-10-15T10:00:00Z'), mergedPR(2, 'Undo A', '2026-10-16T10:00:00Z', 'Reverts #1')));
+  const at = (ls, text) => ls.findIndex((l) => l.startsWith(text));
+  assert.equal(at(k1, '- Merged tasks the Human had to touch') - at(k1, '- Tasks merged'), 1);
+  assert.equal(at(k1, '- PRs reverted') - at(k1, '- Merged tasks the Human had to touch'), 1);
+  assert.equal(at(k1, '- Reverted PRs') - at(k1, '- PRs reverted'), 1);
+  const k0 = lines(revertRows(mergedPR(1, 'Add A', '2026-10-15T10:00:00Z')));
+  assert.equal(k0[at(k0, '- PRs reverted') + 1], '- Reverted PRs: none');
+});
