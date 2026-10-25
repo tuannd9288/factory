@@ -175,8 +175,8 @@ test('entries without a cwd in an extra folder are counted with their dollars, i
     const r = check(['--profile-dir', p.dir]);
     assert.match(r.out, /no cwd: 2 entries, \$/);
     const text = digest([], { since: '2026-10-15', until: '2026-10-22', unplaced: u });
-    assert.match(text, /2 entry .*không ghi cwd/);
-    assert.doesNotMatch(digest([], { since: 'a', until: 'b' }), /không ghi cwd/);
+    assert.match(text, /2 entries .*record no cwd/);
+    assert.doesNotMatch(digest([], { since: 'a', until: 'b' }), /record no cwd/);
   } finally {
     p.cleanup();
   }

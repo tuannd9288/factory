@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import * as ledger from '../bin/lib/ledger.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
-const TITLE = 'Bản tin xưởng 2026-10-17 → 2026-10-24';
+const TITLE = 'Weekly digest 2026-10-17 → 2026-10-24';
 
 function withDir(body) {
   const dir = mkdtempSync(join(tmpdir(), 'fixes-'));
@@ -111,8 +111,8 @@ test('an empty .ok file is no record, and every .ok file found is listed beside 
     writeFileSync(join(state, 'queue-p-other.ok'), '2026-10-23T23:00:00.000Z\n');
     const text = ledger.digest([], { since: 'a', until: 'b', queue: ledger.queueState(state, ['o/app', 'o/new']) });
     assert.match(text, /queue-p-other\.ok: 2026-10-23T23:00:00\.000Z/);
-    assert.match(text, /o\/app: chưa ghi nhận lần quét thành công/);
-    assert.match(text, /o\/new: chưa ghi nhận lần quét thành công/);
+    assert.match(text, /o\/app: no clean sweep recorded/);
+    assert.match(text, /o\/new: no clean sweep recorded/);
     assert.doesNotMatch(text, /queue-o-app\.ok: *\n/);
     assert.ok(!existsSync(join(state, 'none')));
   });
@@ -121,8 +121,8 @@ test('an empty .ok file is no record, and every .ok file found is listed beside 
 test('with the state folder missing, the digest says only that it could not check, with no per-repository lines', () => {
   withDir((dir) => {
     const text = ledger.digest([], { since: 'a', until: 'b', queue: ledger.queueState(join(dir, 'none'), ['o/app', 'o/new']) });
-    assert.match(text, /Không kiểm tra được hàng đợi/);
-    assert.doesNotMatch(text, /chưa ghi nhận lần quét thành công/);
-    assert.doesNotMatch(text, /Lần quét thành công gần nhất/);
+    assert.match(text, /Cannot check the queue/);
+    assert.doesNotMatch(text, /no clean sweep recorded/);
+    assert.doesNotMatch(text, /Last clean sweep/);
   });
 });

@@ -16,8 +16,8 @@ test('the Wilson interval of 18 of 20', () => {
   assert.ok(Math.abs(a - 0.699) < 0.001, a);
   assert.ok(Math.abs(b - 0.972) < 0.001, b);
   assert.equal(wilson(0, 0), null);
-  assert.equal(rate(0, 0), 'chưa có mẫu (n=0)');
-  assert.match(rate(1, 4), /^1\/4 \(25,0%; KTC 95%: 4,6%–69,9%\)$/);
+  assert.equal(rate(0, 0), 'none yet (n=0)');
+  assert.match(rate(1, 4), /^1\/4 \(25\.0%; 95% CI: 4\.6%–69\.9%\)$/);
 });
 
 test('prices each kind of token, and refuses a model it does not know', () => {
@@ -90,11 +90,11 @@ test('a pull request merged by rule after two judged commits: two rounds, not fi
 
 test('the Human is counted as touching a pull request he approved, labelled needs-human, or merged by hand', () => {
   const opts = { human: 'boss', costs: null, profile: false };
-  assert.equal(rowOf('o/r', pr({ reviews: { nodes: [{ author: { login: 'boss' }, state: 'APPROVED' }] } }), opts).touchedWhy, 'duyệt');
+  assert.equal(rowOf('o/r', pr({ reviews: { nodes: [{ author: { login: 'boss' }, state: 'APPROVED' }] } }), opts).touchedWhy, 'reviewed');
   assert.equal(rowOf('o/r', pr({ labels: { nodes: [{ name: 'needs-human' }] } }), opts).touchedWhy, 'needs-human');
   const manual = rowOf('o/r', pr({ mergedAt: '2026-10-20T11:00:00Z', timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'AutoMergeDisabledEvent' }, { __typename: 'MergedEvent' }] } }), opts);
-  assert.equal(manual.touchedWhy, 'merge tay');
-  assert.equal(manual.costNote, 'không có profile');
+  assert.equal(manual.touchedWhy, 'manual merge');
+  assert.equal(manual.costNote, 'no profile');
   assert.equal(rowOf('o/r', pr({ reviews: { nodes: [{ author: { login: 'agent' }, state: 'APPROVED' }] } }), opts).touched, false);
 });
 
@@ -105,15 +105,17 @@ test('the digest gives every rate with its count, and lists what waits for the H
     rowOf('o/r', pr({ number: 2, mergedAt: '2026-10-20T11:00:00Z', commits: { nodes: [commit('a', green)] }, timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'MergedEvent' }] } }), opts),
   ];
   const text = digest(rows, { since: '2026-10-14', until: '2026-10-21', secrets: new Map([['o/r', ['DEPLOY_KEY']], ['o/s', []], ['o/t', null]]) });
-  assert.match(text, /- o\/r: DEPLOY_KEY\n- o\/s: 0\n- o\/t: không kiểm được/);
-  assert.match(text, /2 việc: 1 đã merge, 1 đang mở, 0 bỏ \(0 bỏ trước khi có PR\)/);
-  assert.match(text, /Chi phí tương đương giá API mỗi việc đã merge/);
-  assert.match(text, /\nTiền mặt: phí thuê bao Claude, trả theo tháng, không chia theo việc/);
-  assert.match(text, /o\/r#1 Limit sends — bậc 3, chờ anh duyệt/);
-  assert.match(text, /Việc đã merge: 1\/2 \(50,0%; KTC 95%: /);
-  assert.match(text, /anh phải chạm: 0\/1 /);
-  assert.match(text, /Xanh ngay ở commit đầu tiên được chấm: 1\/1 /);
-  assert.match(text, /\| \? \(không có profile\) \|/);
+  assert.match(text, /- o\/r: DEPLOY_KEY\n- o\/s: 0\n- o\/t: could not be checked/);
+  assert.match(text, /^# Weekly digest 2026-10-14 → 2026-10-21$/m);
+  assert.match(text, /2 tasks: 1 merged, 1 open, 0 abandoned \(0 abandoned before a PR\)/);
+  assert.match(text, /API-equivalent cost per merged task/);
+  assert.match(text, /\nCash: the Claude subscription, paid monthly, not split by task/);
+  assert.match(text, /o\/r#1 Limit sends — tier 3, awaiting the Human's approval/);
+  assert.match(text, /Tasks merged: 1\/2 \(50\.0%; 95% CI: /);
+  assert.match(text, /Merged tasks the Human had to touch: 0\/1 /);
+  assert.match(text, /Green at the first commit the gate judged: 1\/1 /);
+  assert.match(text, /\| \? \(no profile\) \|/);
+  assert.match(text, /\| Repo \| Task \| PR \| Who \| Tier \| Rounds \| API cost \| Human touched \| Outcome \|/);
 });
 
 const REQUIRED = ['verify', 'review', 'verdict', 'tier'];
@@ -225,10 +227,10 @@ test('a task dropped before any pull request is a row, and its cost stays unknow
   assert.equal(row.state, 'abandoned');
   assert.deepEqual(row.prs, []);
   assert.equal(row.cost, null);
-  assert.equal(row.costNote, 'chưa có PR');
+  assert.equal(row.costNote, 'no PR yet');
   assert.equal(row.firstPass, null);
   const text = digest([row], { since: '2026-10-14', until: '2026-10-21' });
-  assert.match(text, /1 việc: 0 đã merge, 0 đang mở, 1 bỏ \(1 bỏ trước khi có PR\)/);
+  assert.match(text, /1 task: 0 merged, 0 open, 1 abandoned \(1 abandoned before a PR\)/);
 });
 
 test('the window holds every task alive in it: started in it, open at its end, or closed inside it', () => {
@@ -270,10 +272,10 @@ test('the digest lists every merged pull request no live verdict covered, and Co
     rowOf('o/r', pr({ number, mergedAt: '2026-10-20T12:00:00Z', state: 'MERGED', headRefOid: H2, mergeCommit: { oid: 'e'.repeat(40) }, comments: { nodes: comments } }), { ...opts, patchOf: () => patch });
   const rows = [merged(1, [said('PASS', H2, P)], P), merged(2, [], P), merged(3, [said('PASS', H, P, 'agent', 2)], null), rowOf('o/r', pr({ number: 4 }), opts)];
   const text = digest(rows, { since: '2026-10-14', until: '2026-10-21' });
-  assert.match(text, /- PR đã merge có verdict người kiểm phủ head: 1\/2 \(50,0%; KTC 95%: /);
-  assert.match(text, /- Không có verdict phủ: o\/r#2 Limit sends\n/);
-  assert.match(text, /- Chưa xác định \(không tính được patch-id trong bản clone\): o\/r#3\n/);
-  assert.match(text, /- Lượt chạy Codex: 3 \(thuê bao Codex của người kiểm, trả theo tháng; không có giá API, không chia theo việc\)/);
+  assert.match(text, /- Merged PRs whose head a live verdict covers: 1\/2 \(50\.0%; 95% CI: /);
+  assert.match(text, /- No covering verdict: o\/r#2 Limit sends\n/);
+  assert.match(text, /- Undetermined \(patch-id not computable in the clone\): o\/r#3\n/);
+  assert.match(text, /- Codex runs: 3 \(the verifier's Codex subscription, paid monthly; no API price, not split by task\)/);
 });
 
 test('the digest counts the pull requests the reviewer raised, per repository', () => {
@@ -283,8 +285,8 @@ test('the digest counts the pull requests the reviewer raised, per repository', 
   const plain = rowOf('o/s', pr({ number: 7 }), opts);
   assert.deepEqual([raised.raised, kept.raised, plain.raised], [true, true, false]);
   const text = digest([raised, kept, plain], { since: '2026-10-14', until: '2026-10-21' });
-  assert.match(text, /- Reviewer nâng lên bậc 3 \(nhãn raised\), theo repo: o\/r 2, o\/s 0\n/);
-  assert.match(digest([], { since: 'a', until: 'b' }), /theo repo: không có việc\n/);
+  assert.match(text, /- Reviewer raised to tier 3 \(label raised\), by repository: o\/r 2, o\/s 0\n/);
+  assert.match(digest([], { since: 'a', until: 'b' }), /by repository: no tasks\n/);
 });
 
 test('the digest counts raised on task rows, the rows it is made of', () => {
@@ -294,5 +296,5 @@ test('the digest counts raised on task rows, the rows it is made of', () => {
   const task = ledger.taskRow('o/r', issue({}), [raised, plain]);
   assert.equal(task.raised, true);
   assert.equal(ledger.taskRow('o/r', issue({ number: 4 }), [plain]).raised, false);
-  assert.match(digest([task, ledger.taskRow('o/s', issue({ number: 5 }), [])], { since: 'a', until: 'b' }), /theo repo: o\/r 1, o\/s 0\n/);
+  assert.match(digest([task, ledger.taskRow('o/s', issue({ number: 5 }), [])], { since: 'a', until: 'b' }), /by repository: o\/r 1, o\/s 0\n/);
 });
