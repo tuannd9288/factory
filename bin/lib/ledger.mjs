@@ -1,5 +1,5 @@
 // The factory's ledger: one row per task, from GitHub and the repository's Claude Code profile, with no model; and the
-// weekly Vietnamese digest built from those rows, every rate with its count and its 95% Wilson interval. A task is an
+// weekly digest built from those rows, every rate with its count and its 95% Wilson interval. A task is an
 // issue labelled task, from its assignment (the label) to its close, with every pull request that closes it; a pull
 // request that closes no task is a task of its own, from its opening. Cost is API-equivalent usage, never cash.
 // See bin/factory-ledger for the arguments.
@@ -25,13 +25,13 @@ export function wilson(k, n, z = 1.96) {
   return [Math.max(0, center - half), Math.min(1, center + half)];
 }
 
-const pct = (x) => `${(x * 100).toFixed(1).replace('.', ',')}%`;
+const pct = (x) => `${(x * 100).toFixed(1)}%`;
 
-/** "k/n (p%; 95%: a–b%)", or "chưa có (n=0)". */
+/** "k/n (p%; 95%: a–b%)", or "none yet (n=0)". */
 export function rate(k, n) {
-  if (!n) return 'chưa có mẫu (n=0)';
+  if (!n) return 'none yet (n=0)';
   const [a, b] = wilson(k, n);
-  return `${k}/${n} (${pct(k / n)}; KTC 95%: ${pct(a)}–${pct(b)})`;
+  return `${k}/${n} (${pct(k / n)}; 95% CI: ${pct(a)}–${pct(b)})`;
 }
 
 /** Dollars of one assistant message's usage at API prices; null for a model the table does not price. */
@@ -241,7 +241,7 @@ export function inspect(profileDirs, { latest = 50 } = {}) {
 export function canaryLine(report) {
   const names = [...report.missing, ...report.stale];
   if (!report.entries || !names.length) return null;
-  return `Cảnh báo: sổ cái không đọc được trường ${[...new Set(names)].join(', ')} trong các phiên Claude Code mới nhất, nên chi phí có thể thiếu (chạy bin/factory-ledger --check).`;
+  return `Warning: the ledger could not read the field(s) ${[...new Set(names)].join(', ')} in the latest Claude Code sessions, so cost may be missing (run bin/factory-ledger --check).`;
 }
 
 /** Whether a task that started at start and ended at end (null while open) was alive in the window [from, to]: it
@@ -258,7 +258,7 @@ export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null })
   const tiers = labels.map((l) => /^tier-([123])$/.exec(l)?.[1]).filter(Boolean).map(Number);
   const events = pr.timelineItems.nodes;
   const reasons = [];
-  if (pr.reviews.nodes.some((r) => r.author?.login === human && ['APPROVED', 'CHANGES_REQUESTED'].includes(r.state))) reasons.push('duyệt');
+  if (pr.reviews.nodes.some((r) => r.author?.login === human && ['APPROVED', 'CHANGES_REQUESTED'].includes(r.state))) reasons.push('reviewed');
   if (events.some((e) => e.__typename === 'LabeledEvent' && e.label?.name === 'needs-human') || labels.includes('needs-human')) reasons.push('needs-human');
   const raised = events.some((e) => e.__typename === 'LabeledEvent' && e.label?.name === 'raised') || labels.includes('raised');
   let byRule = false;
@@ -268,7 +268,7 @@ export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null })
       if (e.__typename === 'AutoMergeDisabledEvent') byRule = false;
       if (e.__typename === 'MergedEvent') break;
     }
-    if (!byRule) reasons.push('merge tay');
+    if (!byRule) reasons.push('manual merge');
   }
   // A round is a commit the gate judged that someone wrote; the queue's merges of main into the branch are not rounds.
   const judged = pr.commits.nodes
@@ -283,11 +283,11 @@ export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null })
   const branch = costs?.get(pr.headRefName);
   let cost = null;
   let costNote;
-  if (!profile) costNote = 'không có profile';
-  else if (!branch) costNote = 'không có phiên trên nhánh';
+  if (!profile) costNote = 'no profile';
+  else if (!branch) costNote = 'no session on the branch';
   else {
     cost = branch.dollars;
-    costNote = branch.unpriced.size ? `thiếu giá: ${[...branch.unpriced].join(', ')}` : '';
+    costNote = branch.unpriced.size ? `unpriced: ${[...branch.unpriced].join(', ')}` : '';
   }
   const comments = pr.comments?.nodes ?? [];
   const lv = coverage(comments, { author: pr.author?.login, head: pr.headRefOid, patch: pr.mergedAt ? patchOf(pr.mergeCommit?.oid, pr.headRefOid) : null });
@@ -345,7 +345,7 @@ export function taskRow(repo, issue, prRows) {
     touched: why.length > 0,
     touchedWhy: why.join(', '),
     cost: !prs.length || unknown ? null : prs.reduce((sum, r) => sum + r.cost, 0),
-    costNote: !prs.length ? 'chưa có PR' : unknown ? `#${unknown.number}: ${unknown.costNote}` : [...new Set(prs.map((r) => r.costNote).filter(Boolean))].join('; '),
+    costNote: !prs.length ? 'no PR yet' : unknown ? `#${unknown.number}: ${unknown.costNote}` : [...new Set(prs.map((r) => r.costNote).filter(Boolean))].join('; '),
     created: assigned,
     merged: landed?.merged ?? null,
     hours: landed ? (Date.parse(landed.merged) - Date.parse(assigned)) / 36e5 : null,
@@ -369,9 +369,15 @@ export function queueState(dir, repos) {
   };
 }
 
-const STATE = { landed: 'đã merge', open: 'đang mở', abandoned: 'bỏ' };
+const STATE = { landed: 'merged', open: 'open', abandoned: 'abandoned' };
 
-/** The weekly digest, in Vietnamese markdown. */
+/** The title of the digest issue for a period. */
+export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
+/** The title the digests posted before #98 carry (#1), built from code points: no accented letter stays in the file. A period
+ * posted under it is updated, not posted again. */
+export const oldDigestTitle = (since, until) => `B${String.fromCodePoint(0x1ea3)}n tin x${String.fromCodePoint(0x1b0, 0x1edf)}ng ${since} → ${until}`;
+
+/** The weekly digest, in markdown. */
 export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
@@ -379,72 +385,72 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
   const costed = rows.filter((r) => r.cost !== null);
   const rounds = rows.filter((r) => r.rounds > 0);
   const lines = [
-    `# Bản tin xưởng ${since} → ${until}`,
+    `# ${digestTitle(since, until)}`,
     '',
-    `${n} việc: ${landed.length} đã merge, ${rows.filter((r) => r.state === 'open').length} đang mở, ${rows.filter((r) => r.state === 'abandoned').length} bỏ (${rows.filter((r) => r.state === 'abandoned' && !r.prs.length).length} bỏ trước khi có PR).`,
+    `${n} ${n === 1 ? 'task' : 'tasks'}: ${landed.length} merged, ${rows.filter((r) => r.state === 'open').length} open, ${rows.filter((r) => r.state === 'abandoned').length} abandoned (${rows.filter((r) => r.state === 'abandoned' && !r.prs.length).length} abandoned before a PR).`,
     ...(canary ? ['', canary] : []),
     '',
-    '## Cần anh quyết',
+    '## Waiting for the Human',
     '',
   ];
   const waiting = rows.filter((r) => r.state === 'open' && (r.tier === 3 || r.touchedWhy.includes('needs-human')));
-  if (waiting.length) for (const r of waiting) lines.push(`- ${r.repo}#${r.number} ${r.title} — ${r.tier === 3 ? 'bậc 3, chờ anh duyệt' : 'needs-human'}`);
-  else lines.push('- Không có.');
+  if (waiting.length) for (const r of waiting) lines.push(`- ${r.repo}#${r.number} ${r.title} — ${r.tier === 3 ? "tier 3, awaiting the Human's approval" : 'needs-human'}`);
+  else lines.push('- None.');
   lines.push(
     '',
-    '## Tỉ lệ (số đếm, tỉ lệ, khoảng tin cậy 95% Wilson)',
+    '## Rates (counts, rates, 95% Wilson confidence intervals)',
     '',
-    `- Việc đã merge: ${rate(landed.length, n)}`,
-    `- Việc đã merge mà anh phải chạm: ${rate(landed.filter((r) => r.touched).length, landed.length)}`,
-    `- Xanh ngay ở commit đầu tiên được chấm: ${rate(judged.filter((r) => r.firstPass).length, judged.length)}`,
-    `- Dùng No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
-    `- Reviewer nâng lên bậc 3 (nhãn raised), theo repo: ${[...new Set(rows.map((r) => r.repo))].sort().map((repo) => `${repo} ${rows.filter((r) => r.repo === repo && r.raised).length}`).join(', ') || 'không có việc'}`,
-    `- Có chi phí đo được: ${rate(costed.length, n)}`,
-    ...(lost?.entries ? [`- ${lost.entries} entry ($${lost.dollars.toFixed(2)} theo giá API) ở thư mục profile phụ không ghi cwd, không tính cho repo nào, nên "không có phiên trên nhánh" có thể che chúng`] : []),
-    `- Số vòng trung bình (commit được cổng chấm): ${rounds.length ? (rounds.reduce((s, r) => s + r.rounds, 0) / rounds.length).toFixed(2).replace('.', ',') : '–'} (n=${rounds.length})`,
-    `- Chi phí tương đương giá API mỗi việc đã merge (mọi lần thử cộng lại; không phải tiền mặt): ${costed.length && landed.length ? `$${(costed.reduce((s, r) => s + r.cost, 0) / landed.length).toFixed(2)} (chi phí đo được trên ${costed.length}/${n} việc)` : 'chưa đo được'}`,
+    `- Tasks merged: ${rate(landed.length, n)}`,
+    `- Merged tasks the Human had to touch: ${rate(landed.filter((r) => r.touched).length, landed.length)}`,
+    `- Green at the first commit the gate judged: ${rate(judged.filter((r) => r.firstPass).length, judged.length)}`,
+    `- Used No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
+    `- Reviewer raised to tier 3 (label raised), by repository: ${[...new Set(rows.map((r) => r.repo))].sort().map((repo) => `${repo} ${rows.filter((r) => r.repo === repo && r.raised).length}`).join(', ') || 'no tasks'}`,
+    `- Cost measured: ${rate(costed.length, n)}`,
+    ...(lost?.entries ? [`- ${lost.entries} entries ($${lost.dollars.toFixed(2)} at API prices) in extra profile folders record no cwd, so they count for no repository, and "no session on the branch" may hide them`] : []),
+    `- Average rounds (commits the gate judged): ${rounds.length ? (rounds.reduce((s, r) => s + r.rounds, 0) / rounds.length).toFixed(2) : '–'} (n=${rounds.length})`,
+    `- API-equivalent cost per merged task (every attempt added up; not cash): ${costed.length && landed.length ? `$${(costed.reduce((s, r) => s + r.cost, 0) / landed.length).toFixed(2)} (cost measured on ${costed.length}/${n} tasks)` : 'not measurable yet'}`,
     '',
-    '## Người kiểm chạy thật (Codex, scripts/live-verify; không phải đầu vào của cổng)',
+    '## Live verifier (Codex, scripts/live-verify; not a gate input)',
     '',
   );
   const livePRs = rows.flatMap((r) => (r.livePRs ?? []).map((p) => ({ ...p, repo: r.repo })));
   const known = livePRs.filter((p) => p.covered !== null);
-  const named = (list) => (list.length ? list.map((p) => `${p.repo}#${p.number}`).join(', ') : 'không có');
+  const named = (list) => (list.length ? list.map((p) => `${p.repo}#${p.number}`).join(', ') : 'none');
   const missed = known.filter((p) => !p.covered);
   lines.push(
-    `- PR đã merge có verdict người kiểm phủ head: ${rate(known.filter((p) => p.covered).length, known.length)}`,
-    `- Không có verdict phủ: ${missed.length ? missed.map((p) => `${p.repo}#${p.number} ${p.title}`).join('; ') : 'không có'}`,
-    `- Chưa xác định (không tính được patch-id trong bản clone): ${named(livePRs.filter((p) => p.covered === null))}`,
-    `- Lượt chạy Codex: ${rows.reduce((sum, r) => sum + (r.codexRuns ?? 0), 0)} (thuê bao Codex của người kiểm, trả theo tháng; không có giá API, không chia theo việc)`,
+    `- Merged PRs whose head a live verdict covers: ${rate(known.filter((p) => p.covered).length, known.length)}`,
+    `- No covering verdict: ${missed.length ? missed.map((p) => `${p.repo}#${p.number} ${p.title}`).join('; ') : 'none'}`,
+    `- Undetermined (patch-id not computable in the clone): ${named(livePRs.filter((p) => p.covered === null))}`,
+    `- Codex runs: ${rows.reduce((sum, r) => sum + (r.codexRuns ?? 0), 0)} (the verifier's Codex subscription, paid monthly; no API price, not split by task)`,
     '',
-    '## Từng việc',
+    '## Per task',
     '',
-    '| Repo | Việc | PR | Ai | Bậc | Vòng | Giá API | Anh chạm | Kết quả |',
+    '| Repo | Task | PR | Who | Tier | Rounds | API cost | Human touched | Outcome |',
     '|---|---|---|---|---|---|---|---|---|',
   );
   for (const r of rows) {
     const cost = r.cost === null ? `? (${r.costNote})` : `$${r.cost.toFixed(2)}${r.costNote ? ` (${r.costNote})` : ''}`;
     lines.push(
-      `| ${r.repo.split('/')[1]} | [#${r.number}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `có (${r.touchedWhy})` : 'không'} | ${STATE[r.state]} |`,
+      `| ${r.repo.split('/')[1]} | [#${r.number}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `yes (${r.touchedWhy})` : 'no'} | ${STATE[r.state]} |`,
     );
   }
   if (queue) {
-    lines.push('', '## Hàng đợi merge (bin/factory-queue)', '');
-    if (queue.missing) lines.push(`- Không kiểm tra được hàng đợi: thư mục trạng thái ${queue.dir} không có (hàng đợi chưa chạy, hoặc FACTORY_STATE sai).`);
+    lines.push('', '## Merge queue (bin/factory-queue)', '');
+    if (queue.missing) lines.push(`- Cannot check the queue: the state folder ${queue.dir} does not exist (the queue has not run, or FACTORY_STATE is wrong).`);
     else if (queue.failed.length) for (const f of queue.failed) lines.push(`- ${f.file}: ${f.text}`);
-    else lines.push('- Không có file .failed.');
-    if (!queue.missing) for (const { label, at } of queue.ok) lines.push(`- Lần quét thành công gần nhất, ${label}: ${at ?? 'chưa ghi nhận lần quét thành công'}`);
+    else lines.push('- No .failed files.');
+    if (!queue.missing) for (const { label, at } of queue.ok) lines.push(`- Last clean sweep, ${label}: ${at ?? 'no clean sweep recorded'}`);
   }
   if (secrets.size) {
-    lines.push('', '## Secret cấp repo (phải là 0: job của mọi nhánh đều đọc được)', '');
-    for (const [repo, names] of secrets) lines.push(`- ${repo}: ${names === null ? 'không kiểm được' : names.length ? names.join(', ') : '0'}`);
+    lines.push('', '## Repository-level secrets (must be 0: the jobs of every branch can read them)', '');
+    for (const [repo, names] of secrets) lines.push(`- ${repo}: ${names === null ? 'could not be checked' : names.length ? names.join(', ') : '0'}`);
   }
   lines.push(
     '',
-    'Việc: một issue có nhãn task, tính từ lúc gắn nhãn đến lúc đóng, gồm mọi PR đóng nó; PR không đóng việc nào là một việc riêng, tính từ lúc mở.',
-    'Giá API: token trong profile Claude Code của repo, theo nhánh của PR, tính theo giá API (bin/lib/prices.json). Đó là mức dùng, không phải tiền đã trả; chưa gồm reviewer chạy trên GitHub.',
-    'Tiền mặt: phí thuê bao Claude, trả theo tháng, không chia theo việc; thuê bao Codex của người kiểm cũng vậy. Ledger không thấy khoản tiền mặt nào khác.',
-    'Anh chạm: anh duyệt, nhãn needs-human, hoặc merge không qua auto-merge.',
+    'Task: an issue labelled task, from the label to the close, with every PR that closes it; a PR that closes no task is a task of its own, from its opening.',
+    'API cost: the tokens in the repository\'s Claude Code profile, by the PR\'s branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
+    'Cash: the Claude subscription, paid monthly, not split by task; the verifier\'s Codex subscription is the same. The ledger sees no other cash.',
+    'Human touched: the Human reviewed it, the label needs-human, or a merge not made by auto-merge.',
   );
   return `${lines.join('\n')}\n`;
 }
@@ -610,13 +616,14 @@ function main(argv) {
   const file = join(mkdtempSync(join(tmpdir(), 'digest-')), 'digest.md');
   writeFileSync(file, text);
   gh(['label', 'create', 'digest', '--repo', opts.post, '--force']);
-  const title = `Bản tin xưởng ${opts.since} → ${opts.until}`;
+  const title = digestTitle(opts.since, opts.until);
+  const titles = [title, oldDigestTitle(opts.since, opts.until)];
   // Neither --search nor --label: both go through GitHub's search index, which lags behind a new issue. A plain list
   // reads the repository, and the titles are compared here.
   const all = JSON.parse(gh(['issue', 'list', '--repo', opts.post, '--state', 'all', '--limit', '1000', '--json', 'number,title']));
   if (all.length >= 1000) throw new Error(`${opts.post} has 1000 issues or more, so the list may be cut short and a digest could be posted twice; nothing posted`);
-  const found = all.filter((i) => i.title === title);
-  if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}": ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
+  const found = all.filter((i) => titles.includes(i.title));
+  if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}" or the older title of that period: ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
 }
