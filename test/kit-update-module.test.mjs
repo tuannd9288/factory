@@ -50,7 +50,8 @@ describe('bin/kit-update --module / --no-module', () => {
       assert.match(git(w.repo, 'log', '-1', '--format=%b'), /Added: 3\./);
       const body = readFileSync(w.body, 'utf8');
       assert.match(body, /`\.gate\/modules`.*`demo`|`demo`.*`\.gate\/modules`/);
-      assert.match(body, /^- `scripts\/lib\/demo\.mjs`$/m);    } finally {
+      assert.match(body, /^- `scripts\/lib\/demo\.mjs`$/m);
+    } finally {
       w.cleanup();
     }
   });
