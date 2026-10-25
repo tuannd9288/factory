@@ -2,7 +2,7 @@
 // checks each contract (#80). Names come from the Human's sourced table of 2026-10-25; the section is English only.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
 
@@ -93,13 +93,71 @@ describe('the layers-and-contracts section of the factory AGENTS.md', () => {
       assert.ok(h9.includes(word), `H9 lacks ${word}`);
     }
     assert.match(h9, /stops every surface/);
-    assert.doesNotMatch(h9, /window/);
+    assert.match(h9, /not yet in the kit's deny rules/);
   });
 
-  test('1e lists no Ghostty, and keeps the pending items marked', () => {
-    const line = items(section()).find((l) => label(l).startsWith('1e '));
-    assert.doesNotMatch(line, /Ghostty/);
-    assert.match(line, /pending/);
+  test('1e lists no Ghostty on any of its lines, and marks each pending item', () => {
+    const block = blocks(section()).find((b) => b.startsWith('- **1e '));
+    assert.doesNotMatch(block, /Ghostty/);
+    assert.match(block, /K1 = C, pending/);
+    assert.match(block, /\(T3, pending\)/);
+  });
+
+  test('2b names the modules a repository lists in .gate/modules', () => {
+    const block = blocks(section()).find((b) => b.startsWith('- **2b '));
+    assert.match(block, /modules \(#70\)/);
+    assert.ok(block.includes('`.gate/modules`'));
+  });
+
+  // Fix round 2 (#80, Colly): a contract's sentence states the factory's rule and is no quote; an organization's
+  // quote sits on an optional "Prior art [KEY]" line.
+  test('each contract states its own sentence, which is not a quote', () => {
+    const sentences = [
+      'Work enters through one issue.',
+      'Work leaves through one pull request that carries its evidence.',
+      'A verdict binds exactly one commit.',
+      'Knowledge is files in the repository, changed by pull request.',
+      'A way of working is a pack of data.',
+      'Tools are commands; permissions live outside the instructions.',
+      'Model choice lives outside the way of working.',
+      'An improvement comes back as ordinary work.',
+      'A surface is only a window.',
+    ];
+    const contracts = blocks(section()).filter((b) => /^- \*\*H[0-9]\*\*/.test(b));
+    contracts.forEach((b, i) => {
+      const after = b.replace(/^- \*\*H[0-9]\*\*:?\s*/, '');
+      assert.ok(after.startsWith(sentences[i]), `H${i + 1} does not open with its sentence: ${after.slice(0, 60)}`);
+      assert.doesNotMatch(after, /^["“]/, `H${i + 1} opens with a quote mark`);
+    });
+  });
+
+  test('a Prior art line reads Prior art [KEY]: "…", and each contract that has one has it once', () => {
+    for (const b of blocks(section()).filter((x) => /^- \*\*H[0-9]\*\*/.test(x))) {
+      const found = b.match(/Prior art/g) ?? [];
+      assert.ok(found.length <= 1, `two Prior art lines in ${b.slice(0, 20)}`);
+      if (found.length) assert.match(b, /\n {2}Prior art \[[A-Z]+[0-9]*\]: ".+"\s*$/, `malformed Prior art: ${b.slice(0, 20)}`);
+    }
+  });
+
+  test('every path in a "Checked by" exists, with its cited lines in range', () => {
+    let seen = 0;
+    for (const b of blocks(section()).filter((x) => /^- \*\*H[0-9]\*\*/.test(x))) {
+      const segment = b.slice(b.indexOf('Checked by:')).split('\n  Prior art')[0];
+      if (/^Checked by: none yet/.test(segment)) continue;
+      for (const m of segment.matchAll(/`([^`\s]+?)(?::(\d+)(?:-(\d+))?)?`/g)) {
+        const [, path, from, to] = m;
+        if (!/[/.]/.test(path)) continue; // a name in backticks, such as `factory`, is no path
+        const file = join(factory, path);
+        assert.ok(existsSync(file), `${label(b)} cites ${path}, which does not exist`);
+        seen += 1;
+        if (from) {
+          const lines = readFileSync(file, 'utf8').split('\n').length;
+          assert.ok(Number(from) >= 1 && Number(to ?? from) <= lines && Number(from) <= Number(to ?? from),
+            `${label(b)} cites ${path}:${from}${to ? `-${to}` : ''}, outside its ${lines} lines`);
+        }
+      }
+    }
+    assert.ok(seen >= 15, `only ${seen} checked paths found`);
   });
 
   test('H3 does not cite the ruleset line that only requires an up-to-date branch', () => {
