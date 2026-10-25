@@ -373,7 +373,6 @@ export function queueState(dir, repos) {
 
 const STATE = { landed: 'merged', open: 'open', abandoned: 'abandoned' };
 
-/** The title of the digest issue for a period. */
 /** The pull requests of this repository that a merged pull request reverts: the `Reverts #N` and `Reverts <repo>#N`
  * lines of its body, which win when there is any (a line for another repository leaves none); else the one merged
  * pull request, before it, whose title is the revert's `Revert "<title>"`, the latest if several. */
@@ -404,6 +403,7 @@ export function revertCount(rows, { since, until }) {
   return { n: plain.length, k: reverted.length, m: during.filter(([key]) => reverts.has(key)).length, reverted };
 }
 
+/** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
 /** The title of the digests posted before #98 (#1), which were Vietnamese. A period posted under it is updated, not
  * posted again. */
@@ -434,9 +434,9 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     '## Rates (counts, rates, 95% Wilson confidence intervals)',
     '',
     `- Tasks merged: ${rate(landed.length, n)}`,
-    `- PRs reverted: ${rate(reverts.k, reverts.n)}; reverts merged in the period: ${reverts.m}`,
-    ...(reverts.k ? [`- Reverted PRs: ${reverts.reverted.map((p) => `${p.repo}#${p.number}`).join(', ')}`] : []),
     `- Merged tasks the Human had to touch: ${rate(landed.filter((r) => r.touched).length, landed.length)}`,
+    `- PRs reverted: ${rate(reverts.k, reverts.n)}; reverts merged in the period: ${reverts.m}`,
+    ...(reverts.n ? [`- Reverted PRs: ${reverts.k ? reverts.reverted.map((p) => `${p.repo}#${p.number}`).join(', ') : 'none'}`] : []),
     `- Green at the first commit the gate judged: ${rate(judged.filter((r) => r.firstPass).length, judged.length)}`,
     `- Used No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
     `- Reviewer raised to tier 3 (label raised), by repository: ${[...new Set(rows.map((r) => r.repo))].sort().map((repo) => `${repo} ${rows.filter((r) => r.repo === repo && r.raised).length}`).join(', ') || 'no tasks'}`,
@@ -485,7 +485,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     'Task: an issue labelled task, from the label to the close, with every PR that closes it; a PR that closes no task is a task of its own, from its opening.',
     'API cost: the tokens in the repository\'s Claude Code profile, by the PR\'s branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
     'Cash: the Claude subscription, paid monthly, not split by task; the verifier\'s Codex subscription is the same. The ledger sees no other cash.',
-    'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N", or, with no such line, whose title is Revert "<title of a merged PR>"; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
+    'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N"; only when its body has no "Reverts" line at all, for any repository, is its title Revert "<title of a merged PR>" read; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
     'Human touched: the Human reviewed it, the label needs-human, or a merge not made by auto-merge.',
   );
   return `${lines.join('\n')}\n`;
