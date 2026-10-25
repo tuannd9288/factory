@@ -110,6 +110,7 @@ describe('bin/kit-update', () => {
       assert.match(git(w.repo, 'log', '-1', '--format=%b', rev), new RegExp(full));
       assert.equal(readFileSync(w.title, 'utf8'), `Bring the kit up to factory main ${sha7}`);
       const lines = text.split('\n');
+      assert.match(lines[0], /: 2 files added, 3 updated, 1 removed;/);
       assert.deepEqual(lines.slice(0, 3).map((l) => l.split(':**')[0]), ['**What changed', '**Effect', '**Evidence']);
       // A blank line between, or the rule would turn the third line into a heading.
       assert.deepEqual(lines.slice(3, 5), ['', '---']);
@@ -303,12 +304,12 @@ describe('bin/kit-update, after review', () => {
       assert.equal(run(w.repo, 'node', [join(w.fac, 'bin/lib/own.mjs'), 'fill', join(w.dir, 'own.md'), join(w.repo, 'AGENTS.md')]).code, 0);
       w.repoCommit({ '.claude/settings.json': `${JSON.stringify(settings, null, 2)}\n` });
       touch(w);
-      w.facCommit({ 'kit/.gate/old-a.txt': null });
+      w.facCommit({ 'kit/.gate/old-a.txt': null, 'kit/.gate/new-d.txt': 'new d\n' });
       const out = w.update(['app']);
       assert.equal(out.code, 0, out.out);
       const body = readFileSync(w.body, 'utf8');
       const lines = body.split('\n');
-      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept[^\n]*deny rules/);
+      assert.match(lines[0], /: 1 file added, 1 updated, 1 removed;/);      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept[^\n]*deny rules/);
       assert.equal(lines.filter((l) => /^```(?!`)/.test(l)).length, 0, 'a 3-backtick fence opens the evidence');
       assert.equal(lines.filter((l) => l === '````text').length, 1);
       assert.equal(lines.filter((l) => l === '````').length, 1);
