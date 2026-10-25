@@ -440,6 +440,33 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
   });
 });
 
+describe('a red-check that passed by the body\'s No-red line', () => {
+  const LINE = 'No-red: a rename with no behaviour to show first';
+  const passedByLine = () => {
+    const w = world();
+    w.stamp(`verify-${w.head()}`);
+    w.stamp(`red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`);
+    writeFileSync(join(git(w.repo, 'rev-parse', '--absolute-git-dir'), 'factory', `red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`), `${LINE}\n`);
+    return w;
+  };
+
+  test('refuses a body file that lacks that line, and names it', () => {
+    const w = passedByLine();
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, new RegExp(`^ship: refused: red-check passed by the body's "${LINE}"; the body file lacks that line$`, 'm'));
+    assert.ok(!w.calls().some((c) => c.startsWith('pr create')));
+  });
+
+  test('opens with a body file that holds it', () => {
+    const w = passedByLine();
+    writeFileSync(join(w.dir, 'body.md'), `${BODY}\n${LINE}\n`);
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^ship: opened #7/m);
+  });
+});
+
 describe('the remote branch', () => {
   test('is read from origin, and opening is refused while it is behind HEAD, or missing', () => {
     const w = world();
