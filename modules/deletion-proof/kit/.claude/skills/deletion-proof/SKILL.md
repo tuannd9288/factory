@@ -28,12 +28,15 @@ All of these, judged at the base (the merge-base with `origin/main`):
 1. **Only whole files.** Every changed source path is a file deleted whole. A source file that is edited, added or
    changed in type refuses the proof, and so does an `export` removed from a file that stays: that takes a test or
    `No-red:`. Docs, configs and other non-source files may change in the same pull request.
-2. **Nothing names it.** No tracked file at the head names a deleted file (its path or its basename). Docs, configs
-   and comments count.
+2. **Nothing names it.** A fixed-string `git grep` finds neither a deleted file's path nor its basename in any tracked
+   file at the head. Docs, configs and comments count. It is not a full reference check: an import written without
+   the extension (`'./old'`) names neither, so knip's list (3) is what vouches for it.
 3. **knip listed it.** knip 6.42.1, run at the base with the repository's own config, listed each deleted file as an
    unused file.
 4. **knip's config is trusted.** It is a JSON file (`knip.json`, `knip.jsonc`, `.knip.json`, `.knip.jsonc`) of plain
-   data keys, and `.gate/protected` at the base names it, so no tier-1 change can loosen what knip reports.
+   data keys, a regular file (not a link), and `.gate/protected` at the base names it; and
+   `package.json` has no `"knip"` key, because knip merges that key with the file and a manifest change is not tier 3.
+   So no tier-1 change can loosen what knip reports.
 
 `review` still runs on a proved deletion and can still block it; the proof replaces only the `No-red:` line.
 
