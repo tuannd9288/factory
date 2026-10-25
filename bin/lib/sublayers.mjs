@@ -38,11 +38,19 @@ export function labelProblems(labels) {
   return out;
 }
 
-/** The problems with open issues: one line for each with no sublayer label, or with more than one. */
+/** One line for each sublayer-* label, in the repository or on an open issue, that is not one of the 17. */
+export function strayProblems(labels, issues) {
+  const listed = new Set(SUBLAYERS.map((s) => s.label));
+  const names = [...labels, ...issues.flatMap((issue) => issue.labels)].map((l) => l.name);
+  return [...new Set(names)].filter((n) => n.startsWith('sublayer-') && !listed.has(n)).sort().map((n) => `not on the list: ${n}`);
+}
+
+/** The problems with open issues: one line for each with none of the 17 labels, or with more than one. */
 export function issueProblems(issues) {
+  const listed = new Set(SUBLAYERS.map((s) => s.label));
   const out = [];
   for (const issue of issues) {
-    const own = issue.labels.map((l) => l.name).filter((n) => n.startsWith('sublayer-'));
+    const own = issue.labels.map((l) => l.name).filter((n) => listed.has(n));
     const head = `issue #${issue.number} (${issue.title})`;
     if (own.length === 0) out.push(`${head}: no sublayer label`);
     else if (own.length > 1) out.push(`${head}: ${own.length} sublayer labels (${own.join(', ')})`);
@@ -80,7 +88,7 @@ export function main(argv) {
     process.stderr.write(`${error.message}\n`);
     return 2;
   }
-  const problems = [...labelProblems(labels), ...issueProblems(issues)];
+  const problems = [...labelProblems(labels), ...issueProblems(issues), ...strayProblems(labels, issues)];
   if (problems.length) {
     process.stdout.write(`${problems.join('\n')}\n`);
     return 1;
