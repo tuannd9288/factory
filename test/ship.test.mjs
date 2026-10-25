@@ -390,6 +390,56 @@ describe('pushing', () => {
   });
 });
 
+describe('a tier 3 whose tier check is red, which is how the kit shows the wait for the Human', () => {
+  const failed = [{ name: 'tier', status: 'COMPLETED', conclusion: 'FAILURE' }];
+  const opened = (tier, labels = []) => {
+    const w = world();
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    writeFileSync(join(w.repo, 'scripts/tier'), FAKE_TIER);
+    git(w.repo, 'update-index', '--assume-unchanged', 'scripts/tier');
+    writeFileSync(join(w.sh, 'tier'), `${tier}\n`);
+    w.pr({ labels: labels.map((name) => ({ name })), statusCheckRollup: failed });
+    return w;
+  };
+
+  test('by the label: armed, then stopped, and stopped again on the next run', () => {
+    const w = opened(3, ['tier-3']);
+    let out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: armed #7/m);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.doesNotMatch(out.out, /nothing to do/);
+  });
+
+  test('by scripts/tier on the paths: the same', () => {
+    const w = opened(3);
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+  });
+
+  test('below tier 3 a red tier check is no wait of the Human\'s', () => {
+    const w = opened(2);
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.doesNotMatch(out.out, /waits for the Human/);
+  });
+
+  test('when scripts/tier cannot judge, ship fails closed: no live-verify, no arming', () => {
+    const w = opened(3);
+    writeFileSync(join(w.repo, 'scripts/tier'), '#!/bin/sh\necho "tier: could not read the policy"\nexit 2\n');
+    const out = w.ship();
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /^ship: could not judge the tier \(scripts\/tier exited 2\)$/m);
+    assert.equal(w.read('lv-calls'), '');
+    assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 0);
+  });
+});
+
 describe('the remote branch', () => {
   test('is read from origin, and opening is refused while it is behind HEAD, or missing', () => {
     const w = world();
