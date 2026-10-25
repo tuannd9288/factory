@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Step 4 of "How a change lands", one command, idempotent on the branch: each run finds the branch's pull request, or
+# opens one, and takes the next step. It refuses a wrong step with the reason; it never refuses a push.
+#   scripts/ship [--body-file <file>] [--title <title>]
+# 1. no pull request: opens it, only when HEAD has a verify stamp and a red-check stamp against origin/main (a full
+#    scripts/verify and scripts/red-check leave them in the git dir); the body is --body-file, with `Closes #<issue>` filled in.
+# 2. an armed pull request whose HEAD is past what was verified, or no longer covered: disarms it first.
+# 3. stops while the pull request carries needs-human, or tier 3 waits on its tier check.
+# 4. runs scripts/live-verify <pr>, and arms auto-merge (--auto --merge) only on PASS or PASS+NOTES and a base of main;
+#    when scripts/live-verify --covered already passes, it arms again without a new run.
+# Exit 0 a step taken or nothing to do, 1 refused or stopped, 2 could not run.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 2
+exec node scripts/lib/ship.mjs "$@"
