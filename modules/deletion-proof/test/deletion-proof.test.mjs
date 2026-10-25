@@ -121,6 +121,31 @@ describe('deletion-proof: the knip config', () => {
     const out = r.attempt({ base: { '{}': '{ "preprocessor": "./tools/pre.js" }\n' }, link: ['{}', 'knip.json'], head: { 'src/old.js': null }, knip: listed });
     refused(out, /config: knip\.json is not a regular file \(mode 120000\), so no deletion can be proved unused/);
   });
+  describe('package.json as knip reads it (loadJSON: a BOM stripped, then JSONC; a link followed)', () => {
+    const PKG = (more) => `{ "name": "app", "private": true, "type": "module"${more} }\n`;
+    const KNIP = ', "knip": { "next": false }';
+    const IN_PACKAGE = /config: the knip config is in package\.json; move it to knip\.json for a machine proof/;
+    test('C1 a BOM before the text, C2 a // comment and C3 a trailing comma do not hide a "knip" key', () => {
+      refused(withConfig({ 'package.json': `﻿${PKG(KNIP)}` }), IN_PACKAGE);
+      refused(withConfig({ 'package.json': `// app\n${PKG(KNIP)}` }), IN_PACKAGE);
+      refused(withConfig({ 'package.json': PKG(`${KNIP},`) }), IN_PACKAGE);
+    });
+    test('C4 a package.json no parser reads is refused with its own reason', () => {
+      refused(withConfig({ 'package.json': '{ not json\n' }), /config: package\.json could not be read as JSON, so no deletion can be proved unused/);
+    });
+    test('C6 a package.json that is a link is refused: knip follows it, git show prints the target\'s name', () => {
+      refused(
+        r.attempt({ base: { 'meta/pkg.json': PKG(KNIP) }, link: ['meta/pkg.json', 'package.json'], head: { 'src/old.js': null }, knip: listed }),
+        /config: package\.json is not a regular file \(mode 120000\)/,
+      );
+    });
+    test('C5 a "knip" key nested under another key, and a devDependencies entry named knip, are no config', () => {
+      for (const more of [', "config": { "knip": { "next": false } }', ', "devDependencies": { "knip": "6.42.1" }']) {
+        const out = withConfig({ 'package.json': PKG(more) });
+        assert.equal(out.code, 0, out.out);
+      }
+    });
+  });
   test('refuses a key that can load code, and a key the gate does not know, at the root and in a workspace', () => {
     for (const [config, key] of [
       [{ preprocessor: './tools/knip-pre.js' }, 'preprocessor'],

@@ -90,10 +90,18 @@ describe('the skill follows the Agent Skills specification', () => {
     const row = text('references/refusals.md').split('\n').find((l) => l.includes('config: the knip config is in package.json'));
     assert.match(row, /beside a (protected )?`knip\.json`/);
   });
+  test('the reference has a row for each package.json line the code prints, naming package.json', () => {
+    const rows = text('references/refusals.md').split('\n');
+    const code = readFileSync(join(MODULE, 'kit/scripts/lib/deletion.mjs'), 'utf8');
+    for (const line of ['config: package.json is not a regular file', 'config: package.json could not be read as JSON']) {
+      assert.ok(code.includes(line.replace(/^config: /, '')), `the code prints ${line}`);
+      assert.ok(rows.some((row) => row.startsWith('|') && row.includes(line)), `a row for ${line}`);
+    }
+  });
   test('SKILL.md says what check 2 is, a fixed-string search, and that a package.json "knip" key is refused', () => {
     assert.match(body, /fixed-string `git grep`/);
     assert.match(body, /not a full reference check/);
-    assert.match(body, /`package\.json` has no `"knip"` key/);
+    assert.match(body, /`package\.json` at the base is a regular file that reads as JSON or JSONC,\s+and has no top-level `"knip"` key/);
   });
 });
 
