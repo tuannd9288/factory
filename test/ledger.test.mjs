@@ -360,3 +360,16 @@ test('a task row keeps the pull requests of its rows for the count', () => {
   assert.deepEqual(countOf([task]), { n: 1, k: 1, m: 1, reverted: ['o/r#1'] });
   assert.deepEqual(countOf([task, a, b]), { n: 1, k: 1, m: 1, reverted: ['o/r#1'] });
 });
+
+test('the digest has a line PRs reverted, with the reverts merged in the period, the reverted numbers and a legend', () => {
+  const rows = revertRows(mergedPR(1, 'Add A', '2026-10-15T10:00:00Z'), mergedPR(2, 'Add B', '2026-10-15T11:00:00Z'), mergedPR(3, 'Undo A', '2026-10-16T10:00:00Z', 'Reverts o/r#1'));
+  const text = digest(rows, revertPeriod);
+  assert.match(text, /\n- PRs reverted: 1\/2 \(50\.0%; 95% CI: [^)]*\); reverts merged in the period: 1\n- Reverted PRs: o\/r#1\n/);
+  assert.match(text, /\nRevert: a merged PR whose body has a line "Reverts #N"/);
+});
+
+test('the digest prints a period with no merged pull request like the other zero rates', () => {
+  const text = digest([], { since: '2026-10-14', until: '2026-10-21' });
+  assert.match(text, /\n- PRs reverted: none yet \(n=0\); reverts merged in the period: 0\n/);
+  assert.doesNotMatch(text, /Reverted PRs:/);
+});
