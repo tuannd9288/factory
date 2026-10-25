@@ -309,7 +309,8 @@ describe('bin/kit-update, after review', () => {
       assert.equal(out.code, 0, out.out);
       const body = readFileSync(w.body, 'utf8');
       const lines = body.split('\n');
-      assert.match(lines[0], /: 1 file added, 1 updated, 1 removed;/);      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept[^\n]*deny rules/);
+      assert.match(lines[0], /: 1 file added, 1 updated, 1 removed;/);
+      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept[^\n]*deny rules/);
       assert.equal(lines.filter((l) => /^```(?!`)/.test(l)).length, 0, 'a 3-backtick fence opens the evidence');
       assert.equal(lines.filter((l) => l === '````text').length, 1);
       assert.equal(lines.filter((l) => l === '````').length, 1);
