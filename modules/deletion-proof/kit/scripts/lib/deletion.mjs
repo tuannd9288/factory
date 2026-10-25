@@ -176,7 +176,20 @@ function knipFiles(base, where) {
       const last = `${prepared.stdout}${prepared.stderr}`.trim().split('\n').at(-1) ?? '';
       throw new Problem([`check 3: the base could not be prepared for knip${last ? `: ${last}` : ''}`]);
     }
-    const knip = spawnSync('npx', ['--yes', KNIP, '--reporter', 'json'], { cwd: where, encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
+    // What knip would not judge the base by: gate_prepare changed a tracked file, or a .gitignore hides a tracked file (knip
+    // reads every .gitignore and does not follow imports of an ignored file, graph/build.js:406). Untracked files are fine.
+    if (git('-C', where, 'status', '--porcelain', '--untracked-files=no').trim()) throw new Problem(["check 3: the base's gate_prepare changed tracked files, so knip would not judge the base"]);
+    const hidden = git('-C', where, 'ls-files', '--cached', '--ignored', '--exclude-standard').split('\n').filter(Boolean);
+    if (hidden.length) throw new Problem([`config: ${hidden[0]} is tracked but gitignored, so knip would not read what it imports`]);
+    // npx runs from a new empty folder: in the checkout it would read the base's .npmrc and find its node_modules/.bin. knip is
+    // pointed at the checkout with its own flag (--directory, util/cli-arguments.js, used as cwd in create-options.js).
+    const empty = mkdtempSync(join(tmpdir(), 'deletion-proof-npx-'));
+    let knip;
+    try {
+      knip = spawnSync('npx', ['--yes', KNIP, '--reporter', 'json', '--directory', where], { cwd: empty, encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
     const code = knip.status ?? 127;
     const err = (knip.stderr ?? '').trim().split('\n')[0] ?? '';
     if (code !== 0 && code !== 1) throw new Problem([`check 3: knip could not run (exit ${code})${err ? `: ${short(err)}` : ''}`]);
