@@ -39,12 +39,12 @@ describe('the pstack pin', () => {
 describe('the pstack pack\'s AGENTS.md', () => {
   const text = () => readFileSync(join(factory, 'packs/pstack/AGENTS.md'), 'utf8');
 
-  test('says where pstack yields: six rules, each with its reason and the pstack line it departs from', () => {
+  test('says where pstack yields: one rule, with its reason and the pstack line it departs from', () => {
     // The pack's file is the section alone: it runs from its heading to its end.
     const section = text().startsWith('## Where pstack yields\n') ? text().slice('## Where pstack yields\n'.length) : '';
     assert.doesNotMatch(section, /^## /m);
     const rules = section.split('\n- ').slice(1);
-    assert.equal(rules.length, 6, section);
+    assert.equal(rules.length, 1, section);
     for (const rule of rules) assert.match(rule, /\(pstack `[\w./-]+:\d+(-\d+)?`/, rule);
   });
 });
