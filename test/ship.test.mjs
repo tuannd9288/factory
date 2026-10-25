@@ -306,6 +306,73 @@ describe('the steps after it opened', () => {
   });
 });
 
+// scripts/tier: prints the tier in $SH/tier, and logs its arguments.
+const FAKE_TIER = String.raw`#!/usr/bin/env node
+const fs = require('fs');
+const sh = process.env.SH;
+fs.appendFileSync(sh + '/tier-calls', process.argv.slice(2).join(' ') + '\n');
+console.log('tier ' + fs.readFileSync(sh + '/tier', 'utf8').trim());
+`;
+
+describe('a tier 3 that the paths make, with no label on the pull request', () => {
+  const opened = (tier) => {
+    const w = world();
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    writeFileSync(join(w.repo, 'scripts/tier'), FAKE_TIER);
+    git(w.repo, 'update-index', '--assume-unchanged', 'scripts/tier');
+    writeFileSync(join(w.sh, 'tier'), `${tier}\n`);
+    return w;
+  };
+  const waiting = [{ name: 'tier', status: 'IN_PROGRESS', conclusion: '' }];
+
+  test('is judged by scripts/tier on origin/main, HEAD and the pull request\'s labels', () => {
+    const w = opened(1);
+    w.pr({ labels: [{ name: 'task' }, { name: 'tier-2' }] });
+    assert.equal(w.ship().code, 0);
+    assert.equal(w.read('tier-calls'), '--base origin/main --head HEAD --labels task,tier-2\n');
+  });
+
+  test('arms by the same PASS rule, then stops with the line, and a later run stops again', () => {
+    const w = opened(3);
+    w.pr({ statusCheckRollup: waiting });
+    let out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: armed #7/m);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 1);
+  });
+
+  test('does not arm it on FAIL, and says FAIL, not the wait', () => {
+    const w = opened(3);
+    w.pr({ statusCheckRollup: waiting });
+    writeFileSync(join(w.sh, 'verdict'), 'FAIL\n');
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /live-verify answered FAIL/);
+    assert.doesNotMatch(out.out, /waits for the Human/);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
+  });
+
+  test('is no wait once the tier check passed, and a running tier check below tier 3 is none', () => {
+    let w = opened(3);
+    w.pr({ statusCheckRollup: [{ name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+    let out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.doesNotMatch(out.out, /waits for the Human/);
+    w = opened(2);
+    w.pr({ statusCheckRollup: waiting });
+    out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^ship: armed #7/m);
+    assert.doesNotMatch(out.out, /waits for the Human/);
+  });
+});
+
 describe('pushing', () => {
   test('is never refused by ship: not before the pull request, not while it is stopped or refused', () => {
     const w = world();
