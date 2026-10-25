@@ -476,3 +476,108 @@ The three live sessions cost $0.18 at API prices:
 - How Herdr would report an interactive Claude Code session.
 - That `--disallowedTools` refuses a call in a pane: no call tried one.
 - The pull-request session through a pane.
+
+## Issue #62: where Claude Code reports the quota windows, Claude Code 2.1.308, 2026-10-26
+
+**The question.** Where does Claude Code report a profile's quota windows, so the factory can read them without
+touching a credential (#58, K2 option B)? The issue names three sources. Nothing here read a credential, a token or the
+Keychain.
+
+**Setup.**
+- **When and where:** 2026-10-25 and 2026-10-26, on the `factory` account, Claude Code 2.1.308. The source 1 extracts were
+  made on 2026-10-26 at 02:25 +07; the source 3 measurement ran at 19:20 to 19:22 UTC on 2026-10-25.
+- **Who ran it:** the Lead measured; the worker read the extracts and wrote this section and the probe item.
+
+| Source | Answer | Claude Code | Date |
+|---|---|---|---|
+| 1. `claude -p --output-format stream-json` carries `rate_limit_event` with both windows | **yes** | 2.1.308 | 2026-10-26 |
+| 2. A profile's session files carry it | **not measured** | 2.1.308 | 2026-10-26 |
+| 3. The status line receives `rate_limits.five_hour` and `rate_limits.seven_day`, each with `used_percentage` and `resets_at` | **yes**, but only after the first API response | 2.1.308 | 2026-10-26 |
+
+### Source 1: `rate_limit_event` in the stream — yes
+
+The logs are four extracts. The Lead made them with `grep`; each holds only the log's `rate_limit_event` lines and its
+`system`/`init` lines, and no message text. Each is cited by the path of the log it was cut from, on the `factory`
+account.
+
+| Extract | Cut from | `rate_limit_event` lines |
+|---|---|---|
+| `issue-58--run.jsonl` | `~/factory-runs/issue-58/run.jsonl` | 22 |
+| `issue-17--run-builder.jsonl` | `~/factory-runs/issue-17/run-builder.jsonl` | 11 |
+| `issue-17--run-reviewer.jsonl` | `~/factory-runs/issue-17/run-reviewer.jsonl` | 15 |
+| `issue-93--run-worker.jsonl` | the first run on seat 2, a new account at 0% used; the run was still going, so the extract is a snapshot | 1 |
+
+That is 49 events in four logs; every one carries both windows.
+- **`rate_limit_info` holds:** `status`, `resetsAt`, `rateLimitType`, `overageStatus`, `overageDisabledReason`,
+  `isUsingOverage` and `unifiedWindows`. The same seven names in all 49 events.
+- **`unifiedWindows` holds:** `five_hour` and `seven_day`, and nothing else.
+- **`five_hour` and `seven_day` each hold:** `utilization` and `resetsAt`, and nothing else.
+- **Values seen.** `status` was `allowed` and `rateLimitType` was `five_hour` in every event. `resetsAt` is epoch
+  seconds.
+- **The unit of `utilization`** is a fraction of the window, 0 to 1, not a percentage. The values range from 0 to 0.74
+  (five hours) and 0 to 0.22 (seven days), in steps of 0.01, and in each log they rise over the run:
+
+| Extract | `five_hour.utilization` | `seven_day.utilization` |
+|---|---|---|
+| `issue-58--run.jsonl` | 0.47 to 0.66 | 0.14 to 0.18 |
+| `issue-17--run-builder.jsonl` | 0.61 to 0.74 | 0.17 to 0.19 |
+| `issue-17--run-reviewer.jsonl` | 0 to 0.15 | 0.19 to 0.22 |
+| `issue-93--run-worker.jsonl` | 0 | 0 |
+
+The reviewer's five-hour value falling to 0 against the builder's 0.74 is a window that reset between the two runs.
+That a value of 1 means the window is full is the unit's name and the range seen, not something a log shows: no event
+reached it.
+
+**The probe check.** `probes/pack-probe.mjs` has a first-session item, "Claude Code reports both quota windows", which
+fails when the stream carries no `rate_limit_event`, or none with `five_hour` and `seven_day` each holding a numeric
+`utilization` and `resetsAt`. `bin/claude-canary` runs the probe on each new version, so a version that drops the event
+is rejected. It reads the stream only. It is a check of Claude Code, not of a pack, and `probes/pack-contract.md` has no
+row for it.
+
+### Source 2: session files — not measured
+
+The Human decided on 2026-10-26, relayed by Colly: "Bỏ nguồn 2 (Recommended)". So source 2 is not measured. No session
+file of any profile was read, by the worker or by any code written for this issue. Whether the files carry the event is
+unknown.
+
+### Source 3: the status line's `rate_limits` — yes
+
+- **How.** The Lead ran an interactive Claude Code in a Herdr pane (Herdr 0.9.5) on seat 2, with the status line set
+  through `--settings` only: the command is in `../measure.log` (`~/factory-runs/issue-62/measure.log`) and no profile
+  file changed. The script `~/factory-runs/issue-62/sl/sl.sh` wrote down what it received, in
+  `~/factory-runs/issue-62/statusline.jsonl`: two records.
+- **Before the first API response** (19:21:47 UTC): no `rate_limits` key. Its keys were `context_window`, `cost`, `cwd`,
+  `effort`, `exceeds_200k_tokens`, `fast_mode`, `model`, `output_style`, `scratchpad_dir`, `session_id`, `thinking`,
+  `transcript_path`, `version`, `workspace`.
+- **After one prompt** (19:22:03 UTC): the same keys plus `prompt_cache`, `prompt_id`, `rate_limits` and `session_name`.
+  `rate_limits.five_hour` and `rate_limits.seven_day` each held `used_percentage` and `resets_at`, and nothing else:
+  - `five_hour`: `used_percentage` 0, `resets_at` 1792973400;
+  - `seven_day`: `used_percentage` 0, `resets_at` 1793415600.
+- **So it appears only after the first API response**, and a script that reads it before then must expect it absent.
+- **Against source 1.**
+  - **Names:** `used_percentage` and `resets_at` here, `utilization` and `resetsAt` there.
+  - **`resets_at`:** the same epoch seconds. `issue-93--run-worker.jsonl`'s event, from seat 2 the same day, has
+    `five_hour.resetsAt` 1792973400 and `seven_day.resetsAt` 1793415600, the two values above.
+  - **The scale of `used_percentage`:** not shown. Only 0 was seen, where a fraction and a percentage are the same
+    number. By its name it is a percentage, 0 to 100, against `utilization`'s 0 to 1, and a reader that takes the two to
+    be one unit would be wrong by a factor of 100; this measurement did not test that.
+- The docs page is https://code.claude.com/docs/en/statusline. The issue cites it for these fields; nothing here goes
+  beyond the issue's words.
+
+### What it does not prove
+
+- Source 2: whether session files carry the event.
+- That the event is on in every kind of account. Four logs on two accounts were read: `status` was `allowed` in all, and
+  `overageStatus` was `rejected` with `org_level_disabled`. What an event holds in a limited, exhausted or overage state
+  is unseen.
+- That the two windows are always both present: they were in all 49 events, which came from runs of one kind
+  (`claude -p`) in two seats.
+- That `utilization` is a fraction up to 1: the largest value seen is 0.74.
+- The scale of the status line's `used_percentage` (see above), and that it is the same measure as `utilization`: only 0
+  was seen.
+- That the status line carries the windows for an account that never made an API call, or under a different login.
+  Only seat 2 was measured, in one session of one prompt.
+- That `rate_limit_event` arrives often enough to read: 11 to 22 events in runs of about the same size, but the
+  frequency was not tied to anything.
+- That the probe item catches a real dropped event: it is shown against mocked streams only, until the next live probe
+  run on a new Claude Code version.
