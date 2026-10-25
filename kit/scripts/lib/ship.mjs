@@ -34,14 +34,19 @@ function open(branch, head, args) {
   } catch {
     return say(1, 'refused: there is no origin/main to judge the head against; fetch it');
   }
-  if (!existsSync(join(stamps, `red-check-${head}-${main}`)))
+  const redStamp = join(stamps, `red-check-${head}-${main}`);
+  if (!existsSync(redStamp))
     return say(1, `refused: HEAD ${short} has no red-check stamp against origin/main ${main.slice(0, 7)}; run scripts/red-check --base origin/main`);
+  const noRed = readFileSync(redStamp, 'utf8').trim();
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);
   const bodyFile = args.bodyFile ?? '.github/pull_request_template.md';
   if (!existsSync(bodyFile)) return say(1, `refused: the body file ${bodyFile} does not exist`);
   if (readFileSync(bodyFile, 'utf8').includes(PLACEHOLDER))
     return say(1, `refused: the body still holds the template's "Closes #${PLACEHOLDER}"; pass --body-file with the issue number filled in`);
+  // red-check passed by a line in the body it was given; CI's red-check reads the body ship sends.
+  if (noRed && !readFileSync(bodyFile, 'utf8').split('\n').some((l) => l.trim() === noRed))
+    return say(1, `refused: red-check passed by the body's "${noRed}"; the body file lacks that line`);
   const title = args.title ?? git(['log', '-1', '--format=%s']);
   const url = gh(['pr', 'create', '--base', 'main', '--head', branch, '--title', title, '--body-file', bodyFile]).trim().split('\n').pop();
   return say(0, `opened #${/(\d+)$/.exec(url)?.[1] ?? '?'} ${url}`);

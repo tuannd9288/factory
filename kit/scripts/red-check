@@ -25,12 +25,14 @@ done
 base=$(git rev-parse --verify "$base^{commit}") || { echo "red-check: $base is not a commit"; exit 2; }
 
 head=$(git rev-parse HEAD) || exit 2
+# passed [<No-red line>]: the stamp holds the line a pass by the PR body rests on, which ship holds its body to.
 passed() {
   local stamps
   # A tree with a change or an untracked file (a forgotten `git add`) is no pass of the head.
   [ -z "$(git status --porcelain)" ] || return 0
   stamps="$(git rev-parse --absolute-git-dir)/factory"
-  mkdir -p "$stamps" && : >"$stamps/red-check-$head-$base"
+  mkdir -p "$stamps" || return 0
+  if [ -n "${1:-}" ]; then printf '%s\n' "$1" >"$stamps/red-check-$head-$base"; else : >"$stamps/red-check-$head-$base"; fi
 }
 
 work=$(mktemp -d) || exit 2
@@ -97,7 +99,7 @@ fi
 reason=$( [ -n "$body" ] && [ -f "$body" ] && grep -E '^No-red: .{20,}' "$body" | head -1 )
 if [ -n "$reason" ]; then
   echo "red-check: passed by the PR body's $reason"
-  passed
+  passed "$reason"
   exit 0
 fi
 if [ -z "$tests" ]; then
