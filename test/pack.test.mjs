@@ -18,7 +18,7 @@ const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 // kit/AGENTS.md composed with packs/pstack, and kit/.claude/settings.json as it was at factory@8ca0e7a, before the
 // split: the core plus packs/pstack must build them byte for byte, or a repository on pstack would see a different
 // kit. The AGENTS.md hash moves with any change to the core's or the pack's text.
-const TODAY_AGENTS = 'e6ecaae84be1c3efbb3de33bfe6cc120a24619600f16778d5e848c5ecb4ccc32';
+const TODAY_AGENTS = '2d494a05f466b777588a86ef45208ebe0f8cc7527fefe4fe44c9bd0db8099425';
 const TODAY_SETTINGS = '4feee66d1a5a26fe2db0213f00c254e13e0382a9390d96f42f1b72653f53171f';
 // The sha256 of JSON.stringify(deny) for the kit's deny list at 8ca0e7a: the rules stay in the core, unchanged.
 const TODAY_DENY = '21e727537fca50e0e30cb774e2c072d42cf17b9755c291617875d02b585fae5e';
@@ -135,7 +135,7 @@ describe('the repository\'s choice', () => {
 });
 
 describe('packs/pstack', () => {
-  test('holds the pin as the installer writes it, and the six rules under their own heading', () => {
+  test('holds the pin as the installer writes it, and the rule under its own heading', () => {
     const settings = read('packs/pstack/settings.json');
     assert.equal(settings, json(JSON.parse(settings)));
     assert.deepEqual(Object.keys(JSON.parse(settings)), ['enabledPlugins', 'extraKnownMarketplaces']);
