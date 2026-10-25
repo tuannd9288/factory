@@ -481,6 +481,63 @@ describe('a live-verify that exits 2 without a BLOCKED verdict', () => {
   });
 });
 
+describe('a remote branch at a commit HEAD does not contain', () => {
+  // Another clone puts a commit on origin/work, which this repository has not fetched.
+  const ahead = (w) => {
+    const other = join(w.dir, 'other');
+    git(w.dir, 'clone', '-q', join(w.dir, 'origin.git'), other);
+    git(other, 'switch', '-q', 'work');
+    const sha = commit(other, { 'other.js': 'x\n' }, 'Someone else pushed');
+    git(other, 'push', '-q', 'origin', 'work');
+    return sha;
+  };
+
+  test('is told to pull first, when origin is ahead and when the branches diverged', () => {
+    const w = world();
+    const theirs = ahead(w);
+    w.passed();
+    let out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, new RegExp(`^ship: refused: origin/work is at ${theirs.slice(0, 7)}, which HEAD [0-9a-f]{7} does not contain; pull first$`, 'm'));
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Mine, not pushed');
+    w.passed();
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /which HEAD [0-9a-f]{7} does not contain; pull first$/m);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr create')));
+  });
+
+  test('keeps "push HEAD first" for a remote that HEAD contains', () => {
+    const w = world();
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Not pushed');
+    w.passed();
+    const out = w.ship();
+    assert.match(out.out, /not HEAD [0-9a-f]{7}; push HEAD first$/m);
+    assert.doesNotMatch(out.out, /pull/);
+  });
+
+  test('keeps today\'s message and adds "or pull, if origin is ahead" when origin\'s commit cannot be fetched', () => {
+    const w = world();
+    const theirs = ahead(w);
+    w.passed();
+    writeFileSync(join(w.sh, 'head'), w.head());
+    // origin answers the first connection (ls-remote) and refuses every later one (the fetch).
+    const once = join(w.dir, 'upload-pack-once');
+    writeFileSync(once, '#!/bin/sh\nn=$(cat "$0.n" 2>/dev/null || echo 0)\necho $((n + 1)) >"$0.n"\n[ "$n" -eq 0 ] || exit 1\nexec git upload-pack "$@"\n', { mode: 0o755 });
+    const out = run(w.repo, join(w.repo, 'scripts/ship'), ['--body-file', join(w.dir, 'body.md')], {
+      ...quiet,
+      GIT_CONFIG_COUNT: '4',
+      GIT_CONFIG_KEY_3: 'remote.origin.uploadpack',
+      GIT_CONFIG_VALUE_3: once,
+      SH: w.sh,
+      PATH: `${join(w.dir, 'bin')}:${process.env.PATH}`,
+      GH_TOKEN: 'not-a-token',
+    });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, new RegExp(`^ship: refused: origin/work is at ${theirs.slice(0, 7)}, not HEAD [0-9a-f]{7}; push HEAD first, or pull, if origin is ahead$`, 'm'));
+  });
+});
+
 describe('a missing stamp', () => {
   const HINT = /^ship: if the work tree is not clean, commit or remove what `git status` shows$/m;
 
