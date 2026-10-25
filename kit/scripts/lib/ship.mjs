@@ -20,8 +20,13 @@ function behind(branch, head) {
   const line = git(['ls-remote', 'origin', `refs/heads/${branch}`]).split('\n')[0];
   const remote = line.split(/\s/)[0];
   if (!remote) return `origin has no branch ${branch}; push HEAD first`;
-  if (remote !== head) return `origin/${branch} is at ${remote.slice(0, 7)}, not HEAD ${head.slice(0, 7)}; push HEAD first`;
-  return '';
+  if (remote === head) return '';
+  const at = `origin/${branch} is at ${remote.slice(0, 7)}`;
+  // Fetch that one ref: origin's commit is in HEAD's history (HEAD is ahead: push) or it is not (origin has what HEAD lacks: pull).
+  const fetched = spawnSync('git', ['fetch', '--quiet', 'origin', `refs/heads/${branch}`], { stdio: 'ignore' }).status === 0 && quietGit(['cat-file', '-e', `${remote}^{commit}`]);
+  if (!fetched) return `${at}, not HEAD ${head.slice(0, 7)}; push HEAD first, or pull, if origin is ahead`;
+  if (quietGit(['merge-base', '--is-ancestor', remote, head])) return `${at}, not HEAD ${head.slice(0, 7)}; push HEAD first`;
+  return `${at}, which HEAD ${head.slice(0, 7)} does not contain; pull first`;
 }
 
 function open(branch, head, args) {
