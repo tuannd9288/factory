@@ -89,8 +89,18 @@ if [ -n "$reason" ]; then
   exit 0
 fi
 if [ -z "$tests" ]; then
+  # A module (modules/<name>/, laid only where .gate/modules names it) may prove a change with no test: its script, where it
+  # exists, goes first. Without it nothing here runs, and the verdicts are main's.
+  proof="" code=1
+  if [ -f scripts/lib/deletion.mjs ]; then
+    printf '%s\n' "$sources" >"$work/sources"
+    proof=$(node scripts/lib/deletion.mjs prove --base "$base" --sources "$work/sources" --work "$work"); code=$?
+    [ "$code" -eq 0 ] && { printf '%s\n' "$proof"; exit 0; }
+  fi
   echo "red-check: source changed with no new or changed test:"
   printf '%s\n' "$sources" | sed 's/^/  /'
+  [ -z "$proof" ] || printf '%s\n' "$proof"
+  [ "$code" -eq 2 ] && exit 2
   echo "Add a test that fails without the change, or give the PR body a line 'No-red: <why no test can fail first>'."
   exit 1
 fi

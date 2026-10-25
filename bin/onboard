@@ -2,7 +2,7 @@
 # Takes a repository into the factory: clones it under the factory root, creates its Claude Code profile (only now)
 # with a settings.json that keeps out what the logged-in claude.ai account would load, writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
 # the Human's.
-#   bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>]
+#   bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>] [--module <name>]...
 # This is the agents' half; a repository that already has the kit is brought up to date with bin/kit-update. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
 # The kit replaces the repository's own AGENTS.md, CLAUDE.md and hooks; its own parts the Human approved come in through
@@ -10,6 +10,9 @@
 # own AGENTS.md or CLAUDE.md is refused without it. Every other file the repository already has is kept.
 # --pack <name> chooses the way of working the kit is composed with (packs/<name>/, bin/lib/pack.mjs), or `none` for the
 # core alone; the default is the repository's own .gate/pack, else pstack. The choice is written to .gate/pack.
+# --module <name> (repeatable) turns on a module (modules/<name>/, bin/lib/module.mjs): its files are copied into the
+# repository, and only into one that turns it on; the choice is written to .gate/modules, the default being the
+# repository's own .gate/modules, else none. A file the repository already has at a module's path is a conflict.
 # FACTORY_ROOT (default: this clone) is where repositories live; AGENT_PROFILES (default: ~/.agent-profiles) where
 # profiles live, as <owner>/<repo>/claude so two owners' repositories of one name never share one; FACTORY_HUMAN
 # (default: tuannd9288) is the code owner of tier 3; FACTORY_AGENT (default: tuan9288-agent) the agents' account.
@@ -19,16 +22,18 @@ root=${FACTORY_ROOT:-$factory}
 profiles=${AGENT_PROFILES:-$HOME/.agent-profiles}
 human=${FACTORY_HUMAN:-tuannd9288}
 agent=${FACTORY_AGENT:-tuan9288-agent}
-url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>]}
+url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>] [--module <name>]...}
 shift
 open_pr=1
 own=""
 pack=""
+modules=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --no-pr) open_pr=0; shift ;;
     --own) own=${2:?onboard: --own needs a file}; shift 2 ;;
     --pack) pack=${2:?onboard: --pack needs a name}; shift 2 ;;
+    --module) modules+=("${2:?onboard: --module needs a name}"); shift 2 ;;
     *) echo "onboard: unknown argument $1; nothing done"; exit 2 ;;
   esac
 done
@@ -39,6 +44,10 @@ owner=$(basename "$(dirname "$path")")
 owner=${owner##*:}
 dest=$root/$name
 [ -e "$dest" ] && { echo "onboard: $dest exists; nothing done"; exit 1; }
+# A module the factory lacks, or one that lays a kit file, is refused before anything is cloned.
+if [ "${#modules[@]}" -gt 0 ]; then
+  why=$(node "$factory/bin/lib/module.mjs" check "$factory" "${modules[@]}" 2>&1) || { echo "onboard: $why; nothing done"; exit 2; }
+fi
 # The AGENTS.md the repository gets is the kit's, the pack's section and its own parts: the 150 lines count all three.
 # Without --pack the repository's own choice is known only after the clone; pstack, the usual one, stands in until then.
 composed=$(mktemp)
@@ -61,8 +70,8 @@ if [ "$open_pr" -eq 1 ]; then
     exit 2
   fi
   # The kit is laid from this clone's working tree, and its evidence names a commit: the two must be one, on main.
-  if git -C "$factory" status --porcelain --ignored --untracked-files=all -- kit packs | grep -v '\.DS_Store$' | grep -q .; then
-    echo "onboard: the factory's kit has changes no commit holds (kit/ and packs/); commit and push them first; nothing done"
+  if git -C "$factory" status --porcelain --ignored --untracked-files=all -- kit packs modules | grep -v '\.DS_Store$' | grep -q .; then
+    echo "onboard: the factory's kit has changes no commit holds (kit/, packs/ and modules/); commit and push them first; nothing done"
     exit 2
   fi
   kit_commit=$(git -C "$factory" rev-parse HEAD)
@@ -85,6 +94,25 @@ if [ -z "$pack" ]; then
       why=$(node "$factory/bin/lib/own.mjs" check "$own" "$composed") || { rm -rf "$dest"; echo "onboard: $why; the clone is removed and nothing else was done"; exit 2; }
     fi
   fi
+fi
+# The modules are the repository's own choice unless --module says: one it names that the factory lacks, or whose files
+# collide with the kit's, is refused like a --module given, and a file the repository has at a module's path is a
+# conflict. $dest did not exist before this run, so the clone is this run's own to remove.
+if [ "${#modules[@]}" -eq 0 ] && [ -f "$dest/.gate/modules" ]; then
+  why=$(node "$factory/bin/lib/module.mjs" names "$dest/.gate/modules" 2>&1) || { rm -rf "$dest"; echo "onboard: $why; the clone is removed and nothing else was done"; exit 2; }
+  while IFS= read -r m; do [ -z "$m" ] || modules+=("$m"); done <<<"$why"
+fi
+module_files=$(mktemp)
+trap 'rm -f "$composed" "$module_files"' EXIT
+if [ "${#modules[@]}" -gt 0 ]; then
+  why=$(node "$factory/bin/lib/module.mjs" files "$factory" "${modules[@]}" 2>&1 >"$module_files") || { rm -rf "$dest"; echo "onboard: .gate/modules: $why; the clone is removed and nothing else was done"; exit 2; }
+  while IFS=$'\t' read -r path m; do
+    if [ -e "$dest/$path" ] || [ -L "$dest/$path" ]; then
+      rm -rf "$dest"
+      echo "onboard: $path is the repository's own file and module $m lays it; the clone is removed and nothing else was done"
+      exit 2
+    fi
+  done <"$module_files"
 fi
 # The kit replaces the repository's own instructions; without the parts of them the Human approved, they would be lost.
 # $dest did not exist before this run (checked above), so the clone is this run's own to remove.
@@ -138,7 +166,7 @@ cd "$dest"
 base=$(git rev-parse HEAD)
 git switch --quiet -c factory/kit
 lists=$(mktemp -d)
-trap 'rm -rf "$lists" "$composed"' EXIT
+trap 'rm -rf "$lists"; rm -f "$composed" "$module_files"' EXIT
 (cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
 : >"$lists/kept"
 : >"$lists/replaced"
@@ -168,14 +196,20 @@ while IFS= read -r path; do
       ;;
   esac
 done <"$lists/kit"
+# A module's files go in after the kit's: none of them is at a path the repository or the kit has (checked above).
+while IFS=$'\t' read -r path m; do
+  mkdir -p "$(dirname "$path")"
+  cp -p "$factory/modules/$m/kit/$path" "$path"
+done <"$module_files"
 # A file the repository had exactly as the kit's was not replaced: git sees no change in it.
 while IFS= read -r path; do git diff --quiet HEAD -- "$path" || echo "$path"; done <"$lists/replaced" >"$lists/changed"
 mv "$lists/changed" "$lists/replaced"
 # .gate/pack is the repository's choice and .gate/kit-files its inventory: both generated here, not files of the kit.
 # Removed first, as AGENTS.md is above: a link the repository holds there would take the write outside the clone.
-rm -f .gate/pack .gate/kit-files
+rm -f .gate/pack .gate/kit-files .gate/modules
 printf '%s\n' "$pack" >.gate/pack
-{ cat "$lists/kit"; echo .gate/kit-files; echo .gate/pack; } | LC_ALL=C sort -u >.gate/kit-files
+[ "${#modules[@]}" -eq 0 ] || printf '%s\n' "${modules[@]}" | LC_ALL=C sort -u >.gate/modules
+{ cat "$lists/kit"; cut -f1 "$module_files"; echo .gate/kit-files; echo .gate/pack; [ ! -f .gate/modules ] || echo .gate/modules; } | LC_ALL=C sort -u >.gate/kit-files
 scripts/setup
 git add -A
 # The kit lands only on a repository where the whole gate passes: a commit nobody verified is not a kit pull request.
