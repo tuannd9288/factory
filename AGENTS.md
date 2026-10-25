@@ -47,6 +47,76 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 
 Everything else that can be undone, agents decide and report after.
 
+## Layers, sublayers and contracts
+
+The map the Human settled on 2026-10-25: five layers, 17 sublayers, nine contracts. "Layer" and
+"sublayer" come from IEEE 802.3, 4.1.1 [IEEE], read in the draft amendment P802.3as/D0.1 (March 2005):
+"The LLC sublayer and the MAC sublayer together are intended to have the same function as that described in the OSI model for the Data Link Layer alone."
+Each name carries a source key; the keys, with their URLs and how fully each was read, are in
+https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every issue and proposal names its sublayer.
+
+- **Layer 0 Substrate** [SH]: what every agent runs on.
+- **Layer 1 Orchestration** [SD3, A1]: how work is given out and watched.
+- **Layer 2 Workers** [F2]: what a worker reads, uses and runs before it opens a pull request.
+- **Layer 3 Merge gates** [OA1]: what decides whether a change lands.
+- **Layer 4 Observability & evals** [SH, U1, A8]: what shows cost and whether the factory improves.
+
+- **0a Environment** [S2, OA1]: the `factory` account, `~/WORKSPACES`, the worktrees under `.claude/worktrees/`.
+- **0b Tools & permissions** [A5, A2]: the deny rules, the permission mode, the agents' `gh` login.
+- **0c Model configuration** [MODELCFG]: which model a role runs on; one profile for each repository.
+- **0d Harness & session** [A2]: the loop that runs Claude Code: `direnv exec`, `bin/claude-canary`.
+- **1a Issues** [GH2]: where work comes in: one issue labelled `task`.
+- **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger.
+- **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
+- **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, the ledger's canary.
+- **1e Surfaces** [GH2, #68]: the Human's own screens: the Herdr TUI, Paseo's app, Rex on the MacBook (K1 = C, pending his
+  check) and Remote Control (T3, pending). Herdr's server and Paseo's daemon stay in 0d.
+- **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines composed.
+- **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
+  repository lists in `.gate/modules`, each bringing its own skill.
+- **2c Verification** [SP3]: what a worker runs before the pull request: `scripts/verify`, `red-check`.
+- **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit.
+- **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
+- **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
+- **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
+- **4b Evals** [A8]: the attacks and the 20 seeded + 20 clean probes.
+
+A sublayer may change anything inside it while its contracts hold; a change to a contract is tier 3 (as is every change
+here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
+decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization that does the same.
+
+- **H1**: Work enters through one issue. Checked by: `kit/AGENTS.md:26`, `probes/pack-contract.md:36`.
+  Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
+- **H2**: Work leaves through one pull request that carries its evidence.
+  Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-contract.md:36`.
+  Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
+- **H3**: A verdict binds exactly one commit.
+  Checked by: `kit/scripts/lib/approval.mjs:1-10`, `kit/AGENTS.md:96`, `kit/scripts/review:27` (one reviewer call per head).
+  Prior art [A8]: "An approval covers one specific commit."
+- **H4**: Knowledge is files in the repository, changed by pull request.
+  Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `scripts/verify:9-16` (the 150-line cap).
+  Prior art [OA1]: "Repository-local, versioned artifacts (e.g., code, markdown, schemas, executable plans) are all it can see."
+- **H5**: A way of working is a pack of data.
+  Checked by: `probes/pack-contract.md`, `probes/pack-probe.mjs`, `test/pack.test.mjs`.
+  Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
+- **H6**: Tools are commands; permissions live outside the instructions.
+  Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:22`, `probes/pack-contract.md:62-76` (the `factory` account, #24).
+  Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
+- **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
+  Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
+- **H8**: An improvement comes back as ordinary work.
+  Checked by: `.github/CODEOWNERS:4`, `probes/score.mjs`, `probes/plan.md`.
+  Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
+- **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
+  factory's unattended sessions; 0d does; (2) the record of a task stays on GitHub (1b) and in 0d's panes, and a surface
+  keeps no sole copy; (3) the factory's own code in this sublayer reads no credential (#58 K2; this binds the factory's
+  code, not the Human's own tools, and K3 keeps Paseo's usage plugin as it is); (4) only a person answers a permission
+  prompt, so agents do not type into another pane: `herdr agent send-keys`, `herdr pane send-keys`, `rex send` and
+  `rex send-key` are denied, which is #76 and not yet in the kit's deny rules; (5) with every surface stopped, the
+  factory still runs. Checked by: none yet. The check will be a test that stops every surface process and shows that a
+  `bin/factory-queue` sweep (the merge queue) and a `probes/pack-probe.mjs` run (the pack probe) still pass.
+  Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
+
 ## This root
 
 - No `CLAUDE.md` here. With one, Claude Code reads it and skips the `AGENTS.md` of every repository below
