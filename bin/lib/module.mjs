@@ -7,6 +7,7 @@
 //   node bin/lib/module.mjs check <factory> <name>...   the working tree's modules exist and collide with nothing
 //   node bin/lib/module.mjs files <factory> <name>...   "<path>\t<module>" for every file they lay, sorted
 //   node bin/lib/module.mjs names <file>                the names a .gate/modules holds, one a line
+//   node bin/lib/module.mjs update <file> <add> <remove>   the names left on (comma lists), one a line
 // On an error it prints the message to stderr and exits 2.
 import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,6 +34,13 @@ export function parseModules(text) {
 export function modulesText(names) {
   const sorted = [...new Set(names)].sort();
   return sorted.length ? `${sorted.join('\n')}\n` : null;
+}
+
+/** The modules left on after --module and --no-module: the current ones, less `remove`, with `add`, sorted. */
+export function updateModules(current, add, remove) {
+  const both = add.filter((name) => remove.includes(name));
+  if (both.length) throw new Error(`--module and --no-module both name ${both[0]}`);
+  return [...new Set([...current.filter((name) => !remove.includes(name)), ...add])].sort();
 }
 
 /** The modules a factory commit holds: the folders of modules/. */
@@ -92,10 +100,13 @@ function filesOf(factory, names) {
 function main([verb, arg, ...names]) {
   if (verb === 'names' && arg) {
     for (const name of parseModules(readFileSync(arg, 'utf8'))) console.log(name);
+  } else if (verb === 'update' && arg && names.length === 2) {
+    const list = (csv) => csv.split(',').filter(Boolean);
+    for (const name of updateModules(parseModules(readFileSync(arg, 'utf8')), list(names[0]), list(names[1]))) console.log(name);
   } else if (['check', 'files'].includes(verb) && arg) {
     const files = filesOf(arg, names);
     if (verb === 'files') for (const [path, name] of files) console.log(`${path}\t${name}`);
-  } else throw new Error('usage: node bin/lib/module.mjs check|files <factory> <name>... | names <file>');
+  } else throw new Error('usage: node bin/lib/module.mjs check|files <factory> <name>... | names <file> | update <file> <add> <remove>');
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
