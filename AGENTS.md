@@ -32,8 +32,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **seatwork, 2026-10-21.** seatwork may be used freely, its code and its text alike. Source: the page "Factory của
   anh", p:372, as the map records it (the page's wording: "seatwork dùng thoải mái, cả mã lẫn chữ").
 - **One thin core, a pack for each way of working, 2026-10-22.** The core is the environment, the gate and the ledger;
-  a way of working is a pack that a repository chooses by one tier-3 line; only the pstack pack is built now. piggery
-  there is no piggery pack (T1 off), OTel stays off (T2 off, as the map records it), and only the Human can bypass
+  a way of working is a pack that a repository chooses by one tier-3 line; only the pstack pack is built now. There
+  is no piggery pack (T1 off), OTel stays off (T2 off, as the map records it), and only the Human can bypass
   the tag ruleset. The Human agreed to all eight decisions on the page as it recommended them. Source:
   https://github.com/tuannd9288/factory/issues/2#issuecomment-6337959043 (the page:
   https://github.com/tuannd9288/factory/issues/2#issuecomment-6336996220).
@@ -50,11 +50,11 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   moved to Triage, "Để sau", as #10 c3 records. Source:
   https://github.com/tuannd9288/factory/issues/10#issuecomment-6372273891 (the Human, through Colly).
 - **The gate's reviewer, 2026-10-24.** The reviewer is the sealed Opus 5.5 reviewer (option A), run as Claude Code
-  headless and paid with a subscription token, not an API key. "One reviewer call per pull request": `verdict` reads
-  `review`'s result for the same head and base, and makes no second call. The gate and pstack's live verifier both
-  stay for now; dropping one is decided only on the probe's numbers. Source:
-  https://github.com/tuannd9288/factory/issues/25#issuecomment-6372755422 (reviewer and payment) and https://github.com/tuannd9288/factory/issues/25#issuecomment-6373226939 (one call; both
-  layers stay).
+  headless and paid with a subscription token, not an API key. In #25 c2's words, "One reviewer call per pull
+  request": `verdict` reads `review`'s result for the same head and base, and makes no second call. The gate and
+  pstack's live verifier both stay for now; dropping one is decided only on the probe's numbers. Source:
+  https://github.com/tuannd9288/factory/issues/25#issuecomment-6372755422 (reviewer and payment) and
+  https://github.com/tuannd9288/factory/issues/25#issuecomment-6373226939 (one call; both layers stay).
 - **Colly's scope, 2026-10-24.** Colly handles only the factory. The piggery teams of Kizuna and kizuna-labs report to
   the Human directly. Source: chat, as the map page records it in Vietnamese; this line is an English rendering, not
   his words.
@@ -97,10 +97,11 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **The order of the gaps, 2026-10-25.** "Theo thứ tự này (Recommended)": 0c (in progress), then 1b, then 3c, then 4a;
   0d follows #75 and #77; 2c comes last. Source: his answer in Colly's session, relayed by Colly, in the map's report
   §0 and https://github.com/tuannd9288/factory/issues/81.
-- **The live verifier, decided 2026-10-25; not built yet.** It was open at the map (it runs on Codex, against the rule
-  above, "Every lead, worker and reviewer runs through Claude Code."), and he decided it on #79's choice
-  page: "Ô cài đặt, mặc định Claude (Recommended)". The verifier's model is a setting for each repository, Claude by default; Codex or both can be
-  chosen; the verifier stays (#25). #95 builds it; until then it runs on Codex only, as "The live verifier" paragraph below says. Sources:
+- **The live verifier, decided 2026-10-25; not built yet.** It was open at the map (it runs on Codex, against the
+  rule above, "Every lead, worker and reviewer runs through Claude Code."), and he decided it on #79's choice page:
+  "Ô cài đặt, mặc định Claude (Recommended)". The verifier's model is a setting for each repository, Claude
+  by default; Codex or both can be chosen; the verifier stays (#25). #95 builds it; until then it runs on Codex only,
+  as "The live verifier" paragraph below says. Sources:
   https://github.com/tuannd9288/factory/issues/79#issuecomment-6398968431 and
   https://github.com/tuannd9288/factory/issues/95.
 - **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
