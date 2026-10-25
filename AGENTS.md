@@ -21,20 +21,20 @@ repository's own `AGENTS.md` governs.
 - agent-desk stays parked. Every lead, worker and reviewer runs through Claude Code. (In this section since 2026-10-21,
   `1b319ee`.)
 
-Each line below gives one decision of the Human's, its date and its source; the lines run by date. A quote keeps his
-words and his language. The WORKSPACES map is https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on
-2026-10-25, relayed by Colly.
+Each line below gives the Human's decision or decisions on one matter, its date and its source; the lines run by date.
+A quote keeps his words and his language. The WORKSPACES map is
+https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-25, relayed by Colly.
 
 - **Use what exists first, 2026-10-18.** Use a ready-made product first; build only when it falls short. Source:
   agent-desk issue #269, as the map's "Đã quyết" block records it.
 - **First product repository, 2026-10-20.** It is not docparse or tuanhub-notifier: "đang ổn, không cần". Source:
   the live copy of the page "Môi trường repo cho agent", decision 3, as the map records it.
 - **seatwork, 2026-10-21.** seatwork may be used freely, its code and its text alike. Source: the page "Factory của
-  anh", p:372, as the map records it (its wording: "seatwork dùng thoải mái, cả mã lẫn chữ").
+  anh", p:372, as the map records it (the page's wording: "seatwork dùng thoải mái, cả mã lẫn chữ").
 - **One thin core, a pack for each way of working, 2026-10-22.** The core is the environment, the gate and the ledger;
   a way of working is a pack that a repository chooses by one tier-3 line; only the pstack pack is built now. piggery
-  does not run the factory's work (T1 off), OTel stays off (T2 off, as the map records it), and only the Human can
-  bypass the tag ruleset. The Human agreed to all eight decisions on the page as it recommended them. Source:
+  there is no piggery pack (T1 off), OTel stays off (T2 off, as the map records it), and only the Human can bypass
+  the tag ruleset. The Human agreed to all eight decisions on the page as it recommended them. Source:
   https://github.com/tuannd9288/factory/issues/2#issuecomment-6337959043 (the page:
   https://github.com/tuannd9288/factory/issues/2#issuecomment-6336996220).
 - **Cleanup of unused code, 2026-10-22.** C1, C2 and C3 all take option B; T1 and T2 on, T3 off; the Human approved
@@ -43,25 +43,27 @@ words and his language. The WORKSPACES map is https://claude.ai/artifact/XAUqXMK
   `No-red:` (C2); the reviewer may raise a tier, never lower one (C3); a cleanup pull request red twice is closed by
   its agent (T2). Source: https://github.com/tuannd9288/factory/issues/10#issuecomment-6341670200 (the summary:
   https://github.com/tuannd9288/factory/issues/10#issuecomment-6338917177).
-- **Feature flags, 2026-10-24.** Not needed for now; revisit when real customers use a product daily. #16 and #21 wait
-  ("Để sau"). Source: https://github.com/tuannd9288/factory/issues/10#issuecomment-6372273891 (the Human, through
-  Colly).
 - **The agents' macOS account, 2026-10-23.** The agents run in their own macOS account, `factory`. Source: #24's body,
   "approved by the Human on 2026-10-23" (https://github.com/tuannd9288/factory/issues/24); done as
   https://github.com/tuannd9288/factory/issues/24#issuecomment-6387379979 records.
+- **Feature flags, 2026-10-24.** Not needed for now; revisit when real customers use a product daily. #16 and #21 are
+  moved to Triage, "Để sau", as #10 c3 records. Source:
+  https://github.com/tuannd9288/factory/issues/10#issuecomment-6372273891 (the Human, through Colly).
 - **The gate's reviewer, 2026-10-24.** The reviewer is the sealed Opus 5.5 reviewer (option A), run as Claude Code
-  headless and paid with a subscription token, not an API key. It is called once for each head: `verdict` reads
-  `review`'s result and makes no second call. The gate and pstack's live verifier both stay for now; dropping one is
-  decided only on the probe's numbers. Source: https://github.com/tuannd9288/factory/issues/25#issuecomment-6372755422
-  (reviewer and payment) and https://github.com/tuannd9288/factory/issues/25#issuecomment-6373226939 (one call; both
+  headless and paid with a subscription token, not an API key. "One reviewer call per pull request": `verdict` reads
+  `review`'s result for the same head and base, and makes no second call. The gate and pstack's live verifier both
+  stay for now; dropping one is decided only on the probe's numbers. Source:
+  https://github.com/tuannd9288/factory/issues/25#issuecomment-6372755422 (reviewer and payment) and https://github.com/tuannd9288/factory/issues/25#issuecomment-6373226939 (one call; both
   layers stay).
 - **Colly's scope, 2026-10-24.** Colly handles only the factory. The piggery teams of Kizuna and kizuna-labs report to
-  the Human directly. Source: chat, as the map page records it (in English there; not a verbatim quote).
+  the Human directly. Source: chat, as the map page records it in Vietnamese; this line is an English rendering, not
+  his words.
 - **Connection over custom, 2026-10-24.** "Hạn chế kiểu custom mà thay vào đấy là cách kết nối." Source: chat, as the
   map page records it.
 - **Three new sources (#58), 2026-10-25.** K1 = D: keep the sublayers and take mechanisms from the three sources (the
-  map records the option; no sentence in #58 or #62 to #68 names it). K2 = B: read each profile's quota from what
-  Claude Code itself reports (`rate_limit_event`), never a credential; quota-axi is dropped, also as a fallback; if #62
+  option is recorded in `inventory-factory.md` §A, row BN, which the map's §7 cites; no sentence in #58 or #62 to #68
+  names it). K2 = B: read each profile's quota from what Claude Code itself reports (`rate_limit_event`, and the
+  status line's `rate_limits`), never a credential; quota-axi is dropped, also as a fallback; if #62
   finds no source, stop and ask the Human. His words on K2: "B, bỏ quota-axi (Recommended)". T1 on: one state for each
   open task, computed in the sweep. T2 off: HumanLayer's phone plugin is not taken. Sources: the bodies of
   https://github.com/tuannd9288/factory/issues/62, /63 (K2), /64 (T1) and /68 (T2); his words:
@@ -70,8 +72,11 @@ words and his language. The WORKSPACES map is https://claude.ai/artifact/XAUqXMK
   (still waiting on him): Rex replaces Ghostty, and Herdr for the interactive sessions on the MacBook, and Herdr keeps
   the factory's sessions on the Mac mini; if a Claude Code session at a permission prompt in an unfocused tab shows no
   blocked mark in the tab header and the session picker, K1 becomes B. K2 = B: layer 1e and contract H9 are added.
-  T3: Remote Control is on for Colly's and the Lead's interactive sessions, beside Paseo, following whichever account the
-  session runs on. Paseo stays. Sources: https://github.com/tuannd9288/factory/issues/68#issuecomment-6393212307 (K3),
+  T3 = on (#78's body): Remote Control for Colly's and the Lead's interactive sessions, beside Paseo, following
+  whichever account the session runs on. On 2026-10-26 the Human deferred it until he moves to an account that can use
+  it: "Tài khoản này tau không dùng được /remote-control delay sau được không Hoặc tau chuyển tài khoản khác khi
+  tiện?" (https://github.com/tuannd9288/factory/issues/78#issuecomment-6400797388). Paseo stays. Sources:
+  https://github.com/tuannd9288/factory/issues/68#issuecomment-6393212307 (K3),
   https://github.com/tuannd9288/factory/issues/68#issuecomment-6394536120 (K1, K2; T3 was pending there) and
   https://github.com/tuannd9288/factory/issues/78 (T3 on).
 - **Evidence for a deletion-only pull request (#70), 2026-10-25.** K1 = (iv), in two steps: a module that each
@@ -86,15 +91,16 @@ words and his language. The WORKSPACES map is https://claude.ai/artifact/XAUqXMK
   so the module's skill is copied only into a repository that turns the module on; "Đồng ý (Recommended)", so two
   lines are added to `kit/scripts/prove-check`; "Cho file một phần đuôi của repo (Recommended)", so `.gate/protected`
   keeps a tail the repository owns, as `AGENTS.md` has Layout and Facts, while `kit-update` keeps updating the kit's
-  head, and the end of `.github/CODEOWNERS` follows. Sources: https://github.com/tuannd9288/factory/issues/71#issuecomment-6395151620
-  and https://github.com/tuannd9288/factory/issues/72#issuecomment-6395151814.
+  head, and the end of `.github/CODEOWNERS` follows. Sources:
+  https://github.com/tuannd9288/factory/issues/71#issuecomment-6395151620 and
+  https://github.com/tuannd9288/factory/issues/72#issuecomment-6395151814.
 - **The order of the gaps, 2026-10-25.** "Theo thứ tự này (Recommended)": 0c (in progress), then 1b, then 3c, then 4a;
   0d follows #75 and #77; 2c comes last. Source: his answer in Colly's session, relayed by Colly, in the map's report
   §0 and https://github.com/tuannd9288/factory/issues/81.
-- **The live verifier, decided 2026-10-25; not built yet.** It was open at the map (it runs on Codex, against "every
-  role through Claude Code"), and he decided it on #79's choice page: "Ô cài đặt, mặc định Claude (Recommended)". The
-  verifier's model is a setting for each repository, Claude by default; Codex or both can be chosen; the verifier stays
-  (#25). #95 builds it; until then it runs on Codex only, as "The live verifier" paragraph below says. Sources:
+- **The live verifier, decided 2026-10-25; not built yet.** It was open at the map (it runs on Codex, against the rule
+  above, "Every lead, worker and reviewer runs through Claude Code."), and he decided it on #79's choice
+  page: "Ô cài đặt, mặc định Claude (Recommended)". The verifier's model is a setting for each repository, Claude by default; Codex or both can be
+  chosen; the verifier stays (#25). #95 builds it; until then it runs on Codex only, as "The live verifier" paragraph below says. Sources:
   https://github.com/tuannd9288/factory/issues/79#issuecomment-6398968431 and
   https://github.com/tuannd9288/factory/issues/95.
 - **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
