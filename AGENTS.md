@@ -47,6 +47,63 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 
 Everything else that can be undone, agents decide and report after.
 
+## Layers, sublayers and contracts
+
+The Human's map of 2026-10-25: five layers, 17 sublayers, nine contracts. "Layer" and "sublayer" come from IEEE 802.3,
+§4.1.1, as Colly quoted it (the clause number is not confirmed against the standard):
+"The LLC sublayer and the MAC sublayer together are intended to have the same function as that described in the OSI model for the Data Link Layer alone."
+Each name carries its source key from the map's `report.md`; every issue and proposal names its sublayer.
+
+- **Layer 0 Substrate** [SH]: what every agent runs on.
+- **Layer 1 Orchestration** [SD3, A1]: how work is given out and watched.
+- **Layer 2 Workers** [F2]: what a worker reads, uses and runs before it opens a pull request.
+- **Layer 3 Merge gates** [OA1]: what decides whether a change lands.
+- **Layer 4 Observability & evals** [SH, U1, A8]: what shows cost and whether the factory improves.
+
+- **0a Environment** [S2, OA1]: the `factory` account, `~/WORKSPACES`, the worktrees under `.claude/worktrees/`.
+- **0b Tools & permissions** [A5, A2]: the deny rules, the permission mode, the agents' `gh` login.
+- **0c Model configuration** [MODELCFG]: which model a role runs on; one profile for each repository.
+- **0d Harness & session** [A2]: the loop that runs Claude Code: `direnv exec`, `bin/claude-canary`.
+- **1a Issues** [GH2]: where work comes in: one issue labelled `task`.
+- **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger.
+- **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
+- **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, the ledger's canary.
+- **1e Surfaces** [GH2, #68]: the screens the Human steers agents from (Paseo, Rex, Ghostty, Herdr, Remote Control).
+- **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines composed.
+- **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository.
+- **2c Verification** [SP3]: what a worker runs before the pull request: `scripts/verify`, `red-check`.
+- **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit.
+- **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
+- **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
+- **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
+- **4b Evals** [A8]: the attacks and the 20 seeded + 20 clean probes.
+
+A layer may change anything inside it while its contracts hold; a change to a contract is tier 3 (as is every change
+here). A contract is named by its code. Its sentence is a quote from its source, or says "(no verbatim source yet)".
+
+- **H1** [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
+  Checked by: `kit/AGENTS.md:26`, `probes/pack-contract.md:36`.
+- **H2** [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
+  Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-contract.md:36`.
+- **H3** [A8]: "An approval covers one specific commit."
+  Checked by: `kit/.gate/ruleset.json:24`, `kit/scripts/lib/approval.mjs:44`, `kit/AGENTS.md:96`.
+- **H4** [OA1]: "Repository-local, versioned artifacts (e.g., code, markdown, schemas, executable plans) are all it can see."
+  Checked by: `scripts/verify:9-16`, `kit/AGENTS.md:101`; `AGENTS.md` is a tier-3 path (`kit/.gate/protected`).
+- **H5** [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
+  Checked by: `probes/pack-contract.md`, `probes/pack-probe.mjs`, `test/pack.test.mjs`.
+- **H6** [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
+  Checked by: `kit/.claude/settings.json:3-28`, `kit/AGENTS.md:97-98`.
+- **H7** [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
+  Checked by: none yet (#62 and #63 do part of it).
+- **H8** [F1]: "When patterns cross a threshold, it files Linear tickets automatically. Droid picks up those tickets,
+  implements fixes, and reviews its own PRs." Checked by: `.github/CODEOWNERS:1`, `probes/score.mjs`, `probes/plan.md`.
+- **H9** [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer
+  servers safely." A surface is only a window onto the factory (no verbatim source yet): with every surface stopped,
+  the merge queue and the pack probe still run. Five rules (#68, 2026-10-25); only rule 4 is on record here, #76: deny
+  `herdr agent send-keys`, `herdr pane send-keys`, `rex send` and `rex send-key` in the kit's deny rules, not yet in
+  `kit/.claude/settings.json`. Checked by: `bin/factory-queue` and `probes/pack-probe.mjs`, run by hand with every
+  surface stopped; no automated check stops the surfaces yet.
+
 ## This root
 
 - No `CLAUDE.md` here. With one, Claude Code reads it and skips the `AGENTS.md` of every repository below
