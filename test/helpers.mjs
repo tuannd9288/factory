@@ -56,7 +56,7 @@ export const APP = {
 };
 
 /** A repository whose main holds the app and the kit, on a fresh branch `work`; `dir` holds its origin and profiles. */
-export function repoWithKit(extra = {}) {
+export function repoWithKit(extra = {}, onboardArgs = []) {
   const dir = mkdtempSync(join(tmpdir(), 'factory-test-'));
   const seed = join(dir, 'seed');
   mkdirSync(seed);
@@ -64,7 +64,7 @@ export function repoWithKit(extra = {}) {
   commit(seed, { ...APP, ...extra }, 'start');
   git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
   mkdirSync(join(dir, 'root'));
-  const onboard = run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr'], {
+  const onboard = run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr', ...onboardArgs], {
     ...quiet,
     FACTORY_ROOT: join(dir, 'root'),
     AGENT_PROFILES: join(dir, 'profiles'),

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# What knip 6.42.1 lists as unused files at the base, run as red-check's deletion proof runs it: a detached worktree at the
+# merge-base with origin/main, the repository's gate_prepare, then knip. Run from the repository root.
+#   knip-at-base report            JSON on stdout: {"base","files":[...]}
+# Exit: 0 done; 2 usage or a git error; 3 the proof is off; 4 knip could not run or the base could not be prepared (stderr says which).
+# It deletes nothing and writes nothing in the work tree.
+set -uo pipefail
+
+usage() { sed -n '4,6p' "$0" | sed 's/^# \{0,1\}//'; }
+case "${1:-}" in
+  report) ;;
+  -h | --help) usage; exit 0 ;;
+  *) echo "knip-at-base: say report (--help)" >&2; exit 2 ;;
+esac
+
+top=$(git rev-parse --show-toplevel) || exit 2
+cd "$top" || exit 2
+git fetch -q origin main || { echo "knip-at-base: could not fetch origin/main" >&2; exit 2; }
+git show origin/main:.gate/modules 2>/dev/null | grep -qx deletion-proof ||
+  { echo "knip-at-base: the proof is off: .gate/modules on origin/main does not list deletion-proof" >&2; exit 3; }
+base=$(git merge-base HEAD origin/main) || { echo "knip-at-base: no merge-base with origin/main" >&2; exit 2; }
+# The module's own script runs knip as the gate does, so what this prints is what the gate will see.
+out=$(node scripts/lib/deletion.mjs report --base "$base")
+code=$?
+if [ "$code" -eq 0 ]; then
+  printf '%s\n' "$out"
+else
+  printf '%s\n' "$out" | sed 's/^/knip-at-base: /' >&2
+fi
+exit "$code"

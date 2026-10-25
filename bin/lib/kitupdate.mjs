@@ -2,7 +2,7 @@
 // (origin/main) holds against what the kit's history has held. Reads git objects of both sides (ls-tree, cat-file, log);
 // it runs nothing the repository holds. bin/kit-evidence then proves the result against the same commit.
 //   node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <repo name>
-//     --human <login> --pack <name> [--out <dir>]
+//     --human <login> --pack <name> [--modules <a,b>] [--out <dir>]
 // `plan` only checks; `lay` also writes the files into the repository's working tree and, with --out, one list per
 // kind (added, updated, kept, removed, dropped-kept; one path a line). Per path:
 //   rendered (AGENTS.md, CODEOWNERS, .claude/settings.json): added when missing; left alone when the base is this commit's
@@ -10,7 +10,10 @@
 //     the kit and pack; otherwise the repository's own: CODEOWNERS and settings are kept, AGENTS.md is a conflict;
 //   other: added when missing; left alone when it is the kit's; replaced by the kit's when it is a blob the kit's history
 //     held; otherwise the repository's own: kept, but a conflict where the kit replaces whole (CLAUDE.md, .githooks/*).
-// A path of the base's .gate/kit-files that kit/ no longer has is removed when its blob is one the kit once held, and
+// A module's files (bin/lib/module.mjs) are laid with the kit's, from the modules --modules names, and are stricter:
+// added, left alone or updated from a past module blob; the repository's own file at a module path is a conflict, never
+// kept. The files of a module the base had on and --modules leaves out are removed, or a conflict when the repository
+// changed one. A path of the base's .gate/kit-files that kit/ no longer has is removed when its blob is one the kit once held, and
 // otherwise kept (dropped-kept). Exit 0, or 1 with the conflicts when the repository's own must be merged by hand.
 import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -18,18 +21,29 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { FACTS, LAYOUT, LIMIT, fill } from './own.mjs';
 import { FILLED, INVENTORY, REPLACES, SETTINGS, git, ownOf, pastBlobs, render, renderedAs, tree } from './evidence.mjs';
+import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
 
 const RENDERED = (path) => Boolean(FILLED[path]) || path === SETTINGS;
 
-export function plan({ factory, commit, repo, base, name, human, pack: packName }) {
+export function plan({ factory, commit, repo, base, name, human, pack: packName, modules }) {
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
   const baseSha = git(repo, ['rev-parse', '--verify', `${base}^{commit}`]).trim();
-  const kit = tree(factory, fac, 'kit/');
+  const names = modules ? modules.split(',') : [];
+  const kit = mergedTree(factory, fac, names);
   const at = tree(repo, baseSha);
   const text = (dir, oid) => git(dir, ['cat-file', 'blob', oid]);
+  const baseNames = baseModules(at.get(MODULES_FILE) ? text(repo, at.get(MODULES_FILE).oid) : null);
+  // The files of a module the base had on and the update turns off; a base that names a module the factory lacks stops it.
+  let off = new Map();
+  const lost = [];
+  try {
+    off = offFiles(factory, fac, baseNames, names);
+  } catch (error) {
+    lost.push(error.message);
+  }
   const pack = packName === 'none' ? null : { settings: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/settings.json`]).trim()), section: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/AGENTS.md`]).trim()) };
-  const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: [], writes: [], removes: [] };
+  const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: lost, writes: [], removes: [] };
   const rendering = (path, want) => {
     const kitText = text(factory, want.oid);
     if (path === SETTINGS) return composeSettings(kitText, pack?.settings ?? null);
@@ -72,18 +86,27 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName 
       out.add.push(path);
       out.writes.push({ path, mode: want.mode, oid: want.oid });
     } else if (had.mode === want.mode && had.oid === want.oid) out.same.push(path);
-    else if (pastBlobs(factory, fac, `kit/${path}`).has(had.oid)) {
+    else if (pastBlobs(factory, fac, want.src).has(had.oid)) {
       out.update.push(path);
       out.writes.push({ path, mode: want.mode, oid: want.oid });
-    } else if (REPLACES(path)) out.conflicts.push(`${path}: the repository's own, which the kit replaces whole`);
+    } else if (want.module) out.conflicts.push(`${path}: the repository's own, at a path module ${want.module} lays; a module's file is never kept`);
+    else if (REPLACES(path)) out.conflicts.push(`${path}: the repository's own, which the kit replaces whole`);
     else out.keep.push(path);
+  }
+  for (const [path, e] of off) {
+    const had = at.get(path);
+    if (!had) continue;
+    if (pastBlobs(factory, fac, e.src).has(had.oid)) {
+      out.remove.push(path);
+      out.removes.push(path);
+    } else out.conflicts.push(`${path}: the repository's own, which module ${e.module} laid and is now off; a module's file is never kept`);
   }
   // What the base lists as the kit's that kit/ no longer has.
   const listed = at.get(INVENTORY) ? text(repo, at.get(INVENTORY).oid).split('\n').filter(Boolean) : [];
   for (const path of listed) {
     const had = at.get(path);
-    if (kit.has(path) || path === INVENTORY || path === PACK_FILE || !had) continue;
-    if (pastBlobs(factory, fac, `kit/${path}`).has(had.oid)) {
+    if (kit.has(path) || off.has(path) || path === INVENTORY || path === PACK_FILE || path === MODULES_FILE || !had) continue;
+    if ([`kit/${path}`, ...baseNames.map((n) => `modules/${n}/kit/${path}`)].some((p) => pastBlobs(factory, fac, p).has(had.oid))) {
       out.remove.push(path);
       out.removes.push(path);
     } else out.droppedKept.push(path);
@@ -113,7 +136,7 @@ function main(argv) {
   const opt = {};
   for (let i = 0; i < rest.length; i += 2) opt[rest[i].replace(/^--/, '')] = rest[i + 1];
   if (!['plan', 'lay'].includes(verb) || ['factory', 'commit', 'repo', 'base', 'name', 'human', 'pack'].some((k) => !opt[k])) {
-    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> --pack <name> [--out <dir>]');
+    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> --pack <name> [--modules <a,b>] [--out <dir>]');
     return 2;
   }
   const result = plan(opt);
