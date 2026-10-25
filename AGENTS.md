@@ -63,6 +63,7 @@ Everything else that can be undone, agents decide and report after.
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, `AGENTS.md` without any way of working |
 | `packs/` | A way of working, one folder each (`packs/pstack/`): its `settings.json` keys, its `AGENTS.md` section, its NOTICE, tests and attacks; `bin/lib/pack.mjs` composes it with the core |
+| `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
 | `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
 | `bin/kit-update` | The onboarded repository's counterpart of onboard: brings its clone up to a factory commit, with evidence, in a pull request from `factory/kit-<sha7>` |
@@ -185,6 +186,18 @@ A pack is what the kit holds only for one way of working. The repository names i
 tier-3 path), and `bin/onboard --pack <name>` chooses it (`none` for the core alone; the default is the repository's
 `.gate/pack`, else `pstack`). `bin/onboard` and `bin/kit-evidence` build `AGENTS.md` and `.claude/settings.json` from the
 core and that pack; the deny rules stay in the core.
+
+A module is what the factory holds only for the repositories that turn it on (#71): `modules/<name>/kit/` holds the
+files it adds, at repository paths (a skill among them, at `.claude/skills/<name>/`), and `modules/<name>/test/` its
+tests. The repository lists its modules in `.gate/modules`, one name a line (a tier-3 path; absent means none), and
+`bin/onboard --module <name>` and `bin/kit-update --module <name>` / `--no-module <name>` write it, as `--pack` writes
+`.gate/pack`. A module's files are copied only where it is on, never over a file the repository has (a conflict, not a
+"kept"), and removed when it is turned off; `bin/kit-evidence` judges them against the module at the factory commit and
+treats `.gate/modules` as generated. The kit's only part in a module is two hooks, both inert without it: `red-check` runs
+`scripts/lib/deletion.mjs` first on a source change with no test where the file exists, and `prove-check --all` also runs
+the `red-check-*` fixtures on disk. No `AGENTS.md` changes with a module: its guidance is its skill. The first module,
+`deletion-proof` (step 1 of #17), proves a pull request whose only source change deletes whole files knip 6.42.1 listed
+as unused; no repository turns it on until #72 (a repository's knip config must be in its `.gate/protected`) lands.
 
 pstack, per repository: the pstack pack's `packs/pstack/settings.json` pins it through a `settings` marketplace named for the
 commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository
