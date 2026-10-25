@@ -33,14 +33,16 @@ class Problem extends Error {
 
 const git = (...args) => execFileSync('git', ['-c', 'core.quotePath=false', '--literal-pathspecs', ...args], { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 
-/** Whether `path` exists in the tree of `rev`. A failure of git itself is not "absent" (#60): it stops the proof. */
-function present(rev, path) {
+/** The mode of `path` in the tree of `rev` (100644, 120000, ...), or null when it is absent. A failure of git itself is not
+ * "absent" (#60): it stops the proof. */
+function modeOf(rev, path) {
   try {
-    return git('ls-tree', '--name-only', rev, '--', path).trim() !== '';
+    return git('ls-tree', rev, '--', path).split(' ')[0] || null;
   } catch (error) {
     throw new Problem([`red-check: could not read ${path} at the base: ${short(String(error.stderr || error.message))}`], 2);
   }
 }
+const present = (rev, path) => modeOf(rev, path) !== null;
 
 // The names knip 6.42.1 looks for, by default: https://knip.dev/overview/configuration#location
 // Only the JSON ones give a machine proof: a JS or TS config can import files the gate does not protect, and the "knip" key
@@ -87,9 +89,20 @@ function protectedAt(base) {
 
 /** Throws a Problem unless knip's config at the base is one the gate can trust. */
 function checkConfig(base) {
+  // knip 6.42.1 merges package.json's "knip" key with the config file (create-options.js:35), so a key there loosens what
+  // knip reports whatever the file says, and package.json is a manifest (tier 2), not a protected path.
+  if (present(base, 'package.json')) {
+    let manifest = null;
+    try {
+      manifest = JSON.parse(git('show', `${base}:package.json`));
+    } catch {}
+    if (isObject(manifest) && 'knip' in manifest) throw new Problem(['config: the knip config is in package.json; move it to knip.json for a machine proof']);
+  }
   const found = JSON_CONFIGS.filter((file) => present(base, file));
   const guarded = protectedAt(base);
   for (const file of found) {
+    // A link is the protected path, but knip follows it to a file that is not.
+    if (modeOf(base, file) !== '100644') throw new Problem([`config: ${file} is not a regular file (mode ${modeOf(base, file)}), so no deletion can be proved unused`]);
     if (!guarded.some((re) => re.test(file))) throw new Problem([`config: ${file} is not in .gate/protected, so a tier-1 change could loosen what knip reports; propose adding it`]);
     let config;
     try {
@@ -103,13 +116,6 @@ function checkConfig(base) {
   }
   if (found.length) return;
   if (CODE_CONFIGS.some((file) => present(base, file))) throw new Problem(['config: a JS or TS knip config can import files the gate does not protect, so no deletion can be proved unused']);
-  let inPackage = false;
-  if (present(base, 'package.json')) {
-    try {
-      inPackage = 'knip' in JSON.parse(git('show', `${base}:package.json`));
-    } catch {}
-  }
-  if (inPackage) throw new Problem(['config: the knip config is in package.json; move it to knip.json for a machine proof']);
   throw new Problem([`config: knip has no config in this repository (none of ${JSON_CONFIGS.join(', ')} at the base), so no deletion can be proved unused`]);
 }
 
