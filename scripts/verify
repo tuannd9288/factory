@@ -15,6 +15,10 @@ for pack in none $(ls packs 2>/dev/null); do
     echo "verify: the AGENTS.md of pack $pack has $n lines; at most 150"; failed=1
   fi
 done
+# The modules together: a file two of them lay, or one the kit lays, or one onboard generates, is refused.
+if [ -d modules ] && ! why=$(node bin/lib/module.mjs check . $(ls modules) 2>&1); then
+  echo "verify: modules: $why"; failed=1
+fi
 for f in kit/scripts/* kit/.githooks/* bin/onboard bin/onboard-owner bin/kit-update bin/kit-evidence bin/factory-ledger bin/factory-queue bin/claude-canary bin/factory-alerts scripts/verify; do
   [ -f "$f" ] || continue
   head -1 "$f" | grep -q bash || continue
@@ -43,7 +47,7 @@ trap 'rm -rf "$sandbox"' EXIT
 for v in $folders; do mkdir "$sandbox/$v"; done
 out=$(env -u NODE_TEST_CONTEXT FACTORY_STATE="$sandbox/FACTORY_STATE" AGENT_PROFILES="$sandbox/AGENT_PROFILES" \
   FACTORY_ROOT="$sandbox/FACTORY_ROOT" XDG_DATA_HOME="$sandbox/XDG_DATA_HOME" \
-  node --test --test-reporter=spec --test-concurrency=4 'test/*.test.mjs' 'packs/*/test/*.test.mjs' 2>&1)
+  node --test --test-reporter=spec --test-concurrency=4 'test/*.test.mjs' 'packs/*/test/*.test.mjs' 'modules/*/test/*.test.mjs' 2>&1)
 code=$?
 summary=$(printf '%s\n' "$out" | grep -E '^ℹ (tests|fail) [0-9]+$' | sed 's/^ℹ //' | tr '\n' ' ')
 tests=$(printf '%s\n' "$out" | sed -n 's/^ℹ tests \([0-9][0-9]*\)$/\1/p')
