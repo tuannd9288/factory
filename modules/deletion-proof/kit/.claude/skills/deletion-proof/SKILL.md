@@ -37,7 +37,9 @@ All of these, judged at the base (the merge-base with `origin/main`):
    data keys, a regular file (not a link), and `.gate/protected` at the base names it. And
    `package.json` at the base is a regular file that reads as JSON or JSONC, and has no top-level `"knip"` key,
    because knip merges that key with the file and a manifest change is not tier 3.
-   So no tier-1 change can loosen what knip reports.
+   Also no tracked file is gitignored at the base, because knip reads every `.gitignore` and does not follow the
+   imports of an ignored file; and the base's `gate_prepare` changes no tracked file. That is all the proof checks
+   of knip's inputs: the configs knip's plugins run are not covered, nor is a `tsconfig` `extends` target.
 
 `review` still runs on a proved deletion and can still block it; the proof replaces only the `No-red:` line.
 

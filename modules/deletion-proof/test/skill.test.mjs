@@ -110,7 +110,7 @@ describe('the skill follows the Agent Skills specification', () => {
     assert.doesNotMatch(body, /no tier-1 change\s+can\s+loosen/);
     assert.match(body, /no tracked file is gitignored at the base/);
     assert.match(body, /`gate_prepare` changes no tracked file/);
-    assert.match(body, /plugin configs knip runs are not covered/);
+    assert.match(body, /the configs knip's plugins run are not covered/);
   });
   test('SKILL.md says what check 2 is, a fixed-string search, and that a package.json "knip" key is refused', () => {
     assert.match(body, /fixed-string `git grep`/);
