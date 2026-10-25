@@ -58,23 +58,29 @@ export function issueProblems(issues) {
   return out;
 }
 
-function gh(args, what) {
+const ISSUE_LIMIT = 500;
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const namedLabels = (v) => Array.isArray(v) && v.every((l) => isObject(l) && typeof l.name === 'string');
+
+function gh(args, what, shape, valid) {
+  const fail = (why) => new Error(`factory-sublayers: gh ${what} failed: ${why}`);
   const r = spawnSync('gh', args, { encoding: 'utf8' });
-  if (r.error || r.status !== 0) {
-    throw new Error(`factory-sublayers: gh ${what} failed: ${(r.error?.message ?? r.stderr ?? '').trim()}`);
-  }
+  if (r.error || r.status !== 0) throw fail((r.error?.message ?? r.stderr ?? '').trim());
+  let data;
   try {
-    return JSON.parse(r.stdout);
+    data = JSON.parse(r.stdout);
   } catch {
-    throw new Error(`factory-sublayers: gh ${what} failed: its output is not JSON`);
+    throw fail('its output is not JSON');
   }
+  if (!valid(data)) throw fail(`its output is not a list of ${shape}`);
+  return data;
 }
 
 /** The check: prints each problem and exits 1, prints one line and exits 0, or says gh failed and exits 2. */
 export function main(argv) {
   let repo = 'tuannd9288/factory';
-  const i = argv.indexOf('--repo');
-  if (i >= 0) repo = argv[i + 1] ?? '';
+  if (argv.length === 2 && argv[0] === '--repo') repo = argv[1];
+  else if (argv.length > 0) repo = '';
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     process.stderr.write('usage: factory-sublayers [--repo <owner/name>]\n');
     return 2;
@@ -82,8 +88,12 @@ export function main(argv) {
   let labels;
   let issues;
   try {
-    labels = gh(['label', 'list', '-R', repo, '--limit', '200', '--json', 'name,description'], 'label list');
-    issues = gh(['issue', 'list', '-R', repo, '--state', 'open', '--limit', '500', '--json', 'number,title,labels'], 'issue list');
+    labels = gh(['label', 'list', '-R', repo, '--limit', '200', '--json', 'name,description'], 'label list', 'labels', namedLabels);
+    issues = gh(['issue', 'list', '-R', repo, '--state', 'open', '--limit', String(ISSUE_LIMIT), '--json', 'number,title,labels'],
+      'issue list', 'issues', (v) => Array.isArray(v) && v.every((i) => isObject(i) && namedLabels(i.labels)));
+    if (issues.length >= ISSUE_LIMIT) {
+      throw new Error(`factory-sublayers: gh issue list returned ${issues.length} issues; the list may be cut at ${ISSUE_LIMIT}`);
+    }
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     return 2;
