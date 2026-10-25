@@ -15,6 +15,15 @@ const say = (code, line) => {
   return code;
 };
 
+/** Why origin's copy of the branch is not HEAD, or '' when it is: GitHub judges the remote head, not the local one. */
+function behind(branch, head) {
+  const line = git(['ls-remote', 'origin', `refs/heads/${branch}`]).split('\n')[0];
+  const remote = line.split(/\s/)[0];
+  if (!remote) return `origin has no branch ${branch}; push HEAD first`;
+  if (remote !== head) return `origin/${branch} is at ${remote.slice(0, 7)}, not HEAD ${head.slice(0, 7)}; push HEAD first`;
+  return '';
+}
+
 function open(branch, head, args) {
   const short = head.slice(0, 7);
   const stamps = join(git(['rev-parse', '--absolute-git-dir']), 'factory');
@@ -27,6 +36,8 @@ function open(branch, head, args) {
   }
   if (!existsSync(join(stamps, `red-check-${head}-${main}`)))
     return say(1, `refused: HEAD ${short} has no red-check stamp against origin/main ${main.slice(0, 7)}; run scripts/red-check --base origin/main`);
+  const gap = behind(branch, head);
+  if (gap) return say(1, `refused: ${gap}`);
   const bodyFile = args.bodyFile ?? '.github/pull_request_template.md';
   if (!existsSync(bodyFile)) return say(1, `refused: the body file ${bodyFile} does not exist`);
   if (readFileSync(bodyFile, 'utf8').includes(PLACEHOLDER))
@@ -47,7 +58,7 @@ function tierWait(pr) {
   return !(tier && (tier.conclusion || ['SUCCESS', 'FAILURE', 'ERROR'].includes(tier.state)));
 }
 
-function step(pr, head) {
+function step(pr, head, branch) {
   const n = pr.number;
   const short = head.slice(0, 7);
   const armed = Boolean(pr.autoMergeRequest);
@@ -66,6 +77,9 @@ function step(pr, head) {
   const stop = () => (tierWait(pr) ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval`) : 0);
   if (armed) return stop() || say(0, `#${n} is armed and a live verdict covers it; nothing to do`);
   if (ahead) return say(1, `refused: HEAD ${short} has commits #${n} lacks; git push first`);
+
+  const gap = behind(branch, head);
+  if (gap) return say(1, `refused: ${gap}`);
 
   if (!covered()) {
     const r = spawnSync('scripts/live-verify', [String(n)], { encoding: 'utf8', maxBuffer: 64 << 20 });
@@ -99,7 +113,7 @@ function main(argv) {
   if (branch === 'main') return say(1, 'refused: the branch is main; work on a branch of its own');
   const head = git(['rev-parse', 'HEAD']);
   const [pr] = JSON.parse(gh(['pr', 'list', '--head', branch, '--state', 'open', '--json', FIELDS]));
-  return pr ? step(pr, head) : open(branch, head, args);
+  return pr ? step(pr, head, branch) : open(branch, head, args);
 }
 
 try {
