@@ -23,7 +23,7 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { LAYOUT, fill, parseOwn } from './own.mjs';
-import { MODULES_FILE, mergedTree, parseModules } from './module.mjs';
+import { MODULES_FILE, mergedTree, offFiles, parseModules } from './module.mjs';
 import { NAME, PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
 
 export const INVENTORY = '.gate/kit-files';
@@ -205,8 +205,10 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   const baseNames = modulesIn(repo, at).names;
   let off = new Map();
   try {
-    off = new Map([...mergedTree(factory, fac, baseNames.filter((n) => !names.includes(n)))].filter(([, e]) => e.module));
-  } catch {}
+    off = offFiles(factory, fac, baseNames, names);
+  } catch (error) {
+    fails.push(error.message);
+  }
   for (const [path, e] of off) if (now.has(path)) fails.push(`left: ${path} (module ${e.module} is off, so its files go)`);
   const chosen = packOf(factory, fac, repo, now);
   if (chosen.why) fails.push(chosen.why);

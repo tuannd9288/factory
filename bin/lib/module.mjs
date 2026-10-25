@@ -43,6 +43,28 @@ export function updateModules(current, add, remove) {
   return [...new Set([...current.filter((name) => !remove.includes(name)), ...add])].sort();
 }
 
+/** The modules a base's .gate/modules text names (null: none). A text that does not parse names none; evidence and kit-update
+ * judge the file itself. */
+export function baseModules(text) {
+  try {
+    return parseModules(text);
+  } catch {
+    return [];
+  }
+}
+
+/** The files, path → { mode, oid, src, module }, of the modules the base had on that `names` leaves out. Throws when the
+ * base names a module the factory commit lacks: then nobody can say which files go, and the run must stop. */
+export function offFiles(factory, fac, baseNames, names) {
+  const off = baseNames.filter((name) => !names.includes(name));
+  if (!off.length) return new Map();
+  try {
+    return new Map([...mergedTree(factory, fac, off)].filter(([, e]) => e.module));
+  } catch (error) {
+    throw new Error(`the base's ${MODULES_FILE}: ${error.message}`);
+  }
+}
+
 /** The modules a factory commit holds: the folders of modules/. */
 export function moduleNames(factory, fac) {
   return [...new Set([...tree(factory, fac, 'modules/').keys()].map((p) => p.split('/')[0]))].sort();

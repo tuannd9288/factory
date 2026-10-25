@@ -21,7 +21,7 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { FACTS, LAYOUT, LIMIT, fill } from './own.mjs';
 import { FILLED, INVENTORY, REPLACES, SETTINGS, git, ownOf, pastBlobs, render, renderedAs, tree } from './evidence.mjs';
-import { MODULES_FILE, mergedTree, parseModules } from './module.mjs';
+import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
 
 const RENDERED = (path) => Boolean(FILLED[path]) || path === SETTINGS;
@@ -33,20 +33,17 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
   const kit = mergedTree(factory, fac, names);
   const at = tree(repo, baseSha);
   const text = (dir, oid) => git(dir, ['cat-file', 'blob', oid]);
-  const baseNames = (() => {
-    try {
-      return at.get(MODULES_FILE) ? parseModules(text(repo, at.get(MODULES_FILE).oid)) : [];
-    } catch {
-      return [];
-    }
-  })();
-  // The files of a module the base had on and the update turns off.
+  const baseNames = baseModules(at.get(MODULES_FILE) ? text(repo, at.get(MODULES_FILE).oid) : null);
+  // The files of a module the base had on and the update turns off; a base that names a module the factory lacks stops it.
   let off = new Map();
+  const lost = [];
   try {
-    off = new Map([...mergedTree(factory, fac, baseNames.filter((n) => !names.includes(n)))].filter(([, e]) => e.module));
-  } catch {}
+    off = offFiles(factory, fac, baseNames, names);
+  } catch (error) {
+    lost.push(error.message);
+  }
   const pack = packName === 'none' ? null : { settings: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/settings.json`]).trim()), section: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/AGENTS.md`]).trim()) };
-  const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: [], writes: [], removes: [] };
+  const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: lost, writes: [], removes: [] };
   const rendering = (path, want) => {
     const kitText = text(factory, want.oid);
     if (path === SETTINGS) return composeSettings(kitText, pack?.settings ?? null);
