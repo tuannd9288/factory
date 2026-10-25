@@ -317,3 +317,162 @@ The 16 class-M defects were all red at `verify`, which made no reviewer call. No
 probe branch stays.
 
 The evidence is in the comments of factory#25.
+
+## Issue #75: a factory run through a Herdr pane, Herdr 0.9.5, Claude Code 2.1.308, 2026-10-26
+
+**The question.** Before the factory's workers move into a Herdr session (#77), does a run started through a Herdr
+pane keep its repository profile and the S1 flags? Two more questions were left open by #68's first pass:
+- does the Herdr server start and stay up in an account with no GUI session?
+- does `direnv exec` keep Herdr's detection of the agent by process name?
+
+**Setup.**
+- **When:** 2026-10-25, 18:29 to 18:34 UTC (2026-10-26, 01:29 to 01:34 +07). Steps 6 and 7, read-only checks after
+  the first review, ran at 18:43 and 18:44 UTC.
+- **Where:** the `factory` account (uid 503) on the Mac mini, reached over `ssh factory@tuans-mac-mini`, with no GUI
+  login. `who` showed two entries, `console` and `ttys000`, both the Human's.
+- **What ran:**
+  - the scratch clone `~/WORKSPACES/factory-pack-scratch` on `main`: its reflog's only entry during the run is the
+    probe's "checkout: moving from main to main" at 18:32:48 UTC (step 6);
+  - its `.envrc`, which sets one name, `CLAUDE_CONFIG_DIR` (step 6 printed the names, not the values);
+  - `gh` as `tuan9288-agent`;
+  - the probe `probes/pack-probe.mjs` at 14c54f1, which `~/WORKSPACES`'s reflog shows was pulled at 18:29:08 UTC,
+    before the probe started at 18:32:29 UTC (step 6).
+- **Who ran it:** the Lead, by hand over ssh. The probe refuses to start unless `gh`'s active account is the agent's,
+  and a worker's seat has no `gh` login.
+- **Logs:** in `~/factory-runs/issue-75/`:
+  - `measure.log` holds every step, with its command and output;
+  - `pack-20261025t1832/` holds the probe's own logs, and `probe.out` its printed result;
+  - `direnv.jsonl` and `plain.jsonl` hold the two short sessions described below.
+
+### The server, with no GUI session
+
+- **The start was not planned.**
+  - The Lead ran `herdr server` expecting its help text. It started a server in the foreground of an ssh command
+    with no tty, and its output went into `head -20`. The same command had first pulled `~/WORKSPACES` to 14c54f1.
+  - The server's `ps` line at 18:31:25 UTC reads `54795 53954 ?? 02:17 herdr server`, so it started at about
+    18:29:08 UTC, the time of the pull.
+  - The status check the Lead ran at that point printed `zsh:1: command not found: herdr`, so the server's state was
+    first read at step 2.
+- **No GUI domain.**
+  - At step 1, `launchctl print gui/503 | grep -ic herdr` printed `0`; stderr was not captured.
+  - Step 6 ran `launchctl print gui/503 2>&1`, after the server had stopped. It printed "Could not print domain:
+    125: Domain does not support specified action" and exited 125. So the account has no GUI domain, and the server
+    was a plain process, not a launchd job.
+- **The ssh session ends.** At 18:31:39 UTC the ssh client was killed:
+  - the shell that ran `herdr server`, pid 53954, was reparented to pid 1;
+  - the server, pid 54795, kept running;
+  - `herdr status server` read "status: running", version 0.9.5, with the socket at
+    `/Users/factory/.config/herdr/herdr.sock`.
+- **It stayed up** until the Lead stopped it at step 5 (18:33:57 UTC), 2 minutes 18 seconds after the ssh session
+  ended. The commands of steps 3 and 4 all reached it.
+
+### The pack probe in a pane
+
+- **The pane.**
+  - The Lead made one with `herdr workspace create --cwd ~/WORKSPACES/factory-pack-scratch --label probe-75 --no-focus`,
+    which gave pane `w1:p1`.
+  - In it, `herdr pane run w1:p1 "cd ~/WORKSPACES && node probes/pack-probe.mjs --repo tuannd9288/factory-pack-scratch --no-pr --log-dir … > … 2>&1; echo PROBE-EXIT=$?"`.
+- **The session.** The probe then started its `cd … && direnv exec . claude -p …` session (`session-a.log:14`), as a
+  child of `node` in the pane's foreground process group.
+- **The flags.** `herdr pane process-info`, at 18:32:33 UTC, shows that session's argv with
+  `--permission-mode acceptEdits`, `--max-turns 8`, and the `--allowedTools` and `--disallowedTools` lists as the
+  probe passes them.
+- **The result.** `PROBE-EXIT=0`.
+
+| Item | Result | Evidence |
+|---|---|---|
+| session starts inside the repository | PASS | cwd `/Users/factory/WORKSPACES/factory-pack-scratch` |
+| pins load (pstack plugin listed) | PASS | plugins: pstack, cc-plugin-agents-md, cc-plugin-telemetry, cc-plugin-plugin-authoring |
+| permission baseline (acceptEdits) in force | PASS | init `permissionMode` "acceptEdits" |
+| nothing from the claude.ai account loads | PASS | no claude.ai connector, tool, synced plugin or synced skill in the init event |
+| `git tag x` refused by a deny rule | PASS | control allowed; "Permission to use Bash with command git tag x has been denied." |
+| `.env` read refused by a deny rule | PASS | "File is in a directory that is denied by your permission settings." |
+| `CLAUDE_CONFIG_DIR` equals the repository's profile | PASS | `/Users/factory/.agent-profiles/tuannd9288/factory-pack-scratch/claude` |
+| `AGENTS.md` marker quoted from loaded context | PASS | "yield at these six points, where the gate's rule wins:" |
+| sessions finished within their turns | PASS | `result.subtype` success, 5 turns |
+| the three pull-request items | SKIP | `--no-pr` |
+
+**Why `--no-pr`.** The pull-request session answers none of #75's questions, and it would start the gate's CI on a
+private repository, whose minutes are billed.
+
+**The `#24 identity` lines**, as printed (never #75 items):
+
+```
+#24 identity ssh: none
+#24 identity gh: tuan9288-agent
+#24 gh logins: tuan9288-agent
+```
+
+Run from the `factory` account, `ssh` no longer answers as the Human, as it did in #6's run from his account.
+
+**So #75's first question is answered: yes.**
+- **The profile:** a run started through a Herdr pane, as `factory`, keeps its repository's `CLAUDE_CONFIG_DIR`.
+- **The S1 flags:**
+  - the session's argv in the pane holds the permission mode and both tool lists;
+  - the permission mode is in force;
+  - an allowed tool runs.
+- **The refusals** came from the repository's deny rules, which beat `git tag x` in `--allowedTools`. No call tried a
+  `--disallowedTools` entry, so this run shows that list passed, not that it refuses.
+
+### What Herdr sees of a `claude -p` run
+
+- **Two sessions.** Two one-turn sessions ran in the same pane, from the scratch clone. Each was
+  `<launch> -p 'Reply with the single word ok.' --max-turns 1 --permission-mode acceptEdits --output-format stream-json --verbose`:
+  - one with `direnv exec . claude`, started by `herdr pane run` with nothing in between;
+  - one with plain `claude`.
+- **Both had the repository's profile.**
+  - `direnv.jsonl`'s init event loads pstack and the memory paths from under
+    `/Users/factory/.agent-profiles/tuannd9288/factory-pack-scratch/claude`, with `permissionMode` "acceptEdits".
+  - `plain.jsonl` shows the same profile: the pane's shell had loaded `.envrc` through its direnv hook after the
+    earlier `cd`. So the two runs differ only in the `direnv exec` wrapper, not in their environment.
+- **The polls.** While each ran, `herdr agent list`, `herdr pane get` and `herdr pane process-info` were polled once a
+  second:
+  - each run lasted about 1.5 seconds (`duration_ms` 1579 and 1524) and was polled twice with the session in the
+    foreground, at 18:33:15 and :16, and at 18:33:18 and :19;
+  - in every poll, `herdr agent list` returned no agent and `agent_status` was "unknown".
+- **The probe's session A** ran about 14 seconds but was polled once, at 18:32:33. The probe's wait loop stopped at
+  its first poll, because the command line shown in the pane already held its end marker `PROBE-EXIT=`. That one poll
+  also returned no agent.
+- **The process.** In each run, the pane's foreground process was named `2.1.308`, for both `name` and `argv0`.
+  `~/.local/bin/claude` is the canary's launcher script,
+  `exec '/Users/factory/.local/share/claude/versions/2.1.308' "$@"`, which `launcherText` writes
+  (`bin/lib/canary.mjs:43`). So the process is named after the version.
+- **Both runs ended** with `result.subtype` success.
+
+**So the second question has a different answer than it assumed.**
+- `direnv exec` changes nothing in what `agent list`, `pane get` and `pane process-info` returned: the foreground
+  process is the same `2.1.308` with or without it.
+- Herdr detected neither run as an agent, so there was no detection for `direnv` to keep.
+- **Why it detected nothing is not shown.** The process name is one candidate. No control run with a process named
+  `claude` was made, and the runs were short.
+- **Herdr's integrations.** Herdr 0.9.5 has `herdr integration install <TARGET>`, and `claude` is one of its targets
+  (step 7, help text only). This issue did not run it and did not check what it writes, or where. It is #77's to
+  weigh, with the Human.
+
+### Cleanup
+
+- **The scratch clone**, checked at step 6 (18:43:57 UTC):
+  - `git status --short --branch` reads `## main...origin/main` and nothing else;
+  - `git tag -l x` and `git branch --list 'probe-*'` print nothing;
+  - `.env` does not exist.
+- **Herdr.** The Lead closed workspace `w1` and ran `herdr server stop`. After that, `herdr status server` read "not
+  running", and no herdr process was left; steps 6 and 7 found none either.
+
+### Cost
+
+The three live sessions cost $0.18 at API prices:
+- the probe's session A, $0.13;
+- step 4's `direnv exec` run, $0.046;
+- step 4's plain run, $0.002.
+
+### What it does not prove
+
+- That the server stays up for hours, or across the Human logging out of his console session. It was watched for
+  2 minutes 18 seconds after the ssh session ended.
+- That a server started the way #77 will start it, as a launchd job or with `nohup`, behaves the same.
+- That Herdr detects nothing in a run lasting more than a few seconds. Session A was polled once, and step 4's runs
+  twice each.
+- Whether Herdr detects a process named `claude`, or a run after `herdr integration install claude`.
+- How Herdr would report an interactive Claude Code session.
+- That `--disallowedTools` refuses a call in a pane: no call tried one.
+- The pull-request session through a pane.
