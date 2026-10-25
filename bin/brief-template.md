@@ -14,7 +14,8 @@ What the work is for, in one or two sentences, and what is not asked of the sess
 
 Every sentence the Human said that bears on the work, copied verbatim, each in double quotes, never translated or
 reworded: it keeps the language the Human wrote it in. Give each its source: the page or message, and its date. Keep
-every number and every name of a section exactly as Colly relayed them. A permission and its reason go together.
+every name of a section and every figure exactly as Colly relayed them (the script checks the quotes; review holds the
+figures). A permission and its reason go together.
 
 ## What is settled
 

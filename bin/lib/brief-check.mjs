@@ -1,6 +1,7 @@
-// The check behind bin/brief-check (#90): a brief must carry what the relay it came from quotes and counts. It compares
-// literally, with no list of exceptions and no model call: every span the relay puts in double quotes must appear in the
-// brief, and so must every number. Which quotes are the Human's it does not judge, since that needs context; the rule
+// The check behind bin/brief-check (#90): a brief must carry what the relay it came from quotes. It compares literally,
+// with no list of exceptions and no model call: every span the relay puts in double quotes must appear in the brief.
+// It does not check numbers (Colly, 2026-10-26, under the Human's rule of 2026-10-25): whether a number matters needs
+// context, so review holds it. Which quotes are the Human's it does not judge, since that needs context; the rule
 // covers the relay's quotes as a whole. Only the brief's own body counts: the template ends with a section that attaches
 // Colly's message as data, and the brief is cut at that heading, or every brief would pass.
 //
@@ -29,19 +30,11 @@ export function quotes(text) {
   return spans.filter(Boolean);
 }
 
-/** The numbers in a text: a maximal run of digits, with a decimal point or a thousands comma inside it. */
-export function numbers(text) {
-  return text.match(/\d+(?:[.,]\d+)*/g) ?? [];
-}
-
-/** What the relay holds that the brief's body lacks: `{ kind: 'quote' | 'number', value }`, each once, in the relay's order. */
+/** The quotes of the relay that the brief's body lacks: `{ kind: 'quote', value }`, each once, in the relay's order. */
 export function missing(brief, relay) {
-  const mine = body(brief);
-  const haystack = squeeze(straight(mine));
-  const have = new Set(numbers(mine));
+  const haystack = squeeze(straight(body(brief)));
   const found = [];
   for (const value of new Set(quotes(relay))) if (!haystack.includes(value)) found.push({ kind: 'quote', value });
-  for (const value of new Set(numbers(relay))) if (!have.has(value)) found.push({ kind: 'number', value });
   return found;
 }
 
@@ -56,8 +49,8 @@ export function check(argv) {
     return { code: 2, out: '', err: `brief-check: cannot read ${error.path ?? 'a file'}: ${error.code ?? error.message}\n` };
   }
   const found = missing(brief, relay);
-  if (!found.length) return { code: 0, out: 'brief-check: the brief carries every quote and number of the relay\n', err: '' };
-  const lines = found.map(({ kind, value }) => (kind === 'quote' ? `missing quote: "${value}"` : `missing number: ${value}`));
+  if (!found.length) return { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' };
+  const lines = found.map(({ value }) => `missing quote: "${value}"`);
   return { code: 1, out: `${lines.join('\n')}\n`, err: '' };
 }
 
