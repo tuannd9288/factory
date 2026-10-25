@@ -27,7 +27,7 @@ process.exit(1);
 
 /** A copy of this factory, committed with origin/main at it (plus `kit`'s files); an onboarded clone of a repository
  * whose bare origin sits beside it, merged to main and pushed. Then the tests change either side. */
-export function world({ kit = {}, onboardArgs = [] } = {}) {
+export function world({ kit = {}, executable = [], onboardArgs = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'kit-update-'));
   const fac = join(dir, 'factory');
   const tracked = git(factory, 'ls-files', '--cached', '--others', '--exclude-standard').split('\n');
@@ -37,6 +37,7 @@ export function world({ kit = {}, onboardArgs = [] } = {}) {
     chmodSync(join(fac, f), statSync(join(factory, f)).mode);
   }
   write(fac, kit);
+  for (const f of executable) chmodSync(join(fac, f), 0o755);
   git(fac, 'init', '-q', '-b', 'main');
   const first = commit(fac, {}, 'factory');
   git(fac, 'update-ref', 'refs/remotes/origin/main', first);
@@ -65,12 +66,16 @@ export function world({ kit = {}, onboardArgs = [] } = {}) {
     XDG_CONFIG_HOME: join(dir, 'xdg-config'),
   };
   mkdirSync(join(dir, 'root'));
-  const onboard = run(dir, join(fac, 'bin/onboard'), [url, '--no-pr', ...onboardArgs], env);
-  assert.equal(onboard.code, 0, onboard.out);
+  // onboardArgs null: no first onboarding; the test runs onboard itself, into a root of its own.
+  const onboard = (args = [], more = {}) => run(dir, join(fac, 'bin/onboard'), [url, '--no-pr', ...args], { ...env, ...more });
   const repo = join(dir, 'root/app');
-  git(repo, 'switch', '-q', 'main');
-  git(repo, 'merge', '-q', '--ff-only', 'factory/kit');
-  git(repo, 'push', '-q', 'origin', 'main');
+  if (onboardArgs) {
+    const first = onboard(onboardArgs);
+    assert.equal(first.code, 0, first.out);
+    git(repo, 'switch', '-q', 'main');
+    git(repo, 'merge', '-q', '--ff-only', 'factory/kit');
+    git(repo, 'push', '-q', 'origin', 'main');
+  }
   const repoCommit = (files, message = 'repository change') => {
     commit(repo, files, message);
     git(repo, 'push', '-q', 'origin', 'main');
@@ -89,5 +94,5 @@ export function world({ kit = {}, onboardArgs = [] } = {}) {
     remote: git(dir, '--git-dir', url, 'for-each-ref', '--format=%(refname) %(objectname)'),
   });
   const show = (rev, path) => git(repo, 'show', `${rev}:${path}`);
-  return { dir, fac, repo, url, body, title, update, repoCommit, facCommit, sha7, calls, state, show, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, fac, repo, url, env, onboard, body, title, update, repoCommit, facCommit, sha7, calls, state, show, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
