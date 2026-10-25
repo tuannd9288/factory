@@ -51,12 +51,12 @@ test('the digest lists every .failed file with its time and cause, and each repo
     assert.match(text, /queue-run\.failed: 2026-10-24T01:00:00\.000Z gh: not logged in/);
     assert.match(text, /queue-o-app\.failed: 2026-10-24T02:00:00\.000Z o\/app: HTTP 502/);
     assert.match(text, /queue-o-app\.ok: 2026-10-23T23:00:00\.000Z/);
-    assert.match(text, /o\/new: chưa ghi nhận lần quét thành công/);
+    assert.match(text, /o\/new: no clean sweep recorded/);
     const clean = ledger.digest([], { since: 'a', until: 'b', queue: ledger.queueState(join(state, 'none'), ['o/new']) });
-    assert.match(clean, /Không kiểm tra được hàng đợi.*none/);
-    assert.doesNotMatch(clean, /Không có file \.failed/);
+    assert.match(clean, /Cannot check the queue.*none/);
+    assert.doesNotMatch(clean, /No \.failed files/);
     mkdirSync(join(state, 'empty'));
-    assert.match(ledger.digest([], { since: 'a', until: 'b', queue: ledger.queueState(join(state, 'empty'), []) }), /Không có file \.failed/);
+    assert.match(ledger.digest([], { since: 'a', until: 'b', queue: ledger.queueState(join(state, 'empty'), []) }), /No \.failed files/);
   });
 });
 
@@ -77,11 +77,13 @@ function ledgerRun(dir, list) {
   return { out, calls: readFileSync(join(dir, 'calls'), 'utf8') };
 }
 
-const TITLE = 'Bản tin xưởng 2026-10-17 → 2026-10-24';
+const TITLE = 'Weekly digest 2026-10-17 → 2026-10-24';
+// The title the digests posted before #98 carry (#1).
+const OLD_TITLE = (since, until) => `Bản tin xưởng ${since} → ${until}`;
 
 test('--post creates the digest when no issue has its title, ignoring fuzzy near matches', () => {
   withDir((dir) => {
-    const { out, calls } = ledgerRun(dir, [{ number: 3, title: 'Bản tin xưởng 2026-10-10 → 2026-10-17' }, { number: 4, title: `${TITLE} (copy)` }]);
+    const { out, calls } = ledgerRun(dir, [{ number: 3, title: 'Weekly digest 2026-10-10 → 2026-10-17' }, { number: 4, title: `${TITLE} (copy)` }]);
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.match(calls, /issue create/);
     assert.doesNotMatch(calls, /issue edit/);
@@ -90,12 +92,38 @@ test('--post creates the digest when no issue has its title, ignoring fuzzy near
 
 test('a second --post for one period updates the issue it finds, open or closed, by the exact title', () => {
   withDir((dir) => {
-    const { out, calls } = ledgerRun(dir, [{ number: 3, title: 'Bản tin xưởng 2026-10-10 → 2026-10-17', state: 'OPEN' }, { number: 7, title: TITLE, state: 'CLOSED' }]);
+    const { out, calls } = ledgerRun(dir, [{ number: 3, title: 'Weekly digest 2026-10-10 → 2026-10-17', state: 'OPEN' }, { number: 7, title: TITLE, state: 'CLOSED' }]);
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.match(calls, /issue list .*--state all/);
     assert.match(calls, /issue edit 7 --repo o\/factory --add-label digest --body-file \S+/);
     assert.doesNotMatch(calls, /issue create/);
     assert.match(out.stdout, /issues\/7/);
+  });
+});
+
+test('a digest posted under the old title for the same period is found and updated, not posted twice', () => {
+  withDir((dir) => {
+    const { out, calls } = ledgerRun(dir, [{ number: 3, title: OLD_TITLE('2026-10-10', '2026-10-17') }, { number: 5, title: OLD_TITLE('2026-10-17', '2026-10-24'), state: 'CLOSED' }]);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(calls, /issue edit 5 --repo o\/factory --add-label digest --body-file \S+/);
+    assert.doesNotMatch(calls, /issue create/);
+  });
+});
+
+test('an old-title digest of another period does not stop a new one being created', () => {
+  withDir((dir) => {
+    const { out, calls } = ledgerRun(dir, [{ number: 3, title: OLD_TITLE('2026-10-10', '2026-10-17') }]);
+    assert.equal(out.status, 0, out.stdout + out.stderr);
+    assert.match(calls, /issue create .*--title Weekly digest 2026-10-17 → 2026-10-24/);
+  });
+});
+
+test('one issue under the old title and one under the new, for one period: update none, name both', () => {
+  withDir((dir) => {
+    const { out, calls } = ledgerRun(dir, [{ number: 5, title: OLD_TITLE('2026-10-17', '2026-10-24') }, { number: 7, title: TITLE }]);
+    assert.notEqual(out.status, 0, out.stdout + out.stderr);
+    assert.match(out.stderr, /#5.*#7/);
+    assert.doesNotMatch(calls, /issue (edit|create)/);
   });
 });
 

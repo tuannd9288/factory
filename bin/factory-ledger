@@ -4,7 +4,7 @@
 #                      [--post owner/name] [--profile-dir <dir>]...
 #   bin/factory-ledger --check [--latest N] [--profile-dir <dir>]...
 # --rows prints one tab-separated row per task (one pull request opened in the window); --digest (the default) prints
-# the Vietnamese digest; --post files it as an issue labelled "digest" in the named repository (the factory's own).
+# the digest; --post files it as an issue labelled "digest" in the named repository (the factory's own).
 # --check is the canary: over the latest N assistant entries of every profile under AGENT_PROFILES plus the --profile-dir
 # folders it lists the key paths with their types (opening only message and message.usage) and names the fields the
 # ledger reads that are missing, or stale (absent from the newest session file or the newest 10 entries); it prints no

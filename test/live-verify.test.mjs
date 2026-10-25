@@ -57,9 +57,9 @@ const result = {
   driver: 'cli',
   ran: mode === 'no-live' ? [] : live,
   gates: [{ command: 'scripts/verify', result: 'verify: 1 passed' }],
-  audit: 'Thay đổi nhỏ, đúng mô tả.',
-  issues: mode === 'issues' ? ['add(2, -3) trả về 5'] : [],
-  notes: mode === 'notes' ? ['Chưa có thông báo lỗi khi thiếu đối số'] : [],
+  audit: 'A small change, as described.',
+  issues: mode === 'issues' ? ['add(2, -3) returns 5'] : [],
+  notes: mode === 'notes' ? ['No error message yet when an argument is missing'] : [],
   reason: '',
 };
 fs.writeFileSync(a[a.indexOf('-o') + 1], JSON.stringify(result));
@@ -95,8 +95,8 @@ function world({ driver = DRIVER } = {}) {
       JSON.stringify({
         number: 7,
         url: 'https://github.com/o/app/pull/7',
-        title: 'Đặt tên phép tính',
-        body: 'Closes #3\n\nCLI nhận tên phép tính trước hai số.',
+        title: 'Name the operation',
+        body: 'Closes #3\n\nThe CLI takes the operation name before the two numbers.',
         author: { login: 'tuan9288-agent' },
         baseRefName: 'main',
         baseRefOid: base,
@@ -109,7 +109,7 @@ function world({ driver = DRIVER } = {}) {
       }),
     );
   pr();
-  writeFileSync(join(lv, 'issue.json'), JSON.stringify({ number: 3, title: 'CLI đặt tên phép tính', body: '`node cli.js add 2 3` in ra 5.' }));
+  writeFileSync(join(lv, 'issue.json'), JSON.stringify({ number: 3, title: 'CLI names the operation', body: '`node cli.js add 2 3` prints 5.' }));
   const envOf = (env = {}) => ({
     ...quiet,
     GH_TOKEN: 'not-a-token',
@@ -172,11 +172,17 @@ describe('live-verify', () => {
       assert.match(posted, new RegExp(`^parent: ${w.base}$`, 'm'));
       assert.match(posted, new RegExp(`^patch: ${w.patchOf(w.base, w.head)}$`, 'm'));
       assert.match(posted, /^codex: codex-cli 0\.159\.2, 1 run$/m);
-      assert.match(posted, /Chưa có thông báo lỗi khi thiếu đối số/);
+      assert.match(posted, /No error message yet when an argument is missing/);
+      assert.match(posted, /^\*\*Run as a user\*\*$/m);
+      assert.match(posted, /^\*\*Gates re-run on the head\*\*$/m);
+      assert.match(posted, /^\*\*Diff read\*\*$/m);
+      assert.match(posted, /^\*\*Notes\*\*$/m);
+      assert.match(posted, /^The verifier's verdict is no input to the gate: it lowers no tier and replaces no required check\.$/m);
       // The brief stands alone: the goal from the pull request and its issue, the exact commits, the driver.
       const prompt = w.read('prompt');
-      assert.match(prompt, /CLI nhận tên phép tính/);
-      assert.match(prompt, /`node cli\.js add 2 3` in ra 5/);
+      assert.match(prompt, /The CLI takes the operation name/);
+      assert.match(prompt, /`node cli\.js add 2 3` prints 5/);
+      assert.match(prompt, /Write audit, issues, notes, observed and reason in English\./);
       assert.match(prompt, /node cli\.js add <a> <b>, as a user types it/);
       // The log of Codex's runs stays, for the BLOCKED comment that points at it; the worktrees go.
       assert.match(readdirSync(join(w.repo, '.claude/worktrees')).join(' '), /^live-verify-7-[A-Za-z0-9]{6}\.log$/);
@@ -292,6 +298,7 @@ describe('live-verify', () => {
         const out = w.verify();
         assert.equal(out.code, 2, out.out);
         assert.match(w.read('comments'), /^live-verify: BLOCKED$/m);
+        assert.match(w.read('comments'), /^Reason: /m);
         assert.match(w.read('comments'), /\.gate\/driver\.json/);
         assert.match(w.read('comments'), /^codex: not run$/m);
         assert.deepEqual(w.execs(), []);
@@ -322,6 +329,7 @@ describe('live-verify', () => {
       const out = w.verify(['7'], { CODEX_LOGGED_IN: '0' });
       assert.equal(out.code, 2, out.out);
       assert.match(w.read('comments'), /^live-verify: BLOCKED$/m);
+      assert.match(w.read('comments'), /^Reason: /m);
       assert.match(w.read('comments'), /not logged in/);
       const calls = w.read('codex-calls').split('\n').filter(Boolean).map((l) => JSON.parse(l).args.join(' '));
       assert.ok(calls.every((c) => c === '--version' || c === 'login status'), calls.join('\n'));
@@ -336,6 +344,7 @@ describe('live-verify', () => {
       const out = w.verify(['7'], { CODEX_MODE: 'exit1' });
       assert.equal(out.code, 2, out.out);
       assert.match(w.read('comments'), /^live-verify: BLOCKED$/m);
+      assert.match(w.read('comments'), /^Reason: /m);
       assert.match(w.read('comments'), /codex exec exited 1/);
       assert.equal(w.execs().length, 1);
     } finally {
@@ -350,6 +359,7 @@ describe('live-verify', () => {
         const out = w.verify(['7'], { CODEX_MODE: mode });
         assert.equal(out.code, 2, out.out);
         assert.match(w.read('comments'), /^live-verify: BLOCKED$/m);
+        assert.match(w.read('comments'), /^Reason: /m);
         assert.match(w.read('comments'), /^codex: codex-cli 0\.159\.2, 2 runs$/m);
         assert.equal(w.execs().length, 2);
       } finally {
@@ -364,7 +374,8 @@ describe('live-verify', () => {
       const out = w.verify(['7'], { CODEX_MODE: 'issues' });
       assert.equal(out.code, 1, out.out);
       assert.match(w.read('comments'), /^live-verify: FAIL$/m);
-      assert.match(w.read('comments'), /add\(2, -3\) trả về 5/);
+      assert.match(w.read('comments'), /add\(2, -3\) returns 5/);
+      assert.match(w.read('comments'), /^\*\*Issues\*\*$/m);
     } finally {
       w.cleanup();
     }
@@ -415,7 +426,7 @@ describe('live-verify --covered', () => {
       // Only the pull request's author posts verdicts: anyone else's text is not one.
       assert.equal(covered([{ author: { login: 'someone' }, body: verdict('PASS', head2, own) }]).code, 1);
       // The header is the comment's first lines; a line quoted further down is not a verdict.
-      assert.equal(covered([{ author: agent, body: `Xem lại:\n${verdict('PASS', head2, own)}` }]).code, 1);
+      assert.equal(covered([{ author: agent, body: `See again:\n${verdict('PASS', head2, own)}` }]).code, 1);
     } finally {
       w.cleanup();
     }
