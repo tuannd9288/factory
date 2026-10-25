@@ -49,7 +49,7 @@ Everything else that can be undone, agents decide and report after.
 
 ## Layers, sublayers and contracts
 
-The Human's map of 2026-10-25: five layers, 17 sublayers, nine contracts. "Layer" and
+The map the Human settled on 2026-10-25: five layers, 17 sublayers, nine contracts. "Layer" and
 "sublayer" come from IEEE 802.3, 4.1.1 [IEEE], read in the draft amendment P802.3as/D0.1 (March 2005):
 "The LLC sublayer and the MAC sublayer together are intended to have the same function as that described in the OSI model for the Data Link Layer alone."
 Each name carries a source key; the keys, with their URLs and how fully each was read, are in
@@ -80,7 +80,7 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
 - **4b Evals** [A8]: the attacks and the 20 seeded + 20 clean probes.
 
-A layer may change anything inside it while its contracts hold; a change to a contract is tier 3 (as is every change
+A sublayer may change anything inside it while its contracts hold; a change to a contract is tier 3 (as is every change
 here). A contract is named by its code. Its sentence is a quote from its source, or says "(no verbatim source yet)".
 
 - **H1** [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
@@ -102,7 +102,7 @@ here). A contract is named by its code. Its sentence is a quote from its source,
 - **H9** [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer
   servers safely." Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the factory's unattended
   sessions; 0d does; (2) the record of a task stays on GitHub (1b) and in 0d's panes, and a surface keeps no sole copy;
-  (3) the factory's own code in this layer reads no credential (#58 K2; this binds the factory's code, not the Human's
+  (3) the factory's own code in this sublayer reads no credential (#58 K2; this binds the factory's code, not the Human's
   own tools, and K3 keeps Paseo's usage plugin as it is); (4) only a person answers a permission prompt, so agents do not
   type into another pane: `herdr agent send-keys`, `herdr pane send-keys`, `rex send` and `rex send-key` are denied,
   which is #76 and not yet in the kit's deny rules; (5) with every surface stopped, the factory still runs.
