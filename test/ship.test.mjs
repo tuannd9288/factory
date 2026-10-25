@@ -467,6 +467,20 @@ describe('a red-check that passed by the body\'s No-red line', () => {
   });
 });
 
+describe('a live-verify that exits 2 without a BLOCKED verdict', () => {
+  test('is said to have not run, with none of the BLOCKED advice', () => {
+    const w = world();
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    writeFileSync(join(w.sh, 'verdict'), 'CRASH\n');
+    const out = w.ship();
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /^ship: live-verify could not run on #7 \(exit 2\); nothing was armed$/m);
+    assert.doesNotMatch(out.out, /BLOCKED|recommended answer/);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
+  });
+});
+
 describe('the remote branch', () => {
   test('is read from origin, and opening is refused while it is behind HEAD, or missing', () => {
     const w = world();
