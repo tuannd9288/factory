@@ -100,7 +100,10 @@ function step(pr, head, branch) {
     process.stdout.write(r.stdout ?? '');
     process.stderr.write(r.stderr ?? '');
     if (r.status === 1) return say(1, `refused to arm #${n}: live-verify answered FAIL; fix forward with a red test, then run ship again`);
-    if (r.status === 2) return say(2, `stopped on #${n}: live-verify is BLOCKED; put the reason and your recommended answer in the pull request`);
+    // Exit 2 is BLOCKED, which live-verify says in its first words; any other exit 2 is a run that did not happen.
+    if (r.status === 2 && /^live-verify: BLOCKED\b/m.test(r.stdout ?? ''))
+      return say(2, `stopped on #${n}: live-verify is BLOCKED; put the reason and your recommended answer in the pull request`);
+    if (r.status === 2) return say(2, `live-verify could not run on #${n} (exit 2); nothing was armed`);
     if (r.status !== 0) return say(2, `could not run: live-verify exited ${r.status ?? r.signal}`);
   }
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
