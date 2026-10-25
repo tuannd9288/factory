@@ -300,6 +300,7 @@ export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null })
     prs: [pr.number],
     live,
     livePRs: pr.mergedAt ? [{ number: pr.number, title: pr.title, covered: live }] : [],
+    merges: pr.mergedAt ? [{ number: pr.number, title: pr.title, body: pr.body ?? '', merged: pr.mergedAt }] : [],
     codexRuns: lv.runs,
     who: [pr.author?.login ?? '?', ...(branch ? [...branch.models].map((m) => m.replace(/^claude-/, '')) : [])].join(' · '),
     tier: tiers.length ? Math.max(...tiers) : null,
@@ -334,6 +335,7 @@ export function taskRow(repo, issue, prRows) {
     url: issue.url,
     prs: prs.map((r) => r.number),
     livePRs: prs.flatMap((r) => r.livePRs ?? []),
+    merges: prs.flatMap((r) => r.merges ?? []),
     codexRuns: prs.reduce((sum, r) => sum + (r.codexRuns ?? 0), 0),
     who: prs[0]?.who ?? '?',
     tier: tiers.length ? Math.max(...tiers) : null,
@@ -372,6 +374,36 @@ export function queueState(dir, repos) {
 const STATE = { landed: 'merged', open: 'open', abandoned: 'abandoned' };
 
 /** The title of the digest issue for a period. */
+/** The pull requests of this repository that a merged pull request reverts: the `Reverts #N` and `Reverts <repo>#N`
+ * lines of its body, which win when there is any (a line for another repository leaves none); else the one merged
+ * pull request, before it, whose title is the revert's `Revert "<title>"`, the latest if several. */
+function revertsOf(repo, pr, merged) {
+  const lines = [...(pr.body ?? '').matchAll(/^[ \t]*Reverts[ \t]+(?:([\w.-]+\/[\w.-]+))?#(\d+)[ \t]*\.?[ \t]*$/gm)];
+  if (lines.length) return lines.filter((m) => !m[1] || m[1].toLowerCase() === repo.toLowerCase()).map((m) => Number(m[2]));
+  const title = /^Revert "(.*)"$/s.exec(pr.title)?.[1];
+  if (title === undefined) return [];
+  const hit = merged.filter((o) => o.title === title && o.number !== pr.number && Date.parse(o.merged) <= Date.parse(pr.merged)).sort((a, b) => b.merged.localeCompare(a.merged))[0];
+  return hit ? [hit.number] : [];
+}
+
+/** Reverted pull requests in the period [since 00:00, until 23:59:59] (UTC), from the merged pull requests the rows
+ * hold. n: those merged in it that are not reverts; k: of them, the ones a revert merged by its end reverts; m: every
+ * revert merged in it; reverted: the k, as { repo, number }. */
+export function revertCount(rows, { since, until }) {
+  const from = Date.parse(`${since}T00:00:00Z`);
+  const to = Date.parse(`${until}T23:59:59Z`);
+  const all = new Map();
+  for (const r of rows) for (const p of r.merges ?? []) all.set(`${r.repo}#${p.number}`, { ...p, repo: r.repo });
+  const byRepo = (repo) => [...all.values()].filter((p) => p.repo === repo);
+  const reverts = new Map([...all].map(([key, p]) => [key, revertsOf(p.repo, p, byRepo(p.repo))]).filter(([, t]) => t.length));
+  const during = [...all].filter(([, p]) => Date.parse(p.merged) >= from && Date.parse(p.merged) <= to);
+  const plain = during.filter(([key]) => !reverts.has(key));
+  const undone = new Set();
+  for (const [key, targets] of reverts) if (Date.parse(all.get(key).merged) <= to) for (const t of targets) undone.add(`${all.get(key).repo}#${t}`);
+  const reverted = plain.filter(([key]) => undone.has(key)).map(([, p]) => ({ repo: p.repo, number: p.number })).sort((a, b) => a.repo.localeCompare(b.repo) || a.number - b.number);
+  return { n: plain.length, k: reverted.length, m: during.filter(([key]) => reverts.has(key)).length, reverted };
+}
+
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
 /** The title of the digests posted before #98 (#1), which were Vietnamese. A period posted under it is updated, not
  * posted again. */
