@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# bin/brief-check <brief> <relay> (#90): fails, naming each one, when a span the relay puts in double quotes or a number
+# in the relay is missing from the brief's own body (the part above the attached message). Plain code: no model, no network.
+# Exits 0 when the brief carries everything, 1 when it does not, 2 on a usage error or an unreadable file.
+exec node "$(dirname "$0")/lib/brief-check.mjs" "$@"
