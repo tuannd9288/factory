@@ -98,6 +98,20 @@ describe('the skill follows the Agent Skills specification', () => {
       assert.ok(rows.some((row) => row.startsWith('|') && row.includes(line)), `a row for ${line}`);
     }
   });
+  test('the reference has a row for each line of the base checks: a gitignored tracked file, a gate_prepare that changed tracked files', () => {
+    const rows = text('references/refusals.md').split('\n').filter((row) => row.startsWith('|'));
+    const code = readFileSync(join(MODULE, 'kit/scripts/lib/deletion.mjs'), 'utf8');
+    for (const line of ['is tracked but gitignored, so knip would not read what it imports', "the base's gate_prepare changed tracked files"]) {
+      assert.ok(code.includes(line), `the code prints ${line}`);
+      assert.ok(rows.some((row) => row.includes(line)), `a row for ${line}`);
+    }
+  });
+  test('SKILL.md says exactly what item 4 checks and no longer claims that no tier-1 change can loosen knip', () => {
+    assert.doesNotMatch(body, /no tier-1 change\s+can\s+loosen/);
+    assert.match(body, /no tracked file is gitignored at the base/);
+    assert.match(body, /`gate_prepare` changes no tracked file/);
+    assert.match(body, /plugin configs knip runs are not covered/);
+  });
   test('SKILL.md says what check 2 is, a fixed-string search, and that a package.json "knip" key is refused', () => {
     assert.match(body, /fixed-string `git grep`/);
     assert.match(body, /not a full reference check/);

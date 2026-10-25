@@ -30,7 +30,15 @@ export function moduleRepo(extra = {}) {
   mkdirSync(bin);
   writeFileSync(
     join(bin, 'npx'),
-    ['#!/bin/sh', 'echo "pwd=$(pwd -P) head=$(git rev-parse HEAD) prepared=$([ -f .prepared ] && echo yes || echo no) args=$*" >>"$FAKE_NPX_LOG"', 'cat "$FAKE_KNIP_REPORT"', 'exit "${FAKE_KNIP_EXIT:-1}"', ''].join('\n'),
+    [
+      '#!/bin/sh',
+      // Where it runs, whether that folder is empty, and the folder knip is told to look at (--directory), with its commit and mark.
+      'dir=; prev=; for a in "$@"; do [ "$prev" = --directory ] && dir=$a; prev=$a; done',
+      'echo "pwd=$(pwd -P) empty=$([ -z "$(ls -A)" ] && echo yes || echo no) dir=$dir head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) prepared=$([ -f "$dir/.prepared" ] && echo yes || echo no) args=$*" >>"$FAKE_NPX_LOG"',
+      'cat "$FAKE_KNIP_REPORT"',
+      'exit "${FAKE_KNIP_EXIT:-1}"',
+      '',
+    ].join('\n'),
   );
   chmodSync(join(bin, 'npx'), 0o755);
   const log = join(r.dir, 'npx.log');

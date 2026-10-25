@@ -30,9 +30,25 @@ describe('deletion-proof: whole files knip listed', () => {
     const out = r.attempt({ head: { 'src/old.js': null }, knip: report(fl('src/old.js')) });
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, PASSED);
-    assert.match(log(), new RegExp(`^pwd=\\S+ head=${out.base} prepared=yes args=--yes knip@6\\.42\\.1 --reporter json$`, 'm'));
+    const line = log().trim();
     assert.equal(log().split('\n').filter(Boolean).length, 1);
-    assert.notEqual(log().match(/^pwd=(\S+)/)[1], realpathSync(r.repo));
+    const m = /^pwd=(\S+) empty=(\w+) dir=(\S+) head=(\w+) prepared=(\w+) args=(.*)$/.exec(line);
+    assert.ok(m, line);
+    assert.equal(m[4], out.base, 'knip is pointed at a checkout of the base');
+    assert.equal(m[5], 'yes', 'after gate_prepare');
+    assert.equal(m[6], `--yes knip@6.42.1 --reporter json --directory ${m[3]}`);
+    assert.notEqual(m[3], realpathSync(r.repo));
+  });
+  test('runs npx from a new empty folder, not from the base checkout (a project .npmrc there would choose what runs), and removes both', () => {
+    rmSync(r.log, { force: true });
+    const out = r.attempt({ base: { '.npmrc': 'registry=http://127.0.0.1:1/\n' }, head: { 'src/old.js': null }, knip: report(fl('src/old.js')) });
+    assert.equal(out.code, 0, out.out);
+    const m = /^pwd=(\S+) empty=(\w+) dir=(\S+)/.exec(log());
+    assert.ok(m, log());
+    assert.equal(m[2], 'yes', 'the folder npx ran in was empty');
+    assert.notEqual(m[1], m[3], 'and is not the checkout');
+    assert.ok(!existsSync(m[1]), 'the empty folder is removed');
+    assert.ok(!existsSync(m[3]), 'so is the checkout');
   });
   test('passes several files, .jsx and .tsx among them: the gate reads no code', () => {
     const out = r.attempt({ head: { 'src/old.js': null, 'src/view.jsx': null, 'src/typed.tsx': null }, knip: report(fl('src/old.js'), fl('src/view.jsx'), fl('src/typed.tsx')) });
@@ -266,5 +282,37 @@ describe('deletion-proof: the composite of rounds 1 and 3 through package.json',
     commit(r.repo, { 'src/old.js': null }, 'delete old.js');
     const out = script(r.repo, 'red-check', ['--base', 'origin/main'], r.env(report(fl('src/old.js'))));
     refused(out, /config: the knip config is in package\.json; move it to knip\.json for a machine proof/);
+  });
+});
+
+describe('deletion-proof: what knip would not see of the base', () => {
+  let r;
+  before(() => (r = moduleRepo({ 'src/index.js': "import './app.js';\n", 'src/app.js': "import { u } from './used';\nconsole.log(u);\n", 'src/used.js': 'export const u = 1;\n', 'src/old.js': 'export const old = 1;\n' })));
+  after(() => r.cleanup());
+  const config = (fn) => readFileSync(join(r.repo, '.gate/config.sh'), 'utf8') + `\n${fn}\n`;
+  const listed = report(fl('src/used.js'));
+  const GITIGNORED = /config: src\/app\.js is tracked but gitignored, so knip would not read what it imports/;
+
+  test('refuses a tracked file a nested .gitignore names: knip would not follow its imports (B2)', () => {
+    refused(r.attempt({ base: { 'src/.gitignore': 'app.js\n' }, head: { 'src/used.js': null }, knip: listed }), GITIGNORED);
+  });
+  test('refuses it for a root .gitignore too, and for one that gate_prepare writes', () => {
+    refused(r.attempt({ base: { '.gitignore': 'src/app.js\n' }, head: { 'src/used.js': null }, knip: listed }), GITIGNORED);
+    refused(r.attempt({ base: { '.gate/config.sh': config('gate_prepare() { echo app.js >"$1/src/.gitignore"; }') }, head: { 'src/used.js': null }, knip: listed }), GITIGNORED);
+  });
+  test('a .gitignore that ignores only untracked files, node_modules/ and dist/, refuses nothing', () => {
+    const out = r.attempt({ base: { '.gitignore': 'node_modules/\ndist/\n.prepared\n' }, head: { 'src/used.js': null }, knip: listed });
+    assert.equal(out.code, 0, out.out);
+  });
+
+  const CHANGED = /check 3: the base's gate_prepare changed tracked files, so knip would not judge the base/;
+  test('refuses a gate_prepare that edits, deletes or stages a tracked file', () => {
+    for (const fn of ['echo "// x" >>"$1/src/old.js"', 'rm "$1/src/old.js"', 'echo "// x" >>"$1/src/old.js"; git -C "$1" add src/old.js']) {
+      refused(r.attempt({ base: { '.gate/config.sh': config(`gate_prepare() { ${fn}; }`) }, head: { 'src/used.js': null }, knip: listed }), CHANGED);
+    }
+  });
+  test('a gate_prepare that only adds untracked files, as npm ci adds node_modules/, passes', () => {
+    const out = r.attempt({ base: { '.gate/config.sh': config('gate_prepare() { mkdir -p "$1/node_modules/x"; echo 1 >"$1/node_modules/x/index.js"; touch "$1/.prepared"; }') }, head: { 'src/used.js': null }, knip: listed });
+    assert.equal(out.code, 0, out.out);
   });
 });
