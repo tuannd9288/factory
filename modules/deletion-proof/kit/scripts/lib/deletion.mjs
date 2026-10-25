@@ -91,11 +91,17 @@ function protectedAt(base) {
 function checkConfig(base) {
   // knip 6.42.1 merges package.json's "knip" key with the config file (create-options.js:35), so a key there loosens what
   // knip reports whatever the file says, and package.json is a manifest (tier 2), not a protected path.
-  if (present(base, 'package.json')) {
-    let manifest = null;
+  // knip reads it as loadJSON does (util/fs.js): a leading BOM stripped, JSON.parse and then JSONC, through the filesystem, so
+  // a link is followed; the gate reads the same text through the same parser, or refuses.
+  const manifestMode = modeOf(base, 'package.json');
+  if (manifestMode !== null) {
+    if (manifestMode !== '100644') throw new Problem([`config: package.json is not a regular file (mode ${manifestMode}), so no deletion can be proved unused`]);
+    let manifest;
     try {
-      manifest = JSON.parse(git('show', `${base}:package.json`));
-    } catch {}
+      manifest = parseJsonc(git('show', `${base}:package.json`).replace(/^﻿/, ''));
+    } catch {
+      throw new Problem(['config: package.json could not be read as JSON, so no deletion can be proved unused']);
+    }
     if (isObject(manifest) && 'knip' in manifest) throw new Problem(['config: the knip config is in package.json; move it to knip.json for a machine proof']);
   }
   const found = JSON_CONFIGS.filter((file) => present(base, file));
