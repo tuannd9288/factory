@@ -416,6 +416,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
   const judged = rows.filter((r) => r.firstPass !== null);
   const costed = rows.filter((r) => r.cost !== null);
   const rounds = rows.filter((r) => r.rounds > 0);
+  const reverts = revertCount(rows, { since, until });
   const lines = [
     `# ${digestTitle(since, until)}`,
     '',
@@ -433,6 +434,8 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     '## Rates (counts, rates, 95% Wilson confidence intervals)',
     '',
     `- Tasks merged: ${rate(landed.length, n)}`,
+    `- PRs reverted: ${rate(reverts.k, reverts.n)}; reverts merged in the period: ${reverts.m}`,
+    ...(reverts.k ? [`- Reverted PRs: ${reverts.reverted.map((p) => `${p.repo}#${p.number}`).join(', ')}`] : []),
     `- Merged tasks the Human had to touch: ${rate(landed.filter((r) => r.touched).length, landed.length)}`,
     `- Green at the first commit the gate judged: ${rate(judged.filter((r) => r.firstPass).length, judged.length)}`,
     `- Used No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
@@ -482,6 +485,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     'Task: an issue labelled task, from the label to the close, with every PR that closes it; a PR that closes no task is a task of its own, from its opening.',
     'API cost: the tokens in the repository\'s Claude Code profile, by the PR\'s branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
     'Cash: the Claude subscription, paid monthly, not split by task; the verifier\'s Codex subscription is the same. The ledger sees no other cash.',
+    'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N", or, with no such line, whose title is Revert "<title of a merged PR>"; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
     'Human touched: the Human reviewed it, the label needs-human, or a merge not made by auto-merge.',
   );
   return `${lines.join('\n')}\n`;
