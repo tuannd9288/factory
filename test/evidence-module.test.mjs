@@ -209,4 +209,10 @@ describe('bin/kit-evidence with modules', () => {
       assert.match(out.out, /extra: scripts\/lib\/demo\.mjs \(not a kit file\)/);
     });
   });
+
+  test('fails, never swallows, a base that names a module the factory commit no longer has', () =>
+    given({ on: [], had: { '.gate/modules': 'gone\n' }, laid: { '.gate/modules': null } }, (out) => {
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /the base's \.gate\/modules: no module gone in [0-9a-f]+\/modules; there are: demo, other/);
+    }));
 });

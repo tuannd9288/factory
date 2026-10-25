@@ -5,7 +5,7 @@ import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { git, run } from '../../../test/helpers.mjs';
+import { commit, git, run, script } from '../../../test/helpers.mjs';
 import { PREPARE, entry, fl, moduleRepo, report } from './lib.mjs';
 
 const PASSED = /^red-check: passed as a pure deletion: knip listed every deleted file at the base, and nothing names them$/m;
@@ -109,10 +109,17 @@ describe('deletion-proof: the knip config', () => {
     }
     refused(withConfig({ 'knip.json': null, 'package.json': '{ "name": "app", "private": true, "type": "module", "knip": { "entry": [] } }\n' }), /config: the knip config is in package\.json; move it to knip\.json for a machine proof/);
   });
-  test('a "knip" key nested elsewhere in package.json is no config; knip.json wins over a package.json key', () => {
+  test('a "knip" key nested elsewhere in package.json is no config', () => {
     refused(withConfig({ 'knip.json': null, 'package.json': '{ "name": "app", "private": true, "type": "module", "config": { "knip": {} } }\n' }), /config: knip has no config/);
-    const out = withConfig({ 'package.json': '{ "name": "app", "private": true, "type": "module", "knip": { "entry": [] } }\n' });
-    assert.equal(out.code, 0, out.out);
+  });
+  test('a package.json "knip" key beside a protected knip.json is refused: knip 6.42.1 merges the two (create-options.js:35)', () => {
+    for (const key of [{ entry: [] }, { next: false }, { preprocessor: './tools/knip-pre.js' }]) {
+      refused(withConfig({ 'package.json': JSON.stringify({ name: 'app', private: true, type: 'module', knip: key }) }), /config: the knip config is in package\.json; move it to knip\.json for a machine proof/);
+    }
+  });
+  test('a knip.json that is a symlink is refused: the link is protected, what it points at is not', () => {
+    const out = r.attempt({ base: { '{}': '{ "preprocessor": "./tools/pre.js" }\n' }, link: ['{}', 'knip.json'], head: { 'src/old.js': null }, knip: listed });
+    refused(out, /config: knip\.json is not a regular file \(mode 120000\), so no deletion can be proved unused/);
   });
   test('refuses a key that can load code, and a key the gate does not know, at the root and in a workspace', () => {
     for (const [config, key] of [
@@ -210,5 +217,29 @@ describe('deletion-proof: errors are errors', () => {
     assert.ok(!existsSync(join(r.repo, '.prepared')));
     assert.equal(git(r.repo, 'worktree', 'list').split('\n').length, 1, 'no worktree is left behind');
     assert.match(PREPARE, /gate_prepare/);
+  });
+});
+
+describe('deletion-proof: the composite of rounds 1 and 3 through package.json', () => {
+  let r;
+  before(() => (r = moduleRepo({ 'src/old.js': 'export const old = 1;\n', 'src/use.js': "import { old as o } from './old';\nexport const v = o;\n", 'tools/knip-pre.js': 'export default (o) => o;\n' })));
+  after(() => r.cleanup());
+
+  test('step 1 is tier 2, step 2 tier 1, and step 3, the deletion of a file still imported, is refused', () => {
+    const land = (name, files) => {
+      git(r.repo, 'switch', '-q', '-C', name, 'main');
+      commit(r.repo, files, name);
+      const tier = run(r.repo, join(r.repo, 'scripts/tier'), ['--base', 'main']);
+      git(r.repo, 'switch', '-q', 'main');
+      git(r.repo, 'merge', '-q', '--ff-only', name);
+      git(r.repo, 'push', '-q', 'origin', 'main');
+      return tier.out;
+    };
+    assert.match(land('step1', { 'package.json': '{ "name": "app", "private": true, "type": "module", "knip": { "preprocessor": "./tools/knip-pre.js" } }\n' }), /^tier 2/);
+    assert.match(land('step2', { 'tools/knip-pre.js': 'export default (o) => { for (const i of o.issues ?? []) i.files = [{ name: i.file }]; return o; };\n' }), /^tier 1/);
+    git(r.repo, 'switch', '-q', '-C', 'step3', 'origin/main');
+    commit(r.repo, { 'src/old.js': null }, 'delete old.js');
+    const out = script(r.repo, 'red-check', ['--base', 'origin/main'], r.env(report(fl('src/old.js'))));
+    refused(out, /config: the knip config is in package\.json; move it to knip\.json for a machine proof/);
   });
 });

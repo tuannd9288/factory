@@ -41,10 +41,16 @@ export function moduleRepo(extra = {}) {
   let n = 0;
   /** Commits `base` and then `head` on a branch off main and runs red-check against the base, with the fake knip printing
    * `knip`. `body` is the pull request body. */
-  const attempt = ({ base = {}, head = {}, knip, body, symlink, more = {}, args = [] }) => {
+  const attempt = ({ base = {}, head = {}, knip, body, symlink, link, more = {}, args = [] }) => {
     n += 1;
     git(r.repo, 'switch', '-q', '-C', `case${n}`, 'origin/main');
     commit(r.repo, base, `base ${n}`);
+    if (link) {
+      // A link in the base itself: [target, path].
+      git(r.repo, 'rm', '-q', '-f', '--ignore-unmatch', link[1]);
+      symlinkSync(link[0], join(r.repo, link[1]));
+      commit(r.repo, {}, `base link ${n}`);
+    }
     const sha = git(r.repo, 'rev-parse', 'HEAD');
     if (symlink) {
       git(r.repo, 'rm', '-q', symlink[1]);

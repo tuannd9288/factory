@@ -170,4 +170,14 @@ describe('bin/kit-update --module / --no-module', () => {
       w.cleanup();
     }
   });
+
+  test('stops, never carries on, when the base names a module the factory lacks and --no-module would turn it off', () => {
+    const w = world({ kit: DEMO, executable: EXEC });
+    try {
+      w.repoCommit({ '.gate/modules': 'gone\n' });
+      refused(w, w.update(['app', '--no-pr', '--no-module', 'gone']), /the base's \.gate\/modules: no module gone.*there are: .*demo/);
+    } finally {
+      w.cleanup();
+    }
+  });
 });
