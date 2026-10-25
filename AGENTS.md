@@ -49,10 +49,11 @@ Everything else that can be undone, agents decide and report after.
 
 ## Layers, sublayers and contracts
 
-The Human's map of 2026-10-25: five layers, 17 sublayers, nine contracts. "Layer" and "sublayer" come from IEEE 802.3,
-§4.1.1, as Colly quoted it (the clause number is not confirmed against the standard):
+The Human's map of 2026-10-25: five layers, 17 sublayers, nine contracts. "Layer" and
+"sublayer" come from IEEE 802.3, 4.1.1 [IEEE], read in the draft amendment P802.3as/D0.1 (March 2005):
 "The LLC sublayer and the MAC sublayer together are intended to have the same function as that described in the OSI model for the Data Link Layer alone."
-Each name carries its source key from the map's `report.md`; every issue and proposal names its sublayer.
+Each name carries a source key; the keys, with their URLs and how fully each was read, are in
+https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every issue and proposal names its sublayer.
 
 - **Layer 0 Substrate** [SH]: what every agent runs on.
 - **Layer 1 Orchestration** [SD3, A1]: how work is given out and watched.
@@ -68,7 +69,8 @@ Each name carries its source key from the map's `report.md`; every issue and pro
 - **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger.
 - **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
 - **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, the ledger's canary.
-- **1e Surfaces** [GH2, #68]: the screens the Human steers agents from (Paseo, Rex, Ghostty, Herdr, Remote Control).
+- **1e Surfaces** [GH2, #68]: the Human's own screens: the Herdr TUI, Paseo's app, Rex on the MacBook (K1 = C, pending his
+  check) and Remote Control (T3, pending). Herdr's server and Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository.
 - **2c Verification** [SP3]: what a worker runs before the pull request: `scripts/verify`, `red-check`.
@@ -86,23 +88,26 @@ here). A contract is named by its code. Its sentence is a quote from its source,
 - **H2** [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
   Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-contract.md:36`.
 - **H3** [A8]: "An approval covers one specific commit."
-  Checked by: `kit/.gate/ruleset.json:24`, `kit/scripts/lib/approval.mjs:44`, `kit/AGENTS.md:96`.
+  Checked by: `kit/scripts/lib/approval.mjs:1-10`, `kit/AGENTS.md:96`.
 - **H4** [OA1]: "Repository-local, versioned artifacts (e.g., code, markdown, schemas, executable plans) are all it can see."
-  Checked by: `scripts/verify:9-16`, `kit/AGENTS.md:101`; `AGENTS.md` is a tier-3 path (`kit/.gate/protected`).
+  Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `scripts/verify:9-16` (the 150-line cap).
 - **H5** [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
   Checked by: `probes/pack-contract.md`, `probes/pack-probe.mjs`, `test/pack.test.mjs`.
 - **H6** [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
-  Checked by: `kit/.claude/settings.json:3-28`, `kit/AGENTS.md:97-98`.
+  Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:22`.
 - **H7** [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
   Checked by: none yet (#62 and #63 do part of it).
 - **H8** [F1]: "When patterns cross a threshold, it files Linear tickets automatically. Droid picks up those tickets,
-  implements fixes, and reviews its own PRs." Checked by: `.github/CODEOWNERS:1`, `probes/score.mjs`, `probes/plan.md`.
+  implements fixes, and reviews its own PRs." Checked by: `.github/CODEOWNERS:4`, `probes/score.mjs`, `probes/plan.md`.
 - **H9** [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer
-  servers safely." A surface is only a window onto the factory (no verbatim source yet): with every surface stopped,
-  the merge queue and the pack probe still run. Five rules (#68, 2026-10-25); only rule 4 is on record here, #76: deny
-  `herdr agent send-keys`, `herdr pane send-keys`, `rex send` and `rex send-key` in the kit's deny rules, not yet in
-  `kit/.claude/settings.json`. Checked by: `bin/factory-queue` and `probes/pack-probe.mjs`, run by hand with every
-  surface stopped; no automated check stops the surfaces yet.
+  servers safely." Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the factory's unattended
+  sessions; 0d does; (2) the record of a task stays on GitHub (1b) and in 0d's panes, and a surface keeps no sole copy;
+  (3) the factory's own code in this layer reads no credential (#58 K2; this binds the factory's code, not the Human's
+  own tools, and K3 keeps Paseo's usage plugin as it is); (4) only a person answers a permission prompt, so agents do not
+  type into another pane: `herdr agent send-keys`, `herdr pane send-keys`, `rex send` and `rex send-key` are denied,
+  which is #76 and not yet in the kit's deny rules; (5) with every surface stopped, the factory still runs.
+  Checked by: none yet. The check will be a test that stops every surface process and shows that a `bin/factory-queue`
+  sweep (the merge queue) and a `probes/pack-probe.mjs` run (the pack probe) still pass.
 
 ## This root
 
