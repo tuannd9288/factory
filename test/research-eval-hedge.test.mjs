@@ -9,7 +9,7 @@ const KEY = {
   id: 'demo',
   facts: [
     { id: 'F1', all: ['11\\.24\\.2'], cite: 'package\\.json' },
-    { id: 'F2', all: ['no account.{0,30}licen[cs]e'], cite: 'llms', orIsAnswer: true },
+    { id: 'F2', all: ['no account.{0,30}licen[cs]e'], cite: 'llms', orIsAnswer: 'account or licen[cs]e' },
     { id: 'F3', all: ['\\b112\\b'], cite: 'plugins' },
     { id: 'F4', all: ['unambiguous'], cite: 'ast-nodes' },
   ],
