@@ -13,7 +13,8 @@ What the work is for, in one or two sentences, and what is not asked of the sess
 ## The Human's words and their source
 
 Every sentence the Human said that bears on the work, copied verbatim, each in double quotes, never translated or
-reworded: it keeps the language the Human wrote it in. Give each its source: the page or message, and its date. Keep
+reworded: it keeps the language the Human wrote it in. Copy every quote only from raw fetched files (the issue's body
+and comments as fetched, Colly's message as saved), never from a summary of them or from memory. Give each its source: the page or message, and its date. Keep
 every name of a section and every figure exactly as Colly relayed them (the script checks the quotes; review holds the
 figures). A permission and its reason go together.
 
