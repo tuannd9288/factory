@@ -1,7 +1,7 @@
 // bin/seat (#91): the one command that starts an unattended `claude -p` session. This file holds the role presets: the
 // arguments each role gives claude. They come from the hand-written launchers of ~/factory-runs, role by role (see
 // PRESETS). Nothing here reads a credential.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
@@ -103,21 +103,47 @@ function runFiles(runs, ext) {
 
 /** The seat a run's file belongs to: its .seat file, else fallback (a session from before there were seats ran on seat 2). */
 const seatOf = (file, fallback = null) => {
-  const s = file.replace(/\.[^./]*$/, '.seat');
-  return existsSync(s) ? readFileSync(s, 'utf8').trim() : fallback;
-};
-
-const alive = (pid) => {
   try {
-    process.kill(pid, 0);
-    return true;
+    return readFileSync(file.replace(/\.[^./]*$/, '.seat'), 'utf8').trim();
   } catch (e) {
-    return e.code === 'EPERM';
+    if (e.code === 'ENOENT') return fallback; // never there, or a start backing off removed its claim meanwhile
+    throw e;
   }
 };
 
+// The uid and start time of a process, from ps (the kernel's own record, which no launcher can change; argv it can). lstart has
+// one-second precision. ps is by absolute path, since a test's PATH holds no /bin. A failed ps, or no process, is null.
+function processInfo(pid) {
+  for (const ps of ['/bin/ps', '/usr/bin/ps']) {
+    if (!existsSync(ps)) continue;
+    try {
+      const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(execFileSync(ps, ['-o', 'uid=,lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' },stdio: ['ignore', 'pipe', 'ignore'] }));
+      const started = m ? Date.parse(m[2]) : NaN;
+      return Number.isNaN(started) ? null : { uid: Number(m[1]), started };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Whether pid is a live session that wrote a file at fileMs: a process of this user (never pid 1, nor another user's), that
+ * started no later than the file was written, give or take a second; a later start is a pid the system gave again. */
+const alive = (pid, fileMs) => {
+  const p = processInfo(pid);
+  return p !== null && p.uid === process.getuid() && p.started <= fileMs + 1000;
+};
+
 // An empty or non-numeric pid file is no live session (process.kill(0, 0) would succeed for it).
-const filePidAlive = (file) => existsSync(file) && /^[1-9][0-9]*$/.test(readFileSync(file, 'utf8').trim()) && alive(Number(readFileSync(file, 'utf8').trim()));
+// A file that goes away meanwhile (a start backing off removes its claim) is no live session either.
+function filePidAlive(file) {
+  try {
+    const text = readFileSync(file, 'utf8').trim();
+    return /^[1-9][0-9]*$/.test(text) && alive(Number(text), statSync(file).mtimeMs);
+  } catch {
+    return false;
+  }
+}
 
 /** Whether a run is live: its pid file's process (the supervisor, or the claude of an old launcher) or the session the
  * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
@@ -151,16 +177,21 @@ export function seatEvent(runs, seat) {
 export const seatUse = (runs, seat) => seatEvent(runs, seat)?.info.unifiedWindows.seven_day.utilization ?? null;
 
 /** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is under its cap and its
- * stop. reasons say why each seat that was tried was passed over; with seat null, none was free. */
-export function chooseSeat({ runs, resumeSeat = null, seats = ORDER }) {
+ * stop. reasons say why each seat that was tried was passed over; with seat null, none was free. With claim, a function that
+ * writes this start's own pid file for a seat and returns the function that removes it, the count runs after the claim and
+ * includes it: two starts at the same moment cannot both pass a seat at its cap minus one, since each counts the other's
+ * claim (both may back off). The claim of the seat chosen stays. */
+export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = null }) {
   if (resumeSeat !== null && !Object.hasOwn(SEATS, resumeSeat)) throw new Error(`seat ${resumeSeat} does not exist; the seats are 1 and 2`);
   const reasons = [];
   for (const seat of resumeSeat === null ? seats : [resumeSeat]) {
+    const unclaim = claim ? claim(seat) : () => {};
     const n = liveCount(runs, seat);
     const use = seatUse(runs, seat);
-    if (n >= SEATS[seat].cap) reasons.push(`seat ${seat}: ${n} live sessions, at most ${SEATS[seat].cap}`);
+    if (n > SEATS[seat].cap - (claim ? 0 : 1)) reasons.push(`seat ${seat}: ${n - (claim ? 1 : 0)} live sessions, at most ${SEATS[seat].cap}`);
     else if (use !== null && !(Number(use) < Number(SEATS[seat].stop))) reasons.push(`seat ${seat}: seven-day use ${use}, stops at ${SEATS[seat].stop}`);
     else return { seat, reasons };
+    unclaim();
   }
   return { seat: null, reasons };
 }
@@ -229,6 +260,9 @@ export function launch(argv, env = process.env) {
   for (const [what, path] of [['run folder', run], ['work folder', work]]) if (!existsSync(path) || !statSync(path).isDirectory()) throw new Refused(`the ${what} ${path} is not a folder`);
   if (!existsSync(brief) || !statSync(brief).isFile()) throw new Refused(`the brief ${brief} is not a file`);
   const tag = o.tag ?? (o.resume ? basename(brief, extname(brief)) : o.role);
+  // run-<tag>.claim.pid is the claim of a start of <tag>, so a tag of that shape, in any case on a disk that ignores case, would
+  // take another's claim files as its run files.
+  if (/\.claim$/i.test(tag)) throw new Refused(`the tag ${tag} ends in .claim, the name of the claim files of tag ${tag.slice(0, -'.claim'.length)}`);
   // The tag is claimed with a lock folder (mkdir is atomic) for as long as the start takes, so two starts of one tag cannot both pass the check.
   const release = claimTag(join(run, `run-${tag}.lock`), tag);
   try {
@@ -258,8 +292,31 @@ function claimTag(lock, tag) {
 function startSession({ o, env, home, runs, profiles, state, run, work, brief, tag }) {
   const pidFile = join(run, `run-${tag}.pid`);
   if (runLive(pidFile)) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
-  const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats });
-  if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
+  // The claim: this start's own pid with its seat, in run-<tag>.claim.pid and .claim.seat, written before the count and
+  // removed if it backs off. They are files of their own, since run-<tag>.seat also gives the earlier run's log to a seat
+  // (seatEvent) and a claim must not move it. Until the supervisor exists the claim holds bin/seat's pid, which counts as
+  // live (this user's, started before the file).
+  const claimPid = join(run, `run-${tag}.claim.pid`);
+  const claimSeat = join(run, `run-${tag}.claim.seat`);
+  const unclaim = () => {
+    rmSync(claimPid, { force: true });
+    rmSync(claimSeat, { force: true });
+  };
+  const claim = (seat) => {
+    writeFileSync(claimSeat, `${seat}\n`);
+    writeFileSync(claimPid, `${process.pid}\n`);
+    return unclaim;
+  };
+  try {
+    const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim });
+    if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
+    return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat });
+  } finally {
+    unclaim(); // after the run's own .seat and .pid are written, so the count never drops; on any failure, nothing is left
+  }
+}
+
+function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat }) {
   const tokenPath = join(profiles, 'seats/1/oauth-token');
   if (seat === 1) readToken(tokenPath); // refuses now; the supervisor reads it again, just before it starts claude
 
@@ -276,8 +333,9 @@ function startSession({ o, env, home, runs, profiles, state, run, work, brief, t
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
   if (!sup.pid) throw new Refused(`could not start the supervisor of run-${tag}`);
   sup.unref();
-  writeFileSync(pidFile, `${sup.pid}\n`);
+  // The seat first: a pid file with no .seat file would count on seat 2.
   writeFileSync(join(run, `run-${tag}.seat`), `${seat}\n`);
+  writeFileSync(pidFile, `${sup.pid}\n`);
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
 

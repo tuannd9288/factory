@@ -171,6 +171,27 @@ test('a tag that is already running is refused', () => world((w) => {
   assert.match(r.out + r.err, /run-worker is already running/);
 }));
 
+test('a tag that ends in .claim is refused, as --tag or as the name of a resumed brief', () => world((w) => {
+  // run-x.claim.pid is the claim of tag x (#117): a session of tag x.claim would be removed from the count by a start of x.
+  const r = w.start('worker', ['--tag', 'x.claim']);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /x\.claim/);
+  const brief = join(w.run, 'x.claim.md');
+  writeFileSync(brief, 'brief\n');
+  const s = w.seat(['worker', brief, '--run', w.run, '--work', w.work, '--resume', 'sid-9', '--seat', '2']);
+  assert.equal(s.code, 2);
+  assert.match(s.err, /x\.claim/);
+  assert.equal(existsSync(join(w.run, 'run-x.claim.pid')), false);
+}));
+
+test('a tag that ends in .claim in any case is refused, since the run folder\'s disk may ignore case', () => world((w) => {
+  for (const tag of ['x.CLAIM', 'x.Claim']) {
+    const r = w.start('worker', ['--tag', tag]);
+    assert.equal(r.code, 2, tag);
+    assert.match(r.err, /ends in \.claim/i, tag);
+  }
+}));
+
 test('the usage errors exit 2: an unknown role, no --run, no --work, a missing brief', () => world((w) => {
   assert.match(w.seat(['builder', join(w.run, 'BRIEF.md'), '--run', w.run, '--work', w.work]).err, /unknown role builder/);
   assert.equal(w.seat(['worker', join(w.run, 'BRIEF.md'), '--work', w.work]).code, 2);
