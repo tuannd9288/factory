@@ -18,7 +18,7 @@ const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 // kit/AGENTS.md composed with packs/pstack, and kit/.claude/settings.json as it was at factory@8ca0e7a, before the
 // split: the core plus packs/pstack must build them byte for byte, or a repository on pstack would see a different
 // kit. The AGENTS.md hash moves with any change to the core's or the pack's text.
-const TODAY_AGENTS = '2d494a05f466b777588a86ef45208ebe0f8cc7527fefe4fe44c9bd0db8099425';
+const TODAY_AGENTS = '68928aa788543e0abf8c88dc118c2d088e01610709c9d6373fbbcc357ab7787c';
 const TODAY_SETTINGS = '4feee66d1a5a26fe2db0213f00c254e13e0382a9390d96f42f1b72653f53171f';
 // The sha256 of JSON.stringify(deny) for the kit's deny list at 8ca0e7a: the rules stay in the core, unchanged.
 const TODAY_DENY = '21e727537fca50e0e30cb774e2c072d42cf17b9755c291617875d02b585fae5e';

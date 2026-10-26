@@ -18,9 +18,10 @@ This repository is in the factory (`tuannd9288/factory`). Its gate lives here, i
 | `scripts/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
 | `scripts/prove-check --all` | `prove-check: 7 checks fail on their fixtures` |
 | `scripts/live-verify <pr>` | `live-verify: PASS on #12 (head 1a2b3c4, patch 5d6e7f8)`, posted on the pull request |
+| `scripts/ship` | `ship: opened #12 <url>`; run again: `ship: armed #12: a live PASS covers HEAD 1a2b3c4` |
 
-Run `scripts/setup` once per clone. Run `scripts/verify` and `scripts/red-check --base origin/main` before every
-push; CI runs `main`'s copies of both on your change, as the one check `verify`.
+Run `scripts/setup` once per clone. Run `scripts/verify` and `scripts/red-check --base origin/main` before opening
+the pull request; push as often as you like. CI runs `main`'s copies of both on your change, as the one check `verify`.
 
 ## How a change lands
 
@@ -33,12 +34,12 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    module: import the module (`import * as m from`), not the missing name. A new file: load it inside the
    test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR
    body: `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
-4. Once `scripts/verify` and `red-check` pass locally, open the pull request with the template, in English,
-   and run `scripts/live-verify <pr>`. On PASS or PASS+NOTES, and when its base is `main`, enable auto-merge
-   (`gh pr merge --auto --merge`). FAIL: fix forward with a red test, then run it again. BLOCKED: stop, and put
-   the reason and your recommended answer in the pull request. Before pushing a new patch to an armed pull
-   request, disarm it (`gh pr merge --disable-auto`); arm it again once `scripts/live-verify --covered <pr>`
-   passes. Then release the branch and move on; do not wait for CI.
+4. Push, then run `scripts/ship` (`--body-file`: the template in English, `Closes #<issue>` filled in), and again until it
+   says `armed` or stops. Each run takes the next step: opens the pull request, runs `scripts/live-verify <pr>`,
+   arms auto-merge. It refuses to open unless origin holds HEAD and a full `verify` and `red-check` passed on it, to arm on FAIL or
+   a base other than `main`, and stops on `needs-human`, or on a tier 3 it armed that waits for the Human. FAIL: fix forward with a red
+   test, push, run it again. BLOCKED: put the reason and your recommended answer in the pull request. It disarms an
+   armed pull request whose HEAD is past its verdict; push, then run it again. Then release the branch; do not wait for CI.
 5. The gate decides, from `main`'s scripts. Every pull request needs four checks green on its head commit:
    `verify` (`gate.yml`: main's verify, rules and red-check on your code), then `review` and `verdict`
    (`gate-trusted.yml`: the reviewer reads your change as data once `verify` passed; `verdict` passes at once on
@@ -90,8 +91,8 @@ answer; a reversible question never blocks the work.
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
 | Commit subject present, at most 72 characters, never `wip`, a placeholder, `fixup!` or `squash!` | `verify` (`subjects`, every commit of the change); `.githooks/commit-msg` is the local copy |
 | Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
-| Auto-merge only on a base of `main`; a pull request opens only after a local pass; a waiting `tier` or `needs-human` stops your pushes | prose |
-| Auto-merge armed only while a live PASS or PASS+NOTES covers the head or its patch; disarmed before a new patch is pushed | `scripts/live-verify --covered`; the ledger lists each merged pull request no verdict covered |
+| Auto-merge only on a base of `main`; a pull request opens only after a local pass; a tier 3 is armed, then stops until the Human approves; `needs-human` stops before arming | `scripts/ship`, on the stamps a full `verify` and `red-check` leave; a push is never refused |
+| Auto-merge armed only while a live PASS or PASS+NOTES covers the head or its patch; disarmed on the next `ship` once a patch moved past its verdict | `scripts/ship`, on `scripts/live-verify --covered`; the ledger lists each merged pull request no verdict covered |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
 | Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
 | No rewrite of a pushed commit (rebase, amend) and no force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`), and `.claude/settings.json` deny rules |
@@ -104,7 +105,8 @@ A rule with no enforcer goes here as `prose` and gets one, or is deleted, within
 ## Hand-in rule exceptions
 
 A block finding that is wrong for one line is allowed on that line only, in a comment:
-`gate-allow <rule-id>: <why, 20 characters or more>`. The reviewer sees the line in the diff and judges it.
+`gate-allow <rule-id>: <why, 20 characters or more>`; `scripts/rules` prints that line, with the id, under a block.
+The reviewer sees the line in the diff and judges it.
 A deleted test file or lost assertions need one added line naming the test kept in their place and a break that
 turns it red: `gate-allow test-deleted: <path>; kept: <test file> "<test name>"; red: <source file> "<from>" -> "<to>"`
 (or `assertions-removed`; JSON strings). `red-check` needs the kept test red under the break and green without it,
