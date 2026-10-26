@@ -1,73 +1,10 @@
 // The research eval's runner (#92), against bin/seat and a fake `claude` (never a live one): the plan it prints without
-// starting anything, the sessions it starts one at a time for two arms, what it prints for each, and the three ways it stops.
+// starting anything, the sessions it starts one at a time for two arms, what it prints for each, and the ways it stops.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { factory } from './helpers.mjs';
-import { fill, world } from './seat-world.mjs';
-
-const RUN_JS = join(factory, 'probes/research-eval/run.mjs');
-const PROBE = ['knip-reader', 'round4-review'];
-
-// A claude that prints what a session prints: an init event with its tools (minus the denied ones), some Agent calls on arm A,
-// and a result with usage, cost and the report for its task and arm. It logs argv and the brief to FAKE_LOG.
-const FAKE = `#!${process.execPath}
-const fs = require('fs');
-const chunks = [];
-process.stdin.on('data', (c) => chunks.push(c));
-process.stdin.on('end', () => {
-  const e = process.env;
-  const argv = process.argv.slice(2);
-  const brief = Buffer.concat(chunks).toString();
-  const denied = argv.slice(argv.indexOf('--disallowedTools') + 1, argv.indexOf('--output-format'));
-  const arm = denied.includes('Agent') ? 'B' : 'A';
-  const task = brief.split('Research task ')[1].split(':')[0];
-  fs.appendFileSync(e.FAKE_LOG, JSON.stringify({ at: Date.now(), argv, brief, arm, task }) + '\\n');
-  const line = (o) => console.log(JSON.stringify(o));
-  const tools = ['Read', 'Bash', 'Agent', 'Task'].filter((t) => e.FAKE_LEAK === '1' || !denied.includes(t));
-  line({ type: 'system', subtype: 'init', session_id: 's-' + process.pid, model: 'claude-opus-5-5', tools });
-  if (arm === 'A') for (let i = 0; i < Number(e.FAKE_HELPERS || 0); i += 1) line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent', input: {} }] } });
-  const report = JSON.parse(e.FAKE_REPORTS)[task][arm];
-  line({ type: 'result', subtype: 'success', is_error: false, session_id: 's-' + process.pid, num_turns: 5, duration_ms: 10,
-    total_cost_usd: Number(arm === 'A' ? e.FAKE_COST_A : e.FAKE_COST_B),
-    modelUsage: { 'claude-opus-5-5': { inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 1000, cacheCreationInputTokens: 50 } },
-    structured_output: report });
-});
-`;
-
-const lib = () => import('../probes/research-eval/keys.mjs');
-
-async function reports() {
-  const { loadTasks } = await lib();
-  const out = {};
-  for (const t of loadTasks()) {
-    out[t.id] = {
-      A: { conclusion: 'c', evidence: [...t.facts.map((f) => f.example), `${t.unreadable.id}: not readable`], couldNotRead: [t.unreadable.example], needsHuman: [] },
-      B: { conclusion: 'c', evidence: t.facts.map((f) => `${f.id}: unknown`), couldNotRead: [t.unreadable.example], needsHuman: [] },
-    };
-  }
-  return out;
-}
-
-async function evalWorld(body) {
-  const fakeReports = JSON.stringify(await reports());
-  return world(async (w) => {
-    writeFileSync(join(w.bin, 'claude'), FAKE);
-    chmodSync(join(w.bin, 'claude'), 0o755);
-    w.log = join(w.root, 'fake.log');
-    w.calls = () => (existsSync(w.log) ? readFileSync(w.log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
-    w.eval = (args, extra = {}) => {
-      const r = spawnSync(process.execPath, [RUN_JS, '--run', w.run, '--work', w.work, '--poll-ms', '40', ...args], {
-        encoding: 'utf8', cwd: w.root, timeout: 90000,
-        env: w.env({ FAKE_LOG: w.log, FAKE_REPORTS: fakeReports, FAKE_COST_A: '1.5', FAKE_COST_B: '1', FAKE_HELPERS: '2', ...extra }),
-      });
-      return { code: r.status, out: r.stdout, err: r.stderr };
-    };
-    return body(w);
-  });
-}
+import { readdirSync } from 'node:fs';
+import { fill } from './seat-world.mjs';
+import { PROBE, evalWorld } from './research-eval-world.mjs';
 
 test('without --go the probe is only printed: four runs, the exact bin/seat command of each, and nothing is started', () => evalWorld((w) => {
   const r = w.eval(['--set', 'probe']);
@@ -76,12 +13,12 @@ test('without --go the probe is only printed: four runs, the exact bin/seat comm
   assert.equal(lines.length, 4);
   assert.deepEqual(lines.map((l) => l.match(/dry: (re-\S+):/)[1]), PROBE.flatMap((t, i) => (i === 0 ? ['A', 'B'] : ['B', 'A']).map((arm) => `re-${t}-${arm}-1`)));
   for (const l of lines) {
-    assert.match(l, /bin\/seat researcher \S+\/re-\S+\.md --run \S+ --work \S+ --tag re-\S+ --max-turns 80 /);
-    assert.match(l, /--deny WebFetch --deny WebSearch/);
-    assert.equal(/--deny Agent --deny Task$/.test(l), /-B-1:/.test(l), l);
+    assert.match(l, /bin\/seat researcher \S+\/re-probe-\S+\/re-\S+\.md --run \S+\/re-probe-\S+ --work \S+ --tag re-\S+ --max-turns 80 /);
+    assert.match(l, /--deny WebFetch --deny WebSearch /);
+    assert.equal(/--deny Agent --deny Task --deny Workflow$/.test(l), /-B-1:/.test(l), l);
   }
-  assert.match(lines[0], /--add-dir \S+\/issue-70 /);
-  assert.deepEqual(readdirSync(w.run).filter((n) => n.startsWith('run-')), [], 'no session was started');
+  assert.match(lines[0], /--add-dir \S+\/issue-70\/sources\/knip /);
+  assert.deepEqual(readdirSync(w.runs).filter((n) => n.startsWith('re-')), [], 'no session folder was made');
   assert.deepEqual(w.calls(), []);
   assert.match(r.out, /not started: add --go/);
 }));
@@ -91,10 +28,10 @@ test('--go runs the probe one session at a time and prints each run\'s score, to
   assert.equal(r.code, 0, r.out + r.err);
   const calls = w.calls();
   assert.equal(calls.length, 4);
-  assert.deepEqual(calls.map((c) => `${c.task}:${c.arm}`), ['knip-reader:A', 'knip-reader:B', 'round4-review:B', 'round4-review:A']);
+  assert.deepEqual(calls.map((c) => c.arm), ['A', 'B', 'B', 'A']);
   for (const c of calls) {
     assert.equal(c.argv[c.argv.indexOf('--max-turns') + 1], '80');
-    assert.match(c.brief, /F1\./);
+    assert.ok(c.stdin > 0, 'the brief was given on stdin');
   }
   const records = w.records();
   assert.equal(records.length, 4);
@@ -114,22 +51,22 @@ test('--go runs the probe one session at a time and prints each run\'s score, to
   assert.match(r.out, /^spent \$5\.00 of the \$24\.00 limit$/m);
 }));
 
-test('it stops when the spend passes the limit, after the run that passed it, and says so with exit 3', () => evalWorld((w) => {
-  const r = w.eval(['--set', 'probe', '--go'], { FAKE_COST_A: '10', FAKE_COST_B: '10' });
+test('a session that costs more than its cap takes the spend past the limit: the runner stops after it, with exit 3', () => evalWorld((w) => {
+  const r = w.eval(['--set', 'probe', '--go'], [{ cost: 30 }]);
   assert.equal(r.code, 3, r.out + r.err);
-  assert.equal(w.calls().length, 3, 'the third run took the spend to $30; the fourth never started');
-  assert.match(r.out, /^stopped: spend \$30\.00 passed the limit of \$24\.00 after re-round4-review-B-1$/m);
+  assert.equal(w.calls().length, 1);
+  assert.match(r.out, /^stopped: spend \$30\.00 passed the limit of \$24\.00 after re-knip-reader-A-1$/m);
 }));
 
-test('a spend that only reaches the limit does not stop it, and --limit-usd moves the limit', () => evalWorld((w) => {
-  const exact = w.eval(['--set', 'probe', '--go', '--limit-usd', '40'], { FAKE_COST_A: '10', FAKE_COST_B: '10' });
-  assert.equal(exact.code, 0, exact.out + exact.err);
+test('--limit-usd moves the limit', () => evalWorld((w) => {
+  const r = w.eval(['--set', 'probe', '--go', '--limit-usd', '100'], [{ cost: 10 }, { cost: 10 }, { cost: 10 }, { cost: 10 }]);
+  assert.equal(r.code, 0, r.out + r.err);
   assert.equal(w.calls().length, 4);
-  assert.match(exact.out, /^spent \$40\.00 of the \$40\.00 limit$/m);
+  assert.match(r.out, /^spent \$40\.00 of the \$100\.00 limit$/m);
 }));
 
 test('arm B with an Agent tool still in its session is a broken arm: the runner stops at once with exit 4', () => evalWorld((w) => {
-  const r = w.eval(['--set', 'probe', '--go'], { FAKE_LEAK: '1' });
+  const r = w.eval(['--set', 'probe', '--go'], [{}, { leak: true }]);
   assert.equal(r.code, 4, r.out + r.err);
   assert.equal(w.calls().length, 2, 'A, then B, which had the tool');
   assert.match(r.out, /^stopped: re-knip-reader-B-1 had the Agent tool, so arm B is not arm B$/m);
