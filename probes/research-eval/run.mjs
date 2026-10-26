@@ -3,7 +3,7 @@
 // today, B the same with the Agent tool denied), grades each report with grade.mjs and prints what each run and each arm cost.
 // Without --go it only prints the plan. See README.md for the decision rule.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,15 +37,53 @@ export function planRuns(tasks, set) {
   return plan;
 }
 
-/** The arguments of bin/seat for a run. Both arms deny the web, since the tasks are answered from disk and a fetched page
- * could answer what the disk cannot; arm B also denies the tool that starts helper agents. */
-export function seatArgs(entry, { run, work, runsRoot, turns }) {
+// The factory checkout this file sits in. A session never reads its eval folder (the keys), and no folder given to the runner
+// may hold the checkout.
+const CHECKOUT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '../..'));
+
+/** The folders of a session: its own run folder, one level under the runs folder where bin/seat counts sessions and reads the
+ * seven-day use, and its own work folder under the folder the caller gave. Nothing else of the eval's is shared with it. */
+export function sessionPaths(entry, { runsRoot, work, set }) {
+  return { run: join(runsRoot, `re-${set}-${entry.tag.slice(3)}`), work: join(work, entry.tag) };
+}
+
+/** The arguments of bin/seat for a run. The session may read its own run folder and its task's folders (the narrowest that
+ * hold its sources), not the keys. Both arms deny the web, since the tasks are answered from disk and a fetched page could
+ * answer what the disk cannot; arm B also denies the tools that start helper agents. */
+export function seatArgs(entry, { runsRoot, work, set, turns }) {
+  const { run, work: cwd } = sessionPaths(entry, { runsRoot, work, set });
   return [
-    'researcher', join(run, `${entry.tag}.md`), '--run', run, '--work', work, '--tag', entry.tag, '--max-turns', String(turns),
-    ...entry.task.sources.flatMap((s) => ['--add-dir', join(runsRoot, s)]),
-    '--deny', 'WebFetch', '--deny', 'WebSearch',
+    'researcher', join(run, `${entry.tag}.md`), '--run', run, '--work', cwd, '--tag', entry.tag, '--max-turns', String(turns),
+    ...(entry.task.readable ?? []).flatMap((r) => ['--add-dir', join(runsRoot, r)]),
+    '--deny', 'WebFetch', '--deny', 'WebSearch', '--deny', `Read(/${CHECKOUT}/probes/research-eval/**)`,
     ...(entry.arm === 'B' ? HELPER_TOOLS.flatMap((t) => ['--deny', t]) : []),
   ];
+}
+
+const SKIP = new Set(['node_modules', '.git']);
+
+/** Why a folder given to the runner is refused, or null: it holds the checkout or is inside it, or it holds another session's
+ * log or a task's key. The walk is bounded; a folder too big to check is refused. */
+export function refusal(dir) {
+  const d = realpathSync(dir);
+  if (d === CHECKOUT || CHECKOUT.startsWith(`${d}/`)) return `${dir} holds the factory checkout`;
+  if (d.startsWith(`${CHECKOUT}/`)) return `${dir} is inside the factory checkout`;
+  let budget = 20000;
+  const walk = (folder, depth) => {
+    if (depth > 5) return null;
+    for (const ent of readdirSync(folder, { withFileTypes: true })) {
+      budget -= 1;
+      if (budget < 0) return `${dir} is too big to check; give an empty folder`;
+      const p = join(folder, ent.name);
+      if (ent.isDirectory()) {
+        const r = SKIP.has(ent.name) ? null : walk(p, depth + 1);
+        if (r) return r;
+      } else if (/^run-.*\.jsonl$/.test(ent.name)) return `${dir} holds a session's log, ${p}`;
+      else if (/research-eval\/tasks\/[^/]+\.json$/.test(p)) return `${dir} holds a task key, ${p}`;
+    }
+    return null;
+  };
+  return walk(d, 0);
 }
 
 /** What a session's log says: whether it has an init event and its tools, the helper agents it started, the events that a
@@ -144,8 +182,12 @@ async function main(argv, env) {
   const runsRoot = env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs');
   const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
   const plan = planRuns(tasks, o.set);
-  const opts = { run: o.run, work: o.work, runsRoot, turns: o.turns };
+  const opts = { runsRoot, work: o.work, set: o.set, turns: o.turns };
   const full = { tasks: tasks.length, runs: SETS.full.runs };
+  for (const dir of [o.run, o.work]) {
+    const why = refusal(dir);
+    if (why) throw new Refused(why);
+  }
   if (!o.go) {
     for (const e of plan) console.log(`dry: ${e.tag}: bin/seat ${seatArgs(e, opts).join(' ')}`);
     console.log(`not started: add --go to run these ${plan.length} sessions, one at a time, stopping when the spend passes ${usd(o.limit)}; each session is capped at ${usd(PRESETS.researcher.budget)} by the researcher preset`);
@@ -154,6 +196,11 @@ async function main(argv, env) {
   if (!o.skipKeyCheck) {
     const problems = keyProblems(plan, runsRoot);
     if (problems.length) throw new Refused(`the keys do not hold, so nothing was started:\n${problems.slice(0, 20).join('\n')}`);
+  }
+  // A folder left by an earlier session of a tag would hand that session's log to this one.
+  for (const e of plan) {
+    const p = sessionPaths(e, opts);
+    for (const dir of [p.run, p.work]) if (existsSync(dir) && readdirSync(dir).length > 0) throw new Refused(`${dir} is left from an earlier run of ${e.tag}; remove it first`);
   }
   const results = [];
   let spent = 0;
@@ -164,7 +211,10 @@ async function main(argv, env) {
     code = c;
   };
   for (const e of plan) {
-    writeFileSync(join(o.run, `${e.tag}.md`), briefOf(e.task, runsRoot));
+    const p = sessionPaths(e, opts);
+    mkdirSync(p.run, { recursive: true });
+    mkdirSync(p.work, { recursive: true });
+    writeFileSync(join(p.run, `${e.tag}.md`), briefOf(e.task, runsRoot));
     const since = Date.now();
     const started = spawnSync(process.execPath, [SEAT_JS, ...seatArgs(e, opts)], { encoding: 'utf8', env });
     if (started.status !== 0) {
@@ -180,7 +230,7 @@ async function main(argv, env) {
       stop(`${e.tag} wrote no record in ${o.timeoutMin} minutes; it may still be running`, 5);
       break;
     }
-    const log = join(o.run, `run-${e.tag}.jsonl`);
+    const log = join(p.run, `run-${e.tag}.jsonl`);
     const m = metricsOf(existsSync(log) ? readFileSync(log, 'utf8') : '');
     const g = grade(e.task, rec.structured);
     const cost = rec.total_cost_usd ?? PRESETS.researcher.budget;
