@@ -90,7 +90,7 @@ if (!String(version.stdout).startsWith(`${pin.version} `)) unavailable('wrong-ve
 const archive = spawnSync('git', ['archive', head], { maxBuffer: 1 << 30 });
 if (archive.status !== 0) unavailable('no-candidate');
 if (spawnSync('tar', ['-x', '-C', candidate], { input: archive.stdout }).status !== 0) unavailable('no-candidate');
-const INSTRUCTIONS = /^(CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md|\.mcp\.json|\.claude)$/;
+const INSTRUCTIONS = /^(CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md|enforced-rules\.md|\.mcp\.json|\.claude)$/;
 (function sweep(dir) {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
@@ -142,7 +142,7 @@ ${enforced}
 ## What to review
 - job ${job}; commit head ${head}; its base (merge-base with main) ${base}.
 - The commit's files are under CANDIDATE_DIR=${candidate}
-  (a git archive of head; files named CLAUDE.md, AGENTS.md, .mcp.json or .claude are renamed with a .candidate suffix).
+  (a git archive of head; files named CLAUDE.md, AGENTS.md, enforced-rules.md, .mcp.json or .claude are renamed with a .candidate suffix).
 - ${noRed ? `The pull request body quotes this line, for you to judge: ${JSON.stringify(noRed)}` : 'The pull request body has no No-red line, so noRed is "unjudged".'}
 - ${numbers ? `The pull request closes these issues of this repository, handed below as data: ${numbers}.` : 'The pull request closes no issue of this repository, so its acceptance is what the body states.'}${elsewhere ? `
 - Closing references that were not read, because they are in another repository: ${elsewhere}.` : ''}
