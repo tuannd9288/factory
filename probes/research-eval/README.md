@@ -41,7 +41,8 @@ Start the probe:
 
 The probe is what fits in $24: the researcher runs on seat 2 only, never on seat 1, which holds a token. Its job is to prove the
 harness and to measure what one session costs, not to compare the arms. With the researcher preset's $15 budget the ceiling
-below lets a second session start only when the first cost $9 or less, so expect one A/B pair at most. A larger probe, and the
+below lets a second session start only when the first cost $9 or less. On 2026-10-26 a probe session cost $0.19 to $0.34, so
+the whole probe fits (#92, issuecomment-6415387868). A larger probe, and the
 40-run set (10 tasks, both arms, 2 runs: `--set full --go --limit-usd <dollars>`), are for the Human to fund once he has the
 measured cost of a session.
 
