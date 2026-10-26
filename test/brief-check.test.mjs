@@ -130,3 +130,18 @@ test('a straight quote inside a Markdown code span is not a quote, and a lone cu
     assert.equal(brief([join(dir, 'empty.md'), join(dir, 'lone.md')]).code, 2);
   });
 });
+
+// A code span stays on its line (#111): a fenced message with no backtick in it is text, and its quotes count.
+test('a fenced message with no backtick and no blank line still has its quotes checked', () => {
+  const relay = '````text\nColly: the Human chose "Use this table (Recommended)".\n````\n';
+  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+    assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'relay.md')]), { code: 1, out: 'missing quote: "Use this table (Recommended)"\n', err: '' });
+  });
+});
+
+test('an inline code span with an even number of quotes still has them checked', () => {
+  const relay = 'He pointed to `specification.md, section "Progressive disclosure"` and left.\n';
+  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+    assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'relay.md')]), { code: 1, out: 'missing quote: "Progressive disclosure"\n', err: '' });
+  });
+});
