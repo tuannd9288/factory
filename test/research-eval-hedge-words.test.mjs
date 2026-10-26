@@ -33,3 +33,13 @@ test('the same words after the dash, in the citation, do not count, and the plai
   assert.equal(await ok('F1: 11.24.2 — package.json:102'), true);
   assert.equal(await ok('F2: 112 — docs/about-plugins.md and src/plugins'), true);
 });
+
+test('"about" is a hedge only before a figure (re-review 3)', async () => {
+  const { loadTasks } = await import('../probes/research-eval/keys.mjs');
+  const { grade } = await import('../probes/research-eval/grade.mjs');
+  const rex = loadTasks().find((t) => t.id === 'rex-docs');
+  const evidence = (entry) => [...rex.facts.map((f) => (f.id === 'F3' ? entry : f.example)), `${rex.unreadable.id}: not readable`];
+  const rexF3 = (entry) => grade(rex, { conclusion: 'c', evidence: evidence(entry), couldNotRead: [rex.unreadable.example], needsHuman: [] }).facts.find((f) => f.id === 'F3').ok;
+  assert.equal(rexF3("F3: about telemetry, Rex doesn't collect telemetry; about checks, no account or licence checks — inputs/raw/rex-llms-full.txt:3329-3330"), true);
+  assert.equal(await ok('F2: about 112 — src/plugins'), false);
+});
