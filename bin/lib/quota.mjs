@@ -64,7 +64,7 @@ export function lastStatusLine(file) {
 export function quotaRows({ runs, statusFiles = [] }) {
   const rows = Object.keys(SEATS).map((n) => {
     const e = seatEvent(runs, n);
-    return { profile: `seat ${n}`, source: 'rate_limit_event', seat: Number(n), windows: e ? windowsOf(e.info) : null, asOf: e?.asOf ?? null, missing: 'no session has run on it' };
+    return { profile: `seat ${n}`, source: 'rate_limit_event', seat: Number(n), windows: e ? windowsOf(e.info) : null, resetsAt: num(e?.info.resetsAt), asOf: e?.asOf ?? null, missing: 'no session has run on it' };
   });
   for (const file of statusFiles) {
     const s = lastStatusLine(file);
@@ -100,25 +100,28 @@ export function quotaSection(rows, { now = Date.now() } = {}) {
   return lines;
 }
 
-/** The five-hour window has no stop in bin/seat; it, and a status-line row (which names no seat), alert from here. */
-export const ALERT_AT = 0.9;
-
-/** The alert lines for the rows: a rejected window, and a window at or above its threshold, when its reset time has not
- * passed. A seat's seven-day threshold is its stop in bin/seat (SEATS), the point where no new session starts on it. A
- * row with no windows gives nothing. */
+/** The alert lines for the rows, at most one for each window, while its reset time has not passed: the window Claude Code
+ * rejected; else one at or above the seat's stop in bin/seat (SEATS), the point where no new session starts on it, for the
+ * five-hour window as for the seven-day one; else one Claude Code itself warns of (status allowed_warning). A status-line row
+ * names no seat and uses 0.90, the Human's seat-2 figure. A row with no windows gives nothing. */
 export function alertLines(rows, { now = Date.now() } = {}) {
   const out = [];
   const name = { five_hour: 'five-hour', seven_day: 'seven-day' };
   for (const r of rows) {
     const w = r.windows;
     if (!w) continue;
+    const stop = r.seat !== null ? Number(SEATS[r.seat].stop) : 0.9;
     const when = (x) => (x?.resetsAt != null ? ` (resets ${fmt(x.resetsAt * 1000)} UTC)` : '');
-    if (w.rejected && !over(w[w.type], now)) out.push(`factory: quota: ${r.profile}: ${name[w.type] ?? 'a'} window rejected${when(w[w.type])}`);
+    // The rejected or warned window is the event's rateLimitType; one of another type has no window of its own, and falls back to the event's resetsAt.
+    const flagged = w.rejected || w.status === 'allowed_warning';
+    const own = w[w.type] ?? (r.resetsAt != null ? { resetsAt: r.resetsAt } : null);
+    if (flagged && !w[w.type] && !over(own, now)) out.push(`factory: quota: ${r.profile}: ${name[w.type] ?? 'a'} window ${w.rejected ? 'rejected' : 'warned of by Claude Code'}${when(own)}`);
     for (const key of ['five_hour', 'seven_day']) {
       const x = w[key];
-      const stop = key === 'seven_day' && r.seat !== null ? Number(SEATS[r.seat].stop) : ALERT_AT;
-      if (!x || over(x, now) || !(x.use >= stop) || (w.rejected && w.type === key)) continue;
-      out.push(`factory: quota: ${r.profile}: ${name[key]} window at ${percent(x.use)}, at or over ${key === 'seven_day' && r.seat !== null ? "bin/seat's stop of " : ''}${percent(stop)}${when(x)}`);
+      if (!x || over(x, now)) continue;
+      if (w.rejected && w.type === key) out.push(`factory: quota: ${r.profile}: ${name[key]} window rejected${when(x)}`);
+      else if (x.use >= stop) out.push(`factory: quota: ${r.profile}: ${name[key]} window at ${percent(x.use)}, at or over ${r.seat !== null ? "bin/seat's stop of " : ''}${percent(stop)}${when(x)}`);
+      else if (w.status === 'allowed_warning' && w.type === key) out.push(`factory: quota: ${r.profile}: ${name[key]} window under a warning from Claude Code, at ${percent(x.use)}${when(x)}`);
     }
   }
   return out;
