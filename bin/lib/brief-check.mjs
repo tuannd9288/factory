@@ -34,8 +34,9 @@ class UnpairedQuote extends Error {
 /**
  * The spans a text puts in double quotes, curly or straight, normalised, in order. An empty span is not a quote.
  * Quotes pair inside one paragraph (lines between blank lines), never across it. A Markdown code span (backticks on
- * one line) pairs its own quotes on their own: an even count yields its pairs, an odd count (the `"` that names the
- * mark) yields none and is not counted in the paragraph. A fence line holds no span, so what a fence holds is text.
+ * one line) pairs its own quotes on their own: an even count yields its pairs, exactly one quote (the `"` that
+ * names the mark) yields none and is not counted in the paragraph, and any other odd count (3, 5, ...) throws, since a
+ * stray backtick can make such a span swallow the Human's words. A fence line holds no span, so what a fence holds is text.
  * A paragraph left with an odd count of double quotes is not guessed at: it throws UnpairedQuote, since any pairing
  * of it could name the wrong words and miss the Human's.
  */
@@ -51,7 +52,9 @@ export function quotes(text) {
     offset += paragraph.length + 1;
     let plain = straight(paragraph);
     for (const m of plain.matchAll(/(`+)[^`\n]*?\1/g)) {
-      if (count(m[0]) % 2 === 0) pair(m[0], at + m.index);
+      const n = count(m[0]);
+      if (n % 2 === 0) pair(m[0], at + m.index);
+      else if (n > 1) throw new UnpairedQuote(paragraph);
     }
     plain = plain.replace(/(`+)[^`\n]*?\1/g, (span) => ' '.repeat(span.length));
     if (count(plain) % 2) throw new UnpairedQuote(paragraph);
