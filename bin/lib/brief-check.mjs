@@ -16,11 +16,15 @@ export const ATTACHMENT_HEADING = "## Colly's message, attached as data";
 const squeeze = (text) => text.replace(/\s+/g, ' ').trim();
 const straight = (text) => text.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
 
+const headingAt = (brief) => brief.split('\n').findIndex((line) => line.trimEnd() === ATTACHMENT_HEADING);
+
+/** Whether the brief has a line that is exactly the attachment heading; without one `check` refuses it (#118). */
+const hasAttachment = (brief) => headingAt(brief) >= 0;
+
 /** The brief's own body: everything above the first line that is the attachment heading. */
 export function body(brief) {
-  const lines = brief.split('\n');
-  const at = lines.findIndex((line) => line.trimEnd() === ATTACHMENT_HEADING);
-  return at < 0 ? brief : `${lines.slice(0, at).join('\n')}\n`;
+  const at = headingAt(brief);
+  return at < 0 ? brief : `${brief.split('\n').slice(0, at).join('\n')}\n`;
 }
 
 /** Thrown when a paragraph holds an odd number of double quotes, so its quotes cannot be paired (#111). */
@@ -81,6 +85,9 @@ export function check(argv) {
     [brief, relay] = argv.map((path) => readFileSync(path, 'utf8'));
   } catch (error) {
     return { code: 2, out: '', err: `brief-check: cannot read ${error.path ?? 'a file'}: ${error.code ?? error.message}\n` };
+  }
+  if (!hasAttachment(brief)) {
+    return { code: 2, out: '', err: `brief-check: the brief has no line that is exactly "${ATTACHMENT_HEADING}", so its attached message cannot be told from its body\n` };
   }
   let found;
   try {
