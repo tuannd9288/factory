@@ -110,3 +110,57 @@ test('it takes exactly two files, and says so when a file cannot be read', () =>
   assert.equal(gone.code, 2);
   assert.match(gone.err, /no-such-file\.md/);
 });
+
+// An unpaired quote must not pair across itself (#111): the check refuses the paragraph instead of passing or misnaming.
+test('a paragraph with an unpaired straight quote exits 2 and names the paragraph; the Human words are not paired away', () => {
+  const relay = 'Colly: the screen is 27" wide.\nHe said "keep it small" today.\n\nAnother paragraph, "fine".\n';
+  withFiles({ 'relay.md': relay, 'brief.md': 'A brief that carries "fine" only.\n' }, (dir) => {
+    const r = brief([join(dir, 'brief.md'), join(dir, 'relay.md')]);
+    assert.equal(r.code, 2);
+    assert.equal(r.out, '');
+    assert.match(r.err, /unpaired.*Colly: the screen is 27" wide\./);
+  });
+});
+
+test('a straight quote inside a Markdown code span is not a quote, and a lone curly quote is unpaired', () => {
+  const ok = 'Item: the `"` mark is odd. He said "keep it small".\n';
+  const lone = 'He said “keep it small and then left.\n';
+  withFiles({ 'ok.md': ok, 'lone.md': lone, 'empty.md': '' }, (dir) => {
+    assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'ok.md')]), { code: 1, out: 'missing quote: "keep it small"\n', err: '' });
+    assert.equal(brief([join(dir, 'empty.md'), join(dir, 'lone.md')]).code, 2);
+  });
+});
+
+// A code span stays on its line (#111): a fenced message with no backtick in it is text, and its quotes count.
+test('a fenced message with no backtick and no blank line still has its quotes checked', () => {
+  const relay = '````text\nColly: the Human chose "Use this table (Recommended)".\n````\n';
+  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+    assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'relay.md')]), { code: 1, out: 'missing quote: "Use this table (Recommended)"\n', err: '' });
+  });
+});
+
+// A stray backtick pairs with a later one; the span between them then holds three quotes and must not drop the Human's words.
+test('a code span holding three quotes exits 2 and does not pass', () => {
+  const relay = 'a stray ` then 27" wide, he said "A" `x`.\n';
+  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+    const r = brief([join(dir, 'empty.md'), join(dir, 'relay.md')]);
+    assert.equal(r.code, 2);
+    assert.equal(r.out, '');
+    assert.match(r.err, /unpaired.*a stray/);
+  });
+});
+
+test('an inline code span with an even number of quotes still has them checked', () => {
+  const relay = 'He pointed to `specification.md, section "Progressive disclosure"` and left.\n';
+  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+    assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'relay.md')]), { code: 1, out: 'missing quote: "Progressive disclosure"\n', err: '' });
+  });
+});
+
+// A quote may hold a code span (#116's relays): the span's text is part of the Human's words.
+test('a quote that holds a code span is carried by a brief that has it verbatim', () => {
+  const relay = 'Colly asked to "does the rule cover the kit script\'s own `gh api user`?"\n';
+  withFiles({ 'relay.md': relay, 'brief.md': 'The question, "does the rule cover the kit script\'s own `gh api user`?"\n' }, (dir) => {
+    assert.deepEqual(brief([join(dir, 'brief.md'), join(dir, 'relay.md')]), { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' });
+  });
+});
