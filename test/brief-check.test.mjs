@@ -102,6 +102,19 @@ test('a brief built from bin/brief-template.md is cut at its attachment: a quote
   });
 });
 
+// A brief with no exact attachment heading has nothing to cut at, so its attached copy would carry every quote (#118).
+test('a brief whose attachment heading is not exact exits 2 and names the heading it looked for', async () => {
+  const { ATTACHMENT_HEADING } = await lib();
+  const relay = 'Colly: the Human said "refuse an empty name".\n';
+  const near = "## Colly's messages, attached as data";
+  withFiles({ 'relay.md': relay, 'brief.md': `Goal.\n\n${near}\n\n${relay}` }, (dir) => {
+    const r = brief([join(dir, 'brief.md'), join(dir, 'relay.md')]);
+    assert.equal(r.code, 2);
+    assert.equal(r.out, '');
+    assert.ok(r.err.includes(ATTACHMENT_HEADING));
+  });
+});
+
 test('it takes exactly two files, and says so when a file cannot be read', () => {
   const none = brief([]);
   assert.equal(none.code, 2);
