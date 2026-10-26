@@ -164,6 +164,12 @@ describe('claude-reviewer', () => {
     assert.ok(!calls.brief.split('## What to review')[0].includes('candidate enforced-rule marker'), 'the rules part holds the candidate\'s copy');
   });
 
+  test('the candidate\'s own .gate/enforced-rules.md is renamed in its archive, as AGENTS.md is, and main\'s rules still reach the brief', () => {
+    assert.ok(calls.files.includes('.gate/enforced-rules.md.candidate'), calls.files.join(','));
+    assert.ok(!calls.files.includes('.gate/enforced-rules.md'), 'the candidate\'s rules file kept its name');
+    assert.ok(calls.brief.includes(readFileSync(join(repo, '.gate/enforced-rules.md'), 'utf8')));
+  });
+
   test('a main with no .gate/enforced-rules.md still gets a review', () => {
     git(repo, 'switch', '-q', '-c', 'bare', base);
     git(repo, 'rm', '-q', '.gate/enforced-rules.md');
