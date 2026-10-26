@@ -246,7 +246,8 @@ if [ -n "${GATE_BODY_FILE:-}" ] && line=$(grep -E -m1 '^No-red: .{20,}' "$GATE_B
   nored=$(printf '%s' "$line" | node -e 'process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(0)).digest("hex").slice(0, 16))')
 fi
 # The issues the pull request closes, read here by main's scripts and handed to the Claude reviewer as data (GATE_ACCEPTANCE_FILE), and
-# their hash, the second half of the reuse key. Unreadable is no verdict at all: unavailable, before any reviewer call.
+# their hash, acc, which the reuse key carries beside head, base, the No-red line and the reviewer. Unreadable is no
+# verdict at all: unavailable, before any reviewer call.
 acc=none
 if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ]; then
   accfile=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/acceptance.XXXXXX") || exit 2
@@ -306,7 +307,8 @@ code=$?
 # A result result.mjs refuses says nothing about the change: unavailable, not a red round.
 [ "$code" -eq 2 ] && { echo "::notice title=review-result::unavailable: malformed"; echo "$job: reviewer unavailable (malformed); the reviewer's result does not count, so this check fails closed"; }
 printf '%s\n' "$checked"
-# review's verdict for verdict to read: fixed text, the SHAs it judged, the No-red line (by hash) and whether it blocks.
+# review's verdict for verdict to read: fixed text, the SHAs it judged, the No-red line and the closing issues (each by
+# hash), the reviewer and whether it blocks.
 [ "$code" -le 1 ] && echo "::notice title=review-verdict::head=$head base=$fork nored=$nored acc=$acc reviewer=${GATE_REVIEWER:-} $([ "$code" -eq 0 ] && echo pass || echo block)"
 cat "$notes"
 [ "$code" -eq 0 ] || exit 1
