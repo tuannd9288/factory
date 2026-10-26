@@ -103,8 +103,12 @@ function runFiles(runs, ext) {
 
 /** The seat a run's file belongs to: its .seat file, else fallback (a session from before there were seats ran on seat 2). */
 const seatOf = (file, fallback = null) => {
-  const s = file.replace(/\.[^./]*$/, '.seat');
-  return existsSync(s) ? readFileSync(s, 'utf8').trim() : fallback;
+  try {
+    return readFileSync(file.replace(/\.[^./]*$/, '.seat'), 'utf8').trim();
+  } catch (e) {
+    if (e.code === 'ENOENT') return fallback; // never there, or a start backing off removed its claim meanwhile
+    throw e;
+  }
 };
 
 // The uid and start time of a process, from ps (the kernel's own record, which no launcher can change; argv it can). lstart has
@@ -285,25 +289,27 @@ function claimTag(lock, tag) {
 function startSession({ o, env, home, runs, profiles, state, run, work, brief, tag }) {
   const pidFile = join(run, `run-${tag}.pid`);
   if (runLive(pidFile)) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
-  const seatFile = join(run, `run-${tag}.seat`);
-  // The claim: this start's own pid in its pid file, with its seat, written before the count and removed if it backs off.
-  // Until the supervisor exists the file holds bin/seat's pid, which counts as live (this user's, started before the file).
-  const claim = (seat) => {
-    writeFileSync(seatFile, `${seat}\n`);
-    writeFileSync(pidFile, `${process.pid}\n`);
-    return () => {
-      rmSync(pidFile, { force: true });
-      rmSync(seatFile, { force: true });
-    };
+  // The claim: this start's own pid with its seat, in run-<tag>.claim.pid and .claim.seat, written before the count and
+  // removed if it backs off. They are files of their own, since run-<tag>.seat also gives the earlier run's log to a seat
+  // (seatEvent) and a claim must not move it. Until the supervisor exists the claim holds bin/seat's pid, which counts as
+  // live (this user's, started before the file).
+  const claimPid = join(run, `run-${tag}.claim.pid`);
+  const claimSeat = join(run, `run-${tag}.claim.seat`);
+  const unclaim = () => {
+    rmSync(claimPid, { force: true });
+    rmSync(claimSeat, { force: true });
   };
-  const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim });
-  if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
+  const claim = (seat) => {
+    writeFileSync(claimSeat, `${seat}\n`);
+    writeFileSync(claimPid, `${process.pid}\n`);
+    return unclaim;
+  };
   try {
+    const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim });
+    if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
     return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat });
-  } catch (e) {
-    rmSync(pidFile, { force: true });
-    rmSync(seatFile, { force: true });
-    throw e;
+  } finally {
+    unclaim(); // after the run's own .seat and .pid are written, so the count never drops; on any failure, nothing is left
   }
 }
 
@@ -324,7 +330,9 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
   if (!sup.pid) throw new Refused(`could not start the supervisor of run-${tag}`);
   sup.unref();
-  writeFileSync(pidFile, `${sup.pid}\n`); // the claim's file, now the supervisor's pid
+  // The seat first: a pid file with no .seat file would count on seat 2.
+  writeFileSync(join(run, `run-${tag}.seat`), `${seat}\n`);
+  writeFileSync(pidFile, `${sup.pid}\n`);
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
 
