@@ -89,3 +89,16 @@ test('seatEvent is the newest log of the seat that reports a seven-day use, with
     assert.equal(seatUse(runs, 2), null);
   });
 });
+
+// The header above says no recorded event has another status than "allowed"; that is wrong. Claude Code's own warning at
+// 0.75 is recorded 25 times (issue-75, -81, -90, -98, -seats): status "allowed_warning", rateLimitType "seven_day".
+test('a recorded allowed_warning event is not rejected, and its status and window are kept', async () => {
+  const { windowsOf } = await quota();
+  assert.deepEqual(windowsOf(event('real-warning-event.jsonl')), {
+    five_hour: { use: 0.3, resetsAt: 1792966800 },
+    seven_day: { use: 0.78, resetsAt: 1793271600 },
+    status: 'allowed_warning',
+    type: 'seven_day',
+    rejected: false,
+  });
+});
