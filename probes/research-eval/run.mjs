@@ -306,6 +306,10 @@ async function main(argv, env) {
       stop(`${e.tag} ran on ${rec.model}, not ${model}`, 6);
       break;
     }
+    if (invalid.length) {
+      stop(`${e.tag} read outside its folders: ${invalid.map((x) => x.path).join(', ')}`, EXIT_INVALID);
+      break;
+    }
     if (spent > o.limit) {
       stop(`spend ${usd(spent)} passed the limit of ${usd(o.limit)} after ${e.tag}`, 3);
       break;

@@ -98,6 +98,8 @@ run and refuses to score that run (`paths.mjs`):
   folder) when a task's readable folder is, holds or sits in a run or work folder of the plan, a `probes/research-eval/tasks`
   folder (this checkout's, `~/WORKSPACES`'s or `issue-92/w92`'s), `issue-92` (the reports), or is or holds the runs folder itself,
   after `..` and symlinks are resolved, so that "inside" can never reach an answer.
+- **The stop.** The first invalid run stops the set (exit 8, which no other stop uses): the runner starts no further session,
+  prints the tag and each outside path, and still writes `research-eval-<set>.json` for the runs so far, the invalid one listed.
 - **If a probe run is flagged,** that is the dated failure that justifies a fail-closed eval preset in `bin/seat`, as its own
   issue (Colly, 2026-10-26).
 
