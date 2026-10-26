@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SEAT_JS, until, world } from './seat-world.mjs';
+import { SEAT_JS, fill, until, world } from './seat-world.mjs';
 
 const alive = (pid) => {
   try {
@@ -31,6 +31,16 @@ test('three concurrent starts with one tag give one session; the others exit 2; 
   const again = w.start('worker', ['--tag', 'same']);
   assert.equal(again.code, 0, again.out + again.err);
   await until(() => w.records().length === 2, 'the second record');
+}));
+
+test('two starts at the same moment on a seat with one place left never both run on it', () => world(async (w) => {
+  const { liveCount } = await import('../bin/lib/seat.mjs');
+  fill(w, 2, 3);
+  fill(w, 1, 4);
+  const hold = { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release') };
+  const codes = await exits(w, ['a', 'b'].map((tag) => w.args('worker', ['--tag', tag])), hold);
+  assert.ok(codes.filter((c) => c === 0).length <= 1, `exit codes ${codes}`);
+  assert.ok(liveCount(w.runs, 2) <= 4, 'seat 2 is not over its cap');
 }));
 
 test('a supervisor killed with SIGKILL leaves a claude that is still counted live and keeps its tag until it ends', () => world(async (w) => {
