@@ -9,6 +9,7 @@ helper tools denied (`bin/seat --deny Agent --deny Task --deny Workflow`).
 | `tasks/*.json` | one task each: sources, the narrow folders a session may read (`readable`), 5 facts with a pattern, a citation pattern and the place each was read, and one question the disk cannot answer |
 | `keys.mjs` | loads the tasks, checks their shape, re-reads every fact on disk (`verifyTask`), writes a task's brief |
 | `grade.mjs` | scores a report against a key: one point for each fact, one for the line "says what it could not read" |
+| `paths.mjs` | the path check: which paths in a session's log lie outside the folders it was given |
 | `run.mjs` | the runner |
 
 ## What the eval does not show
@@ -54,7 +55,13 @@ measured cost of a session.
   helper, or has an event with a `parent_tool_use_id`. Arm A counts `Workflow` calls among its helpers.
 - **One model.** The runner keeps each run's model and stops (exit 6) when it changes within a set.
 - **Keys first.** With `--go` it checks the shape of every task of the set and re-reads every fact on disk before it starts a
-  session, and refuses on any problem (exit 2).
+  session, and refuses on any problem (exit 2). `--skip-key-check` is for the tests, which hold none of the sources; the runner
+  then prints "keys not checked" and records `keyCheck: false` in `research-eval-<set>.json`.
+- **The grader's hedges.** An answer scores nothing when it holds "or", a question mark, a word of doubt (`maybe`, `probably`,
+  `likely`, `possibly`, `perhaps`, `think`, `guess`, `about`, `between`, `either`), or, for a fact with one value (a hash, a date, a
+  version, a count), a second value of the same shape. A fact whose right answer holds an "or" gives that phrase as `orIsAnswer`,
+  and only the phrase is let through. Known limit: a number written in words ("two from 355029d") fails `round4-review` F5, and a
+  figure in words passes the unreadable question's check.
 - **A stuck session.** No record in 45 minutes is a stop (exit 5).
 
 ## What a session can read
@@ -66,9 +73,32 @@ are out of reach. For `round4-review` the readable folders are `issue-17/rev4` a
 text is the source of three facts (and its logs), so that task cannot be narrower. Both arms deny `Read` of
 `probes/research-eval/` in the checkout.
 
-Still open, and not closed by a deny rule: `ls ~/factory-runs` shows the names of the other sessions' folders, and
-`git -C <checkout> show main:probes/research-eval/tasks/<task>.json` reads a key through git, as `AGENTS.md` records for seat 1.
-A test with a fake claude shows that no folder a session may read holds another session's log or a task file.
+The runner does not prevent a session from reading outside these folders: the researcher preset grants plain `Read`, `Grep` and
+`Glob`, which allow every path, and an enumerated deny list would leave open whatever it does not name. It detects it after each
+run and refuses to score that run (`paths.mjs`):
+
+- **What it reads.** The session's own `run-<tag>.jsonl`, before the report is graded. Every path in every tool input: the
+  `file_path`, `path` and `notebook_path` fields; a `pattern` or `glob` that is absolute or holds `..`; and, in a `command`, every
+  token that is absolute, starts with `~`, holds `..` or holds a variable or a command substitution. `Write` and `Edit` are
+  included, since a note left outside the folders is how one arm could reach the other.
+- **How it places a path.** A relative path resolves against the session's work folder, `~` is `HOME`, `..` is normalised, and when
+  the path exists its symlinks are resolved, so a link inside a readable folder that leads out counts as outside. A glob is placed
+  at the folder before its first wildcard. `/dev/null` is not counted.
+- **Inside** is under the session's run folder, its work folder or one of its task's `readable` folders. The readable folders
+  count as inside because the runner gives them to the session for its task. A path it cannot place (`$HOME/x`, a command
+  substitution, `/**`) counts as outside, and so does a session with no log.
+- **What follows.** An invalid run is not scored. It is listed with each outside path in what the runner prints and in `results`
+  of `research-eval-<set>.json` (`invalid`), and the other arm's run of the same task and repetition is not compared with it, so
+  a pair with an invalid arm gives no comparison. Its cost and tokens still count.
+- **What it does not do.** It stops nothing, and it sees only the paths the log shows: a path that a command builds from pieces
+  is seen only as the variable or substitution that builds it, and `git show main:probes/research-eval/tasks/<task>.json` names
+  no path outside the folders. It may flag a read that is legitimate, such as a file that Claude Code itself saves under the
+  profile for a long tool result.
+- **If a probe run is flagged,** that is the dated failure that justifies a fail-closed eval preset in `bin/seat`, as its own
+  issue (Colly, 2026-10-26).
+
+A test with a fake claude shows each case: a path inside, another session's log, a `~` path, a `..` out of the work folder, a link
+inside a readable folder that leads out, and `$HOME/x`.
 
 ## The decision rule
 
