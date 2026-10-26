@@ -4,6 +4,8 @@
 #   scripts/verify --fast          the hand-in rules and gate_fast on the staged files (the pre-commit hook)
 #   scripts/verify --only <check>  one check, no proofs (prove-check runs this)
 #   scripts/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
+# A full run that passes on a clean work tree (no change, no untracked file) leaves factory/verify-<head> in the git dir, which
+# scripts/ship reads; no other form does, and the stamp is never in the work tree.
 # GATE_BASE names the commit the rules and subjects checks read from (default: the merge-base with origin/main).
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 2
@@ -16,6 +18,7 @@ log=$(mktemp -d) || exit 2
 trap 'rm -rf "$log"' EXIT
 ran=0
 failed=""
+full=""
 
 # run <name> <command...>: silent while it passes; on a failure, its name and the end of its output.
 run() {
@@ -87,6 +90,7 @@ case "${1:-}" in
     run tests check_tests "$@"
     ;;
   "")
+    full=1
     for name in $BUILTIN $GATE_CHECKS; do run "$name" "check_$name"; done
     [ -z "$failed" ] && run proofs scripts/prove-check --all
     ;;
@@ -98,6 +102,18 @@ esac
 
 took=$((SECONDS - start))
 if [ -z "$failed" ]; then
+  if [ -n "$full" ]; then
+    dirt=$(git status --porcelain)
+    if [ -z "$dirt" ]; then
+      stamps="$(git rev-parse --absolute-git-dir)/factory"
+      mkdir -p "$stamps" && : >"$stamps/verify-$(git rev-parse HEAD)"
+    else
+      echo "verify: no stamp written, the work tree is not clean:"
+      printf '%s\n' "$dirt" | head -n 5 | sed 's/^/  /'
+      n=$(printf '%s\n' "$dirt" | wc -l | tr -d ' ')
+      [ "$n" -le 5 ] || echo "  … and $((n - 5)) more"
+    fi
+  fi
   echo "verify: $ran passed in ${took}s"
   exit 0
 fi

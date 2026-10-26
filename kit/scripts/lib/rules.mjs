@@ -353,7 +353,10 @@ for (const f of findings) {
   else if (level === 'warn') warnings += 1;
   else allowed += 1;
   const shown = f.text.trim().slice(0, 120);
-  console.log(`${f.path}:${f.line}: ${f.rule} (${level}) ${f.hint}${shown ? `\n    ${shown}` : ''}`);
+  // A deleted test and lost assertions are allowed by a proof, which their hint already shows; the finding of a failing
+  // test edited later is a line the file no longer holds, so no comment can match it.
+  const how = level === 'block' && !['test-deleted', 'assertions-removed', 'failing-test-edited'].includes(f.rule) ? `\n    to allow it: gate-allow ${f.rule}: <why, 20 characters or more>` : '';
+  console.log(`${f.path}:${f.line}: ${f.rule} (${level}) ${f.hint}${shown ? `\n    ${shown}` : ''}${how}`);
 }
 console.log(`rules: ${blocking} blocking, ${warnings} warnings, ${allowed} allowed, in ${changes.length} changed files`);
 process.exit(blocking ? 1 : 0);
