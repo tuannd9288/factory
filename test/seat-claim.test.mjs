@@ -66,6 +66,15 @@ test('a refused start leaves the earlier run\'s .seat, so its log stays on its s
   assert.match(other.err, /seat 1: seven-day use 0\.75/);
 }));
 
+test('a start that fails after it chose a seat leaves no claim behind', () => world(async (w) => {
+  // A directory named like a log of seat 2: reading it as a log throws while the seat is being judged.
+  mkdirSync(join(w.run, 'run-bad.jsonl'));
+  writeFileSync(join(w.run, 'run-bad.seat'), '2\n');
+  const r = w.start('worker');
+  assert.notEqual(r.code, 0, r.out + r.err);
+  assert.deepEqual(readdirSync(w.run).filter((n) => n.startsWith('run-worker')), []);
+}));
+
 test('a supervisor killed with SIGKILL leaves a claude that is still counted live and keeps its tag until it ends', () => world(async (w) => {
   const { liveCount } = await import('../bin/lib/seat.mjs');
   const hold = { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release'), FAKE_SID: 'orphan', FAKE_COST: '9.99', FAKE_TURNS: '99' };
