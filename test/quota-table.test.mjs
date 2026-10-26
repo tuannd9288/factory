@@ -3,7 +3,7 @@
 // number; a window whose reset time has passed is marked, not shown as current. Times are UTC.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,6 +115,49 @@ test('the digest prints the table and the role map', async () => {
     ]);
     assert.ok(block.includes('| worker | claude-sonnet-5-5 | 2 | 2 | acct-b |'));
     assert.ok(text.indexOf('## Quota windows') > text.indexOf('## Sessions'));
+  });
+});
+
+// Fix round 1 (#63): one log that cannot be read (seat 1's, mode 000) must not take the ledger down.
+function withUnreadable(body) {
+  withRuns([['issue-1', 2, 'real-event.jsonl', '2026-10-25T00:00:00Z'], ['issue-2', 1, 'synthetic-rejected-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
+    chmodSync(join(runs, 'issue-2', 'run-worker.jsonl'), 0);
+    mkdirSync(join(runs, 'bin'));
+    mkdirSync(join(runs, 'root'));
+    symlinkSync(process.execPath, join(runs, 'bin/node'));
+    // A gh that answers the digest's calls for an empty period.
+    writeFileSync(join(runs, 'bin/gh'), '#!/bin/sh\ncase "$*" in\n  "api --paginate"*) echo "[[]]" ;;\n  "api repos/o/app/actions/secrets") echo \'{"secrets":[]}\' ;;\n  *) exit 1 ;;\nesac\n');
+    chmodSync(join(runs, 'bin/gh'), 0o755);
+    const env = { FACTORY_RUNS: runs, PATH: `${join(runs, 'bin')}:/usr/bin:/bin`, FACTORY_ROOT: join(runs, 'root'), AGENT_PROFILES: join(runs, 'profiles'), FACTORY_STATE: join(runs, 'state'), FACTORY_PROFILE_DIRS: '' };
+    body((args) => run(factory, join(factory, 'bin/factory-ledger'), ['--repo', 'o/app', '--since', '2026-10-17', '--until', '2026-10-24', ...args], env));
+  });
+}
+const root = { skip: process.getuid?.() === 0 && 'root reads a mode 000 file' };
+
+test('--rows does not compute the quota, so an unreadable log does not fail it', root, () => {
+  withUnreadable((ledgerRun) => {
+    const r = ledgerRun(['--rows']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /^repo\ttask/);
+  });
+});
+
+test('--quota says in one line that a log could not be read, and exits 0', root, () => {
+  withUnreadable((ledgerRun) => {
+    const r = ledgerRun(['--quota']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /could not be read/);
+  });
+});
+
+test('the digest says so in its quota section, and the rest of the digest still prints', root, () => {
+  withUnreadable((ledgerRun) => {
+    const r = ledgerRun([]);
+    assert.equal(r.code, 0, r.out);
+    const block = r.out.slice(r.out.indexOf('## Quota windows'));
+    assert.match(block, /could not be read/);
+    assert.ok(r.out.includes('## Rates'), 'the rates are there');
+    assert.ok(r.out.includes('## Role, model and seat'), 'the role map is there');
   });
 });
 
