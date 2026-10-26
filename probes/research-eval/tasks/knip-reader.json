@@ -11,7 +11,7 @@
       "all": [
         "ee32ee6ca4c8826ca45f306041d9f8c5ffdaa335"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-70/sources/knip",
         "args": [

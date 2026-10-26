@@ -37,9 +37,10 @@
     {
       "id": "F3",
       "ask": "What does the \"Privacy & Telemetry\" page say about telemetry, and about account or licence checks (give the line)?",
+      "orIsAnswer": true,
       "all": [
-        "telemetry",
-        "no account or licen[cs]e check"
+        "(doesn.?t|does not) collect telemetry|no telemetry|collects no telemetry|without telemetry",
+        "no account.{0,30}licen[cs]e.{0,12}check"
       ],
       "cite": "llms-full\\.txt\\D{0,12}33[23]\\d\\b",
       "source": {

@@ -11,7 +11,7 @@
       "all": [
         "\\b(3|three)\\b"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-17/w17",
         "args": [
@@ -41,6 +41,7 @@
     {
       "id": "F3",
       "ask": "Which six file extensions can carry the machine proof at a2f6aa4 (`kit/scripts/lib/deletion.mjs` in `issue-17/w17`)?",
+      "orIsAnswer": true,
       "all": [
         "\\.js\\b",
         "\\.mjs\\b",
@@ -59,12 +60,9 @@
     },
     {
       "id": "F4",
-      "ask": "Under \"The cost of the narrowing\" in `rev4/REVIEW.md`: how many of the factory's own `.mjs` files are readable by the lexer, out of how many, and how many of those hold a backtick and how many a `/`?",
+      "ask": "Under \"The cost of the narrowing\" in `rev4/REVIEW.md`: how many of the factory's own `.mjs` files are readable by the lexer, out of how many, and how many of those hold a backtick and how many a `/`? Give the numbers in that order: readable, total, backtick, slash.",
       "all": [
-        "\\b0\\b",
-        "\\b25\\b",
-        "\\b15\\b",
-        "\\b10\\b"
+        "\\b0\\b.{0,25}\\b25\\b.{0,60}\\b15\\b.{0,25}\\b10\\b"
       ],
       "cite": "REVIEW\\.md\\D{0,12}236\\b",
       "source": {

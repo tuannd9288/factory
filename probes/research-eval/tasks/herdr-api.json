@@ -11,7 +11,7 @@
       "all": [
         "5608de0608918aba2f9d501e7793b984a0ca9cfa"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-68/sources/herdr",
         "args": [
@@ -67,6 +67,7 @@
     {
       "id": "F5",
       "ask": "In the 0.9.5 copy of `socket-api.mdx` (under `docs/versions/0.9.5/`), which five effective status values does it list, and on which line?",
+      "orIsAnswer": true,
       "all": [
         "idle",
         "working",

@@ -11,7 +11,7 @@
       "all": [
         "72e3316f4f5dfe775c77dbf998968c92e2de9019"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-68/sources/paseo",
         "args": [

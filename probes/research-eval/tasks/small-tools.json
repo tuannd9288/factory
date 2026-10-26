@@ -11,7 +11,7 @@
       "all": [
         "4877ea27558817f67068d43e6846e36b99384f3c"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-70/sources/piranha",
         "args": [
@@ -57,7 +57,7 @@
       "all": [
         "913bdac1d59bc2defc658453a65719d133f1ff5a"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-70/sources/semble",
         "args": [
@@ -71,8 +71,9 @@
     {
       "id": "F5",
       "ask": "Which Python versions does semble's `pyproject.toml` require, and on which line?",
+      "orIsAnswer": true,
       "all": [
-        ">=\\s*3\\.10"
+        "3\\.10"
       ],
       "cite": "pyproject\\.toml\\D{0,12}12\\b",
       "source": {

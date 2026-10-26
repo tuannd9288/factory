@@ -11,7 +11,7 @@
       "all": [
         "2f66a45b186d88488fa356862be0117db1ccae9f"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/humanlayer/humanlayer",
         "args": [
@@ -28,7 +28,7 @@
       "all": [
         "\\b2,?107\\b"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/humanlayer/humanlayer",
         "args": [
@@ -46,7 +46,7 @@
       "all": [
         "\\b5,?856\\b"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/humanlayer/humanlayer",
         "args": [

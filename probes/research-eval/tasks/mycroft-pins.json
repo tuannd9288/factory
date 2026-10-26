@@ -11,7 +11,7 @@
       "all": [
         "0443929dad60a05ef56d7278ebb83eac3c59556c"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/mycroft/mycroft",
         "args": [
@@ -28,7 +28,7 @@
       "all": [
         "\\b37\\b"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/mycroft/mycroft",
         "args": [
@@ -46,7 +46,7 @@
       "all": [
         "2026-10-18"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/mycroft/mycroft",
         "args": [

@@ -11,7 +11,7 @@
       "all": [
         "097f4e4a7d79b8db37dc37e2a5146ee59167a777"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/agentrun/agentrun",
         "args": [
@@ -28,7 +28,7 @@
       "all": [
         "\\b588\\b"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/agentrun/agentrun",
         "args": [
@@ -46,7 +46,7 @@
       "all": [
         "2026-09-23"
       ],
-      "cite": "git|rev-parse|rev-list|ls-files",
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
       "source": {
         "git": "issue-58/sources/agentrun/agentrun",
         "args": [

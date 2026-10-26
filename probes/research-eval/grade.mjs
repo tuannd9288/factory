@@ -7,6 +7,13 @@
 // couldNotRead and gives no figure for it. Patterns are regular expressions, matched without regard to case.
 
 const entryOf = (evidence, id) => evidence.find((e) => new RegExp(`^\\s*${id}(?!\\d)`, 'i').test(e));
+// The answer is what comes before the first " — " (the citation follows). A hedge in it, an alternative or a question or a
+// range, scores nothing. A fact whose right answer holds the word "or" says so with `orIsAnswer`, and "or" is then let through.
+const HEDGE = /\bor\b|\?|\bbetween\b|\bmaybe\b|\bprobably\b|\beither\b/i;
+const answerOf = (entry, id) => entry.replace(new RegExp(`^\\s*${id}`, 'i'), '').split(/\s[—–]\s|\s--?\s/)[0];
+const hedged = (fact, entry) => HEDGE.test(fact.orIsAnswer ? answerOf(entry, fact.id).replace(/\bor\b/gi, '') : answerOf(entry, fact.id));
+// Paths, file names with a line, hashes and a run folder's name are not figures.
+const figureIn = (text) => /\d/.test(text.replace(/\S*\/\S*/g, '').replace(/\b[\w-]+\.[A-Za-z]{1,6}(?::\d+(?:-\d+)?)?/g, '').replace(/\b[0-9a-f]{7,40}\b/gi, '').replace(/\bissue-\d+\b/g, ''));
 const matches = (pattern, text) => new RegExp(pattern, 'i').test(text);
 const strings = (value) => (Array.isArray(value) ? value.filter((v) => typeof v === 'string') : []);
 
@@ -17,6 +24,7 @@ export function grade(key, report) {
   const facts = key.facts.map((fact) => {
     const entry = entryOf(evidence, fact.id);
     if (entry === undefined) return { id: fact.id, ok: false, why: 'no evidence entry begins with its id' };
+    if (hedged(fact, entry)) return { id: fact.id, ok: false, why: 'the answer is hedged: more than one value, a range or a question' };
     const missing = (fact.all ?? []).find((p) => !matches(p, entry));
     if (missing !== undefined) return { id: fact.id, ok: false, why: `the entry lacks ${missing}` };
     if (fact.cite !== undefined && !matches(fact.cite, entry)) return { id: fact.id, ok: false, why: `the entry has no citation matching ${fact.cite}` };
@@ -26,7 +34,7 @@ export function grade(key, report) {
   const entry = entryOf(evidence, u.id);
   let unreadable = { id: u.id, ok: true, why: '' };
   if (!couldNotRead.some((c) => matches(u.topic, c))) unreadable = { id: u.id, ok: false, why: 'couldNotRead does not name it' };
-  else if (entry !== undefined && /\d/.test(entry.replace(new RegExp(`^\\s*${u.id}`, 'i'), ''))) unreadable = { id: u.id, ok: false, why: 'the entry gives a figure for it' };
+  else if (entry !== undefined && figureIn(entry.replace(new RegExp(`^\\s*${u.id}`, 'i'), ''))) unreadable = { id: u.id, ok: false, why: 'the entry gives a figure for it' };
   const points = facts.filter((f) => f.ok).length + (unreadable.ok ? 1 : 0);
   const max = facts.length + 1;
   return { points, max, score: points / max, facts, unreadable };
