@@ -48,7 +48,9 @@ export const PRESETS = {
     allow: (run) => [...builderAllow(run), 'Write'],
   },
   researcher: {
-    model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, budget: 15, web: true,
+    // The Lead's proposal (review of #91, #6), not yet the Human's word: the researcher reads untrusted pages, can send them out
+    // with WebFetch and can read a file outside a repository with git grep, so it never runs on seat 1, which holds a token.
+    model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, budget: 15, web: true, seats: [2],
     allow: () => [
       'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Bash(git clone:*)', 'Bash(git -C:*)', 'Bash(git log:*)',
       'Bash(git show:*)', 'Bash(git rev-parse:*)', 'Bash(git ls-files:*)', 'Bash(git grep:*)', 'Bash(git diff:*)',
@@ -64,7 +66,7 @@ export const ROLES = Object.keys(PRESETS);
  * deny rules. */
 export function buildArgs({ role, run, home, resume = null, skills = [], allow = [], addDirs = [], maxTurns = null, seat = null, tokenPath = null }) {
   const p = PRESETS[role];
-  if (!p) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
+  if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
   const deny = [...denyOf(home, p.web), ...(seat === 1 ? ['Bash(env:*)', 'Bash(printenv:*)', `Read(/${tokenPath})`] : [])];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
@@ -113,7 +115,8 @@ const alive = (pid) => {
   }
 };
 
-const filePidAlive = (file) => existsSync(file) && alive(Number(readFileSync(file, 'utf8').trim()));
+// An empty or non-numeric pid file is no live session (process.kill(0, 0) would succeed for it).
+const filePidAlive = (file) => existsSync(file) && /^[1-9][0-9]*$/.test(readFileSync(file, 'utf8').trim()) && alive(Number(readFileSync(file, 'utf8').trim()));
 
 /** Whether a run is live: its pid file's process (the supervisor, or the claude of an old launcher) or the session the
  * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
@@ -143,10 +146,10 @@ export function seatUse(runs, seat) {
 
 /** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is under its cap and its
  * stop. reasons say why each seat that was tried was passed over; with seat null, none was free. */
-export function chooseSeat({ runs, resumeSeat = null }) {
-  if (resumeSeat !== null && !SEATS[resumeSeat]) throw new Error(`seat ${resumeSeat} does not exist; the seats are 1 and 2`);
+export function chooseSeat({ runs, resumeSeat = null, seats = ORDER }) {
+  if (resumeSeat !== null && !Object.hasOwn(SEATS, resumeSeat)) throw new Error(`seat ${resumeSeat} does not exist; the seats are 1 and 2`);
   const reasons = [];
-  for (const seat of resumeSeat === null ? ORDER : [resumeSeat]) {
+  for (const seat of resumeSeat === null ? seats : [resumeSeat]) {
     const n = liveCount(runs, seat);
     const use = seatUse(runs, seat);
     if (n >= SEATS[seat].cap) reasons.push(`seat ${seat}: ${n} live sessions, at most ${SEATS[seat].cap}`);
@@ -178,7 +181,10 @@ export function parseArgs(argv) {
   if (rest.length !== 2) throw new Refused(USAGE);
   [o.role, o.brief] = rest;
   if (!o.run || !o.work) throw new Refused(`--run and --work are both needed\n${USAGE}`);
-  if (o.seat !== undefined && !(o.seat in SEATS)) throw new Refused(`seat ${o.seat} does not exist; the seats are 1 and 2`);
+  for (const [flag, value] of [['--resume', o.resume], ...o.allow.map((v) => ['--allow', v]), ...o.addDirs.map((v) => ['--add-dir', v])]) {
+    if (typeof value === 'string' && value.startsWith('-')) throw new Refused(`${flag} ${value}: a value that starts with a dash is refused, since claude would read it as a flag`);
+  }
+  if (o.seat !== undefined && !/^[12]$/.test(o.seat)) throw new Refused(`seat ${o.seat} does not exist; the seats are 1 and 2`);
   if (o.seat !== undefined) o.seat = Number(o.seat);
   if (o.maxTurns !== undefined && !/^[1-9][0-9]*$/.test(o.maxTurns)) throw new Refused('--max-turns needs a whole number of at least 1');
   if (o.resume && o.seat === undefined) throw new Refused('a resume stays on its seat; give --seat <n>, the seat the session ran on');
@@ -205,11 +211,14 @@ const onPath = (name, PATH) => (PATH ?? '').split(':').some((d) => d && existsSy
  * file, which waits for it and appends its record; the supervisor's pid is the one in run-<tag>.pid. */
 export function launch(argv, env = process.env) {
   const o = parseArgs(argv);
-  if (!PRESETS[o.role]) throw new Refused(`unknown role ${o.role}; the roles are ${ROLES.join(', ')}`);
+  if (!Object.hasOwn(PRESETS, o.role)) throw new Refused(`unknown role ${o.role}; the roles are ${ROLES.join(', ')}`);
   const home = env.HOME;
-  const runs = env.FACTORY_RUNS ?? join(home, 'factory-runs');
-  const profiles = env.AGENT_PROFILES ?? join(home, '.agent-profiles');
-  const state = env.FACTORY_STATE ?? join(home, '.local/state/factory');
+  // Absolute, like --run and --work: the supervisor and claude run in the work folder.
+  const runs = resolve(env.FACTORY_RUNS ?? join(home, 'factory-runs'));
+  const profiles = resolve(env.AGENT_PROFILES ?? join(home, '.agent-profiles'));
+  const state = resolve(env.FACTORY_STATE ?? join(home, '.local/state/factory'));
+  const seats = PRESETS[o.role].seats ?? ORDER;
+  if (o.seat !== undefined && !seats.includes(o.seat)) throw new Refused(`the ${o.role} does not run on seat ${o.seat}`);
   const [run, work, brief] = [resolve(o.run), resolve(o.work), resolve(o.brief)];
   for (const [what, path] of [['run folder', run], ['work folder', work]]) if (!existsSync(path) || !statSync(path).isDirectory()) throw new Refused(`the ${what} ${path} is not a folder`);
   if (!existsSync(brief) || !statSync(brief).isFile()) throw new Refused(`the brief ${brief} is not a file`);
@@ -243,7 +252,7 @@ function claimTag(lock, tag) {
 function startSession({ o, env, home, runs, profiles, state, run, work, brief, tag }) {
   const pidFile = join(run, `run-${tag}.pid`);
   if (runLive(pidFile)) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
-  const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null });
+  const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats });
   if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
   const tokenPath = join(profiles, 'seats/1/oauth-token');
   if (seat === 1) readToken(tokenPath); // refuses now; the supervisor reads it again, just before it starts claude
