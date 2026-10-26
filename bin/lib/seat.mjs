@@ -2,7 +2,7 @@
 // arguments each role gives claude. They come from the hand-written launchers of ~/factory-runs, role by role (see
 // PRESETS). Nothing here reads a credential.
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, writeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -113,9 +113,15 @@ const alive = (pid) => {
   }
 };
 
+const filePidAlive = (file) => existsSync(file) && alive(Number(readFileSync(file, 'utf8').trim()));
+
+/** Whether a run is live: its pid file's process (the supervisor, or the claude of an old launcher) or the session the
+ * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
+const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
+
 /** How many sessions of a seat have a live process. */
 export function liveCount(runs, seat) {
-  return runFiles(runs, '.pid').filter((p) => seatOf(p, '2') === String(seat) && alive(Number(readFileSync(p, 'utf8').trim()))).length;
+  return runFiles(runs, '.pid').filter((p) => seatOf(p, '2') === String(seat) && runLive(p)).length;
 }
 
 /** The seven-day use the newest log of the seat that reports one gives (its last rate_limit_event), or null. */
@@ -208,8 +214,35 @@ export function launch(argv, env = process.env) {
   for (const [what, path] of [['run folder', run], ['work folder', work]]) if (!existsSync(path) || !statSync(path).isDirectory()) throw new Refused(`the ${what} ${path} is not a folder`);
   if (!existsSync(brief) || !statSync(brief).isFile()) throw new Refused(`the brief ${brief} is not a file`);
   const tag = o.tag ?? (o.resume ? basename(brief, extname(brief)) : o.role);
+  // The tag is claimed with a lock folder (mkdir is atomic) for as long as the start takes, so two starts of one tag cannot both pass the check.
+  const release = claimTag(join(run, `run-${tag}.lock`), tag);
+  try {
+    return startSession({ o, env, home, runs, profiles, state, run, work, brief, tag });
+  } finally {
+    release();
+  }
+}
+
+function claimTag(lock, tag) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      mkdirSync(lock);
+      return () => rmSync(lock, { recursive: true, force: true });
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw new Refused(`could not claim run-${tag} (${e.code ?? 'error'})`);
+      // A start that crashed leaves its lock; one older than a minute is not a start in progress.
+      if (attempt === 0 && Date.now() - statSync(lock).mtimeMs > 60000) {
+        rmSync(lock, { recursive: true, force: true });
+        continue;
+      }
+      throw new Refused(`another start of run-${tag} is in progress`);
+    }
+  }
+}
+
+function startSession({ o, env, home, runs, profiles, state, run, work, brief, tag }) {
   const pidFile = join(run, `run-${tag}.pid`);
-  if (existsSync(pidFile) && alive(Number(readFileSync(pidFile, 'utf8').trim()))) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
+  if (runLive(pidFile)) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
   const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null });
   if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
   const tokenPath = join(profiles, 'seats/1/oauth-token');
@@ -222,7 +255,7 @@ export function launch(argv, env = process.env) {
   const args = buildArgs({ role: o.role, run, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
-    tokenPath: seat === 1 ? tokenPath : null, role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
+    childFile: join(run, `run-${tag}.child`), tokenPath: seat === 1 ? tokenPath : null, role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
   };
   for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
@@ -283,6 +316,8 @@ function supervise() {
     appendFileSync(spec.err, `bin/seat: could not start claude (${e instanceof Refused ? 'token' : (e.code ?? 'error')})\n`);
     return finish(null, null, 'start failed');
   }
+  // The session's own pid, so that the run stays counted, and its tag taken, while claude lives even if this supervisor is killed.
+  writeFileSync(spec.childFile, `${child.pid}\n`);
   for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
     process.on(sig, () => {
       try {
@@ -296,6 +331,7 @@ function supervise() {
     if (done) return;
     done = true;
     if (rest.trim()) take(rest);
+    rmSync(spec.childFile, { force: true });
     for (const fd of [stdin, stdout, stderr]) closeSync(fd);
     try {
       mkdirSync(spec.state, { recursive: true });
