@@ -19,7 +19,7 @@ const straight = (text) => text.replace(/[‘’]/g, "'").replace(/[“”]/g, '
 const headingAt = (brief) => brief.split('\n').findIndex((line) => line.trimEnd() === ATTACHMENT_HEADING);
 
 /** Whether the brief has a line that is exactly the attachment heading; without one `check` refuses it (#118). */
-export const hasAttachment = (brief) => headingAt(brief) >= 0;
+const hasAttachment = (brief) => headingAt(brief) >= 0;
 
 /** The brief's own body: everything above the first line that is the attachment heading. */
 export function body(brief) {

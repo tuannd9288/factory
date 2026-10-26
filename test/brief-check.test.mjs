@@ -82,10 +82,8 @@ test('it fails the real #71 brief against message 3, and names exactly the quote
 });
 
 test('it passes a brief written from the template that carries message 3', () => {
-  withFiles({ 'brief.md': withHeading(read('issue-71-brief-carrying.md')) }, (dir) => {
-    const r = brief([join(dir, 'brief.md'), fixture('message-3.md')]);
-    assert.deepEqual(r, { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' });
-  });
+  const r = brief([fixture('issue-71-brief-carrying.md'), fixture('message-3.md')]);
+  assert.deepEqual(r, { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' });
 });
 
 test('it does not count the attached section: the real #71 brief with message 3 pasted under the heading still fails', async () => {
