@@ -42,6 +42,7 @@ export function validateTask(task) {
     if (!Array.isArray(f.all) || f.all.length === 0 || !f.all.every(compiles)) problems.push(`${f.id}: a pattern in all is missing or does not compile`);
     if (!compiles(f.cite)) problems.push(`${f.id}: no cite pattern that compiles`);
     if (!f.source) problems.push(`${f.id}: no source says where it was read`);
+    if (f.orIsAnswer !== undefined && !compiles(f.orIsAnswer)) problems.push(`${f.id}: orIsAnswer must be the phrase of the right answer, a pattern that compiles`);
   }
   if (!compiles(task.unreadable?.topic)) problems.push('the unreadable topic is missing or does not compile');
   return problems;
