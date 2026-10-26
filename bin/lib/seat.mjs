@@ -1,6 +1,8 @@
 // bin/seat (#91): the one command that starts an unattended `claude -p` session. This file holds the role presets: the
 // arguments each role gives claude. They come from the hand-written launchers of ~/factory-runs, role by role (see
 // PRESETS). Nothing here reads a credential.
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/scripts/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. */
@@ -71,4 +73,77 @@ export function buildArgs({ role, run, home, resume = null, skills = [], allow =
     '--disallowedTools', ...deny,
     '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA),
   ];
+}
+
+// The seats, as factory:~/factory-runs/seat.zsh has them (the Human, 2026-10-26): at most four live sessions a seat; seat 1
+// stops at 70% of its week, seat 2 at 90%. A new session tries seat 2 first.
+export const SEATS = { 1: { cap: 4, stop: '0.70' }, 2: { cap: 4, stop: '0.90' } };
+const ORDER = [2, 1];
+
+/** The run*<ext> files of the run folders under runs (one level down). */
+function runFiles(runs, ext) {
+  const out = [];
+  for (const folder of existsSync(runs) ? readdirSync(runs) : []) {
+    const dir = join(runs, folder);
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const n of names) if (n.startsWith('run') && n.endsWith(ext)) out.push(join(dir, n));
+  }
+  return out;
+}
+
+/** The seat a run's file belongs to: its .seat file, else fallback (a session from before there were seats ran on seat 2). */
+const seatOf = (file, fallback = null) => {
+  const s = file.replace(/\.[^./]*$/, '.seat');
+  return existsSync(s) ? readFileSync(s, 'utf8').trim() : fallback;
+};
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+};
+
+/** How many sessions of a seat have a live process. */
+export function liveCount(runs, seat) {
+  return runFiles(runs, '.pid').filter((p) => seatOf(p, '2') === String(seat) && alive(Number(readFileSync(p, 'utf8').trim()))).length;
+}
+
+/** The seven-day use the newest log of the seat that reports one gives (its last rate_limit_event), or null. */
+export function seatUse(runs, seat) {
+  const logs = runFiles(runs, '.jsonl').filter((f) => seatOf(f) === String(seat)).map((f) => ({ f, t: statSync(f).mtimeMs })).sort((a, b) => b.t - a.t);
+  for (const { f } of logs) {
+    const line = readFileSync(f, 'utf8').split('\n').filter((l) => l.includes('"type":"rate_limit_event"')).pop();
+    if (!line) continue;
+    let u;
+    try {
+      u = JSON.parse(line).rate_limit_info?.unifiedWindows?.seven_day?.utilization;
+    } catch {
+      continue;
+    }
+    if (u !== undefined && u !== null && u !== '') return u;
+  }
+  return null;
+}
+
+/** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is under its cap and its
+ * stop. reasons say why each seat that was tried was passed over; with seat null, none was free. */
+export function chooseSeat({ runs, resumeSeat = null }) {
+  if (resumeSeat !== null && !SEATS[resumeSeat]) throw new Error(`seat ${resumeSeat} does not exist; the seats are 1 and 2`);
+  const reasons = [];
+  for (const seat of resumeSeat === null ? ORDER : [resumeSeat]) {
+    const n = liveCount(runs, seat);
+    const use = seatUse(runs, seat);
+    if (n >= SEATS[seat].cap) reasons.push(`seat ${seat}: ${n} live sessions, at most ${SEATS[seat].cap}`);
+    else if (use !== null && !(Number(use) < Number(SEATS[seat].stop))) reasons.push(`seat ${seat}: seven-day use ${use}, stops at ${SEATS[seat].stop}`);
+    else return { seat, reasons };
+  }
+  return { seat: null, reasons };
 }
