@@ -119,17 +119,23 @@ export function place(raw, { cwd, home }) {
 
 /** Every path the tool inputs of a session's log hold: [{ tool, path }], as the session wrote them. */
 export function pathsOf(logText) {
-  const out = [];
+  const events = [];
   for (const l of logText.split('\n')) {
-    let e;
     try {
-      e = JSON.parse(l);
+      events.push(JSON.parse(l));
     } catch {
-      continue;
+      // not an event
     }
-    if (e.type !== 'assistant') continue;
+  }
+  // The calls Claude Code refused never ran: the CLI lists them in each result event's permission_denials. With no result
+  // event nothing is left out.
+  const refused = new Set(events.filter((e) => e?.type === 'result').flatMap((e) => (Array.isArray(e.permission_denials) ? e.permission_denials : []).map((d) => d?.tool_use_id)));
+  const out = [];
+  for (const e of events) {
+    if (e?.type !== 'assistant') continue;
     for (const c of e.message?.content ?? []) {
       if (c.type !== 'tool_use' || typeof c.input !== 'object' || c.input === null) continue;
+      if (typeof c.id === 'string' && refused.has(c.id)) continue;
       for (const f of PATH_FIELDS) if (typeof c.input[f] === 'string') out.push({ tool: c.name, path: c.input[f] });
       for (const f of PATTERN_FIELDS) if (typeof c.input[f] === 'string' && (c.input[f].startsWith('/') || c.input[f].includes('..'))) out.push({ tool: c.name, path: c.input[f] });
       if (typeof c.input.command === 'string') {
