@@ -126,6 +126,8 @@ export function pathsOf(logText) {
       for (const f of PATTERN_FIELDS) if (typeof c.input[f] === 'string' && (c.input[f].startsWith('/') || c.input[f].includes('..'))) out.push({ tool: c.name, path: c.input[f] });
       if (typeof c.input.command === 'string') {
         for (const words of wordsOf(c.input.command)) {
+          // A bare `cd` goes to ~ and `cd -` to the last folder: the relative paths after it cannot be placed.
+          if (words[0]?.text === 'cd' && (words.length === 1 || words[1].text === '-')) out.push({ tool: c.name, path: words.map((x) => x.raw).slice(0, 2).join(' '), unplaceable: true });
           for (const word of words) {
             if (!word.plain) out.push({ tool: c.name, path: word.raw, unplaceable: true });
             // A plain word is also split on "=", "," and ":", so that `--dir=/x` gives its path.
