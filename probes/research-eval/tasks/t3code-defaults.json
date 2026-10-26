@@ -1,0 +1,89 @@
+{
+  "id": "t3code-defaults",
+  "title": "T3 Code: licence, default mode and notifications",
+  "sources": [
+    "issue-68"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "ask": "What commit is the clone `issue-68/sources/t3code` at (the full hash)?",
+      "all": [
+        "24c80f34a1013f0c67ddcf05b8980b812d26f1e1"
+      ],
+      "cite": "git|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-68/sources/t3code",
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "out": "24c80f34a1013f0c67ddcf05b8980b812d26f1e1"
+      },
+      "example": "F1: 24c80f34a1013f0c67ddcf05b8980b812d26f1e1 — git rev-parse HEAD"
+    },
+    {
+      "id": "F2",
+      "ask": "Under which licence, and whose copyright, is the repository (`LICENSE`), and on which line is the holder?",
+      "all": [
+        "MIT",
+        "T3 Tools"
+      ],
+      "cite": "LICENSE\\D{0,12}3\\b",
+      "source": {
+        "file": "issue-68/sources/t3code/LICENSE",
+        "line": 3,
+        "has": "Copyright (c) 2026 T3 Tools Inc."
+      },
+      "example": "F2: MIT, Copyright (c) 2026 T3 Tools Inc. — LICENSE:3"
+    },
+    {
+      "id": "F3",
+      "ask": "In `packages/contracts/src/providerPolicy.ts`, what is `DEFAULT_RUNTIME_MODE`, and on which line?",
+      "all": [
+        "full-access"
+      ],
+      "cite": "providerPolicy\\.ts\\D{0,12}32\\b",
+      "source": {
+        "file": "issue-68/sources/t3code/packages/contracts/src/providerPolicy.ts",
+        "line": 32,
+        "has": "DEFAULT_RUNTIME_MODE: RuntimeMode = \"full-access\""
+      },
+      "example": "F3: \"full-access\" — packages/contracts/src/providerPolicy.ts:32"
+    },
+    {
+      "id": "F4",
+      "ask": "In `docs/user/mobile-notifications.md`, for how long do finished results remain visible in the ongoing-activity card, and on which line?",
+      "all": [
+        "\\b15 minutes"
+      ],
+      "cite": "mobile-notifications\\.md\\D{0,12}5\\b",
+      "source": {
+        "file": "issue-68/sources/t3code/docs/user/mobile-notifications.md",
+        "line": 5,
+        "has": "up to 15 minutes"
+      },
+      "example": "F4: up to 15 minutes — docs/user/mobile-notifications.md:5"
+    },
+    {
+      "id": "F5",
+      "ask": "In the same file, which Android version do notifications require at least, and on which line?",
+      "all": [
+        "Android 7\\.0|\\b7\\.0\\b"
+      ],
+      "cite": "mobile-notifications\\.md\\D{0,12}9\\b",
+      "source": {
+        "file": "issue-68/sources/t3code/docs/user/mobile-notifications.md",
+        "line": 9,
+        "has": "Android 7.0 or newer"
+      },
+      "example": "F5: Android 7.0 or newer — docs/user/mobile-notifications.md:9"
+    }
+  ],
+  "unreadable": {
+    "id": "F6",
+    "ask": "How many downloads does the T3 Code iOS app have?",
+    "topic": "download",
+    "example": "the download count of the T3 Code iOS app: it is not on disk"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "id": "round4-review",
+  "title": "The round-4 review of #17",
+  "sources": [
+    "issue-17"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "ask": "How many commits does the range `aedffb0..a2f6aa4` add in the repository `issue-17/w17`?",
+      "all": [
+        "\\b(3|three)\\b"
+      ],
+      "cite": "git|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-17/w17",
+        "args": [
+          "rev-list",
+          "--count",
+          "aedffb0..a2f6aa4"
+        ],
+        "out": "3"
+      },
+      "example": "F1: 3 — git -C issue-17/w17 rev-list --count aedffb0..a2f6aa4"
+    },
+    {
+      "id": "F2",
+      "ask": "In `rev4/REVIEW.md`, how many tests did `test/deletion-narrow.test.mjs` hold at 9938d14, and how many of them failed?",
+      "all": [
+        "\\b25\\b",
+        "\\b21\\b"
+      ],
+      "cite": "REVIEW\\.md\\D{0,12}18[78]\\b",
+      "source": {
+        "file": "issue-17/rev4/REVIEW.md",
+        "line": 187,
+        "has": "25 tests, 21"
+      },
+      "example": "F2: 25 tests, 21 failed — rev4/REVIEW.md:187"
+    },
+    {
+      "id": "F3",
+      "ask": "Which six file extensions can carry the machine proof at a2f6aa4 (`kit/scripts/lib/deletion.mjs` in `issue-17/w17`)?",
+      "all": [
+        "\\.js\\b",
+        "\\.mjs\\b",
+        "\\.cjs\\b",
+        "\\.ts\\b",
+        "\\.mts\\b",
+        "\\.cts\\b"
+      ],
+      "cite": "deletion\\.mjs\\D{0,12}(102|105|116)\\b",
+      "source": {
+        "file": "issue-17/w17/kit/scripts/lib/deletion.mjs",
+        "line": 105,
+        "has": ".js, .mjs, .cjs, .ts, .mts or .cts"
+      },
+      "example": "F3: .js .mjs .cjs .ts .mts .cts — kit/scripts/lib/deletion.mjs:105"
+    },
+    {
+      "id": "F4",
+      "ask": "Under \"The cost of the narrowing\" in `rev4/REVIEW.md`: how many of the factory's own `.mjs` files are readable by the lexer, out of how many, and how many of those hold a backtick and how many a `/`?",
+      "all": [
+        "\\b0\\b",
+        "\\b25\\b",
+        "\\b15\\b",
+        "\\b10\\b"
+      ],
+      "cite": "REVIEW\\.md\\D{0,12}236\\b",
+      "source": {
+        "file": "issue-17/rev4/REVIEW.md",
+        "line": 236,
+        "has": "0 of the factory's own 25 `.mjs` files are readable (15 hold a backtick, 10 a `/`)"
+      },
+      "example": "F4: 0 of 25 readable; 15 hold a backtick, 10 a / — rev4/REVIEW.md:236"
+    },
+    {
+      "id": "F5",
+      "ask": "In the review's verify section: how many tests passed, and which commit was the merge-base used as GATE_BASE?",
+      "all": [
+        "\\b559\\b",
+        "028531d"
+      ],
+      "cite": "REVIEW\\.md\\D{0,12}24[45]\\b",
+      "source": {
+        "file": "issue-17/rev4/REVIEW.md",
+        "line": 244,
+        "has": "559 tests passed in 340s"
+      },
+      "example": "F5: 559 tests passed; merge-base 028531d — rev4/REVIEW.md:244-245"
+    }
+  ],
+  "unreadable": {
+    "id": "F6",
+    "ask": "How many weekly npm downloads does knip have?",
+    "topic": "downloads",
+    "example": "the weekly npm downloads of knip: they are not on disk"
+  }
+}

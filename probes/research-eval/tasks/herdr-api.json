@@ -1,0 +1,92 @@
+{
+  "id": "herdr-api",
+  "title": "Herdr 0.9.5: version, blocked agents and the socket",
+  "sources": [
+    "issue-68"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "ask": "What commit is the clone `issue-68/sources/herdr` at (the full hash)?",
+      "all": [
+        "5608de0608918aba2f9d501e7793b984a0ca9cfa"
+      ],
+      "cite": "git|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-68/sources/herdr",
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "out": "5608de0608918aba2f9d501e7793b984a0ca9cfa"
+      },
+      "example": "F1: 5608de0608918aba2f9d501e7793b984a0ca9cfa — git rev-parse HEAD"
+    },
+    {
+      "id": "F2",
+      "ask": "Which version does Herdr's root `Cargo.toml` declare, and on which line?",
+      "all": [
+        "0\\.9\\.5"
+      ],
+      "cite": "Cargo\\.toml\\D{0,12}3\\b",
+      "source": {
+        "file": "issue-68/sources/herdr/Cargo.toml",
+        "line": 3,
+        "has": "version = \"0.9.5\""
+      },
+      "example": "F2: 0.9.5 — Cargo.toml:3"
+    },
+    {
+      "id": "F3",
+      "ask": "In `src/app/api/agents.rs`, which error code does the API return when the target agent is blocked, and on which line?",
+      "all": [
+        "agent_blocked"
+      ],
+      "cite": "agents\\.rs\\D{0,12}1(6[5-9]|7[0-7])\\b",
+      "source": {
+        "file": "issue-68/sources/herdr/src/app/api/agents.rs",
+        "line": 171,
+        "has": "\"agent_blocked\""
+      },
+      "example": "F3: agent_blocked — src/app/api/agents.rs:171"
+    },
+    {
+      "id": "F4",
+      "ask": "In `src/api/server.rs`, which octal permission mode does the socket constant hold, and on which line?",
+      "all": [
+        "0o600"
+      ],
+      "cite": "server\\.rs\\D{0,12}29\\b",
+      "source": {
+        "file": "issue-68/sources/herdr/src/api/server.rs",
+        "line": 29,
+        "has": "SOCKET_PERMISSION_MODE: u32 = 0o600"
+      },
+      "example": "F4: 0o600 (SOCKET_PERMISSION_MODE) — src/api/server.rs:29"
+    },
+    {
+      "id": "F5",
+      "ask": "In the 0.9.5 copy of `socket-api.mdx` (under `docs/versions/0.9.5/`), which five effective status values does it list, and on which line?",
+      "all": [
+        "idle",
+        "working",
+        "blocked",
+        "done",
+        "unknown"
+      ],
+      "cite": "socket-api\\.mdx\\D{0,12}421\\b",
+      "source": {
+        "file": "issue-68/sources/herdr/docs/versions/0.9.5/website/src/content/docs/socket-api.mdx",
+        "line": 421,
+        "has": "Effective status values are `idle`, `working`, `blocked`, `done`, and `unknown`"
+      },
+      "example": "F5: idle, working, blocked, done, unknown — docs/versions/0.9.5/website/src/content/docs/socket-api.mdx:421"
+    }
+  ],
+  "unreadable": {
+    "id": "F6",
+    "ask": "How many GitHub stars does Herdr have today?",
+    "topic": "stars",
+    "example": "the number of GitHub stars of Herdr today: it is not in the clone"
+  }
+}

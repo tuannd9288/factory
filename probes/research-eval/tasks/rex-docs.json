@@ -1,0 +1,88 @@
+{
+  "id": "rex-docs",
+  "title": "Rex's docs, as fetched on 2026-10-25",
+  "sources": [
+    "issue-68"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "ask": "In `inputs/raw/rex-llms-full.txt`, which OSC number does the Program Status Protocol use, and on which line is its heading?",
+      "all": [
+        "7501"
+      ],
+      "cite": "llms-full\\.txt\\D{0,12}23[78]\\d\\b",
+      "source": {
+        "file": "issue-68/inputs/raw/rex-llms-full.txt",
+        "line": 2374,
+        "has": "(OSC 7501)"
+      },
+      "example": "F1: OSC 7501 — inputs/raw/rex-llms-full.txt:2374"
+    },
+    {
+      "id": "F2",
+      "ask": "In that protocol's example message, which `state` and which `kind` are reported (give the line)?",
+      "all": [
+        "blocked",
+        "permission"
+      ],
+      "cite": "llms-full\\.txt\\D{0,12}23[89]\\d\\b",
+      "source": {
+        "file": "issue-68/inputs/raw/rex-llms-full.txt",
+        "line": 2387,
+        "has": "state=blocked:kind=permission"
+      },
+      "example": "F2: state=blocked, kind=permission — inputs/raw/rex-llms-full.txt:2387"
+    },
+    {
+      "id": "F3",
+      "ask": "What does the \"Privacy & Telemetry\" page say about telemetry, and about account or licence checks (give the line)?",
+      "all": [
+        "telemetry",
+        "no account or licen[cs]e check"
+      ],
+      "cite": "llms-full\\.txt\\D{0,12}33[23]\\d\\b",
+      "source": {
+        "file": "issue-68/inputs/raw/rex-llms-full.txt",
+        "line": 3329,
+        "has": "Rex doesn't collect telemetry"
+      },
+      "example": "F3: Rex doesn't collect telemetry; no account or license checks — inputs/raw/rex-llms-full.txt:3329-3330"
+    },
+    {
+      "id": "F4",
+      "ask": "Which command must follow `rex send` to press Enter, according to the \"Typing Into a Terminal\" section (give the line)?",
+      "all": [
+        "send-key",
+        "enter"
+      ],
+      "cite": "llms-full\\.txt\\D{0,12}19[78]\\d\\b",
+      "source": {
+        "file": "issue-68/inputs/raw/rex-llms-full.txt",
+        "line": 1983,
+        "has": "rex send-key enter"
+      },
+      "example": "F4: rex send-key enter — inputs/raw/rex-llms-full.txt:1983"
+    },
+    {
+      "id": "F5",
+      "ask": "In the same section, what does `rex send-key ctrl+c` do (give the line)?",
+      "all": [
+        "interrupt"
+      ],
+      "cite": "llms-full\\.txt\\D{0,12}199[0-2]\\b",
+      "source": {
+        "file": "issue-68/inputs/raw/rex-llms-full.txt",
+        "line": 1992,
+        "has": "interrupts whatever is running"
+      },
+      "example": "F5: it interrupts whatever is running — inputs/raw/rex-llms-full.txt:1992"
+    }
+  ],
+  "unreadable": {
+    "id": "F6",
+    "ask": "How many people use Rex today?",
+    "topic": "users|people|usage",
+    "example": "the number of people who use Rex today: it is not on disk"
+  }
+}
