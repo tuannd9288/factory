@@ -10,6 +10,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/scripts/lib/policy.mjs';
 import { coverage } from '../../kit/scripts/lib/verdict.mjs';
+import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PRICES = JSON.parse(readFileSync(join(here, 'prices.json'), 'utf8')).models;
@@ -422,13 +423,18 @@ export function readSessions(dir) {
   });
 }
 
-/** One line for each session that ran in the period, and the total cost. A resumed session's total_cost_usd covers the
- * whole session, so a session counts once, by its last record; the records of one session are never added (#89). */
-export function sessionLines(records, since, until) {
+/** The sessions that ran in the period, one record each: a resumed session's total_cost_usd covers the whole session, so a
+ * session counts once, by its last record; the records of one session are never added (#89). */
+export function keptSessions(records, since, until) {
   const [from, to] = [Date.parse(`${since}T00:00:00Z`), Date.parse(`${until}T23:59:59Z`)];
   const last = new Map();
   for (const r of records.filter((x) => inWindow(x.start, x.end, from, to)).sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(r.session ?? `${r.run}#${r.tag}`, r);
-  const kept = [...last.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  return [...last.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+}
+
+/** One line for each session that ran in the period, and the total cost. */
+export function sessionLines(records, since, until) {
+  const kept = keptSessions(records, since, until);
   const cost = (r) => (typeof r.total_cost_usd === 'number' ? `$${r.total_cost_usd.toFixed(2)}` : '$?');
   return {
     lines: kept.map((r) => `- ${r.role} ${r.tag}, ${r.model}, ${cost(r)}, ${Number(r.minutes).toFixed(1)} min`),
@@ -437,7 +443,7 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {} }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -500,6 +506,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     const { lines: ran, total } = sessionLines(sessions, since, until);
     lines.push('', '## Sessions (bin/seat)', '', ...(ran.length ? [...ran, `- Total: $${total.toFixed(2)} over ${ran.length} ${ran.length === 1 ? 'session' : 'sessions'} (the last record of each; a resumed session's cost is cumulative, so its records are not added)`] : ['- None.']));
   }
+  if (quota) lines.push('', ...(quota.error ? ['## Quota windows (what Claude Code itself reports)', '', `- ${quota.error}`] : quotaSection(quota.rows, { now: quota.now })), '', '## Role, model and seat (bin/seat)', '', ...roleMapLines(keptSessions(sessions ?? [], since, until), accounts));
   if (queue) {
     lines.push('', '## Merge queue (bin/factory-queue)', '');
     if (queue.missing) lines.push(`- Cannot check the queue: the state folder ${queue.dir} does not exist (the queue has not run, or FACTORY_STATE is wrong).`);
@@ -597,7 +604,7 @@ function check(dirs, latest, extra) {
 }
 
 function main(argv) {
-  const opts = { repos: [], since: null, until: null, mode: 'digest', post: null, check: false, latest: 50, profileDirs: (process.env.FACTORY_PROFILE_DIRS ?? '').split(':').filter(Boolean) };
+  const opts = { repos: [], since: null, until: null, mode: 'digest', post: null, check: false, latest: 50, profileDirs: (process.env.FACTORY_PROFILE_DIRS ?? '').split(':').filter(Boolean), quota: false, statusFiles: (process.env.FACTORY_STATUSLINE ?? '').split(':').filter(Boolean) };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--repo') opts.repos.push(argv[++i]);
@@ -607,6 +614,8 @@ function main(argv) {
     else if (a === '--digest') opts.mode = 'digest';
     else if (a === '--post') opts.post = argv[++i];
     else if (a === '--check') opts.check = true;
+    else if (a === '--quota') opts.quota = true;
+    else if (a === '--statusline') opts.statusFiles.push(argv[++i]);
     else if (a === '--latest') {
       const n = Number(argv[++i]);
       if (!Number.isInteger(n) || n < 1) throw new Error('--latest needs a whole number of at least 1');
@@ -618,6 +627,20 @@ function main(argv) {
   const profilesDir = process.env.AGENT_PROFILES ?? join(process.env.HOME, '.agent-profiles');
   if (opts.check) {
     process.exitCode = check(profileFolders(profilesDir, opts.profileDirs), opts.latest, opts.profileDirs);
+    return;
+  }
+  // The quota is read only by --quota and the digest; a run log that cannot be read gives one line, not a failed ledger.
+  const quotaNow = () => {
+    const runs = resolve(process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'));
+    try {
+      return { rows: quotaRows({ runs, statusFiles: opts.statusFiles }), now: Date.now() };
+    } catch (error) {
+      return { error: `The runs folder or a log in it could not be read (${error.code ?? 'error'}), so there is no quota table.` };
+    }
+  };
+  if (opts.quota) {
+    const q = quotaNow();
+    console.log(q.error ?? quotaSection(q.rows, { now: q.now }).join('\n'));
     return;
   }
   const day = (d) => d.toISOString().slice(0, 10);
@@ -676,7 +699,7 @@ function main(argv) {
   }
   const report = inspect(profileFolders(profilesDir, opts.profileDirs), { latest: opts.latest });
   const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions: readSessions(state) });
+  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions: readSessions(state), quota: quotaNow(), accounts: accountsOf(process.env.FACTORY_SEAT_ACCOUNTS) });
   if (!opts.post) {
     process.stdout.write(text);
     return;

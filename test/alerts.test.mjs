@@ -18,7 +18,7 @@ function withState(files, body) {
     }
     const alerts = (args = [], env = {}) => {
       const { FACTORY_NO_ALERTS, ...outer } = process.env;
-      const r = spawnSync(join(factory, 'bin/factory-alerts'), args, { encoding: 'utf8', env: { ...outer, FACTORY_STATE: dir, TZ: 'UTC', ...env } });
+      const r = spawnSync(join(factory, 'bin/factory-alerts'), args, { encoding: 'utf8', env: { ...outer, FACTORY_STATE: dir, FACTORY_RUNS: join(dir, 'no-runs'), FACTORY_STATUSLINE: '', TZ: 'UTC', ...env } });
       return { code: r.status, out: r.stdout, err: r.stderr };
     };
     body({ dir, alerts });
