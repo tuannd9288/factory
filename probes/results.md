@@ -476,3 +476,214 @@ The three live sessions cost $0.18 at API prices:
 - How Herdr would report an interactive Claude Code session.
 - That `--disallowedTools` refuses a call in a pane: no call tried one.
 - The pull-request session through a pane.
+
+## The cloud session trial (issue #93), Claude Code on the web, 2026-10-26
+
+The Human's words, verbatim, relayed by Colly:
+- It started on "Khoan, chạy cloudsesion được thì chạy đi, vì đang có 250$ credit."
+- It ended on "Hiểu, không kết nối được gh của tau đúng không, bỏ qua cloud session."
+
+Both are on #93 (issuecomment-6401698168, issuecomment-6402229414).
+
+**The question.** Can a cloud session build a code-only issue end to end? Four checks: clone the private repository, run verify, push the branch, open the pull request.
+
+**The run.**
+- **Opened** by the Lead on the MacBook at 01:50 +07, from `~/Desktop/TuanHub/tools/factory` (remote `tuannd9288/factory`). The terminal output of `claude --cloud` is kept at `factory:~/factory-runs/issue-93/inputs/cloud-start.log`.
+- **Session:** `session_01Q7W7iTVUbxERAodPZn5XQx`.
+- **The brief** is kept at `factory:~/factory-runs/issue-93/BRIEF-cloud.md`.
+
+| Check | Result |
+|---|---|
+| Clone the private repository | yes |
+| Run verify | ran: "tests 709 fail 5" |
+| Push the branch | no |
+| Open the pull request | no, since nothing was pushed |
+
+- **Verify's five failures.**
+  - One came from the session's own change, `packs/pstack/test/pstack.test.mjs:47`, and the session fixed it.
+  - Four fail on `main` (`14c54f1`) in that environment, because the session runs as root:
+    - `test/kit.test.mjs`, "fails a test that cannot load at the base";
+    - `test/kit.test.mjs`, "fails a test file that selects no test";
+    - two #24 probes, on EACCES.
+- **The push.** The cloud clone had no `origin` remote: `git remote -v` printed nothing, and the session did not add one. Its branch, `claude/issue-93-remove-repeated-rules`, exists only in the cloud.
+
+**Evidence.** The session's own final report, which the Human pasted to Colly. Colly's summary of it is verbatim on #93 (issuecomment-6402229414). The Lead did not read the session itself. `claude --teleport <id>`, which `cloud-start.log` names, was not tried, since the Human ended the trial.
+
+**Cost.** Not read. The session ran on the claude.ai account of the Lead's own pane.
+
+**Outcome.** #93 was built instead by a worker on seat 2. The cloud result served only as a comparison in the review brief. No cloud session runs again unless the Human says so. Colly notes two needs for a later try: a repository the cloud clone has as a GitHub remote, and a verify that passes as root.
+
+**What it does not prove.**
+- **Why the clone had no remote.** It may be the cloud environment's setup, or the GitHub App's access. Neither was read.
+- **The root failures.** Whether these four are the only tests that fail as root.
+
+## Issue #62: where Claude Code reports the quota windows, Claude Code 2.1.308, 2026-10-26
+
+**The question.** Where does Claude Code report a profile's quota windows, so the factory can read them without
+touching a credential (#58, K2 option B)? The issue names three sources. Nothing here read a credential, a token or the
+Keychain.
+
+**Setup.**
+- **When and where:** 2026-10-25 and 2026-10-26, on the `factory` account, Claude Code 2.1.308. The source 1 extracts were
+  made on 2026-10-26 at 02:25 +07; the source 3 measurement ran at 19:20 to 19:22 UTC on 2026-10-25.
+- **Who ran it:** the Lead measured; the worker read the extracts and wrote this section and the probe item.
+
+| Source | Answer | Claude Code | Date |
+|---|---|---|---|
+| 1. `claude -p --output-format stream-json` carries `rate_limit_event` with both windows | **yes** | 2.1.308 | 2026-10-26 |
+| 2. A profile's session files carry it | **not measured** | 2.1.308 | 2026-10-26 |
+| 3. The status line receives `rate_limits.five_hour` and `rate_limits.seven_day`, each with `used_percentage` and `resets_at` | **yes**, but absent before the first prompt (inferred: only after the first API response) | 2.1.308 | 2026-10-26 |
+
+### Source 1: `rate_limit_event` in the stream — yes
+
+The logs are four extracts. The Lead made them with `grep`; each holds only the log's `rate_limit_event` lines and its
+`system`/`init` lines, and no message text. Each is cited by the path of the log it was cut from, on the `factory`
+account.
+
+| Extract | Cut from | `rate_limit_event` lines |
+|---|---|---|
+| `issue-58--run.jsonl` | `~/factory-runs/issue-58/run.jsonl` | 22 |
+| `issue-17--run-builder.jsonl` | `~/factory-runs/issue-17/run-builder.jsonl` | 11 |
+| `issue-17--run-reviewer.jsonl` | `~/factory-runs/issue-17/run-reviewer.jsonl` | 15 |
+| `issue-93--run-worker.jsonl` | `~/factory-runs/issue-93/run-worker.jsonl`, the first run on seat 2 (a new account, by the Lead's brief; the 0% shows in the log); the run was still going, so the extract is a snapshot | 1 |
+
+That is 49 events in four logs; every one carries both windows.
+- **`rate_limit_info` holds:** `status`, `resetsAt`, `rateLimitType`, `overageStatus`, `overageDisabledReason`,
+  `isUsingOverage` and `unifiedWindows`. The same seven names in all 49 events.
+- **`unifiedWindows` holds:** `five_hour` and `seven_day`, and nothing else.
+- **`five_hour` and `seven_day` each hold:** `utilization` and `resetsAt`, and nothing else.
+- **Values seen.** `status` was `allowed` and `rateLimitType` was `five_hour` in every event. `resetsAt` is epoch
+  seconds.
+- **The unit of `utilization`** is an inference from the values seen: most likely a fraction of the window, 0 to 1, not a
+  percentage. The values range from 0 to 0.74 (five hours) and 0 to 0.22 (seven days), in steps of 0.01, and in each log
+  they mostly rise over the run (issue-58's `five_hour` goes 0.52, 0.51, 0.52 at events 7 to 9):
+
+| Extract | `five_hour.utilization` | `seven_day.utilization` |
+|---|---|---|
+| `issue-58--run.jsonl` | 0.47 to 0.66 | 0.14 to 0.18 |
+| `issue-17--run-builder.jsonl` | 0.61 to 0.74 | 0.17 to 0.19 |
+| `issue-17--run-reviewer.jsonl` | 0 to 0.15 | 0.19 to 0.22 |
+| `issue-93--run-worker.jsonl` | 0 | 0 |
+
+The reviewer's five-hour value falling to 0 against the builder's 0.74 is, by inference, a window that reset between the two runs: the top-level `resetsAt` moves from 1792867200 (builder)
+to 1792885200 (reviewer), 18000 s later.
+That a value of 1 means the window is full is the unit's name and the range seen, not something a log shows: no event
+reached it.
+
+**The probe check.** `probes/pack-probe.mjs` has a first-session item, "Claude Code reports both quota windows", which
+fails when the stream carries no `rate_limit_event`, or none with `five_hour` and `seven_day` each holding a numeric
+`utilization` and `resetsAt`. `bin/claude-canary` runs the probe on each new version, so a version that drops the event
+is rejected. It reads the stream only. Every probe run now exits 1 when the first session's stream lacks a complete event, not only
+the canary's: a pack's acceptance run, the #24 `--human-home` run, a run whose profile is not on a claude.ai
+subscription (where no `rate_limit_event` is to be expected), and another pack's `--claude` launcher that does not pass
+the event through. It is a check of Claude Code, not of a pack, and `probes/pack-contract.md` has no
+row for it.
+
+### Source 2: session files — not measured
+
+The Human decided on 2026-10-26, relayed by Colly: "Bỏ nguồn 2 (Recommended)". So source 2 is not measured. No session
+file of any profile was read, by the worker or by any code written for this issue. Whether the files carry the event is
+unknown.
+
+### Source 3: the status line's `rate_limits` — yes
+
+- **How.** The Lead ran an interactive Claude Code in a Herdr pane (Herdr 0.9.5) on seat 2, with the status line set
+  through `--settings` only: the command is in `~/factory-runs/issue-62/measure.log`, and no profile setting changed (the
+  status line came from `--settings` only). The script `~/factory-runs/issue-62/sl/sl.sh` wrote down what it received, in
+  `~/factory-runs/issue-62/statusline.jsonl`: two records.
+- **Before the first prompt** (19:21:47 UTC; the prompt was sent at 19:22:01): no `rate_limits` key. Its keys were `context_window`, `cost`, `cwd`,
+  `effort`, `exceeds_200k_tokens`, `fast_mode`, `model`, `output_style`, `scratchpad_dir`, `session_id`, `thinking`,
+  `transcript_path`, `version`, `workspace`.
+- **After one prompt** (19:22:03 UTC): the same keys plus `prompt_cache`, `prompt_id`, `rate_limits` and `session_name`.
+  `rate_limits.five_hour` and `rate_limits.seven_day` each held `used_percentage` and `resets_at`, and nothing else:
+  - `five_hour`: `used_percentage` 0, `resets_at` 1792973400;
+  - `seven_day`: `used_percentage` 0, `resets_at` 1793415600.
+- **So it appears, by inference from one record before and one after, only after the first API response**, and a script that reads it before then must expect it absent.
+- **Against source 1.**
+  - **Names:** `used_percentage` and `resets_at` here, `utilization` and `resetsAt` there.
+  - **`resets_at`:** the same epoch seconds. `issue-93--run-worker.jsonl`'s event, from seat 2 the same day, has
+    `five_hour.resetsAt` 1792973400 and `seven_day.resetsAt` 1793415600, the two values above.
+  - **The scale of `used_percentage`:** not shown. Only 0 was seen, where a fraction and a percentage are the same
+    number. By its name it is a percentage, 0 to 100, against `utilization`'s 0 to 1, and a reader that takes the two to
+    be one unit would be wrong by a factor of 100; this measurement did not test that.
+- The docs page is https://code.claude.com/docs/en/statusline. The issue cites it for these fields; nothing here goes
+  beyond the issue's words.
+
+### What it does not prove
+
+- Source 2: whether session files carry the event.
+- That the event is on in every kind of account. Four logs on two accounts were read: `status` was `allowed` in all, and
+  `overageStatus` was `rejected` with `org_level_disabled`. What an event holds in a limited, exhausted or overage state
+  is unseen.
+- That the two windows are always both present: they were in all 49 events, which came from runs of one kind
+  (`claude -p`) in two seats.
+- That `utilization` is a fraction up to 1: the largest value seen is 0.74.
+- The scale of the status line's `used_percentage` (see above), and that it is the same measure as `utilization`: only 0
+  was seen.
+- That the status line carries the windows for an account that never made an API call, or under a different login.
+  Only seat 2 was measured, in one session of one prompt.
+- That `rate_limit_event` arrives often enough to read: 11 to 22 events per log in three logs and one in issue-93's snapshot, but no log holds a run's size, so the
+  frequency was not tied to anything.
+- That the probe item catches a real dropped event: it is shown against mocked streams only, until the next live probe
+  run on a new Claude Code version.
+
+## Issue #83: a revert pull request through the gate, factory-scratch, 2026-10-25 UTC
+
+The Lead ran the drill from the factory account (`tuan9288-agent`), with porcelain `gh` and plain `git`. It ran at
+03:44 to 03:46 on 2026-10-26 on the Mac mini's clock (+0700). The times below are UTC.
+
+**The sources:**
+- the Lead's own timestamps, `~/factory-runs/issue-83/drill-times.txt`;
+- the two scripts the Lead ran, kept beside it as the command log (`inputs/drill-commands/drill1.sh`, `drill2.sh`);
+- `gh pr view`, `gh run list` and `gh ruleset view`, read afterwards.
+
+### The change
+
+- factory-scratch#56 added one line to `README.md`, a tier 1 change. It was opened at 20:44:12.
+- The Lead's script armed auto-merge on it with `gh pr merge --auto --merge --match-head-commit`. The arming is in the
+  command log, not in what `gh` printed.
+- It merged at 20:44:32, as merge commit `67043ba`.
+
+### The revert
+
+| Step | Time |
+|---|---|
+| Decision to revert | 20:45:44 |
+| `git revert -m 1 67043ba` on a branch from `main`, pushed | 20:45:47 |
+| factory-scratch#57 opened, its body starting `Reverts #56.` | 20:45:48 |
+| Auto-merge armed by the Lead's script, `gh pr merge --auto --merge --match-head-commit` | 20:45:51 |
+| Seven checks ran, all green (`verify`, `rules`, `red-check`, `verify-trusted`, `review`, `verdict`, `tier`) | 20:45:53 to 20:46:04 |
+| Merged, merge commit `7e9f999` | 20:46:15 |
+
+**How long it took.** From the decision to the revert's merge: 31 seconds. The checks took 11 seconds of it.
+
+**Who merged it.** `gh pr view` names `tuan9288-agent` as the merger of both pull requests. That it was auto-merge
+is an inference: each was armed before its checks ended, #56 merged 4 seconds after its last check and #57 11 seconds
+after its last, and the Lead ran no merge of its own.
+
+**What the ruleset requires.** factory-scratch's ruleset `factory-gate`, read with `gh ruleset view` after the drill,
+requires six of the seven checks: `verify`, `rules`, `red-check`, `verify-trusted`, `review` and `verdict`. It is
+strict, so a branch must be up to date with `main`. It requires no count of approvals, but code-owner review is on:
+a change to a path `.github/CODEOWNERS` gives to `@tuannd9288`, such as `.gate/` or `scripts/`, needs his review.
+`README.md` has no code owner, so the drill needed no approval.
+
+**What Actions ran.** Four workflow runs: `gate` and `gate-trusted` for each pull request, each run 11 to 14
+seconds. The minutes billed were not read; GitHub rounds each job up to a whole minute.
+
+### What it does not prove
+
+- **The reviewer.** factory-scratch's `GATE_REVIEWER` is `stub`, so `review` made no reviewer call. A real reviewer
+  adds its own minutes.
+- **The tier.** The revert was tier 1 and needed no approval. A revert that touches a tier-3 path waits for the
+  Human's approval, like any tier-3 change.
+- **`main` moving.** Nothing else landed during the drill. A revert behind `main` must be brought up to date, which
+  costs a `bin/factory-queue` sweep and a second run of the gate.
+- **A conflict.** It reverted the tip of `main`, so it could not conflict. Reverting an older change can.
+- **`red-check`.** The revert removed a README line, so `No-red:` applied. A revert of a behaviour change must pass
+  `red-check`, or justify its `No-red:`.
+- **A deploy.** A revert on `main` does not undo a deploy; that step is the Human's.
+- **The kit.** factory-scratch runs the kit as installed on 2026-10-21, older than the kit on `main`.
+- **A real defect.** No defect was found or diagnosed. The time starts at the decision, not at the failure, and the
+  commands were written before it: the revert commit is dated one second after the decision.
+- **The ledger.** `bin/factory-ledger` was not run against factory-scratch. The count of reverts is tested on pull
+  requests in `QUERY`'s form.

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The sublayer check (#82): every sublayer label exists with its description, and every open issue carries exactly one.
+# Porcelain gh only. Exits 0 when nothing is reported, 1 when something is, 2 when gh fails or the arguments are wrong.
+# Usage: bin/factory-sublayers [--repo <owner/name>]   (default tuannd9288/factory)
+exec node "$(dirname "$0")/lib/sublayers.mjs" "$@"
