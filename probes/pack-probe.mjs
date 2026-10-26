@@ -1,5 +1,6 @@
 // The pack conformance probe: drives a pack's launcher (default: plain Claude Code behind direnv) and gh in a scratch
-// repository the factory has taken in, and prints PASS or FAIL for each item of probes/pack-contract.md.
+// repository the factory has taken in, and prints PASS or FAIL for each item of probes/pack-contract.md,
+// and for one property of Claude Code the contract does not list (the quota windows in the stream).
 //   node probes/pack-probe.mjs --repo owner/name [--root <factory root>] [--profiles <dir>] [--log-dir <dir>]
 //     [--claude "direnv exec . claude"] [--ledger bin/factory-ledger] [--max-turns 8] [--max-turns-pr 25] [--no-pr]
 //     [--poll-seconds 20] [--timeout-minutes 20] [--agent tuan9288-agent] [--env-prefix "direnv exec ."]
@@ -33,9 +34,10 @@ const allowedPr = (branch) => ['Bash(git add *)', 'Bash(git commit *)', `Bash(gi
 const DISALLOWED = ['Bash(gh pr merge:*)', 'Bash(scripts/live-verify:*)', 'Bash(git commit *--no-verify*)', 'Bash(git commit * -n *)', 'Bash(git commit -n *)', 'Bash(git commit --no-verify*)'];
 
 /** A `claude -p --output-format stream-json` run (Claude Code 2.1.308): where it started, its mode and plugins, each
- * tool call with its result, the denials the result reports and the permission_denied events. */
+ * tool call with its result, the denials the result reports, the permission_denied events and the quota windows of each
+ * rate_limit_event (null for an event without them). */
 export function parseSession(text) {
-  const session = { cwd: null, plugins: [], permissionMode: null, model: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, failed: null, text: '', loaded: null };
+  const session = { cwd: null, plugins: [], permissionMode: null, model: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, failed: null, text: '', loaded: null, rateLimits: [] };
   const byId = new Map();
   for (const line of text.split('\n')) {
     let e;
@@ -64,6 +66,8 @@ export function parseSession(text) {
         tool.output = typeof b.content === 'string' ? b.content : (b.content ?? []).map((c) => c.text ?? '').join('\n');
         tool.isError = Boolean(b.is_error);
       }
+    } else if (e.type === 'rate_limit_event') {
+      session.rateLimits.push(e.rate_limit_info?.unifiedWindows ?? null);
     } else if (e.type === 'result') {
       session.subtype = e.subtype ?? null;
       // An error the session ended in (a usage limit, an API error) can still carry subtype success.
@@ -87,6 +91,15 @@ function fromAccount(loaded) {
     ...loaded.plugins.filter((p) => String(p.source ?? '').endsWith('@synced')).map((p) => `plugin ${p.source}`),
     ...loaded.skills.filter((s) => s.startsWith('anthropic-skills:')).map((s) => `skill ${s}`),
   ];
+}
+/** What is missing from one event's unifiedWindows: each window and its two fields, by name (#62). */
+function missingWindows(windows) {
+  const missing = [];
+  for (const w of ['five_hour', 'seven_day']) {
+    if (typeof windows?.[w] !== 'object' || windows[w] === null) missing.push(w);
+    else for (const f of ['utilization', 'resetsAt']) if (typeof windows[w][f] !== 'number') missing.push(`${w}.${f}`);
+  }
+  return missing;
 }
 const commandOf = (t) => (t.name === 'Bash' ? String(t.input.command ?? '') : '');
 
@@ -128,6 +141,17 @@ export function judge({ session, prSession, profile, marker, secret, root, tagEx
   add('session starts inside the repository', session.cwd !== null && real(session.cwd).startsWith(real(root)), `cwd ${session.cwd ?? 'not reported'}`);
   add('pins load (pstack plugin listed)', session.plugins.includes('pstack'), `plugins: ${session.plugins.join(', ') || 'none'}`);
   add('permission baseline (acceptEdits) in force', session.permissionMode === 'acceptEdits', `init permissionMode ${JSON.stringify(session.permissionMode)}`);
+  // Not a check of a pack but of Claude Code: #63 reads these windows from the stream, so a version that drops them is caught here.
+  const complete = session.rateLimits.find((w) => !missingWindows(w).length);
+  add(
+    'Claude Code reports both quota windows (rate_limit_event, unifiedWindows five_hour and seven_day)',
+    Boolean(complete),
+    complete
+      ? `${session.rateLimits.length} rate_limit_event in the stream; five_hour and seven_day each carry utilization and resetsAt`
+      : session.rateLimits.length
+        ? `${session.rateLimits.length} rate_limit_event in the stream, none complete; missing in the last: ${missingWindows(session.rateLimits.at(-1)).join(', ')}`
+        : 'no rate_limit_event in the stream',
+  );
   const named = sessions.map((s, i) => [i ? 'pull request session' : 'first session', s.loaded]);
   const unread = named.filter(([, loaded]) => !loaded).map(([name]) => name);
   const account = named.filter(([, loaded]) => loaded).map(([name, loaded]) => [name, fromAccount(loaded)]).filter(([, found]) => found.length);

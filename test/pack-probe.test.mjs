@@ -23,15 +23,20 @@ const TAG_DENIED = 'Permission to use Bash with command git tag x has been denie
 const READ_DENIED = '<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>';
 const denied = (id, name, reasonType, message) => ev({ type: 'system', subtype: 'permission_denied', tool_name: name, tool_use_id: id, decision_reason_type: reasonType, message, session_id: 's1' });
 
+// Issue #62: the event as 2.1.308 emits it (probes/results.md); `windows` is the value of rate_limit_info.unifiedWindows.
+const RATE_WINDOWS = { five_hour: { utilization: 0.15, resetsAt: 1792867200 }, seven_day: { utilization: 0.14, resetsAt: 1793271600 } };
+const rateEvent = (windows) => ev({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1792867200, rateLimitType: 'five_hour', overageStatus: 'rejected', isUsingOverage: false, unifiedWindows: windows }, uuid: 'u1', session_id: 's1' });
+
 /** A good first session, as 2.1.308 emits it: the control branch is made, the tag and the .env read are denied by a
  * rule, the profile is printed, the marker comes from context. */
 function stream(over = {}) {
   const o = { cwd: '/r/app', mode: 'acceptEdits', plugins: ['pstack', 'cc-plugin-agents-md'], subtype: 'success', profile: [`${PROFILE}\n`, false], marker: MARKER, ctl: CTL, markerRead: false,
     tag: { event: ['subcommandResults', TAG_DENIED], text: TAG_DENIED, isError: true, denial: true },
-    env: { event: null, text: READ_DENIED, isError: true, denial: true }, ...over };
+    env: { event: null, text: READ_DENIED, isError: true, denial: true }, rate: [RATE_WINDOWS], ...over };
   const denials = [];
   const lines = [
     ev({ type: 'system', subtype: 'init', cwd: o.cwd, session_id: 's1', permissionMode: o.mode, model: 'claude-opus-5-5', plugins: o.plugins.map((name) => ({ name })) }),
+    ...o.rate.map((windows) => rateEvent(windows)),
     use('t0', 'Bash', { command: `git branch ${o.ctl}` }),
     out('t0', '(Bash completed with no output)'),
   ];
@@ -70,6 +75,25 @@ test('a session whose tag and .env read are denied by rules, with the control al
   const items = await verdict(stream());
   assert.deepEqual(items.map((i) => i.ok), items.map(() => true), JSON.stringify(items.filter((i) => !i.ok)));
   assert.ok(items.length >= 11, items.map((i) => i.item).join('\n'));
+});
+
+test('#62: the stream must carry rate_limit_event with both windows, each with utilization and resetsAt', async () => {
+  const item = 'Claude Code reports both quota windows';
+  const good = by(await verdict(stream()), item);
+  assert.equal(good.ok, true, JSON.stringify(good));
+  assert.match(good.evidence, /1 rate_limit_event/);
+  const none = by(await verdict(stream({ rate: [] })), item);
+  assert.equal(none.ok, false);
+  assert.match(none.evidence, /no rate_limit_event/);
+  const noWeek = by(await verdict(stream({ rate: [{ five_hour: RATE_WINDOWS.five_hour }] })), item);
+  assert.equal(noWeek.ok, false);
+  assert.match(noWeek.evidence, /seven_day/);
+  const noReset = by(await verdict(stream({ rate: [{ five_hour: { utilization: 0.1, resetsAt: 1 }, seven_day: { utilization: 0.1 } }] })), item);
+  assert.equal(noReset.ok, false);
+  assert.match(noReset.evidence, /seven_day\.resetsAt/);
+  const noUtil = by(await verdict(stream({ rate: [{ five_hour: { resetsAt: 1 }, seven_day: { utilization: 0.1, resetsAt: 1 } }] })), item);
+  assert.equal(noUtil.ok, false);
+  assert.match(noUtil.evidence, /five_hour\.utilization/);
 });
 
 test('a tag the session was allowed to make, or never tried, fails', async () => {
