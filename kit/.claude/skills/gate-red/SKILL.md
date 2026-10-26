@@ -27,10 +27,10 @@ approval holds while the patch is unchanged, as when the queue merges `main` in;
 
 ## A blocking finding
 
-- Fix it with a new commit. Never rewrite a pushed commit: the red heads `rounds` counts and the approval's commit would go.
+- Fix it with a new commit; `AGENTS.md`, in "Rules and what enforces them", says why a pushed commit is never rewritten.
 - A finding you dispute goes to the Human: label the pull request `needs-human` and put your recommended answer in it.
 
 ## Rounds
 
 At the third head commit judged red, `rounds` labels the pull request `needs-human`, which makes it tier 3: the Human
-decides. Stop pushing then.
+decides. Stop pushing until the Human answers.
