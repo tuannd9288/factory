@@ -79,21 +79,28 @@ run and refuses to score that run (`paths.mjs`):
 
 - **What it reads.** The session's own `run-<tag>.jsonl`, before the report is graded. Every path in every tool input: the
   `file_path`, `path` and `notebook_path` fields; a `pattern` or `glob` that is absolute or holds `..`; and, in a `command`, every
-  token that is absolute, starts with `~`, holds `..` or holds a variable or a command substitution. `Write` and `Edit` are
-  included, since a note left outside the folders is how one arm could reach the other.
+  word that is absolute, starts with `~` or holds `..`. `Write` and `Edit` are included, since a note left outside the folders
+  is how one arm could reach the other.
+- **One allow rule for a shell command: a word is placeable only when it is plain text.** The `command` is read quote by quote.
+  Single-quoted text is literal and is checked as written. A word whose unquoted or double-quoted part holds any shell
+  expansion cannot be placed, so it counts as outside: a `$` in any form (`$VAR`, `${…}`, `$(…)`, `$'…'`, `$"…"`), a backslash, a
+  brace, or a backtick. A bare `cd` and `cd -` are outside too, since the next relative path cannot be placed. The cost is
+  accepted: an unquoted regex with a backslash, or an inline script with braces, makes the run invalid and prints its path. The
+  words split on whitespace and on `; | & < >` outside quotes.
 - **How it places a path.** A relative path resolves against the session's work folder, `~` is `HOME`, `..` is normalised, and when
   the path exists its symlinks are resolved, so a link inside a readable folder that leads out counts as outside. A glob is placed
-  at the folder before its first wildcard. `/dev/null` is not counted.
+  at the folder before its first wildcard (a glob is not one of the expansions above, and its matches are not followed, so a
+  match that is a link leading out is not seen). `/dev/null` is not counted.
 - **Inside** is under the session's run folder, its work folder or one of its task's `readable` folders. The readable folders
   count as inside because the runner gives them to the session for its task. A path it cannot place (`$HOME/x`, a command
   substitution, `/**`) counts as outside, and so does a session with no log.
 - **What follows.** An invalid run is not scored. It is listed with each outside path in what the runner prints and in `results`
   of `research-eval-<set>.json` (`invalid`), and the other arm's run of the same task and repetition is not compared with it, so
   a pair with an invalid arm gives no comparison. Its cost and tokens still count.
-- **What it does not do.** It stops nothing, and it sees only the paths the log shows: a path that a command builds from pieces
-  is seen only as the variable or substitution that builds it, and `git show main:probes/research-eval/tasks/<task>.json` names
-  no path outside the folders. It may flag a read that is legitimate, such as a file that Claude Code itself saves under the
-  profile for a long tool result.
+- **What it does not do.** It is evidence of where a session read, not a sandbox: it prevents nothing, and no reader of a shell
+  command is complete. It sees only the paths the log shows, and a command built only to evade it can still pass (a known
+  limit, not a finding to fix): `git show main:probes/research-eval/tasks/<task>.json` names no path outside the folders. It may
+  flag a read that is legitimate, such as a file that Claude Code itself saves under the profile for a long tool result.
 - **The guard.** Before any session starts, with or without `--go`, the runner refuses the set (exit 7, naming the task and the
   folder) when a task's readable folder is, holds or sits in a run or work folder of the plan, a `probes/research-eval/tasks`
   folder (this checkout's, `~/WORKSPACES`'s or `issue-92/w92`'s), `issue-92` (the reports), or is or holds the runs folder itself,
