@@ -9,15 +9,18 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PRESETS } from '../../bin/lib/seat.mjs';
 import { grade } from './grade.mjs';
-import { briefOf, loadTasks } from './keys.mjs';
+import { briefOf, loadTasks, validateTask, verifyTask } from './keys.mjs';
 
 // bin/seat is a one-line wrapper of this file; running the file with the same node needs no shell on the PATH.
 const SEAT_JS = join(dirname(fileURLToPath(import.meta.url)), '../../bin/lib/seat.mjs');
 export const ARMS = ['A', 'B'];
 export const PROBE_TASKS = ['knip-reader', 'round4-review'];
 const SETS = { probe: { runs: 1 }, full: { runs: 2 } };
-const HELPER_TOOLS = ['Agent', 'Task'];
+// The tools that start helper agents: Agent (called Task before), and Workflow.
+const HELPER_TOOLS = ['Agent', 'Task', 'Workflow'];
 const DEFAULTS = { turns: 80, pollMs: 5000, timeoutMin: 45, limit: 24 };
+// Printed with the results and kept in them: what the eval cannot show.
+const NOTE = 'Both arms deny the web (WebFetch, WebSearch), so the helpers are the only difference; this departs from "A, as today". The eval measures helpers on research over files on disk and says nothing about helpers in web research, where the 13 helpers of #58, #68, #68b and #70 mostly worked.';
 
 class Refused extends Error {}
 
@@ -45,10 +48,13 @@ export function seatArgs(entry, { run, work, runsRoot, turns }) {
   ];
 }
 
-/** What a session's log says: its tools, the helper agents it started, and its tokens (all models, helpers included). */
+/** What a session's log says: whether it has an init event and its tools, the helper agents it started, the events that a
+ * subagent wrote (they carry a parent_tool_use_id), and its tokens (all models, helpers included). */
 export function metricsOf(text) {
   let tools = [];
+  let init = false;
   let helpers = 0;
+  let subagentEvents = 0;
   let usage = {};
   for (const l of text.split('\n')) {
     let e;
@@ -57,13 +63,17 @@ export function metricsOf(text) {
     } catch {
       continue;
     }
-    if (e.type === 'system' && e.subtype === 'init' && Array.isArray(e.tools)) tools = e.tools;
+    if (e.type === 'system' && e.subtype === 'init') {
+      init = true;
+      if (Array.isArray(e.tools)) tools = e.tools;
+    }
+    if (e.parent_tool_use_id !== undefined && e.parent_tool_use_id !== null) subagentEvents += 1;
     if (e.type === 'assistant') helpers += (e.message?.content ?? []).filter((c) => c.type === 'tool_use' && HELPER_TOOLS.includes(c.name)).length;
     if (e.type === 'result' && e.modelUsage) usage = e.modelUsage;
   }
   const sum = (key) => Object.values(usage).reduce((s, u) => s + (u[key] ?? 0), 0);
   return {
-    tools, helpers,
+    init, tools, helpers, subagentEvents,
     tokensIn: sum('inputTokens') + sum('cacheReadInputTokens') + sum('cacheCreationInputTokens'), tokensOut: sum('outputTokens'),
   };
 }
@@ -94,6 +104,7 @@ function parse(argv) {
   const value = { '--set': 'set', '--run': 'run', '--work': 'work', '--limit-usd': 'limit', '--turns': 'turns', '--poll-ms': 'pollMs', '--timeout-min': 'timeoutMin' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--go') o.go = true;
+    else if (argv[i] === '--skip-key-check') o.skipKeyCheck = true; // for the tests, which hold none of the sources
     else if (argv[i] in value && i + 1 < argv.length) o[value[argv[i]]] = argv[++i];
     else throw new Refused(`unknown option or missing value: ${argv[i]}`);
   }
@@ -107,6 +118,17 @@ function parse(argv) {
   }
   o.limit ??= DEFAULTS.limit;
   return o;
+}
+
+/** The problems of the keys of the tasks in a plan: a shape that is wrong, no readable folders, a fact that no longer holds. */
+function keyProblems(plan, runsRoot) {
+  const out = [];
+  for (const task of new Set(plan.map((e) => e.task))) {
+    for (const p of validateTask(task)) out.push(`${task.id}: ${p}`);
+    if (!Array.isArray(task.readable) || task.readable.length === 0) out.push(`${task.id}: no readable folders`);
+    for (const p of verifyTask(task, runsRoot)) out.push(`${task.id} ${p.id}: ${p.why}`);
+  }
+  return out;
 }
 
 const recordOf = (state, tag, since) => {
@@ -129,8 +151,13 @@ async function main(argv, env) {
     console.log(`not started: add --go to run these ${plan.length} sessions, one at a time, stopping when the spend passes ${usd(o.limit)}; each session is capped at ${usd(PRESETS.researcher.budget)} by the researcher preset`);
     return 0;
   }
+  if (!o.skipKeyCheck) {
+    const problems = keyProblems(plan, runsRoot);
+    if (problems.length) throw new Refused(`the keys do not hold, so nothing was started:\n${problems.slice(0, 20).join('\n')}`);
+  }
   const results = [];
   let spent = 0;
+  let model = null;
   let code = 0;
   const stop = (line, c) => {
     console.log(`stopped: ${line}`);
@@ -158,10 +185,22 @@ async function main(argv, env) {
     const g = grade(e.task, rec.structured);
     const cost = rec.total_cost_usd ?? PRESETS.researcher.budget;
     spent += cost;
-    results.push({ tag: e.tag, task: e.task.id, arm: e.arm, rep: e.rep, points: g.points, max: g.max, score: g.score, cost, minutes: rec.minutes, tokensIn: m.tokensIn, tokensOut: m.tokensOut, helpers: m.helpers, ended: rec.ended, tools: m.tools });
-    console.log(`${e.tag} score ${g.points}/${g.max} tokens ${m.tokensIn} in ${m.tokensOut} out minutes ${rec.minutes} cost ${usd(cost)} helpers ${m.helpers}${rec.total_cost_usd == null ? ' (cost unknown, counted at the cap)' : ''}`);
-    if (e.arm === 'B' && m.tools.some((t) => HELPER_TOOLS.includes(t))) {
-      stop(`${e.tag} had the Agent tool, so arm B is not arm B`, 4);
+    results.push({ tag: e.tag, task: e.task.id, arm: e.arm, rep: e.rep, points: g.points, max: g.max, score: g.score, cost, minutes: rec.minutes, tokensIn: m.tokensIn, tokensOut: m.tokensOut, helpers: m.helpers, ended: rec.ended, model: rec.model, tools: m.tools });
+    console.log(`${e.tag} score ${g.points}/${g.max} tokens ${m.tokensIn} in ${m.tokensOut} out minutes ${rec.minutes} cost ${usd(cost)} helpers ${m.helpers} ended ${rec.ended}${rec.ended === 'success' ? '' : ' (cut or failed, not a low score)'}${rec.total_cost_usd == null ? ' (cost unknown, counted at the cap)' : ''}`);
+    // Arm B must be without helpers: it stops the set when the log cannot show that, or shows a helper.
+    const leaked = HELPER_TOOLS.find((t) => m.tools.includes(t));
+    const broken = e.arm !== 'B' ? null
+      : !m.init ? `${e.tag} wrote no init event, so its tools are unknown`
+        : leaked ? `${e.tag} had the ${leaked} tool, so arm B is not arm B`
+          : m.helpers > 0 ? `${e.tag} started ${m.helpers} helper${m.helpers === 1 ? '' : 's'}, so arm B is not arm B`
+            : m.subagentEvents > 0 ? `${e.tag} had ${m.subagentEvents} events from a subagent, so arm B is not arm B` : null;
+    if (broken) {
+      stop(broken, 4);
+      break;
+    }
+    model ??= rec.model;
+    if (rec.model !== model) {
+      stop(`${e.tag} ran on ${rec.model}, not ${model}`, 6);
       break;
     }
     if (spent > o.limit) {
@@ -184,7 +223,8 @@ async function main(argv, env) {
       console.log(`estimate for the full set (${full.tasks} tasks x ${full.runs} runs x 2 arms): ${usd(cost)}, about ${Math.round(minutes)} minutes, from these ${results.length} runs`);
     } else console.log('estimate for the full set: not yet, it needs a run of each arm');
     console.log(`spent ${usd(spent)} of the ${usd(o.limit)} limit`);
-    writeFileSync(join(o.run, `research-eval-${o.set}.json`), `${JSON.stringify({ set: o.set, limit: o.limit, spent, results, summary: s }, null, 2)}\n`);
+    console.log(`note: ${NOTE}`);
+    writeFileSync(join(o.run, `research-eval-${o.set}.json`), `${JSON.stringify({ set: o.set, limit: o.limit, spent, note: NOTE, results, summary: s }, null, 2)}\n`);
   }
   return code;
 }
