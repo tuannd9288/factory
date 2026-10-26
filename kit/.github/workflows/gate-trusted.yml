@@ -3,7 +3,9 @@
 # runs only in gate.yml on pull_request, and none restores an Actions cache, which this event shares with main.
 #   review   reads the candidate as data: its commits are fetched into main's checkout with no work tree. It waits for
 #            gate.yml's verify on the head and runs the reviewer, once per head (a push is a new head; an edit that leaves
-#            head, base and the No-red line alone reuses the earlier result), only after it passed. It is told when the
+#            head, base, the No-red line and the closing issues alone reuses the earlier result), only after it passed.
+#            For GATE_REVIEWER=claude it first reads the issues of this repository the pull request closes (`gh pr view`,
+#            `gh issue view`, so `issues: read` and `pull-requests: read`) and hands them over as data. It is told when the
 #            job started and how long it may run (GATE_JOB_START, GATE_JOB_MINUTES), so a call is sized to the time left. The
 #            reviewer's credential (CLAUDE_CODE_OAUTH_TOKEN for GATE_REVIEWER=claude) comes from the environment "reviewer",
 #            whose branch policy admits main alone; Claude Code is the pinned one of scripts/reviewer, installed with
@@ -53,6 +55,8 @@ jobs:
       actions: read
       contents: read
       checks: read
+      issues: read
+      pull-requests: read
     steps:
       - name: Note when the job started
         run: echo "GATE_JOB_START=$(date +%s)" >>"$GITHUB_ENV"
