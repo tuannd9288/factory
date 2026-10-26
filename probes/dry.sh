@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Builds each probe in a throwaway worktree without pushing. For C*: runs verify and red-check as the agent would.
+export PROBE_DRY=1 # a builder that would open an issue (A1) opens none
 source "$(dirname "$0")/drive.sh"
 source "$(dirname "$0")/probes.sh"
 for id in "$@"; do
