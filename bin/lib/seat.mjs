@@ -128,22 +128,27 @@ export function liveCount(runs, seat) {
   return runFiles(runs, '.pid').filter((p) => seatOf(p, '2') === String(seat) && runLive(p)).length;
 }
 
-/** The seven-day use the newest log of the seat that reports one gives (its last rate_limit_event), or null. */
-export function seatUse(runs, seat) {
+/** The rate_limit_info that the newest log of the seat reporting a seven-day use gives (its last rate_limit_event), with the
+ * log's time, or null. The one reader of a seat's quota: seatUse and the ledger's table (bin/lib/quota.mjs) both use it. */
+export function seatEvent(runs, seat) {
   const logs = runFiles(runs, '.jsonl').filter((f) => seatOf(f) === String(seat)).map((f) => ({ f, t: statSync(f).mtimeMs })).sort((a, b) => b.t - a.t);
-  for (const { f } of logs) {
+  for (const { f, t } of logs) {
     const line = readFileSync(f, 'utf8').split('\n').filter((l) => l.includes('"type":"rate_limit_event"')).pop();
     if (!line) continue;
-    let u;
+    let info;
     try {
-      u = JSON.parse(line).rate_limit_info?.unifiedWindows?.seven_day?.utilization;
+      info = JSON.parse(line).rate_limit_info;
     } catch {
       continue;
     }
-    if (u !== undefined && u !== null && u !== '') return u;
+    const u = info?.unifiedWindows?.seven_day?.utilization;
+    if (u !== undefined && u !== null && u !== '') return { info, asOf: t };
   }
   return null;
 }
+
+/** The seven-day use of the seat (see seatEvent), or null. */
+export const seatUse = (runs, seat) => seatEvent(runs, seat)?.info.unifiedWindows.seven_day.utilization ?? null;
 
 /** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is under its cap and its
  * stop. reasons say why each seat that was tried was passed over; with seat null, none was free. */
