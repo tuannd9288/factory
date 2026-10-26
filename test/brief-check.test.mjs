@@ -139,6 +139,17 @@ test('a fenced message with no backtick and no blank line still has its quotes c
   });
 });
 
+// A stray backtick pairs with a later one; the span between them then holds three quotes and must not drop the Human's words.
+test('a code span holding three quotes exits 2 and does not pass', () => {
+  const relay = 'a stray ` then 27" wide, he said "A" `x`.\n';
+  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+    const r = brief([join(dir, 'empty.md'), join(dir, 'relay.md')]);
+    assert.equal(r.code, 2);
+    assert.equal(r.out, '');
+    assert.match(r.err, /unpaired.*a stray/);
+  });
+});
+
 test('an inline code span with an even number of quotes still has them checked', () => {
   const relay = 'He pointed to `specification.md, section "Progressive disclosure"` and left.\n';
   withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
