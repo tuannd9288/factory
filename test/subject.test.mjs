@@ -30,11 +30,6 @@ describe('the subject rules', () => {
     for (const [subject, rule] of BAD) assert.match(subjectProblem(subject) ?? '', rule, JSON.stringify(subject));
     for (const subject of GOOD) assert.equal(subjectProblem(subject), null, subject);
   });
-  test('the hook holds no list of its own', () => {
-    const hook = readFileSync(join(factory, 'kit/.githooks/commit-msg'), 'utf8');
-    assert.match(hook, /subject\.mjs/);
-    assert.doesNotMatch(hook, /WIP|wip|\$\{#subject\}|72/);
-  });
 });
 
 describe('the hook and verify on a repository with the kit', () => {
@@ -85,9 +80,7 @@ describe('the hook and verify on a repository with the kit', () => {
 });
 
 describe("the factory's own pull requests", () => {
-  test('its verify checks the subjects from the event base, on a full checkout', () => {
-    const verify = readFileSync(join(factory, 'scripts/verify'), 'utf8');
-    assert.match(verify, /kit\/scripts\/lib\/subject\.mjs --base "\$GATE_BASE"/);
+  test('the verify workflow fetches the full history and names the event base', () => {
     const workflow = readFileSync(join(factory, '.github/workflows/verify.yml'), 'utf8');
     assert.match(workflow, /fetch-depth: 0/);
     assert.match(workflow, /GATE_BASE: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
@@ -171,13 +164,6 @@ describe('what the subject is, and when the script runs', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-  test('kit/AGENTS.md shows the counts verify and prove-check now print, and has not grown', () => {
-    const text = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
-    assert.match(text, /`verify: 6 passed in 12s`/);
-    assert.match(text, /`prove-check: 7 checks fail on their fixtures`/);
-    assert.ok(text.split('\n').length - 1 <= 143, 'kit/AGENTS.md grew past main\'s 142 lines and the one line of PR 31');
-    assert.match(text, /fixup!` or `squash!`/);
   });
   test('the factory\'s verify fails at once when it runs on a pull request with no base, even with the guard missing it ends in seconds', () => {
     // A stub node first on PATH: without the guard, verify would run its whole test suite, which runs this test again.

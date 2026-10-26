@@ -19,6 +19,9 @@ if (a[0] === 'ruleset' && a[1] === 'check') {
 }
 if (a[0] === 'repo' && a[1] === 'view' && a.includes('nameWithOwner')) said('tuannd9288/app');
 if (a[0] === 'repo' && a[1] === 'view' && a.includes('id')) said('R_kgDOtest');
+if (a[0] === 'api' && a[1] === 'user') said(process.env.GH_LOGIN || 'tuan9288-agent');
+if (a[0] === 'api' && a[1] === 'repos/tuannd9288/app') said('1234');
+if (a[0] === 'api' && a[1] === 'repos/tuannd9288/app/rules/branches/main') said('[{"type": "pull_request"}]');
 if (a[0] === 'label') process.exit(0);
 if (a[0] === 'pr' && a[1] === 'create') { fs.writeFileSync(process.env.PR_BODY, a[a.indexOf('--body') + 1]); fs.writeFileSync(process.env.PR_TITLE, a[a.indexOf('--title') + 1]); said('https://github.com/tuannd9288/app/pull/1'); }
 process.stderr.write('fake gh: ' + a.join(' ') + '\n');

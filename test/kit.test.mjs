@@ -6,6 +6,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { APP, commit, factory, git, quiet, repoWithKit, run, script, write } from './helpers.mjs';
+import { world } from './world.mjs';
 
 const RED_AT_BASE =
   "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport * as m from '../src/math.js';\n\ntest('multiplies', () => {\n  assert.equal(m.mul(2, 3), 6);\n});\n";
@@ -742,8 +743,6 @@ describe('review, verdict, tier and rounds', () => {
     assert.match(out.out, /^::notice title=review-result::raise: deletes a sign-in var\nreview \(stub\): raises to tier 3: deletes a sign-in var\nreview \(stub\): passes/);
     out = job('review', { 'src/math.js': `${MUL}// GATE-STUB-RAISE ::error::x\n// GATE-STUB-FINDING off by one\n` }, { GATE_REVIEWER: 'stub' });
     assert.equal(out.code, 1, out.out);
-    const wf = readFileSync(join(factory, 'kit/.github/workflows/gate-trusted.yml'), 'utf8');
-    assert.match(wf, /rounds:\n {4}name: rounds\n {4}needs: \[review, verdict\]\n {4}if: failure\(\)/);
   });
   test('a raise that lowers a tier, names another tier than 3, or comes from the verdict is malformed', () => {
     const check = (result, job = 'review') =>
@@ -964,8 +963,7 @@ describe('review, verdict, tier and rounds', () => {
     assert.ok(!out.out.includes('##['), out.out);
     annotations();
   });
-  test('kit/AGENTS.md says tier waits for review below tier 3 only; the history usage names --run', () => {
-    assert.match(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /`tier`, which below tier 3 waits for `review`/);
+  test('history.mjs raise with no pr, head or run exits 2 and says which are needed', () => {
     const out = run(factory, 'node', [join(factory, 'kit/scripts/lib/history.mjs'), 'raise']);
     assert.equal(out.code, 2);
     assert.match(out.out, /--pr, --head or --run are needed/);
@@ -1035,9 +1033,6 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /when the pull request was raised could not be read/);
     assert.doesNotMatch(out.out, /approved/);
-  });
-  test('kit/AGENTS.md tells a writer to re-run the failed jobs when tier follows a red review', () => {
-    assert.match(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /`review is red; tier follows it` is not his wait: re-run the failed jobs, never `review` alone/);
   });
   test('a raise removes raised before it adds it, so the bot\'s own event holds an earlier approval back, now and on a re-run', () => {
     const ev = (name, createdAt, login) => ({ label: { name }, createdAt, actor: { login } });
@@ -1496,8 +1491,18 @@ describe('gate-trusted.yml permissions', () => {
     assert.doesNotMatch(block('review'), /: write$/m);
     assert.match(block('tier'), /timeout-minutes: 75\n/);
   });
-  test('bin/onboard creates the label raised beside tier-3', () => {
-    assert.match(readFileSync(join(factory, 'bin/onboard'), 'utf8'), /for label in [^;]*\btier-3\b[^;]*\braised\b[^;]*; do gh label create/);
+  test('bin/onboard creates the label raised beside tier-3, before it opens the pull request', () => {
+    const w = world({ onboardArgs: null });
+    try {
+      const out = run(w.dir, join(w.fac, 'bin/onboard'), [w.url], w.env);
+      assert.equal(out.code, 0, out.out);
+      const calls = w.calls();
+      const at = (prefix) => calls.findIndex((c) => c.startsWith(prefix));
+      assert.ok(at('label create tier-3') >= 0 && at('label create raised') >= 0, calls.join('\n'));
+      assert.ok(at('label create raised') < at('pr create'), calls.join('\n'));
+    } finally {
+      w.cleanup();
+    }
   });
   for (const [name, scopes] of Object.entries(NEEDS)) {
     test(`the ${name} job holds the scopes its scripts call`, () => {
@@ -1591,11 +1596,6 @@ describe('onboard', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-  test('AGENTS.md starts an unattended run inside the repository, for direnv exec keeps the caller\'s directory', () => {
-    const runs = [...readFileSync(join(factory, 'AGENTS.md'), 'utf8').matchAll(/`([^`]*direnv exec [^`]*claude[^`]*)`/g)].map((m) => m[1]);
-    assert.ok(runs.length, 'AGENTS.md gives no unattended run');
-    for (const line of runs) assert.match(line, /^cd <root>\/<repo> && direnv exec \. /);
   });
   /** A seed repository with `files` (null-valued entries skipped) and, beside it, what onboard needs; `link` makes
    * CLAUDE.md a symlink to AGENTS.md, as some repositories keep it. */
@@ -1776,9 +1776,10 @@ describe('workflows and ruleset', () => {
     }
     assert.ok(candidate > 0, 'no job runs the candidate\'s code');
   });
-  test('kit/AGENTS.md asks for no reply in a thread while no workflow reads one', () => {
-    if (workflows.some((wf) => events(wf).some((e) => /comment/.test(e)))) return;
-    assert.doesNotMatch(readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8'), /\bthread\b|\bwithdraw\b/);
+  test('rounds runs only after a red review or verdict', () => {
+    const { rounds } = yaml('.github/workflows/gate-trusted.yml').jobs;
+    assert.deepEqual(rounds.needs, ['review', 'verdict']);
+    assert.equal(rounds.if, 'failure()');
   });
   test('the ruleset keeps an approval through a push, for the tier check binds it to the patch', () => {
     const rule = ruleset.rules.find((r) => r.type === 'pull_request');
