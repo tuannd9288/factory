@@ -506,7 +506,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     const { lines: ran, total } = sessionLines(sessions, since, until);
     lines.push('', '## Sessions (bin/seat)', '', ...(ran.length ? [...ran, `- Total: $${total.toFixed(2)} over ${ran.length} ${ran.length === 1 ? 'session' : 'sessions'} (the last record of each; a resumed session's cost is cumulative, so its records are not added)`] : ['- None.']));
   }
-  if (quota) lines.push('', ...quotaSection(quota.rows, { now: quota.now }), '', '## Role, model and seat (bin/seat)', '', ...roleMapLines(keptSessions(sessions ?? [], since, until), accounts));
+  if (quota) lines.push('', ...(quota.error ? ['## Quota windows (what Claude Code itself reports)', '', `- ${quota.error}`] : quotaSection(quota.rows, { now: quota.now })), '', '## Role, model and seat (bin/seat)', '', ...roleMapLines(keptSessions(sessions ?? [], since, until), accounts));
   if (queue) {
     lines.push('', '## Merge queue (bin/factory-queue)', '');
     if (queue.missing) lines.push(`- Cannot check the queue: the state folder ${queue.dir} does not exist (the queue has not run, or FACTORY_STATE is wrong).`);
@@ -629,10 +629,18 @@ function main(argv) {
     process.exitCode = check(profileFolders(profilesDir, opts.profileDirs), opts.latest, opts.profileDirs);
     return;
   }
-  const runs = resolve(process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'));
-  const quota = { rows: quotaRows({ runs, statusFiles: opts.statusFiles }), now: Date.now() };
+  // The quota is read only by --quota and the digest; a run log that cannot be read gives one line, not a failed ledger.
+  const quotaNow = () => {
+    const runs = resolve(process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'));
+    try {
+      return { rows: quotaRows({ runs, statusFiles: opts.statusFiles }), now: Date.now() };
+    } catch (error) {
+      return { error: `The runs folder or a log in it could not be read (${error.code ?? 'error'}), so there is no quota table.` };
+    }
+  };
   if (opts.quota) {
-    console.log(quotaSection(quota.rows, { now: quota.now }).join('\n'));
+    const q = quotaNow();
+    console.log(q.error ?? quotaSection(q.rows, { now: q.now }).join('\n'));
     return;
   }
   const day = (d) => d.toISOString().slice(0, 10);
@@ -691,7 +699,7 @@ function main(argv) {
   }
   const report = inspect(profileFolders(profilesDir, opts.profileDirs), { latest: opts.latest });
   const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions: readSessions(state), quota, accounts: accountsOf(process.env.FACTORY_SEAT_ACCOUNTS) });
+  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions: readSessions(state), quota: quotaNow(), accounts: accountsOf(process.env.FACTORY_SEAT_ACCOUNTS) });
   if (!opts.post) {
     process.stdout.write(text);
     return;
