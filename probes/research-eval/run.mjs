@@ -3,7 +3,7 @@
 // today, B the same with the Agent tool denied), grades each report with grade.mjs and prints what each run and each arm cost.
 // Without --go it only prints the plan. See README.md for the decision rule.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -224,6 +224,8 @@ async function main(argv, env) {
     const since = Date.now();
     const started = spawnSync(process.execPath, [SEAT_JS, ...seatArgs(e, opts)], { encoding: 'utf8', env });
     if (started.status !== 0) {
+      // Nothing of the session exists, so a later start of the tag is not refused for a folder it left.
+      for (const dir of [p.run, p.work]) rmSync(dir, { recursive: true, force: true });
       stop(`bin/seat refused ${e.tag}: ${(started.stderr + started.stdout).trim()}`, 2);
       break;
     }
