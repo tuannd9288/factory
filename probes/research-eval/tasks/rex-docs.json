@@ -37,7 +37,7 @@
     {
       "id": "F3",
       "ask": "What does the \"Privacy & Telemetry\" page say about telemetry, and about account or licence checks (give the line)?",
-      "orIsAnswer": true,
+      "orIsAnswer": "account( checks)? or licen[cs]e",
       "all": [
         "(doesn.?t|does not) collect telemetry|no telemetry|collects no telemetry|without telemetry",
         "no account.{0,30}licen[cs]e.{0,12}check"

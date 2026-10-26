@@ -67,7 +67,7 @@
     {
       "id": "F5",
       "ask": "In the 0.9.5 copy of `socket-api.mdx` (under `docs/versions/0.9.5/`), which five effective status values does it list, and on which line?",
-      "orIsAnswer": true,
+      "orIsAnswer": ", or unknown",
       "all": [
         "idle",
         "working",

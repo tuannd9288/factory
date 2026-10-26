@@ -71,7 +71,7 @@
     {
       "id": "F5",
       "ask": "Which Python versions does semble's `pyproject.toml` require, and on which line?",
-      "orIsAnswer": true,
+      "orIsAnswer": "or newer",
       "all": [
         "3\\.10"
       ],

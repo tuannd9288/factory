@@ -41,7 +41,7 @@
     {
       "id": "F3",
       "ask": "Which six file extensions can carry the machine proof at a2f6aa4 (`kit/scripts/lib/deletion.mjs` in `issue-17/w17`)?",
-      "orIsAnswer": true,
+      "orIsAnswer": "or \\.cts",
       "all": [
         "\\.js\\b",
         "\\.mjs\\b",
