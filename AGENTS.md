@@ -18,7 +18,93 @@ repository's own `AGENTS.md` governs.
   on a scratch repository against two bars (the Human, 2026-10-21): the mechanical bar, every mechanical defect
   caught; and the full-gate bar, with the real reviewer, at least 18/20 seeded caught, every load-bearing one caught,
   at most 1/20 clean blocked. `probes/plan.md` states both; `probes/results.md` has the first run's numbers.
-- agent-desk stays parked. Every lead, worker and reviewer runs through Claude Code.
+- agent-desk stays parked. Every lead, worker and reviewer runs through Claude Code. (In this section since 2026-10-21,
+  `1b319ee`.)
+
+Each line below gives the Human's decision or decisions on one matter, its date and its source; the lines run by date.
+A quote keeps his words and his language. The WORKSPACES map is
+https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-25, relayed by Colly.
+
+- **Use what exists first, 2026-10-18.** Use a ready-made product first; build only when it falls short. Source:
+  agent-desk issue #269, as the map's "Đã quyết" block records it.
+- **First product repository, 2026-10-20.** It is not docparse or tuanhub-notifier: "đang ổn, không cần". Source:
+  the live copy of the page "Môi trường repo cho agent", decision 3, as the map records it.
+- **seatwork, 2026-10-21.** seatwork may be used freely, its code and its text alike. Source: the page "Factory của
+  anh", p:372, as the map records it (the page's wording: "seatwork dùng thoải mái, cả mã lẫn chữ").
+- **One thin core, a pack for each way of working, 2026-10-22.** The core is the environment, the gate and the ledger;
+  a way of working is a pack that a repository chooses by one tier-3 line; only the pstack pack is built now. There
+  is no piggery pack (T1 off), OTel stays off (T2 off, as the map records it), and only the Human can bypass
+  the tag ruleset. The Human agreed to all eight decisions on the page as it recommended them. Source:
+  https://github.com/tuannd9288/factory/issues/2#issuecomment-6337959043 (the page:
+  https://github.com/tuannd9288/factory/issues/2#issuecomment-6336996220).
+- **Cleanup of unused code, 2026-10-22.** C1, C2 and C3 all take option B; T1 and T2 on, T3 off; the Human approved
+  all five as the page recommended. As the Lead's summary of the page puts it: one sweep of each repository when it
+  joins, then the weekly digest counts again (C1); for a pull request that only deletes, a machine proof stands in for
+  `No-red:` (C2); the reviewer may raise a tier, never lower one (C3); a cleanup pull request red twice is closed by
+  its agent (T2). Source: https://github.com/tuannd9288/factory/issues/10#issuecomment-6341670200 (the summary:
+  https://github.com/tuannd9288/factory/issues/10#issuecomment-6338917177).
+- **The agents' macOS account, 2026-10-23.** The agents run in their own macOS account, `factory`. Source: #24's body,
+  "approved by the Human on 2026-10-23" (https://github.com/tuannd9288/factory/issues/24); done as
+  https://github.com/tuannd9288/factory/issues/24#issuecomment-6387379979 records.
+- **Feature flags, 2026-10-24.** Not needed for now; revisit when real customers use a product daily. #16 and #21 are
+  moved to Triage, "Để sau", as #10 c3 records. Source:
+  https://github.com/tuannd9288/factory/issues/10#issuecomment-6372273891 (the Human, through Colly).
+- **The gate's reviewer, 2026-10-24.** The reviewer is the sealed Opus 5.5 reviewer (option A), run as Claude Code
+  headless and paid with a subscription token, not an API key. In #25 c2's words, "One reviewer call per pull
+  request": `verdict` reads `review`'s result for the same head and base, and makes no second call. The gate and
+  pstack's live verifier both stay for now; dropping one is decided only on the probe's numbers. Source:
+  https://github.com/tuannd9288/factory/issues/25#issuecomment-6372755422 (reviewer and payment) and
+  https://github.com/tuannd9288/factory/issues/25#issuecomment-6373226939 (one call; both layers stay).
+- **Colly's scope, 2026-10-24.** Colly handles only the factory. The piggery teams of Kizuna and kizuna-labs report to
+  the Human directly. Source: chat, as the map page records it in Vietnamese; this line is an English rendering, not
+  his words.
+- **Connection over custom, 2026-10-24.** "Hạn chế kiểu custom mà thay vào đấy là cách kết nối." Source: chat, as the
+  map page records it.
+- **Three new sources (#58), 2026-10-25.** K1 = D: keep the sublayers and take mechanisms from the three sources (the
+  option is recorded in `inventory-factory.md` §A, row BN, which the map's §7 cites; no sentence in #58 or #62 to #68
+  names it). K2 = B: read each profile's quota from what Claude Code itself reports (`rate_limit_event`, and the
+  status line's `rate_limits`), never a credential; quota-axi is dropped, also as a fallback; if #62
+  finds no source, stop and ask the Human. His words on K2: "B, bỏ quota-axi (Recommended)". T1 on: one state for each
+  open task, computed in the sweep. T2 off: HumanLayer's phone plugin is not taken. Sources: the bodies of
+  https://github.com/tuannd9288/factory/issues/62, /63 (K2), /64 (T1) and /68 (T2); his words:
+  https://github.com/tuannd9288/factory/issues/63#issuecomment-6401665776.
+- **Control surfaces (#68), 2026-10-25.** K3: keep Paseo's usage plugin as it is. K1 = C, which holds on his own check
+  (still waiting on him): Rex replaces Ghostty, and Herdr for the interactive sessions on the MacBook, and Herdr keeps
+  the factory's sessions on the Mac mini; if a Claude Code session at a permission prompt in an unfocused tab shows no
+  blocked mark in the tab header and the session picker, K1 becomes B. K2 = B: layer 1e and contract H9 are added.
+  T3 = on (#78's body): Remote Control for Colly's and the Lead's interactive sessions, beside Paseo, following
+  whichever account the session runs on. On 2026-10-26 the Human deferred it until he moves to an account that can use
+  it: "Tài khoản này tau không dùng được /remote-control delay sau được không Hoặc tau chuyển tài khoản khác khi
+  tiện?" (https://github.com/tuannd9288/factory/issues/78#issuecomment-6400797388). Paseo stays. Sources:
+  https://github.com/tuannd9288/factory/issues/68#issuecomment-6393212307 (K3),
+  https://github.com/tuannd9288/factory/issues/68#issuecomment-6394536120 (K1, K2; T3 was pending there) and
+  https://github.com/tuannd9288/factory/issues/78 (T3 on).
+- **Evidence for a deletion-only pull request (#70), 2026-10-25.** K1 = (iv), in two steps: a module that each
+  repository turns on, outside the `kit/` core. K2 = B: the proof refuses when the base holds a plugin config file that
+  knip runs and it is not in `.gate/protected`. Decision (a) stands: no parser is added to the gate, and option (v) is
+  not taken. No purchase: not JetBrains, not Qodana, not Graphite; semble stays a search tool. The file limits of (a)
+  are dropped, "Đồng ý bỏ giới hạn (Recommended)": every file knip lists, `.jsx` and `.tsx` included, can carry the
+  machine proof. Sources: https://github.com/tuannd9288/factory/issues/70#issuecomment-6394028120 (K2, (a), no
+  purchase), https://github.com/tuannd9288/factory/issues/70#issuecomment-6395152044 (limits),
+  https://github.com/tuannd9288/factory/issues/71#issuecomment-6395151620 (item 4) and #71's body (K1 = (iv)).
+- **The module and the protected tail (#71, #72), 2026-10-25.** His labels: "S2: chỉ chép vào repo bật (Recommended)",
+  so the module's skill is copied only into a repository that turns the module on; "Đồng ý (Recommended)", so two
+  lines are added to `kit/scripts/prove-check`; "Cho file một phần đuôi của repo (Recommended)", so `.gate/protected`
+  keeps a tail the repository owns, as `AGENTS.md` has Layout and Facts, while `kit-update` keeps updating the kit's
+  head, and the end of `.github/CODEOWNERS` follows. Sources:
+  https://github.com/tuannd9288/factory/issues/71#issuecomment-6395151620 and
+  https://github.com/tuannd9288/factory/issues/72#issuecomment-6395151814.
+- **The order of the gaps, 2026-10-25.** "Theo thứ tự này (Recommended)": 0c (in progress), then 1b, then 3c, then 4a;
+  0d follows #75 and #77; 2c comes last. Source: his answer in Colly's session, relayed by Colly, in the map's report
+  §0 and https://github.com/tuannd9288/factory/issues/81.
+- **The live verifier, decided 2026-10-25; not built yet.** It was open at the map (it runs on Codex, against the
+  rule above, "Every lead, worker and reviewer runs through Claude Code."), and he decided it on #79's choice page:
+  "Ô cài đặt, mặc định Claude (Recommended)". The verifier's model is a setting for each repository, Claude
+  by default; Codex or both can be chosen; the verifier stays (#25). #95 builds it; until then it runs on Codex only,
+  as "The live verifier" paragraph below says. Sources:
+  https://github.com/tuannd9288/factory/issues/79#issuecomment-6398968431 and
+  https://github.com/tuannd9288/factory/issues/95.
+- **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
 
 ## Tiers
 
@@ -85,13 +171,13 @@ A sublayer may change anything inside it while its contracts hold; a change to a
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
 decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization that does the same.
 
-- **H1**: Work enters through one issue. Checked by: `kit/AGENTS.md:26`, `probes/pack-contract.md:36`.
+- **H1**: Work enters through one issue. Checked by: `kit/AGENTS.md:28`, `probes/pack-contract.md:36`.
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
   Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-contract.md:36`.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
-  Checked by: `kit/scripts/lib/approval.mjs:1-10`, `kit/AGENTS.md:96`, `kit/scripts/review:27` (one reviewer call per head).
+  Checked by: `kit/scripts/lib/approval.mjs:1-10`, `kit/AGENTS.md:97`, `kit/scripts/review:27` (one reviewer call per head).
   Prior art [A8]: "An approval covers one specific commit."
 - **H4**: Knowledge is files in the repository, changed by pull request.
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `scripts/verify:9-16` (the 150-line cap).
@@ -125,6 +211,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 - This folder stays out of every sync between the Macs. Code moves only through GitHub.
 - `.gitignore` admits only the factory's own files, so every repository folder is ignored.
 - A change to `kit/` changes every repository's gate at its next kit pull request: it is tier 3 here.
+- Before any brief, the Lead posts the Human's words verbatim, with their source, on the issue, in a comment marked
+  "relayed by Colly"; the brief carries them, and `bin/brief-check <brief> <relay>` is the check (#90).
 - The weekly digest is `bin/factory-ledger --post tuannd9288/factory`: it posts even when the canary (`--check`) finds a
   field missing or stale, saying so in one line. No job runs it yet; its schedule (launchd, as the agents' account) is
   the Human's to set up.
@@ -141,6 +229,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
+| `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
 | `bin/factory-sublayers` | The sublayer check (#82): the 17 `sublayer-<code>` labels exist with their descriptions, and every open issue carries exactly one; the list is `bin/lib/sublayers.mjs`, the template `.github/ISSUE_TEMPLATE/task.md` |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/`, each pack's in `packs/*/test/`, and the 150-line cap on every composed `AGENTS.md` |
