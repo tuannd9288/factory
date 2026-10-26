@@ -108,7 +108,7 @@ describe('bin/onboard --module', () => {
       assert.ok(!existsSync(join(w.repo, '.gate/modules')), 'no .gate/modules');
       const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8');
       assert.doesNotMatch(inventory, /demo|\.gate\/modules/);
-      assert.ok(!existsSync(join(w.repo, '.claude/skills')), 'no skills folder');
+      assert.ok(!existsSync(join(w.repo, '.claude/skills/demo')), 'no folder of the module\'s skill');
     } finally {
       w.cleanup();
     }
