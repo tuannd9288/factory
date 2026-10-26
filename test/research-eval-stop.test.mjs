@@ -20,6 +20,15 @@ test('a first session that reads outside its folders is the last: exit 8, the ta
   assert.deepEqual(results[0].invalid.map((x) => x.path), ['~/x', '/etc/hosts']);
 }));
 
+test('the partner of an invalid run is not scored either: its arm has no mean (re-review 3)', () => evalWorld((w) => {
+  const r = w.eval(['--set', 'probe', '--go'], [{}, read('/etc/hosts')]);
+  assert.equal(r.code, 8, r.out + r.err);
+  const { summary } = resultOf(w);
+  assert.equal(summary.arms.A.meanScore, null, 'A\'s run beside the invalid B is not in the mean');
+  assert.equal(summary.arms.B.meanScore, null);
+  assert.equal(summary.arms.A.runs, 1, 'it is still counted, and paid for');
+}));
+
 test('a valid run before it is kept, and its pair is not compared', () => evalWorld((w) => {
   const r = w.eval(['--set', 'probe', '--go'], [{}, read('/etc/hosts')]);
   assert.equal(r.code, 8, r.out + r.err);
