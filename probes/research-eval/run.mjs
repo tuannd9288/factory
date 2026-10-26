@@ -190,7 +190,7 @@ async function main(argv, env) {
   }
   if (!o.go) {
     for (const e of plan) console.log(`dry: ${e.tag}: bin/seat ${seatArgs(e, opts).join(' ')}`);
-    console.log(`not started: add --go to run these ${plan.length} sessions, one at a time, stopping when the spend passes ${usd(o.limit)}; each session is capped at ${usd(PRESETS.researcher.budget)} by the researcher preset`);
+    console.log(`not started: add --go to run these ${plan.length} sessions, one at a time; none starts that could take the spend past ${usd(o.limit)}, counting each at the researcher preset's ${usd(PRESETS.researcher.budget)} budget, which is a request to claude and not a proven limit on a subscription seat`);
     return 0;
   }
   if (!o.skipKeyCheck) {
@@ -211,6 +211,12 @@ async function main(argv, env) {
     code = c;
   };
   for (const e of plan) {
+    // The limit is a ceiling: a session counts at the preset's budget, which is a request to claude and not a proven limit
+    // on a subscription seat, so none starts that could take the spend past the limit.
+    if (spent + PRESETS.researcher.budget > o.limit) {
+      stop(`the next session could pass the limit: spent ${usd(spent)} plus the preset's budget ${usd(PRESETS.researcher.budget)} would pass ${usd(o.limit)}, before ${e.tag}`, 3);
+      break;
+    }
     const p = sessionPaths(e, opts);
     mkdirSync(p.run, { recursive: true });
     mkdirSync(p.work, { recursive: true });
