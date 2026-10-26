@@ -2,7 +2,7 @@
 // (bin/lib/module.mjs). A module here is a throwaway one, `demo`, added to a copy of the factory.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { git } from './helpers.mjs';
 import { world } from './world.mjs';
@@ -108,7 +108,8 @@ describe('bin/onboard --module', () => {
       assert.ok(!existsSync(join(w.repo, '.gate/modules')), 'no .gate/modules');
       const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8');
       assert.doesNotMatch(inventory, /demo|\.gate\/modules/);
-      assert.ok(!existsSync(join(w.repo, '.claude/skills/demo')), 'no folder of the module\'s skill');
+      // .claude/skills holds the kit's own skill folders and no other: a module's skill, under any folder name, is not there.
+      assert.deepEqual(readdirSync(join(w.repo, '.claude/skills')).sort(), readdirSync(join(w.fac, 'kit/.claude/skills')).sort());
     } finally {
       w.cleanup();
     }
