@@ -74,18 +74,66 @@
     },
     {
       "id": "F5",
-      "ask": "In the review's verify section: how many tests passed, and which commit was the merge-base used as GATE_BASE?",
+      "ask": "Of the 14 lines of `test/deletion-proof.test.mjs` that a2f6aa4 removes, how many does `git blame` at aedffb0 put in each of the commits 355029d, af5c818 and 82a1548?",
       "all": [
-        "\\b559\\b",
-        "028531d"
+        "(355029d\\D{0,14}\\b2\\b|\\b2\\b\\D{0,14}355029d)",
+        "(af5c818\\D{0,14}\\b6\\b|\\b6\\b\\D{0,14}af5c818)",
+        "(82a1548\\D{0,14}\\b6\\b|\\b6\\b\\D{0,14}82a1548)"
       ],
-      "cite": "REVIEW\\.md\\D{0,12}24[45]\\b",
+      "cite": "REVIEW\\.md\\D{0,12}17[12]\\b|git blame",
       "source": {
-        "file": "issue-17/rev4/REVIEW.md",
-        "line": 244,
-        "has": "559 tests passed in 340s"
+        "blame": "issue-17/w17",
+        "rev": "aedffb0",
+        "file": "issue-17/w17/test/deletion-proof.test.mjs",
+        "ranges": [
+          [
+            464,
+            465
+          ],
+          [
+            541,
+            541
+          ],
+          [
+            543,
+            543
+          ],
+          [
+            546,
+            547
+          ],
+          [
+            549,
+            549
+          ],
+          [
+            552,
+            552
+          ],
+          [
+            681,
+            681
+          ],
+          [
+            684,
+            685
+          ],
+          [
+            687,
+            687
+          ],
+          [
+            690,
+            691
+          ]
+        ],
+        "counts": {
+          "355029d": 2,
+          "af5c818": 6,
+          "82a1548": 6
+        }
       },
-      "example": "F5: 559 tests passed; merge-base 028531d — rev4/REVIEW.md:244-245"
+      "example": "F5: 355029d 2, af5c818 6, 82a1548 6 — rev4/REVIEW.md:171-172, and git blame aedffb0"
     }
   ],
   "unreadable": {

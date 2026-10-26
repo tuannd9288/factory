@@ -80,13 +80,15 @@ function check(source, root) {
     const repo = inside(root, source.blame);
     if (!repo) return `${source.blame} is outside the runs folder`;
     const counts = {};
+    // The file may be given from the runs folder, like every other path in a key, or from the repository.
+    const file = source.file.startsWith(`${source.blame}/`) ? source.file.slice(source.blame.length + 1) : source.file;
     try {
       for (const [from, to] of source.ranges) {
-        const out = execFileSync('git', ['-C', repo, 'blame', '--line-porcelain', '-L', `${from},${to}`, source.rev, '--', source.file], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
+        const out = execFileSync('git', ['-C', repo, 'blame', '--line-porcelain', '-L', `${from},${to}`, source.rev, '--', file], { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
         for (const line of out.split('\n')) if (/^[0-9a-f]{40} \d+ \d+/.test(line)) counts[line.slice(0, 7)] = (counts[line.slice(0, 7)] ?? 0) + 1;
       }
     } catch {
-      return `git blame ${source.rev} ${source.file} failed in ${source.blame}`;
+      return `git blame ${source.rev} ${file} failed in ${source.blame}`;
     }
     const sorted = (o) => JSON.stringify(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
     return sorted(counts) === sorted(source.counts) ? null : `git blame at ${source.rev} gives ${JSON.stringify(counts)}, not ${JSON.stringify(source.counts)}`;
