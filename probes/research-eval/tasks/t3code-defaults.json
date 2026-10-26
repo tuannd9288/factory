@@ -68,7 +68,7 @@
     {
       "id": "F5",
       "ask": "In the same file, which Android version do notifications require at least, and on which line?",
-      "orIsAnswer": "or newer",
+      "orIsAnswer": "or (newer|later|higher|above)",
       "all": [
         "Android 7\\.0|\\b7\\.0\\b"
       ],
