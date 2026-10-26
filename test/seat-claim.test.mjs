@@ -33,15 +33,20 @@ test('three concurrent starts with one tag give one session; the others exit 2; 
   await until(() => w.records().length === 2, 'the second record');
 }));
 
-test('two starts at the same moment on a seat with one place left never both run on it', () => world(async (w) => {
+// Without the fix, one try lets both through about 56 times in 100, so five tries are red about 98% of the time.
+test('two starts at the same moment on a seat with one place left never both run on it', async () => {
   const { liveCount } = await import('../bin/lib/seat.mjs');
-  fill(w, 2, 3);
-  fill(w, 1, 4);
-  const hold = { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release') };
-  const codes = await exits(w, ['a', 'b'].map((tag) => w.args('worker', ['--tag', tag])), hold);
-  assert.ok(codes.filter((c) => c === 0).length <= 1, `exit codes ${codes}`);
-  assert.ok(liveCount(w.runs, 2) <= 4, 'seat 2 is not over its cap');
-}));
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    await world(async (w) => {
+      fill(w, 2, 3);
+      fill(w, 1, 4);
+      const hold = { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release') };
+      const codes = await exits(w, ['a', 'b'].map((tag) => w.args('worker', ['--tag', tag])), hold);
+      assert.ok(codes.filter((c) => c === 0).length <= 1, `try ${attempt}: exit codes ${codes}`);
+      assert.ok(liveCount(w.runs, 2) <= 4, `try ${attempt}: seat 2 is not over its cap`);
+    });
+  }
+});
 
 // An ended run: a dead pid, its seat, and a log whose last rate_limit_event gives use, with an mtime minutes ago.
 function ended(dir, tag, seat, use, minutesAgo) {
