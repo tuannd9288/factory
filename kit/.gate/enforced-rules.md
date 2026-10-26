@@ -1,7 +1,7 @@
 # Rules that code enforces
 
 The rows of `AGENTS.md`'s table that a program refuses or flags. The gate's reviewer reads this file from `main` with
-`AGENTS.md`; a session reads it when a check is red or when its change touches the gate. A path here is tier 3.
+`AGENTS.md`. A path here is tier 3.
 
 | Rule | Enforced by |
 |---|---|

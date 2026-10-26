@@ -71,7 +71,7 @@ answer; a reversible question never blocks the work.
 
 ## Rules and what enforces them
 
-The rules a program refuses or flags are in `.gate/enforced-rules.md`, which the gate's reviewer reads with this file; its intro says when you read it.
+The rules a program refuses or flags are in `.gate/enforced-rules.md`, which the gate's reviewer reads with this file; read it when a check is red or your change touches the gate.
 
 | Rule | Enforced by |
 |---|---|
