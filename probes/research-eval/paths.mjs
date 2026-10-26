@@ -9,7 +9,7 @@ const PATH_FIELDS = ['file_path', 'path', 'notebook_path'];
 const PATTERN_FIELDS = ['pattern', 'glob'];
 const UNPLACEABLE = /\$[A-Za-z_{(]|`/;
 // A shell expansion in text that is not single-quoted: the word that holds it cannot be placed, so it counts as outside.
-const EXPANSION = /\$[A-Za-z_{(]|`/;
+const EXPANSION = /[$`]/;
 
 /** The commands of a shell command line, each a list of words { raw, text, plain }: `raw` as written, `text` with the quotes taken
  * off, `plain` when no unquoted or double-quoted part of it holds an expansion. Words split on whitespace and on `; | & < >` and
