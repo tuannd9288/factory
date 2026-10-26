@@ -2,7 +2,7 @@
 // The skill is guidance for an agent; the gate never depends on it. Step 1 ships the whole-file parts only.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { git, run, script } from '../../../test/helpers.mjs';
@@ -25,97 +25,23 @@ function parse(source) {
   return { front, body: m[2] };
 }
 
-describe('the skill follows the Agent Skills specification', () => {
-  const { front, body } = parse(text('SKILL.md'));
+// Claude Code loads the skill from its front matter (agentskills.io/specification): the name must be the folder's, and the
+// one tool the skill grants must be a script the module lays. Retention bar: a key Claude Code reads, outside this repository.
+describe('the skill loads', () => {
+  const { front } = parse(text('SKILL.md'));
 
-  test('name matches its folder: lowercase letters, digits and single hyphens, at most 64, no hyphen at either end', () => {
-    assert.equal(front.name, 'deletion-proof');
-    assert.equal(front.name, 'deletion-proof'.toLowerCase());
+  test('front matter: the name is the folder\'s and a valid skill name; the description is not empty and at most 1024 characters', () => {
+    assert.equal(front.name, SKILL.split('/').at(-1));
     assert.match(front.name, /^[a-z0-9]+(-[a-z0-9]+)*$/);
     assert.ok(front.name.length <= 64);
-    assert.equal(SKILL.split('/').at(-1), front.name, 'the folder is the name');
-  });
-  test('description says what it does and when, in 1024 characters at most', () => {
     assert.ok(front.description.length > 0 && front.description.length <= 1024, `${front.description.length} characters`);
-    assert.match(front.description, /^Use when /);
-    assert.match(front.description, /not a pure deletion/);
-    assert.match(front.description, /Not for /);
   });
-  test('compatibility is at most 500 characters; only keys the specification or Claude Code know are used', () => {
-    assert.ok(front.compatibility.length <= 500);
-    for (const key of Object.keys(front)) assert.ok(['name', 'description', 'compatibility', 'allowed-tools', 'license', 'metadata'].includes(key), key);
-  });
-  test('allowed-tools grants the one script by a fixed repository path, with no variable (the factory\'s grants refuse any)', () => {
-    assert.equal(front['allowed-tools'], 'Bash(.claude/skills/deletion-proof/scripts/knip-at-base *)');
-    assert.doesNotMatch(front['allowed-tools'], /[$`]/);
-  });
-  test('the body is under 500 lines and about 5,000 tokens (characters / 4) at most', () => {
-    assert.ok(body.split('\n').length < 500, `${body.split('\n').length} lines`);
-    assert.ok(body.length / 4 <= 5000, `${Math.round(body.length / 4)} tokens`);
-  });
-  test('one reference, one level deep: references/refusals.md, named in the body and linking to nothing', () => {
-    assert.deepEqual(readdirSync(join(SKILL, 'references')), ['refusals.md']);
-    assert.match(body, /references\/refusals\.md/);
-    assert.doesNotMatch(text('references/refusals.md'), /\]\(|references\/|scripts\//);
-  });
-  test('the folder holds SKILL.md, the reference and the script, and nothing else', () => {
-    const all = readdirSync(SKILL, { recursive: true }).filter((p) => statSync(join(SKILL, p)).isFile()).sort();
-    assert.deepEqual(all, ['SKILL.md', 'references/refusals.md', 'scripts/knip-at-base']);
-    assert.ok(statSync(join(SKILL, 'scripts/knip-at-base')).mode & 0o111, 'the script is executable');
-  });
-  test('step 1 only: no fix mode, no kept-file clause, no node --check, no plugin-config line', () => {
-    const all = `${text('SKILL.md')}\n${text('references/refusals.md')}\n${text('scripts/knip-at-base')}`;
-    assert.doesNotMatch(all, /knip-at-base fix|--fix|keyword-only|node --check|knip's bytes|byte-exact|plugin config/i);
-    assert.match(text('references/refusals.md'), /config: <knip config> is not in \.gate\/protected/);
-  });
-  test('says review still runs on a proved deletion, and the gate never depends on the skill', () => {
-    assert.match(body, /`review` still runs on a proved deletion/);
-    assert.match(body, /The proof is the gate's/);
-  });
-  test('every refusal the module can print has a row in the reference, and the one it cannot print has none', () => {
-    const refusals = text('references/refusals.md');
-    const code = readFileSync(join(MODULE, 'kit/scripts/lib/deletion.mjs'), 'utf8');
-    for (const line of ['config: <file> holds the key', 'config: knip has no config', 'is not in .gate/protected', 'check 1:', 'check 2:', 'check 3: knip did not list', 'check 3: the base could not be prepared', 'knip could not run']) {
-      assert.ok(refusals.includes(line), line);
-    }
-    // The lines of checkConfig and the report, each in the code and in the reference.
-    for (const line of ['config: the knip config is in package.json', 'is not a regular file', 'could not be read as JSON', 'is not a JSON object', 'a JS or TS knip config', 'changes type', 'is still named in', 'JSON report could not be read']) {
-      assert.ok(code.includes(line.replace(/^config: /, '')), `the code prints ${line}`);
-      assert.ok(refusals.includes(line), `a row for ${line}`);
-    }
-    assert.doesNotMatch(code, /deletes no file/);
-    assert.doesNotMatch(refusals, /deletes no file/);
-  });
-  test('the row for a package.json "knip" key says it is refused beside a knip.json too', () => {
-    const row = text('references/refusals.md').split('\n').find((l) => l.includes('config: the knip config is in package.json'));
-    assert.match(row, /beside a (protected )?`knip\.json`/);
-  });
-  test('the reference has a row for each package.json line the code prints, naming package.json', () => {
-    const rows = text('references/refusals.md').split('\n');
-    const code = readFileSync(join(MODULE, 'kit/scripts/lib/deletion.mjs'), 'utf8');
-    for (const line of ['config: package.json is not a regular file', 'config: package.json could not be read as JSON']) {
-      assert.ok(code.includes(line.replace(/^config: /, '')), `the code prints ${line}`);
-      assert.ok(rows.some((row) => row.startsWith('|') && row.includes(line)), `a row for ${line}`);
-    }
-  });
-  test('the reference has a row for each line of the base checks: a gitignored tracked file, a gate_prepare that changed tracked files', () => {
-    const rows = text('references/refusals.md').split('\n').filter((row) => row.startsWith('|'));
-    const code = readFileSync(join(MODULE, 'kit/scripts/lib/deletion.mjs'), 'utf8');
-    for (const line of ['is tracked but gitignored, so knip would not read what it imports', "the base's gate_prepare changed tracked files"]) {
-      assert.ok(code.includes(line), `the code prints ${line}`);
-      assert.ok(rows.some((row) => row.includes(line)), `a row for ${line}`);
-    }
-  });
-  test('SKILL.md says exactly what item 4 checks and no longer claims that no tier-1 change can loosen knip', () => {
-    assert.doesNotMatch(body, /no tier-1 change\s+can\s+loosen/);
-    assert.match(body, /no tracked file is gitignored at the base/);
-    assert.match(body, /`gate_prepare` changes no tracked file/);
-    assert.match(body, /the configs knip's plugins run are not covered/);
-  });
-  test('SKILL.md says what check 2 is, a fixed-string search, and that a package.json "knip" key is refused', () => {
-    assert.match(body, /fixed-string `git grep`/);
-    assert.match(body, /not a full reference check/);
-    assert.match(body, /`package\.json` at the base is a regular file that reads as JSON or JSONC,\s+and has no top-level `"knip"` key/);
+  test('allowed-tools grants a script the module lays, by a path with no variable', () => {
+    const grant = /^Bash\((\S+) \*\)$/.exec(front['allowed-tools']);
+    assert.ok(grant, front['allowed-tools']);
+    assert.doesNotMatch(grant[1], /[$`]/);
+    const laid = join(MODULE, 'kit', grant[1]);
+    assert.ok(statSync(laid).isFile() && statSync(laid).mode & 0o111, `${grant[1]} is an executable file under the module's kit/`);
   });
 });
 
