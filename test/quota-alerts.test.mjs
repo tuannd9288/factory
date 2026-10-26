@@ -181,6 +181,20 @@ test('both windows of a seat alert at that seat\'s own stop: seat 1 from 0.70, s
   });
 });
 
+// The guard above ("a runs folder that cannot be read never fails the hook") cannot fail alone: the hook's outer catch also
+// gives empty output. What quotaLines' own catch protects is the *.failed lines, which a bad runs folder must not hide.
+test('a runs folder that cannot be read leaves the *.failed lines printed', () => {
+  world(({ state, runs, alerts }) => {
+    writeFileSync(join(state, 'queue-o-app.failed'), 'o/app: gh timed out\n');
+    rmSync(runs, { recursive: true });
+    writeFileSync(runs, 'a file, not a folder');
+    const r = alerts();
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.lines.length, 1, r.out);
+    assert.match(r.lines[0], /queue-o-app\.failed.*gh timed out/);
+  });
+});
+
 test('a rejected event of another rateLimitType expires at the event\'s own resetsAt', () => {
   const opus = (inSeconds) => {
     const e = JSON.parse(eventLine('synthetic-rejected-event.jsonl', { five: 0.1, seven: 0.1 }));
