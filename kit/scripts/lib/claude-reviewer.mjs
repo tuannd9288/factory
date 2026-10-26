@@ -1,7 +1,8 @@
 // The gate's reviewer: Claude Code, headless, Opus at max effort, with Read, Grep and Glob over an extract of the candidate
 // and nothing else. It is the reviewer behind GATE_REVIEWER=claude, called by `review` once per head (a push is a new head;
-// an edit that leaves head, base and the No-red line alone reuses the earlier result: scripts/review); `verdict` reads
-// review's result and makes no call.
+// an edit that leaves head, base, the No-red line and the closing issues alone reuses the earlier result: scripts/review);
+// `verdict` reads review's result and makes no call. The issues the pull request closes come from GATE_ACCEPTANCE_FILE, which
+// main's scripts wrote with scripts/lib/acceptance.mjs; a file that is there and not that shape is `unavailable: acceptance`.
 //   node scripts/lib/claude-reviewer.mjs review <base> <head> --out <result file>
 //   exit 0  the result is in <result file>: the JSON of scripts/lib/result.mjs; reviewer, job, base and head are the
 //           script's, never the model's
