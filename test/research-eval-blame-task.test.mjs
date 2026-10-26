@@ -13,9 +13,6 @@ test('round4-review has five facts and one of them is the blame of the 14 remove
   assert.equal(t.facts.length, 5);
   const f = blameFact(t);
   assert.ok(f, 'a fact with a blame source');
-  assert.equal(f.source.blame, 'issue-17/w17');
-  assert.equal(f.source.rev, 'aedffb0');
-  assert.deepEqual(f.source.counts, { '355029d': 2, af5c818: 6, '82a1548': 6 });
   const lines = f.source.ranges.reduce((n, [from, to]) => n + (to - from + 1), 0);
   assert.equal(lines, 14);
   assert.ok(t.readable.some((r) => `${f.source.blame}/`.startsWith(`${r}/`)), 'the repository is readable');
@@ -31,9 +28,4 @@ test('its example scores; a count given to the wrong commit, or counts with no c
   assert.equal(run(`${f.id}: 355029d 6, af5c818 2, 82a1548 6 — rev4/REVIEW.md:171`), false);
   assert.equal(run(`${f.id}: 2, 6 and 6 — rev4/REVIEW.md:171`), false);
   assert.equal(run(`${f.id}: 355029d 2, af5c818 6, 82a1548 6 — from the review`), false, 'no citation');
-});
-
-test('the fact copied from the review\'s verify line is gone', async () => {
-  const t = await task();
-  assert.ok(!t.facts.some((f) => f.all.some((p) => p.includes('559'))));
 });

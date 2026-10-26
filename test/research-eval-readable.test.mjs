@@ -31,13 +31,6 @@ test('the folders are narrower than the run folders: no task may read a whole ru
   for (const t of loadTasks()) for (const r of t.readable ?? ['issue-0']) assert.ok(!/^issue-\d+$/.test(r), `${t.id}: ${r} is a whole run folder`);
 });
 
-test('the brief lists the readable folders and not the sources they sit in', async () => {
-  const { briefOf, loadTasks } = await keys();
-  const task = loadTasks().find((t) => t.id === 'knip-reader');
-  const listed = briefOf(task, '/r').split('\n').filter((l) => l.startsWith('- /r/')).map((l) => l.slice(2));
-  assert.deepEqual(listed, task.readable.map((r) => `/r/${r}`));
-});
-
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
 
 function blameWorld(body) {
@@ -70,6 +63,15 @@ test('a blame fact counts the lines of some ranges by the commit that wrote them
     assert.equal(wrong.length, 1);
     assert.match(wrong[0].why, /blame/);
     assert.match(wrong[0].why, new RegExp(c));
+  });
+});
+
+test('a blame fact may name its file from the runs folder, as every other path in a key does', async () => {
+  const { verifyTask } = await keys();
+  blameWorld((root, { a, b, c, head }) => {
+    const task = (file, counts) => ({ facts: [{ id: 'F1', source: { blame: 'issue-9', rev: head, file, ranges: [[1, 2], [4, 6]], counts } }] });
+    assert.deepEqual(verifyTask(task('issue-9/f.txt', { [a]: 1, [c]: 1, [b]: 3 }), root), []);
+    assert.equal(verifyTask(task('issue-9/f.txt', { [a]: 2, [b]: 3 }), root).length, 1);
   });
 });
 

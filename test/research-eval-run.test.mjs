@@ -79,6 +79,8 @@ test('a refusal by bin/seat (no free seat) stops it with exit 2, naming the refu
   assert.match(r.out + r.err, /seat 2: 4 live sessions/);
   assert.match(r.out, /^stopped: bin\/seat refused re-knip-reader-A-1/m);
   assert.deepEqual(w.calls(), []);
+  // The refused session leaves no folder, so that starting it again later is not refused as "left from an earlier run".
+  assert.deepEqual(readdirSync(w.work), []);
 }));
 
 test('the full set needs a limit named by the person who starts it, and a set must be named', () => evalWorld((w) => {
