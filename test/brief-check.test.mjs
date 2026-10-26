@@ -156,3 +156,11 @@ test('an inline code span with an even number of quotes still has them checked',
     assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'relay.md')]), { code: 1, out: 'missing quote: "Progressive disclosure"\n', err: '' });
   });
 });
+
+// A quote may hold a code span (#116's relays): the span's text is part of the Human's words.
+test('a quote that holds a code span is carried by a brief that has it verbatim', () => {
+  const relay = 'Colly asked to "does the rule cover the kit script\'s own `gh api user`?"\n';
+  withFiles({ 'relay.md': relay, 'brief.md': 'The question, "does the rule cover the kit script\'s own `gh api user`?"\n' }, (dir) => {
+    assert.deepEqual(brief([join(dir, 'brief.md'), join(dir, 'relay.md')]), { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' });
+  });
+});
