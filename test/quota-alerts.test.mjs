@@ -130,3 +130,68 @@ test('FACTORY_NO_ALERTS=1 silences the quota lines, and a runs folder that canno
     assert.deepEqual(alerts(), { code: 0, out: '', err: '', lines: [] });
   });
 });
+
+// Fix round 1 (#63): Claude Code's own warning (status allowed_warning, 0.75), one number per seat, a reset for any type.
+
+/** The recorded warning event with its seven-day use and the seconds from now at which that window (and the event) resets. */
+function warningLine({ seven = 0.78, five = 0.3, sevenIn = 24 * HOUR }) {
+  const e = JSON.parse(readFileSync(fixturePath('real-warning-event.jsonl'), 'utf8'));
+  const i = e.rate_limit_info;
+  i.unifiedWindows.five_hour.utilization = five;
+  i.unifiedWindows.five_hour.resetsAt = nowSec() + 48 * HOUR;
+  Object.assign(i.unifiedWindows.seven_day, { utilization: seven, resetsAt: nowSec() + sevenIn });
+  i.utilization = seven;
+  i.resetsAt = nowSec() + sevenIn;
+  return `${JSON.stringify(e)}\n`;
+}
+
+test('an allowed_warning window is named once, with its seat, window and reset, though it is under the seat\'s stop', () => {
+  world(({ log, alerts }) => {
+    log(2, warningLine({}));
+    const r = alerts();
+    assert.equal(r.lines.length, 1, r.out);
+    assert.match(r.lines[0], /seat 2.*seven-day.*warning.*78%.*resets/);
+  });
+});
+
+test('an allowed_warning window over the seat\'s stop is one line, not a warning line and a threshold line', () => {
+  world(({ log, alerts }) => {
+    log(1, warningLine({}));
+    assert.equal(alerts().lines.length, 1);
+  });
+});
+
+test('the warning line goes away once the window\'s reset has passed', () => {
+  world(({ log, alerts }) => {
+    log(2, warningLine({ sevenIn: -HOUR }));
+    assert.equal(alerts().out, '');
+  });
+});
+
+test('both windows of a seat alert at that seat\'s own stop: seat 1 from 0.70, seat 2 from 0.90, five-hour included', () => {
+  world(({ log, alerts }) => {
+    log(1, eventLine('synthetic-high-week-event.jsonl', { five: 0.69, seven: 0.1 }));
+    assert.equal(alerts().out, '');
+    log(1, eventLine('synthetic-high-week-event.jsonl', { five: 0.7, seven: 0.1 }));
+    assert.match(alerts().out, /seat 1.*five-hour.*70%/);
+  });
+  world(({ log, alerts }) => {
+    log(2, eventLine('synthetic-high-week-event.jsonl', { five: 0.79, seven: 0.1 }));
+    assert.equal(alerts().out, '');
+  });
+});
+
+test('a rejected event of another rateLimitType expires at the event\'s own resetsAt', () => {
+  const opus = (inSeconds) => {
+    const e = JSON.parse(eventLine('synthetic-rejected-event.jsonl', { five: 0.1, seven: 0.1 }));
+    e.rate_limit_info.rateLimitType = 'seven_day_opus';
+    e.rate_limit_info.resetsAt = nowSec() + inSeconds;
+    return `${JSON.stringify(e)}\n`;
+  };
+  world(({ log, alerts }) => {
+    log(1, opus(-HOUR));
+    assert.equal(alerts().out, '');
+    log(1, opus(HOUR));
+    assert.match(alerts().out, /seat 1.*rejected.*resets/);
+  });
+});
