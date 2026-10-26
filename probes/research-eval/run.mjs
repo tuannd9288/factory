@@ -196,7 +196,7 @@ async function main(argv, env) {
   if (!o.skipKeyCheck) {
     const problems = keyProblems(plan, runsRoot);
     if (problems.length) throw new Refused(`the keys do not hold, so nothing was started:\n${problems.slice(0, 20).join('\n')}`);
-  }
+  } else console.log('keys not checked');
   // A folder left by an earlier session of a tag would hand that session's log to this one.
   for (const e of plan) {
     const p = sessionPaths(e, opts);
@@ -282,7 +282,7 @@ async function main(argv, env) {
     } else console.log('estimate for the full set: not yet, it needs a run of each arm');
     console.log(`spent ${usd(spent)} of the ${usd(o.limit)} limit`);
     console.log(`note: ${NOTE}`);
-    writeFileSync(join(o.run, `research-eval-${o.set}.json`), `${JSON.stringify({ set: o.set, limit: o.limit, spent, note: NOTE, results, summary: s }, null, 2)}\n`);
+    writeFileSync(join(o.run, `research-eval-${o.set}.json`), `${JSON.stringify({ set: o.set, limit: o.limit, spent, keyCheck: !o.skipKeyCheck, note: NOTE, results, summary: s }, null, 2)}\n`);
   }
   return code;
 }
