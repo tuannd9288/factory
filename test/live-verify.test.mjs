@@ -161,23 +161,40 @@ function world({ driver = DRIVER } = {}) {
 }
 
 /**
- * Whether a recorded gh call (argv joined by spaces) writes to a pull request: `--approve`; `pr review`, `merge`,
- * `edit`, `close`, `ready`, `reopen` or `update-branch`; or a `gh api` call that sets a method other than GET or any body. It names no call as allowed.
- * Leading global flags (-R, --repo) are skipped. An argument with a space in it splits in the record; that can only
- * add a false red, never hide a flag.
+ * Whether a recorded gh call (argv joined by spaces) writes to a pull request: `--approve`; a `pr` verb of `review`,
+ * `merge`, `edit`, `close`, `ready`, `reopen` or `update-branch`; or a `gh api` call that sets a method other than
+ * GET or any body. It names no call as allowed. `pr` and `api` are found at any position, so a global flag with a
+ * value before them hides nothing; the pr verb is the first token after `pr` that is neither a flag nor the value of
+ * -R/--repo; short flags are read in a cluster (-iX PUT, -if k=v, -iXPUT). An argument with a space in it splits in
+ * the record, and a word `pr` or `api` used as an argument is read as the noun: both can only add a false red.
  */
 function writes(call) {
   const args = call.split(' ');
   if (args.includes('--approve')) return true;
-  let i = 0;
-  while (i < args.length && args[i].startsWith('-')) i += /^(-R|--repo)$/.test(args[i]) ? 2 : 1;
-  if (args[i] === 'pr') return ['review', 'merge', 'edit', 'close', 'ready', 'reopen', 'update-branch'].includes(args[i + 1]);
-  if (args[i] !== 'api') return false;
-  const rest = args.slice(i + 1);
-  return rest.some((a, k) => {
-    if (/^(-f|-F|--field|--raw-field|--input)$/.test(a) || /^(-[fF].|--field=|--raw-field=|--input=)/.test(a)) return true;
-    const method = /^(-X|--method)$/.test(a) ? rest[k + 1] : /^(-X.|--method=)/.test(a) ? a.replace(/^(-X|--method=)/, '') : null;
-    return method !== null && String(method).toUpperCase() !== 'GET';
+  const verbs = ['review', 'merge', 'edit', 'close', 'ready', 'reopen', 'update-branch'];
+  return args.some((word, at) => {
+    const rest = args.slice(at + 1);
+    if (word === 'pr') {
+      let k = 0;
+      while (k < rest.length && rest[k].startsWith('-')) k += /^(-R|--repo)$/.test(rest[k]) ? 2 : 1;
+      return verbs.includes(rest[k]);
+    }
+    if (word !== 'api') return false;
+    return rest.some((a, k) => {
+      if (/^(--field|--raw-field|--input)(=|$)/.test(a)) return true;
+      let method = a === '--method' ? rest[k + 1] : a.startsWith('--method=') ? a.slice(9) : null;
+      if (/^-[A-Za-z]/.test(a)) {
+        for (let c = 1; c < a.length; c += 1) {
+          if (a[c] === 'f' || a[c] === 'F') return true;
+          if (a[c] === 'X') {
+            method = a.slice(c + 1) || rest[k + 1];
+            break;
+          }
+          if ('qtHp'.includes(a[c])) break;
+        }
+      }
+      return method != null && String(method).toUpperCase() !== 'GET';
+    });
   });
 }
 
