@@ -177,7 +177,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-contract.md:36`.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
-  Checked by: `kit/scripts/lib/approval.mjs:1-10`, `kit/AGENTS.md:97`, `kit/scripts/review:27` (one reviewer call per head).
+  Checked by: `kit/scripts/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/scripts/review:27` (one reviewer call per head).
   Prior art [A8]: "An approval covers one specific commit."
 - **H4**: Knowledge is files in the repository, changed by pull request.
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `scripts/verify:9-16` (the 150-line cap).

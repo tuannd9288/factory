@@ -41,17 +41,8 @@ the pull request; push as often as you like. CI runs `main`'s copies of both on 
    a base other than `main`, and stops on `needs-human`, or on a tier 3 it armed that waits for the Human. FAIL: fix forward with a red
    test, push, run it again. BLOCKED: put the reason and your recommended answer in the pull request. It disarms an
    armed pull request whose HEAD is past its verdict; push, then run it again. Then release the branch; do not wait for CI.
-5. The gate decides, from `main`'s scripts. Every pull request needs four checks green on its head commit:
-   `verify` (`gate.yml`: main's verify, rules and red-check on your code), then `review` and `verdict`
-   (`gate-trusted.yml`: the reviewer reads your change as data once `verify` passed; `verdict` passes at once on
-   tier 1), and `tier`, which below tier 3 waits for `review` to end, and on tier 3 for the Human's approval of your
-   change. The reviewer may raise a change to tier 3 (label `raised`), never lower one. His approval holds while the
-   patch is unchanged, as when the queue merges `main` in; a new patch needs a new one. A label never lowers a tier.
-   A red `tier` that says `review is red; tier follows it` is not his wait: re-run the failed jobs, never `review` alone.
-   One that waits for his approval is his wait: never re-run it; the queue re-runs it after he approves.
-6. A blocking finding is fixed by a new commit. A finding you dispute goes to the Human: label the pull request
-   `needs-human` and put your recommended answer in it. At the third head commit judged red, `rounds` labels the
-   pull request `needs-human`, which makes it tier 3: the Human decides.
+5. Four checks decide, from `main`'s scripts, on the head commit. When one is red or a `tier` waits, or a finding is
+   disputed, read the skill `gate-red` (`.claude/skills/gate-red/SKILL.md`) before you act.
 
 ## The live verifier
 
@@ -80,26 +71,13 @@ answer; a reversible question never blocks the work.
 
 ## Rules and what enforces them
 
+The rules a program refuses or flags are in `.gate/enforced-rules.md`, which the gate's reviewer reads with this file; read it when a check is red or your change touches the gate.
+
 | Rule | Enforced by |
 |---|---|
-| Checks green on the exact head commit before merge | ruleset: `verify`, `review`, `verdict`, `tier` pinned to GitHub Actions, branch up to date |
-| No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `scripts/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
-| A new test fails at the base and passes at the head | `red-check`, inside `verify` |
-| A failing test committed first is not weakened later | `scripts/rules` (`failing-test-edited`) |
-| Every check is shown failing on a fixture | `scripts/prove-check` in `verify` and `verify-trusted` |
-| Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `scripts/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
-| Tier-3 paths are one list, and CODEOWNERS ends with exactly it | `.gate/protected`; `verify` (`policy`) |
-| Removing a label lowers no tier | `tier` reads every label the pull request ever had |
-| Commit subject present, at most 72 characters, never `wip`, a placeholder, `fixup!` or `squash!` | `verify` (`subjects`, every commit of the change); `.githooks/commit-msg` is the local copy |
 | Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
-| Auto-merge only on a base of `main`; a pull request opens only after a local pass; a tier 3 is armed, then stops until the Human approves; `needs-human` stops before arming | `scripts/ship`, on the stamps a full `verify` and `red-check` leave; a push is never refused |
-| Auto-merge armed only while a live PASS or PASS+NOTES covers the head or its patch; disarmed on the next `ship` once a patch moved past its verdict | `scripts/ship`, on `scripts/live-verify --covered`; the ledger lists each merged pull request no verdict covered |
-| No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
-| Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
 | No rewrite of a pushed commit (rebase, amend) and no force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`), and `.claude/settings.json` deny rules |
-| No `--no-verify`, tags, releases; no reads of `.env` or of the Human's own Claude Code and Cursor profiles (`~/.claude*`, `~/.cursor/`), whose transcripts are his, or of the verifier's Codex profile, which holds its login | `.claude/settings.json` deny rules, in Claude Code only; for tags, and for a release that would create one, also the ruleset `factory-tags`; a draft is not refused |
 | Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
-| A candidate's code runs only in `gate.yml`'s `verify`: on `pull_request`, which cannot write `main`'s Actions cache, never under `pull_request_target`; on a GitHub-hosted runner, never on a self-hosted one that also runs `main`'s or a deploy's jobs; with no secret and a read-only token | the factory's tests check the kit's workflows. A pull request that changes `gate.yml` runs its own copy for its `verify`; it is tier 3, and the Human reads that file before approving |
 
 A rule with no enforcer goes here as `prose` and gets one, or is deleted, within 30 days.
 
