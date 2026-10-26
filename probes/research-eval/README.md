@@ -94,6 +94,10 @@ run and refuses to score that run (`paths.mjs`):
   is seen only as the variable or substitution that builds it, and `git show main:probes/research-eval/tasks/<task>.json` names
   no path outside the folders. It may flag a read that is legitimate, such as a file that Claude Code itself saves under the
   profile for a long tool result.
+- **The guard.** Before any session starts, with or without `--go`, the runner refuses the set (exit 7, naming the task and the
+  folder) when a task's readable folder is, holds or sits in a run or work folder of the plan, a `probes/research-eval/tasks`
+  folder (this checkout's, `~/WORKSPACES`'s or `issue-92/w92`'s), `issue-92` (the reports), or is or holds the runs folder itself,
+  after `..` and symlinks are resolved, so that "inside" can never reach an answer.
 - **If a probe run is flagged,** that is the dated failure that justifies a fail-closed eval preset in `bin/seat`, as its own
   issue (Colly, 2026-10-26).
 

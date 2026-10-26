@@ -1,6 +1,6 @@
 // The research eval's path check (#92): the runner does not stop a session from reading outside its folders; it reads the session's
 // log after the run and lists every path in a tool input that lies outside them. A path it cannot place counts as outside.
-import { existsSync, realpathSync } from 'node:fs';
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
 // The fields that hold a path (a `pattern` or `glob` only when it is absolute or climbs with ".."), and the tool whose `command`
@@ -11,15 +11,33 @@ const UNPLACEABLE = /\$[A-Za-z_{(]|`/;
 // Reading or writing the null device reaches no session's files.
 const HARMLESS = new Set(['/dev/null']);
 
-/** The real path of a path that need not exist: the real path of its deepest existing folder, and the rest as it is. */
-const realOf = (path) => {
+const present = (p) => {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The real path of a path that need not exist: the real path of its deepest existing folder, and the rest as it is. A link
+ * whose target is gone is followed all the same, since the target may come back. */
+export const realOf = (path, depth = 0) => {
   let head = path;
   const rest = [];
-  while (!existsSync(head) && dirname(head) !== head) {
+  while (!present(head) && dirname(head) !== head) {
     rest.unshift(basename(head));
     head = dirname(head);
   }
-  return join(existsSync(head) ? realpathSync(head) : head, ...rest);
+  let base = head;
+  if (present(head)) {
+    try {
+      base = realpathSync(head);
+    } catch {
+      base = depth < 20 ? realOf(resolve(dirname(head), readlinkSync(head)), depth + 1) : head;
+    }
+  }
+  return join(base, ...rest);
 };
 
 /** Where a path sits, as an absolute real path, or null when it cannot be placed (a variable, a command substitution, another

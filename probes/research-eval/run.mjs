@@ -5,11 +5,11 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PRESETS } from '../../bin/lib/seat.mjs';
 import { grade } from './grade.mjs';
-import { outsidePaths } from './paths.mjs';
+import { outsidePaths, realOf } from './paths.mjs';
 import { briefOf, loadTasks, validateTask, verifyTask } from './keys.mjs';
 
 // bin/seat is a one-line wrapper of this file; running the file with the same node needs no shell on the PATH.
@@ -23,7 +23,16 @@ const DEFAULTS = { turns: 80, pollMs: 5000, timeoutMin: 45, limit: 24 };
 // Printed with the results and kept in them: what the eval cannot show.
 const NOTE = 'Both arms deny the web (WebFetch, WebSearch), so the helpers are the only difference; this departs from "A, as today". The eval measures helpers on research over files on disk and says nothing about helpers in web research, where the 13 helpers of #58, #68, #68b and #70 mostly worked.';
 
-class Refused extends Error {}
+class Refused extends Error {
+  constructor(message, exitCode = 2) {
+    super(message);
+    this.exitCode = exitCode;
+  }
+}
+// Exit codes of the runner besides 0: 2 refused to start, 3 spend, 4 arm B broken, 5 stuck, 6 model changed, 7 a readable folder
+// reaches an answer, 8 a run read outside its folders.
+const EXIT_GUARD = 7;
+const EXIT_INVALID = 8;
 
 /** The runs of a set, in the order they start: for each repetition, each task with its two arms, the arm that goes first
  * alternating from task to task so that neither arm always runs first. */
@@ -59,6 +68,33 @@ export function seatArgs(entry, { runsRoot, work, set, turns }) {
     '--deny', 'WebFetch', '--deny', 'WebSearch', '--deny', `Read(/${CHECKOUT}/probes/research-eval/**)`,
     ...(entry.arm === 'B' ? HELPER_TOOLS.flatMap((t) => ['--deny', t]) : []),
   ];
+}
+
+/** The folders no readable folder may be, or hold, or sit in: every run and work folder of the plan, the keys of this checkout and
+ * of every checkout the runner can name, and issue-92 (the reports). The runs folder itself is checked apart: a readable folder
+ * sits in it, but may not be it or hold it. */
+function forbidden(plan, { runsRoot, work, set, home }) {
+  const keys = (root) => join(root, 'probes/research-eval/tasks');
+  return [
+    ...plan.flatMap((e) => Object.values(sessionPaths(e, { runsRoot, work, set }))),
+    keys(CHECKOUT), keys(join(home, 'WORKSPACES')), keys(join(runsRoot, 'issue-92/w92')), join(runsRoot, 'issue-92'),
+  ];
+}
+
+/** The tasks of a plan with a readable folder that is, holds or sits in a forbidden folder, one line each. Two paths meet when one
+ * is the other or an ancestor of it, after `..` and symlinks are resolved. */
+export function guardProblems(plan, opts) {
+  const bad = forbidden(plan, opts).map((f) => realOf(resolve(f)));
+  const root = realOf(resolve(opts.runsRoot));
+  const out = [];
+  for (const task of new Set(plan.map((e) => e.task))) {
+    for (const r of task.readable ?? []) {
+      const at = realOf(resolve(join(opts.runsRoot, r)));
+      const hit = at === root || root.startsWith(`${at}/`) ? root : bad.find((b) => at === b || at.startsWith(`${b}/`) || b.startsWith(`${at}/`));
+      if (hit) out.push(`${task.id}: its readable folder ${r} (${at}) is, holds or sits in ${hit}`);
+    }
+  }
+  return out;
 }
 
 const SKIP = new Set(['node_modules', '.git']);
@@ -191,6 +227,8 @@ async function main(argv, env) {
     const why = refusal(dir);
     if (why) throw new Refused(why);
   }
+  const reaching = guardProblems(plan, { ...opts, home: env.HOME });
+  if (reaching.length) throw new Refused(`a readable folder reaches an answer, so nothing was started:\n${reaching.join('\n')}`, EXIT_GUARD);
   if (!o.go) {
     for (const e of plan) console.log(`dry: ${e.tag}: bin/seat ${seatArgs(e, opts).join(' ')}`);
     console.log(`not started: add --go to run these ${plan.length} sessions, one at a time; none starts that could take the spend past ${usd(o.limit)}, counting each at the researcher preset's ${usd(PRESETS.researcher.budget)} budget, which is a request to claude and not a proven limit on a subscription seat`);
@@ -302,6 +340,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   } catch (e) {
     if (!(e instanceof Refused)) throw e;
     process.stderr.write(`research-eval: ${e.message}\n`);
-    process.exitCode = 2;
+    process.exitCode = e.exitCode;
   }
 }
