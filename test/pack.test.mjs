@@ -162,9 +162,11 @@ describe('onboard --pack', () => {
       assert.equal(out.code, 0, out.out);
       assert.equal(repoText(s, '.gate/pack'), 'pstack\n');
       assert.equal(repoText(s, 'AGENTS.md'), composeAgents(read('kit/AGENTS.md'), read('packs/pstack/AGENTS.md')).replace('<repo>', 'app'));
-      // Independent of compose: the pack's section and its pin are in the files onboard wrote.
+      // Independent of compose: the pack's section and every key of its pin are in the files onboard wrote.
       assert.ok(repoText(s, 'AGENTS.md').includes(read('packs/pstack/AGENTS.md')));
-      assert.deepEqual(JSON.parse(repoText(s, '.claude/settings.json')).enabledPlugins, JSON.parse(read('packs/pstack/settings.json')).enabledPlugins);
+      const pin = JSON.parse(read('packs/pstack/settings.json'));
+      const laid = JSON.parse(repoText(s, '.claude/settings.json'));
+      for (const [key, value] of Object.entries(pin)) assert.deepEqual(laid[key], value, key);
       assert.equal(repoText(s, '.claude/settings.json'), composeSettings(read('kit/.claude/settings.json'), read('packs/pstack/settings.json')));
       assert.ok(repoText(s, '.gate/kit-files').split('\n').includes('.gate/pack'));
     } finally {

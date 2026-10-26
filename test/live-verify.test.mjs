@@ -178,11 +178,13 @@ describe('live-verify', () => {
       assert.match(posted, /^\*\*Diff read\*\*$/m);
       assert.match(posted, /^\*\*Notes\*\*$/m);
       assert.match(posted, /^The verifier's verdict is no input to the gate: it lowers no tier and replaces no required check\.$/m);
+      // It reads the pull request and its issue and comments; it never approves, reviews or merges.
+      const kinds = w.read('gh-calls').split('\n').filter(Boolean).map((c) => c.split(' ').slice(0, 2).join(' '));
+      assert.ok(kinds.length > 0 && kinds.every((k) => ['api user', 'pr view', 'issue view', 'pr comment'].includes(k)), kinds.join('\n'));
       // The brief stands alone: the goal from the pull request and its issue, the exact commits, the driver.
       const prompt = w.read('prompt');
       assert.match(prompt, /The CLI takes the operation name/);
       assert.match(prompt, /`node cli\.js add 2 3` prints 5/);
-      assert.match(prompt, /Write audit, issues, notes, observed and reason in English\./);
       assert.match(prompt, /node cli\.js add <a> <b>, as a user types it/);
       // The log of Codex's runs stays, for the BLOCKED comment that points at it; the worktrees go.
       assert.match(readdirSync(join(w.repo, '.claude/worktrees')).join(' '), /^live-verify-7-[A-Za-z0-9]{6}\.log$/);

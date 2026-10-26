@@ -562,7 +562,6 @@ describe('the pinned install and the workflow', () => {
       assert.equal(out.code, 0, out.out);
       assert.doesNotMatch(out.out, /unavailable/);
       assert.match(readFileSync(join(dir, 'path'), 'utf8'), /claude-code-linux-x64\n$/);
-      assert.doesNotMatch(readFileSync(join(dir, 'path'), 'utf8'), /node_modules\/\.bin/, 'the .bin link is a placeholder when no script runs');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

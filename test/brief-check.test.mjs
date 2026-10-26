@@ -96,7 +96,7 @@ test('a brief built from bin/brief-template.md is cut at its attachment: a quote
   const template = readFileSync(join(factory, 'bin/brief-template.md'), 'utf8');
   const relay = 'Colly: the Human said "refuse an empty name".\n';
   const attached = (text) => `${text}\n${relay}`;
-  withFiles({ 'relay.md': relay, 'carries.md': attached(template.replace('## Goal\n', '## Goal\n\n"refuse an empty name"\n')), 'only-attached.md': attached(template) }, (dir) => {
+  withFiles({ 'relay.md': relay, 'carries.md': attached(`"refuse an empty name"\n\n${template}`), 'only-attached.md': attached(template) }, (dir) => {
     assert.equal(brief([join(dir, 'carries.md'), join(dir, 'relay.md')]).code, 0);
     assert.deepEqual(brief([join(dir, 'only-attached.md'), join(dir, 'relay.md')]), { code: 1, out: 'missing quote: "refuse an empty name"\n', err: '' });
   });
