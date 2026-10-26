@@ -162,7 +162,7 @@ function world({ driver = DRIVER } = {}) {
 
 /**
  * Whether a recorded gh call (argv joined by spaces) writes to a pull request: `--approve`; `pr review`, `merge`,
- * `edit` or `close`; or a `gh api` call that sets a method other than GET or any body. It names no call as allowed.
+ * `edit`, `close`, `ready`, `reopen` or `update-branch`; or a `gh api` call that sets a method other than GET or any body. It names no call as allowed.
  * Leading global flags (-R, --repo) are skipped. An argument with a space in it splits in the record; that can only
  * add a false red, never hide a flag.
  */
@@ -171,7 +171,7 @@ function writes(call) {
   if (args.includes('--approve')) return true;
   let i = 0;
   while (i < args.length && args[i].startsWith('-')) i += /^(-R|--repo)$/.test(args[i]) ? 2 : 1;
-  if (args[i] === 'pr') return ['review', 'merge', 'edit', 'close'].includes(args[i + 1]);
+  if (args[i] === 'pr') return ['review', 'merge', 'edit', 'close', 'ready', 'reopen', 'update-branch'].includes(args[i + 1]);
   if (args[i] !== 'api') return false;
   const rest = args.slice(i + 1);
   return rest.some((a, k) => {
