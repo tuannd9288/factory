@@ -9,7 +9,7 @@ const PATH_FIELDS = ['file_path', 'path', 'notebook_path'];
 const PATTERN_FIELDS = ['pattern', 'glob'];
 const UNPLACEABLE = /\$[A-Za-z_{(]|`/;
 // A shell expansion in text that is not single-quoted: the word that holds it cannot be placed, so it counts as outside.
-const EXPANSION = /[$`]/;
+const EXPANSION = /[$`\\]/;
 
 /** The commands of a shell command line, each a list of words { raw, text, plain }: `raw` as written, `text` with the quotes taken
  * off, `plain` when no unquoted or double-quoted part of it holds an expansion. Words split on whitespace and on `; | & < >` and
@@ -25,8 +25,18 @@ export function wordsOf(command) {
       word = null;
     }
   };
-  for (const ch of command) {
-    if (quote === "'") {
+  const chars = [...command];
+  for (let i = 0; i < chars.length; i += 1) {
+    const ch = chars[i];
+    if (ch === '\\' && quote !== "'") {
+      // A backslash escapes the next character: it opens no quote and ends no word. The word it is in is not plain.
+      open();
+      const next = chars[i + 1] ?? '';
+      word.raw += ch + next;
+      word.text += next;
+      word.open += ch;
+      i += 1;
+    } else if (quote === "'") {
       word.raw += ch;
       if (ch === "'") {
         quote = null;
