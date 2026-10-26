@@ -84,9 +84,11 @@ run and refuses to score that run (`paths.mjs`):
   word that is absolute, starts with `~` or holds `..`. `Write` and `Edit` are included, since a note left outside the folders
   is how one arm could reach the other.
 - **One allow rule for a shell command: a word is placeable only when it is plain text.** The `command` is read quote by quote.
-  Single-quoted text is literal and is checked as written. A word whose unquoted or double-quoted part holds any shell
-  expansion cannot be placed, so it counts as outside: a `$` in any form (`$VAR`, `${…}`, `$(…)`, `$'…'`, `$"…"`), a backslash, a
-  brace, or a backtick. A bare `cd` and `cd -` are outside too, since the next relative path cannot be placed. The cost is
+  Single-quoted text is literal and is checked as written. A word whose unquoted part holds any shell expansion cannot be
+  placed, so it counts as outside: a `$` in any form (`$VAR`, `${…}`, `$(…)`, `$'…'`, `$"…"`), a backslash, a brace, or a
+  backtick. Double-quoted text is read as the shell reads it: only a `$` or a backtick there makes the word unplaceable; a
+  backslash escapes only `$`, a backtick, `"`, `\` and a newline, and braces and other backslashes are text, so
+  `grep -n "a\|b"` is plain (the probe's first run, 2026-10-26, was invalid on such a regex until this reading). A bare `cd` and `cd -` are outside too, since the next relative path cannot be placed. The cost is
   accepted: an unquoted regex with a backslash, or an inline script with braces, makes the run invalid and prints its path. The
   words split on whitespace and on `; | & < >` outside quotes.
 - **How it places a path.** A relative path resolves against the session's work folder, `~` is `HOME`, `..` is normalised, and when
