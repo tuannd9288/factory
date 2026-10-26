@@ -139,7 +139,7 @@ try {
       }
     }
   } else if (args[0] === 'reuse') {
-    // The latest completed review of any gate-trusted run on this head whose verdict names this head, base and No-red line.
+    // The latest completed review of any gate-trusted run on this head whose verdict names this head, base, No-red line and closing issues.
     const runs = api(`${base}/actions/workflows/gate-trusted.yml/runs?head_sha=${opt('--head')}&per_page=100`);
     if (!Array.isArray(runs.workflow_runs) || runs.total_count !== runs.workflow_runs.length) throw new Error('the runs on this head are more than one page, or unreadable');
     const found = [];

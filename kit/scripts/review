@@ -265,7 +265,7 @@ if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ] && [ -n "${GITHUB_RU
       "reuse "*)
         read -r _ pv rid rest <<<"$prior"
         if [ "$rest" = none ]; then echo "::notice title=review-result::none"; else why=${rest#raise }; echo "::notice title=review-result::raise: ${why//%/%25}"; fi
-        echo "review: reused the review of run $rid for this head, base and No-red line; no call made (one call per head)"
+        echo "review: reused the review of run $rid for this head, base, No-red line and closing issues; no call made (one call per head)"
         echo "::notice title=review-verdict::head=$head base=$fork nored=$nored acc=$acc reviewer=${GATE_REVIEWER:-} $pv"
         [ "$pv" = pass ] && exit 0
         echo "review blocks ${head:0:8} (reused; its findings are in the log of run $rid)"
