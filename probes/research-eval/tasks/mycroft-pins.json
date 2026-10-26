@@ -1,0 +1,100 @@
+{
+  "id": "mycroft-pins",
+  "title": "mycroft at its 2026-10-23 commit",
+  "sources": [
+    "issue-58"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "ask": "What commit is the clone `issue-58/sources/mycroft/mycroft` at (the full hash)?",
+      "all": [
+        "0443929dad60a05ef56d7278ebb83eac3c59556c"
+      ],
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-58/sources/mycroft/mycroft",
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "out": "0443929dad60a05ef56d7278ebb83eac3c59556c"
+      },
+      "example": "F1: 0443929dad60a05ef56d7278ebb83eac3c59556c — git rev-parse HEAD"
+    },
+    {
+      "id": "F2",
+      "ask": "How many commits does that clone have in its history?",
+      "all": [
+        "\\b37\\b"
+      ],
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-58/sources/mycroft/mycroft",
+        "args": [
+          "rev-list",
+          "--count",
+          "HEAD"
+        ],
+        "out": "37"
+      },
+      "example": "F2: 37 — git rev-list --count HEAD"
+    },
+    {
+      "id": "F3",
+      "ask": "On what date (YYYY-MM-DD) was its first commit made?",
+      "all": [
+        "2026-10-18"
+      ],
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-58/sources/mycroft/mycroft",
+        "args": [
+          "log",
+          "--max-parents=0",
+          "--format=%cs"
+        ],
+        "out": "2026-10-18"
+      },
+      "example": "F3: 2026-10-18 — git log --max-parents=0 --format=%cs"
+    },
+    {
+      "id": "F4",
+      "ask": "In `ios/project.yml`, which revision of PiDurableKit is pinned, and on which line?",
+      "all": [
+        "1305a72"
+      ],
+      "cite": "project\\.yml\\D{0,12}23\\b",
+      "source": {
+        "file": "issue-58/sources/mycroft/mycroft/ios/project.yml",
+        "line": 23,
+        "has": "revision: 1305a72ffe5ea29a9f5e7d576a7cf9334189c1ef"
+      },
+      "example": "F4: 1305a72ffe5ea29a9f5e7d576a7cf9334189c1ef — ios/project.yml:23"
+    },
+    {
+      "id": "F5",
+      "ask": "Under which licence, and whose copyright, is mycroft (`LICENSE`), and on which line is the holder?",
+      "all": [
+        "MIT",
+        "Vojtech Kurka"
+      ],
+      "cite": "LICENSE\\D{0,12}3\\b",
+      "source": {
+        "file": "issue-58/sources/mycroft/mycroft/LICENSE",
+        "line": 3,
+        "has": "Copyright (c) 2026 Vojtech Kurka"
+      },
+      "example": "F5: MIT, Vojtech Kurka — LICENSE:3"
+    }
+  ],
+  "unreadable": {
+    "id": "F6",
+    "ask": "How many GitHub stars does mycroft have today?",
+    "topic": "stars",
+    "example": "the number of GitHub stars of mycroft today: it is not in the clone"
+  },
+  "readable": [
+    "issue-58/sources/mycroft/mycroft"
+  ]
+}

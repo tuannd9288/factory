@@ -1,0 +1,98 @@
+{
+  "id": "small-tools",
+  "title": "Piranha, Graphify and semble: pins and metadata",
+  "sources": [
+    "issue-70"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "ask": "What commit is the clone `issue-70/sources/piranha` at (the full hash)?",
+      "all": [
+        "4877ea27558817f67068d43e6846e36b99384f3c"
+      ],
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-70/sources/piranha",
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "out": "4877ea27558817f67068d43e6846e36b99384f3c"
+      },
+      "example": "F1: 4877ea27558817f67068d43e6846e36b99384f3c — git rev-parse HEAD"
+    },
+    {
+      "id": "F2",
+      "ask": "Which version does Piranha's root `Cargo.toml` declare, and on which line?",
+      "all": [
+        "0\\.4\\.9"
+      ],
+      "cite": "Cargo\\.toml\\D{0,12}6\\b",
+      "source": {
+        "file": "issue-70/sources/piranha/Cargo.toml",
+        "line": 6,
+        "has": "version = \"0.4.9\""
+      },
+      "example": "F2: 0.4.9 — Cargo.toml:6"
+    },
+    {
+      "id": "F3",
+      "ask": "Under which package name and version does Graphify publish itself in its `pyproject.toml`?",
+      "all": [
+        "graphifyy",
+        "0\\.9\\.95"
+      ],
+      "cite": "pyproject\\.toml\\D{0,12}[67]\\b",
+      "source": {
+        "file": "issue-70/sources/graphify/pyproject.toml",
+        "line": 7,
+        "has": "version = \"0.9.95\""
+      },
+      "example": "F3: graphifyy 0.9.95 — pyproject.toml:6-7"
+    },
+    {
+      "id": "F4",
+      "ask": "What commit is the clone `issue-70/sources/semble` at (the full hash)?",
+      "all": [
+        "913bdac1d59bc2defc658453a65719d133f1ff5a"
+      ],
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-70/sources/semble",
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "out": "913bdac1d59bc2defc658453a65719d133f1ff5a"
+      },
+      "example": "F4: 913bdac1d59bc2defc658453a65719d133f1ff5a — git rev-parse HEAD"
+    },
+    {
+      "id": "F5",
+      "ask": "Which Python versions does semble's `pyproject.toml` require, and on which line?",
+      "orIsAnswer": "or (newer|later|higher|above)",
+      "all": [
+        "3\\.10"
+      ],
+      "cite": "pyproject\\.toml\\D{0,12}12\\b",
+      "source": {
+        "file": "issue-70/sources/semble/pyproject.toml",
+        "line": 12,
+        "has": "requires-python = \">=3.10\""
+      },
+      "example": "F5: >=3.10 — pyproject.toml:12"
+    }
+  ],
+  "unreadable": {
+    "id": "F6",
+    "ask": "How many monthly PyPI downloads does semble have?",
+    "topic": "downloads",
+    "example": "the monthly PyPI downloads of semble: they are not on disk"
+  },
+  "readable": [
+    "issue-70/sources/piranha",
+    "issue-70/sources/graphify",
+    "issue-70/sources/semble"
+  ]
+}

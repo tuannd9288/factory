@@ -64,11 +64,11 @@ export const ROLES = Object.keys(PRESETS);
 
 /** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories and run its
  * `sv`); skills become Skill(<name>) grants and allow is a run's own extra grants; seat and tokenPath add seat 1's
- * deny rules. */
-export function buildArgs({ role, run, home, resume = null, skills = [], allow = [], addDirs = [], maxTurns = null, seat = null, tokenPath = null }) {
+ * deny rules; deny is a run's own extra deny rules (#92), which come before seat 1's. */
+export function buildArgs({ role, run, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, seat = null, tokenPath = null }) {
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
-  const deny = [...denyOf(home, p.web), ...(seat === 1 ? ['Bash(env:*)', 'Bash(printenv:*)', `Read(/${tokenPath})`] : [])];
+  const deny = [...denyOf(home, p.web), ...extraDeny, ...(seat === 1 ? ['Bash(env:*)', 'Bash(printenv:*)', `Read(/${tokenPath})`] : [])];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
@@ -198,13 +198,13 @@ export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = nul
 
 class Refused extends Error {}
 
-const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
+const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--deny <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
 const VALUE = { '--run': 'run', '--work': 'work', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
-const LIST = { '--skill': 'skills', '--allow': 'allow', '--add-dir': 'addDirs' };
+const LIST = { '--skill': 'skills', '--allow': 'allow', '--deny': 'deny', '--add-dir': 'addDirs' };
 
 /** The arguments of bin/seat as an object; a Refused error, in a sentence, for anything else. */
 export function parseArgs(argv) {
-  const o = { skills: [], allow: [], addDirs: [] };
+  const o = { skills: [], allow: [], deny: [], addDirs: [] };
   const rest = [];
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -218,7 +218,7 @@ export function parseArgs(argv) {
   if (rest.length !== 2) throw new Refused(USAGE);
   [o.role, o.brief] = rest;
   if (!o.run || !o.work) throw new Refused(`--run and --work are both needed\n${USAGE}`);
-  for (const [flag, value] of [['--resume', o.resume], ...o.allow.map((v) => ['--allow', v]), ...o.addDirs.map((v) => ['--add-dir', v])]) {
+  for (const [flag, value] of [['--resume', o.resume], ...o.allow.map((v) => ['--allow', v]), ...o.deny.map((v) => ['--deny', v]), ...o.addDirs.map((v) => ['--add-dir', v])]) {
     if (typeof value === 'string' && value.startsWith('-')) throw new Refused(`${flag} ${value}: a value that starts with a dash is refused, since claude would read it as a flag`);
   }
   if (o.seat !== undefined && !/^[12]$/.test(o.seat)) throw new Refused(`seat ${o.seat} does not exist; the seats are 1 and 2`);
@@ -324,7 +324,7 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const child = { ...env, GH_CONFIG_DIR: join(run, '.gh-empty'), CLAUDE_CONFIG_DIR: join(profiles, 'seats', String(seat), 'claude') };
   for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete child[name];
   mkdirSync(child.GH_CONFIG_DIR, { recursive: true });
-  const args = buildArgs({ role: o.role, run, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
+  const args = buildArgs({ role: o.role, run, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
     childFile: join(run, `run-${tag}.child`), tokenPath: seat === 1 ? tokenPath : null, role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),

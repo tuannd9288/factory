@@ -1,0 +1,91 @@
+{
+  "id": "paseo-daemon",
+  "title": "Paseo 0.13.0: defaults of its daemon",
+  "sources": [
+    "issue-68"
+  ],
+  "facts": [
+    {
+      "id": "F1",
+      "ask": "What commit is the clone `issue-68/sources/paseo` at (the full hash)?",
+      "all": [
+        "72e3316f4f5dfe775c77dbf998968c92e2de9019"
+      ],
+      "cite": "\\bgit\\b|rev-parse|rev-list|ls-files",
+      "source": {
+        "git": "issue-68/sources/paseo",
+        "args": [
+          "rev-parse",
+          "HEAD"
+        ],
+        "out": "72e3316f4f5dfe775c77dbf998968c92e2de9019"
+      },
+      "example": "F1: 72e3316f4f5dfe775c77dbf998968c92e2de9019 — git rev-parse HEAD"
+    },
+    {
+      "id": "F2",
+      "ask": "Which version does the root `package.json` declare, and on which line?",
+      "all": [
+        "0\\.13\\.0"
+      ],
+      "cite": "package\\.json\\D{0,12}3\\b",
+      "source": {
+        "file": "issue-68/sources/paseo/package.json",
+        "line": 3,
+        "has": "\"version\": \"0.13.0\""
+      },
+      "example": "F2: 0.13.0 — package.json:3"
+    },
+    {
+      "id": "F3",
+      "ask": "In `packages/server/src/server/config.ts`, which default port does the daemon use, and on which line?",
+      "all": [
+        "6767"
+      ],
+      "cite": "config\\.ts\\D{0,12}38\\b",
+      "source": {
+        "file": "issue-68/sources/paseo/packages/server/src/server/config.ts",
+        "line": 38,
+        "has": "DEFAULT_PORT = 6767"
+      },
+      "example": "F3: 6767 — packages/server/src/server/config.ts:38"
+    },
+    {
+      "id": "F4",
+      "ask": "In the same file, which relay endpoint is the default, and on which line?",
+      "all": [
+        "relay\\.paseo\\.sh:443"
+      ],
+      "cite": "config\\.ts\\D{0,12}39\\b",
+      "source": {
+        "file": "issue-68/sources/paseo/packages/server/src/server/config.ts",
+        "line": 39,
+        "has": "relay.paseo.sh:443"
+      },
+      "example": "F4: relay.paseo.sh:443 — packages/server/src/server/config.ts:39"
+    },
+    {
+      "id": "F5",
+      "ask": "Which address does `SECURITY.md` say the daemon binds to by default, and on which line?",
+      "all": [
+        "127\\.0\\.0\\.1"
+      ],
+      "cite": "SECURITY\\.md\\D{0,12}49\\b",
+      "source": {
+        "file": "issue-68/sources/paseo/SECURITY.md",
+        "line": 49,
+        "has": "binds to `127.0.0.1`"
+      },
+      "example": "F5: 127.0.0.1 — SECURITY.md:49"
+    }
+  ],
+  "unreadable": {
+    "id": "F6",
+    "ask": "How many GitHub stars does Paseo have today?",
+    "topic": "stars",
+    "example": "the number of GitHub stars of Paseo today: it is not in the clone"
+  },
+  "readable": [
+    "issue-68/sources/paseo"
+  ]
+}
