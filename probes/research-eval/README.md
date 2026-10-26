@@ -39,7 +39,7 @@ Start the probe:
 
     node probes/research-eval/run.mjs --set probe --run <results folder> --work <work folder> --go
 
-The probe is what fits in $24: the researcher runs on seat 2 only, which is shared with Kizuna labs. Its job is to prove the
+The probe is what fits in $24: the researcher runs on seat 2 only, never on seat 1, which holds a token. Its job is to prove the
 harness and to measure what one session costs, not to compare the arms. With the researcher preset's $15 budget the ceiling
 below lets a second session start only when the first cost $9 or less, so expect one A/B pair at most. A larger probe, and the
 40-run set (10 tasks, both arms, 2 runs: `--set full --go --limit-usd <dollars>`), are for the Human to fund once he has the
@@ -58,10 +58,12 @@ measured cost of a session.
   session, and refuses on any problem (exit 2). `--skip-key-check` is for the tests, which hold none of the sources; the runner
   then prints "keys not checked" and records `keyCheck: false` in `research-eval-<set>.json`.
 - **The grader's hedges.** An answer scores nothing when it holds "or", a question mark, a word of doubt (`maybe`, `probably`,
-  `likely`, `possibly`, `perhaps`, `think`, `guess`, `about`, `between`, `either`), or, for a fact with one value (a hash, a date, a
-  version, a count), a second value of the same shape. A fact whose right answer holds an "or" gives that phrase as `orIsAnswer`,
+  `likely`, `possibly`, `perhaps`, `think`, `guess`, `between`, `either`, and `about` before a figure), or, for a fact with one value
+  (a hash, a date, a version, a count), a second value of the same shape joined to another by a list mark (`,`, `/`, a dash,
+  brackets, "to", "and", "or"); a year that begins a date is no count. A fact whose right answer holds an "or" gives that phrase as `orIsAnswer`,
   and only the phrase is let through. Known limit: a number written in words ("two from 355029d") fails `round4-review` F5, and a
-  figure in words passes the unreadable question's check.
+  figure in words passes the unreadable question's check. A second value joined by `;`, `|`, `&` or "vs" still scores, and a hedge
+  after the dash, in the answer's citation, is not looked for.
 - **A stuck session.** No record in 45 minutes is a stop (exit 5).
 
 ## What a session can read
@@ -100,7 +102,10 @@ run and refuses to score that run (`paths.mjs`):
 - **What it does not do.** It is evidence of where a session read, not a sandbox: it prevents nothing, and no reader of a shell
   command is complete. It sees only the paths the log shows, and a command built only to evade it can still pass (a known
   limit, not a finding to fix): `git show main:probes/research-eval/tasks/<task>.json` names no path outside the folders. It may
-  flag a read that is legitimate, such as a file that Claude Code itself saves under the profile for a long tool result.
+  flag a read that is legitimate, such as a file that Claude Code itself saves under the profile for a long tool result, or a `Grep` regex that starts with `/`
+  or holds `..` (`pattern` is read as a path for `Grep` as for `Glob`; 1 of 714 `Grep` calls in the old logs). A relative word
+  that neither starts with `/` or `~` nor holds `..` is not collected, so after a `cd` into a readable folder a relative path
+  through a link that leads out is not seen.
 - **The guard.** Before any session starts, with or without `--go`, the runner refuses the set (exit 7, naming the task and the
   folder) when a task's readable folder is, holds or sits in a run or work folder of the plan, a `probes/research-eval/tasks`
   folder (this checkout's, `~/WORKSPACES`'s or `issue-92/w92`'s), `issue-92` (the reports), or is or holds the runs folder itself,
