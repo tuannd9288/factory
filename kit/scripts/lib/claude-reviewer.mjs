@@ -108,6 +108,9 @@ const INSTRUCTIONS = /^(CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md|\.mcp\.json|\.cl
 const git = (args) => spawnSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28 }).stdout ?? '';
 const diff = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', base, head]);
 const rules = existsSync('AGENTS.md') ? readFileSync('AGENTS.md', 'utf8') : '(main has no AGENTS.md)';
+// The rules code enforces sit in their own file, beside AGENTS.md, so a session that is not in a red gate need not load them;
+// the reviewer reads both, from main.
+const enforced = existsSync('.gate/enforced-rules.md') ? readFileSync('.gate/enforced-rules.md', 'utf8') : '(main has no .gate/enforced-rules.md)';
 const body = process.env.GATE_BODY_FILE && existsSync(process.env.GATE_BODY_FILE) ? readFileSync(process.env.GATE_BODY_FILE, 'utf8') : '';
 const noRed = /^No-red: .{20,}$/m.exec(body)?.[0];
 const CAP = 150_000;
@@ -132,6 +135,9 @@ const brief = `Review the commit named below. Your system prompt says how.
 
 ## The repository's rules (from main, trusted)
 ${rules}
+
+## The rules that code enforces (from main, trusted; .gate/enforced-rules.md)
+${enforced}
 
 ## What to review
 - job ${job}; commit head ${head}; its base (merge-base with main) ${base}.
