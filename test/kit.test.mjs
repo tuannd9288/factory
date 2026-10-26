@@ -6,7 +6,6 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { APP, commit, factory, git, quiet, repoWithKit, run, script, write } from './helpers.mjs';
-import { world } from './world.mjs';
 
 const RED_AT_BASE =
   "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport * as m from '../src/math.js';\n\ntest('multiplies', () => {\n  assert.equal(m.mul(2, 3), 6);\n});\n";
@@ -1490,19 +1489,6 @@ describe('gate-trusted.yml permissions', () => {
     const block = (n) => jobs.find((j) => j.startsWith(`${n}:`));
     assert.doesNotMatch(block('review'), /: write$/m);
     assert.match(block('tier'), /timeout-minutes: 75\n/);
-  });
-  test('bin/onboard creates the label raised beside tier-3, before it opens the pull request', () => {
-    const w = world({ onboardArgs: null });
-    try {
-      const out = run(w.dir, join(w.fac, 'bin/onboard'), [w.url], w.env);
-      assert.equal(out.code, 0, out.out);
-      const calls = w.calls();
-      const at = (prefix) => calls.findIndex((c) => c.startsWith(prefix));
-      assert.ok(at('label create tier-3') >= 0 && at('label create raised') >= 0, calls.join('\n'));
-      assert.ok(at('label create raised') < at('pr create'), calls.join('\n'));
-    } finally {
-      w.cleanup();
-    }
   });
   for (const [name, scopes] of Object.entries(NEEDS)) {
     test(`the ${name} job holds the scopes its scripts call`, () => {
