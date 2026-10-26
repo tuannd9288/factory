@@ -2,7 +2,7 @@
 // arguments each role gives claude. They come from the hand-written launchers of ~/factory-runs, role by role (see
 // PRESETS). Nothing here reads a credential.
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, writeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -234,24 +234,21 @@ export function launch(argv, env = process.env) {
 }
 
 /** The record of a session that has ended: spec is what launch decided, text the session's log, end how it ended. */
-export function recordOf(spec, text, { code, signal, error = null, end = new Date() }) {
-  const events = text.split('\n').flatMap((l) => {
-    try {
-      return [JSON.parse(l)];
-    } catch {
-      return [];
-    }
-  });
+export function recordOf(spec, events, { code, signal, error = null, end = new Date() }) {
   const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
-  const result = events.filter((e) => e.type === 'result').pop() ?? null;
+  // A run can hold several results (a background task that ends starts another query): turns and duration add up; the cost
+  // is cumulative, so the last result's is the whole; the report is the last one that has it.
+  const results = events.filter((e) => e.type === 'result');
+  const result = results.at(-1) ?? null;
+  const sum = (key) => (results.some((r) => typeof r[key] === 'number') ? results.reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0) : null);
   const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
   return {
     session: result?.session_id ?? init?.session_id ?? spec.resume ?? null,
     role: spec.role, seat: spec.seat, tag: spec.tag, run: spec.run,
     model: models.length ? models.join(',') : (init?.model ?? spec.model),
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
-    turns: result?.num_turns ?? null, duration_ms: result?.duration_ms ?? null, total_cost_usd: result?.total_cost_usd ?? null,
-    structured: result?.structured_output ?? null,
+    turns: sum('num_turns'), duration_ms: sum('duration_ms'), total_cost_usd: result?.total_cost_usd ?? null,
+    structured: results.findLast((r) => r.structured_output !== undefined && r.structured_output !== null)?.structured_output ?? null,
     ended: result ? (result.subtype ?? 'result') : 'no-result',
     exitCode: code ?? null, signal: signal ?? null, ...(error ? { error } : {}),
   };
@@ -265,12 +262,22 @@ function supervise() {
   const [stdin, stdout, stderr] = [openSync(spec.brief, 'r'), openSync(spec.jsonl, 'w'), openSync(spec.err, 'w')];
   const [cmd, ...args] = spec.cmd;
   let done = false;
+  let rest = '';
+  const events = [];
+  const take = (line) => {
+    try {
+      const e = JSON.parse(line);
+      if (e?.type === 'result' || (e?.type === 'system' && e.subtype === 'init')) events.push(e);
+    } catch {
+      // Not an event.
+    }
+  };
   // Only claude's environment holds the token, read here, just before it starts.
   const env = { ...process.env };
   let child;
   try {
     if (spec.tokenPath) env.CLAUDE_CODE_OAUTH_TOKEN = readToken(spec.tokenPath);
-    child = spawn(cmd, args, { cwd: spec.cwd, env, stdio: [stdin, stdout, stderr], detached: true });
+    child = spawn(cmd, args, { cwd: spec.cwd, env, stdio: [stdin, 'pipe', stderr], detached: true });
   } catch (e) {
     // A fixed message: a Node error can quote the environment.
     appendFileSync(spec.err, `bin/seat: could not start claude (${e instanceof Refused ? 'token' : (e.code ?? 'error')})\n`);
@@ -288,14 +295,24 @@ function supervise() {
   function finish(code, signal, error = null) {
     if (done) return;
     done = true;
+    if (rest.trim()) take(rest);
     for (const fd of [stdin, stdout, stderr]) closeSync(fd);
     try {
       mkdirSync(spec.state, { recursive: true });
-      appendFileSync(join(spec.state, 'sessions.jsonl'), `${JSON.stringify(recordOf(spec, readFileSync(spec.jsonl, 'utf8'), { code, signal, error }))}\n`);
+      appendFileSync(join(spec.state, 'sessions.jsonl'), `${JSON.stringify(recordOf(spec, events, { code, signal, error }))}\n`);
     } catch (e) {
       appendFileSync(spec.err, `bin/seat: could not write the record: ${e.code ?? 'error'}\n`);
     }
   }
+  // The log is what this child wrote through the pipe, and the record is built from the same events, so no other process's
+  // output (an orphan that wrote to the same path) can get into it.
+  child.stdout.on('data', (chunk) => {
+    writeSync(stdout, chunk);
+    rest += chunk.toString('utf8');
+    const lines = rest.split('\n');
+    rest = lines.pop();
+    for (const l of lines) take(l);
+  });
   child.on('error', (e) => finish(null, null, `${e.syscall ?? 'spawn'} ${e.code ?? 'failed'}`));
   child.on('close', finish);
 }
