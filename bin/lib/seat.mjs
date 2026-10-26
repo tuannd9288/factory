@@ -48,7 +48,7 @@ export const PRESETS = {
     allow: (run) => [...builderAllow(run), 'Write'],
   },
   researcher: {
-    // The Lead's proposal (review of #91, #6), not yet the Human's word: the researcher reads untrusted pages, can send them out
+    // The Lead's proposal (review of #91, #6), agreed by Colly on 2026-10-26: the researcher reads untrusted pages, can send them out
     // with WebFetch and can read a file outside a repository with git grep, so it never runs on seat 1, which holds a token.
     model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, budget: 15, web: true, seats: [2],
     allow: () => [

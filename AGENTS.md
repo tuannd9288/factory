@@ -257,7 +257,9 @@ deny rule still wins over a grant; a command holding a variable or `$(…)` is d
 Every unattended session of a role (worker, the Lead's reviewer, researcher; not the gate's reviewer) starts through
 `bin/seat <role> <brief> --run <folder> --work <folder>` (#91), run from the factory checkout, not through a
 repository's `direnv exec`. It picks the seat, sets the role's model, grants, budget and report shape, loads seat 1's
-token into the child's environment only, and records the session.
+token into the child's environment only, and records the session. Known limit: the token file sits on disk, and any
+session with a `git:*` grant can print it (`git grep --no-index`); seat 1's deny rules cover `Read`, `env` and
+`printenv`, not that. So the researcher, which reads untrusted pages and can send them out, never runs on seat 1.
 
 A pack is what the kit holds only for one way of working. The repository names its pack in one line of `.gate/pack` (a
 tier-3 path), and `bin/onboard --pack <name>` chooses it (`none` for the core alone; the default is the repository's
