@@ -1446,7 +1446,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     }
     annotations();
   });
-  test('review reuses the result of an earlier run for the same head, base and No-red line: one call per head', () => {
+  test('review reuses the result of an earlier run for the same head, base, No-red line and closing issues: one call per head', () => {
     claude({ output: { blocking: [], noRed: 'accepted' } });
     write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99, event: 'pull_request_target' }] }) });
     const { head, base } = candidate();
@@ -1455,7 +1455,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     let out = again('review', head, reviewEnv);
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^::notice title=review-result::none\n/);
-    assert.match(out.out, /review: reused the review of run 99 for this head, base and No-red line; no call made/);
+    assert.match(out.out, /review: reused the review of run 99 for this head, base, No-red line and closing issues; no call made/);
     assert.ok(out.out.includes(`::notice title=review-verdict::head=${head} base=${base} nored=none acc=none reviewer=claude pass\n`), out.out);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8'), '', 'a call was made');
     earlier('none', 'block');
