@@ -14,7 +14,8 @@ export const PROBE = ['knip-reader', 'round4-review'];
 export const PROBE_CALLS = [PROBE[0], PROBE[0], PROBE[1], PROBE[1]];
 
 // step: { task, cost (null: none in the result), model, ended, noInit, leak (tools stay), tools (extra), parent (an event from a
-// subagent), helpers (Agent calls, in either arm), workflow (Workflow calls), hang (no result for a few seconds) }
+// subagent), helpers (Agent calls, in either arm), workflow (Workflow calls), hang (no result for a few seconds),
+// calls (tool_use events: [{ name, input }]), links (symlinks the session makes first: [{ from, to }]) }
 const FAKE = `#!${process.execPath}
 const fs = require('fs');
 const path = require('path');
@@ -42,6 +43,8 @@ process.stdin.on('end', () => {
   if (!step.noInit) line({ type: 'system', subtype: 'init', session_id: 's-' + process.pid, model, tools });
   for (let i = 0; i < (step.helpers === undefined ? (arm === 'A' ? 2 : 0) : step.helpers); i += 1) line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent', input: {} }] } });
   for (let i = 0; i < (step.workflow || 0); i += 1) line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Workflow', input: {} }] } });
+  for (const l of step.links || []) { fs.mkdirSync(path.dirname(l.from), { recursive: true }); fs.mkdirSync(l.to, { recursive: true }); fs.writeFileSync(path.join(l.to, 'secret.txt'), 'x'); fs.symlinkSync(l.to, l.from); }
+  for (const c of step.calls || []) line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: c.name, input: c.input }] } });
   if (step.parent) line({ type: 'user', parent_tool_use_id: 'toolu_x', message: { content: [] } });
   if (step.hang) { setTimeout(() => process.exit(0), 6000); return; }
   const report = JSON.parse(e.FAKE_REPORTS)[step.task][arm];
