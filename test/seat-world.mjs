@@ -10,7 +10,8 @@ import { factory } from './helpers.mjs';
 export const TOKEN = 'fake-token-0123456789-do-not-leak';
 export const SEAT_JS = join(factory, 'bin/lib/seat.mjs');
 
-// FAKE_MODE: ok (one result), two (two results, the report only in the first), hang (waits for FAKE_RELEASE), noresult (exit 3).
+// FAKE_MODE: ok (one result), two (two results, the report only in the first), hang (waits for FAKE_RELEASE, then its result),
+// holdafter (one result, then waits for FAKE_RELEASE), split (a result line cut inside a multi-byte character), noresult (exit 3).
 // It writes what it saw to FAKE_OUT, and what its parent's environment holds (the supervisor's) as booleans only.
 const FAKE = `#!${process.execPath}
 const fs = require('fs');
@@ -25,9 +26,9 @@ process.stdin.on('end', () => {
     parent = fs.existsSync('/proc/' + process.ppid + '/environ') ? fs.readFileSync('/proc/' + process.ppid + '/environ', 'latin1') : spawnSync('/bin/ps', ['eww', '-p', String(process.ppid)], { encoding: 'latin1' }).stdout;
   } catch {}
   fs.writeFileSync(e.FAKE_OUT, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), cwd: process.cwd(), stdin: Buffer.concat(chunks).toString(),
-    parentHasToken: parent.includes('CLAUDE_CODE_OAUTH_TOKEN'), parentSeen: parent.length > 0,
+    parentHasToken: parent.includes('CLAUDE_CODE_OAUTH_TOKEN'), parentSeen: parent.includes('PATH='),
     env: { gh: e.GH_CONFIG_DIR, config: e.CLAUDE_CONFIG_DIR, token: e.CLAUDE_CODE_OAUTH_TOKEN ?? null, spec: e.FACTORY_SEAT_SUPERVISE ?? null,
-      GH_TOKEN: 'GH_TOKEN' in e, GITHUB_TOKEN: 'GITHUB_TOKEN' in e, ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' in e } }));
+      GH_TOKEN: 'GH_TOKEN' in e, GITHUB_TOKEN: 'GITHUB_TOKEN' in e, ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' in e, ANTHROPIC_AUTH_TOKEN: 'ANTHROPIC_AUTH_TOKEN' in e } }));
   const line = (o) => console.log(JSON.stringify(o));
   const sid = e.FAKE_SID ?? 'sess-1';
   line({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-sonnet-5-5' });
@@ -37,11 +38,24 @@ process.stdin.on('end', () => {
     return;
   }
   if (e.FAKE_MODE === 'noresult') process.exit(3);
+  if (e.FAKE_MODE === 'split') {
+    // One result line in two writes, cut inside the two bytes of a.
+    const text = JSON.stringify({ type: 'result', subtype: 'success', session_id: sid, num_turns: 1, duration_ms: 1, total_cost_usd: 1, structured_output: { conclusion: 'L\\u00e0m (Recommended) \\u2014 ng\\u01b0\\u1ee1ng 70%', evidence: [], couldNotRead: [], needsHuman: [] } }) + '\\n';
+    const buf = Buffer.from(text);
+    const cut = buf.indexOf(Buffer.from('\\u00e0')) + 1;
+    process.stdout.write(buf.subarray(0, cut));
+    setTimeout(() => { process.stdout.write(buf.subarray(cut)); process.exit(0); }, 100);
+    return;
+  }
   const report = { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [] };
   line({ type: 'result', subtype: 'success', is_error: false, session_id: sid, num_turns: 7, duration_ms: 1234, total_cost_usd: Number(e.FAKE_COST ?? 1.25), modelUsage: { 'claude-sonnet-5-5': {} }, structured_output: report });
   if (e.FAKE_MODE === 'two') {
     line({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-sonnet-5-5' });
     line({ type: 'result', subtype: 'error_max_turns', is_error: false, session_id: sid, num_turns: 2, duration_ms: 500, total_cost_usd: 2.5, modelUsage: { 'claude-sonnet-5-5': {} } });
+  }
+  if (e.FAKE_MODE === 'holdafter') {
+    // The result is out; the process lives until FAKE_RELEASE, so a test can act between the result and the end.
+    const timer = setInterval(() => { if (fs.existsSync(e.FAKE_RELEASE)) { clearInterval(timer); process.exit(0); } }, 20);
   }
 });
 `;
