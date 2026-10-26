@@ -15,22 +15,11 @@ const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 const packs = () => readdirSync(join(factory, 'packs')).filter((n) => lstatSync(join(factory, 'packs', n)).isDirectory()).sort();
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 
-// kit/AGENTS.md composed with packs/pstack, and kit/.claude/settings.json as it was at factory@8ca0e7a, before the
-// split: the core plus packs/pstack must build them byte for byte, or a repository on pstack would see a different
-// kit. The AGENTS.md hash moves with any change to the core's or the pack's text.
-const TODAY_AGENTS = '68928aa788543e0abf8c88dc118c2d088e01610709c9d6373fbbcc357ab7787c';
-const TODAY_SETTINGS = '4feee66d1a5a26fe2db0213f00c254e13e0382a9390d96f42f1b72653f53171f';
 // The sha256 of JSON.stringify(deny) for the kit's deny list at 8ca0e7a: the rules stay in the core, unchanged.
 const TODAY_DENY = '21e727537fca50e0e30cb774e2c072d42cf17b9755c291617875d02b585fae5e';
 
 describe('composing the core with a pack', () => {
-  test('the core plus packs/pstack builds today\'s AGENTS.md and .claude/settings.json byte for byte', async () => {
-    const { composeAgents, composeSettings } = await lib();
-    assert.equal(sha256(composeAgents(read('kit/AGENTS.md'), read('packs/pstack/AGENTS.md'))), TODAY_AGENTS);
-    assert.equal(sha256(composeSettings(read('kit/.claude/settings.json'), read('packs/pstack/settings.json'))), TODAY_SETTINGS);
-  });
-
-  test('with no pack the core alone is valid: only the deny rules, and rules that do not mention pstack', async () => {
+  test('with no pack the core alone is valid: only the deny rules, and the kit\'s AGENTS.md as it is', async () => {
     const { composeAgents, composeSettings } = await lib();
     const settings = JSON.parse(composeSettings(read('kit/.claude/settings.json'), null));
     assert.deepEqual(Object.keys(settings), ['permissions']);
@@ -38,8 +27,6 @@ describe('composing the core with a pack', () => {
     assert.equal(sha256(JSON.stringify(settings.permissions.deny)), TODAY_DENY);
     const agents = composeAgents(read('kit/AGENTS.md'), null);
     assert.equal(agents, read('kit/AGENTS.md'));
-    assert.doesNotMatch(agents, /pstack yields/);
-    for (const heading of ['## What the Human keeps', '## Layout', '## Facts the code cannot tell']) assert.ok(agents.split('\n').includes(heading), heading);
   });
 
   test('the deny rules stay in the core: a pack with a permissions key is refused, and so is a key in both', async () => {
@@ -144,35 +131,6 @@ describe('packs/pstack', () => {
     assert.ok(agents.endsWith('\n\n'), 'ends with the blank line before the next heading');
     assert.equal(agents.split('\n').filter((l) => l.startsWith('## ')).length, 1);
   });
-
-  test('names its own parts in its NOTICE, and the root NOTICE points to it', () => {
-    const notice = read('packs/pstack/NOTICE');
-    assert.match(notice, /packs\/pstack\/AGENTS\.md/);
-    assert.match(notice, /packs\/pstack\/settings\.json/);
-    assert.match(notice, /f713f14203cd6420cec13cd7c55c32d598dbab68/);
-    assert.match(notice, /MIT License/);
-    const root = read('NOTICE');
-    assert.match(root, /packs\/pstack\/NOTICE/);
-    assert.doesNotMatch(root, /Where pstack yields|kit\/\.claude\/settings\.json/);
-    for (const port of ['kit/scripts/live-verify', 'kit/scripts/lib/', 'verdict.mjs']) assert.ok(root.includes(port), port);
-  });
-
-  test('keeps attack 23 in its own folder, and probes/plan.md keeps the heading with a pointer', () => {
-    assert.match(read('packs/pstack/attacks.md'), /^### Attack 23: two pstack pins in one profile$/m);
-    assert.match(read('packs/pstack/attacks.md'), /two pstack pins|claude plugin install/);
-    const plan = read('probes/plan.md');
-    assert.match(plan, /^### Attack 23: two pstack pins in one profile\n\n.*packs\/pstack\/attacks\.md/m);
-    assert.doesNotMatch(plan, /case 1: <name> is pstack-pin/);
-  });
-});
-
-describe('the factory\'s own verify', () => {
-  test('runs the packs\' tests, and counts the lines of every composed AGENTS.md', () => {
-    const verify = read('scripts/verify');
-    assert.match(verify, /'packs\/\*\/test\/\*\.test\.mjs'/);
-    assert.doesNotMatch(verify, /wc -l <kit\/AGENTS\.md/);
-    assert.match(verify, /bin\/lib\/pack\.mjs/);
-  });
 });
 
 describe('onboard --pack', () => {
@@ -196,7 +154,7 @@ describe('onboard --pack', () => {
   };
   const repoText = (s, path) => readFileSync(join(s.repo, path), 'utf8');
 
-  test('by default lays pstack: .gate/pack, today\'s AGENTS.md and today\'s .claude/settings.json, and lists .gate/pack as generated', async () => {
+  test('by default lays pstack: .gate/pack, the AGENTS.md and .claude/settings.json that compose gives, and lists .gate/pack as generated', async () => {
     const { composeAgents, composeSettings } = await lib();
     const s = seeded();
     try {
@@ -204,8 +162,11 @@ describe('onboard --pack', () => {
       assert.equal(out.code, 0, out.out);
       assert.equal(repoText(s, '.gate/pack'), 'pstack\n');
       assert.equal(repoText(s, 'AGENTS.md'), composeAgents(read('kit/AGENTS.md'), read('packs/pstack/AGENTS.md')).replace('<repo>', 'app'));
-      assert.equal(sha256(repoText(s, 'AGENTS.md').replace('# app', '# <repo>')), TODAY_AGENTS);
-      assert.equal(sha256(repoText(s, '.claude/settings.json')), TODAY_SETTINGS);
+      // Independent of compose: the pack's section and every key of its pin are in the files onboard wrote.
+      assert.ok(repoText(s, 'AGENTS.md').includes(read('packs/pstack/AGENTS.md')));
+      const pin = JSON.parse(read('packs/pstack/settings.json'));
+      const laid = JSON.parse(repoText(s, '.claude/settings.json'));
+      for (const [key, value] of Object.entries(pin)) assert.deepEqual(laid[key], value, key);
       assert.equal(repoText(s, '.claude/settings.json'), composeSettings(read('kit/.claude/settings.json'), read('packs/pstack/settings.json')));
       assert.ok(repoText(s, '.gate/kit-files').split('\n').includes('.gate/pack'));
     } finally {

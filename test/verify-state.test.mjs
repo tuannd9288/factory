@@ -3,10 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory } from './helpers.mjs';
+import { commit, factory, git } from './helpers.mjs';
 
 const FOLDERS = ['FACTORY_STATE', 'AGENT_PROFILES', 'FACTORY_ROOT'];
 
@@ -22,7 +22,8 @@ test('forgets its own folders', () => {
 });
 `;
 
-function verify(tests) {
+// `setup(copy)` may prepare the copy (a git history) and return environment variables for the run.
+function verify(tests, setup = null) {
   const dir = mkdtempSync(join(tmpdir(), 'verify-state-'));
   try {
     const copy = join(dir, 'factory');
@@ -40,11 +41,13 @@ function verify(tests) {
     copyFileSync(join(factory, 'scripts/verify'), join(copy, 'scripts/verify'));
     // The line cap on the composed AGENTS.md runs bin/lib/pack.mjs, which reads the kit's AGENTS.md and imports own.mjs.
     mkdirSync(join(copy, 'bin/lib'), { recursive: true });
-    for (const lib of ['pack.mjs', 'own.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
+    // The modules check (bin/lib/module.mjs) runs once a modules/ folder exists, and reads the kit's tree through evidence.mjs.
+    for (const lib of ['pack.mjs', 'own.mjs', 'module.mjs', 'evidence.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
     const caller = Object.fromEntries(FOLDERS.map((name) => [name, join(dir, 'caller', name)]));
     for (const path of Object.values(caller)) mkdirSync(path, { recursive: true });
     const { NODE_TEST_CONTEXT, GATE_BASE, GITHUB_EVENT_NAME, ...outer } = process.env;
-    const r = spawnSync('bash', [join(copy, 'scripts/verify')], { encoding: 'utf8', env: { ...outer, ...caller } });
+    const extra = setup ? setup(copy) : {};
+    const r = spawnSync('bash', [join(copy, 'scripts/verify')], { encoding: 'utf8', env: { ...outer, ...caller, ...extra } });
     const left = Object.values(caller).flatMap((path) => readdirSync(path, { recursive: true }));
     return { code: r.status, out: `${r.stdout}${r.stderr}`, left };
   } finally {
@@ -105,4 +108,53 @@ test('scripts/verify fails a run in which a test removed a state folder it was g
   const r = verify({ 'test/removes.test.mjs': REMOVES });
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /^verify: a test removed or replaced the FACTORY_STATE folder it was given$/m);
+});
+
+// What scripts/verify runs and checks beyond the state folders: the tests of modules and packs, the modules together
+// (#71), and the line cap on each composed AGENTS.md (#7).
+const FAILS = (what) => `import { test } from 'node:test';\ntest('${what}', () => { throw new Error('${what}'); });\n`;
+
+test('scripts/verify runs the tests under modules/*/test: a failing one fails the run', () => {
+  const r = verify({ 'modules/x/test/x.test.mjs': FAILS('a module test ran') });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /a module test ran/);
+  assert.match(r.out, /the kit's tests failed/);
+});
+
+test('scripts/verify runs the tests under packs/*/test: a failing one fails the run', () => {
+  const pack = { 'kit/AGENTS.md': '# kit\n\n## What the Human keeps\n\n- x\n', 'packs/x/AGENTS.md': '## X\n\nA rule.\n\n', 'packs/x/settings.json': '{}\n' };
+  const r = verify({ ...pack, 'packs/x/test/x.test.mjs': FAILS('a pack test ran') });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /a pack test ran/);
+  assert.equal(verify(pack).code, 0, 'the same pack with no failing test passes');
+});
+
+test('scripts/verify checks the modules together: two that lay one path fail the run, naming the path', () => {
+  const r = verify({ 'modules/a/kit/x.txt': 'a\n', 'modules/b/kit/x.txt': 'b\n' });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /^verify: modules: x\.txt: module b lays it, and module a already does$/m);
+  assert.equal(verify({ 'modules/a/kit/x.txt': 'a\n', 'modules/b/kit/y.txt': 'b\n' }).code, 0, 'modules that lay different paths pass');
+});
+
+test('scripts/verify fails a composed AGENTS.md of more than 150 lines, and passes one of exactly 150', () => {
+  const agents = (n) => `# kit\n${'x\n'.repeat(n - 1)}`;
+  const r = verify({ 'kit/AGENTS.md': agents(151) });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /^verify: the AGENTS.md of pack none has 151 lines; at most 150$/m);
+  assert.equal(verify({ 'kit/AGENTS.md': agents(150) }).code, 0);
+});
+
+test('scripts/verify checks the subject of every commit since GATE_BASE: a bad one fails the run, a good one passes', () => {
+  const tests = { 'kit/scripts/lib/subject.mjs': readFileSync(join(factory, 'kit/scripts/lib/subject.mjs'), 'utf8') };
+  const from = (subject) => (copy) => {
+    git(copy, 'init', '-q', '-b', 'main');
+    const start = commit(copy, {}, 'Start');
+    commit(copy, { 'change.txt': 'x\n' }, subject);
+    return { GATE_BASE: start };
+  };
+  const bad = verify(tests, from('WIP'));
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /^verify: a commit subject breaks a rule$/m);
+  const good = verify(tests, from('Say what the change does'));
+  assert.equal(good.code, 0, good.out);
 });

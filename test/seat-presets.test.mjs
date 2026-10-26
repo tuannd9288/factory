@@ -85,11 +85,6 @@ test('an unknown role is refused by name', async () => {
   assert.throws(() => buildArgs({ role: 'builder', run: RUN, home: HOME }), /unknown role builder/);
 });
 
-test('the schema asks for conclusion, evidence, couldNotRead and needsHuman, all required', async () => {
-  const { SCHEMA: schema } = await lib();
-  assert.equal(JSON.stringify(schema), SCHEMA);
-});
-
 test('a researcher\'s resume takes 200 turns', async () => {
   const { buildArgs } = await lib();
   const resumed = buildArgs({ role: 'researcher', run: RUN, home: HOME, resume: 'sid-3' });

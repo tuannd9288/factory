@@ -283,10 +283,11 @@ describe('kit evidence', () => {
   });
 });
 
-// A gh that answers what bin/onboard asks on its pull request path, as the agents' account, and keeps the body.
+// A gh that answers what bin/onboard asks on its pull request path, as the agents' account, logs its calls and keeps the body.
 const ONBOARD_GH = String.raw`#!/usr/bin/env node
 const fs = require('fs');
 const a = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_LOG, a.join(' ') + '\n');
 const said = (s) => { process.stdout.write(s + '\n'); process.exit(0); };
 if (a[0] === 'api' && a[1] === 'user') said('tuan9288-agent');
 if (a[0] === 'api' && a[1] === 'repos/tuannd9288/app/rules/branches/main') said('[{"type":"pull_request"}]');
@@ -330,12 +331,14 @@ function prWorld(files = {}) {
       ...quiet,
       PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
       PR_BODY: body,
+      GH_LOG: join(dir, 'gh.log'),
       FACTORY_ROOT: join(dir, root),
       AGENT_PROFILES: join(dir, 'profiles'),
       XDG_DATA_HOME: join(dir, 'xdg'),
       XDG_CONFIG_HOME: join(dir, 'xdg-config'),
     });
-  return { dir, fac, body, onboard, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  const ghCalls = () => readFileSync(join(dir, 'gh.log'), 'utf8').split('\n').filter(Boolean);
+  return { dir, fac, body, onboard, ghCalls, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 describe('the kit pull request', () => {
@@ -358,6 +361,8 @@ describe('the kit pull request', () => {
       assert.equal(out.code, 0, out.out);
       const text = readFileSync(body, 'utf8');
       assert.match(text, /^kit-evidence: PASS$/m);
+      // The gate's review job raises a change with the label raised; the repository needs it beside tier-3.
+      assert.ok(w.ghCalls().some((c) => c.startsWith('label create raised ')), w.ghCalls().join('\n'));
       assert.match(text, /^pack: pstack$/m);
       assert.match(text, new RegExp(`^factory commit: ${ahead}, kit tree [0-9a-f]{40}$`, 'm'));
       assert.match(text, /^repository: tuannd9288\/app \(id 1234\)$/m);
