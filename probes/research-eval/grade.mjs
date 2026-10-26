@@ -12,21 +12,25 @@ const entryOf = (evidence, id) => evidence.find((e) => new RegExp(`^\\s*${id}(?!
 // the phrase is taken out before the hedge is looked for: "3.10 or newer" scores, "3.9 or 3.10" does not.
 const HEDGE = /\bor\b|\?|\babout\s+\d|\b(?:between|maybe|probably|either|likely|possibly|perhaps|think|guess)\b/i;
 const answerOf = (entry, id) => entry.replace(new RegExp(`^\\s*${id}`, 'i'), '').split(/\s[—–]\s|\s--?\s/)[0];
-const hedged = (fact, entry) => {
+// The answer with the right answer's own "or" phrase taken out.
+const bareAnswer = (fact, entry) => {
   const answer = answerOf(entry, fact.id);
-  return HEDGE.test(typeof fact.orIsAnswer === 'string' ? answer.replace(new RegExp(fact.orIsAnswer, 'gi'), ' ') : answer);
+  return typeof fact.orIsAnswer === 'string' ? answer.replace(new RegExp(fact.orIsAnswer, 'gi'), ' ') : answer;
 };
+const hedged = (fact, entry) => HEDGE.test(bareAnswer(fact, entry));
 // Paths, file names with a line, hashes and a run folder's name are not figures.
 const figureIn = (text) => /\d/.test(text.replace(/\S*\/\S*/g, '').replace(/\b[\w-]+\.[A-Za-z]{1,6}(?::\d+(?:-\d+)?)?/g, '').replace(/\b[0-9a-f]{7,40}\b/gi, '').replace(/\bissue-\d+\b/g, ''));
 const matches = (pattern, text) => new RegExp(pattern, 'i').test(text);
 // A fact with one value (a hash, a date, a version, a count) is one whose only `all` pattern matches a token of its example, and
 // the token has one of these shapes. Its answer must not hold a second token of that shape: "11.24.1, 11.24.2" is a list of
 // candidates, which "or" and the other hedge words do not catch.
+// The text between two values of a list: list marks, brackets and "to", "and", "or" only.
+const LIST = /^(?:[\s,/()[\]—–-]|\b(?:to|and|or)\b)*$/;
 const SHAPES = [
   { whole: /^[0-9a-f]{7,40}$/i, find: /\b[0-9a-f]{7,40}\b/gi },
   { whole: /^\d{4}-\d\d-\d\d$/, find: /\b\d{4}-\d\d-\d\d\b/g },
   { whole: /^\d+(?:\.\d+)+$/, find: /\b\d+(?:\.\d+)+\b/g },
-  { whole: /^\d[\d,]*$/, find: /(?<![\w.-])\d[\d,]*(?!\w|\.\d)/g },
+  { whole: /^\d[\d,]*$/, find: /(?<![\w.-])\d[\d,]*(?!\w|\.\d|-\d\d-)/g },
 ];
 const shapeOf = (fact) => {
   if (fact.all?.length !== 1 || typeof fact.example !== 'string') return null;
@@ -36,13 +40,17 @@ const shapeOf = (fact) => {
 const manyValues = (fact, entry) => {
   const shape = shapeOf(fact);
   if (!shape) return false;
-  const seen = [];
-  for (const t of answerOf(entry, fact.id).match(shape.find) ?? []) {
-    const v = t.toLowerCase().replace(/,/g, '');
+  const answer = bareAnswer(fact, entry);
+  let prev = null;
+  for (const m of answer.matchAll(shape.find)) {
+    const v = m[0].toLowerCase().replace(/,/g, '');
     // A short hash of a commit is the same commit as its full hash.
-    if (!seen.some((s) => s === v || (shape === SHAPES[0] && (s.startsWith(v) || v.startsWith(s))))) seen.push(v);
+    const same = prev !== null && (prev.v === v || (shape === SHAPES[0] && (prev.v.startsWith(v) || v.startsWith(prev.v))));
+    // The context of the answer ("112 of 199 plugin folders", "(in knip 6.42.1)") is no second value: only a list mark joins one.
+    if (prev !== null && !same && LIST.test(answer.slice(prev.end, m.index))) return true;
+    prev = { v, end: m.index + m[0].length };
   }
-  return seen.length > 1;
+  return false;
 };
 const strings = (value) => (Array.isArray(value) ? value.filter((v) => typeof v === 'string') : []);
 
