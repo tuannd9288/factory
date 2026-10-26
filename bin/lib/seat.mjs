@@ -213,16 +213,16 @@ export function launch(argv, env = process.env) {
   const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null });
   if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
   const tokenPath = join(profiles, 'seats/1/oauth-token');
-  const token = seat === 1 ? readToken(tokenPath) : null;
+  if (seat === 1) readToken(tokenPath); // refuses now; the supervisor reads it again, just before it starts claude
 
+  // Neither bin/seat's environment nor the supervisor's holds the token, nor the caller's GitHub or API credentials.
   const child = { ...env, GH_CONFIG_DIR: join(run, '.gh-empty'), CLAUDE_CONFIG_DIR: join(profiles, 'seats', String(seat), 'claude') };
-  delete child.CLAUDE_CODE_OAUTH_TOKEN;
-  if (token !== null) child.CLAUDE_CODE_OAUTH_TOKEN = token;
+  for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY']) delete child[name];
   mkdirSync(child.GH_CONFIG_DIR, { recursive: true });
   const args = buildArgs({ role: o.role, run, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
-    role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
+    tokenPath: seat === 1 ? tokenPath : null, role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
   };
   for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
@@ -264,7 +264,18 @@ function supervise() {
   delete process.env.FACTORY_SEAT_SUPERVISE;
   const [stdin, stdout, stderr] = [openSync(spec.brief, 'r'), openSync(spec.jsonl, 'w'), openSync(spec.err, 'w')];
   const [cmd, ...args] = spec.cmd;
-  const child = spawn(cmd, args, { cwd: spec.cwd, env: process.env, stdio: [stdin, stdout, stderr], detached: true });
+  let done = false;
+  // Only claude's environment holds the token, read here, just before it starts.
+  const env = { ...process.env };
+  let child;
+  try {
+    if (spec.tokenPath) env.CLAUDE_CODE_OAUTH_TOKEN = readToken(spec.tokenPath);
+    child = spawn(cmd, args, { cwd: spec.cwd, env, stdio: [stdin, stdout, stderr], detached: true });
+  } catch (e) {
+    // A fixed message: a Node error can quote the environment.
+    appendFileSync(spec.err, `bin/seat: could not start claude (${e instanceof Refused ? 'token' : (e.code ?? 'error')})\n`);
+    return finish(null, null, 'start failed');
+  }
   for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
     process.on(sig, () => {
       try {
@@ -274,8 +285,7 @@ function supervise() {
       }
     });
   }
-  let done = false;
-  const finish = (code, signal, error = null) => {
+  function finish(code, signal, error = null) {
     if (done) return;
     done = true;
     for (const fd of [stdin, stdout, stderr]) closeSync(fd);
@@ -285,7 +295,7 @@ function supervise() {
     } catch (e) {
       appendFileSync(spec.err, `bin/seat: could not write the record: ${e.code ?? 'error'}\n`);
     }
-  };
+  }
   child.on('error', (e) => finish(null, null, `${e.syscall ?? 'spawn'} ${e.code ?? 'failed'}`));
   child.on('close', finish);
 }
