@@ -260,8 +260,9 @@ export function launch(argv, env = process.env) {
   for (const [what, path] of [['run folder', run], ['work folder', work]]) if (!existsSync(path) || !statSync(path).isDirectory()) throw new Refused(`the ${what} ${path} is not a folder`);
   if (!existsSync(brief) || !statSync(brief).isFile()) throw new Refused(`the brief ${brief} is not a file`);
   const tag = o.tag ?? (o.resume ? basename(brief, extname(brief)) : o.role);
-  // run-<tag>.claim.pid is the claim of a start of <tag>, so a tag of that shape would take another's claim files as its run files.
-  if (tag.endsWith('.claim')) throw new Refused(`the tag ${tag} ends in .claim, the name of the claim files of tag ${tag.slice(0, -'.claim'.length)}`);
+  // run-<tag>.claim.pid is the claim of a start of <tag>, so a tag of that shape, in any case on a disk that ignores case, would
+  // take another's claim files as its run files.
+  if (/\.claim$/i.test(tag)) throw new Refused(`the tag ${tag} ends in .claim, the name of the claim files of tag ${tag.slice(0, -'.claim'.length)}`);
   // The tag is claimed with a lock folder (mkdir is atomic) for as long as the start takes, so two starts of one tag cannot both pass the check.
   const release = claimTag(join(run, `run-${tag}.lock`), tag);
   try {
