@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bin/brief-check <brief> <relay> (#90): fails, naming each one, when a span the relay puts in double quotes
 # is missing from the brief's own body (the part above the attached message). Plain code: no model, no network.
-# Exits 0 when the brief carries everything, 1 when it does not, 2 on a usage error, an unreadable file
-# or a relay paragraph whose double quotes are odd in number.
+# Exits 0 when the brief carries everything, 1 when it does not, 2 on a usage error, an unreadable file,
+# a brief with no line that is exactly the attachment heading, or a relay paragraph whose double quotes are odd in number.
 exec node "$(dirname "$0")/lib/brief-check.mjs" "$@"

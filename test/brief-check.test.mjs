@@ -12,6 +12,8 @@ import { factory } from './helpers.mjs';
 
 const fixture = (name) => join(factory, 'test/fixtures/relay', name);
 const read = (name) => readFileSync(fixture(name), 'utf8');
+// A brief ends in its attachment (#118); the recorded briefs and the small ones here are bodies, so they get the heading.
+const withHeading = (text) => `${text}\n## Colly's message, attached as data\n`;
 const lib = () => import('../bin/lib/brief-check.mjs');
 
 function brief(args) {
@@ -73,13 +75,17 @@ test('body: the brief ends at the attachment heading; what follows is data and c
 // Case C is the source "Progressive disclosure". The brief writes it in lower case, and the check folds no case. The
 // brief also turns the factory's rule "không skill cấp user" into English. Case B, the number 50–100, is not the script's.
 test('it fails the real #71 brief against message 3, and names exactly the quotes it misses', () => {
-  const r = brief([fixture('issue-71-brief.md'), fixture('message-3.md')]);
-  assert.deepEqual(r, { code: 1, out: 'missing quote: "Progressive disclosure"\nmissing quote: "không skill cấp user"\n', err: '' });
+  withFiles({ 'brief.md': withHeading(read('issue-71-brief.md')) }, (dir) => {
+    const r = brief([join(dir, 'brief.md'), fixture('message-3.md')]);
+    assert.deepEqual(r, { code: 1, out: 'missing quote: "Progressive disclosure"\nmissing quote: "không skill cấp user"\n', err: '' });
+  });
 });
 
 test('it passes a brief written from the template that carries message 3', () => {
-  const r = brief([fixture('issue-71-brief-carrying.md'), fixture('message-3.md')]);
-  assert.deepEqual(r, { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' });
+  withFiles({ 'brief.md': withHeading(read('issue-71-brief-carrying.md')) }, (dir) => {
+    const r = brief([join(dir, 'brief.md'), fixture('message-3.md')]);
+    assert.deepEqual(r, { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' });
+  });
 });
 
 test('it does not count the attached section: the real #71 brief with message 3 pasted under the heading still fails', async () => {
@@ -127,7 +133,7 @@ test('it takes exactly two files, and says so when a file cannot be read', () =>
 // An unpaired quote must not pair across itself (#111): the check refuses the paragraph instead of passing or misnaming.
 test('a paragraph with an unpaired straight quote exits 2 and names the paragraph; the Human words are not paired away', () => {
   const relay = 'Colly: the screen is 27" wide.\nHe said "keep it small" today.\n\nAnother paragraph, "fine".\n';
-  withFiles({ 'relay.md': relay, 'brief.md': 'A brief that carries "fine" only.\n' }, (dir) => {
+  withFiles({ 'relay.md': relay, 'brief.md': withHeading('A brief that carries "fine" only.\n') }, (dir) => {
     const r = brief([join(dir, 'brief.md'), join(dir, 'relay.md')]);
     assert.equal(r.code, 2);
     assert.equal(r.out, '');
@@ -138,7 +144,7 @@ test('a paragraph with an unpaired straight quote exits 2 and names the paragrap
 test('a straight quote inside a Markdown code span is not a quote, and a lone curly quote is unpaired', () => {
   const ok = 'Item: the `"` mark is odd. He said "keep it small".\n';
   const lone = 'He said “keep it small and then left.\n';
-  withFiles({ 'ok.md': ok, 'lone.md': lone, 'empty.md': '' }, (dir) => {
+  withFiles({ 'ok.md': ok, 'lone.md': lone, 'empty.md': withHeading('') }, (dir) => {
     assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'ok.md')]), { code: 1, out: 'missing quote: "keep it small"\n', err: '' });
     assert.equal(brief([join(dir, 'empty.md'), join(dir, 'lone.md')]).code, 2);
   });
@@ -147,7 +153,7 @@ test('a straight quote inside a Markdown code span is not a quote, and a lone cu
 // A code span stays on its line (#111): a fenced message with no backtick in it is text, and its quotes count.
 test('a fenced message with no backtick and no blank line still has its quotes checked', () => {
   const relay = '````text\nColly: the Human chose "Use this table (Recommended)".\n````\n';
-  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+  withFiles({ 'relay.md': relay, 'empty.md': withHeading('') }, (dir) => {
     assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'relay.md')]), { code: 1, out: 'missing quote: "Use this table (Recommended)"\n', err: '' });
   });
 });
@@ -155,7 +161,7 @@ test('a fenced message with no backtick and no blank line still has its quotes c
 // A stray backtick pairs with a later one; the span between them then holds three quotes and must not drop the Human's words.
 test('a code span holding three quotes exits 2 and does not pass', () => {
   const relay = 'a stray ` then 27" wide, he said "A" `x`.\n';
-  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+  withFiles({ 'relay.md': relay, 'empty.md': withHeading('') }, (dir) => {
     const r = brief([join(dir, 'empty.md'), join(dir, 'relay.md')]);
     assert.equal(r.code, 2);
     assert.equal(r.out, '');
@@ -165,7 +171,7 @@ test('a code span holding three quotes exits 2 and does not pass', () => {
 
 test('an inline code span with an even number of quotes still has them checked', () => {
   const relay = 'He pointed to `specification.md, section "Progressive disclosure"` and left.\n';
-  withFiles({ 'relay.md': relay, 'empty.md': '' }, (dir) => {
+  withFiles({ 'relay.md': relay, 'empty.md': withHeading('') }, (dir) => {
     assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'relay.md')]), { code: 1, out: 'missing quote: "Progressive disclosure"\n', err: '' });
   });
 });
@@ -173,7 +179,7 @@ test('an inline code span with an even number of quotes still has them checked',
 // A quote may hold a code span (#116's relays): the span's text is part of the Human's words.
 test('a quote that holds a code span is carried by a brief that has it verbatim', () => {
   const relay = 'Colly asked to "does the rule cover the kit script\'s own `gh api user`?"\n';
-  withFiles({ 'relay.md': relay, 'brief.md': 'The question, "does the rule cover the kit script\'s own `gh api user`?"\n' }, (dir) => {
+  withFiles({ 'relay.md': relay, 'brief.md': withHeading('The question, "does the rule cover the kit script\'s own `gh api user`?"\n') }, (dir) => {
     assert.deepEqual(brief([join(dir, 'brief.md'), join(dir, 'relay.md')]), { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' });
   });
 });
