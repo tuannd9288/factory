@@ -171,13 +171,13 @@ A sublayer may change anything inside it while its contracts hold; a change to a
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
 decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization that does the same.
 
-- **H1**: Work enters through one issue. Checked by: `kit/AGENTS.md:26`, `probes/pack-contract.md:36`.
+- **H1**: Work enters through one issue. Checked by: `kit/AGENTS.md:28`, `probes/pack-contract.md:36`.
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
   Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-contract.md:36`.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
-  Checked by: `kit/scripts/lib/approval.mjs:1-10`, `kit/AGENTS.md:96`, `kit/scripts/review:27` (one reviewer call per head).
+  Checked by: `kit/scripts/lib/approval.mjs:1-10`, `kit/AGENTS.md:97`, `kit/scripts/review:27` (one reviewer call per head).
   Prior art [A8]: "An approval covers one specific commit."
 - **H4**: Knowledge is files in the repository, changed by pull request.
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `scripts/verify:9-16` (the 150-line cap).
@@ -211,6 +211,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 - This folder stays out of every sync between the Macs. Code moves only through GitHub.
 - `.gitignore` admits only the factory's own files, so every repository folder is ignored.
 - A change to `kit/` changes every repository's gate at its next kit pull request: it is tier 3 here.
+- Before any brief, the Lead posts the Human's words verbatim, with their source, on the issue, in a comment marked
+  "relayed by Colly"; the brief carries them, and `bin/brief-check <brief> <relay>` is the check (#90).
 - The weekly digest is `bin/factory-ledger --post tuannd9288/factory`: it posts even when the canary (`--check`) finds a
   field missing or stale, saying so in one line. No job runs it yet; its schedule (launchd, as the agents' account) is
   the Human's to set up.
@@ -227,6 +229,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
+| `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/`, each pack's in `packs/*/test/`, and the 150-line cap on every composed `AGENTS.md` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
