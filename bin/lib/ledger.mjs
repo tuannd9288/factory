@@ -377,8 +377,35 @@ export const digestTitle = (since, until) => `Weekly digest ${since} → ${until
  * posted again. */
 export const oldDigestTitle = (since, until) => `Bản tin xưởng ${since} → ${until}`;
 
+/** The records bin/seat appended to sessions.jsonl in the state folder (#91), none when the file is absent. */
+export function readSessions(dir) {
+  const file = join(dir, 'sessions.jsonl');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').flatMap((l) => {
+    try {
+      return l.trim() ? [JSON.parse(l)] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** One line for each session that ran in the period, and the total cost. A resumed session's total_cost_usd covers the
+ * whole session, so a session counts once, by its last record; the records of one session are never added (#89). */
+export function sessionLines(records, since, until) {
+  const [from, to] = [Date.parse(`${since}T00:00:00Z`), Date.parse(`${until}T23:59:59Z`)];
+  const last = new Map();
+  for (const r of records.filter((x) => inWindow(x.start, x.end, from, to)).sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(r.session ?? `${r.run}#${r.tag}`, r);
+  const kept = [...last.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  const cost = (r) => (typeof r.total_cost_usd === 'number' ? `$${r.total_cost_usd.toFixed(2)}` : '$?');
+  return {
+    lines: kept.map((r) => `- ${r.role} ${r.tag}, ${r.model}, ${cost(r)}, ${Number(r.minutes).toFixed(1)} min`),
+    total: kept.reduce((sum, r) => sum + (typeof r.total_cost_usd === 'number' ? r.total_cost_usd : 0), 0),
+  };
+}
+
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -433,6 +460,10 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     lines.push(
       `| ${r.repo.split('/')[1]} | [#${r.number}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `yes (${r.touchedWhy})` : 'no'} | ${STATE[r.state]} |`,
     );
+  }
+  if (sessions) {
+    const { lines: ran, total } = sessionLines(sessions, since, until);
+    lines.push('', '## Sessions (bin/seat)', '', ...(ran.length ? [...ran, `- Total: $${total.toFixed(2)} over ${ran.length} ${ran.length === 1 ? 'session' : 'sessions'} (the last record of each; a resumed session's cost is cumulative, so its records are not added)`] : ['- None.']));
   }
   if (queue) {
     lines.push('', '## Merge queue (bin/factory-queue)', '');
@@ -608,7 +639,8 @@ function main(argv) {
     }
   }
   const report = inspect(profileFolders(profilesDir, opts.profileDirs), { latest: opts.latest });
-  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), opts.repos), unplaced: unplaced(opts.profileDirs) });
+  const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions: readSessions(state) });
   if (!opts.post) {
     process.stdout.write(text);
     return;
