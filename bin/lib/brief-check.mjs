@@ -36,7 +36,8 @@ class UnpairedQuote extends Error {
  * Quotes pair inside one paragraph (lines between blank lines), never across it. A Markdown code span (backticks on
  * one line) pairs its own quotes on their own: an even count yields its pairs, exactly one quote (the `"` that
  * names the mark) yields none and is not counted in the paragraph, and any other odd count (3, 5, ...) throws, since a
- * stray backtick can make such a span swallow the Human's words. A fence line holds no span, so what a fence holds is text.
+ * stray backtick can make such a span swallow the Human's words. The span's text stays in the paragraph, only its quote marks leave it, so a quote
+ * that holds a span keeps the span's words. A fence line holds no span, so what a fence holds is text.
  * A paragraph left with an odd count of double quotes is not guessed at: it throws UnpairedQuote, since any pairing
  * of it could name the wrong words and miss the Human's.
  */
@@ -56,7 +57,7 @@ export function quotes(text) {
       if (n % 2 === 0) pair(m[0], at + m.index);
       else if (n > 1) throw new UnpairedQuote(paragraph);
     }
-    plain = plain.replace(/(`+)[^`\n]*?\1/g, (span) => ' '.repeat(span.length));
+    plain = plain.replace(/(`+)[^`\n]*?\1/g, (span) => span.replace(/"/g, ' '));
     if (count(plain) % 2) throw new UnpairedQuote(paragraph);
     pair(plain, at);
   }
