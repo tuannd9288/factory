@@ -82,7 +82,9 @@ run and refuses to score that run (`paths.mjs`):
 - **What it reads.** The session's own `run-<tag>.jsonl`, before the report is graded. Every path in every tool input: the
   `file_path`, `path` and `notebook_path` fields; a `pattern` or `glob` that is absolute or holds `..`; and, in a `command`, every
   word that is absolute, starts with `~` or holds `..`. `Write` and `Edit` are included, since a note left outside the folders
-  is how one arm could reach the other.
+  is how one arm could reach the other. A call that Claude Code refused never ran: the CLI lists it in the result event's
+  `permission_denials` by its `tool_use_id`, and the check leaves it out. A log with no result event keeps every call. The
+  probe's first two runs (2026-10-26) were invalid only on refused calls.
 - **One allow rule for a shell command: a word is placeable only when it is plain text.** The `command` is read quote by quote.
   Single-quoted text is literal and is checked as written. A word whose unquoted part holds any shell expansion cannot be
   placed, so it counts as outside: a `$` in any form (`$VAR`, `${…}`, `$(…)`, `$'…'`, `$"…"`), a backslash, a brace, or a
@@ -107,7 +109,8 @@ run and refuses to score that run (`paths.mjs`):
   flag a read that is legitimate, such as a file that Claude Code itself saves under the profile for a long tool result, or a `Grep` regex that starts with `/`
   or holds `..` (`pattern` is read as a path for `Grep` as for `Glob`; 1 of 714 `Grep` calls in the old logs). A relative word
   that neither starts with `/` or `~` nor holds `..` is not collected, so after a `cd` into a readable folder a relative path
-  through a link that leads out is not seen.
+  through a link that leads out is not seen. Inside double quotes the shell drops a backslash-newline, and the check keeps the
+  newline, so `cat "\<newline>/etc/hosts"` is not collected; only a command built to evade reaches it.
 - **The guard.** Before any session starts, with or without `--go`, the runner refuses the set (exit 7, naming the task and the
   folder) when a task's readable folder is, holds or sits in a run or work folder of the plan, a `probes/research-eval/tasks`
   folder (this checkout's, `~/WORKSPACES`'s or `issue-92/w92`'s), `issue-92` (the reports), or is or holds the runs folder itself,
