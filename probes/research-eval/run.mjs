@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PRESETS } from '../../bin/lib/seat.mjs';
 import { grade } from './grade.mjs';
+import { outsidePaths } from './paths.mjs';
 import { briefOf, loadTasks, validateTask, verifyTask } from './keys.mjs';
 
 // bin/seat is a one-line wrapper of this file; running the file with the same node needs no shell on the PATH.
@@ -118,20 +119,22 @@ export function metricsOf(text) {
 
 const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
 
-/** Each arm's totals and mean score; the tasks whose mean points differ between the arms by a point or more; and B's mean
- * score minus A's. */
+/** Each arm's totals (every run, since every run was paid for) and mean score; the tasks whose mean points differ between the
+ * arms by a point or more; and B's mean score minus A's. An invalid run is not scored, and neither is its partner (the other
+ * arm's run of the same task and repetition), so that no comparison rests on a pair with an invalid arm. */
 export function summarize(results) {
+  const scored = results.filter((r) => !r.invalid && !results.some((o) => o.invalid && o.task === r.task && o.rep === r.rep && o.arm !== r.arm));
   const arms = {};
   for (const arm of ARMS) {
     const rs = results.filter((r) => r.arm === arm);
     const total = (key) => rs.reduce((s, r) => s + r[key], 0);
-    arms[arm] = { runs: rs.length, meanScore: mean(rs.map((r) => r.score)), tokensIn: total('tokensIn'), tokensOut: total('tokensOut'), minutes: total('minutes'), cost: total('cost') };
+    arms[arm] = { runs: rs.length, meanScore: mean(scored.filter((r) => r.arm === arm).map((r) => r.score)), tokensIn: total('tokensIn'), tokensOut: total('tokensOut'), minutes: total('minutes'), cost: total('cost') };
   }
-  const flipped = [...new Set(results.map((r) => r.task))].filter((task) => {
-    const [a, b] = ARMS.map((arm) => mean(results.filter((r) => r.task === task && r.arm === arm).map((r) => r.points)));
+  const flipped = [...new Set(scored.map((r) => r.task))].filter((task) => {
+    const [a, b] = ARMS.map((arm) => mean(scored.filter((r) => r.task === task && r.arm === arm).map((r) => r.points)));
     return a !== null && b !== null && Math.abs(a - b) >= 1 - 1e-9;
   });
-  const delta = arms.A.runs && arms.B.runs ? arms.B.meanScore - arms.A.meanScore : null;
+  const delta = arms.A.meanScore !== null && arms.B.meanScore !== null ? arms.B.meanScore - arms.A.meanScore : null;
   return { arms, flipped, delta };
 }
 
@@ -239,12 +242,16 @@ async function main(argv, env) {
       break;
     }
     const log = join(p.run, `run-${e.tag}.jsonl`);
-    const m = metricsOf(existsSync(log) ? readFileSync(log, 'utf8') : '');
-    const g = grade(e.task, rec.structured);
+    const text = existsSync(log) ? readFileSync(log, 'utf8') : null;
+    const m = metricsOf(text ?? '');
+    // The paths of the session's tool inputs, checked before the report is graded. A session with no log cannot be checked.
+    const invalid = text === null ? [{ tool: '-', path: '(its log could not be read)' }]
+      : outsidePaths(text, { cwd: p.work, inside: [p.run, p.work, ...(e.task.readable ?? []).map((r) => join(runsRoot, r))], home: env.HOME });
+    const g = invalid.length ? null : grade(e.task, rec.structured);
     const cost = rec.total_cost_usd ?? PRESETS.researcher.budget;
     spent += cost;
-    results.push({ tag: e.tag, task: e.task.id, arm: e.arm, rep: e.rep, points: g.points, max: g.max, score: g.score, cost, minutes: rec.minutes, tokensIn: m.tokensIn, tokensOut: m.tokensOut, helpers: m.helpers, ended: rec.ended, model: rec.model, tools: m.tools });
-    console.log(`${e.tag} score ${g.points}/${g.max} tokens ${m.tokensIn} in ${m.tokensOut} out minutes ${rec.minutes} cost ${usd(cost)} helpers ${m.helpers} ended ${rec.ended}${rec.ended === 'success' ? '' : ' (cut or failed, not a low score)'}${rec.total_cost_usd == null ? ' (cost unknown, counted at the cap)' : ''}`);
+    results.push({ tag: e.tag, task: e.task.id, arm: e.arm, rep: e.rep, points: g?.points ?? null, max: g?.max ?? null, score: g?.score ?? null, ...(invalid.length ? { invalid } : {}), cost, minutes: rec.minutes, tokensIn: m.tokensIn, tokensOut: m.tokensOut, helpers: m.helpers, ended: rec.ended, model: rec.model, tools: m.tools });
+    console.log(`${e.tag} ${g ? `score ${g.points}/${g.max}` : `INVALID: not scored; read outside its folders: ${invalid.map((x) => x.path).join(', ')}`} tokens ${m.tokensIn} in ${m.tokensOut} out minutes ${rec.minutes} cost ${usd(cost)} helpers ${m.helpers} ended ${rec.ended}${rec.ended === 'success' ? '' : ' (cut or failed, not a low score)'}${rec.total_cost_usd == null ? ' (cost unknown, counted at the cap)' : ''}`);
     // Arm B must be without helpers: it stops the set when the log cannot show that, or shows a helper.
     const leaked = HELPER_TOOLS.find((t) => m.tools.includes(t));
     const broken = e.arm !== 'B' ? null
@@ -270,9 +277,11 @@ async function main(argv, env) {
     const s = summarize(results);
     for (const arm of ARMS) {
       const a = s.arms[arm];
-      if (a.runs) console.log(`arm ${arm}: ${a.runs} runs, mean score ${a.meanScore.toFixed(2)}, tokens ${a.tokensIn} in / ${a.tokensOut} out, minutes ${a.minutes.toFixed(2)}, cost ${usd(a.cost)}`);
+      if (a.runs) console.log(`arm ${arm}: ${a.runs} runs, mean score ${a.meanScore === null ? 'none (no run scored)' : a.meanScore.toFixed(2)}, tokens ${a.tokensIn} in / ${a.tokensOut} out, minutes ${a.minutes.toFixed(2)}, cost ${usd(a.cost)}`);
     }
     if (s.delta !== null) console.log(`B minus A: ${s.delta.toFixed(2)}; flipped: ${s.flipped.length ? s.flipped.join(', ') : 'none'}`);
+    const invalid = results.filter((r) => r.invalid);
+    if (invalid.length) console.log(`${invalid.length} invalid run${invalid.length === 1 ? '' : 's'} (${invalid.map((r) => r.tag).join(', ')}): not scored, and the partner of each is not compared${s.delta === null ? '; no comparison' : ''}`);
     const per = ARMS.map((arm) => (s.arms[arm].runs ? s.arms[arm] : null));
     if (per.every(Boolean)) {
       const n = full.tasks * full.runs;
