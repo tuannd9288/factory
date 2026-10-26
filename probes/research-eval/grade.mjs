@@ -10,7 +10,7 @@ const entryOf = (evidence, id) => evidence.find((e) => new RegExp(`^\\s*${id}(?!
 // The answer is what comes before the first " — " (the citation follows). A hedge in it, an alternative or a question or a
 // range, scores nothing. A fact whose right answer holds the word "or" gives that phrase as `orIsAnswer` (a pattern), and only
 // the phrase is taken out before the hedge is looked for: "3.10 or newer" scores, "3.9 or 3.10" does not.
-const HEDGE = /\bor\b|\?|\bbetween\b|\bmaybe\b|\bprobably\b|\beither\b/i;
+const HEDGE = /\bor\b|\?|\b(?:between|maybe|probably|either|likely|possibly|perhaps|think|guess|about)\b/i;
 const answerOf = (entry, id) => entry.replace(new RegExp(`^\\s*${id}`, 'i'), '').split(/\s[—–]\s|\s--?\s/)[0];
 const hedged = (fact, entry) => {
   const answer = answerOf(entry, fact.id);
