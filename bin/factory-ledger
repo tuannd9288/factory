@@ -3,6 +3,11 @@
 #   bin/factory-ledger [--repo owner/name]... [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--rows | --digest]
 #                      [--post owner/name] [--profile-dir <dir>]...
 #   bin/factory-ledger --check [--latest N] [--profile-dir <dir>]...
+#   bin/factory-ledger --quota [--statusline <file>]...
+# --quota prints each seat's five-hour and seven-day windows (#63), as Claude Code itself reports them: the newest
+# rate_limit_event in the run logs under FACTORY_RUNS (default ~/factory-runs), and the last rate_limits record of each
+# status-line file given by --statusline or FACTORY_STATUSLINE (colon-separated). It reads no credential or profile, and
+# the digest carries the same table. FACTORY_SEAT_ACCOUNTS ("1=name,2=name") names the accounts in the digest's role map.
 # --rows prints one tab-separated row per task (one pull request opened in the window); --digest (the default) prints
 # the digest; --post files it as an issue labelled "digest" in the named repository (the factory's own).
 # --check is the canary: over the latest N assistant entries of every profile under AGENT_PROFILES plus the --profile-dir
