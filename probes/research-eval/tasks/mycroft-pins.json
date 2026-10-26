@@ -93,5 +93,8 @@
     "ask": "How many GitHub stars does mycroft have today?",
     "topic": "stars",
     "example": "the number of GitHub stars of mycroft today: it is not in the clone"
-  }
+  },
+  "readable": [
+    "issue-58/sources/mycroft/mycroft"
+  ]
 }

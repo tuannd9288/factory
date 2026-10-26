@@ -84,5 +84,8 @@
     "ask": "How many GitHub stars does Paseo have today?",
     "topic": "stars",
     "example": "the number of GitHub stars of Paseo today: it is not in the clone"
-  }
+  },
+  "readable": [
+    "issue-68/sources/paseo"
+  ]
 }

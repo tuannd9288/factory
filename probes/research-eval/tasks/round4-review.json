@@ -93,5 +93,9 @@
     "ask": "How many weekly npm downloads does knip have?",
     "topic": "downloads",
     "example": "the weekly npm downloads of knip: they are not on disk"
-  }
+  },
+  "readable": [
+    "issue-17/rev4",
+    "issue-17/w17"
+  ]
 }

@@ -90,5 +90,8 @@
     "ask": "How many GitHub stars does HumanLayer have today?",
     "topic": "stars",
     "example": "the number of GitHub stars of HumanLayer today: it is not in the clone"
-  }
+  },
+  "readable": [
+    "issue-58/sources/humanlayer/humanlayer"
+  ]
 }

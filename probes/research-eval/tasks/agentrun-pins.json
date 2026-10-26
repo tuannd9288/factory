@@ -92,5 +92,8 @@
     "ask": "How many GitHub stars does agentrun have today?",
     "topic": "stars",
     "example": "the number of GitHub stars of agentrun today: it is not in the clone"
-  }
+  },
+  "readable": [
+    "issue-58/sources/agentrun/agentrun"
+  ]
 }

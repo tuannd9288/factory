@@ -86,5 +86,8 @@
     "ask": "How many downloads does the T3 Code iOS app have?",
     "topic": "download",
     "example": "the download count of the T3 Code iOS app: it is not on disk"
-  }
+  },
+  "readable": [
+    "issue-68/sources/t3code"
+  ]
 }

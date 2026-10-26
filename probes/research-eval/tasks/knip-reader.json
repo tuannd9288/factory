@@ -85,5 +85,8 @@
     "ask": "How many open GitHub issues does knip have today?",
     "topic": "open.{0,12}issues",
     "example": "the number of open GitHub issues of knip today: the clone has no issue tracker"
-  }
+  },
+  "readable": [
+    "issue-70/sources/knip"
+  ]
 }

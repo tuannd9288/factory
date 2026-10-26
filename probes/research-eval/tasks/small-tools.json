@@ -89,5 +89,10 @@
     "ask": "How many monthly PyPI downloads does semble have?",
     "topic": "downloads",
     "example": "the monthly PyPI downloads of semble: they are not on disk"
-  }
+  },
+  "readable": [
+    "issue-70/sources/piranha",
+    "issue-70/sources/graphify",
+    "issue-70/sources/semble"
+  ]
 }

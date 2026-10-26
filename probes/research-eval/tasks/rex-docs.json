@@ -85,5 +85,8 @@
     "ask": "How many people use Rex today?",
     "topic": "users|people|usage",
     "example": "the number of people who use Rex today: it is not on disk"
-  }
+  },
+  "readable": [
+    "issue-68/inputs/raw"
+  ]
 }

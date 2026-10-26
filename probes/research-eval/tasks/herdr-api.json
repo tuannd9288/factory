@@ -89,5 +89,8 @@
     "ask": "How many GitHub stars does Herdr have today?",
     "topic": "stars",
     "example": "the number of GitHub stars of Herdr today: it is not in the clone"
-  }
+  },
+  "readable": [
+    "issue-68/sources/herdr"
+  ]
 }
