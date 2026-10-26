@@ -24,7 +24,7 @@ export function body(brief) {
 }
 
 /** Thrown when a paragraph holds an odd number of double quotes, so its quotes cannot be paired (#111). */
-export class UnpairedQuote extends Error {
+class UnpairedQuote extends Error {
   constructor(paragraph) {
     super(`unpaired double quote in the paragraph: ${squeeze(paragraph)}`);
     this.paragraph = paragraph;
@@ -33,18 +33,31 @@ export class UnpairedQuote extends Error {
 
 /**
  * The spans a text puts in double quotes, curly or straight, normalised, in order. An empty span is not a quote.
- * Quotes pair inside one paragraph (lines between blank lines), never across it, and a double quote inside a
- * Markdown code span is not a quote. A paragraph with an odd count of double quotes is not guessed at: it throws
- * UnpairedQuote, since any pairing of it could name the wrong words and miss the Human's.
+ * Quotes pair inside one paragraph (lines between blank lines), never across it. A Markdown code span (backticks on
+ * one line) pairs its own quotes on their own: an even count yields its pairs, an odd count (the `"` that names the
+ * mark) yields none and is not counted in the paragraph. A fence line holds no span, so what a fence holds is text.
+ * A paragraph left with an odd count of double quotes is not guessed at: it throws UnpairedQuote, since any pairing
+ * of it could name the wrong words and miss the Human's.
  */
 export function quotes(text) {
-  const spans = [];
+  const found = [];
+  const pair = (chunk, at) => {
+    for (const m of chunk.matchAll(/"([^"]*)"/g)) found.push({ at: at + m.index, value: squeeze(m[1]) });
+  };
+  const count = (chunk) => (chunk.match(/"/g) ?? []).length;
+  let offset = 0;
   for (const paragraph of text.split(/\n\s*\n/)) {
-    const plain = straight(paragraph.replace(/(`+)[^`]*?\1/g, ' '));
-    if ((plain.match(/"/g) ?? []).length % 2) throw new UnpairedQuote(paragraph);
-    for (const m of plain.matchAll(/"([^"]*)"/g)) spans.push(squeeze(m[1]));
+    const at = offset;
+    offset += paragraph.length + 1;
+    let plain = straight(paragraph);
+    for (const m of plain.matchAll(/(`+)[^`\n]*?\1/g)) {
+      if (count(m[0]) % 2 === 0) pair(m[0], at + m.index);
+    }
+    plain = plain.replace(/(`+)[^`\n]*?\1/g, (span) => ' '.repeat(span.length));
+    if (count(plain) % 2) throw new UnpairedQuote(paragraph);
+    pair(plain, at);
   }
-  return spans.filter(Boolean);
+  return found.sort((x, y) => x.at - y.at).map(({ value }) => value).filter(Boolean);
 }
 
 /** The quotes of the relay that the brief's body lacks: `{ kind: 'quote', value }`, each once, in the relay's order. */
