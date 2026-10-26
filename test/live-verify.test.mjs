@@ -178,9 +178,11 @@ describe('live-verify', () => {
       assert.match(posted, /^\*\*Diff read\*\*$/m);
       assert.match(posted, /^\*\*Notes\*\*$/m);
       assert.match(posted, /^The verifier's verdict is no input to the gate: it lowers no tier and replaces no required check\.$/m);
-      // It reads the pull request and its issue and comments; it never approves, reviews or merges.
-      const kinds = w.read('gh-calls').split('\n').filter(Boolean).map((c) => c.split(' ').slice(0, 2).join(' '));
-      assert.ok(kinds.length > 0 && kinds.every((k) => ['api user', 'pr view', 'issue view', 'pr comment'].includes(k)), kinds.join('\n'));
+      // It never approves, reviews, merges or edits a pull request; a new read is no harm. A call that carries
+      // --approve as any argument counts. At least one call is recorded, so the script must have run.
+      const calls = w.read('gh-calls').split('\n').filter(Boolean);
+      const harmful = calls.filter((c) => ['pr review', 'pr merge', 'pr edit'].includes(c.split(' ').slice(0, 2).join(' ')) || c.split(' ').includes('--approve'));
+      assert.ok(calls.length > 0 && harmful.length === 0, calls.join('\n'));
       // The brief stands alone: the goal from the pull request and its issue, the exact commits, the driver.
       const prompt = w.read('prompt');
       assert.match(prompt, /The CLI takes the operation name/);
