@@ -8,6 +8,53 @@ import { basename, dirname, join, resolve } from 'node:path';
 const PATH_FIELDS = ['file_path', 'path', 'notebook_path'];
 const PATTERN_FIELDS = ['pattern', 'glob'];
 const UNPLACEABLE = /\$[A-Za-z_{(]|`/;
+// A shell expansion in text that is not single-quoted: the word that holds it cannot be placed, so it counts as outside.
+const EXPANSION = /\$[A-Za-z_{(]|`/;
+
+/** The commands of a shell command line, each a list of words { raw, text, plain }: `raw` as written, `text` with the quotes taken
+ * off, `plain` when no unquoted or double-quoted part of it holds an expansion. Words split on whitespace and on `; | & < >` and
+ * a newline outside quotes; single-quoted text is literal. */
+export function wordsOf(command) {
+  const commands = [[]];
+  let word = null;
+  let quote = null;
+  const open = () => (word ??= { raw: '', text: '', open: '' });
+  const end = () => {
+    if (word) {
+      commands.at(-1).push({ raw: word.raw, text: word.text, plain: !EXPANSION.test(word.open) });
+      word = null;
+    }
+  };
+  for (const ch of command) {
+    if (quote === "'") {
+      word.raw += ch;
+      if (ch === "'") {
+        quote = null;
+        word.open += '\0';
+      } else word.text += ch;
+    } else if (quote === '"') {
+      word.raw += ch;
+      if (ch === '"') quote = null;
+      else {
+        word.text += ch;
+        word.open += ch;
+      }
+    } else if (ch === "'" || ch === '"') {
+      open().raw += ch;
+      quote = ch;
+    } else if (/\s/.test(ch) || ';|&<>'.includes(ch)) {
+      end();
+      if (ch === '\n' || ';|&'.includes(ch)) commands.push([]);
+    } else {
+      open();
+      word.raw += ch;
+      word.text += ch;
+      word.open += ch;
+    }
+  }
+  end();
+  return commands;
+}
 // Reading or writing the null device reaches no session's files.
 const HARMLESS = new Set(['/dev/null']);
 
@@ -68,9 +115,12 @@ export function pathsOf(logText) {
       for (const f of PATH_FIELDS) if (typeof c.input[f] === 'string') out.push({ tool: c.name, path: c.input[f] });
       for (const f of PATTERN_FIELDS) if (typeof c.input[f] === 'string' && (c.input[f].startsWith('/') || c.input[f].includes('..'))) out.push({ tool: c.name, path: c.input[f] });
       if (typeof c.input.command === 'string') {
-        // Split on whitespace, quotes and the shell's separators, so that `2>/dev/null` and `--dir=/x` give their paths.
-        for (const t of c.input.command.split(/[\s;|&<>'"=,:]+/)) {
-          if (UNPLACEABLE.test(t) || t.startsWith('/') || t.startsWith('~') || t.includes('..')) out.push({ tool: c.name, path: t });
+        for (const words of wordsOf(c.input.command)) {
+          for (const word of words) {
+            if (!word.plain) out.push({ tool: c.name, path: word.raw, unplaceable: true });
+            // A plain word is also split on "=", "," and ":", so that `--dir=/x` gives its path.
+            else for (const t of word.text.split(/[=,:]+/)) if (t.startsWith('/') || t.startsWith('~') || t.includes('..')) out.push({ tool: c.name, path: t });
+          }
         }
       }
     }
@@ -81,7 +131,8 @@ export function pathsOf(logText) {
 /** The paths of a log that lie outside the folders: [{ tool, path }]. `inside` are the folders the session was given. */
 export function outsidePaths(logText, { cwd, inside, home }) {
   const roots = inside.map((d) => realOf(resolve(d)));
-  return pathsOf(logText).filter(({ path }) => {
+  return pathsOf(logText).filter(({ path, unplaceable }) => {
+    if (unplaceable) return true;
     if (HARMLESS.has(path)) return false;
     const at = place(path, { cwd, home });
     return at === null || !roots.some((r) => at === r || at.startsWith(`${r}/`));
