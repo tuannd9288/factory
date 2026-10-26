@@ -160,6 +160,27 @@ function world({ driver = DRIVER } = {}) {
   };
 }
 
+/**
+ * Whether a recorded gh call (argv joined by spaces) writes to a pull request: `--approve`; `pr review`, `merge`,
+ * `edit` or `close`; or a `gh api` call that sets a method other than GET or any body. It names no call as allowed.
+ * Leading global flags (-R, --repo) are skipped. An argument with a space in it splits in the record; that can only
+ * add a false red, never hide a flag.
+ */
+function writes(call) {
+  const args = call.split(' ');
+  if (args.includes('--approve')) return true;
+  let i = 0;
+  while (i < args.length && args[i].startsWith('-')) i += /^(-R|--repo)$/.test(args[i]) ? 2 : 1;
+  if (args[i] === 'pr') return ['review', 'merge', 'edit', 'close'].includes(args[i + 1]);
+  if (args[i] !== 'api') return false;
+  const rest = args.slice(i + 1);
+  return rest.some((a, k) => {
+    if (/^(-f|-F|--field|--raw-field|--input)$/.test(a) || /^(-[fF].|--field=|--raw-field=|--input=)/.test(a)) return true;
+    const method = /^(-X|--method)$/.test(a) ? rest[k + 1] : /^(-X.|--method=)/.test(a) ? a.replace(/^(-X|--method=)/, '') : null;
+    return method !== null && String(method).toUpperCase() !== 'GET';
+  });
+}
+
 describe('live-verify', () => {
   test('posts the verdict with the head, the parent and the patch it covers, and cleans its worktrees up', () => {
     const w = world();
@@ -178,11 +199,10 @@ describe('live-verify', () => {
       assert.match(posted, /^\*\*Diff read\*\*$/m);
       assert.match(posted, /^\*\*Notes\*\*$/m);
       assert.match(posted, /^The verifier's verdict is no input to the gate: it lowers no tier and replaces no required check\.$/m);
-      // It never approves, reviews, merges or edits a pull request; a new read is no harm. A call that carries
-      // --approve as any argument counts. At least one call is recorded, so the script must have run.
+      // It never writes to a pull request by any route; a read is no harm. At least one call is recorded, so the
+      // script must have run.
       const calls = w.read('gh-calls').split('\n').filter(Boolean);
-      const harmful = calls.filter((c) => ['pr review', 'pr merge', 'pr edit'].includes(c.split(' ').slice(0, 2).join(' ')) || c.split(' ').includes('--approve'));
-      assert.ok(calls.length > 0 && harmful.length === 0, calls.join('\n'));
+      assert.ok(calls.length > 0 && !calls.some(writes), calls.join('\n'));
       // The brief stands alone: the goal from the pull request and its issue, the exact commits, the driver.
       const prompt = w.read('prompt');
       assert.match(prompt, /The CLI takes the operation name/);
