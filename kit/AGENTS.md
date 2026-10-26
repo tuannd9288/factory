@@ -34,6 +34,8 @@ the pull request; push as often as you like. CI runs `main`'s copies of both on 
    module: import the module (`import * as m from`), not the missing name. A new file: load it inside the
    test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR
    body: `No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
+   Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or AGENTS.md, and review
+   reads it.
 4. Push, then run `scripts/ship` (`--body-file`: the template in English, `Closes #<issue>` filled in), and again until it
    says `armed` or stops. Each run takes the next step: opens the pull request, runs `scripts/live-verify <pr>`,
    arms auto-merge. It refuses to open unless origin holds HEAD and a full `verify` and `red-check` passed on it, to arm on FAIL or

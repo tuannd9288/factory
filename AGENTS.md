@@ -216,6 +216,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 - The weekly digest is `bin/factory-ledger --post tuannd9288/factory`: it posts even when the canary (`--check`) finds a
   field missing or stale, saying so in one line. No job runs it yet; its schedule (launchd, as the agents' account) is
   the Human's to set up.
+- Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or AGENTS.md, and review
+  reads it. A test that reads text stays only when a program in this repository reads those bytes (#112).
 
 | Path | What it is |
 |---|---|
