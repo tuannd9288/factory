@@ -8,12 +8,16 @@ import { basename, dirname, join, resolve } from 'node:path';
 const PATH_FIELDS = ['file_path', 'path', 'notebook_path'];
 const PATTERN_FIELDS = ['pattern', 'glob'];
 const UNPLACEABLE = /\$[A-Za-z_{(]|`/;
-// A shell expansion in text that is not single-quoted: the word that holds it cannot be placed, so it counts as outside.
+// A shell expansion outside quotes, and inside double quotes, where the shell expands only "$" and a backtick: the word that
+// holds one cannot be placed, so it counts as outside.
 const EXPANSION = /[$`\\{}]/;
+const QUOTED_EXPANSION = /[$`]/;
+// What a backslash escapes inside double quotes; before any other character it is a plain backslash there.
+const QUOTED_ESCAPES = new Set(['$', '`', '"', '\\', '\n']);
 
 /** The commands of a shell command line, each a list of words { raw, text, plain }: `raw` as written, `text` with the quotes taken
- * off, `plain` when no unquoted or double-quoted part of it holds an expansion. Words split on whitespace and on `; | & < >` and
- * a newline outside quotes; single-quoted text is literal. */
+ * off, `plain` when no part of it holds an expansion. Words split on whitespace and on `; | & < >` and a newline outside quotes;
+ * single-quoted text is literal, and double-quoted text is read as the shell reads it. */
 export function wordsOf(command) {
   const commands = [[]];
   let word = null;
@@ -28,7 +32,7 @@ export function wordsOf(command) {
   const chars = [...command];
   for (let i = 0; i < chars.length; i += 1) {
     const ch = chars[i];
-    if (ch === '\\' && quote !== "'") {
+    if (ch === '\\' && quote === null) {
       // A backslash escapes the next character: it opens no quote and ends no word. The word it is in is not plain.
       open();
       const next = chars[i + 1] ?? '';
@@ -45,9 +49,13 @@ export function wordsOf(command) {
     } else if (quote === '"') {
       word.raw += ch;
       if (ch === '"') quote = null;
-      else {
+      else if (ch === '\\' && QUOTED_ESCAPES.has(chars[i + 1])) {
+        word.raw += chars[i + 1];
+        word.text += chars[i + 1];
+        i += 1;
+      } else {
         word.text += ch;
-        word.open += ch;
+        if (QUOTED_EXPANSION.test(ch)) word.open += ch;
       }
     } else if (ch === "'" || ch === '"') {
       open().raw += ch;
