@@ -89,3 +89,10 @@ test('the schema asks for conclusion, evidence, couldNotRead and needsHuman, all
   const { SCHEMA: schema } = await lib();
   assert.equal(JSON.stringify(schema), SCHEMA);
 });
+
+test('a researcher\'s resume takes 200 turns', async () => {
+  const { buildArgs } = await lib();
+  const resumed = buildArgs({ role: 'researcher', run: RUN, home: HOME, resume: 'sid-3' });
+  assert.deepEqual(resumed.slice(0, 9), ['-p', '--resume', 'sid-3', '--model', 'opus', '--effort', 'high', '--max-turns', '200']);
+  assert.deepEqual(resumed.slice(9), buildArgs({ role: 'researcher', run: RUN, home: HOME }).slice(7));
+});
