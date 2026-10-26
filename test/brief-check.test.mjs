@@ -110,3 +110,23 @@ test('it takes exactly two files, and says so when a file cannot be read', () =>
   assert.equal(gone.code, 2);
   assert.match(gone.err, /no-such-file\.md/);
 });
+
+// An unpaired quote must not pair across itself (#111): the check refuses the paragraph instead of passing or misnaming.
+test('a paragraph with an unpaired straight quote exits 2 and names the paragraph; the Human words are not paired away', () => {
+  const relay = 'Colly: the screen is 27" wide.\nHe said "keep it small" today.\n\nAnother paragraph, "fine".\n';
+  withFiles({ 'relay.md': relay, 'brief.md': 'A brief that carries "fine" only.\n' }, (dir) => {
+    const r = brief([join(dir, 'brief.md'), join(dir, 'relay.md')]);
+    assert.equal(r.code, 2);
+    assert.equal(r.out, '');
+    assert.match(r.err, /unpaired.*Colly: the screen is 27" wide\./);
+  });
+});
+
+test('a straight quote inside a Markdown code span is not a quote, and a lone curly quote is unpaired', () => {
+  const ok = 'Item: the `"` mark is odd. He said "keep it small".\n';
+  const lone = 'He said “keep it small and then left.\n';
+  withFiles({ 'ok.md': ok, 'lone.md': lone, 'empty.md': '' }, (dir) => {
+    assert.deepEqual(brief([join(dir, 'empty.md'), join(dir, 'ok.md')]), { code: 1, out: 'missing quote: "keep it small"\n', err: '' });
+    assert.equal(brief([join(dir, 'empty.md'), join(dir, 'lone.md')]).code, 2);
+  });
+});
