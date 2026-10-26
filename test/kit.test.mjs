@@ -462,6 +462,9 @@ describe('review, verdict, tier and rounds', () => {
         'case "$*" in *itemTypes:*LABELED_EVENT*) case "$*" in *"actor{login}"*) ;; *) echo "fake gh: the label query does not ask for actor{login}" >&2; exit 1 ;; esac ;; esac',
         'case "$*" in',
         // The review job is found through the run (99) and its annotations through the job's id (501), never by name.
+        // The closing issues, as gh prints them (2026-10-26): porcelain commands only. None unless a test writes closing.json.
+        '  "pr view 7 --repo o/app --json closingIssuesReferences") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; cat "$FAKE/closing.json" 2>/dev/null || echo \'{"closingIssuesReferences":[]}\' ;;',
+        '  "issue view "*" --repo o/app --json number,title,labels,body") echo "issue view $3" >>"$FAKE/ghlog"; cat "$FAKE/issue-$3.json" ;;',
         '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; cat "$FAKE/jobs.json" ;;',
         '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
         '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
@@ -538,7 +541,7 @@ describe('review, verdict, tier and rounds', () => {
     annotations();
     labels();
     reviews([]);
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null });
   });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
 
@@ -1170,7 +1173,7 @@ describe('review, verdict, tier and rounds', () => {
 const fs = require('fs');
 const conf = JSON.parse(fs.readFileSync(${JSON.stringify(join(f, 'claude.json'))}, 'utf8'));
 if (process.argv[2] === '--version') { console.log('2.1.308 (Claude Code)'); process.exit(0); }
-fs.readFileSync(0, 'utf8');
+fs.writeFileSync(${JSON.stringify(join(f, 'brief'))}, fs.readFileSync(0, 'utf8'));
 fs.appendFileSync(${JSON.stringify(join(f, 'claude-calls'))}, 'call\\n');
 const e = (x) => console.log(JSON.stringify(x));
 e({ type: 'system', subtype: 'init', tools: ['Read', 'Grep', 'Glob', 'StructuredOutput'], mcp_servers: [], plugins: [], skills: [], slash_commands: [] });
@@ -1198,11 +1201,11 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     const base = git(trusted, 'rev-parse', 'origin/main');
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^::notice title=review-result::none\n/);
-    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none reviewer=claude pass\n`), out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none acc=none reviewer=claude pass\n`), out.out);
     claude({ output: { blocking: [{ id: 'f1', claim: 'off by one in add' }], noRed: 'unjudged' } });
     out = job('review', { 'src/math.js': MUL }, reviewEnv);
     assert.equal(out.code, 1, out.out);
-    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none reviewer=claude block\n`), out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${out.head} base=${base} nored=none acc=none reviewer=claude block\n`), out.out);
     assert.match(out.out, /f1: off by one in add/);
   });
   test('a quota failure of the Claude reviewer reads as unavailable: it fails the check, and leaves no verdict annotation', () => {
@@ -1217,6 +1220,106 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /unknown reviewer 'gpt'/);
   });
+  // #96: the issues the pull request closes, read by scripts/review with gh porcelain before the reviewer runs.
+  const REF = (number, owner = 'o', name = 'app') => ({ id: `I_${number}`, number, repository: { id: 'R_x', name, owner: { id: 'U_x', login: owner } }, url: `https://github.com/${owner}/${name}/issues/${number}` });
+  const ISSUE = (number, extra = {}) => ({ body: '## Acceptance\n\n- Refuse an empty name.\n', labels: [{ id: 'LA_1', name: 'task', description: '', color: 'ffffff' }], number, title: 'Initials', ...extra });
+  const closing = (...refs) => write(fake, { 'closing.json': JSON.stringify({ closingIssuesReferences: refs }), ghlog: '' });
+  const briefSeen = () => readFileSync(join(fake, 'brief'), 'utf8');
+  const ghLog = () => readFileSync(join(fake, 'ghlog'), 'utf8').split('\n').filter(Boolean);
+  const claudeCalls = () => readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length;
+  const accOf = (text) => /::notice title=review-verdict::head=\S+ base=\S+ nored=\S+ acc=(\S+) reviewer=/.exec(text)?.[1];
+
+  test('review reads the closing issues of this repository before the reviewer runs, hands them over, and names their hash in the verdict', () => {
+    claude({ output: { blocking: [], noRed: 'unjudged' } });
+    closing(REF(5), REF(9, 'someone', 'else'));
+    write(fake, { 'issue-5.json': JSON.stringify(ISSUE(5)), 'issue-9.json': JSON.stringify(ISSUE(9)) });
+    const out = job('review', { 'src/math.js': MUL }, reviewEnv);
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(ghLog(), ['pr view', 'issue view 5']);
+    assert.match(briefSeen(), /### Issue #5: Initials\nLabels: task\n## Acceptance\n\n- Refuse an empty name\./);
+    assert.match(briefSeen(), /not read, because they are in another repository: someone\/else#9/);
+    assert.match(accOf(out.out), /^[0-9a-f]{16}$/);
+  });
+
+  test('review with no closing issue names acc=none and says so in the brief', () => {
+    claude({ output: { blocking: [], noRed: 'unjudged' } });
+    closing();
+    const out = job('review', { 'src/math.js': MUL }, reviewEnv);
+    assert.equal(out.code, 0, out.out);
+    assert.equal(accOf(out.out), 'none');
+    assert.match(briefSeen(), /closes no issue of this repository, so its acceptance is what the body states/);
+  });
+
+  test('closing issues that cannot be read make the review unavailable (acceptance), with no reviewer call and no verdict', () => {
+    claude({ output: { blocking: [], noRed: 'unjudged' } });
+    closing(REF(5));
+    write(fake, { 'issue-5.json': JSON.stringify(ISSUE(5)), ghfails: '' });
+    let out = job('review', { 'src/math.js': MUL }, reviewEnv);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^::notice title=review-result::unavailable: acceptance\nreview: reviewer unavailable \(acceptance\); /);
+    assert.doesNotMatch(out.out, /review-verdict/);
+    assert.equal(claudeCalls(), 0);
+    // gh printing what is not the recorded shape is the same, and so is a pull request number the job was not given.
+    write(fake, { ghfails: null, 'issue-5.json': JSON.stringify({ number: 5, title: 'Initials' }) });
+    out = again('review', out.head, reviewEnv);
+    assert.match(out.out, /unavailable: acceptance/);
+    assert.equal(claudeCalls(), 0);
+    out = again('review', out.head, { ...reviewEnv, GATE_PR: '' });
+    assert.match(out.out, /unavailable: acceptance/);
+    assert.equal(claudeCalls(), 0);
+  });
+
+  test('the stub reviewer reads no acceptance', () => {
+    closing(REF(5));
+    const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'stub', ...pr });
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(ghLog(), []);
+  });
+
+  test('review reuses an earlier review only while the closing issues are as they were: a changed issue is a new question', () => {
+    claude({ output: { blocking: [], noRed: 'accepted' } });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99, event: 'pull_request_target' }] }) });
+    closing(REF(5));
+    write(fake, { 'issue-5.json': JSON.stringify(ISSUE(5)) });
+    const { head, base } = candidate();
+    let out = again('review', head, reviewEnv);
+    assert.equal(out.code, 0, out.out);
+    const acc = accOf(out.out);
+    assert.match(acc, /^[0-9a-f]{16}$/);
+    const earlier = (a) => write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=none acc=${a} reviewer=claude pass`)]), 'claude-calls': '' });
+    earlier(acc);
+    out = again('review', head, reviewEnv);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /reused the review of run 99/);
+    assert.equal(claudeCalls(), 0, 'a call was made');
+    assert.equal(accOf(out.out), acc);
+    write(fake, { 'issue-5.json': JSON.stringify(ISSUE(5, { body: 'Acceptance: refuse an empty name and a blank one.\n' })) });
+    out = again('review', head, reviewEnv);
+    assert.doesNotMatch(out.out, /reused/);
+    assert.equal(claudeCalls(), 1, 'a changed issue was not asked again');
+    assert.notEqual(accOf(out.out), acc);
+    // The same head with no closing issue at all is another question too.
+    closing();
+    earlier(acc);
+    out = again('review', head, reviewEnv);
+    assert.doesNotMatch(out.out, /reused/);
+    assert.equal(claudeCalls(), 1);
+    annotations();
+  });
+
+  test('verdict passes on an annotation with acc, and says the reviewer was unavailable (acceptance) when that was the result', () => {
+    const { head, base } = candidate();
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=none acc=0123456789abcdef reviewer=claude pass`)]) });
+    let out = again('verdict', head, { GATE_REVIEWER: '', ...pr });
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /verdict: review passed/);
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'unavailable: acceptance')]) });
+    out = again('verdict', head, { GATE_REVIEWER: '', ...pr });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /verdict: reviewer unavailable \(acceptance\); this is not a finding on the change/);
+    annotations();
+  });
+
   test('verdict waits for review of its run and passes with it, naming the same head and base, with no reviewer call', () => {
     claude({ output: { blocking: [], noRed: 'unjudged' } });
     const { head, base } = candidate();
@@ -1321,7 +1424,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
   test('review reuses nothing from a run that is not of pull_request_target, or names no event: a branch can write its own pull_request workflow', () => {
     claude({ output: { blocking: [], noRed: 'accepted' } });
     const { head, base } = candidate();
-    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=none reviewer=claude pass`)]) });
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=none acc=none reviewer=claude pass`)]) });
     for (const run of [{ id: 99, event: 'pull_request' }, { id: 99 }, { id: 99, event: 'push' }]) {
       write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [run] }), 'claude-calls': '' });
       const out = again('review', head, reviewEnv);
@@ -1334,7 +1437,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     claude({ output: { blocking: [], noRed: 'accepted' } });
     write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99, event: 'pull_request_target' }] }) });
     const { head, base } = candidate();
-    const same = `head=${head} base=${base} nored=none`;
+    const same = `head=${head} base=${base} nored=none acc=none`;
     for (const [what, verdict, calls] of [['a stub verdict', `${same} reviewer=stub pass`, 1], ['one naming no reviewer', `${same} pass`, 1], ['a claude verdict', `${same} reviewer=claude pass`, 0]]) {
       write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', verdict)]), 'claude-calls': '' });
       const out = again('review', head, reviewEnv);
@@ -1347,13 +1450,13 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     claude({ output: { blocking: [], noRed: 'accepted' } });
     write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99, event: 'pull_request_target' }] }) });
     const { head, base } = candidate();
-    const earlier = (nored, verdict = 'pass') => write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=${nored} reviewer=claude ${verdict}`)]) });
+    const earlier = (nored, verdict = 'pass') => write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${head} base=${base} nored=${nored} acc=none reviewer=claude ${verdict}`)]) });
     earlier('none');
     let out = again('review', head, reviewEnv);
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^::notice title=review-result::none\n/);
     assert.match(out.out, /review: reused the review of run 99 for this head, base and No-red line; no call made/);
-    assert.ok(out.out.includes(`::notice title=review-verdict::head=${head} base=${base} nored=none reviewer=claude pass\n`), out.out);
+    assert.ok(out.out.includes(`::notice title=review-verdict::head=${head} base=${base} nored=none acc=none reviewer=claude pass\n`), out.out);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8'), '', 'a call was made');
     earlier('none', 'block');
     out = again('review', head, reviewEnv);
@@ -1367,7 +1470,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     assert.equal(out.code, 0, out.out);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'a changed No-red line was not judged');
     write(fake, { 'claude-calls': '' });
-    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${'a'.repeat(40)} base=${base} nored=none reviewer=claude pass`)]) });
+    write(fake, { 'annotations.json': JSON.stringify([NOTE('review-result', 'none'), NOTE('review-verdict', `head=${'a'.repeat(40)} base=${base} nored=none acc=none reviewer=claude pass`)]) });
     again('review', head, reviewEnv);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'another head was reused');
     write(fake, { 'claude-calls': '' });
@@ -1382,7 +1485,7 @@ describe('gate-trusted.yml permissions', () => {
   // What each job's scripts call, and the scope GitHub asks for it (docs.github.com, "Permissions required for GitHub
   // Apps": checks for check runs and suites, pull requests for reviews, labels on a pull request and its timeline).
   const NEEDS = {
-    review: { actions: 'read', checks: 'read' },
+    review: { actions: 'read', checks: 'read', issues: 'read', 'pull-requests': 'read' },
     verdict: { actions: 'read', checks: 'read', 'pull-requests': 'read' },
     tier: { actions: 'read', checks: 'read', 'pull-requests': 'write' },
     rounds: { checks: 'read', 'pull-requests': 'write' },
