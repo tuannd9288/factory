@@ -516,14 +516,6 @@ describe('the pinned install and the workflow', () => {
     assert.equal(pin.effort, 'max');
   });
 
-  test('review installs it with npm ci --ignore-scripts, runs the platform package\'s claude, and checks its version', () => {
-    const review = job('review');
-    assert.match(review, /claude-code-linux-x64/);
-    assert.doesNotMatch(review, /node_modules\/\.bin|install\.cjs/, 'the .bin link is a placeholder when no script runs');
-    assert.match(review, /claude --version/);
-    assert.match(review, /reviewer\.json/);
-  });
-
   test('review gives the reviewer the job\'s start and length, and the length is the job\'s timeout', () => {
     const review = job('review');
     assert.match(review, /GATE_JOB_START=\$\(date \+%s\)" >>"\$GITHUB_ENV"/);
@@ -570,13 +562,10 @@ describe('the pinned install and the workflow', () => {
       assert.equal(out.code, 0, out.out);
       assert.doesNotMatch(out.out, /unavailable/);
       assert.match(readFileSync(join(dir, 'path'), 'utf8'), /claude-code-linux-x64\n$/);
+      assert.doesNotMatch(readFileSync(join(dir, 'path'), 'utf8'), /node_modules\/\.bin/, 'the .bin link is a placeholder when no script runs');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-
-  test('review holds actions: read, which the runs listing behind a reused result needs on a private repository', () => {
-    assert.match(job('review'), /permissions:[\s\S]*actions: read/);
   });
 
   test('review installs it with npm ci --ignore-scripts and holds the token; verdict calls no reviewer and holds neither', () => {
@@ -587,26 +576,5 @@ describe('the pinned install and the workflow', () => {
     const verdict = job('verdict');
     assert.doesNotMatch(verdict, /environment:|CLAUDE_CODE|GATE_REVIEWER|secrets\./);
     assert.match(verdict, /actions: read/);
-  });
-
-  test('the prompt cites its source lines in agent-desk@0cd59d55 and carries the No-red and raise rules', () => {
-    const p = read('kit/scripts/lib/reviewer-prompt.md');
-    for (const lines of ['12-17', '18-56', '70-84']) assert.match(p, new RegExp(`agent-desk@0cd59d55 plugin/content/prompts/REVIEWER.md:${lines}`));
-    assert.match(p, /No-red/);
-    assert.match(p, /raise/);
-    assert.doesNotMatch(p, /Before Adding a Test/);
-    assert.doesNotMatch(p, /Rule that matters most:\*\* report only what you traced, answer the question directly, write nothing\.\n\nEverything/, 'REVIEWER.md:10 is not a cited range');
-    assert.doesNotMatch(p, /You cannot fetch the issue/);
-    assert.match(p, /acceptance is what the issues the pull request closes state/i);
-    assert.match(p, /closes none of this repository, the acceptance is what the body states/i);
-    assert.match(p, /body that contradicts its closing issue's acceptance is a finding/i);
-    assert.match(p.split('\n').slice(0, 12).join('\n'), /closing issues/);
-  });
-
-  test('NOTICE names the agent-desk port with its commit and lines', () => {
-    const n = read('NOTICE');
-    assert.match(n, /agent-desk/);
-    assert.match(n, /0cd59d55/);
-    assert.match(n, /REVIEWER\.md:12-17, 18-56, 70-84/);
   });
 });

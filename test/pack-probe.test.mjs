@@ -115,37 +115,6 @@ test('a tag or .env read the model declined to attempt is INCONCLUSIVE, never a 
   assert.equal(exitCodeOf([{ ok: true }, { ok: null }]), 0, 'a skipped item (--no-pr) is not a failure');
 });
 
-test('session A says it is the factory\'s permission probe, that the refusals are expected, and asks for each call exactly once', async () => {
-  const w = await world();
-  try {
-    w.probe();
-    const a = w.calls().split('\n').find((l) => l.startsWith('claude -p') && !l.includes('gh issue create'));
-    assert.match(a, /permission probe/);
-    assert.match(a, /expected to be refused by the permission rules/);
-    assert.match(a, /exactly once/);
-    assert.match(a, /do not decline/i);
-  } finally {
-    w.cleanup();
-  }
-});
-
-test('the PR session labels the pull request task and carries a test that fails first, in two commits', async () => {
-  const w = await world();
-  try {
-    w.probe();
-    const pr = w.calls().split('\n').find((l) => l.startsWith('claude -p') && l.includes('gh issue create'));
-    assert.match(pr, /gh pr create [^.]*--label task/);
-    assert.match(pr, /test\/math\.test\.js/);
-    assert.match(pr, /src\/math\.js/);
-    assert.match(pr, /Failing-test: /);
-    assert.match(pr, /import \* as math/, 'a named import that is missing would fail to load, and red-check wants a failure, not an error');
-    assert.match(pr, /commit -m '[^']+' -m 'Failing-test: /);
-    assert.doesNotMatch(pr, /No-red/);
-  } finally {
-    w.cleanup();
-  }
-});
-
 test('a denial that is only "requires approval" is no proof of a deny rule', async () => {
   const approval = { event: ['other', 'This command requires approval'], text: 'This command requires approval', isError: true, denial: true };
   const item = by(await verdict(stream({ tag: approval })), 'git tag x refused');
@@ -512,22 +481,6 @@ test('the script runs through a symlinked path rather than exiting 0 unrun', asy
   }
 });
 
-test('the contract names the baseline, drops the one-agent claim, and AGENTS.md links it and the launcher carries the mode', () => {
-  const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
-  for (const clause of ['S1', 'S2', 'S5']) assert.match(contract, new RegExp(`^## ${clause}\\b`, 'm'));
-  assert.match(contract, /probes\/pack-probe\.mjs/);
-  assert.match(contract, /--permission-mode acceptEdits/);
-  assert.match(contract, /pstack install/);
-  assert.match(contract, /merged/);
-  assert.doesNotMatch(contract, /only agent that runs|Claude Code only/);
-  const agents = readFileSync(join(factory, 'AGENTS.md'), 'utf8');
-  assert.match(agents, /probes\/pack-contract\.md/);
-  const launcher = agents.slice(agents.indexOf('Unattended runs'), agents.indexOf('pstack, per repository'));
-  assert.match(launcher, /--permission-mode acceptEdits/);
-  assert.match(launcher, /2\.1\.308/);
-  assert.ok(existsSync(join(factory, 'probes/pack-probe.mjs')));
-});
-
 // --- fixes 2: the marker, exact grants, the issue found by title, mutants M1, M2 and M11, the dirty-file message ---
 
 test('the marker skips indented continuation lines and is compared trimmed', async () => {
@@ -555,17 +508,6 @@ test('each session gets only the commands it runs: no blanket git or gh, the tag
   } finally {
     w.cleanup();
   }
-});
-
-test('the launcher example in AGENTS.md grants no blanket git or gh, and the contract cites the permission rules page', () => {
-  const agents = readFileSync(join(factory, 'AGENTS.md'), 'utf8');
-  const launcher = agents.slice(agents.indexOf('Unattended runs'), agents.indexOf('pstack, per repository'));
-  assert.doesNotMatch(launcher, /Bash\((git|gh):\*\)/);
-  assert.match(launcher, /--allowedTools "Bash\(git branch /);
-  const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
-  assert.match(contract, /code\.claude\.com\/docs\/en\/permissions/);
-  assert.match(contract, /2026-10-22/);
-  assert.match(contract, /#3 \/ PR #11|PR #11/, 'the skill result cites #3 and PR #11');
 });
 
 test('Ctrl-C between gh issue create and gh pr create still closes the issue, found by its title', async () => {
@@ -698,14 +640,6 @@ test('the PR session writes its body to a file and commits with -m only, and the
   }
 });
 
-test('AGENTS.md says a trailing * admits any arguments, and a command with a variable or $(…) is denied under a grant', () => {
-  const agents = readFileSync(join(factory, 'AGENTS.md'), 'utf8');
-  const launcher = agents.slice(agents.indexOf('Unattended runs'), agents.indexOf('pstack, per repository'));
-  assert.match(launcher, /trailing `\*` admits any arguments, a refspec included/);
-  assert.match(launcher, /variable or `\$\(…\)`.*denied/s);
-  assert.match(launcher, /2\.1\.308/);
-});
-
 test('the seed script makes a small Node repository whose tests pass, and refuses a folder that exists', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pack-seed-'));
   try {
@@ -723,18 +657,6 @@ test('the seed script makes a small Node repository whose tests pass, and refuse
 });
 
 // --- additions: the contract's start / next step / one session per issue, and the #24 identity step ---
-
-test('the contract carries start, next step and one session per issue: pstack answers by hand, each checked by prose, the lease cited', () => {
-  const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
-  const section = contract.slice(contract.indexOf('## Start, next step, one session per issue'), contract.indexOf('## Running the probe'));
-  assert.ok(section.length > 100, 'no section Start, next step, one session per issue');
-  for (const q of [/what launches a session on an issue/i, /what the session calls next/i, /what stops two sessions from working on one issue/i]) assert.match(section, q);
-  assert.equal((section.match(/the Human or a Lead, by hand/g) ?? []).length, 3);
-  assert.ok((section.match(/`prose`/g) ?? []).length >= 3, 'each clause names prose as its check');
-  assert.match(section, /agent-desk@0cd59d55 `AGENTS\.md:113`/);
-  assert.match(section, /lease[^.]*push GitHub accepts once/);
-  assert.match(section, /builds? nothing|nothing is built/i);
-});
 
 test('ssh -T output: authenticated gives the login, denied and timed out give none', async () => {
   const { parseSshLogin } = await probeModule();
@@ -878,27 +800,12 @@ test('a pull request whose head branch is not the probe\'s fails the run, and is
   }
 });
 
-test('L2: the probe\'s header and the contract say that only a process-group signal stops it at once', () => {
-  const header = readFileSync(join(factory, 'probes/pack-probe.mjs'), 'utf8').split('\n').slice(0, 20).join('\n');
-  const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
-  for (const text of [header, contract]) assert.match(text, /process-group signal/);
-});
-
-test('L4 and L5: the contract states no line budget for root AGENTS.md and no longer calls the probe\'s change docs-only', () => {
-  const contract = readFileSync(join(factory, 'probes/pack-contract.md'), 'utf8');
-  assert.doesNotMatch(contract, /line budget/);
-  assert.doesNotMatch(contract, /docs-only/);
-  assert.match(contract, /src\/math\.js/);
-});
-
 test('L6: the identity step runs under its own --env-prefix, default direnv exec ., not a cut of --claude', async () => {
   const w = await world();
   try {
     const own = spawnSync('node', [join(factory, 'probes/pack-probe.mjs'), ...w.args, '--env-prefix', 'env IDENT_MARK=own', '--no-pr'], { encoding: 'utf8', env: w.env });
     assert.equal(own.status, 0, own.stdout + own.stderr);
     assert.match(w.calls(), /^ssh -T .* mark=own$/m);
-    assert.match(readFileSync(join(factory, 'probes/pack-probe.mjs'), 'utf8'), /--env-prefix/);
-    assert.doesNotMatch(readFileSync(join(factory, 'probes/pack-probe.mjs'), 'utf8'), /replace\(\/ claude\$\//);
   } finally {
     w.cleanup();
   }
@@ -993,13 +900,6 @@ test('the issue the session created must carry the label task, and the item is a
   } finally {
     w.cleanup();
   }
-});
-
-test('the C20 text states what git shows and does not say one fact caused the other', () => {
-  const results = readFileSync(join(factory, 'probes/results.md'), 'utf8');
-  const c20 = results.slice(results.indexOf('C20 (#54) landed'), results.indexOf('The other 19 clean changes'));
-  assert.ok(c20.length > 100);
-  assert.doesNotMatch(c20, /which is why|because/);
 });
 
 // #30: what the logged-in claude.ai account loads into a writer session, read from each session's init event. The

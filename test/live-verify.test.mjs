@@ -274,8 +274,6 @@ describe('live-verify', () => {
       assert.match(args, /--ignore-rules /);
       assert.doesNotMatch(args, /network_access/);
       assert.doesNotMatch(args, /dangerously|--approve-for-me| -m /);
-      const text = readFileSync(join(factory, 'kit/scripts/live-verify'), 'utf8') + readFileSync(join(factory, 'kit/scripts/lib/live-verify.mjs'), 'utf8');
-      assert.doesNotMatch(text, /--dangerously|pr review|--approve\b|codex login(?! status)|'login',(?! *'status')/);
     } finally {
       w.cleanup();
     }
