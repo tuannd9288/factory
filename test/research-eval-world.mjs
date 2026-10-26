@@ -44,7 +44,7 @@ process.stdin.on('end', () => {
   for (let i = 0; i < (step.helpers === undefined ? (arm === 'A' ? 2 : 0) : step.helpers); i += 1) line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent', input: {} }] } });
   for (let i = 0; i < (step.workflow || 0); i += 1) line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Workflow', input: {} }] } });
   for (const l of step.links || []) { fs.mkdirSync(path.dirname(l.from), { recursive: true }); fs.mkdirSync(l.to, { recursive: true }); fs.writeFileSync(path.join(l.to, 'secret.txt'), 'x'); fs.symlinkSync(l.to, l.from); }
-  for (const c of step.calls || []) line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: c.name, input: c.input }] } });
+  for (const c of step.calls || []) line({ type: 'assistant', parent_tool_use_id: c.parent || null, message: { content: [{ type: 'tool_use', name: c.name, input: c.input }] } });
   if (step.parent) line({ type: 'user', parent_tool_use_id: 'toolu_x', message: { content: [] } });
   if (step.hang) { setTimeout(() => process.exit(0), 6000); return; }
   const report = JSON.parse(e.FAKE_REPORTS)[step.task][arm];

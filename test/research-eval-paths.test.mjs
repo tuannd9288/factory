@@ -30,6 +30,7 @@ test('paths inside the session\'s folders are valid: its task\'s folder, its own
 // The runner stops at the first invalid run, so each case is the first session of a world of its own.
 const knip = (w) => join(w.runs, 'issue-70/sources/knip');
 const CASES = [
+  ['a helper\'s Read (an assistant event with a parent_tool_use_id)', () => '/etc/hosts', (p) => ({ calls: [{ ...call('Read', { file_path: p }), parent: 'toolu_helper' }] })],
   ['another session\'s log', (w) => join(w.runs, 're-probe-knip-reader-B-1/run-re-knip-reader-B-1.jsonl'), (p) => ({ calls: [call('Read', { file_path: p })] })],
   ['a ~ path', () => '~/factory-runs/issue-92/report-worker.md', (p) => ({ calls: [call('Read', { file_path: p })] })],
   ['a .. out of the work folder', () => '../re-knip-reader-B-1/notes.txt', (p) => ({ calls: [call('Write', { file_path: p, content: 'x' })] })],
