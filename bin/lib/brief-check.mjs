@@ -23,10 +23,27 @@ export function body(brief) {
   return at < 0 ? brief : `${lines.slice(0, at).join('\n')}\n`;
 }
 
-/** The spans a text puts in double quotes, curly or straight, normalised, in order. An empty span is not a quote. */
+/** Thrown when a paragraph holds an odd number of double quotes, so its quotes cannot be paired (#111). */
+export class UnpairedQuote extends Error {
+  constructor(paragraph) {
+    super(`unpaired double quote in the paragraph: ${squeeze(paragraph)}`);
+    this.paragraph = paragraph;
+  }
+}
+
+/**
+ * The spans a text puts in double quotes, curly or straight, normalised, in order. An empty span is not a quote.
+ * Quotes pair inside one paragraph (lines between blank lines), never across it, and a double quote inside a
+ * Markdown code span is not a quote. A paragraph with an odd count of double quotes is not guessed at: it throws
+ * UnpairedQuote, since any pairing of it could name the wrong words and miss the Human's.
+ */
 export function quotes(text) {
   const spans = [];
-  for (const m of text.matchAll(/“([^”]*)”|"([^"]*)"/g)) spans.push(squeeze(straight(m[1] ?? m[2])));
+  for (const paragraph of text.split(/\n\s*\n/)) {
+    const plain = straight(paragraph.replace(/(`+)[^`]*?\1/g, ' '));
+    if ((plain.match(/"/g) ?? []).length % 2) throw new UnpairedQuote(paragraph);
+    for (const m of plain.matchAll(/"([^"]*)"/g)) spans.push(squeeze(m[1]));
+  }
   return spans.filter(Boolean);
 }
 
@@ -48,7 +65,13 @@ export function check(argv) {
   } catch (error) {
     return { code: 2, out: '', err: `brief-check: cannot read ${error.path ?? 'a file'}: ${error.code ?? error.message}\n` };
   }
-  const found = missing(brief, relay);
+  let found;
+  try {
+    found = missing(brief, relay);
+  } catch (error) {
+    if (!(error instanceof UnpairedQuote)) throw error;
+    return { code: 2, out: '', err: `brief-check: ${error.message}\n` };
+  }
   if (!found.length) return { code: 0, out: 'brief-check: the brief carries every quote of the relay\n', err: '' };
   const lines = found.map(({ value }) => `missing quote: "${value}"`);
   return { code: 1, out: `${lines.join('\n')}\n`, err: '' };
