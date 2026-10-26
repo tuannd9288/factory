@@ -3,8 +3,8 @@
 // carries the orphan's session id, cost or report.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SEAT_JS, fill, until, world } from './seat-world.mjs';
 
@@ -41,6 +41,29 @@ test('two starts at the same moment on a seat with one place left never both run
   const codes = await exits(w, ['a', 'b'].map((tag) => w.args('worker', ['--tag', tag])), hold);
   assert.ok(codes.filter((c) => c === 0).length <= 1, `exit codes ${codes}`);
   assert.ok(liveCount(w.runs, 2) <= 4, 'seat 2 is not over its cap');
+}));
+
+// An ended run: a dead pid, its seat, and a log whose last rate_limit_event gives use, with an mtime minutes ago.
+function ended(dir, tag, seat, use, minutesAgo) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `run-${tag}.pid`), `${spawnSync(process.execPath, ['-e', '']).pid}\n`);
+  writeFileSync(join(dir, `run-${tag}.seat`), `${seat}\n`);
+  const log = join(dir, `run-${tag}.jsonl`);
+  writeFileSync(log, `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: { utilization: use } } } })}\n`);
+  const t = new Date(Date.now() - minutesAgo * 60000);
+  utimesSync(log, t, t);
+}
+
+test('a refused start leaves the earlier run\'s .seat, so its log stays on its seat and seat 1 keeps its stop', () => world(async (w) => {
+  fill(w, 2, 4);
+  ended(w.run, 'worker', 1, 0.75, 1); // the worker's last run ended on seat 1, now past its stop of 0.70
+  ended(join(w.runs, 'issue-3'), 'old', 1, 0.10, 60);
+  const first = w.start('worker');
+  assert.equal(first.code, 2, first.out + first.err);
+  assert.equal(readFileSync(join(w.run, 'run-worker.seat'), 'utf8'), '1\n');
+  const other = w.start('worker', ['--tag', 'other']);
+  assert.equal(other.code, 2, other.out + other.err);
+  assert.match(other.err, /seat 1: seven-day use 0\.75/);
 }));
 
 test('a supervisor killed with SIGKILL leaves a claude that is still counted live and keeps its tag until it ends', () => world(async (w) => {
