@@ -100,6 +100,30 @@ export function quotaSection(rows, { now = Date.now() } = {}) {
   return lines;
 }
 
+/** The five-hour window has no stop in bin/seat; it, and a status-line row (which names no seat), alert from here. */
+export const ALERT_AT = 0.9;
+
+/** The alert lines for the rows: a rejected window, and a window at or above its threshold, when its reset time has not
+ * passed. A seat's seven-day threshold is its stop in bin/seat (SEATS), the point where no new session starts on it. A
+ * row with no windows gives nothing. */
+export function alertLines(rows, { now = Date.now() } = {}) {
+  const out = [];
+  const name = { five_hour: 'five-hour', seven_day: 'seven-day' };
+  for (const r of rows) {
+    const w = r.windows;
+    if (!w) continue;
+    const when = (x) => (x?.resetsAt != null ? ` (resets ${fmt(x.resetsAt * 1000)} UTC)` : '');
+    if (w.rejected && !over(w[w.type], now)) out.push(`factory: quota: ${r.profile}: ${name[w.type] ?? 'a'} window rejected${when(w[w.type])}`);
+    for (const key of ['five_hour', 'seven_day']) {
+      const x = w[key];
+      const stop = key === 'seven_day' && r.seat !== null ? Number(SEATS[r.seat].stop) : ALERT_AT;
+      if (!x || over(x, now) || !(x.use >= stop) || (w.rejected && w.type === key)) continue;
+      out.push(`factory: quota: ${r.profile}: ${name[key]} window at ${percent(x.use)}, at or over ${key === 'seven_day' && r.seat !== null ? "bin/seat's stop of " : ''}${percent(stop)}${when(x)}`);
+    }
+  }
+  return out;
+}
+
 /** The table of role, model and seat for the sessions (the kept records of ledger.keptSessions), with an account where one
  * was given by seat: nothing in a log names the account. */
 export function roleMapLines(kept, accounts = {}) {
