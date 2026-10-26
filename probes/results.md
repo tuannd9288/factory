@@ -626,3 +626,64 @@ unknown.
   frequency was not tied to anything.
 - That the probe item catches a real dropped event: it is shown against mocked streams only, until the next live probe
   run on a new Claude Code version.
+
+## Issue #83: a revert pull request through the gate, factory-scratch, 2026-10-25 UTC
+
+The Lead ran the drill from the factory account (`tuan9288-agent`), with porcelain `gh` and plain `git`. It ran at
+03:44 to 03:46 on 2026-10-26 on the Mac mini's clock (+0700). The times below are UTC.
+
+**The sources:**
+- the Lead's own timestamps, `~/factory-runs/issue-83/drill-times.txt`;
+- the two scripts the Lead ran, kept beside it as the command log (`inputs/drill-commands/drill1.sh`, `drill2.sh`);
+- `gh pr view`, `gh run list` and `gh ruleset view`, read afterwards.
+
+### The change
+
+- factory-scratch#56 added one line to `README.md`, a tier 1 change. It was opened at 20:44:12.
+- The Lead's script armed auto-merge on it with `gh pr merge --auto --merge --match-head-commit`. The arming is in the
+  command log, not in what `gh` printed.
+- It merged at 20:44:32, as merge commit `67043ba`.
+
+### The revert
+
+| Step | Time |
+|---|---|
+| Decision to revert | 20:45:44 |
+| `git revert -m 1 67043ba` on a branch from `main`, pushed | 20:45:47 |
+| factory-scratch#57 opened, its body starting `Reverts #56.` | 20:45:48 |
+| Auto-merge armed by the Lead's script, `gh pr merge --auto --merge --match-head-commit` | 20:45:51 |
+| Seven checks ran, all green (`verify`, `rules`, `red-check`, `verify-trusted`, `review`, `verdict`, `tier`) | 20:45:53 to 20:46:04 |
+| Merged, merge commit `7e9f999` | 20:46:15 |
+
+**How long it took.** From the decision to the revert's merge: 31 seconds. The checks took 11 seconds of it.
+
+**Who merged it.** `gh pr view` names `tuan9288-agent` as the merger of both pull requests. That it was auto-merge
+is an inference: each was armed before its checks ended, #56 merged 4 seconds after its last check and #57 11 seconds
+after its last, and the Lead ran no merge of its own.
+
+**What the ruleset requires.** factory-scratch's ruleset `factory-gate`, read with `gh ruleset view` after the drill,
+requires six of the seven checks: `verify`, `rules`, `red-check`, `verify-trusted`, `review` and `verdict`. It is
+strict, so a branch must be up to date with `main`. It requires no count of approvals, but code-owner review is on:
+a change to a path `.github/CODEOWNERS` gives to `@tuannd9288`, such as `.gate/` or `scripts/`, needs his review.
+`README.md` has no code owner, so the drill needed no approval.
+
+**What Actions ran.** Four workflow runs: `gate` and `gate-trusted` for each pull request, each run 11 to 14
+seconds. The minutes billed were not read; GitHub rounds each job up to a whole minute.
+
+### What it does not prove
+
+- **The reviewer.** factory-scratch's `GATE_REVIEWER` is `stub`, so `review` made no reviewer call. A real reviewer
+  adds its own minutes.
+- **The tier.** The revert was tier 1 and needed no approval. A revert that touches a tier-3 path waits for the
+  Human's approval, like any tier-3 change.
+- **`main` moving.** Nothing else landed during the drill. A revert behind `main` must be brought up to date, which
+  costs a `bin/factory-queue` sweep and a second run of the gate.
+- **A conflict.** It reverted the tip of `main`, so it could not conflict. Reverting an older change can.
+- **`red-check`.** The revert removed a README line, so `No-red:` applied. A revert of a behaviour change must pass
+  `red-check`, or justify its `No-red:`.
+- **A deploy.** A revert on `main` does not undo a deploy; that step is the Human's.
+- **The kit.** factory-scratch runs the kit as installed on 2026-10-21, older than the kit on `main`.
+- **A real defect.** No defect was found or diagnosed. The time starts at the decision, not at the failure, and the
+  commands were written before it: the revert commit is dated one second after the decision.
+- **The ledger.** `bin/factory-ledger` was not run against factory-scratch. The count of reverts is tested on pull
+  requests in `QUERY`'s form.
