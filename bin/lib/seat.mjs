@@ -180,15 +180,16 @@ export function parseArgs(argv) {
   return o;
 }
 
-/** Seat 1's token from its file: newlines stripped. Refuses, naming the path only, when the file is missing or empty. */
+/** Seat 1's token from its file, trailing newlines stripped. Refuses, naming the path only, when the file is missing, empty
+ * or holds any byte outside printable ASCII (0x21-0x7E): such a value would make Node throw an error that quotes it. */
 function readToken(path) {
   let text = '';
   try {
-    text = readFileSync(path, 'utf8').replace(/[\r\n]/g, '');
+    text = readFileSync(path, 'latin1').replace(/[\r\n]+$/, '');
   } catch {
     // Missing or unreadable: the same refusal below.
   }
-  if (!text.trim()) throw new Refused(`seat 1: the token file ${path} is missing or empty`);
+  if (!/^[\x21-\x7e]+$/.test(text)) throw new Refused(`seat 1: the token file ${path} is missing, empty or not printable ASCII`);
   return text;
 }
 
@@ -295,9 +296,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     try {
       process.stdout.write(launch(process.argv.slice(2)));
     } catch (e) {
-      if (!(e instanceof Refused)) throw e;
-      process.stderr.write(`bin/seat: ${e.message}\n`);
-      process.exitCode = 2;
+      // A Node error can quote the environment, so anything but our own refusal prints its code and nothing else.
+      process.stderr.write(`bin/seat: ${e instanceof Refused ? e.message : `failed (${e.code ?? e.name})`}\n`);
+      process.exitCode = e instanceof Refused ? 2 : 1;
     }
   }
 }
