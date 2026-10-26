@@ -217,7 +217,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   field missing or stale, saying so in one line. No job runs it yet; its schedule (launchd, as the agents' account) is
   the Human's to set up.
 - Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or AGENTS.md, and review
-  reads it. A test that reads text stays only when a program in this repository reads those bytes (#112).
+  reads it. A test that reads text stays only when a program in this repository reads those bytes: a parser, a hash a
+  script compares, or a file `onboard` or `kit-update` writes (#112).
 
 | Path | What it is |
 |---|---|
