@@ -25,10 +25,13 @@
 # GATE_REVIEWER picks the reviewer; it is a repository variable, which only an admin sets:
 #   stub    scratch repositories only: scripts/lib/stub-reviewer.mjs, no model
 #   claude  scripts/lib/claude-reviewer.mjs: Claude Code, Opus at max effort, read-only tools, in `review` only, once per head:
-#           an earlier review of this head, base and No-red line (any run of this workflow) is reused, not asked again
+#           an earlier review of this head, base, No-red line and closing issues (any run of this workflow) is reused, not asked
+#           again. Before it, main's scripts read the issues the pull request closes (scripts/lib/acceptance.mjs: gh pr view and
+#           gh issue view, this repository's issues only) and hand them to the reviewer as data; their hash is `acc`. Unreadable
+#           is `review-result: unavailable: acceptance`, with no reviewer call. The stub reads none.
 #   unset   fails closed: no reviewer is configured, so nothing merges on this gate
 # A reviewer's result counts only through scripts/lib/result.mjs: a missing, malformed or unbound one fails. After it, `review`
-# prints the annotation `review-verdict` (head=<sha> base=<sha> pass|block) that `verdict` reads. A reviewer that gave no
+# prints the annotation `review-verdict` (head=<sha> base=<sha> nored=<hash|none> acc=<hash|none> reviewer=<name> pass|block) that `verdict` reads. A reviewer that gave no
 # verdict at all (a usage limit, a bad token, a timeout, a result result.mjs refuses, a reviewer that crashed or is not
 # configured) leaves `review-result: unavailable: <class>` instead and fails: the check is red, `rounds` does not count the
 # head, and `tier` says the reviewer was unavailable. A reviewer output that held a token (exit 4) stays an ordinary red.
@@ -242,14 +245,28 @@ nored=none
 if [ -n "${GATE_BODY_FILE:-}" ] && line=$(grep -E -m1 '^No-red: .{20,}' "$GATE_BODY_FILE"); then
   nored=$(printf '%s' "$line" | node -e 'process.stdout.write(require("crypto").createHash("sha256").update(require("fs").readFileSync(0)).digest("hex").slice(0, 16))')
 fi
+# The issues the pull request closes, read here by main's scripts and handed to the Claude reviewer as data (GATE_ACCEPTANCE_FILE), and
+# their hash, the second half of the reuse key. Unreadable is no verdict at all: unavailable, before any reviewer call.
+acc=none
+if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ]; then
+  accfile=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/acceptance.XXXXXX") || exit 2
+  trap 'rm -f "$result" "$notes" "$accfile"' EXIT
+  if acc=$(node scripts/lib/acceptance.mjs --repo "${GITHUB_REPOSITORY:-}" --pr "${GATE_PR:-}" --out "$accfile"); then
+    export GATE_ACCEPTANCE_FILE=$accfile
+  else
+    echo "::notice title=review-result::unavailable: acceptance"
+    echo "$job: reviewer unavailable (acceptance); the issues the pull request closes could not be read (${acc:-no reason given}), which is not a finding on the change, so this check fails closed"
+    exit 1
+  fi
+fi
 if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
-  if prior=$(node scripts/lib/history.mjs reuse --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork" --nored "$nored" --reviewer "${GATE_REVIEWER:-}" 2>&1); then
+  if prior=$(node scripts/lib/history.mjs reuse --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork" --nored "$nored" --acc "$acc" --reviewer "${GATE_REVIEWER:-}" 2>&1); then
     case "$prior" in
       "reuse "*)
         read -r _ pv rid rest <<<"$prior"
         if [ "$rest" = none ]; then echo "::notice title=review-result::none"; else why=${rest#raise }; echo "::notice title=review-result::raise: ${why//%/%25}"; fi
         echo "review: reused the review of run $rid for this head, base and No-red line; no call made (one call per head)"
-        echo "::notice title=review-verdict::head=$head base=$fork nored=$nored reviewer=${GATE_REVIEWER:-} $pv"
+        echo "::notice title=review-verdict::head=$head base=$fork nored=$nored acc=$acc reviewer=${GATE_REVIEWER:-} $pv"
         [ "$pv" = pass ] && exit 0
         echo "review blocks ${head:0:8} (reused; its findings are in the log of run $rid)"
         exit 1
@@ -290,6 +307,6 @@ code=$?
 [ "$code" -eq 2 ] && { echo "::notice title=review-result::unavailable: malformed"; echo "$job: reviewer unavailable (malformed); the reviewer's result does not count, so this check fails closed"; }
 printf '%s\n' "$checked"
 # review's verdict for verdict to read: fixed text, the SHAs it judged, the No-red line (by hash) and whether it blocks.
-[ "$code" -le 1 ] && echo "::notice title=review-verdict::head=$head base=$fork nored=$nored reviewer=${GATE_REVIEWER:-} $([ "$code" -eq 0 ] && echo pass || echo block)"
+[ "$code" -le 1 ] && echo "::notice title=review-verdict::head=$head base=$fork nored=$nored acc=$acc reviewer=${GATE_REVIEWER:-} $([ "$code" -eq 0 ] && echo pass || echo block)"
 cat "$notes"
 [ "$code" -eq 0 ] || exit 1

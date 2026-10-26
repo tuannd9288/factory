@@ -53,6 +53,8 @@ jobs:
       actions: read
       contents: read
       checks: read
+      issues: read
+      pull-requests: read
     steps:
       - name: Note when the job started
         run: echo "GATE_JOB_START=$(date +%s)" >>"$GITHUB_ENV"
