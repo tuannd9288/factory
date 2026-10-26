@@ -1,8 +1,10 @@
 // bin/seat (#91): the one command that starts an unattended `claude -p` session. This file holds the role presets: the
 // arguments each role gives claude. They come from the hand-written launchers of ~/factory-runs, role by role (see
 // PRESETS). Nothing here reads a credential.
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, extname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/scripts/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. */
@@ -146,4 +148,156 @@ export function chooseSeat({ runs, resumeSeat = null }) {
     else return { seat, reasons };
   }
   return { seat: null, reasons };
+}
+
+class Refused extends Error {}
+
+const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
+const VALUE = { '--run': 'run', '--work': 'work', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
+const LIST = { '--skill': 'skills', '--allow': 'allow', '--add-dir': 'addDirs' };
+
+/** The arguments of bin/seat as an object; a Refused error, in a sentence, for anything else. */
+export function parseArgs(argv) {
+  const o = { skills: [], allow: [], addDirs: [] };
+  const rest = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a in VALUE || a in LIST) {
+      if (i + 1 >= argv.length) throw new Refused(`${a} needs a value\n${USAGE}`);
+      if (a in LIST) o[LIST[a]].push(argv[++i]);
+      else o[VALUE[a]] = argv[++i];
+    } else if (a.startsWith('--')) throw new Refused(`unknown option ${a}\n${USAGE}`);
+    else rest.push(a);
+  }
+  if (rest.length !== 2) throw new Refused(USAGE);
+  [o.role, o.brief] = rest;
+  if (!o.run || !o.work) throw new Refused(`--run and --work are both needed\n${USAGE}`);
+  if (o.seat !== undefined && !(o.seat in SEATS)) throw new Refused(`seat ${o.seat} does not exist; the seats are 1 and 2`);
+  if (o.seat !== undefined) o.seat = Number(o.seat);
+  if (o.maxTurns !== undefined && !/^[1-9][0-9]*$/.test(o.maxTurns)) throw new Refused('--max-turns needs a whole number of at least 1');
+  if (o.resume && o.seat === undefined) throw new Refused('a resume stays on its seat; give --seat <n>, the seat the session ran on');
+  if (o.tag !== undefined && !/^[A-Za-z0-9._-]+$/.test(o.tag)) throw new Refused('--tag takes letters, digits, dot, dash and underscore');
+  return o;
+}
+
+/** Seat 1's token from its file: newlines stripped. Refuses, naming the path only, when the file is missing or empty. */
+function readToken(path) {
+  let text = '';
+  try {
+    text = readFileSync(path, 'utf8').replace(/[\r\n]/g, '');
+  } catch {
+    // Missing or unreadable: the same refusal below.
+  }
+  if (!text.trim()) throw new Refused(`seat 1: the token file ${path} is missing or empty`);
+  return text;
+}
+
+const onPath = (name, PATH) => (PATH ?? '').split(':').some((d) => d && existsSync(join(d, name)));
+
+/** Starts a session in the background and returns what to print. The session runs under a detached supervisor of this
+ * file, which waits for it and appends its record; the supervisor's pid is the one in run-<tag>.pid. */
+export function launch(argv, env = process.env) {
+  const o = parseArgs(argv);
+  if (!PRESETS[o.role]) throw new Refused(`unknown role ${o.role}; the roles are ${ROLES.join(', ')}`);
+  const home = env.HOME;
+  const runs = env.FACTORY_RUNS ?? join(home, 'factory-runs');
+  const profiles = env.AGENT_PROFILES ?? join(home, '.agent-profiles');
+  const state = env.FACTORY_STATE ?? join(home, '.local/state/factory');
+  const [run, work, brief] = [resolve(o.run), resolve(o.work), resolve(o.brief)];
+  for (const [what, path] of [['run folder', run], ['work folder', work]]) if (!existsSync(path) || !statSync(path).isDirectory()) throw new Refused(`the ${what} ${path} is not a folder`);
+  if (!existsSync(brief) || !statSync(brief).isFile()) throw new Refused(`the brief ${brief} is not a file`);
+  const tag = o.tag ?? (o.resume ? basename(brief, extname(brief)) : o.role);
+  const pidFile = join(run, `run-${tag}.pid`);
+  if (existsSync(pidFile) && alive(Number(readFileSync(pidFile, 'utf8').trim()))) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
+  const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null });
+  if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
+  const tokenPath = join(profiles, 'seats/1/oauth-token');
+  const token = seat === 1 ? readToken(tokenPath) : null;
+
+  const child = { ...env, GH_CONFIG_DIR: join(run, '.gh-empty'), CLAUDE_CONFIG_DIR: join(profiles, 'seats', String(seat), 'claude') };
+  delete child.CLAUDE_CODE_OAUTH_TOKEN;
+  if (token !== null) child.CLAUDE_CODE_OAUTH_TOKEN = token;
+  mkdirSync(child.GH_CONFIG_DIR, { recursive: true });
+  const args = buildArgs({ role: o.role, run, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
+  const spec = {
+    cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
+    role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
+  };
+  for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
+  const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
+  if (!sup.pid) throw new Refused(`could not start the supervisor of run-${tag}`);
+  sup.unref();
+  writeFileSync(pidFile, `${sup.pid}\n`);
+  writeFileSync(join(run, `run-${tag}.seat`), `${seat}\n`);
+  return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
+}
+
+/** The record of a session that has ended: spec is what launch decided, text the session's log, end how it ended. */
+export function recordOf(spec, text, { code, signal, error = null, end = new Date() }) {
+  const events = text.split('\n').flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  });
+  const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
+  const result = events.filter((e) => e.type === 'result').pop() ?? null;
+  const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
+  return {
+    session: result?.session_id ?? init?.session_id ?? spec.resume ?? null,
+    role: spec.role, seat: spec.seat, tag: spec.tag, run: spec.run,
+    model: models.length ? models.join(',') : (init?.model ?? spec.model),
+    start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
+    turns: result?.num_turns ?? null, duration_ms: result?.duration_ms ?? null, total_cost_usd: result?.total_cost_usd ?? null,
+    structured: result?.structured_output ?? null,
+    ended: result ? (result.subtype ?? 'result') : 'no-result',
+    exitCode: code ?? null, signal: signal ?? null, ...(error ? { error } : {}),
+  };
+}
+
+/** The detached half: runs the session with the brief on stdin and its log and errors in the run folder, forwards a
+ * signal it gets to the session, and when the session ends appends its record to $FACTORY_STATE/sessions.jsonl. */
+function supervise() {
+  const spec = JSON.parse(process.env.FACTORY_SEAT_SUPERVISE);
+  delete process.env.FACTORY_SEAT_SUPERVISE;
+  const [stdin, stdout, stderr] = [openSync(spec.brief, 'r'), openSync(spec.jsonl, 'w'), openSync(spec.err, 'w')];
+  const [cmd, ...args] = spec.cmd;
+  const child = spawn(cmd, args, { cwd: spec.cwd, env: process.env, stdio: [stdin, stdout, stderr], detached: true });
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+    process.on(sig, () => {
+      try {
+        process.kill(-child.pid, sig);
+      } catch {
+        child.kill(sig);
+      }
+    });
+  }
+  let done = false;
+  const finish = (code, signal, error = null) => {
+    if (done) return;
+    done = true;
+    for (const fd of [stdin, stdout, stderr]) closeSync(fd);
+    try {
+      mkdirSync(spec.state, { recursive: true });
+      appendFileSync(join(spec.state, 'sessions.jsonl'), `${JSON.stringify(recordOf(spec, readFileSync(spec.jsonl, 'utf8'), { code, signal, error }))}\n`);
+    } catch (e) {
+      appendFileSync(spec.err, `bin/seat: could not write the record: ${e.code ?? 'error'}\n`);
+    }
+  };
+  child.on('error', (e) => finish(null, null, `${e.syscall ?? 'spawn'} ${e.code ?? 'failed'}`));
+  child.on('close', finish);
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv[2] === '--supervise') supervise();
+  else {
+    try {
+      process.stdout.write(launch(process.argv.slice(2)));
+    } catch (e) {
+      if (!(e instanceof Refused)) throw e;
+      process.stderr.write(`bin/seat: ${e.message}\n`);
+      process.exitCode = 2;
+    }
+  }
 }

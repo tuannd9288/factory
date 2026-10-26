@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# bin/seat <role> <brief> --run <run folder> --work <work folder> [options] (#91): starts one unattended `claude -p` session
+# in the background, on a seat, with the role's preset, and appends its record to $FACTORY_STATE/sessions.jsonl when it ends.
+# Exits 2 on a usage error, a missing seat token or no free seat. See bin/lib/seat.mjs.
+exec node "$(dirname "$0")/lib/seat.mjs" "$@"
