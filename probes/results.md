@@ -476,3 +476,43 @@ The three live sessions cost $0.18 at API prices:
 - How Herdr would report an interactive Claude Code session.
 - That `--disallowedTools` refuses a call in a pane: no call tried one.
 - The pull-request session through a pane.
+
+## The cloud session trial (issue #93), Claude Code on the web, 2026-10-26
+
+The Human's words, verbatim, relayed by Colly:
+- It started on "Khoan, chạy cloudsesion được thì chạy đi, vì đang có 250$ credit."
+- It ended on "Hiểu, không kết nối được gh của tau đúng không, bỏ qua cloud session."
+
+Both are on #93 (issuecomment-6401698168, issuecomment-6402229414).
+
+**The question.** Can a cloud session build a code-only issue end to end? Four checks: clone the private repository, run verify, push the branch, open the pull request.
+
+**The run.**
+- **Opened** by the Lead on the MacBook at 01:50 +07, from `~/Desktop/TuanHub/tools/factory` (remote `tuannd9288/factory`). The terminal output of `claude --cloud` is kept at `factory:~/factory-runs/issue-93/inputs/cloud-start.log`.
+- **Session:** `session_01Q7W7iTVUbxERAodPZn5XQx`.
+- **The brief** is kept at `factory:~/factory-runs/issue-93/BRIEF-cloud.md`.
+
+| Check | Result |
+|---|---|
+| Clone the private repository | yes |
+| Run verify | ran: "tests 709 fail 5" |
+| Push the branch | no |
+| Open the pull request | no, since nothing was pushed |
+
+- **Verify's five failures.**
+  - One came from the session's own change, `packs/pstack/test/pstack.test.mjs:47`, and the session fixed it.
+  - Four fail on `main` (`14c54f1`) in that environment, because the session runs as root:
+    - `test/kit.test.mjs`, "fails a test that cannot load at the base";
+    - `test/kit.test.mjs`, "fails a test file that selects no test";
+    - two #24 probes, on EACCES.
+- **The push.** The cloud clone had no `origin` remote: `git remote -v` printed nothing, and the session did not add one. Its branch, `claude/issue-93-remove-repeated-rules`, exists only in the cloud.
+
+**Evidence.** The session's own final report, which the Human pasted to Colly. Colly's summary of it is verbatim on #93 (issuecomment-6402229414). The Lead did not read the session itself. `claude --teleport <id>`, which `cloud-start.log` names, was not tried, since the Human ended the trial.
+
+**Cost.** Not read. The session ran on the claude.ai account of the Lead's own pane.
+
+**Outcome.** #93 was built instead by a worker on seat 2. The cloud result served only as a comparison in the review brief. No cloud session runs again unless the Human says so. Colly notes two needs for a later try: a repository the cloud clone has as a GitHub remote, and a verify that passes as root.
+
+**What it does not prove.**
+- **Why the clone had no remote.** It may be the cloud environment's setup, or the GitHub App's access. Neither was read.
+- **The root failures.** Whether these four are the only tests that fail as root.

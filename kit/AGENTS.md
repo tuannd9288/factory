@@ -3,7 +3,8 @@
 <One paragraph: what this repository is, who uses it, where it runs.>
 
 This repository is in the factory (`tuannd9288/factory`). Its gate lives here, in `scripts/`, `.gate/` and
-`.github/`; this file is the rules an agent follows in it. At most 150 lines, counted by `scripts/verify`.
+`.github/`; this file is the rules an agent follows in it. At most 150 lines, and
+`CLAUDE.md` is `@AGENTS.md`, both checked by `scripts/verify`.
 
 ## Commands
 
@@ -24,7 +25,7 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
 ## How a change lands
 
 1. One task is one issue labelled `task`, one branch, one worktree and one pull request whose body says
-   `Closes #<issue>`; the ledger counts the task from that label. Never push to `main`; the ruleset refuses it.
+   `Closes #<issue>`; the ledger counts the task from that label. Never push to `main` or delete it; the ruleset refuses it.
 2. Before writing, run `scripts/tier` on the files you expect to touch. Tier 2 or 3: commit the failing test
    first, alone, with the trailer `Failing-test: <test command>`. Later commits never edit those test lines.
 3. Every source change carries a test that fails without it: `red-check` lays the new or changed tests onto
@@ -45,6 +46,7 @@ push; CI runs `main`'s copies of both on your change, as the one check `verify`.
    change. The reviewer may raise a change to tier 3 (label `raised`), never lower one. His approval holds while the
    patch is unchanged, as when the queue merges `main` in; a new patch needs a new one. A label never lowers a tier.
    A red `tier` that says `review is red; tier follows it` is not his wait: re-run the failed jobs, never `review` alone.
+   One that waits for his approval is his wait: never re-run it; the queue re-runs it after he approves.
 6. A blocking finding is fixed by a new commit. A finding you dispute goes to the Human: label the pull request
    `needs-human` and put your recommended answer in it. At the third head commit judged red, `rounds` labels the
    pull request `needs-human`, which makes it tier 3: the Human decides.
@@ -67,8 +69,7 @@ merged pull request, whether a verdict covered its head, and the weekly digest l
 
 ## What the Human keeps
 
-- Tier 3: changes to a path in `.gate/protected`: `.github/`, `.gate/`, `.githooks/`, `.claude/`, `scripts/`,
-  `AGENTS.md`, `CLAUDE.md`, and the test, lint and type-check configuration.
+- Tier 3: changes to a path in `.gate/protected`.
 - A pull request stuck after three rounds (`needs-human`), with a recommended answer in it.
 - Every deploy. Nothing here deploys without him.
 
@@ -79,7 +80,6 @@ answer; a reversible question never blocks the work.
 
 | Rule | Enforced by |
 |---|---|
-| Never push or force-push `main`, never delete it | ruleset on `main` |
 | Checks green on the exact head commit before merge | ruleset: `verify`, `review`, `verdict`, `tier` pinned to GitHub Actions, branch up to date |
 | No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `scripts/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
 | A new test fails at the base and passes at the head | `red-check`, inside `verify` |
@@ -94,11 +94,10 @@ answer; a reversible question never blocks the work.
 | Auto-merge armed only while a live PASS or PASS+NOTES covers the head or its patch; disarmed before a new patch is pushed | `scripts/live-verify --covered`; the ledger lists each merged pull request no verdict covered |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
 | Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
-| No force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`), and `.claude/settings.json` deny rules |
+| No rewrite of a pushed commit (rebase, amend) and no force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`), and `.claude/settings.json` deny rules |
 | No `--no-verify`, tags, releases; no reads of `.env` or of the Human's own Claude Code and Cursor profiles (`~/.claude*`, `~/.cursor/`), whose transcripts are his, or of the verifier's Codex profile, which holds its login | `.claude/settings.json` deny rules, in Claude Code only; for tags, and for a release that would create one, also the ruleset `factory-tags`; a draft is not refused |
 | Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
 | A candidate's code runs only in `gate.yml`'s `verify`: on `pull_request`, which cannot write `main`'s Actions cache, never under `pull_request_target`; on a GitHub-hosted runner, never on a self-hosted one that also runs `main`'s or a deploy's jobs; with no secret and a read-only token | the factory's tests check the kit's workflows. A pull request that changes `gate.yml` runs its own copy for its `verify`; it is tier 3, and the Human reads that file before approving |
-| `AGENTS.md` at most 150 lines; `CLAUDE.md` is `@AGENTS.md` | `scripts/verify` (`instructions`) |
 
 A rule with no enforcer goes here as `prose` and gets one, or is deleted, within 30 days.
 
