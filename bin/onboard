@@ -10,7 +10,9 @@
 # own AGENTS.md or CLAUDE.md is refused without it. Every other file the repository already has is kept, byte for byte:
 # the kit ships no scripts/ file of a repository's and no .githooks/, so its own scripts/verify, helpers and hooks stay.
 # A repository with its own scripts/verify gets the adapter lines at the end of the .gate/config.sh the kit lays
-# (bin/lib/adapter.mjs): GATE_NATIVE names the verify, and gate_fast calls its .githooks/pre-commit.
+# (bin/lib/adapter.mjs): GATE_NATIVE names the verify, and gate_fast calls its .githooks/pre-commit. A .claude/settings.json
+# it has gets the kit's deny lines it lacks inserted as text (bin/lib/settings.mjs), every other byte kept; a shape that
+# cannot take them is refused before anything is written and the clone removed. With none, the pack composes the file.
 # --pack <name> chooses the way of working the kit is composed with (packs/<name>/, bin/lib/pack.mjs), or `none` for the
 # core alone; the default is the repository's own .gate/pack, else pstack. The choice is written to .gate/pack.
 # --module <name> (repeatable) turns on a module (modules/<name>/, bin/lib/module.mjs): its files are copied into the
@@ -131,6 +133,23 @@ if [ -n "$theirs" ] && [ -z "$own" ]; then
   echo "is removed and nothing else was done"
   exit 2
 fi
+# The repository's own .claude/settings.json gets the kit's deny lines as text (bin/lib/settings.mjs); a shape the lines
+# cannot be added to without touching other bytes is told now, before anything is written.
+if [ -L "$dest/.claude/settings.json" ]; then
+  rm -rf "$dest"
+  echo "onboard: .claude/settings.json is a link, which the kit will not write through; the clone is removed and nothing else was done"
+  exit 2
+fi
+if [ -f "$dest/.claude/settings.json" ]; then
+  trial=$(mktemp)
+  cp "$dest/.claude/settings.json" "$trial"
+  if ! why=$(node "$factory/bin/lib/settings.mjs" add "$trial" "$factory/kit/.claude/settings.json"); then
+    rm -rf "$dest" "$trial"
+    echo "onboard: .claude/settings.json: ${why#settings: $trial: }; the clone is removed and nothing else was done"
+    exit 2
+  fi
+  rm -f "$trial"
+fi
 
 profile=$profiles/$owner/$name/claude
 # The profile's settings.json is the one place that turns off what the claude.ai account loads into every session: its
@@ -173,6 +192,7 @@ trap 'rm -rf "$lists"; rm -f "$composed" "$module_files"' EXIT
 (cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
 : >"$lists/kept"
 : >"$lists/replaced"
+: >"$lists/merged"
 had_config=0
 [ -e .gate/config.sh ] && had_config=1
 while IFS= read -r path; do
@@ -182,6 +202,12 @@ while IFS= read -r path; do
         # Removed first: cp would write through a link (a CLAUDE.md linked to AGENTS.md) into the file it names.
         echo "$path" >>"$lists/replaced"
         rm -f "$path"
+        ;;
+      .claude/settings.json)
+        # The repository's own file keeps every byte; the kit's deny lines it lacks are inserted (checked above).
+        node "$factory/bin/lib/settings.mjs" add "$path" "$factory/kit/$path" >/dev/null
+        echo "$path" >>"$lists/merged"
+        continue
         ;;
       *)
         echo "$path" >>"$lists/kept"
