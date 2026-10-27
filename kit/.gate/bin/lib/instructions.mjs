@@ -1,0 +1,72 @@
+// A repository's instruction files, read the same way by .gate/bin/verify (the working tree) and .gate/bin/verify-trusted
+// (the candidate's git objects, before main's protected files are laid over it). The kit owns one marked block at the
+// start of the root AGENTS.md, after an optional title line; the repository owns every byte after it.
+//   node instructions.mjs <command> ...
+// Exit 0 fine, 1 on a problem, 2 when something cannot be read.
+
+export const BEGIN = '<!-- factory:gate:begin -->';
+export const END = '<!-- factory:gate:end -->';
+
+function fail(problem, message) {
+  return Object.assign(new Error(message), { problem });
+}
+
+const blank = (line) => /^\s*$/.test(line);
+
+/** The head of a text: its title line (line 1, a level-1 heading) and the blank lines after it, or just the blank
+ * lines at its start; only a line that ends in a newline counts. Returns how many lines it takes. */
+function headLines(lines) {
+  const whole = lines.length - 1;
+  let n = whole > 0 && /^# \S/.test(lines[0]) ? 1 : 0;
+  while (n < whole && blank(lines[n])) n += 1;
+  return n;
+}
+
+/** Where the block is: { ok: true, head, block, tail } with head + block + tail the text, or { ok: false, problem }:
+ * missing, malformed, duplicate or not-at-start. A marker is a whole line; a code fence does not hide one. */
+export function splitGate(text) {
+  const lines = String(text).split('\n');
+  const begins = [];
+  const ends = [];
+  lines.forEach((line, i) => {
+    if (line === BEGIN) begins.push(i);
+    if (line === END) ends.push(i);
+  });
+  if (!begins.length && !ends.length) return { ok: false, problem: 'missing' };
+  if (begins.length > 1 || ends.length > 1) return { ok: false, problem: 'duplicate' };
+  if (begins.length !== 1 || ends.length !== 1 || ends[0] < begins[0]) return { ok: false, problem: 'malformed' };
+  const [b] = begins;
+  const [e] = ends;
+  const before = lines.slice(0, b);
+  if (b && headLines([...before, '']) !== before.length) return { ok: false, problem: 'not-at-start' };
+  const head = b ? `${before.join('\n')}\n` : '';
+  const block = lines.slice(b, e + 1).join('\n') + (e + 1 < lines.length ? '\n' : '');
+  const tail = lines.slice(e + 1).join('\n');
+  return { ok: true, head, block, tail };
+}
+
+/** The text with the kit's block in it: right after the head, a blank line between the head and the block, one after.
+ * A text that already starts with exactly this block comes back unchanged. Throws, with .problem, on CRLF, on a block
+ * that is not this one, and on any other marker line. */
+export function insertGate(text, block) {
+  if (text.includes('\r')) throw fail('crlf', 'the file has CRLF line ends; the block would mix them (convert them first)');
+  const found = splitGate(text);
+  if (found.ok) {
+    if (found.block === block) return text;
+    throw fail('altered', 'the file has a Gate block that is not the kit\'s');
+  }
+  if (found.problem !== 'missing') throw fail(found.problem, `the file has Gate markers and they are ${found.problem}`);
+  const lines = text.split('\n');
+  const n = headLines(lines);
+  const head = n ? `${lines.slice(0, n).join('\n')}\n` : '';
+  const rest = lines.slice(n).join('\n');
+  const separator = head && !blank(lines[n - 1]) ? '\n' : '';
+  return head + separator + block + (rest === '' ? '' : '\n') + rest;
+}
+
+/** The text with its block replaced by `block`; the head and the tail are not touched. */
+export function replaceGate(text, block) {
+  const found = splitGate(text);
+  if (!found.ok) throw fail(found.problem, `the file's Gate block is ${found.problem}`);
+  return found.head + block + found.tail;
+}
