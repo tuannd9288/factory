@@ -88,6 +88,20 @@ test('a pull request merged by rule after two judged commits: two rounds, not fi
   assert.equal(row.hours, 2);
 });
 
+test('a merge by the agents\' login without auto-merge is a team merge; only the Human\'s own merge, or an unknown actor, is a touch', () => {
+  const opts = { human: 'boss', costs: null, profile: false };
+  const merged = (actor) =>
+    rowOf('o/r', pr({ mergedAt: '2026-10-20T11:00:00Z', timelineItems: { nodes: [{ __typename: 'MergedEvent', ...(actor ? { actor: { login: actor } } : {}) }] } }), opts);
+  assert.equal(merged('agent').touched, false);
+  assert.equal(merged('agent').touchedWhy, '');
+  assert.equal(merged('boss').touchedWhy, 'manual merge');
+  assert.equal(merged('BOSS').touchedWhy, 'manual merge');
+  assert.equal(merged(null).touchedWhy, 'manual merge');
+  // Auto-merge armed by an agent stays no touch whoever the merge event names.
+  const auto = rowOf('o/r', pr({ mergedAt: '2026-10-20T11:00:00Z', timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'MergedEvent', actor: { login: 'boss' } }] } }), opts);
+  assert.equal(auto.touched, false);
+});
+
 test('the Human is counted as touching a pull request he approved, labelled needs-human, or merged by hand', () => {
   const opts = { human: 'boss', costs: null, profile: false };
   assert.equal(rowOf('o/r', pr({ reviews: { nodes: [{ author: { login: 'boss' }, state: 'APPROVED' }] } }), opts).touchedWhy, 'reviewed');
