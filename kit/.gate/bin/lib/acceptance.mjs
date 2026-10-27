@@ -4,13 +4,15 @@
 //           the first 16 hex characters of a sha256 of that file's content, or `none` when it names no issue at all
 //   exit 3  unreadable (gh failed, or printed what is not the recorded shape): one line `acceptance: <why>`, no file
 //   exit 2  usage
-// Two porcelain commands only, never `gh api`: `gh pr view <n> --json closingIssuesReferences`, then for each reference to
-// an issue of this repository `gh issue view <n> --json number,title,labels,body`. A reference to another repository is named in
+// Two porcelain commands only, never `gh api`: `gh pr view <n> --json closingIssuesReferences,body`, then for each reference
+// to an issue of this repository `gh issue view <n> --json number,title,labels,body`. The references are the closing ones and
+// the issue the body's `Issue: #<n>` line names (prbody.mjs), once each; `Issue: none` or no line adds none. A reference to another repository is named in
 // `elsewhere` and its text is never fetched. The body is cut at 30,000 characters (`length` keeps the full size). Nothing from
 // the candidate's tree reaches this: the workflow runs it in main's checkout, with the job's read-only token.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
+import { issue as issueLine } from './prbody.mjs';
 
 export const BODY_CAP = 30_000;
 const args = process.argv.slice(2);
@@ -39,13 +41,19 @@ const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 const isNumber = (v) => Number.isInteger(v) && v > 0;
 const text = (v) => typeof v === 'string';
 
-const listing = gh('pr', 'view', pr, '--repo', repo, '--json', 'closingIssuesReferences');
-if (!isObject(listing) || !Array.isArray(listing.closingIssuesReferences)) fail('gh pr view did not print closingIssuesReferences as a list');
+const listing = gh('pr', 'view', pr, '--repo', repo, '--json', 'closingIssuesReferences,body');
+if (!isObject(listing) || !Array.isArray(listing.closingIssuesReferences) || !text(listing.body)) fail('gh pr view did not print closingIssuesReferences as a list and the body as text');
+
+// The issue the body names in its `Issue: #<n>` line is read as if the pull request closed it, whatever it closes.
+const named = issueLine(listing.body);
+const [owner, name] = repo.split('/');
+const references = [...listing.closingIssuesReferences];
+if (named.ok && named.kind === 'number') references.push({ number: named.number, repository: { name, owner: { login: owner } } });
 
 const issues = [];
 const elsewhere = [];
 const seen = new Set();
-for (const ref of listing.closingIssuesReferences) {
+for (const ref of references) {
   if (!isObject(ref) || !isNumber(ref.number) || !isObject(ref.repository) || !text(ref.repository.name) || !isObject(ref.repository.owner) || !text(ref.repository.owner.login))
     fail('a closing issue reference is not number and repository.owner.login/name');
   const where = `${ref.repository.owner.login}/${ref.repository.name}`;

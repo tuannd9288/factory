@@ -462,13 +462,12 @@ describe('review, verdict, tier and rounds', () => {
         'case "$*" in *itemTypes:*LABELED_EVENT*) case "$*" in *"actor{login}"*) ;; *) echo "fake gh: the label query does not ask for actor{login}" >&2; exit 1 ;; esac ;; esac',
         'case "$*" in',
         // The review job is found through the run (99) and its annotations through the job's id (501), never by name.
-        // The closing issues, as gh prints them (2026-10-26): porcelain commands only. None unless a test writes closing.json.
-        '  "pr view 7 --repo o/app --json closingIssuesReferences") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; cat "$FAKE/closing.json" 2>/dev/null || echo \'{"closingIssuesReferences":[]}\' ;;',
+        // The body and closing issues, as gh prints them (2026-10-26): porcelain commands only, read by acceptance.mjs and by tier's
+        // claim check (#133). prview.json is a test's own answer; else closing.json; else no closing issue and `Issue: none`.
+        '  "pr view 7 --repo o/app --json closingIssuesReferences,body") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; if [ -e "$FAKE/prview.json" ]; then cat "$FAKE/prview.json"; else cat "$FAKE/closing.json" 2>/dev/null || printf \'%s\\n\' \'{"body":"Issue: none\\n","closingIssuesReferences":[]}\'; fi ;;',
         '  "issue view "*" --repo o/app --json number,title,labels,body") echo "issue view $3" >>"$FAKE/ghlog"; cat "$FAKE/issue-$3.json" ;;',
         // A test that moves something while a job waits leaves $FAKE/mover.sh, which runs once at the first listing.
         '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
-        // The pull request's body and closing issues, as tier reads them (#133): no Issue line unless a test writes prview.json.
-        '  "pr view 7 --repo o/app --json closingIssuesReferences,body") cat "$FAKE/prview.json" 2>/dev/null || printf \'%s\\n\' \'{"body":"Issue: none\\n","closingIssuesReferences":[]}\' ;;',
         '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
         '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
         '  *check-runs/777/annotations*) cat "$FAKE/ann777.json" 2>/dev/null || echo "[]" ;;',
@@ -1316,7 +1315,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
   // #96: the issues the pull request closes, read by .gate/bin/review with gh porcelain before the reviewer runs.
   const REF = (number, owner = 'o', name = 'app') => ({ id: `I_${number}`, number, repository: { id: 'R_x', name, owner: { id: 'U_x', login: owner } }, url: `https://github.com/${owner}/${name}/issues/${number}` });
   const ISSUE = (number, extra = {}) => ({ body: '## Acceptance\n\n- Refuse an empty name.\n', labels: [{ id: 'LA_1', name: 'task', description: '', color: 'ffffff' }], number, title: 'Initials', ...extra });
-  const closing = (...refs) => write(fake, { 'closing.json': JSON.stringify({ closingIssuesReferences: refs }), ghlog: '' });
+  const closing = (...refs) => write(fake, { 'closing.json': JSON.stringify({ closingIssuesReferences: refs, body: 'Issue: none\n' }), ghlog: '' });
   const briefSeen = () => readFileSync(join(fake, 'brief'), 'utf8');
   const ghLog = () => readFileSync(join(fake, 'ghlog'), 'utf8').split('\n').filter(Boolean);
   const claudeCalls = () => readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length;
