@@ -1,8 +1,10 @@
 // A repository's instruction files, read the same way by .gate/bin/verify (the working tree) and .gate/bin/verify-trusted
 // (the candidate's git objects, before main's protected files are laid over it). The kit owns one marked block at the
 // start of the root AGENTS.md, after an optional title line; the repository owns every byte after it.
-//   node instructions.mjs <command> ...
+//   node instructions.mjs section <file>   the kit's gate-section.md is one well-formed block within the kit's budget
 // Exit 0 fine, 1 on a problem, 2 when something cannot be read.
+import { readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export const BEGIN = '<!-- factory:gate:begin -->';
 export const END = '<!-- factory:gate:end -->';
@@ -111,3 +113,44 @@ export function sizeProblems(text) {
   if (lines <= MAX_LINES && bytes <= MAX_BYTES) return [];
   return [`AGENTS.md has ${lines} lines (at most ${MAX_LINES}) and ${bytes} bytes (at most ${MAX_BYTES}): the kit does not shorten it; the repository does`];
 }
+
+/** Every kit file the Gate block names. The check wants each one a regular file; it reads no link of the repository's. */
+export const REQUIRED = [
+  '.gate/bin/setup',
+  '.gate/bin/verify',
+  '.gate/bin/red-check',
+  '.gate/bin/tier',
+  '.gate/enforced-rules.md',
+  '.gate/gate-section.md',
+  '.claude/skills/gate-red/SKILL.md',
+];
+
+/** The kit's canonical block, as .gate/gate-section.md holds it: one well-formed block and nothing else. With
+ * { budget: true } (the factory's own check) it also fits what leaves a repository room: 26 lines, 3072 bytes. */
+export function sectionProblems(text, { budget = false } = {}) {
+  const found = splitGate(text);
+  if (!found.ok) return [`the Gate block is ${found.problem}`];
+  if (found.head !== '' || found.tail !== '') return ['the file holds text outside the Gate block'];
+  if (budget && (countLines(text) > 26 || Buffer.byteLength(text) > 3072)) return [`the Gate block has ${countLines(text)} lines and ${Buffer.byteLength(text)} bytes; at most 26 and 3072, so a repository keeps room under 150 lines and 32 KiB`];
+  return [];
+}
+
+function main([command, ...rest]) {
+  if (command === 'section' && rest.length === 1) {
+    let text;
+    try {
+      text = readFileSync(rest[0], 'utf8');
+    } catch (error) {
+      console.log(`instructions: could not read ${rest[0]}: ${error.code ?? error.message}`);
+      return 2;
+    }
+    const problems = sectionProblems(text, { budget: true });
+    for (const p of problems) console.log(`instructions: ${p}`);
+    return problems.length ? 1 : 0;
+  }
+  console.log('usage: instructions.mjs section <file>');
+  return 2;
+}
+
+// Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
