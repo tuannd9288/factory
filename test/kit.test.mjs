@@ -1041,6 +1041,19 @@ describe('review, verdict, tier and rounds', () => {
     assert.match(out.out, /^tier 3\n {2}label needs-human/);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
   });
+  test('review waits for verify as long as .gate/config.sh says it may run, and fails closed on a value it cannot read', () => {
+    const file = join(trusted, '.gate/config.sh');
+    const was = readFileSync(file, 'utf8');
+    try {
+      writeFileSync(file, `${was}\nGATE_VERIFY_TIMEOUT=abc\n`);
+      const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'stub', ...pr });
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /GATE_VERIFY_TIMEOUT/);
+      assert.doesNotMatch(out.out, /review-verdict/);
+    } finally {
+      writeFileSync(file, was);
+    }
+  });
   test('the review wait is GATE_REVIEW_WAIT, which GATE_WAIT for verify does not shorten', () => {
     labels();
     reviewJob('in_progress');
