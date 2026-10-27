@@ -1,4 +1,4 @@
-// The one change a module makes to the kit's red-check (#71): where scripts/lib/deletion.mjs exists, a source change with
+// The one change a module makes to the kit's red-check (#71): where .gate/bin/lib/deletion.mjs exists, a source change with
 // no test goes to it first. And the proof that off is off: a repository without the module gets main's verdicts, byte for
 // byte (main's red-check and prove-check are kept in test/fixtures, as e65c3c8 had them), calls neither the module's
 // script nor npx, and its prove-check --all runs main's fixtures and no others.

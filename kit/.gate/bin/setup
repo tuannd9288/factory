@@ -11,7 +11,11 @@ if [ -z "$(git config --local --get core.hooksPath)" ] && [ ! -d .githooks ]; th
   git config core.hooksPath .gate/hooks || exit 1
   echo "setup: hooks from .gate/hooks"
 else
-  echo "setup: hooks left as they are ($(git config --local --get core.hooksPath || echo "the repository's own"))"
+  if [ -n "$(git config --local --get core.hooksPath)" ]; then
+    echo "setup: hooks left as they are ($(git config --local --get core.hooksPath))"
+  else
+    echo "setup: hooks unset; the repository's own setup sets them"
+  fi
 fi
 if [ "${1:-}" = --ci ]; then
   . .gate/config.sh || exit 2

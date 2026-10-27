@@ -1162,7 +1162,7 @@ describe('review, verdict, tier and rounds', () => {
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
   });
 
-  // The Claude Code reviewer through scripts/review, and verdict reading review's result: one reviewer call per pull request.
+  // The Claude Code reviewer through .gate/bin/review, and verdict reading review's result: one reviewer call per pull request.
   const FAKE_CLAUDE = (f) => `#!/usr/bin/env node
 const fs = require('fs');
 const conf = JSON.parse(fs.readFileSync(${JSON.stringify(join(f, 'claude.json'))}, 'utf8'));
@@ -1214,7 +1214,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /unknown reviewer 'gpt'/);
   });
-  // #96: the issues the pull request closes, read by scripts/review with gh porcelain before the reviewer runs.
+  // #96: the issues the pull request closes, read by .gate/bin/review with gh porcelain before the reviewer runs.
   const REF = (number, owner = 'o', name = 'app') => ({ id: `I_${number}`, number, repository: { id: 'R_x', name, owner: { id: 'U_x', login: owner } }, url: `https://github.com/${owner}/${name}/issues/${number}` });
   const ISSUE = (number, extra = {}) => ({ body: '## Acceptance\n\n- Refuse an empty name.\n', labels: [{ id: 'LA_1', name: 'task', description: '', color: 'ffffff' }], number, title: 'Initials', ...extra });
   const closing = (...refs) => write(fake, { 'closing.json': JSON.stringify({ closingIssuesReferences: refs }), ghlog: '' });

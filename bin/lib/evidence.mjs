@@ -242,7 +242,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   const removed = [];
   const merged = [];
   const adapted = [];
-  const was =(path, oid, why) => `${path} (was ${oid.slice(0, 12)}, ${why} at factory ${fac.slice(0, 7)})`;
+  const was = (path, oid, why) => `${path} (was ${oid.slice(0, 12)}, ${why} at factory ${fac.slice(0, 7)})`;
   let exact = 0;
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const have = now.get(path);
@@ -313,7 +313,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
         if (own && older) updated.push(was(path, had.oid, 'kit'));
         else if (own) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
       }
-    } else if (path === SETTINGS ||(path === 'AGENTS.md' && chosen.why)) {
+    } else if (path === SETTINGS || (path === 'AGENTS.md' && chosen.why)) {
       // Built from the kit and the pack; with no pack to build from, the failure above says why and nothing is compared.
       if (!chosen.why && blob(repo, have.oid) !== composeSettings(blob(factory, want.oid), chosen.pack?.settings ?? null)) fails.push(`differs: ${path} (content)`);
       else if (!chosen.why) {

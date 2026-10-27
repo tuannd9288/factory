@@ -306,7 +306,7 @@ describe('the steps after it opened', () => {
   });
 });
 
-// scripts/tier: prints the tier in $SH/tier, and logs its arguments.
+// .gate/bin/tier: prints the tier in $SH/tier, and logs its arguments.
 const FAKE_TIER = String.raw`#!/usr/bin/env node
 const fs = require('fs');
 const sh = process.env.SH;
@@ -326,7 +326,7 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
   };
   const waiting = [{ name: 'tier', status: 'IN_PROGRESS', conclusion: '' }];
 
-  test('is judged by scripts/tier on origin/main, HEAD and the pull request\'s labels', () => {
+  test('is judged by .gate/bin/tier on origin/main, HEAD and the pull request\'s labels', () => {
     const w = opened(1);
     w.pr({ labels: [{ name: 'task' }, { name: 'tier-2' }] });
     assert.equal(w.ship().code, 0);
@@ -415,7 +415,7 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     assert.doesNotMatch(out.out, /nothing to do/);
   });
 
-  test('by scripts/tier on the paths: the same', () => {
+  test('by .gate/bin/tier on the paths: the same', () => {
     const w = opened(3);
     const out = w.ship();
     assert.equal(out.code, 1, out.out);
@@ -429,7 +429,7 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     assert.doesNotMatch(out.out, /waits for the Human/);
   });
 
-  test('when scripts/tier cannot judge, ship fails closed: no live-verify, no arming', () => {
+  test('when .gate/bin/tier cannot judge, ship fails closed: no live-verify, no arming', () => {
     const w = opened(3);
     writeFileSync(join(w.repo, '.gate/bin/tier'), '#!/bin/sh\necho "tier: could not read the policy"\nexit 2\n');
     const out = w.ship();
