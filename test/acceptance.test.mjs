@@ -36,7 +36,9 @@ describe('acceptance reader', () => {
   let dir;
   const T = join(factory, 'kit/.gate/bin/lib/acceptance.mjs');
   const out = () => join(dir, 'acceptance.json');
-  const closing = (...refs) => writeFileSync(join(dir, 'closing.json'), JSON.stringify({ closingIssuesReferences: refs }));
+  // What the body says, as gh prints it beside the closing references (#133: the Issue: line).
+  let bodyText = '';
+  const closing = (...refs) => writeFileSync(join(dir, 'closing.json'), JSON.stringify({ closingIssuesReferences: refs, body: bodyText }));
   const issueFile = (number, value) => writeFileSync(join(dir, `issue-${number}.json`), typeof value === 'string' ? value : JSON.stringify(value));
   const calls = () => readFileSync(join(dir, 'gh-calls'), 'utf8').split('\n').filter(Boolean);
   const read = () => run(dir, process.execPath, [T, '--repo', 'tuannd9288/factory', '--pr', '104', '--out', out()], { PATH: `${join(dir, 'bin')}:${process.env.PATH}` });
@@ -49,6 +51,7 @@ describe('acceptance reader', () => {
   });
   after(() => rmSync(dir, { recursive: true, force: true }));
   beforeEach(() => {
+    bodyText = '';
     for (const f of ['gh-fails', 'acceptance.json']) rmSync(join(dir, f), { force: true });
     writeFileSync(join(dir, 'gh-calls'), '');
   });
@@ -59,7 +62,7 @@ describe('acceptance reader', () => {
     const r = read();
     assert.equal(r.code, 0, r.out);
     assert.match(r.out.trim(), /^[0-9a-f]{16}$/);
-    assert.deepEqual(calls(), ['pr view 104 --repo tuannd9288/factory --json closingIssuesReferences', 'issue view 90 --repo tuannd9288/factory --json number,title,labels,body']);
+    assert.deepEqual(calls(), ['pr view 104 --repo tuannd9288/factory --json closingIssuesReferences,body', 'issue view 90 --repo tuannd9288/factory --json number,title,labels,body']);
     const file = JSON.parse(readFileSync(out(), 'utf8'));
     assert.deepEqual(file, { issues: [{ number: 90, title: "Record the Human's words", labels: ['sublayer-1b', 'task'], body: issue(90).body, length: issue(90).body.length }], elsewhere: [] });
   });
@@ -117,6 +120,56 @@ describe('acceptance reader', () => {
     assert.notEqual(hashOf(issue(90, { body: 'another acceptance\n' })), first);
     assert.notEqual(hashOf(issue(90, { title: 'another title' })), first);
     assert.notEqual(hashOf(issue(90, { labels: [] })), first);
+  });
+
+  test('a pull request that names its issue only by Issue: #<n> and closes nothing has that issue read for the reviewer', () => {
+    bodyText = 'Summary\nIssue: #90\nTeam: team-x\n';
+    closing();
+    issueFile(90, issue(90));
+    const r = read();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out.trim(), /^[0-9a-f]{16}$/);
+    assert.deepEqual(JSON.parse(readFileSync(out(), 'utf8')).issues.map((i) => i.number), [90]);
+    assert.deepEqual(calls().slice(1), ['issue view 90 --repo tuannd9288/factory --json number,title,labels,body']);
+  });
+
+  test('an issue named by Issue: and also closed is read once; one named and another closed are both read', () => {
+    bodyText = 'Issue: #90\n';
+    closing(ref(90));
+    issueFile(90, issue(90));
+    assert.equal(read().code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(out(), 'utf8')).issues.map((i) => i.number), [90]);
+    bodyText = 'Issue: #90\n';
+    closing(ref(91));
+    issueFile(91, issue(91));
+    assert.equal(read().code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(out(), 'utf8')).issues.map((i) => i.number).sort(), [90, 91]);
+  });
+
+  test('Issue: none, a placeholder, or no Issue: line adds nothing, and the hash follows the issue named', () => {
+    for (const text of ['Issue: none\n', 'Issue: #<issue labelled task>\n', 'Closes #90\n']) {
+      bodyText = text;
+      closing();
+      const r = read();
+      assert.equal(r.code, 0, r.out);
+      assert.equal(r.out.trim(), 'none', text);
+    }
+    closing(ref(90));
+    issueFile(90, issue(90));
+    const closed = read().out.trim();
+    bodyText = 'Issue: #90\n';
+    closing();
+    assert.equal(read().out.trim(), closed, 'the same issue by either route is the same question');
+  });
+
+  test('an Issue: that names an issue gh cannot read, or a listing with no body, is exit 3', () => {
+    bodyText = 'Issue: #404\n';
+    closing();
+    const r = read();
+    assert.equal(r.code, 3, r.out);
+    assert.ok(!existsSync(out()));
+    writeFileSync(join(dir, 'closing.json'), JSON.stringify({ closingIssuesReferences: [] }));
+    assert.equal(read().code, 3);
   });
 
   test('gh failing, or printing what is not the recorded shape, is exit 3 with a one-line reason and no file', () => {
