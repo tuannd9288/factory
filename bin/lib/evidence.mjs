@@ -16,7 +16,11 @@
 // evidence, and the files built from it are not compared. Where the repository
 // had its own AGENTS.md, CLAUDE.md or hook, the kit's file replaced it, and the evidence names the blob it had; the
 // repository's own parts that --own put in AGENTS.md's last two sections are shown in full, every other line of it
-// must be the kit's. A managed file that is none of these, one missing, or a path the pull request changes outside
+// must be the kit's. Three more kinds are for the files a repository keeps (#132): merged (a .claude/settings.json the
+// base had is the base's bytes with the kit's deny lines inserted as text, bin/lib/settings.mjs, and nothing else; with no
+// file at the base the pack composes it, as above); adapter (.gate/config.sh is the kit's text, or with the lines
+// bin/lib/adapter.mjs writes for the files the head holds); untouched (the repository's own scripts/ and .githooks/ files,
+// which the kit does not ship, are in the head as in the base). A managed file that is none of these, one missing, or a path the pull request changes outside
 // the inventory fails it. The result names the factory commit, the kit's tree, the repository's id, base and head, so
 // it holds for those and nothing else. See bin/kit-evidence for the arguments.
 import { execFileSync } from 'node:child_process';
@@ -25,12 +29,19 @@ import { fileURLToPath } from 'node:url';
 import { LAYOUT, fill, parseOwn } from './own.mjs';
 import { MODULES_FILE, mergedTree, offFiles, parseModules } from './module.mjs';
 import { NAME, PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
+import { HOOK, NATIVE, adapterBlock } from './adapter.mjs';
+import { addDeny } from './settings.mjs';
 
 export const INVENTORY = '.gate/kit-files';
 export const SETTINGS = '.claude/settings.json';
+export const CONFIG = '.gate/config.sh';
 export const FILLED = { '.github/CODEOWNERS': (v) => ['@OWNER', `@${v.human}`], 'AGENTS.md': (v) => ['<repo>', v.name] };
-// What the kit replaces when the repository has its own (bin/onboard's REPLACE): its instructions and its hooks.
-export const REPLACES = (path) => path === 'AGENTS.md' || path === 'CLAUDE.md' || path.startsWith('.githooks/');
+// What the kit replaces when the repository has its own (bin/onboard's REPLACE): its instructions.
+export const REPLACES = (path) => path === 'AGENTS.md' || path === 'CLAUDE.md';
+// What the kit leaves alone, byte for byte: the repository's own scripts/ and hooks. A kit file under scripts/ is a kit file.
+export const UNTOUCHED = (path) => path.startsWith('scripts/') || path.startsWith('.githooks/');
+// The kit's deny lines, out of the kit's settings.json text.
+export const denyOf = (kitSettings) => JSON.parse(kitSettings).permissions.deny;
 const GIT_MS = 60_000;
 
 export const git = (dir, args, encoding = 'utf8') => execFileSync('git', ['-C', dir, ...args], { encoding, maxBuffer: 64 << 20, timeout: GIT_MS });
@@ -218,7 +229,9 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   const replaced = [];
   const updated = [];
   const removed = [];
-  const was = (path, oid, why) => `${path} (was ${oid.slice(0, 12)}, ${why} at factory ${fac.slice(0, 7)})`;
+  const merged = [];
+  const adapted = [];
+  const was =(path, oid, why) => `${path} (was ${oid.slice(0, 12)}, ${why} at factory ${fac.slice(0, 7)})`;
   let exact = 0;
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const have = now.get(path);
@@ -231,6 +244,24 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
       else if (had && !asIs(had) && !pastBlobs(factory, fac, want.src).has(had.oid)) fails.push(`differs: ${path} (the repository's own, at a path module ${want.module} lays)`);
       else if (had && !asIs(had)) updated.push(was(path, had.oid, `module ${want.module}`));
       else exact++;
+      continue;
+    }
+    if (path === SETTINGS && had) {
+      // The repository's own file: its bytes with the kit's deny lines inserted as text, and nothing else changed.
+      let expected;
+      try {
+        expected = addDeny(blob(repo, had.oid), denyOf(blob(factory, want.oid))).text;
+      } catch (error) {
+        fails.push(`differs: ${path} (${error.message})`);
+        continue;
+      }
+      if (!have) fails.push(`missing: ${path}`);
+      else if (have.mode !== had.mode) fails.push(`differs: ${path} (mode ${have.mode}, the repository's ${had.mode})`);
+      else if (blob(repo, have.oid) !== expected) fails.push(`differs: ${path} (not the repository's own with only the kit's deny lines added)`);
+      else {
+        filled.add(path);
+        merged.push(path);
+      }
       continue;
     }
     let own = had && (had.mode !== want.mode || had.oid !== want.oid);
@@ -251,7 +282,22 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
     else if (same) kept.push(path);
     else if (own && !REPLACES(path) && !older) fails.push(`differs: ${path} (the repository's own, changed)`);
     else if (have.mode !== want.mode) fails.push(`differs: ${path} (mode ${have.mode}, the kit's ${want.mode})`);
-    else if (path === SETTINGS || (path === 'AGENTS.md' && chosen.why)) {
+    else if (path === CONFIG) {
+      // The kit's text, with the adapter lines for the repository's own files when it has its own scripts/verify.
+      const hook = now.get(HOOK);
+      const block = adapterBlock({ native: now.has(NATIVE), hookText: hook ? blob(repo, hook.oid) : null });
+      const text = blob(repo, have.oid);
+      const kitText = blob(factory, want.oid);
+      if (text !== kitText && text !== kitText + block) fails.push(`differs: ${path} (not the kit's text with the adapter lines for this repository)`);
+      else if (text !== kitText) {
+        filled.add(path);
+        adapted.push(path);
+      } else {
+        exact++;
+        if (own && older) updated.push(was(path, had.oid, 'kit'));
+        else if (own) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
+      }
+    } else if (path === SETTINGS ||(path === 'AGENTS.md' && chosen.why)) {
       // Built from the kit and the pack; with no pack to build from, the failure above says why and nothing is compared.
       if (!chosen.why && blob(repo, have.oid) !== composeSettings(blob(factory, want.oid), chosen.pack?.settings ?? null)) fails.push(`differs: ${path} (content)`);
       else if (!chosen.why) {
@@ -310,8 +356,11 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
     // so may a module's, dropped by the module or with the module, from the places the base's modules laid it.
     const places = [`kit/${path}`, ...baseNames.map((n) => `modules/${n}/kit/${path}`)];
     if (had && listed.has(path) && !now.has(path) && places.some((p) => pastBlobs(factory, fac, p).has(had.oid))) removed.push(was(path, had.oid, off.has(path) ? `module ${off.get(path).module} is off` : 'no longer in the kit'));
+    else if (had && UNTOUCHED(path) && !listed.has(path)) fails.push(`differs: ${path} (the repository's own, which the kit leaves untouched)`);
     else fails.push(`extra: ${path} (not a kit file)`);
   }
+  // The repository's own scripts/ and hooks, which the kit does not ship: they are in the head as they were in the base.
+  const untouched = [...at].filter(([path, e]) => UNTOUCHED(path) && !kit.has(path) && !listed.has(path) && now.get(path)?.oid === e.oid && now.get(path)?.mode === e.mode).map(([path]) => path).sort();
   const lines = [
     `kit-evidence: ${fails.length ? 'FAIL' : 'PASS'}`,
     `factory commit: ${fac}, kit tree ${kitTree}`,
@@ -324,6 +373,9 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
   ];
   if (fails.length) lines.push('failures:', ...fails.map((f) => `  ${f}`));
   lines.push('rendered (bin/onboard fills these in):', ...(rendered.length ? rendered.map((l) => `  ${l}`) : ['  none']));
+  if (merged.length) lines.push("merged (the repository's own file with the kit's deny lines inserted as text; every other byte is the base's):", ...merged.map((p) => `  ${p}`));
+  if (adapted.length) lines.push("adapter (the kit's text with the lines bin/lib/adapter.mjs writes for the repository's own files):", ...adapted.map((p) => `  ${p}`));
+  if (untouched.length) lines.push("untouched (the repository's own scripts/ and hooks, which the kit does not ship; unchanged):", ...untouched.map((p) => `  ${p}`));
   lines.push("replaced (the repository's own at the base, now the kit's):", ...(replaced.length ? replaced.map((p) => `  ${p}`) : ['  none']));
   lines.push("kept (the repository's own, unchanged):", ...(kept.length ? kept.map((p) => `  ${p}`) : ['  none']));
   // Only bin/kit-update's pull requests make these two; a first onboarding's evidence has neither.
