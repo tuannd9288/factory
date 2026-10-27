@@ -325,9 +325,11 @@ hooks, and the Human is told to onboard it afresh. Its evidence names each updat
 pull request that changes the repository's head or tail of `AGENTS.md`. The gate judges the block of such a pull request
 too: `.gate/bin/verify-trusted` reads the candidate's git objects before it lays `main`'s protected files over them, and a
 block, `.gate/gate-section.md` or `.gate/kit-commit` that differs from the base's passes only when the commit
-`.gate/kit-commit` names is on the main of `tuannd9288/factory` (public: it is fetched, and a fetch that fails is red),
-holds that block, is not older than the base's, and leaves the tail and `CLAUDE.md` as they were. A deliberate roll back
-of the kit is refused by that rule; it waits until the factory's main has moved on.
+`.gate/kit-commit` names is on the first-parent line of the main of `tuannd9288/factory` (public: it is fetched, and a
+fetch that fails is red; onboard and kit-update ask the same of `origin/main`), holds that block, is not older than the
+base's, and leaves the tail and `CLAUDE.md` as they were. A deliberate roll back of the kit is refused by that rule; it
+waits until the factory's main has moved on. A block that main reverted later still passes while it is not older than the
+base's. The variable `GATE_FACTORY_URL` is for tests and takes only an absolute local folder.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (the bootstrap rule asks
