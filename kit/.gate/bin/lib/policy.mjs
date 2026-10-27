@@ -121,6 +121,10 @@ function main(argv) {
     }
     if (command === 'check') {
       const problems = ownersProblems(dir);
+      // The repository's own verify (GATE_NATIVE) decides what the gate runs, so it is a protected path or the check fails.
+      const n = rest.indexOf('--native');
+      const native = n >= 0 ? rest[n + 1] : '';
+      if (native && !protectedOf(dir).paths.some((p) => p.re.test(native))) problems.push(`${native} is the native verify (GATE_NATIVE) and no protected path in .gate/protected covers it`);
       for (const p of problems) console.log(`policy: ${p}`);
       if (problems.length) console.log('policy: .gate/protected and the end of .github/CODEOWNERS list the same paths, each owned by the Human');
       return problems.length ? 1 : 0;

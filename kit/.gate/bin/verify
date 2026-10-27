@@ -43,7 +43,7 @@ check_instructions() {
 }
 
 check_policy() {
-  node .gate/bin/lib/policy.mjs check
+  node .gate/bin/lib/policy.mjs check ${GATE_NATIVE:+--native "$GATE_NATIVE"}
 }
 
 check_rules() {
