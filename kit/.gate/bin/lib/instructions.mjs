@@ -71,6 +71,28 @@ export function replaceGate(text, block) {
   return found.head + block + found.tail;
 }
 
+const REGULAR = ['100644', '100755'];
+
+/** The problems with CLAUDE.md as an entry { mode, bytes } (null when missing): a regular file whose first line is
+ * exactly @AGENTS.md, or a symlink whose one-line relative target is the root AGENTS.md, as ./ and nothing else. */
+export function carrierProblems(entry) {
+  if (!entry) return ['CLAUDE.md is missing: it must start with the line @AGENTS.md, or be a relative symlink to AGENTS.md'];
+  if (REGULAR.includes(entry.mode)) {
+    const first = entry.bytes.toString('utf8').split('\n')[0];
+    return first === '@AGENTS.md' ? [] : ['the first line of CLAUDE.md must be exactly @AGENTS.md (prose may follow it); a file of only the text AGENTS.md is not an import'];
+  }
+  if (entry.mode !== '120000') return [`CLAUDE.md is not a file or a symlink (mode ${entry.mode})`];
+  const target = entry.bytes.toString('utf8');
+  if (target === '') return ['CLAUDE.md is a symlink with an empty target'];
+  if (/[\n\0]/.test(target)) return ['CLAUDE.md is a symlink whose target is not one line'];
+  if (target.startsWith('/')) return [`CLAUDE.md links to an absolute path (${target}); the link must be relative`];
+  const parts = target.split('/').filter((p) => p !== '.');
+  if (parts.includes('..')) return [`CLAUDE.md links to ${target}, which goes up with ..; the link must be AGENTS.md at the root, with no .. in it`];
+  if (parts.length === 1 && parts[0] === 'CLAUDE.md') return ['CLAUDE.md links to itself (a cycle)'];
+  if (parts.length !== 1 || parts[0] !== 'AGENTS.md' || target.endsWith('/')) return [`CLAUDE.md links to ${target}; it must link to AGENTS.md at the root`];
+  return [];
+}
+
 export const MAX_LINES = 150;
 export const MAX_BYTES = 32768;
 
