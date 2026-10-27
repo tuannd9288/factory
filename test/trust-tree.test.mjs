@@ -15,8 +15,6 @@ describe('a candidate whose tree has two AGENTS.md entries', () => {
 
   /** A commit on the base whose tree lists `path` twice: the base's own blob, then `second`. */
   const duplicated = (path, second) => {
-    git(t.r.repo, 'reset', '-q', '--hard');
-    git(t.r.repo, 'switch', '-q', '-C', 'dup', t.baseSha);
     const secondBlob = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: t.r.repo, input: second, encoding: 'utf8' }).stdout.trim();
     const lines = git(t.r.repo, 'ls-tree', t.baseSha).split('\n');
     const at = lines.findIndex((l) => l.endsWith(`\t${path}`));
@@ -24,7 +22,9 @@ describe('a candidate whose tree has two AGENTS.md entries', () => {
     const mk = spawnSync('git', ['mktree'], { cwd: t.r.repo, input: `${lines.join('\n')}\n`, encoding: 'utf8' });
     assert.equal(mk.status, 0, `git mktree: ${mk.stderr}`);
     const commitSha = git(t.r.repo, 'commit-tree', mk.stdout.trim(), '-p', t.baseSha, '-m', 'a tree with two entries');
-    git(t.r.repo, 'reset', '-q', '--hard', commitSha);
+    // Only HEAD moves; the worktree keeps the base's files. A checkout of a tree that lists a name twice differs between git
+    // builds (CI's took the file as untracked on the next switch), and the check reads objects, not the worktree.
+    git(t.r.repo, 'reset', '-q', '--soft', commitSha);
     return commitSha;
   };
 
@@ -37,7 +37,6 @@ describe('a candidate whose tree has two AGENTS.md entries', () => {
 
   test('is red for CLAUDE.md too', () => {
     for (const path of ['CLAUDE.md']) {
-      git(t.r.repo, 'reset', '-q', '--hard');
       duplicated(path, 'something else\n');
       const out = t.objects();
       assert.equal(out.code === 1 || out.code === 2, true, `${path}: ${out.out}`);
