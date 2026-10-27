@@ -310,7 +310,9 @@ describe('bin/kit-update, after review', () => {
       const body = readFileSync(w.body, 'utf8');
       const lines = body.split('\n');
       assert.match(lines[0], /: 1 file added, 1 updated, 1 removed;/);
-      assert.match(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept[^\n]*deny rules/);
+      // The file already holds every deny line the kit has, so it is merged to itself: nothing says it is kept.
+      assert.doesNotMatch(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept/);
+      assert.ok(JSON.parse(w.show(`factory/kit-${w.sha7()}`, '.claude/settings.json')).permissions.deny.includes('Read(./secrets/**)'));
       assert.equal(lines.filter((l) => /^```(?!`)/.test(l)).length, 0, 'a 3-backtick fence opens the evidence');
       assert.equal(lines.filter((l) => l === '````text').length, 1);
       assert.equal(lines.filter((l) => l === '````').length, 1);
@@ -362,7 +364,7 @@ describe('bin/kit-update, after review', () => {
       out = w.update(['app', '--no-pr']);
       assert.equal(out.code, 0, out.out);
       assert.equal(w.show('HEAD', '.claude/settings.json'), raw.trim());
-      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n(?: {2}.*\n)* {2}\.claude\/settings\.json$/m);
+      assert.match(out.out, /^merged \(.*\):\n {2}\.claude\/settings\.json$/m);
       assert.equal(w.show('HEAD', '.gate/config?sh'), config.trim());
     } finally {
       w.cleanup();
