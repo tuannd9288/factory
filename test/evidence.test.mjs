@@ -6,6 +6,7 @@ import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtemp
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
+import { addDeny } from '../bin/lib/settings.mjs';
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const DENY = { permissions: { deny: ['Read(./.env*)'] } };
@@ -448,7 +449,7 @@ describe('a base that already holds the kit\'s rendering', () => {
     }
   });
 
-  test('still fails a truly own AGENTS.md left as it is, and still keeps a truly own CODEOWNERS and settings', () => {
+  test('still fails a truly own AGENTS.md left as it is, still keeps a truly own CODEOWNERS, and takes the deny lines into a truly own settings', () => {
     let w = world({ had: { 'AGENTS.md': '# Our map\n\nOur rules.\n' }, laid: { 'AGENTS.md': '# Our map\n\nOur rules.\n' } });
     try {
       const out = w.evidence();
@@ -457,12 +458,31 @@ describe('a base that already holds the kit\'s rendering', () => {
     } finally {
       w.cleanup();
     }
-    const own = { '.github/CODEOWNERS': '* @someone\n', '.claude/settings.json': json({ theirs: true }) };
+    const own = { '.github/CODEOWNERS': '* @someone\n' };
     w = world({ had: own, laid: own });
     try {
       const out = w.evidence();
       assert.equal(out.code, 0, out.out);
-      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.claude\/settings\.json\n {2}\.github\/CODEOWNERS\n {2}\.github\/pull_request_template\.md$/m);
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.github\/CODEOWNERS\n {2}\.github\/pull_request_template\.md$/m);
+    } finally {
+      w.cleanup();
+    }
+    // A settings.json of its own is the base's bytes with the kit's deny lines inserted; left as it was, it lacks them.
+    const theirs = json({ theirs: true });
+    w = world({ had: { '.claude/settings.json': theirs }, laid: { '.claude/settings.json': theirs } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: \.claude\/settings\.json \(not the repository's own with only the kit's deny lines added\)$/m);
+    } finally {
+      w.cleanup();
+    }
+    const merged = addDeny(theirs, DENY.permissions.deny).text;
+    w = world({ had: { '.claude/settings.json': theirs }, laid: { '.claude/settings.json': merged } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^merged \(.*\):\n {2}\.claude\/settings\.json$/m);
     } finally {
       w.cleanup();
     }
@@ -600,7 +620,7 @@ describe('evidence over a base that is a rendering', () => {
     try {
       const out = w.evidence();
       assert.equal(out.code, 1, out.out);
-      assert.match(out.out, /^ {2}differs: \.claude\/settings\.json \(the repository's own, changed\)$/m);
+      assert.match(out.out, /^ {2}differs: \.claude\/settings\.json \(not the repository's own with only the kit's deny lines added\)$/m);
     } finally {
       w.cleanup();
     }
