@@ -135,9 +135,9 @@ if [ -n "$theirs" ] && [ -z "$own" ]; then
 fi
 # The repository's own .claude/settings.json gets the kit's deny lines as text (bin/lib/settings.mjs); a shape the lines
 # cannot be added to without touching other bytes is told now, before anything is written.
-if [ -L "$dest/.claude/settings.json" ]; then
+if { [ -e "$dest/.claude/settings.json" ] || [ -L "$dest/.claude/settings.json" ]; } && { [ -L "$dest/.claude/settings.json" ] || [ ! -f "$dest/.claude/settings.json" ]; }; then
   rm -rf "$dest"
-  echo "onboard: .claude/settings.json is a link, which the kit will not write through; the clone is removed and nothing else was done"
+  echo "onboard: .claude/settings.json is not a regular file (a link or a directory), and the kit will not write through or into it; the clone is removed and nothing else was done"
   exit 2
 fi
 if [ -f "$dest/.claude/settings.json" ]; then
