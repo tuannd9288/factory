@@ -8,6 +8,12 @@
 # scripts/ship reads; no other form does, and the stamp is never in the work tree.
 # GATE_BASE names the commit the rules and subjects checks read from (default: the merge-base with origin/main).
 set -uo pipefail
+# gate_fast and the native verify run the repository's own commands; one that calls this script again would run it for ever.
+# Only those two routes set the variable: prove-check and red-check run verify on purpose and are not under them.
+if [ -n "${GATE_IN_VERIFY:-}" ]; then
+  echo "verify: reached again from ${GATE_IN_VERIFY}: that is a loop: the repository's hook or verify calls .gate/bin/verify. Take that call out."
+  exit 2
+fi
 cd "$(git rev-parse --show-toplevel)" || exit 2
 export GATE_REPORT=${GATE_REPORT:-$PWD/.gate/report.xml}
 . .gate/config.sh || { echo "verify: could not read .gate/config.sh"; exit 2; }
@@ -70,7 +76,7 @@ check_tests() {
 
 # The repository's own whole verify, named by GATE_NATIVE (set with "native" in GATE_CHECKS, in .gate/config.sh).
 check_native() {
-  "./$GATE_NATIVE"
+  GATE_IN_VERIFY=native "./$GATE_NATIVE"
 }
 
 known() {
@@ -83,7 +89,7 @@ case "${1:-}" in
     run rules .gate/bin/rules --staged
     staged=$(git diff --cached --name-only --diff-filter=ACMR)
     # shellcheck disable=SC2086
-    run fast gate_fast $staged
+    GATE_IN_VERIFY=gate_fast run fast gate_fast $staged
     ;;
   --only)
     known "${2:-}" || { echo "verify: no check named '${2:-}' (checks: $BUILTIN $GATE_CHECKS)"; exit 2; }
