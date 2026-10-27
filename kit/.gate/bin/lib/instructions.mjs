@@ -162,11 +162,12 @@ export function check({ agents, claude, targets, expected }) {
   else {
     let text = null;
     try {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(agents.bytes);
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(agents.bytes);
     } catch {
       out.push('AGENTS.md is not valid UTF-8');
     }
-    if (text !== null) {
+    if (text !== null && text.startsWith('\uFEFF')) out.push('AGENTS.md starts with a byte-order mark; the block must come first, so take the mark out');
+    else if (text !== null) {
       const found = splitGate(text);
       if (!found.ok) out.push(GATE_MESSAGES[found.problem]);
       else if (expected !== null && found.block !== expected) out.push('the Gate block of AGENTS.md is not .gate/gate-section.md: the kit owns that block, so change the kit\'s file, not this copy');
@@ -331,7 +332,7 @@ function main([command, ...rest]) {
       if (option('--agents')) {
         const entry = entryAt(dirname(resolve(option('--agents'))), basename(option('--agents')));
         if (!regular(entry)) throw fail('not-a-file', `${option('--agents')} is not a regular file`);
-        text = new TextDecoder('utf-8', { fatal: true }).decode(entry.bytes);
+        text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(entry.bytes);
       }
       process.stdout.write(composeAgents(text, section, option('--name')));
       return 0;

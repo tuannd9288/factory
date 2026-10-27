@@ -282,7 +282,7 @@ It refuses any other login, and a `main` without the bootstrap pull request rule
    and the deny rules. The repository keeps its own `AGENTS.md` and `CLAUDE.md`: the kit puts one marked `## Gate` block
    at the start of `AGENTS.md`, after an optional title line, and writes the import `@AGENTS.md` as `CLAUDE.md` only where
    there is none (`kit/.gate/bin/lib/instructions.mjs`). An `AGENTS.md` that would be over 150 lines or 32 KiB with the
-   block, a Gate marker that is malformed, CRLF, or a `CLAUDE.md` that neither starts with `@AGENTS.md` nor links to
+   block, a Gate marker that is malformed, CRLF or a byte-order mark, or a `CLAUDE.md` that neither starts with `@AGENTS.md` nor links to
    `AGENTS.md` refuses the run and removes the clone; the kit cuts and rewrites nothing. `--own <file>` is a complete
    `AGENTS.md` the repository prepared, used in place of the clone's and checked the same way. The kit ships no
    `scripts/verify` and no `.githooks/`, so the repository's own `scripts/`, helpers and
