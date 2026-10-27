@@ -256,7 +256,7 @@ git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 moved=""
 moved='The repository'"'"'s own `AGENTS.md` has the kit'"'"'s marked `## Gate` block inserted at its start, after the title line; every other byte of it is the repository'"'"'s, and so is its `CLAUDE.md` (the import is written only where there was none).'
-[ -z "$own" ] || moved="$moved The `AGENTS.md` came in through `--own`: the evidence below prints its text in full."
+[ -z "$own" ] || moved="$moved"' The `AGENTS.md` came in through `--own`: the evidence below prints its text in full.'
 # The repository's own scripts/ and hooks, which the kit does not ship and leaves byte for byte (the evidence checks it).
 untouched=$(git ls-tree -r --name-only "$base" -- scripts .githooks | grep -vxFf "$lists/kit" || true)
 untouched_list=$(printf '%s' "$untouched" | sed '/^$/d; s/^/  - `/; s/$/`/')
