@@ -18,7 +18,7 @@ describe('a repository with its own verify', () => {
       '.gate/config.sh': readFileSync(join(factory, 'kit/.gate/config.sh'), 'utf8') + ADAPTER,
       'scripts/verify': OWN_VERIFY,
       '.githooks/pre-commit': OWN_HOOK,
-    });
+    }, [], ['scripts/verify', '.githooks/pre-commit']);
   });
   after(() => r.cleanup());
 

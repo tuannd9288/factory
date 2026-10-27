@@ -68,6 +68,11 @@ check_tests() {
   return 1
 }
 
+# The repository's own whole verify, named by GATE_NATIVE (set with "native" in GATE_CHECKS, in .gate/config.sh).
+check_native() {
+  "./$GATE_NATIVE"
+}
+
 known() {
   case " $BUILTIN $GATE_CHECKS " in *" $1 "*) return 0 ;; esac
   return 1

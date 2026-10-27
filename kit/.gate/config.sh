@@ -18,6 +18,11 @@ gate_prepare() {
   :
 }
 
+# A repository that keeps its own whole verify names it: GATE_NATIVE=scripts/verify and GATE_CHECKS="native". verify then
+# runs it as a check (proved by .gate/proofs/native.sh), and policy check requires the path to be in .gate/protected.
+# bin/onboard appends these lines, and gate_fast calling the repository's .githooks/pre-commit, when it finds the files.
+GATE_NATIVE=""
+
 # The repository's own checks, each a function check_<name> in this file that fails on a problem, with a fixture
 # .gate/proofs/<name>.patch that makes it fail. Space-separated names.
 GATE_CHECKS=""
