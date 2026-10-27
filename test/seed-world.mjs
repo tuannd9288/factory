@@ -19,7 +19,7 @@ export const PRE_COMMIT = '#!/bin/sh\nexec node "$(git rev-parse --show-toplevel
 export const PRE_PUSH = '#!/bin/sh\necho "pre-push: not main" >&2\nexit 0\n';
 export const SETTINGS = `${JSON.stringify({ permissions: { deny: ['Read(./.env*)', 'Bash(rm -rf *)'] }, enabledPlugins: { 'pstack@parcel-notes': true } }, null, 2)}\n`;
 export const OWN = '## Layout\n\n`src/` holds the app.\n\n## Facts the code cannot tell\n\n- Ships on Fridays.\n';
-export const ADAPTER = '\n# --- adapter, written by bin/onboard from the repository\'s own files ---\nGATE_NATIVE=scripts/verify\nGATE_CHECKS="native"\ngate_fast() { .githooks/pre-commit; }\n';
+export const ADAPTER = '\n# --- adapter, written by bin/onboard from the repository\'s own files ---\nGATE_NATIVE=scripts/verify\nGATE_CHECKS="${GATE_CHECKS:+$GATE_CHECKS }native"\ngate_fast() { .githooks/pre-commit; }\n';
 
 export const SEED = {
   'scripts/verify': OWN_VERIFY,

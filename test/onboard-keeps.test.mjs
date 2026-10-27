@@ -2,7 +2,7 @@
 // of .gate/config.sh, and the full verify runs the repository's own verify as the native check.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { factory, git, script } from './helpers.mjs';
 import { ADAPTER, OWN_VERIFY, PRE_COMMIT, PRE_PUSH, SIZE, seeded } from './seed-world.mjs';
@@ -64,6 +64,22 @@ describe('bin/onboard over a repository with its own verify', () => {
     try {
       assert.equal(s.onboard().code, 0);
       assert.equal(s.read('.gate/config.sh'), own);
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  test('adds native to the checks the config already names, so both run', () => {
+    const s = seeded();
+    try {
+      assert.equal(s.onboard().code, 0);
+      // A later session fills the kit's own line above the adapter block and defines the check.
+      const config = s.read('.gate/config.sh').replace('GATE_CHECKS=""', 'GATE_CHECKS="lint"');
+      writeFileSync(join(s.repo, '.gate/config.sh'), `${config}check_lint() { true; }\n`);
+      for (const check of ['lint', 'native']) {
+        const out = script(s.repo, 'verify', ['--only', check]);
+        assert.equal(out.code, 0, `${check}: ${out.out}`);
+      }
     } finally {
       s.cleanup();
     }
