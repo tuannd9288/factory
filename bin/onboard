@@ -276,11 +276,20 @@ kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 replaced=$(sed 's/^/  - `/; s/$/`/' "$lists/replaced")
 moved=""
 [ -n "$own" ] && moved='The repository'"'"'s own parts that the Human approved (`--own`) sit in the last two sections of `AGENTS.md`, Layout and Facts the code cannot tell; the evidence below prints every line.'
-grep -q '^\.githooks/' "$lists/replaced" && moved="${moved:+$moved }The old hook's commands (\`.githooks/\`) move into \`gate_fast\` in \`.gate/config.sh\`, a job for the repository's session."
+# The repository's own scripts/ and hooks, which the kit does not ship and leaves byte for byte (the evidence checks it).
+untouched=$(git ls-tree -r --name-only "$base" -- scripts .githooks | grep -vxFf "$lists/kit" || true)
+untouched_list=$(printf '%s' "$untouched" | sed '/^$/d; s/^/  - `/; s/$/`/')
+grep -qx '.claude/settings.json' "$lists/merged" && moved="${moved:+$moved }The repository's own \`.claude/settings.json\` has the kit's deny lines inserted as text; every other byte is the repository's, and the evidence below names it as merged."
+if [ "$had_config" -eq 0 ] && [ -f scripts/verify ]; then
+  adapter_note="\`.gate/config.sh\` ends with the adapter lines: \`GATE_NATIVE=scripts/verify\` runs the repository's own verify as the \`native\` check"
+  grep -q '^gate_fast() { \.githooks/pre-commit; }$' .gate/config.sh && adapter_note="$adapter_note, and \`gate_fast\` in \`.gate/config.sh\` calls \`.githooks/pre-commit\`"
+  moved="${moved:+$moved }$adapter_note."
+fi
+[ -z "$untouched" ] || moved="${moved:+$moved }The repository's own hooks stay in \`.githooks/\` and run only in a clone that ran the repository's own setup; the kit's \`.gate/hooks/\` serve a repository with none."
 gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, hooks, hand-in rules and templates" --body "$(cat <<EOF
 ## Summary for the Human
 - Purpose: bring $name into the factory with the kit of tuannd9288/factory.
-- Change: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (with \`protected\`: the tier-3 paths), \`.githooks/\`, three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`; the pack \`$pack\` (named in \`.gate/pack\`) is composed into \`AGENTS.md\` and \`.claude/settings.json\`.
+- Change: \`.gate/bin/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review, setup), \`.gate/hooks/\`, \`.gate/\` (with \`protected\`: the tier-3 paths), \`scripts/\` (ship, live-verify), three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`; the pack \`$pack\` (named in \`.gate/pack\`) is composed into \`AGENTS.md\` and, where the repository had no \`.claude/settings.json\`, into that file.
 - Evidence: the full \`.gate/bin/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
 - Tier: 3 (touches \`.github/\`, \`scripts/\`, \`.gate/\`).
 - Rollback: revert this PR.
@@ -291,6 +300,9 @@ ${kept:-  - none}
 
 ## Files the repository already had, replaced by the kit
 ${replaced:-  - none}
+
+## Files the repository already had, left untouched
+${untouched_list:-  - none}
 ${moved:+
 $moved
 }
