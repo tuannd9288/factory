@@ -19,7 +19,7 @@ done
 if [ -d modules ] && ! why=$(node bin/lib/module.mjs check . $(ls modules) 2>&1); then
   echo "verify: modules: $why"; failed=1
 fi
-for f in kit/scripts/* kit/.gate/bin/* kit/.gate/hooks/* bin/onboard bin/onboard-owner bin/kit-update bin/kit-evidence bin/factory-ledger bin/factory-queue bin/claude-canary bin/factory-alerts scripts/verify; do
+for f in packs/pstack/scripts/* kit/.gate/bin/* kit/.gate/hooks/* bin/onboard bin/onboard-owner bin/kit-update bin/kit-evidence bin/factory-ledger bin/factory-queue bin/claude-canary bin/factory-alerts scripts/verify; do
   [ -f "$f" ] || continue
   head -1 "$f" | grep -q bash || continue
   bash -n "$f" 2>/dev/null || { echo "verify: $f does not parse"; failed=1; }

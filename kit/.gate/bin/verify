@@ -5,7 +5,7 @@
 #   .gate/bin/verify --only <check>  one check, no proofs (prove-check runs this)
 #   .gate/bin/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
 # A full run that passes on a clean work tree (no change, no untracked file) leaves factory/verify-<head> in the git dir, which
-# scripts/ship reads; no other form does, and the stamp is never in the work tree.
+# a team's scripts/ship (packs/pstack) reads; no other form does, and the stamp is never in the work tree.
 # GATE_BASE names the commit the rules and subjects checks read from (default: the merge-base with origin/main).
 set -uo pipefail
 # gate_fast and the native verify run the repository's own commands; one that calls this script again would run it for ever.

@@ -342,7 +342,7 @@ describe('bin/kit-update, after review', () => {
     const w = world();
     try {
       touch(w);
-      const section = readFileSync(join(w.fac, 'packs/pstack/AGENTS.md'), 'utf8').replace(/\n+$/, '');
+      const section = readFileSync(join(w.fac, 'packs/pstack/section.md'), 'utf8').replace(/\n+$/, '');
       const agents = readFileSync(join(w.repo, 'AGENTS.md'), 'utf8');
       assert.ok(agents.includes(`${section}\n\n`));
       w.repoCommit({ 'AGENTS.md': agents.replace(`${section}\n\n`, '') });

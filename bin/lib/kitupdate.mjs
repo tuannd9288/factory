@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { FACTS, LAYOUT, LIMIT, fill } from './own.mjs';
-import { CONFIG, FILLED, INVENTORY, REPLACES, SETTINGS, blockFor, denyOf, git, ownOf, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
+import { CONFIG, FILLED, INVENTORY, REPLACES, SETTINGS, blockFor, denyOf, git, ownOf, pastBlobs, pastWithBlock, render, renderedAs, showQuiet, tree } from './evidence.mjs';
 import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
 import { addDeny } from './settings.mjs';
@@ -46,7 +46,11 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
   } catch (error) {
     lost.push(error.message);
   }
-  const pack = packName === 'none' ? null : { settings: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/settings.json`]).trim()), section: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/AGENTS.md`]).trim()) };
+  // The pack's section is section.md since #132; a factory commit that holds it as AGENTS.md is read all the same.
+  const pack = packName === 'none' ? null : {
+    settings: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/settings.json`]).trim()),
+    section: showQuiet(factory, fac, `packs/${packName}/section.md`) ?? text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/AGENTS.md`]).trim()),
+  };
   const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: lost, writes: [], removes: [] };
   const rendering = (path, want) => {
     const kitText = text(factory, want.oid);

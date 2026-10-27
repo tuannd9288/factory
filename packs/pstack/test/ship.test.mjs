@@ -1,11 +1,11 @@
 // scripts/ship (#85): one command that opens the pull request only after a local pass and then takes step 4's next step,
-// against a fake gh and a fake scripts/live-verify, in a copy of the kit with a real bare origin.
+// against a fake gh and a fake scripts/live-verify, in a copy of the kit and the pstack pack with a real bare origin.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { commit, factory, git, run, quiet } from './helpers.mjs';
+import { commit, factory, git, run, quiet } from '../../../test/helpers.mjs';
 
 // gh: the one pull request is $SH/pr.json (absent: none); every call is appended to $SH/gh-calls.
 const FAKE_GH = String.raw`#!/usr/bin/env node
@@ -53,6 +53,9 @@ function world() {
   const repo = join(dir, 'app');
   const sh = join(dir, 'sh');
   cpSync(join(factory, 'kit'), repo, { recursive: true });
+  // What a pstack team copies into its repository (packs/pstack/section.md): the pack's scripts and its .gate files.
+  cpSync(join(factory, 'packs/pstack/scripts'), join(repo, 'scripts'), { recursive: true });
+  cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
   mkdirSync(sh);
   git(repo, 'init', '-q', '-b', 'main');
   commit(repo, { 'cli.js': 'console.log(1);\n' }, 'start');

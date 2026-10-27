@@ -117,9 +117,20 @@ function packOf(factory, fac, repo, now) {
   if (!NAME.test(name) || !have.includes(name)) return { why: `${PACK_FILE}: no pack ${name} in ${fac}/packs; there are: ${have.join(', ')}` };
   const blob = (file) => git(factory, ['cat-file', 'blob', `${fac}:packs/${name}/${file}`]);
   try {
-    return { name, pack: { settings: blob('settings.json'), section: blob('AGENTS.md') } };
+    // section.md since #132; an older factory commit holds the section as AGENTS.md.
+    const section = showQuiet(factory, fac, `packs/${name}/section.md`) ?? blob('AGENTS.md');
+    return { name, pack: { settings: blob('settings.json'), section } };
   } catch {
-    return { why: `${PACK_FILE}: packs/${name}/ in ${fac.slice(0, 12)} lacks settings.json or AGENTS.md` };
+    return { why: `${PACK_FILE}: packs/${name}/ in ${fac.slice(0, 12)} lacks settings.json or section.md` };
+  }
+}
+
+/** The blob at rev:path in the factory, or null; git's complaint about an absent path is not output. */
+export function showQuiet(factory, rev, path) {
+  try {
+    return execFileSync('git', ['-C', factory, 'cat-file', 'blob', `${rev}:${path}`], { encoding: 'utf8', maxBuffer: 64 << 20, timeout: GIT_MS, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return null;
   }
 }
 
@@ -164,21 +175,17 @@ export function ownOf(text) {
 /** The pairs of kit file and pack file the factory had together: at this commit, then after each commit that changed
  * either. The pack's file is null before packs/<name>/ existed, and for the pack `none`. */
 function renderStates(factory, fac, path, packName, packNow) {
-  const file = path === 'AGENTS.md' ? 'AGENTS.md' : path === SETTINGS ? 'settings.json' : null;
-  const packed = file && packName && packName !== 'none';
-  const show = (rev, p) => {
-    try {
-      // The path is often absent from an older commit; git's own complaint about that is not output.
-      return execFileSync('git', ['-C', factory, 'cat-file', 'blob', `${rev}:${p}`], { encoding: 'utf8', maxBuffer: 64 << 20, timeout: GIT_MS, stdio: ['ignore', 'pipe', 'ignore'] });
-    } catch {
-      return null;
-    }
-  };
+  // The pack's section is packs/<name>/section.md since #132; an older commit held it as AGENTS.md.
+  const files = path === 'AGENTS.md' ? ['section.md', 'AGENTS.md'] : path === SETTINGS ? ['settings.json'] : [];
+  const packed = files.length > 0 && packName && packName !== 'none';
+  // The path is often absent from an older commit.
+  const show = (rev, p) => showQuiet(factory, rev, p);
+  const packAt = (rev) => files.reduce((found, f) => found ?? show(rev, `packs/${packName}/${f}`), null);
   const states = [{ kit: show(fac, `kit/${path}`), pack: packed ? packNow : null }];
-  const paths = [`kit/${path}`, ...(packed ? [`packs/${packName}/${file}`] : [])];
+  const paths = [`kit/${path}`, ...(packed ? files.map((f) => `packs/${packName}/${f}`) : [])];
   for (const rev of git(factory, ['--literal-pathspecs', 'log', '--format=%H', fac, '--', ...paths]).split('\n').filter(Boolean)) {
     const kit = show(rev, `kit/${path}`);
-    if (kit !== null) states.push({ kit, pack: packed ? show(rev, `packs/${packName}/${file}`) : null });
+    if (kit !== null) states.push({ kit, pack: packed ? packAt(rev) : null });
   }
   return states;
 }

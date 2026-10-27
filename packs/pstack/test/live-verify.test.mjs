@@ -1,11 +1,11 @@
-// scripts/live-verify: the live verifier on Codex, against a fake gh and a fake codex on PATH, in a copy of the kit.
+// scripts/live-verify: the live verifier on Codex, against a fake gh and a fake codex on PATH, in a copy of the kit and the pstack pack.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { commit, factory, git, quiet, run } from './helpers.mjs';
+import { commit, factory, git, quiet, run } from '../../../test/helpers.mjs';
 
 // gh: the pull request and its issue from $LV, every comment posted appended to $LV/comments.
 const FAKE_GH = String.raw`#!/usr/bin/env node
@@ -74,6 +74,9 @@ function world({ driver = DRIVER } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'live-verify-')));
   const repo = join(dir, 'app');
   cpSync(join(factory, 'kit'), repo, { recursive: true });
+  // What a pstack team copies into its repository (packs/pstack/section.md): the pack's scripts and its .gate files.
+  cpSync(join(factory, 'packs/pstack/scripts'), join(repo, 'scripts'), { recursive: true });
+  cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
   git(repo, 'init', '-q', '-b', 'main');
   writeFileSync(join(repo, '.github/CODEOWNERS'), '* @tuannd9288\n');
   if (driver) writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify(driver));

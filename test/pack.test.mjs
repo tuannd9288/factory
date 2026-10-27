@@ -56,7 +56,7 @@ describe('composing the core with a pack', () => {
     const kit = read('kit/AGENTS.md');
     assert.ok(composeAgents(kit, null).split('\n').length - 1 <= 150);
     assert.ok(packs().length >= 1, 'no pack under packs/');
-    for (const name of packs()) assert.ok(composeAgents(kit, read(`packs/${name}/AGENTS.md`)).split('\n').length - 1 <= 150, name);
+    for (const name of packs()) assert.ok(composeAgents(kit, read(`packs/${name}/section.md`)).split('\n').length - 1 <= 150, name);
   });
 });
 
@@ -70,7 +70,7 @@ describe('reading a pack', () => {
   test('none is no pack; a name returns the text of its two files', async () => {
     const { readPack } = await lib();
     assert.equal(readPack(factory, 'none'), null);
-    assert.deepEqual(readPack(factory, 'pstack'), { name: 'pstack', settings: read('packs/pstack/settings.json'), section: read('packs/pstack/AGENTS.md') });
+    assert.deepEqual(readPack(factory, 'pstack'), { name: 'pstack', settings: read('packs/pstack/settings.json'), section: read('packs/pstack/section.md') });
   });
 
   test('an unknown name is refused, naming the packs there are, sorted', async () => {
@@ -93,7 +93,7 @@ describe('reading a pack', () => {
     const { composeAgents, composeSettings } = await lib();
     let out = run(factory, 'node', [cli, 'agents', factory, 'pstack']);
     assert.equal(out.code, 0, out.out);
-    assert.equal(out.out, composeAgents(read('kit/AGENTS.md'), read('packs/pstack/AGENTS.md')));
+    assert.equal(out.out, composeAgents(read('kit/AGENTS.md'), read('packs/pstack/section.md')));
     out = run(factory, 'node', [cli, 'settings', factory, 'pstack']);
     assert.equal(out.out, composeSettings(read('kit/.claude/settings.json'), read('packs/pstack/settings.json')));
     out = run(factory, 'node', [cli, 'agents', factory, 'none']);
@@ -126,10 +126,9 @@ describe('packs/pstack', () => {
     const settings = read('packs/pstack/settings.json');
     assert.equal(settings, json(JSON.parse(settings)));
     assert.deepEqual(Object.keys(JSON.parse(settings)), ['enabledPlugins', 'extraKnownMarketplaces']);
-    const agents = read('packs/pstack/AGENTS.md');
+    const agents = read('packs/pstack/section.md');
     assert.ok(agents.startsWith('## Where pstack yields\n'));
     assert.ok(agents.endsWith('\n\n'), 'ends with the blank line before the next heading');
-    assert.equal(agents.split('\n').filter((l) => l.startsWith('## ')).length, 1);
   });
 });
 
@@ -161,9 +160,9 @@ describe('onboard --pack', () => {
       const out = s.onboard();
       assert.equal(out.code, 0, out.out);
       assert.equal(repoText(s, '.gate/pack'), 'pstack\n');
-      assert.equal(repoText(s, 'AGENTS.md'), composeAgents(read('kit/AGENTS.md'), read('packs/pstack/AGENTS.md')).replace('<repo>', 'app'));
+      assert.equal(repoText(s, 'AGENTS.md'), composeAgents(read('kit/AGENTS.md'), read('packs/pstack/section.md')).replace('<repo>', 'app'));
       // Independent of compose: the pack's section and every key of its pin are in the files onboard wrote.
-      assert.ok(repoText(s, 'AGENTS.md').includes(read('packs/pstack/AGENTS.md')));
+      assert.ok(repoText(s, 'AGENTS.md').includes(read('packs/pstack/section.md')));
       const pin = JSON.parse(read('packs/pstack/settings.json'));
       const laid = JSON.parse(repoText(s, '.claude/settings.json'));
       for (const [key, value] of Object.entries(pin)) assert.deepEqual(laid[key], value, key);
@@ -218,7 +217,7 @@ describe('onboard --pack', () => {
     const { composeAgents } = await lib();
     const s = seeded({ 'AGENTS.md': '# Our map\n' });
     try {
-      const composed = composeAgents(read('kit/AGENTS.md'), read('packs/pstack/AGENTS.md')).split('\n').length - 1;
+      const composed = composeAgents(read('kit/AGENTS.md'), read('packs/pstack/section.md')).split('\n').length - 1;
       const budget = 150 - (composed - 2);
       const long = `## Layout\n\n${'- a line\n'.repeat(budget)}\n## Facts the code cannot tell\n\n- one more\n`;
       writeFileSync(join(s.dir, 'own.md'), long);

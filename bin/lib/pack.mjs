@@ -1,12 +1,12 @@
 // A pack is what the kit holds only for one way of working: packs/<name>/settings.json (keys merged into the kit's
-// .claude/settings.json) and packs/<name>/AGENTS.md (one "## " section placed before "## What the Human keeps"). The
+// .claude/settings.json) and packs/<name>/section.md (one "## " section placed before "## What the Human keeps"). The
 // kit's core stays valid without one. A repository names its pack in .gate/pack, one line: the name, or "none". The
 // functions are pure so that bin/onboard and bin/lib/evidence.mjs build the same files from the same texts; the deny
 // rules and the repository's own Layout and Facts stay in the core, which no pack can write to.
 //   node bin/lib/pack.mjs settings <factory> <pack>   prints the composed .claude/settings.json
 //   node bin/lib/pack.mjs agents <factory> <pack>     prints the composed AGENTS.md (own parts not yet filled)
 // On an error it prints the message to stderr and exits 2.
-import { readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FACTS, LAYOUT } from './own.mjs';
@@ -27,7 +27,10 @@ export function readPack(factory, name) {
     }
   };
   if (!NAME.test(String(name)) || !names().includes(name)) throw new Error(`no pack ${name} in ${dir}; there are: ${names().join(', ')}`);
-  return { name, settings: readFileSync(join(dir, name, 'settings.json'), 'utf8'), section: readFileSync(join(dir, name, 'AGENTS.md'), 'utf8') };
+  // The section is packs/<name>/section.md since #132, so no file in packs/ is read as nested instructions; a pack that
+  // still holds it as AGENTS.md is read all the same.
+  const sectionFile = existsSync(join(dir, name, 'section.md')) ? 'section.md' : 'AGENTS.md';
+  return { name, settings: readFileSync(join(dir, name, 'settings.json'), 'utf8'), section: readFileSync(join(dir, name, sectionFile), 'utf8') };
 }
 
 /** The kit's settings with the pack's keys after them. A pack cannot carry `permissions` or a key the kit has. */
