@@ -465,7 +465,10 @@ describe('review, verdict, tier and rounds', () => {
         // The closing issues, as gh prints them (2026-10-26): porcelain commands only. None unless a test writes closing.json.
         '  "pr view 7 --repo o/app --json closingIssuesReferences") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; cat "$FAKE/closing.json" 2>/dev/null || echo \'{"closingIssuesReferences":[]}\' ;;',
         '  "issue view "*" --repo o/app --json number,title,labels,body") echo "issue view $3" >>"$FAKE/ghlog"; cat "$FAKE/issue-$3.json" ;;',
-        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; cat "$FAKE/jobs.json" ;;',
+        // A test that moves something while a job waits leaves $FAKE/mover.sh, which runs once at the first listing.
+        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
+        // The pull request's body and closing issues, as tier reads them (#133): no Issue line unless a test writes prview.json.
+        '  "pr view 7 --repo o/app --json closingIssuesReferences,body") cat "$FAKE/prview.json" 2>/dev/null || printf \'%s\\n\' \'{"body":"Issue: none\\n","closingIssuesReferences":[]}\' ;;',
         '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
         '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
         '  *check-runs/777/annotations*) cat "$FAKE/ann777.json" 2>/dev/null || echo "[]" ;;',
@@ -652,6 +655,102 @@ describe('review, verdict, tier and rounds', () => {
     reviewJob('success');
     assert.equal(again('tier', out.head, pr).code, 0);
   });
+  // #133: tier compares the pull request's Claim: line with the tip of claim/<n> on origin, read when tier runs.
+  const dropClaim = () => run(trusted, 'git', ['push', '-q', 'origin', ':refs/heads/claim/7'], quiet);
+  const claimTip = (subject, parent) => {
+    const base = parent ?? git(trusted, 'rev-parse', 'origin/main');
+    const sha = git(trusted, 'commit-tree', `${base}^{tree}`, '-p', base, '-m', subject);
+    git(trusted, 'push', '-q', 'origin', `${sha}:refs/heads/claim/7`);
+    return sha;
+  };
+  const prBody = (text, closing = []) => write(fake, { 'prview.json': JSON.stringify({ body: text, closingIssuesReferences: closing }) });
+  const closes = (number, [owner, name] = ['o', 'app']) => ({ number, repository: { name, owner: { login: owner } } });
+  const tierRun = (files = { 'src/math.js': MUL }) => job('tier', files, pr);
+  beforeEach(() => {
+    write(fake, { 'prview.json': null, 'mover.sh': null });
+    dropClaim();
+  });
+
+  test('tier passes when Claim: is the tip of claim/<n> for the issue named, and says which claim it read', () => {
+    const sha = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${sha}\nTeam: team-x\n`);
+    const out = tierRun();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /team-x/);
+  });
+  test('tier fails when the claim moved after the pull request was opened, naming the new holder', () => {
+    const first = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${first}\nTeam: team-x\n`);
+    assert.equal(tierRun().code, 0);
+    claimTip('handoff 7 team-y', first);
+    const out = tierRun();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /handoff 7 team-y/);
+  });
+  test('tier fails when the claim named was released, though its commit is the tip', () => {
+    const first = claimTip('claim 7 team-x');
+    claimTip('release 7', first);
+    prBody(`Issue: #7\nClaim: ${first}\n`);
+    assert.equal(tierRun().code, 1);
+    prBody(`Issue: #7\nClaim: ${git(trusted, 'ls-remote', 'origin', 'refs/heads/claim/7').split('\t')[0]}\n`);
+    assert.equal(tierRun().code, 1);
+  });
+  test('tier fails when Issue: #<n> has no Claim: line, a Claim: that is not a sha, or no claim on the issue', () => {
+    prBody('Issue: #7\nTeam: team-x\n');
+    assert.equal(tierRun().code, 1);
+    const sha = claimTip('claim 7 team-x');
+    prBody('Issue: #7\nClaim: <sha printed by .gate/bin/claim>\n');
+    assert.equal(tierRun().code, 1);
+    dropClaim();
+    prBody(`Issue: #7\nClaim: ${sha}\n`);
+    assert.equal(tierRun().code, 1);
+  });
+  test('tier fails with no Issue: line, and passes Issue: none that closes nothing here', () => {
+    prBody('Team: team-x\n');
+    assert.equal(tierRun().code, 1);
+    prBody('Issue: none\nTeam: team-x\n');
+    assert.equal(tierRun().code, 0);
+    prBody('Issue: none\n', [closes(9)]);
+    assert.equal(tierRun().code, 1);
+    prBody('Issue: none\n', [closes(9, ['o', 'elsewhere'])]);
+    assert.equal(tierRun().code, 0);
+  });
+  test('tier fails when the pull request closes an issue other than the one it names', () => {
+    const sha = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(9)]);
+    assert.equal(tierRun().code, 1);
+    prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(7)]);
+    assert.equal(tierRun().code, 0);
+    prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(9, ['o', 'elsewhere'])]);
+    assert.equal(tierRun().code, 0);
+  });
+  test('tier fails closed when the body cannot be read', () => {
+    write(fake, { 'prview.json': 'not json' });
+    assert.notEqual(tierRun().code, 0);
+  });
+  test('a tier-3 pull request with a stale claim fails too, whoever approved it', () => {
+    const first = claimTip('claim 7 team-x');
+    claimTip('handoff 7 team-y', first);
+    prBody(`Issue: #7\nClaim: ${first}\n`);
+    reviews([review('tuannd9288', 'APPROVED', 'x'.repeat(40))]);
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /handoff 7 team-y/);
+  });
+  test('tier reads the claim again after it waited for the review: a claim moved during the wait fails it', () => {
+    const first = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${first}\n`);
+    reviewJob('in_progress');
+    const done = JSON.stringify({ jobs: [{ id: 501, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(501), status: 'completed', conclusion: 'success' }], total_count: 1 });
+    write(fake, { 'jobs-done.json': done });
+    const next = git(trusted, 'commit-tree', `${first}^{tree}`, '-p', first, '-m', 'handoff 7 team-y');
+    write(fake, { 'mover.sh': `#!/bin/sh\ngit -C ${JSON.stringify(trusted)} push -q origin ${next}:refs/heads/claim/7\ncp "$FAKE/jobs-done.json" "$FAKE/jobs.json"\n` });
+    chmodSync(join(fake, 'mover.sh'), 0o755);
+    const out = tierRun();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /handoff 7 team-y/);
+  });
+
   test('a raise from a review that passed makes tier 3: tier labels raised and tier-3 and waits for the Human', () => {
     labels();
     reviews([]);
