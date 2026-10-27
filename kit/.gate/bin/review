@@ -9,10 +9,10 @@
 #   verdict  review's verdict from tier 2, read from the review job of its own workflow run (GITHUB_RUN_ID) for this head and
 #            base, with no reviewer call of its own; it passes at once on tier 1, so the required check always exists
 # The reviewer runs only once `verify` (gate.yml, on pull_request) passed on the head: the cheaper judge first, and a
-# red head needs a new commit anyway. The job waits for it up to GATE_WAIT seconds (default 1800, verify's own
-# timeout), then fails closed.
+# red head needs a new commit anyway. The job waits for it up to GATE_WAIT seconds (default: the minutes
+# GATE_VERIFY_TIMEOUT of .gate/config.sh gives verify, which .gate/bin/verify-timeout reads), then fails closed.
 #   tier     labels the tier; below tier 3 by paths and labels it waits for `review` of its own workflow run (GITHUB_RUN_ID,
-#            up to GATE_REVIEW_WAIT, default 4200 s), so it is never green before the reviewer ended, and follows it: a
+#            up to GATE_REVIEW_WAIT, default 6000 s), so it is never green before the reviewer ended, and follows it: a
 #            red or cancelled `review` fails it. It reads the review's result annotation whatever the conclusion; a raise
 #            there (or in any review on this head) labels the pull request raised and tier-3, and a result left absent
 #            fails it. A raise needs an approval given after it. On tier 3 it requires a code owner who is not the
@@ -92,10 +92,10 @@ claim_check() {
 # Waits for the `review` job of this workflow run and reads its result annotation, whatever its conclusion: sets
 # $review_red when it ended red or cancelled, and $did_raise and $raised (one line) when it reported a raise. A review
 # that ended green and left no result annotation is read again GATE_RESULT_TRIES times (the listing may lag the job), then
-# fails closed: absence is never "no raise". Fails closed on a timeout, GATE_REVIEW_WAIT (default 4200 s), which is not
+# fails closed: absence is never "no raise". Fails closed on a timeout, GATE_REVIEW_WAIT (default 6000 s), which is not
 # GATE_WAIT, the wait for verify.
 wait_review() {
-  local deadline=$((SECONDS + ${GATE_REVIEW_WAIT:-4200})) state tries=0
+  local deadline=$((SECONDS + ${GATE_REVIEW_WAIT:-6000})) state tries=0
   raised="" did_raise="" review_red="" unavailable=""
   [ -n "${GITHUB_RUN_ID:-}" ] || { echo "tier: GITHUB_RUN_ID is unset, so the review of this run cannot be found, and this check fails closed"; return 1; }
   while :; do
@@ -128,7 +128,7 @@ wait_review() {
 # review-verdict annotation names both. A result for another head or base, a blocking or absent one, or a review that
 # ended without one fails closed. Prints the unavailable notice first when review had no verdict.
 wait_verdict() {
-  local deadline=$((SECONDS + ${GATE_REVIEW_WAIT:-4200})) state tries=0
+  local deadline=$((SECONDS + ${GATE_REVIEW_WAIT:-6000})) state tries=0
   [ -n "${GITHUB_RUN_ID:-}" ] || { echo "verdict: GITHUB_RUN_ID is unset, so the review of this run cannot be found, and this check fails closed"; return 1; }
   while :; do
     state=$(node .gate/bin/lib/history.mjs verdict --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork") ||
@@ -234,7 +234,10 @@ esac
 
 # Waits for gate.yml's verify on the head; returns 1 unless it passed.
 wait_verify() {
-  local deadline=$((SECONDS + ${GATE_WAIT:-1800})) state
+  local wait deadline state
+  # GATE_WAIT overrides; else as long as .gate/config.sh lets verify run (GATE_VERIFY_TIMEOUT): a value it cannot read fails closed.
+  wait=${GATE_WAIT:-$(.gate/bin/verify-timeout --seconds)} || { echo "$job: how long verify may run could not be read from .gate/config.sh (GATE_VERIFY_TIMEOUT), so this check fails closed"; return 1; }
+  deadline=$((SECONDS + wait))
   while :; do
     state=$(node .gate/bin/lib/history.mjs check --repo "${GITHUB_REPOSITORY:-}" --head "$head" --name verify) ||
       { echo "$job: verify on ${head:0:8} could not be read ($state), so this check fails closed"; return 1; }

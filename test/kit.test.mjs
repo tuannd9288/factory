@@ -1621,7 +1621,7 @@ describe('gate-trusted.yml permissions', () => {
   test('review holds no write scope and tier has 75 minutes for its wait', () => {
     const block = (n) => jobs.find((j) => j.startsWith(`${n}:`));
     assert.doesNotMatch(block('review'), /: write$/m);
-    assert.match(block('tier'), /timeout-minutes: 75\n/);
+    assert.match(block('tier'), /timeout-minutes: 105\n/);
   });
   for (const [name, scopes] of Object.entries(NEEDS)) {
     test(`the ${name} job holds the scopes its scripts call`, () => {
@@ -1884,7 +1884,8 @@ describe('workflows and ruleset', () => {
         if (!runsCandidate(j)) continue;
         candidate += 1;
         assert.deepEqual(events(wf), ['pull_request'], `${wf.file} ${id} runs the candidate's code on ${events(wf).join(', ')}`);
-        assert.match(String(j['runs-on']), /^ubuntu-[\w.]+$/, `${wf.file} ${id} runs the candidate's code on ${j['runs-on']}`);
+        // GitHub-hosted Ubuntu, or the repository variable GATE_PR_RUNNER with hosted Ubuntu as its default (test/gate-workflows.test.mjs).
+        assert.match(String(j['runs-on']), /^(ubuntu-[\w.]+|\$\{\{ fromJSON\(vars\.GATE_PR_RUNNER \|\| '"ubuntu-[\w.]+"'\) \}\})$/, `${wf.file} ${id} runs the candidate's code on ${j['runs-on']}`);
         assert.equal(j.environment, undefined, `${wf.file} ${id} runs the candidate's code in an environment`);
         assert.doesNotMatch(JSON.stringify(j), /secrets\./, `${wf.file} ${id} hands the candidate's code a secret`);
         assert.deepEqual(j.permissions ?? wf.permissions, { contents: 'read' }, `${wf.file} ${id} gives the candidate's code more than read`);

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# The minutes the gate lets `verify` run on a pull request: GATE_VERIFY_TIMEOUT in .gate/config.sh next to this script's
+# folder (30 when it names none), a whole number from 1 to 60.
+#   .gate/bin/verify-timeout            the minutes
+#   .gate/bin/verify-timeout --seconds  the same in seconds (how long `review` waits for verify)
+#   .gate/bin/verify-timeout --max      the largest value allowed; the ceilings of the jobs in .github/workflows are sized to it
+# A value it cannot read is exit 2 with a reason and no number, so a job that needs it fails closed. gate.yml runs it in the
+# base's checkout, so only main's value counts; a pull request that edits the config takes effect after it merges.
+set -uo pipefail
+MAX=60
+here=$(cd "$(dirname "$0")/../.." && pwd) || exit 2
+case "${1:-}" in
+  "" | --seconds) ;;
+  --max) echo "$MAX"; exit 0 ;;
+  *) echo "usage: .gate/bin/verify-timeout [--seconds | --max]"; exit 2 ;;
+esac
+value=$( (. "$here/.gate/config.sh" >/dev/null 2>&1 || exit 2; printf '%s' "${GATE_VERIFY_TIMEOUT:-30}") ) ||
+  { echo "verify-timeout: .gate/config.sh could not be read"; exit 2; }
+if ! [[ $value =~ ^[1-9][0-9]?$ ]] || [ "$value" -gt "$MAX" ]; then
+  echo "verify-timeout: GATE_VERIFY_TIMEOUT in .gate/config.sh must be a whole number of minutes from 1 to $MAX"
+  exit 2
+fi
+if [ "${1:-}" = --seconds ]; then echo $((value * 60)); else echo "$value"; fi

@@ -2,8 +2,10 @@
 # scripts checked out from the pull request's base. It runs on pull_request, not pull_request_target: it writes only
 # the pull request's own Actions cache, never one main's or a deploy's jobs restore, and it holds no secret and a
 # read-only token. GitHub runs the candidate's copy of this file, so a change to it is a .gate/protected path: tier 3,
-# the Human's approval. It runs on a GitHub-hosted runner, never on a self-hosted one that also runs main's or a
-# deploy's jobs, where the candidate's code could leave something behind for them.
+# the Human's approval. The runner is the repository variable GATE_PR_RUNNER (a JSON label list, as main.yml's
+# GATE_RUNNER), GitHub-hosted Ubuntu when unset; never a runner that holds a secret or runs main's or a deploy's jobs, and
+# a self-hosted one only when it is ephemeral and the two-job canary proved it clean (.gate/enforced-rules.md). The verify
+# step's timeout is GATE_VERIFY_TIMEOUT in main's .gate/config.sh, read by the step before it.
 name: gate
 
 on:
@@ -20,8 +22,10 @@ concurrency:
 jobs:
   verify:
     name: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ${{ fromJSON(vars.GATE_PR_RUNNER || '"ubuntu-latest"') }}
+    # The ceiling: the largest GATE_VERIFY_TIMEOUT (.gate/bin/verify-timeout --max) and the checkouts and setup. The verify
+    # step below is bound by the repository's own value.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,9 +42,16 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - id: cfg
+        name: Read the verify timeout from main's .gate/config.sh
+        run: |
+          minutes=$(.gate/bin/verify-timeout) || exit 1
+          echo "minutes=$minutes" >>"$GITHUB_OUTPUT"
+        working-directory: trusted
       - run: |
           printf '%s\n' "$BODY" >"$RUNNER_TEMP/pr-body.txt"
           GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" .gate/bin/verify-trusted ../candidate "$BASE"
+        timeout-minutes: ${{ fromJSON(steps.cfg.outputs.minutes) }}
         working-directory: trusted
         env:
           BASE: ${{ github.event.pull_request.base.sha }}

@@ -27,6 +27,10 @@ GATE_NATIVE=""
 # .gate/proofs/<name>.patch that makes it fail. Space-separated names.
 GATE_CHECKS=""
 
+# The minutes `verify` may run on a pull request, 1 to 60. .gate/bin/verify-timeout reads it, for the verify step of
+# gate.yml and for how long `review` waits for that check.
+GATE_VERIFY_TIMEOUT=30
+
 # Paths whose change is a source change, for red-check; tests are told apart by .gate/handin.json's "tests" patterns.
 GATE_SOURCE='\.([cm]?[jt]sx?|py|go|rs|rb|java|kt|kts|scala|php|swift|cs|c|cc|cpp|h|hpp|sh)$'
 export GATE_SOURCE
