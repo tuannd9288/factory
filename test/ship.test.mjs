@@ -434,7 +434,7 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     writeFileSync(join(w.repo, '.gate/bin/tier'), '#!/bin/sh\necho "tier: could not read the policy"\nexit 2\n');
     const out = w.ship();
     assert.equal(out.code, 2, out.out);
-    assert.match(out.out, /^ship: could not judge the tier \(scripts\/tier exited 2\)$/m);
+    assert.match(out.out, /^ship: could not judge the tier \(\.gate\/bin\/tier exited 2\)$/m);
     assert.equal(w.read('lv-calls'), '');
     assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 0);
   });
