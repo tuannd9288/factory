@@ -29,7 +29,7 @@ export const SEED = {
   '.claude/settings.json': SETTINGS,
   'AGENTS.md': '# parcel-notes\n\nOur rules.\n',
 };
-const EXECUTABLE = ['scripts/verify', '.githooks/pre-commit', '.githooks/pre-push'];
+export const EXECUTABLE = ['scripts/verify', '.githooks/pre-commit', '.githooks/pre-push'];
 
 /** The seed with `files` over it (a null value drops one), a bare origin, and `onboard(...args)` that runs bin/onboard
  * --no-pr over it with --own already given unless `own` is false. */
