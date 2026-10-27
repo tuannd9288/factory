@@ -95,6 +95,9 @@ describe('bin/kit-update on the new layout', () => {
       assert.equal(readFileSync(join(w.repo, '.gate/config.sh'), 'utf8'), `${kitConfig}# a new default\n${ADAPTER}`);
       assert.match(out.out, /^updated \(.*\):\n(?: {2}.*\n)* {2}\.gate\/config\.sh \(was /m);
       // A config.sh the repository edited is still its own, and is kept.
+      git(w.repo, 'switch', '-q', 'main');
+      git(w.repo, 'merge', '-q', '--ff-only', `factory/kit-${w.sha7()}`);
+      git(w.repo, 'push', '-q', 'origin', 'main');
       w.repoCommit({ '.gate/config.sh': `${readFileSync(join(w.repo, '.gate/config.sh'), 'utf8')}# ours\n` });
       w.facCommit({ 'kit/.gate/config.sh': `${kitConfig}# a new default\n# and another\n` });
       const again = w.update(['app', '--no-pr']);

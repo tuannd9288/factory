@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { FACTS, LAYOUT, LIMIT, fill } from './own.mjs';
-import { FILLED, INVENTORY, REPLACES, SETTINGS, denyOf, git, ownOf, pastBlobs, render, renderedAs, tree } from './evidence.mjs';
+import { CONFIG, FILLED, INVENTORY, REPLACES, SETTINGS, blockFor, denyOf, git, ownOf, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
 import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
 import { addDeny } from './settings.mjs';
@@ -128,6 +128,10 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
     else if (pastBlobs(factory, fac, want.src).has(had.oid)) {
       out.update.push(path);
       out.writes.push({ path, mode: want.mode, oid: want.oid });
+    } else if (path === CONFIG && pastWithBlock(factory, fac, want.src, text(repo, had.oid), blockFor(repo, at))) {
+      // An older kit text with the adapter block after it: laid anew, with the block.
+      out.update.push(path);
+      out.writes.push({ path, mode: want.mode, text: text(factory, want.oid) + blockFor(repo, at) });
     } else if (want.module) out.conflicts.push(`${path}: the repository's own, at a path module ${want.module} lays; a module's file is never kept`);
     else if (REPLACES(path)) out.conflicts.push(`${path}: the repository's own, which the kit replaces whole`);
     else out.keep.push(path);

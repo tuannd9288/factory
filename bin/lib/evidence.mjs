@@ -125,6 +125,17 @@ function packOf(factory, fac, repo, now) {
 
 const pastCache = new Map();
 
+/** The adapter lines for the files a tree holds: bin/lib/adapter.mjs's block, "" when the repository has no scripts/verify. */
+export function blockFor(repo, files) {
+  const hook = files.get(HOOK);
+  return adapterBlock({ native: files.has(NATIVE), hookText: hook ? git(repo, ['cat-file', 'blob', hook.oid]) : null });
+}
+
+/** Whether text is a kit text the factory once held at src, followed by the adapter block. */
+export function pastWithBlock(factory, fac, src, text, block) {
+  return block !== '' && [...pastBlobs(factory, fac, src)].some((oid) => git(factory, ['cat-file', 'blob', oid]) + block === text);
+}
+
 /** Every blob the factory's history (from rev) held at exactly path: its blob after each commit that changed it. No
  * renames or copies are followed, so a blob that only ever lived at another path is not one of these; and the path is
  * literal, so a repository's file named `config?sh` does not glob onto the kit's `config.sh`. */
@@ -280,6 +291,8 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
     const same = own && have && have.mode === had.mode && have.oid === had.oid;
     // A file as an older kit had it, not the repository's own, when the pull request brings it to the kit's.
     if (own && !same && !older && !FILLED[path] && path !== SETTINGS) older = pastBlobs(factory, fac, want.src).has(had.oid);
+    // An older kit config with the adapter block after it is an older kit's too: it is laid anew with the block.
+    if (path === CONFIG && own && !same && !older && had.mode === want.mode) older = pastWithBlock(factory, fac, want.src, blob(repo, had.oid), blockFor(repo, now));
     if (!have) fails.push(`missing: ${path}`);
     else if (same && REPLACES(path)) fails.push(`differs: ${path} (the repository's own, which the kit replaces)`);
     else if (same) kept.push(path);
@@ -287,14 +300,14 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
     else if (have.mode !== want.mode) fails.push(`differs: ${path} (mode ${have.mode}, the kit's ${want.mode})`);
     else if (path === CONFIG) {
       // The kit's text, with the adapter lines for the repository's own files when it has its own scripts/verify.
-      const hook = now.get(HOOK);
-      const block = adapterBlock({ native: now.has(NATIVE), hookText: hook ? blob(repo, hook.oid) : null });
+      const block = blockFor(repo, now);
       const text = blob(repo, have.oid);
       const kitText = blob(factory, want.oid);
       if (text !== kitText && text !== kitText + block) fails.push(`differs: ${path} (not the kit's text with the adapter lines for this repository)`);
       else if (text !== kitText) {
         filled.add(path);
         adapted.push(path);
+        if (own && older) updated.push(was(path, had.oid, 'kit'));
       } else {
         exact++;
         if (own && older) updated.push(was(path, had.oid, 'kit'));
