@@ -6,7 +6,7 @@
 //   node .gate/bin/lib/policy.mjs checks [--rules <dir>]      the required checks of .gate/ruleset.json, one per line
 // Exit 0 fine, 1 on a mismatch, 2 when a policy file cannot be read.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** A gitignore-style pattern as a regex over repository paths. */
@@ -124,7 +124,9 @@ function main(argv) {
       // The repository's own verify (GATE_NATIVE) decides what the gate runs, so it is a protected path or the check fails.
       const n = rest.indexOf('--native');
       const native = n >= 0 ? rest[n + 1] : '';
-      if (native && !protectedOf(dir).paths.some((p) => p.re.test(native))) problems.push(`${native} is the native verify (GATE_NATIVE) and no protected path in .gate/protected covers it`);
+      // check_native runs "./$GATE_NATIVE": a value with .. or a leading / would be matched here as written and run elsewhere.
+      if (native && (native.startsWith('/') || native.endsWith('/') || native.split('/').includes('..') || posix.normalize(native) !== native)) problems.push(`${native} is not a plain relative path, so it cannot be the native verify (GATE_NATIVE)`);
+      else if (native && !protectedOf(dir).paths.some((p) => p.re.test(native))) problems.push(`${native} is the native verify (GATE_NATIVE) and no protected path in .gate/protected covers it`);
       for (const p of problems) console.log(`policy: ${p}`);
       if (problems.length) console.log('policy: .gate/protected and the end of .github/CODEOWNERS list the same paths, each owned by the Human');
       return problems.length ? 1 : 0;
