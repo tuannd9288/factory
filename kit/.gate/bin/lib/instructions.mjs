@@ -9,9 +9,9 @@
 //   node instructions.mjs section <file>   the kit's gate-section.md is one well-formed block within the kit's budget
 // Exit 0 fine, 1 on a problem, 2 when something cannot be read.
 import { spawnSync } from 'node:child_process';
-import { lstatSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const BEGIN = '<!-- factory:gate:begin -->';
@@ -245,14 +245,32 @@ export function entryIn(repo, rev, path) {
 function fetchFactory(url) {
   const dir = mkdtempSync(join(tmpdir(), 'gate-factory-'));
   const done = () => rmSync(dir, { recursive: true, force: true });
-  for (const args of [['init', '--bare', '-q', dir], ['-C', dir, 'fetch', '--quiet', '--no-tags', url, 'main:refs/heads/main']]) {
-    const r = git(args);
-    if (r.status !== 0) {
-      done();
-      throw new Error(`could not fetch the factory's main from ${url}: ${String(r.stderr).trim().split('\n')[0]}`);
+  // git() throws when a run is killed (a timeout): the folder goes then too, not only when git exits non-zero.
+  try {
+    for (const args of [['init', '--bare', '-q', dir], ['-C', dir, 'fetch', '--quiet', '--no-tags', url, 'main:refs/heads/main']]) {
+      const r = git(args);
+      if (r.status !== 0) throw new Error(`could not fetch the factory's main from ${url}: ${String(r.stderr).trim().split('\n')[0]}`);
     }
+  } catch (error) {
+    done();
+    throw error;
   }
   return { dir, done };
+}
+
+/** Where the factory's main is fetched from: the public factory, unless GATE_FACTORY_URL names a local folder, as an
+ * absolute path. That variable is for tests. Anything else it holds (a URL, a file:// URL, a relative path, a path that is
+ * no folder) is a problem and not a fallback; unset or empty is the public factory. */
+function factoryLocation(env = process.env) {
+  const given = env.GATE_FACTORY_URL;
+  if (given === undefined || given === '') return { url: FACTORY_URL };
+  let folder = false;
+  try {
+    folder = isAbsolute(given) && statSync(given).isDirectory();
+  } catch {
+    folder = false;
+  }
+  return folder ? { url: given } : { problem: `GATE_FACTORY_URL must be an absolute path to a local folder, and is only for tests; it is ${JSON.stringify(given)}` };
 }
 
 const isAncestor = (dir, older, newer) => git(['-C', dir, 'merge-base', '--is-ancestor', older, newer]).status === 0;
@@ -278,7 +296,7 @@ export function objectProblems(options) {
   }
 }
 
-function judgeObjects({ repo, base, head = 'HEAD', url = process.env.GATE_FACTORY_URL || FACTORY_URL }) {
+function judgeObjects({ repo, base, head = 'HEAD', location = factoryLocation() }) {
   const read = (rev) => ({ agents: entryIn(repo, rev, 'AGENTS.md'), claude: entryIn(repo, rev, 'CLAUDE.md'), section: entryIn(repo, rev, SECTION), commit: entryIn(repo, rev, KIT_COMMIT) });
   const b = read(base);
   const c = read(head);
@@ -297,10 +315,13 @@ function judgeObjects({ repo, base, head = 'HEAD', url = process.env.GATE_FACTOR
   if (!key) problems.push(`${KIT_COMMIT} must be one full factory commit (40 lowercase hex characters) and a newline: this pull request changes the Gate block, its file or that commit`);
   else {
     let factory = null;
-    try {
-      factory = fetchFactory(url);
-    } catch (error) {
-      problems.push(`${error.message}: a kit update cannot be judged`);
+    if (location.problem) problems.push(`could not fetch the factory's main: ${location.problem}: a kit update cannot be judged`);
+    else {
+      try {
+        factory = fetchFactory(location.url);
+      } catch (error) {
+        problems.push(`${error.message}: a kit update cannot be judged`);
+      }
     }
     if (factory) {
       try {
