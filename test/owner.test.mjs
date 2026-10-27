@@ -246,6 +246,36 @@ test('a second bypass actor on the live tag ruleset is taken out: exactly one PU
   }
 });
 
+test('factory-claims: a claim ref cannot be deleted or rewritten, with no bypass, and no other ref is named', () => {
+  const claims = JSON.parse(readFileSync(join(factory, 'bin/rulesets/claims.json'), 'utf8'));
+  assert.equal(claims.name, 'factory-claims');
+  assert.equal(claims.target, 'branch');
+  assert.equal(claims.enforcement, 'active');
+  assert.deepEqual(claims.conditions.ref_name, { include: ['refs/heads/claim/**'], exclude: [] });
+  assert.deepEqual(claims.rules.map((r) => r.type).sort(), ['deletion', 'non_fast_forward']);
+  assert.deepEqual(claims.bypass_actors, []);
+});
+
+test('the owner script sets factory-claims before the kit lands and keeps it after, and a second run changes nothing', () => {
+  const w = world();
+  try {
+    const dry = w.owner(['tuannd9288/app', '--id', '1234']);
+    assert.match(dry.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-claims","target":"branch".*"refs\/heads\/claim\/\*\*".*"deletion"/);
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.ok(w.state().rulesets.some((r) => r.name === 'factory-claims'));
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [] });
+    w.clear();
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.ok(w.state().rulesets.some((r) => r.name === 'factory-claims'));
+    w.clear();
+    const again = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(again.code, 0, again.out);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('a setting that does not read back as set leaves the onboarding incomplete', () => {
   const w = world({ ignore: 'rulesets' });
   try {
