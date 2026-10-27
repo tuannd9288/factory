@@ -22,7 +22,7 @@ const note = (title, message) => ({ title, message, annotation_level: 'notice' }
 
 describe('history.mjs and the acc of a review-verdict', () => {
   let dir;
-  const T = join(factory, 'kit/scripts/lib/history.mjs');
+  const T = join(factory, 'kit/.gate/bin/lib/history.mjs');
   const annotate = (verdict, result = 'none') => writeFileSync(join(dir, 'annotations.json'), JSON.stringify([note('review-result', result), note('review-verdict', verdict)]));
   const history = (kind, ...extra) =>
     run(dir, process.execPath, [T, kind, '--repo', 'o/app', '--run', '99', '--head', HEAD, '--base', BASE, ...extra], { PATH: `${join(dir, 'bin')}:${process.env.PATH}` }).out.trim();

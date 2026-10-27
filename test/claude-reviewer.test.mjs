@@ -1,4 +1,4 @@
-// #25: the Claude Code reviewer (kit/scripts/lib/claude-reviewer.mjs), against a fake `claude` on PATH. No model runs.
+// #25: the Claude Code reviewer (kit/.gate/bin/lib/claude-reviewer.mjs), against a fake `claude` on PATH. No model runs.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -62,7 +62,7 @@ describe('claude-reviewer', () => {
   let base;
   let head;
   let calls;
-  const T = join(factory, 'kit/scripts/lib/claude-reviewer.mjs');
+  const T = join(factory, 'kit/.gate/bin/lib/claude-reviewer.mjs');
   const conf = (c) => writeFileSync(join(dir, 'claude.json'), JSON.stringify(c));
   const callsOf = () => readFileSync(join(dir, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   /** Runs the reviewer on the candidate; the environment is the job's, with both tokens set unless env says otherwise. */
@@ -466,7 +466,7 @@ Labels: sublayer-1b, task
 
 describe('the call fits the job\'s time', () => {
   test('the budget is the time left in the job less a margin, capped at the call\'s own bound', async () => {
-    const { callBudget } = await import('../kit/scripts/lib/budget.mjs');
+    const { callBudget } = await import('../kit/.gate/bin/lib/budget.mjs');
     const now = 1_000_000;
     const at = (minutesIn) => callBudget({ now, start: now - minutesIn * 60, jobMinutes: 60, marginMinutes: 5, capMinutes: 25 });
     assert.equal(at(0).minutes, 25);
@@ -480,7 +480,7 @@ describe('the call fits the job\'s time', () => {
 });
 
 describe('claude-reviewer and the job\'s time', () => {
-  const T = join(factory, 'kit/scripts/lib/claude-reviewer.mjs');
+  const T = join(factory, 'kit/.gate/bin/lib/claude-reviewer.mjs');
   test('with no time left in the job it makes no call and says timeout; with some, an overloaded API is not retried', () => {
     const dir = mkdtempSync(join(tmpdir(), 'claude-budget-'));
     try {
@@ -529,9 +529,9 @@ describe('the pinned install and the workflow', () => {
   };
 
   test('the reviewer pins Claude Code by a lockfile, and the version it expects is the lockfile\'s', () => {
-    const pin = JSON.parse(read('kit/scripts/lib/reviewer.json'));
-    const lock = JSON.parse(read('kit/scripts/reviewer/package-lock.json'));
-    const pkg = JSON.parse(read('kit/scripts/reviewer/package.json'));
+    const pin = JSON.parse(read('kit/.gate/bin/lib/reviewer.json'));
+    const lock = JSON.parse(read('kit/.gate/bin/reviewer/package-lock.json'));
+    const pkg = JSON.parse(read('kit/.gate/bin/reviewer/package.json'));
     assert.equal(pkg.dependencies['@anthropic-ai/claude-code'], pin.version);
     assert.equal(lock.packages['node_modules/@anthropic-ai/claude-code'].version, pin.version);
     assert.match(lock.packages['node_modules/@anthropic-ai/claude-code'].integrity, /^sha512-/);
@@ -554,15 +554,15 @@ describe('the pinned install and the workflow', () => {
     try {
       mkdirSync(join(dir, 'bin'));
       mkdirSync(join(dir, 'scripts/lib'), { recursive: true });
-      const pkg = join(dir, 'scripts/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64');
-      writeFileSync(join(dir, 'scripts/lib/reviewer.json'), JSON.stringify({ version: '2.1.308' }));
+      const pkg = join(dir, '.gate/bin/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64');
+      writeFileSync(join(dir, '.gate/bin/lib/reviewer.json'), JSON.stringify({ version: '2.1.308' }));
       const fake = (name, body) => {
         writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
         chmodSync(join(dir, name), 0o755);
       };
       const go = (npm, claude) => {
         fake('bin/npm', npm);
-        rmSync(join(dir, 'scripts/reviewer'), { recursive: true, force: true });
+        rmSync(join(dir, '.gate/bin/reviewer'), { recursive: true, force: true });
         if (claude !== null) {
           mkdirSync(pkg, { recursive: true });
           writeFileSync(join(pkg, 'claude'), `#!/bin/sh\n${claude}\n`);

@@ -145,7 +145,7 @@ test('scripts/verify fails a composed AGENTS.md of more than 150 lines, and pass
 });
 
 test('scripts/verify checks the subject of every commit since GATE_BASE: a bad one fails the run, a good one passes', () => {
-  const tests = { 'kit/scripts/lib/subject.mjs': readFileSync(join(factory, 'kit/scripts/lib/subject.mjs'), 'utf8') };
+  const tests = { 'kit/.gate/bin/lib/subject.mjs': readFileSync(join(factory, 'kit/.gate/bin/lib/subject.mjs'), 'utf8') };
   const from = (subject) => (copy) => {
     git(copy, 'init', '-q', '-b', 'main');
     const start = commit(copy, {}, 'Start');

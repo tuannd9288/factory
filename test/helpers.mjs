@@ -81,5 +81,5 @@ export function repoWithKit(extra = {}, onboardArgs = []) {
 }
 
 export function script(repo, name, args = [], env = {}) {
-  return run(repo, join(repo, 'scripts', name), args, { ...quiet, ...env });
+  return run(repo, join(repo, '.gate/bin', name), args, { ...quiet, ...env });
 }

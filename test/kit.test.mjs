@@ -159,7 +159,7 @@ describe('junit reader', () => {
   after(() => rmSync(dir, { recursive: true, force: true }));
   const read = (xml) => {
     writeFileSync(join(dir, 'r.xml'), xml);
-    return run(dir, 'node', [join(factory, 'kit/scripts/lib/junit.mjs'), join(dir, 'r.xml')]).out.trim();
+    return run(dir, 'node', [join(factory, 'kit/.gate/bin/lib/junit.mjs'), join(dir, 'r.xml')]).out.trim();
   };
 
   test('counts a node file that could not load as an error, not a failure', () => {
@@ -178,7 +178,7 @@ describe('junit reader', () => {
     );
   });
   test('a missing report is an error', () => {
-    assert.equal(run(dir, 'node', [join(factory, 'kit/scripts/lib/junit.mjs'), join(dir, 'none.xml')]).out.trim(), 'tests=0 failures=0 errors=1 skipped=0');
+    assert.equal(run(dir, 'node', [join(factory, 'kit/.gate/bin/lib/junit.mjs'), join(dir, 'none.xml')]).out.trim(), 'tests=0 failures=0 errors=1 skipped=0');
   });
 });
 
@@ -363,11 +363,11 @@ describe('verify and prove-check', () => {
     write(r.repo, { 'test/fail.test.js': null });
   });
   test('prove-check fails a check that passes its fixture', () => {
-    write(r.repo, { 'scripts/rules': '#!/usr/bin/env bash\nexit 0\n' });
+    write(r.repo, { '.gate/bin/rules': '#!/usr/bin/env bash\nexit 0\n' });
     const out = script(r.repo, 'prove-check', ['rules']);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /rules PASSED its fixture/);
-    git(r.repo, 'checkout', '-q', '--', 'scripts/rules');
+    git(r.repo, 'checkout', '-q', '--', '.gate/bin/rules');
   });
   test('a check of the repository without a fixture fails verify', () => {
     const config = readFileSync(join(r.repo, '.gate/config.sh'), 'utf8');
@@ -391,7 +391,7 @@ describe('verify-trusted', () => {
   const candidate = (files, env = {}) => {
     git(r.repo, 'switch', '-q', '-C', 'c', 'origin/main');
     commit(r.repo, files, 'candidate');
-    return run(trusted, join(trusted, 'scripts/verify-trusted'), [r.repo, git(r.repo, 'rev-parse', 'origin/main')], env);
+    return run(trusted, join(trusted, '.gate/bin/verify-trusted'), [r.repo, git(r.repo, 'rev-parse', 'origin/main')], env);
   };
 
   test('passes a good candidate that changes no protected path', () => {
@@ -416,13 +416,13 @@ describe('verify-trusted', () => {
     assert.match(out.out, /test-focused/);
   });
   test('fails a verify replaced by exit 0', () => {
-    const out = candidate({ 'scripts/verify': '#!/usr/bin/env bash\nexit 0\n' });
+    const out = candidate({ '.gate/bin/verify': '#!/usr/bin/env bash\nexit 0\n' });
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /no longer fail on main's fixtures/);
   });
   test('fails a rules check switched off inside verify', () => {
-    const verify = readFileSync(join(r.repo, 'scripts/verify'), 'utf8').replace('scripts/rules ${GATE_BASE:+--base "$GATE_BASE"}', 'true');
-    const out = candidate({ 'scripts/verify': verify });
+    const verify = readFileSync(join(r.repo, '.gate/bin/verify'), 'utf8').replace('.gate/bin/rules ${GATE_BASE:+--base "$GATE_BASE"}', 'true');
+    const out = candidate({ '.gate/bin/verify': verify });
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /rules PASSED its fixture/);
   });
@@ -432,7 +432,7 @@ describe('verify-trusted', () => {
     assert.match(out.out, /main's red-check fails on the candidate's code/);
   });
   test('fails a candidate whose code main\'s verify rejects', () => {
-    const out = candidate({ 'scripts/rules': '#!/usr/bin/env bash\nexit 0\n', 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
+    const out = candidate({ '.gate/bin/rules': '#!/usr/bin/env bash\nexit 0\n', 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /main's verify fails on the candidate's code/);
   });
@@ -513,7 +513,7 @@ describe('review, verdict, tier and rounds', () => {
   const again = (kind, head, env = {}) => {
     write(fake, { edits: '', calls: '' });
     write(fake, { head });
-    const out = run(trusted, join(trusted, 'scripts/review'), [kind, '--base', git(trusted, 'rev-parse', 'origin/main'), '--head', head], {
+    const out = run(trusted, join(trusted, '.gate/bin/review'), [kind, '--base', git(trusted, 'rev-parse', 'origin/main'), '--head', head], {
       PATH: `${join(fake, 'bin')}:${process.env.PATH}`,
       FAKE: fake,
       GITHUB_REPOSITORY: 'o/app',
@@ -584,7 +584,7 @@ describe('review, verdict, tier and rounds', () => {
   });
   test('a reviewer result that is malformed, unbound to the head, or silent on a No-red claim fails', () => {
     const check = (result, args = []) =>
-      spawnSync('node', [join(factory, 'kit/scripts/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40), ...args], { input: result, encoding: 'utf8' });
+      spawnSync('node', [join(factory, 'kit/.gate/bin/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40), ...args], { input: result, encoding: 'utf8' });
     const good = { reviewer: 'x', job: 'review', base: 'b'.repeat(40), head: 'h'.repeat(40), blocking: [], noRed: 'unjudged' };
     assert.equal(check(JSON.stringify(good)).status, 0);
     assert.equal(check('not json').status, 2);
@@ -745,7 +745,7 @@ describe('review, verdict, tier and rounds', () => {
   });
   test('a raise that lowers a tier, names another tier than 3, or comes from the verdict is malformed', () => {
     const check = (result, job = 'review') =>
-      spawnSync('node', [join(factory, 'kit/scripts/lib/result.mjs'), '--job', job, '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], { input: JSON.stringify(result), encoding: 'utf8' });
+      spawnSync('node', [join(factory, 'kit/.gate/bin/lib/result.mjs'), '--job', job, '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], { input: JSON.stringify(result), encoding: 'utf8' });
     const good = { reviewer: 'x', job: 'review', base: 'b'.repeat(40), head: 'h'.repeat(40), blocking: [], noRed: 'unjudged' };
     const ok = check({ ...good, raise: { tier: 3, why: 'a sign-in var' } });
     assert.equal(ok.status, 0, ok.stdout);
@@ -756,7 +756,7 @@ describe('review, verdict, tier and rounds', () => {
   });
   test('the reason is one line and a command can only be the single notice result.mjs prints', () => {
     for (const why of ['::error::x', '%0A::warning::y', 'a\n::add-mask::z']) {
-      const r = spawnSync('node', [join(factory, 'kit/scripts/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], {
+      const r = spawnSync('node', [join(factory, 'kit/.gate/bin/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], {
         input: JSON.stringify({ reviewer: 'x', job: 'review', base: 'b'.repeat(40), head: 'h'.repeat(40), blocking: [], noRed: 'unjudged', raise: { tier: 3, why } }),
         encoding: 'utf8',
       });
@@ -937,7 +937,7 @@ describe('review, verdict, tier and rounds', () => {
     const commandsOf = (stdout) =>
       stdout.split(/\r\n|\r|\n/).flatMap((line) => [...(line.trimStart().startsWith('::') ? [line.trim()] : []), ...(line.includes('##[') ? [line] : [])]);
     const send = (result) =>
-      spawnSync('node', [join(factory, 'kit/scripts/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], { input: JSON.stringify(result), encoding: 'utf8' });
+      spawnSync('node', [join(factory, 'kit/.gate/bin/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], { input: JSON.stringify(result), encoding: 'utf8' });
     const good = { reviewer: 'x', job: 'review', base: 'b'.repeat(40), head: 'h'.repeat(40), blocking: [], noRed: 'unjudged' };
     for (const why of ['##[stop-commands]x', '##[error]x', 'a\r::add-mask::z', 'sets a var ("A": false, // ##[stop-commands]zq7x)']) {
       const r = send({ ...good, raise: { tier: 3, why } });
@@ -963,7 +963,7 @@ describe('review, verdict, tier and rounds', () => {
     annotations();
   });
   test('history.mjs raise with no pr, head or run exits 2 and says which are needed', () => {
-    const out = run(factory, 'node', [join(factory, 'kit/scripts/lib/history.mjs'), 'raise']);
+    const out = run(factory, 'node', [join(factory, 'kit/.gate/bin/lib/history.mjs'), 'raise']);
     assert.equal(out.code, 2);
     assert.match(out.out, /--pr, --head or --run are needed/);
   });
@@ -999,7 +999,7 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /do not include run 99, so the union of raises cannot be trusted/);
     write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }) });
-    const wrong = run(trusted, 'node', [join(trusted, 'scripts/lib/history.mjs'), 'raise', '--repo', 'o/app', '--run', '99', '--head', 'f'.repeat(40)], { PATH: `${join(fake, 'bin')}:${process.env.PATH}`, FAKE: fake });
+    const wrong = run(trusted, 'node', [join(trusted, '.gate/bin/lib/history.mjs'), 'raise', '--repo', 'o/app', '--run', '99', '--head', 'f'.repeat(40)], { PATH: `${join(fake, 'bin')}:${process.env.PATH}`, FAKE: fake });
     assert.equal(wrong.code, 2, wrong.out);
     assert.match(wrong.out, /do not include run 99/);
   });

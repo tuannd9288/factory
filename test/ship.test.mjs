@@ -319,8 +319,8 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
     const w = world();
     w.passed();
     assert.equal(w.ship().code, 0);
-    writeFileSync(join(w.repo, 'scripts/tier'), FAKE_TIER);
-    git(w.repo, 'update-index', '--assume-unchanged', 'scripts/tier');
+    writeFileSync(join(w.repo, '.gate/bin/tier'), FAKE_TIER);
+    git(w.repo, 'update-index', '--assume-unchanged', '.gate/bin/tier');
     writeFileSync(join(w.sh, 'tier'), `${tier}\n`);
     return w;
   };
@@ -396,8 +396,8 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     const w = world();
     w.passed();
     assert.equal(w.ship().code, 0);
-    writeFileSync(join(w.repo, 'scripts/tier'), FAKE_TIER);
-    git(w.repo, 'update-index', '--assume-unchanged', 'scripts/tier');
+    writeFileSync(join(w.repo, '.gate/bin/tier'), FAKE_TIER);
+    git(w.repo, 'update-index', '--assume-unchanged', '.gate/bin/tier');
     writeFileSync(join(w.sh, 'tier'), `${tier}\n`);
     w.pr({ labels: labels.map((name) => ({ name })), statusCheckRollup: failed });
     return w;
@@ -431,7 +431,7 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
 
   test('when scripts/tier cannot judge, ship fails closed: no live-verify, no arming', () => {
     const w = opened(3);
-    writeFileSync(join(w.repo, 'scripts/tier'), '#!/bin/sh\necho "tier: could not read the policy"\nexit 2\n');
+    writeFileSync(join(w.repo, '.gate/bin/tier'), '#!/bin/sh\necho "tier: could not read the policy"\nexit 2\n');
     const out = w.ship();
     assert.equal(out.code, 2, out.out);
     assert.match(out.out, /^ship: could not judge the tier \(scripts\/tier exited 2\)$/m);

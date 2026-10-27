@@ -43,7 +43,7 @@ test('the cost of the rounds query on base is what the review computed: 102,100 
 
 test('every GraphQL query in the kit costs at most 500,000 nodes and 100 points', () => {
   const found = [];
-  for (const file of ['kit/scripts/lib/history.mjs', 'kit/scripts/lib/tier.mjs', 'kit/scripts/lib/approval.mjs']) {
+  for (const file of ['kit/.gate/bin/lib/history.mjs', 'kit/.gate/bin/lib/tier.mjs', 'kit/.gate/bin/lib/approval.mjs']) {
     let text = '';
     try {
       text = readFileSync(join(factory, file), 'utf8');

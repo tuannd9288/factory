@@ -1,4 +1,4 @@
-// The commit subject rules: one source (kit/scripts/lib/subject.mjs) read by the commit-msg hook and by verify's
+// The commit subject rules: one source (kit/.gate/bin/lib/subject.mjs) read by the commit-msg hook and by verify's
 // `subjects` check, which also runs on the factory's own pull requests.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +26,7 @@ const GOOD = ['x'.repeat(72), 'Fix the queue', 'Update the ledger', 'Changes the
 
 describe('the subject rules', () => {
   test('one list says which subjects break a rule, and which rule', async () => {
-    const { subjectProblem } = await import(join(factory, 'kit/scripts/lib/subject.mjs'));
+    const { subjectProblem } = await import(join(factory, 'kit/.gate/bin/lib/subject.mjs'));
     for (const [subject, rule] of BAD) assert.match(subjectProblem(subject) ?? '', rule, JSON.stringify(subject));
     for (const subject of GOOD) assert.equal(subjectProblem(subject), null, subject);
   });
@@ -95,7 +95,7 @@ describe("the factory's own pull requests", () => {
       git(dir, 'switch', '-q', 'main');
       const bad = commit(dir, { c: '1\n' }, 'update');
       git(dir, 'merge', '-q', '--no-ff', '-m', 'WIP', 'side');
-      const out = run(dir, 'node', [join(factory, 'kit/scripts/lib/subject.mjs'), '--base', base]);
+      const out = run(dir, 'node', [join(factory, 'kit/.gate/bin/lib/subject.mjs'), '--base', base]);
       assert.equal(out.code, 1, out.out);
       assert.match(out.out, new RegExp(`${bad.slice(0, 7)}\\w*: say what the commit changes, not 'update'`));
       assert.doesNotMatch(out.out, /WIP|Add b/);
@@ -114,7 +114,7 @@ describe('what the subject is, and when the script runs', () => {
   const hook = (file) => run(factory, join(factory, 'kit/.githooks/commit-msg'), [file]);
 
   test('the subject is git\'s: blank and comment lines skipped, the first paragraph joined by spaces', async () => {
-    const { subjectOf } = await import(join(factory, 'kit/scripts/lib/subject.mjs'));
+    const { subjectOf } = await import(join(factory, 'kit/.gate/bin/lib/subject.mjs'));
     assert.equal(subjectOf('\n\nAdd g\n\nbody\n'), 'Add g');
     assert.equal(subjectOf('# a comment\nAdd g\n# another\nmore\n\nbody'), 'Add g more');
     assert.equal(subjectOf('First line of\nthe subject\n\nbody'), 'First line of the subject');
@@ -134,7 +134,7 @@ describe('what the subject is, and when the script runs', () => {
   test('run through a symlinked path the script still judges, rather than exiting 0 unrun', () => {
     const dir = mkdtempSync(join(tmpdir(), 'subject-link-'));
     try {
-      symlinkSync(join(factory, 'kit/scripts/lib'), join(dir, 'lib'));
+      symlinkSync(join(factory, 'kit/.gate/bin/lib'), join(dir, 'lib'));
       const out = run(factory, 'node', [join(dir, 'lib/subject.mjs'), msg(dir, 'WIP\n')]);
       assert.equal(out.code, 1, out.out);
       assert.match(out.out, /not 'WIP'/);
@@ -143,7 +143,7 @@ describe('what the subject is, and when the script runs', () => {
     }
   });
   test('the length is in characters, not UTF-16 units: 71 x and an emoji is 72', async () => {
-    const { subjectProblem } = await import(join(factory, 'kit/scripts/lib/subject.mjs'));
+    const { subjectProblem } = await import(join(factory, 'kit/.gate/bin/lib/subject.mjs'));
     assert.equal(subjectProblem(`${'x'.repeat(71)}\u{1F600}`), null);
     assert.match(subjectProblem(`${'x'.repeat(72)}\u{1F600}`), /73 characters/);
   });
@@ -158,7 +158,7 @@ describe('what the subject is, and when the script runs', () => {
       git(dir, 'add', 'b');
       git(dir, 'commit', '-q', '-F', file);
       const sha = git(dir, 'rev-parse', '--short', 'HEAD');
-      const out = run(dir, 'node', [join(factory, 'kit/scripts/lib/subject.mjs'), '--base', base]);
+      const out = run(dir, 'node', [join(factory, 'kit/.gate/bin/lib/subject.mjs'), '--base', base]);
       assert.equal(out.code, 1, out.out);
       assert.ok(out.out.startsWith(`${sha}: say what the commit changes, not 'WIP \u0001 odd'`), JSON.stringify(out.out));
     } finally {
@@ -178,7 +178,7 @@ describe('what the subject is, and when the script runs', () => {
     }
   });
   test('leading spaces do not hide a rule: "  WIP" is refused by the hook and by verify alike', async () => {
-    const { subjectProblem } = await import(join(factory, 'kit/scripts/lib/subject.mjs'));
+    const { subjectProblem } = await import(join(factory, 'kit/.gate/bin/lib/subject.mjs'));
     for (const subject of ['  WIP', ' fix', '  fixup! Add a', '   ']) assert.ok(subjectProblem(subject), JSON.stringify(subject));
     assert.equal(subjectProblem('  Add a thing'), null);
     const dir = mkdtempSync(join(tmpdir(), 'subject-space-'));
@@ -191,7 +191,7 @@ describe('what the subject is, and when the script runs', () => {
       writeFileSync(join(dir, 'msg'), '  WIP\n');
       git(dir, 'commit', '-q', '--cleanup=verbatim', '-F', join(dir, 'msg'));
       // (git 2.x already drops the leading spaces in %s; the trim is for any git that keeps them.)
-      const out = run(dir, 'node', [join(factory, 'kit/scripts/lib/subject.mjs'), '--base', base]);
+      const out = run(dir, 'node', [join(factory, 'kit/.gate/bin/lib/subject.mjs'), '--base', base]);
       assert.equal(out.code, 1, out.out);
       assert.match(out.out, /not '  WIP'|not 'WIP'/);
     } finally {
