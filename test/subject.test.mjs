@@ -111,7 +111,7 @@ describe('what the subject is, and when the script runs', () => {
     writeFileSync(file, text);
     return file;
   };
-  const hook = (file) => run(factory, join(factory, 'kit/.githooks/commit-msg'), [file]);
+  const hook = (file) => run(factory, join(factory, 'kit/.gate/hooks/commit-msg'), [file]);
 
   test('the subject is git\'s: blank and comment lines skipped, the first paragraph joined by spaces', async () => {
     const { subjectOf } = await import(join(factory, 'kit/.gate/bin/lib/subject.mjs'));

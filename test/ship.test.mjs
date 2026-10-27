@@ -102,7 +102,7 @@ describe('opening the pull request', () => {
     w.stamp(`red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`);
     const out = w.ship();
     assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} has no verify stamp; run scripts\/verify on it$/m);
+    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} has no verify stamp; run \.gate\/bin\/verify on it$/m);
     assert.ok(!w.calls().some((c) => c.startsWith('pr create')), w.calls().join('\n'));
   });
 
@@ -111,7 +111,7 @@ describe('opening the pull request', () => {
     w.stamp(`verify-${w.head()}`);
     let out = w.ship();
     assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} has no red-check stamp against origin\/main [0-9a-f]{7}; run scripts\/red-check --base origin\/main$/m);
+    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} has no red-check stamp against origin\/main [0-9a-f]{7}; run \.gate\/bin\/red-check --base origin\/main$/m);
     w.stamp(`red-check-${w.head()}-${'0'.repeat(40)}`);
     out = w.ship();
     assert.equal(out.code, 1, out.out);

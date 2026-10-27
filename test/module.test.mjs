@@ -69,7 +69,7 @@ describe('the factory side', () => {
   test('refuses a module file at a kit path, at another module\'s path, or at a generated file of the repository', async () => {
     const { mergedTree } = await lib();
     for (const [why, kit, names, re] of [
-      ['a kit path', { 'modules/demo/kit/scripts/verify': 'x\n' }, ['demo'], /scripts\/verify.*module demo.*kit/],
+      ['a kit path', { 'modules/demo/kit/.gate/bin/verify': 'x\n' }, ['demo'], /\.gate\/bin\/verify.*module demo.*kit/],
       ['another module\'s path', { 'modules/demo/kit/x.txt': 'a\n', 'modules/other/kit/x.txt': 'b\n' }, ['demo', 'other'], /x\.txt.*modules? (demo|other)/],
       ['.gate/pack', { 'modules/demo/kit/.gate/pack': 'x\n' }, ['demo'], /\.gate\/pack.*generated/],
       ['.gate/modules', { 'modules/demo/kit/.gate/modules': 'x\n' }, ['demo'], /\.gate\/modules.*generated/],
@@ -131,11 +131,11 @@ describe('bin/onboard --module', () => {
   });
 
   test('refuses a module that lays a kit file, before it clones', () => {
-    const w = world({ kit: { 'modules/demo/kit/scripts/verify': 'x\n' }, onboardArgs: null });
+    const w = world({ kit: { 'modules/demo/kit/.gate/bin/verify': 'x\n' }, onboardArgs: null });
     try {
       const out = w.onboard(['--module', 'demo'], { FACTORY_ROOT: join(w.dir, 'root-two') });
       assert.equal(out.code, 2, out.out);
-      assert.match(out.out, /scripts\/verify.*module demo.*kit/);
+      assert.match(out.out, /\.gate\/bin\/verify.*module demo.*kit/);
       assert.ok(!existsSync(join(w.dir, 'root-two', 'app')));
     } finally {
       w.cleanup();

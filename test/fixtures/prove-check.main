@@ -45,7 +45,7 @@ for name in $names; do
   fi
   run=$(sed -n '/^diff --git/q;s/^\(# \)\{0,1\}Run: //p' "$fixture" | head -1)
   says=$(sed -n '/^diff --git/q;s/^\(# \)\{0,1\}Says: //p' "$fixture" | head -1)
-  run=${run:-scripts/verify --only $name}
+  run=${run:-.gate/bin/verify --only $name}
   says=${says:-$name}
   w="$work/$name"
   if ! git -C "$tree" worktree add --detach --quiet "$w" "$snapshot" 2>"$work/$name.err"; then
