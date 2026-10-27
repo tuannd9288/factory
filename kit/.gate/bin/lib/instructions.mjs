@@ -60,6 +60,7 @@ export function splitGate(text) {
  * that is not this one, and on any other marker line. */
 export function insertGate(text, block) {
   if (text.includes('\r')) throw fail('crlf', 'the file has CRLF line ends; the block would mix them (convert them first)');
+  if (text.startsWith('﻿')) throw fail('bom', 'the file starts with a byte-order mark; the block must come first, so take the mark out first');
   const found = splitGate(text);
   if (found.ok) {
     if (found.block === block) return text;
