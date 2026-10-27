@@ -162,7 +162,7 @@ test('the owner script applies, reads back what it set, and on a second run chan
     assert.match(out.out, /read back: every setting as planned/);
     assert.match(out.out, /waiting: tuan9288-agent accepts the invitation/);
     const s = w.state();
-    assert.deepEqual(s.rulesets.map((r) => r.name).sort(), ['factory-bootstrap', 'factory-branches', 'factory-tags']);
+    assert.deepEqual(s.rulesets.map((r) => r.name).sort(), ['factory-bootstrap', 'factory-branches', 'factory-claims', 'factory-tags']);
     assert.deepEqual(s.environment.policies.map((p) => p.name), ['main']);
     w.set({ collaborator: 'write', invitations: [] });
     w.clear();
@@ -188,7 +188,7 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     const gate = writes.findIndex((l) => / -X POST repos\/tuannd9288\/app\/rulesets /.test(l));
     const drop = writes.findIndex((l) => / -X DELETE repos\/tuannd9288\/app\/rulesets\/\d+/.test(l));
     assert.ok(gate >= 0 && drop > gate, writes.join('\n'));
-    assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-gate', 'factory-tags']);
+    assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-claims', 'factory-gate', 'factory-tags']);
   } finally {
     w.cleanup();
   }
