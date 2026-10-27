@@ -5,11 +5,14 @@
 //     --human <login> --pack <name> [--modules <a,b>] [--out <dir>]
 // `plan` only checks; `lay` also writes the files into the repository's working tree and, with --out, one list per
 // kind (added, updated, kept, removed, dropped-kept; one path a line). Per path:
-//   rendered (AGENTS.md, CODEOWNERS, .claude/settings.json): added when missing; left alone when the base is this commit's
+//   rendered (AGENTS.md, CODEOWNERS): added when missing; left alone when the base is this commit's
 //     rendering (AGENTS.md with the own parts the base carries); rendered anew when the base is an older rendering of
-//     the kit and pack; otherwise the repository's own: CODEOWNERS and settings are kept, AGENTS.md is a conflict;
+//     the kit and pack; otherwise the repository's own: CODEOWNERS is kept, AGENTS.md is a conflict;
+//   .claude/settings.json: added (the pack composes it) when missing; otherwise the base's bytes with the kit's deny lines it
+//     lacks inserted as text (bin/lib/settings.mjs), every other byte kept, a shape the lines cannot be added to a conflict;
 //   other: added when missing; left alone when it is the kit's; replaced by the kit's when it is a blob the kit's history
-//     held; otherwise the repository's own: kept, but a conflict where the kit replaces whole (CLAUDE.md, .githooks/*).
+//     held; otherwise the repository's own: kept, but a conflict where the kit replaces whole (CLAUDE.md). The repository's own
+//     scripts/ and .githooks/ files are not in kit/, so they are never read.
 // A module's files (bin/lib/module.mjs) are laid with the kit's, from the modules --modules names, and are stricter:
 // added, left alone or updated from a past module blob; the repository's own file at a module path is a conflict, never
 // kept. The files of a module the base had on and --modules leaves out are removed, or a conflict when the repository
@@ -20,11 +23,12 @@ import { dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { FACTS, LAYOUT, LIMIT, fill } from './own.mjs';
-import { FILLED, INVENTORY, REPLACES, SETTINGS, git, ownOf, pastBlobs, render, renderedAs, tree } from './evidence.mjs';
+import { FILLED, INVENTORY, REPLACES, SETTINGS, denyOf, git, ownOf, pastBlobs, render, renderedAs, tree } from './evidence.mjs';
 import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
+import { addDeny } from './settings.mjs';
 
-const RENDERED = (path) => Boolean(FILLED[path]) || path === SETTINGS;
+const RENDERED = (path) => Boolean(FILLED[path]);
 
 export function plan({ factory, commit, repo, base, name, human, pack: packName, modules }) {
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
@@ -51,6 +55,28 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
   };
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const had = at.get(path);
+    if (path === SETTINGS) {
+      // The repository's own file: its bytes with the kit's deny lines it lacks inserted as text. With none, the pack composes it.
+      if (!had) {
+        out.add.push(path);
+        out.writes.push({ path, mode: want.mode, text: rendering(path, want) });
+        continue;
+      }
+      const own = text(repo, had.oid);
+      let to;
+      try {
+        to = addDeny(own, denyOf(text(factory, want.oid))).text;
+      } catch (error) {
+        out.conflicts.push(`${path}: ${error.message}`);
+        continue;
+      }
+      if (to === own) out.same.push(path);
+      else {
+        out.update.push(path);
+        out.writes.push({ path, mode: had.mode, text: to });
+      }
+      continue;
+    }
     if (RENDERED(path)) {
       const to = rendering(path, want);
       if (!had) {

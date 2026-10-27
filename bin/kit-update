@@ -4,11 +4,13 @@
 # <sha7>" from the branch factory/kit-<sha7>.
 #   bin/kit-update <repo-url|name> [--no-pr] [--module <name>]... [--no-module <name>]...
 # From a fresh branch off origin/main, for every path of kit/ at this clone's HEAD (bin/lib/kitupdate.mjs):
-#   - the rendered files (AGENTS.md, CODEOWNERS, .claude/settings.json) are rendered as onboard does; AGENTS.md keeps the
-#     two sections of the repository's own that the base carries, and uses the pack the base's .gate/pack names, else pstack;
+#   - the rendered files (AGENTS.md, CODEOWNERS) are rendered as onboard does; AGENTS.md keeps the two sections of the
+#     repository's own that the base carries, and uses the pack the base's .gate/pack names, else pstack;
+#   - a .claude/settings.json the repository has gets the kit's deny lines it lacks inserted as text, as onboard does;
 #   - a kit file the repository lacks is added; one it holds as an older kit had it is replaced by the kit's;
-#   - a kit file the repository changed is kept and named, but where the kit replaces whole (CLAUDE.md, .githooks/*) or
-#     in AGENTS.md it is a conflict, and kit-update stops before it does anything;
+#   - a kit file the repository changed is kept and named, but where the kit replaces whole (CLAUDE.md) or
+#     in AGENTS.md it is a conflict, and kit-update stops before it does anything; the repository's own scripts/ and
+#     .githooks/ are not the kit's and are never touched;
 #   - a file the base lists in .gate/kit-files that kit/ no longer has is removed when it is an older kit file, else kept.
 # --module turns a module on and --no-module off (modules/<name>/, bin/lib/module.mjs); with neither the base's
 # .gate/modules stands. A module's files are added, updated and removed like the kit's, but a file the repository changed
@@ -16,7 +18,8 @@
 # Then .gate/kit-files, .gate/pack and .gate/modules as onboard writes them, the repository's own .gate/bin/setup and .gate/bin/verify, the
 # commit, and bin/kit-evidence, which must pass. Without --no-pr it then creates the labels, pushes the branch and
 # opens the pull request. A failing verify or evidence leaves the branch committed and nothing pushed.
-# It refuses, doing nothing, when the clone is missing or dirty, origin/main has no .gate/kit-files, the factory's kit/
+# It refuses, doing nothing, when the clone is missing or dirty, origin/main has no .gate/kit-files or lists scripts/verify
+# among them (the old layout, where the kit shipped it: onboard the repository afresh), the factory's kit/
 # or packs/ has changes no commit holds or its HEAD is not on origin/main, or the branch exists here or on origin; and,
 # without --no-pr, when gh's login is not the agents' account or main has no pull request rule. It never uses gh api.
 # FACTORY_ROOT (default: this clone) is where repositories live; FACTORY_HUMAN (default: tuannd9288) is the code owner
@@ -83,6 +86,13 @@ else
   owner=$(basename "$(dirname "$origin")")
   slug=${owner##*:}/$(basename "$origin")
   id=unchecked
+fi
+
+# A repository onboarded before the commands moved to .gate/bin has the kit's own scripts/verify among its kit files; what
+# the kit lays now does not fit on it, and its hooks and settings were the kit's: onboard it afresh. (.gate/pack is still
+# written, so it is no sign of the old layout.)
+if git -C "$dest" show origin/main:.gate/kit-files | grep -qx 'scripts/verify'; then
+  refuse "$name has the old layout (scripts/verify is among its kit files); bin/kit-update brings a repository from the new layout to the new one: onboard it afresh"
 fi
 
 # The pack is the repository's own choice, else pstack, as in onboard.
@@ -159,11 +169,11 @@ git push --quiet -u origin "$branch"
 # The evidence prints the repository's own sections in full: fence it with more backticks than any fence inside it.
 longest=$(printf '%s\n' "$evidence" | { grep -o '`\{3,\}' || true; } | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
 fence=$(printf '`%.0s' $(seq 1 $((longest > 2 ? longest + 1 : 3))))
-# A settings.json or CODEOWNERS the repository changed is kept, so the kit's newer rules never reach it.
+# A CODEOWNERS the repository changed is kept, so the kit's newer lines never reach it.
 note=""
 modnote=""
 [ -z "$modules" ] || modnote=" Module \`$(printf '%s' "$modules" | paste -sd, - | sed 's/,/, /g')\` (named in \`.gate/modules\`): the module's files exist only in a repository that turns it on."
-grep -qx '.claude/settings.json' "$lists/kept" && note=" The repository's \`.claude/settings.json\` is its own, so it is kept: the kit's new deny rules do not reach this file."
+grep -qx '.claude/settings.json' "$lists/updated" && note=" The kit's new deny lines are inserted into the repository's \`.claude/settings.json\` as text; every other byte is the repository's."
 grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.github/CODEOWNERS\` is its own, so it is kept: the kit's new lines do not reach this file."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
 gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
