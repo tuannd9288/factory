@@ -265,7 +265,7 @@ It refuses any other login, and a `main` without the bootstrap pull request rule
    `live-verify`), the gate workflows, the PR template, `CODEOWNERS`, deny rules, an `AGENTS.md` and the one-line
    `CLAUDE.md`. The kit ships no `scripts/verify` and no `.githooks/`, so the repository's own `scripts/`, helpers and
    hooks stay byte for byte. With its own `scripts/verify`, onboard ends the `.gate/config.sh` it lays with the adapter
-   block (`bin/lib/adapter.mjs`): `GATE_NATIVE=scripts/verify`, `GATE_CHECKS="native"`, and `gate_fast() {
+   block (`bin/lib/adapter.mjs`): `GATE_NATIVE=scripts/verify`, `GATE_CHECKS="${GATE_CHECKS:+$GATE_CHECKS }native"` (it adds to the checks named above it), and `gate_fast() {
    .githooks/pre-commit; }` only when that hook exists and does not call `.gate/bin/verify`; a `.gate/config.sh` the
    repository has is kept. A `.claude/settings.json` the repository has gets the kit's deny lines inserted as text
    (`bin/lib/settings.mjs`) and nothing else changes; a shape it cannot take is refused and the clone removed; where

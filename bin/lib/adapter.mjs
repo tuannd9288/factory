@@ -13,7 +13,7 @@ export const HOOK = '.githooks/pre-commit';
  * or null; an empty string when it has no scripts/verify. A hook that calls .gate/bin/verify is not folded: a loop. */
 export function adapterBlock({ native, hookText }) {
   if (!native) return '';
-  const lines = ['', "# --- adapter, written by bin/onboard from the repository's own files ---", `GATE_NATIVE=${NATIVE}`, 'GATE_CHECKS="native"'];
+  const lines = ['', "# --- adapter, written by bin/onboard from the repository's own files ---", `GATE_NATIVE=${NATIVE}`, 'GATE_CHECKS="${GATE_CHECKS:+$GATE_CHECKS }native"'];
   if (hookText !== null && !hookText.includes('.gate/bin/verify')) lines.push(`gate_fast() { ${HOOK}; }`);
   return `${lines.join('\n')}\n`;
 }
