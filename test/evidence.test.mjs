@@ -237,6 +237,29 @@ describe('the kit pull request', () => {
     }
   });
 
+  test('opens only from a factory commit on the first-parent line of origin/main: a merge\'s second parent is refused', () => {
+    const w = prWorld();
+    try {
+      const { fac, onboard } = w;
+      git(fac, 'switch', '-q', '-c', 'side');
+      const side = commit(fac, {}, 'side');
+      git(fac, 'switch', '-q', 'main');
+      commit(fac, {}, 'main moves');
+      git(fac, 'merge', '-q', '--no-ff', '-m', 'merge side', 'side');
+      const merged = git(fac, 'rev-parse', 'HEAD');
+      git(fac, 'update-ref', 'refs/remotes/origin/main', merged);
+      git(fac, 'switch', '-q', '--detach', side);
+      let out = onboard('second');
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, new RegExp(`the factory's commit ${side.slice(0, 7)} is not on its origin/main`));
+      git(fac, 'switch', '-q', '--detach', merged);
+      out = onboard('first');
+      assert.equal(out.code, 0, out.out);
+    } finally {
+      w.cleanup();
+    }
+  });
+
   test('tells the Human that the gate check verify is red on this pull request, and why it does not block', () => {
     const w = prWorld();
     try {
