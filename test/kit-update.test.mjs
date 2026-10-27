@@ -39,7 +39,7 @@ describe('bin/kit-update', () => {
       // The three rendered files are reported as rendered, and none as kept or replaced.
       assert.match(out.out, /^ {2}AGENTS\.md:1: /m);
       assert.match(out.out, /^replaced \(the repository's own at the base, now the kit's\):\n {2}none$/m);
-      assert.doesNotMatch(out.out, /^ {2}(AGENTS\.md|\.github\/CODEOWNERS|\.claude\/settings\.json)$/m);
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}none$/m);
       // --no-pr: nothing pushed, and gh was never asked anything.
       assert.deepEqual(w.state().remote, before.remote);
       assert.deepEqual(w.calls(), []);
