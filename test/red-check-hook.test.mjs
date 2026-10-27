@@ -1,4 +1,4 @@
-// The one change a module makes to the kit's red-check (#71): where scripts/lib/deletion.mjs exists, a source change with
+// The one change a module makes to the kit's red-check (#71): where .gate/bin/lib/deletion.mjs exists, a source change with
 // no test goes to it first. And the proof that off is off: a repository without the module gets main's verdicts, byte for
 // byte (main's red-check and prove-check are kept in test/fixtures, as e65c3c8 had them), calls neither the module's
 // script nor npx, and its prove-check --all runs main's fixtures and no others.
@@ -111,8 +111,8 @@ describe('prove-check --all with a red-check-* fixture on disk', () => {
   let r;
   before(() => (r = repoWithKit()));
   after(() => r.cleanup());
-  const GOOD = '# Proof: a source change with no test fails red-check.\n# Run: scripts/red-check --base HEAD~1\n# Says: source changed with no new or changed test\nmkdir -p src\necho "export const z = 1;" >src/z.js\ngit add -A\ngit commit -qm z\n';
-  const BAD = GOOD.replace('# Run: scripts/red-check --base HEAD~1', '# Run: true');
+  const GOOD = '# Proof: a source change with no test fails red-check.\n# Run: .gate/bin/red-check --base HEAD~1\n# Says: source changed with no new or changed test\nmkdir -p src\necho "export const z = 1;" >src/z.js\ngit add -A\ngit commit -qm z\n';
+  const BAD = GOOD.replace('# Run: .gate/bin/red-check --base HEAD~1', '# Run: true');
 
   test('runs it with the others, and counts it', () => {
     commit(r.repo, { '.gate/proofs/red-check-demo.sh': GOOD }, 'a fixture a module lays');
@@ -142,7 +142,7 @@ describe('the red-check hook', () => {
     r = repoWithKit({ 'src/old.js': 'export const old = 1;\n', 'src/gone.js': 'export const gone = 1;\n' });
     log = join(r.dir, 'module.log');
     // The stand-in is never committed: a script outside .gate/kit-files would be a source change of its own.
-    appendFileSync(join(r.repo, '.git/info/exclude'), 'scripts/lib/deletion.mjs\n');
+    appendFileSync(join(r.repo, '.git/info/exclude'), '.gate/bin/lib/deletion.mjs\n');
   });
   after(() => r.cleanup());
 
@@ -150,7 +150,7 @@ describe('the red-check hook', () => {
   const stub = (code, lines = []) => {
     mkdirSync(join(r.repo, 'scripts/lib'), { recursive: true });
     writeFileSync(
-      join(r.repo, 'scripts/lib/deletion.mjs'),
+      join(r.repo, '.gate/bin/lib/deletion.mjs'),
       `import { appendFileSync, readFileSync } from 'node:fs';\nconst a = process.argv.slice(2);\nappendFileSync(${JSON.stringify(log)}, JSON.stringify({ args: a, sources: readFileSync(a[a.indexOf('--sources') + 1], 'utf8') }) + '\\n');\nfor (const l of ${JSON.stringify(lines)}) console.log(l);\nprocess.exit(${code});\n`,
     );
   };
@@ -165,7 +165,7 @@ describe('the red-check hook', () => {
     }
     return script(r.repo, 'red-check', args);
   };
-  after(() => rmSync(join(r.repo, 'scripts/lib/deletion.mjs'), { force: true }));
+  after(() => rmSync(join(r.repo, '.gate/bin/lib/deletion.mjs'), { force: true }));
 
   test('runs the module\'s script on a source change with no test, with the base, the sources and a work folder', () => {
     rmSync(log, { force: true });

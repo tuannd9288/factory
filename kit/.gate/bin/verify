@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# The repository's one gate command. It prints only failures and a one-line summary; a check that cannot run fails.
+#   .gate/bin/verify                 every check, then every check's proof (.gate/bin/prove-check --all)
+#   .gate/bin/verify --fast          the hand-in rules and gate_fast on the staged files (the pre-commit hook)
+#   .gate/bin/verify --only <check>  one check, no proofs (prove-check runs this)
+#   .gate/bin/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
+# A full run that passes on a clean work tree (no change, no untracked file) leaves factory/verify-<head> in the git dir, which
+# scripts/ship reads; no other form does, and the stamp is never in the work tree.
+# GATE_BASE names the commit the rules and subjects checks read from (default: the merge-base with origin/main).
+set -uo pipefail
+# gate_fast and the native verify run the repository's own commands; one that calls this script again would run it for ever.
+# Only those two routes set the variable: prove-check and red-check run verify on purpose and are not under them.
+if [ -n "${GATE_IN_VERIFY:-}" ]; then
+  echo "verify: reached again from ${GATE_IN_VERIFY}: that is a loop: the repository's hook or verify calls .gate/bin/verify. Take that call out."
+  exit 2
+fi
+cd "$(git rev-parse --show-toplevel)" || exit 2
+export GATE_REPORT=${GATE_REPORT:-$PWD/.gate/report.xml}
+. .gate/config.sh || { echo "verify: could not read .gate/config.sh"; exit 2; }
+
+BUILTIN="instructions policy rules subjects tests"
+start=$SECONDS
+log=$(mktemp -d) || exit 2
+trap 'rm -rf "$log"' EXIT
+ran=0
+failed=""
+full=""
+
+# run <name> <command...>: silent while it passes; on a failure, its name and the end of its output.
+run() {
+  local name=$1
+  shift
+  ran=$((ran + 1))
+  "$@" >"$log/$name" 2>&1
+  local code=$?
+  [ "$code" -eq 0 ] && return 0
+  failed="$failed $name"
+  if [ "$code" -eq 127 ] || [ "$code" -eq 126 ]; then echo "verify: $name could not run (exit $code)"; else echo "verify: $name failed"; fi
+  tail -n 40 "$log/$name" | sed 's/^/  /'
+  return 0
+}
+
+check_instructions() {
+  [ -f AGENTS.md ] || { echo "AGENTS.md is missing"; return 1; }
+  local n
+  n=$(wc -l <AGENTS.md | tr -d ' ')
+  [ "$n" -le 150 ] || { echo "AGENTS.md has $n lines; at most 150"; return 1; }
+  [ "$(cat CLAUDE.md 2>/dev/null)" = "@AGENTS.md" ] || { echo "CLAUDE.md must be the single line @AGENTS.md"; return 1; }
+}
+
+check_policy() {
+  node .gate/bin/lib/policy.mjs check ${GATE_NATIVE:+--native "$GATE_NATIVE"}
+}
+
+check_rules() {
+  .gate/bin/rules ${GATE_BASE:+--base "$GATE_BASE"}
+}
+
+check_subjects() {
+  node .gate/bin/lib/subject.mjs --base "${GATE_BASE:-}"
+}
+
+check_tests() {
+  mkdir -p "$(dirname "$GATE_REPORT")" && rm -f "$GATE_REPORT"
+  local code=0 summary
+  gate_tests "$@" >/dev/null 2>&1 || code=$?
+  summary=$(node .gate/bin/lib/junit.mjs --failures "$GATE_REPORT") || { echo "the JUnit report could not be read"; return 1; }
+  # The report decides as much as the exit code: a runner that exits 0 over failed tests still fails here.
+  case "$summary" in
+    "tests=0 "*) echo "no tests ran ($(echo "$summary" | head -1))"; return 1 ;;
+    *" failures=0 errors=0 "*) [ "$code" -eq 0 ] && return 0 ;;
+  esac
+  echo "tests failed (exit $code): $summary"
+  return 1
+}
+
+# The repository's own whole verify, named by GATE_NATIVE (set with "native" in GATE_CHECKS, in .gate/config.sh).
+check_native() {
+  GATE_IN_VERIFY=native "./$GATE_NATIVE"
+}
+
+known() {
+  case " $BUILTIN $GATE_CHECKS " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
+case "${1:-}" in
+  --fast)
+    run rules .gate/bin/rules --staged
+    staged=$(git diff --cached --name-only --diff-filter=ACMR)
+    # shellcheck disable=SC2086
+    GATE_IN_VERIFY=gate_fast run fast gate_fast $staged
+    ;;
+  --only)
+    known "${2:-}" || { echo "verify: no check named '${2:-}' (checks: $BUILTIN $GATE_CHECKS)"; exit 2; }
+    run "$2" "check_$2"
+    ;;
+  --tests)
+    shift
+    [ "$#" -gt 0 ] || { echo "verify: --tests needs test files"; exit 2; }
+    run tests check_tests "$@"
+    ;;
+  "")
+    full=1
+    for name in $BUILTIN $GATE_CHECKS; do run "$name" "check_$name"; done
+    [ -z "$failed" ] && run proofs .gate/bin/prove-check --all
+    ;;
+  *)
+    echo "verify: unknown argument $1"
+    exit 2
+    ;;
+esac
+
+took=$((SECONDS - start))
+if [ -z "$failed" ]; then
+  if [ -n "$full" ]; then
+    dirt=$(git status --porcelain)
+    if [ -z "$dirt" ]; then
+      stamps="$(git rev-parse --absolute-git-dir)/factory"
+      mkdir -p "$stamps" && : >"$stamps/verify-$(git rev-parse HEAD)"
+    else
+      echo "verify: no stamp written, the work tree is not clean:"
+      printf '%s\n' "$dirt" | head -n 5 | sed 's/^/  /'
+      n=$(printf '%s\n' "$dirt" | wc -l | tr -d ' ')
+      [ "$n" -le 5 ] || echo "  … and $((n - 5)) more"
+    fi
+  fi
+  echo "verify: $ran passed in ${took}s"
+  exit 0
+fi
+echo "verify: failed:$failed (of $ran) in ${took}s"
+exit 1

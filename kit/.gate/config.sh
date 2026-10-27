@@ -1,4 +1,4 @@
-# The repository's gate settings, sourced by scripts/verify, scripts/red-check and scripts/prove-check.
+# The repository's gate settings, sourced by .gate/bin/verify, .gate/bin/red-check and .gate/bin/prove-check.
 # The kit ships defaults for a Node repository that tests with node --test; a repository changes them when it joins.
 
 # Runs the named test files, or every test when none is named, and writes JUnit XML to "$GATE_REPORT".
@@ -17,6 +17,11 @@ gate_fast() {
 gate_prepare() {
   :
 }
+
+# A repository that keeps its own whole verify names it: GATE_NATIVE=scripts/verify, and native joins GATE_CHECKS. verify then
+# runs it as a check (proved by .gate/proofs/native.sh), and policy check requires the path to be in .gate/protected.
+# bin/onboard appends these lines, and gate_fast calling the repository's .githooks/pre-commit, when it finds the files.
+GATE_NATIVE=""
 
 # The repository's own checks, each a function check_<name> in this file that fails on a problem, with a fixture
 # .gate/proofs/<name>.patch that makes it fail. Space-separated names.

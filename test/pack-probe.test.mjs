@@ -503,7 +503,7 @@ test('each session gets only the commands it runs: no blanket git or gh, the tag
       assert.doesNotMatch(line, /live-verify:\*\)$|Bash\(gh api/);
     }
     for (const rule of ['Bash(git branch probe-ctl-*)', 'Bash(git tag x)', 'Bash(printenv CLAUDE_CONFIG_DIR)']) assert.ok(a.includes(`'${rule}'`) || a.includes(rule), rule);
-    for (const rule of ['Bash(git add *)', 'Bash(git commit *)', 'Bash(gh issue create *)', 'Bash(gh pr create *)', 'Bash(scripts/verify *)']) assert.ok(pr.includes(rule), rule);
+    for (const rule of ['Bash(git add *)', 'Bash(git commit *)', 'Bash(gh issue create *)', 'Bash(gh pr create *)', 'Bash(.gate/bin/verify *)']) assert.ok(pr.includes(rule), rule);
     assert.ok(!a.includes('gh pr create') && !a.includes('git push'), 'the first session grants no push or pull request');
   } finally {
     w.cleanup();

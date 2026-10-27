@@ -6,6 +6,8 @@ import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtemp
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
+import { addDeny } from '../bin/lib/settings.mjs';
+import { EXECUTABLE, OWN, SEED } from './seed-world.mjs';
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const DENY = { permissions: { deny: ['Read(./.env*)'] } };
@@ -70,16 +72,15 @@ function world({ kit: more = {}, had = {}, laid = {}, packs = PACKS, pack = 'pst
 // The kit's AGENTS.md ends with the two sections a repository fills, and its own instructions and hook, which onboard
 // lays over the repository's: a repository that had its own AGENTS.md, CLAUDE.md and pre-commit hook.
 const SECTIONED = `# <repo>\n\nRules for <repo>.\n\n${KEEPS}\n## Layout\n\n<The directories.>\n\n## Facts the code cannot tell\n\n<Decisions.>\n`;
-const HOOK = '#!/usr/bin/env bash\nexec scripts/verify --fast\n';
 const OWN_LAYOUT = ['`src/` holds the app; `test/` its tests.'];
 const OWN_FACTS = ['- 2026-10-01, the Human: the app ships on Fridays.', '- Its mail goes through one shared inbox.'];
 const filled = (layout = OWN_LAYOUT, facts = OWN_FACTS) =>
   `# app\n\nRules for app.\n\n${SECTION}${KEEPS}\n## Layout\n\n${layout.join('\n')}\n\n## Facts the code cannot tell\n\n${facts.join('\n')}\n`;
 const replacing = (laid = {}) =>
   world({
-    kit: { 'kit/AGENTS.md': SECTIONED, 'kit/CLAUDE.md': '@AGENTS.md\n', 'kit/.githooks/pre-commit': HOOK },
-    had: { 'AGENTS.md': '# Our map\n\nOur rules.\n', 'CLAUDE.md': '@AGENTS.md\n\nMore of our rules.\n', '.githooks/pre-commit': '#!/bin/sh\nmake lint\n' },
-    laid: { 'AGENTS.md': filled(), 'CLAUDE.md': '@AGENTS.md\n', '.githooks/pre-commit': HOOK, ...laid },
+    kit: { 'kit/AGENTS.md': SECTIONED, 'kit/CLAUDE.md': '@AGENTS.md\n' },
+    had: { 'AGENTS.md': '# Our map\n\nOur rules.\n', 'CLAUDE.md': '@AGENTS.md\n\nMore of our rules.\n' },
+    laid: { 'AGENTS.md': filled(), 'CLAUDE.md': '@AGENTS.md\n', ...laid },
   });
 
 describe('kit evidence', () => {
@@ -160,7 +161,7 @@ describe('kit evidence', () => {
       const was = (path) => git(w.repo, 'rev-parse', `${w.base}:${path}`).slice(0, 12);
       assert.match(
         out.out,
-        new RegExp(`^replaced \\(the repository's own at the base, now the kit's\\):\n {2}\\.githooks/pre-commit \\(was ${was('.githooks/pre-commit')}\\)\n {2}AGENTS\\.md \\(was ${was('AGENTS.md')}\\)\n {2}CLAUDE\\.md \\(was ${was('CLAUDE.md')}\\)$`, 'm'),
+        new RegExp(`^replaced \\(the repository's own at the base, now the kit's\\):\n {2}AGENTS\\.md \\(was ${was('AGENTS.md')}\\)\n {2}CLAUDE\\.md \\(was ${was('CLAUDE.md')}\\)$`, 'm'),
       );
       assert.match(out.out, /^ {2}AGENTS\.md:1: `# <repo>` → `# app`$/m);
       assert.match(out.out, /^ {2}AGENTS\.md:15: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app; `test\/` its tests\.$/m);
@@ -172,12 +173,12 @@ describe('kit evidence', () => {
   });
 
   test('fails a replaced file left as the repository had it, a text outside the two sections, and a heading inside one', () => {
-    let w = replacing({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nmake lint\n' });
+    let w = replacing({ 'AGENTS.md': '# Our map\n\nOur rules.\n', 'CLAUDE.md': '@AGENTS.md\n\nMore of our rules.\n' });
     try {
       const out = w.evidence();
       assert.equal(out.code, 1, out.out);
       assert.match(out.out, /^ {2}differs: AGENTS\.md \(the repository's own, which the kit replaces\)$/m);
-      assert.match(out.out, /^ {2}differs: \.githooks\/pre-commit \(the repository's own, which the kit replaces\)$/m);
+      assert.match(out.out, /^ {2}differs: CLAUDE\.md \(the repository's own, which the kit replaces\)$/m);
     } finally {
       w.cleanup();
     }
@@ -318,7 +319,7 @@ function prWorld(files = {}) {
   mkdirSync(seed);
   git(seed, 'init', '-q', '-b', 'main');
   write(seed, { ...APP, ...files });
-  for (const hook of Object.keys(files).filter((p) => p.startsWith('.githooks/'))) chmodSync(join(seed, hook), 0o755);
+  for (const path of Object.keys(files).filter((p) => EXECUTABLE.includes(p) || p.startsWith('.githooks/'))) chmodSync(join(seed, path), 0o755);
   commit(seed, {}, 'start');
   const url = join(dir, 'remote/tuannd9288/app.git');
   git(dir, 'clone', '-q', '--bare', seed, url);
@@ -346,7 +347,7 @@ describe('the kit pull request', () => {
     const w = prWorld();
     try {
       const { dir, fac, body, onboard } = w;
-      appendFileSync(join(fac, 'kit/scripts/verify'), '# not committed\n');
+      appendFileSync(join(fac, 'kit/.gate/bin/verify'), '# not committed\n');
       let out = onboard('dirty');
       assert.equal(out.code, 2, out.out);
       assert.match(out.out, /the factory's kit has changes no commit holds/);
@@ -387,23 +388,31 @@ describe('the kit pull request', () => {
       const out = w.onboard('root');
       assert.equal(out.code, 0, out.out);
       const text = readFileSync(w.body, 'utf8');
-      assert.match(text, /^Note: the `verify` check of this PR is red \(`scripts\/verify-trusted: No such file`, code 127\) because `main` has no kit yet; it does not block the merge, because `factory-bootstrap` requires no check\.$/m);
+      assert.match(text, /^Note: the `verify` check of this PR is red \(`\.gate\/bin\/verify-trusted: No such file`, code 127\) because `main` has no kit yet; it does not block the merge, because `factory-bootstrap` requires no check\.$/m);
     } finally {
       w.cleanup();
     }
   });
 
-  test("says in its body and its evidence which of the repository's files the kit replaced, and where the old hook's commands go", () => {
-    const w = prWorld({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n' });
+  test("says in its body and its evidence what the kit replaced, merged and left untouched, and where the gate's commands and hooks are", () => {
+    const w = prWorld(SEED);
     try {
-      writeFileSync(join(w.dir, 'own.md'), '## Layout\n\n`src/` holds the app.\n\n## Facts the code cannot tell\n\n- Ships on Fridays.\n');
+      writeFileSync(join(w.dir, 'own.md'), OWN);
       const out = w.onboard('root', '--own', join(w.dir, 'own.md'));
       assert.equal(out.code, 0, out.out);
       const text = readFileSync(w.body, 'utf8');
-      assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- `\.githooks\/pre-commit`\n {2}- `AGENTS\.md`\n/m);
-      assert.match(text, /move into `gate_fast` in `\.gate\/config\.sh`/);
+      assert.match(text, /`\.gate\/bin\/`/);
+      assert.match(text, /`\.gate\/hooks\/`/);
+      assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- `AGENTS\.md`\n/m);
+      assert.match(text, /^## Files the repository already had, left untouched\n {2}- `\.githooks\/pre-commit`\n {2}- `\.githooks\/pre-push`\n {2}- `scripts\/size\.mjs`\n {2}- `scripts\/verify`\n/m);
+      assert.match(text, /`\.claude\/settings\.json` has the kit's deny lines inserted as text/);
+      assert.match(text, /`GATE_NATIVE=scripts\/verify`.*`gate_fast` in `\.gate\/config\.sh` calls `\.githooks\/pre-commit`/);
+      assert.doesNotMatch(text, /move into `gate_fast`/);
       assert.match(text, /The repository's own parts that the Human approved \(`--own`\)/);
-      assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}\.githooks\/pre-commit \(was [0-9a-f]{12}\)\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
+      assert.match(text, /^kit-evidence: PASS$/m);
+      assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
+      assert.match(text, /^merged \(.*\):\n {2}\.claude\/settings\.json$/m);
+      assert.match(text, /^untouched \(.*\):\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-push\n {2}scripts\/size\.mjs\n {2}scripts\/verify$/m);
       assert.match(text, /^ {2}AGENTS\.md:\d+: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app\.$/m);
     } finally {
       w.cleanup();
@@ -449,7 +458,7 @@ describe('a base that already holds the kit\'s rendering', () => {
     }
   });
 
-  test('still fails a truly own AGENTS.md left as it is, and still keeps a truly own CODEOWNERS and settings', () => {
+  test('still fails a truly own AGENTS.md left as it is, still keeps a truly own CODEOWNERS, and takes the deny lines into a truly own settings', () => {
     let w = world({ had: { 'AGENTS.md': '# Our map\n\nOur rules.\n' }, laid: { 'AGENTS.md': '# Our map\n\nOur rules.\n' } });
     try {
       const out = w.evidence();
@@ -458,12 +467,31 @@ describe('a base that already holds the kit\'s rendering', () => {
     } finally {
       w.cleanup();
     }
-    const own = { '.github/CODEOWNERS': '* @someone\n', '.claude/settings.json': json({ theirs: true }) };
+    const own = { '.github/CODEOWNERS': '* @someone\n' };
     w = world({ had: own, laid: own });
     try {
       const out = w.evidence();
       assert.equal(out.code, 0, out.out);
-      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.claude\/settings\.json\n {2}\.github\/CODEOWNERS\n {2}\.github\/pull_request_template\.md$/m);
+      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.github\/CODEOWNERS\n {2}\.github\/pull_request_template\.md$/m);
+    } finally {
+      w.cleanup();
+    }
+    // A settings.json of its own is the base's bytes with the kit's deny lines inserted; left as it was, it lacks them.
+    const theirs = json({ theirs: true });
+    w = world({ had: { '.claude/settings.json': theirs }, laid: { '.claude/settings.json': theirs } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ {2}differs: \.claude\/settings\.json \(not the repository's own with only the kit's deny lines added\)$/m);
+    } finally {
+      w.cleanup();
+    }
+    const merged = addDeny(theirs, DENY.permissions.deny).text;
+    w = world({ had: { '.claude/settings.json': theirs }, laid: { '.claude/settings.json': merged } });
+    try {
+      const out = w.evidence();
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^merged \(.*\):\n {2}\.claude\/settings\.json$/m);
     } finally {
       w.cleanup();
     }
@@ -601,7 +629,7 @@ describe('evidence over a base that is a rendering', () => {
     try {
       const out = w.evidence();
       assert.equal(out.code, 1, out.out);
-      assert.match(out.out, /^ {2}differs: \.claude\/settings\.json \(the repository's own, changed\)$/m);
+      assert.match(out.out, /^ {2}differs: \.claude\/settings\.json \(not the repository's own with only the kit's deny lines added\)$/m);
     } finally {
       w.cleanup();
     }

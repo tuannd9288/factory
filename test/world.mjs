@@ -27,7 +27,7 @@ process.exit(1);
 
 /** A copy of this factory, committed with origin/main at it (plus `kit`'s files); an onboarded clone of a repository
  * whose bare origin sits beside it, merged to main and pushed. Then the tests change either side. */
-export function world({ kit = {}, executable = [], onboardArgs = [] } = {}) {
+export function world({ kit = {}, executable = [], onboardArgs = [], seedFiles = {}, seedExecutable = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'kit-update-'));
   const fac = join(dir, 'factory');
   const tracked = git(factory, 'ls-files', '--cached', '--others', '--exclude-standard').split('\n');
@@ -44,6 +44,8 @@ export function world({ kit = {}, executable = [], onboardArgs = [] } = {}) {
   const seed = join(dir, 'seed');
   mkdirSync(seed);
   git(seed, 'init', '-q', '-b', 'main');
+  write(seed, seedFiles);
+  for (const f of seedExecutable) chmodSync(join(seed, f), 0o755);
   commit(seed, APP, 'start');
   const url = join(dir, 'remote/tuannd9288/app.git');
   git(dir, 'clone', '-q', '--bare', seed, url);

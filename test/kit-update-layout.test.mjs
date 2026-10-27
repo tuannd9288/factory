@@ -1,0 +1,126 @@
+// bin/kit-update on the new layout: it refuses a repository onboarded in the old one, inserts the deny lines the kit has
+// gained into the repository's own .claude/settings.json as text, and leaves its own scripts/ and .githooks/ alone.
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { factory, git, run } from './helpers.mjs';
+import { addDeny } from '../bin/lib/settings.mjs';
+import { ADAPTER, EXECUTABLE, SEED, SETTINGS } from './seed-world.mjs';
+import { world } from './world.mjs';
+
+const { 'AGENTS.md': _agents, ...OWN_FILES } = SEED;
+const seededWorld = () => world({ seedFiles: OWN_FILES, seedExecutable: EXECUTABLE });
+
+describe('bin/kit-update on the new layout', () => {
+  test('refuses a repository whose kit files list scripts/verify (the old layout), saying to onboard it afresh, and does nothing', () => {
+    const w = world();
+    try {
+      const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8');
+      w.repoCommit({ '.gate/kit-files': `${inventory}scripts/verify\n` });
+      const before = w.state();
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /old layout/);
+      assert.match(out.out, /scripts\/verify/);
+      assert.match(out.out, /onboard it afresh/);
+      assert.match(out.out, /nothing done/);
+      assert.deepEqual(w.state(), before);
+      assert.deepEqual(w.calls(), []);
+      // .gate/pack is still written by onboard, so it is no reason to refuse.
+      git(w.repo, 'revert', '--no-edit', 'HEAD');
+      git(w.repo, 'push', '-q', 'origin', 'main');
+      assert.ok(readFileSync(join(w.repo, '.gate/pack'), 'utf8').length > 0);
+      const again = w.update(['app', '--no-pr']);
+      assert.equal(again.code, 0, again.out);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test("inserts the deny lines the kit gained into the repository's own settings.json, and leaves its scripts/ and hooks alone", () => {
+    const w = seededWorld();
+    try {
+      const base = git(w.repo, 'rev-parse', 'HEAD');
+      const had = readFileSync(join(w.repo, '.claude/settings.json'), 'utf8');
+      const kit = JSON.parse(readFileSync(join(w.fac, 'kit/.claude/settings.json'), 'utf8'));
+      kit.permissions.deny.push('Bash(curl *)');
+      const wanted = kit.permissions.deny;
+      w.facCommit({ 'kit/.claude/settings.json': `${JSON.stringify(kit, null, 2)}\n` });
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kit-evidence: PASS$/m);
+      const { text, ranges, added } = addDeny(had, wanted);
+      assert.deepEqual(added, ['Bash(curl *)']);
+      const head = readFileSync(join(w.repo, '.claude/settings.json'), 'utf8');
+      assert.equal(head, text);
+      let back = head;
+      for (const [from, to] of [...ranges].reverse()) back = back.slice(0, from) + back.slice(to);
+      assert.equal(back, had);
+      assert.deepEqual(JSON.parse(head).enabledPlugins, JSON.parse(SETTINGS).enabledPlugins);
+      assert.match(out.out, /^merged \(.*\):\n {2}\.claude\/settings\.json$/m);
+      assert.equal(git(w.repo, 'diff', '--name-only', base, 'HEAD', '--', 'scripts', '.githooks'), '');
+      assert.match(out.out, /^untouched \(.*\):\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-push\n {2}scripts\/size\.mjs\n {2}scripts\/verify$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('renders a settings.json that is a past rendering of the kit and the pack anew, so a new pin still arrives', () => {
+    const w = world();
+    try {
+      const pack = readFileSync(join(w.fac, 'packs/pstack/settings.json'), 'utf8');
+      w.facCommit({ 'packs/pstack/settings.json': pack.replaceAll('f713f14', 'abc1234') });
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kit-evidence: PASS$/m);
+      const head = readFileSync(join(w.repo, '.claude/settings.json'), 'utf8');
+      assert.ok(head.includes('pstack-abc1234') && !head.includes('pstack-f713f14'), head);
+      assert.equal(head, run(w.fac, 'node', [join(w.fac, 'bin/lib/pack.mjs'), 'settings', w.fac, 'pstack']).out);
+      assert.match(out.out, /^updated \(.*\):\n(?: {2}.*\n)* {2}\.claude\/settings\.json \(was /m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('re-lays a config.sh that is an older kit text plus the adapter block with the new kit text plus the block', () => {
+    const w = seededWorld();
+    try {
+      const kitConfig = readFileSync(join(w.fac, 'kit/.gate/config.sh'), 'utf8');
+      assert.equal(readFileSync(join(w.repo, '.gate/config.sh'), 'utf8'), kitConfig + ADAPTER);
+      w.facCommit({ 'kit/.gate/config.sh': `${kitConfig}# a new default\n` });
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kit-evidence: PASS$/m);
+      assert.equal(readFileSync(join(w.repo, '.gate/config.sh'), 'utf8'), `${kitConfig}# a new default\n${ADAPTER}`);
+      assert.match(out.out, /^updated \(.*\):\n(?: {2}.*\n)* {2}\.gate\/config\.sh \(was /m);
+      // A config.sh the repository edited is still its own, and is kept.
+      git(w.repo, 'switch', '-q', 'main');
+      git(w.repo, 'merge', '-q', '--ff-only', `factory/kit-${w.sha7()}`);
+      git(w.repo, 'push', '-q', 'origin', 'main');
+      w.repoCommit({ '.gate/config.sh': `${readFileSync(join(w.repo, '.gate/config.sh'), 'utf8')}# ours\n` });
+      w.facCommit({ 'kit/.gate/config.sh': `${kitConfig}# a new default\n# and another\n` });
+      const again = w.update(['app', '--no-pr']);
+      assert.equal(again.code, 0, again.out);
+      assert.match(readFileSync(join(w.repo, '.gate/config.sh'), 'utf8'), /# ours\n$/);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('stops with nothing done on a settings.json shape the lines cannot be added to as text', () => {
+    const w = world();
+    try {
+      w.repoCommit({ '.claude/settings.json': '{\n  // ours\n  "permissions": { "deny": [] }\n}\n' });
+      const before = w.state();
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /\.claude\/settings\.json: .*not plain JSON/);
+      assert.match(out.out, /nothing done/);
+      assert.deepEqual(w.state(), before);
+      assert.deepEqual(w.calls(), []);
+    } finally {
+      w.cleanup();
+    }
+  });
+});

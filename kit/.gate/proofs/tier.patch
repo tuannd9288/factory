@@ -1,5 +1,5 @@
 Proof for tier: a change to a gate file, which CODEOWNERS lists, is tier 3.
-Run: scripts/tier --base HEAD~1 --max 1
+Run: .gate/bin/tier --base HEAD~1 --max 1
 Says: tier 3
 
 diff --git a/.gate/tier-proof.txt b/.gate/tier-proof.txt

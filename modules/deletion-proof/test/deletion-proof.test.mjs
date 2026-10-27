@@ -214,7 +214,7 @@ describe('deletion-proof: the config must be protected at the base', () => {
   });
   test('the config files the gate can trust are those it names, and a changed knip.json is tier 3 where it is protected', () => {
     const out = r.attempt({ head: { 'knip.json': '{ "entry": [] }\n', 'packages/a/knip.json': '{}\n' }, knip: listed });
-    const tier = run(r.repo, join(r.repo, 'scripts/tier'), ['--base', out.base]);
+    const tier = run(r.repo, join(r.repo, '.gate/bin/tier'), ['--base', out.base]);
     assert.match(tier.out, /^tier 3/m);
     assert.match(tier.out, /knip\.json/);
   });
@@ -229,7 +229,7 @@ describe('deletion-proof: errors are errors', () => {
     rmSync(work, { recursive: true, force: true });
     mkdirSync(work);
     writeFileSync(join(work, 'sources'), sources);
-    return run(r.repo, 'node', ['scripts/lib/deletion.mjs', 'prove', '--base', base, '--sources', join(work, 'sources'), '--work', work], r.env());
+    return run(r.repo, 'node', ['.gate/bin/lib/deletion.mjs', 'prove', '--base', base, '--sources', join(work, 'sources'), '--work', work], r.env());
   };
 
   test('a base git cannot read is exit 2 with its own words, never "knip has no config" (#60)', () => {
@@ -239,18 +239,18 @@ describe('deletion-proof: errors are errors', () => {
     assert.doesNotMatch(out.out, /knip has no config|not a pure deletion/);
   });
   test('the usage line when run with nothing', () => {
-    const out = run(r.repo, 'node', ['scripts/lib/deletion.mjs']);
+    const out = run(r.repo, 'node', ['.gate/bin/lib/deletion.mjs']);
     assert.equal(out.code, 2);
     assert.match(out.out, /usage: deletion\.mjs prove --base <rev> --sources <file> --work <dir> \| report --base <rev>/);
   });
   test('report prints what knip lists at the base as JSON: the base and the unused files', () => {
     const base = git(r.repo, 'rev-parse', 'HEAD');
-    const out = run(r.repo, 'node', ['scripts/lib/deletion.mjs', 'report', '--base', base], r.env(report(fl('src/old.js'), entry('src/lib.js', { exports: [{ name: 'x' }] }))));
+    const out = run(r.repo, 'node', ['.gate/bin/lib/deletion.mjs', 'report', '--base', base], r.env(report(fl('src/old.js'), entry('src/lib.js', { exports: [{ name: 'x' }] }))));
     assert.equal(out.code, 0, out.out);
     assert.deepEqual(JSON.parse(out.out), { base, files: ['src/old.js'] });
   });
   test('report exits 4 and says why when knip cannot run, and nothing else', () => {
-    const out = run(r.repo, 'node', ['scripts/lib/deletion.mjs', 'report', '--base', git(r.repo, 'rev-parse', 'HEAD')], r.env('boom\n', { FAKE_KNIP_EXIT: '2' }));
+    const out = run(r.repo, 'node', ['.gate/bin/lib/deletion.mjs', 'report', '--base', git(r.repo, 'rev-parse', 'HEAD')], r.env('boom\n', { FAKE_KNIP_EXIT: '2' }));
     assert.equal(out.code, 4, out.out);
     assert.match(out.out, /deletion-proof: knip could not run \(exit 2\)/);
   });
@@ -270,7 +270,7 @@ describe('deletion-proof: the composite of rounds 1 and 3 through package.json',
     const land = (name, files) => {
       git(r.repo, 'switch', '-q', '-C', name, 'main');
       commit(r.repo, files, name);
-      const tier = run(r.repo, join(r.repo, 'scripts/tier'), ['--base', 'main']);
+      const tier = run(r.repo, join(r.repo, '.gate/bin/tier'), ['--base', 'main']);
       git(r.repo, 'switch', '-q', 'main');
       git(r.repo, 'merge', '-q', '--ff-only', name);
       git(r.repo, 'push', '-q', 'origin', 'main');

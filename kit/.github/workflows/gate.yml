@@ -1,4 +1,4 @@
-# The one job that runs the candidate's code: main's verify and red-check on it (scripts/verify-trusted), main's
+# The one job that runs the candidate's code: main's verify and red-check on it (.gate/bin/verify-trusted), main's
 # scripts checked out from the pull request's base. It runs on pull_request, not pull_request_target: it writes only
 # the pull request's own Actions cache, never one main's or a deploy's jobs restore, and it holds no secret and a
 # read-only token. GitHub runs the candidate's copy of this file, so a change to it is a .gate/protected path: tier 3,
@@ -40,7 +40,7 @@ jobs:
           node-version: 24
       - run: |
           printf '%s\n' "$BODY" >"$RUNNER_TEMP/pr-body.txt"
-          GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" scripts/verify-trusted ../candidate "$BASE"
+          GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" .gate/bin/verify-trusted ../candidate "$BASE"
         working-directory: trusted
         env:
           BASE: ${{ github.event.pull_request.base.sha }}

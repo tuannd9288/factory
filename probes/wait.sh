@@ -3,7 +3,7 @@
 # the kit's ruleset requires. PROBE_REPO names the scratch repository.
 REPO=${PROBE_REPO:?set PROBE_REPO to the scratch repository, owner/name}
 kit=$(dirname "$0")/../kit
-need=$(node "$kit/scripts/lib/policy.mjs" checks --rules "$kit" | wc -l) || exit 2
+need=$(node "$kit/.gate/bin/lib/policy.mjs" checks --rules "$kit" | wc -l) || exit 2
 busy() {
   for n in "$@"; do
     s=$(gh pr view "$n" --repo "$REPO" --json state --jq .state 2>/dev/null) || return 0

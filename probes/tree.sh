@@ -6,7 +6,7 @@ REPO=${PROBE_REPO:?set PROBE_REPO to the scratch repository, owner/name}
 R=${PROBE_HOME:?set PROBE_HOME}/root/${REPO#*/}
 since=${1:?usage: tree.sh <commit the ruleset was imported on>}
 kit=$(dirname "$0")/../kit
-names=$(node "$kit/scripts/lib/policy.mjs" checks --rules "$kit" | jq -Rnc '[inputs]') || exit 2
+names=$(node "$kit/.gate/bin/lib/policy.mjs" checks --rules "$kit" | jq -Rnc '[inputs]') || exit 2
 need=$(echo "$names" | jq length)
 git -C "$R" fetch -q origin
 for m in $(git -C "$R" rev-list --first-parent --merges "$since"..origin/main | tail -r); do

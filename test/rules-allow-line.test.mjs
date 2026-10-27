@@ -1,4 +1,4 @@
-// scripts/rules, when it blocks a line, prints the gate-allow line that would allow it, with the rule's own id (#85).
+// .gate/bin/rules, when it blocks a line, prints the gate-allow line that would allow it, with the rule's own id (#85).
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { repoWithKit, script, write } from './helpers.mjs';

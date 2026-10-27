@@ -1,4 +1,4 @@
-// #94: the gate's reviewer reads main's .gate/enforced-rules.md (kit/scripts/lib/claude-reviewer.mjs); the kit must lay it,
+// #94: the gate's reviewer reads main's .gate/enforced-rules.md (kit/.gate/bin/lib/claude-reviewer.mjs); the kit must lay it,
 // and it must be a tier-3 path, so a pull request cannot edit the rules its own reviewer reads below tier 3.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';

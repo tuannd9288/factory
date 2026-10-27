@@ -1,6 +1,6 @@
 // A throwaway repository with the kit installed by bin/onboard, and helpers to change it and run its scripts.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,12 +56,14 @@ export const APP = {
 };
 
 /** A repository whose main holds the app and the kit, on a fresh branch `work`; `dir` holds its origin and profiles. */
-export function repoWithKit(extra = {}, onboardArgs = []) {
+export function repoWithKit(extra = {}, onboardArgs = [], executable = []) {
   const dir = mkdtempSync(join(tmpdir(), 'factory-test-'));
   const seed = join(dir, 'seed');
   mkdirSync(seed);
   git(seed, 'init', '-q', '-b', 'main');
-  commit(seed, { ...APP, ...extra }, 'start');
+  write(seed, { ...APP, ...extra });
+  for (const path of executable) chmodSync(join(seed, path), 0o755);
+  commit(seed, {}, 'start');
   git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
   mkdirSync(join(dir, 'root'));
   const onboard = run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr', ...onboardArgs], {
@@ -81,5 +83,5 @@ export function repoWithKit(extra = {}, onboardArgs = []) {
 }
 
 export function script(repo, name, args = [], env = {}) {
-  return run(repo, join(repo, 'scripts', name), args, { ...quiet, ...env });
+  return run(repo, join(repo, '.gate/bin', name), args, { ...quiet, ...env });
 }

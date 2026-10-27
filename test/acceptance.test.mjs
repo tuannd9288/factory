@@ -1,4 +1,4 @@
-// #96: the trusted read of the issues a pull request closes (kit/scripts/lib/acceptance.mjs), against a fake `gh` on PATH.
+// #96: the trusted read of the issues a pull request closes (kit/.gate/bin/lib/acceptance.mjs), against a fake `gh` on PATH.
 // The shapes are the ones gh printed on 2026-10-26 for `gh pr view --json closingIssuesReferences` and `gh issue view
 // --json number,title,labels,body`. No network and no real gh.
 import { describe, test, before, after, beforeEach } from 'node:test';
@@ -34,7 +34,7 @@ const issue = (number, extra = {}) => ({
 
 describe('acceptance reader', () => {
   let dir;
-  const T = join(factory, 'kit/scripts/lib/acceptance.mjs');
+  const T = join(factory, 'kit/.gate/bin/lib/acceptance.mjs');
   const out = () => join(dir, 'acceptance.json');
   const closing = (...refs) => writeFileSync(join(dir, 'closing.json'), JSON.stringify({ closingIssuesReferences: refs }));
   const issueFile = (number, value) => writeFileSync(join(dir, `issue-${number}.json`), typeof value === 'string' ? value : JSON.stringify(value));

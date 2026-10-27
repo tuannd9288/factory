@@ -41,8 +41,8 @@ function verify(tests, setup = null) {
     copyFileSync(join(factory, 'scripts/verify'), join(copy, 'scripts/verify'));
     // The line cap on the composed AGENTS.md runs bin/lib/pack.mjs, which reads the kit's AGENTS.md and imports own.mjs.
     mkdirSync(join(copy, 'bin/lib'), { recursive: true });
-    // The modules check (bin/lib/module.mjs) runs once a modules/ folder exists, and reads the kit's tree through evidence.mjs.
-    for (const lib of ['pack.mjs', 'own.mjs', 'module.mjs', 'evidence.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
+    // The modules check (bin/lib/module.mjs) runs once a modules/ folder exists, and reads the kit tree through evidence.mjs, which imports adapter.mjs and settings.mjs.
+    for (const lib of ['pack.mjs', 'own.mjs', 'module.mjs', 'evidence.mjs', 'adapter.mjs', 'settings.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
     const caller = Object.fromEntries(FOLDERS.map((name) => [name, join(dir, 'caller', name)]));
     for (const path of Object.values(caller)) mkdirSync(path, { recursive: true });
     const { NODE_TEST_CONTEXT, GATE_BASE, GITHUB_EVENT_NAME, ...outer } = process.env;
@@ -145,7 +145,7 @@ test('scripts/verify fails a composed AGENTS.md of more than 150 lines, and pass
 });
 
 test('scripts/verify checks the subject of every commit since GATE_BASE: a bad one fails the run, a good one passes', () => {
-  const tests = { 'kit/scripts/lib/subject.mjs': readFileSync(join(factory, 'kit/scripts/lib/subject.mjs'), 'utf8') };
+  const tests = { 'kit/.gate/bin/lib/subject.mjs': readFileSync(join(factory, 'kit/.gate/bin/lib/subject.mjs'), 'utf8') };
   const from = (subject) => (copy) => {
     git(copy, 'init', '-q', '-b', 'main');
     const start = commit(copy, {}, 'Start');

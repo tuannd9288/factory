@@ -5,9 +5,14 @@
 #   bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>] [--module <name>]...
 # This is the agents' half; a repository that already has the kit is brought up to date with bin/kit-update. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
-# The kit replaces the repository's own AGENTS.md, CLAUDE.md and hooks; its own parts the Human approved come in through
+# The kit replaces the repository's own AGENTS.md and CLAUDE.md; its own parts the Human approved come in through
 # --own <file>, which holds the two sections the kit's AGENTS.md ends with (bin/lib/own.mjs), and a repository with its
-# own AGENTS.md or CLAUDE.md is refused without it. Every other file the repository already has is kept.
+# own AGENTS.md or CLAUDE.md is refused without it. Every other file the repository already has is kept, byte for byte:
+# the kit ships no scripts/ file of a repository's and no .githooks/, so its own scripts/verify, helpers and hooks stay.
+# A repository with its own scripts/verify gets the adapter lines at the end of the .gate/config.sh the kit lays
+# (bin/lib/adapter.mjs): GATE_NATIVE names the verify, and gate_fast calls its .githooks/pre-commit. A .claude/settings.json
+# it has gets the kit's deny lines it lacks inserted as text (bin/lib/settings.mjs), every other byte kept; a shape that
+# cannot take them is refused before anything is written and the clone removed. With none, the pack composes the file.
 # --pack <name> chooses the way of working the kit is composed with (packs/<name>/, bin/lib/pack.mjs), or `none` for the
 # core alone; the default is the repository's own .gate/pack, else pstack. The choice is written to .gate/pack.
 # --module <name> (repeatable) turns on a module (modules/<name>/, bin/lib/module.mjs): its files are copied into the
@@ -128,6 +133,23 @@ if [ -n "$theirs" ] && [ -z "$own" ]; then
   echo "is removed and nothing else was done"
   exit 2
 fi
+# The repository's own .claude/settings.json gets the kit's deny lines as text (bin/lib/settings.mjs); a shape the lines
+# cannot be added to without touching other bytes is told now, before anything is written.
+if { [ -e "$dest/.claude/settings.json" ] || [ -L "$dest/.claude/settings.json" ]; } && { [ -L "$dest/.claude/settings.json" ] || [ ! -f "$dest/.claude/settings.json" ]; }; then
+  rm -rf "$dest"
+  echo "onboard: .claude/settings.json is not a regular file (a link or a directory), and the kit will not write through or into it; the clone is removed and nothing else was done"
+  exit 2
+fi
+if [ -f "$dest/.claude/settings.json" ]; then
+  trial=$(mktemp)
+  cp "$dest/.claude/settings.json" "$trial"
+  if ! why=$(node "$factory/bin/lib/settings.mjs" add "$trial" "$factory/kit/.claude/settings.json"); then
+    rm -rf "$dest" "$trial"
+    echo "onboard: .claude/settings.json: ${why#settings: $trial: }; the clone is removed and nothing else was done"
+    exit 2
+  fi
+  rm -f "$trial"
+fi
 
 profile=$profiles/$owner/$name/claude
 # The profile's settings.json is the one place that turns off what the claude.ai account loads into every session: its
@@ -170,13 +192,22 @@ trap 'rm -rf "$lists"; rm -f "$composed" "$module_files"' EXIT
 (cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
 : >"$lists/kept"
 : >"$lists/replaced"
+: >"$lists/merged"
+had_config=0
+[ -e .gate/config.sh ] && had_config=1
 while IFS= read -r path; do
   if [ -e "$path" ] || [ -L "$path" ]; then
     case "$path" in
-      AGENTS.md | CLAUDE.md | .githooks/*)
+      AGENTS.md | CLAUDE.md)
         # Removed first: cp would write through a link (a CLAUDE.md linked to AGENTS.md) into the file it names.
         echo "$path" >>"$lists/replaced"
         rm -f "$path"
+        ;;
+      .claude/settings.json)
+        # The repository's own file keeps every byte; the kit's deny lines it lacks are inserted (checked above).
+        node "$factory/bin/lib/settings.mjs" add "$path" "$factory/kit/$path" >/dev/null
+        echo "$path" >>"$lists/merged"
+        continue
         ;;
       *)
         echo "$path" >>"$lists/kept"
@@ -196,6 +227,9 @@ while IFS= read -r path; do
       ;;
   esac
 done <"$lists/kit"
+# A repository with its own scripts/verify gets the adapter lines (bin/lib/adapter.mjs), but only in a .gate/config.sh the
+# kit has just laid: one the repository had is its own.
+[ "$had_config" -eq 1 ] || node "$factory/bin/lib/adapter.mjs" "$dest" >>.gate/config.sh
 # A module's files go in after the kit's: none of them is at a path the repository or the kit has (checked above).
 while IFS=$'\t' read -r path m; do
   mkdir -p "$(dirname "$path")"
@@ -210,12 +244,12 @@ rm -f .gate/pack .gate/kit-files .gate/modules
 printf '%s\n' "$pack" >.gate/pack
 [ "${#modules[@]}" -eq 0 ] || printf '%s\n' "${modules[@]}" | LC_ALL=C sort -u >.gate/modules
 { cat "$lists/kit"; cut -f1 "$module_files"; echo .gate/kit-files; echo .gate/pack; [ ! -f .gate/modules ] || echo .gate/modules; } | LC_ALL=C sort -u >.gate/kit-files
-scripts/setup
+.gate/bin/setup
 git add -A
 # The kit lands only on a repository where the whole gate passes: a commit nobody verified is not a kit pull request.
-if ! GATE_BASE=HEAD scripts/verify; then
-  echo "onboard: the kit is staged on factory/kit, not committed: scripts/verify fails. Fill .gate/config.sh (test"
-  echo "command, fast checks), merge the files the repository already had, run scripts/verify, then commit and open"
+if ! GATE_BASE=HEAD .gate/bin/verify; then
+  echo "onboard: the kit is staged on factory/kit, not committed: .gate/bin/verify fails. Fill .gate/config.sh (test"
+  echo "command, fast checks), merge the files the repository already had, run .gate/bin/verify, then commit and open"
   echo "the pull request."
   exit 1
 fi
@@ -242,12 +276,21 @@ kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 replaced=$(sed 's/^/  - `/; s/$/`/' "$lists/replaced")
 moved=""
 [ -n "$own" ] && moved='The repository'"'"'s own parts that the Human approved (`--own`) sit in the last two sections of `AGENTS.md`, Layout and Facts the code cannot tell; the evidence below prints every line.'
-grep -q '^\.githooks/' "$lists/replaced" && moved="${moved:+$moved }The old hook's commands (\`.githooks/\`) move into \`gate_fast\` in \`.gate/config.sh\`, a job for the repository's session."
+# The repository's own scripts/ and hooks, which the kit does not ship and leaves byte for byte (the evidence checks it).
+untouched=$(git ls-tree -r --name-only "$base" -- scripts .githooks | grep -vxFf "$lists/kit" || true)
+untouched_list=$(printf '%s' "$untouched" | sed '/^$/d; s/^/  - `/; s/$/`/')
+grep -qx '.claude/settings.json' "$lists/merged" && moved="${moved:+$moved }The repository's own \`.claude/settings.json\` has the kit's deny lines inserted as text; every other byte is the repository's, and the evidence below names it as merged."
+if [ "$had_config" -eq 0 ] && [ -f scripts/verify ]; then
+  adapter_note="\`.gate/config.sh\` ends with the adapter lines: \`GATE_NATIVE=scripts/verify\` runs the repository's own verify as the \`native\` check"
+  grep -q '^gate_fast() { \.githooks/pre-commit; }$' .gate/config.sh && adapter_note="$adapter_note, and \`gate_fast\` in \`.gate/config.sh\` calls \`.githooks/pre-commit\`"
+  moved="${moved:+$moved }$adapter_note."
+fi
+[ -z "$untouched" ] || moved="${moved:+$moved }The repository's own hooks stay in \`.githooks/\` and run only in a clone that ran the repository's own setup; the kit's \`.gate/hooks/\` serve a repository with none."
 gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, hooks, hand-in rules and templates" --body "$(cat <<EOF
 ## Summary for the Human
 - Purpose: bring $name into the factory with the kit of tuannd9288/factory.
-- Change: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (with \`protected\`: the tier-3 paths), \`.githooks/\`, three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`; the pack \`$pack\` (named in \`.gate/pack\`) is composed into \`AGENTS.md\` and \`.claude/settings.json\`.
-- Evidence: the full \`scripts/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
+- Change: \`.gate/bin/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review, setup), \`.gate/hooks/\`, \`.gate/\` (with \`protected\`: the tier-3 paths), \`scripts/\` (ship, live-verify), three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`; the pack \`$pack\` (named in \`.gate/pack\`) is composed into \`AGENTS.md\` and, where the repository had no \`.claude/settings.json\`, into that file.
+- Evidence: the full \`.gate/bin/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
 - Tier: 3 (touches \`.github/\`, \`scripts/\`, \`.gate/\`).
 - Rollback: revert this PR.
 - Needs the Human: yes — confirm \`.gate/load-bearing\` (tier 2) and \`.gate/protected\` (tier 3); recommendation: approve once the repository's session has filled both lists.
@@ -257,6 +300,9 @@ ${kept:-  - none}
 
 ## Files the repository already had, replaced by the kit
 ${replaced:-  - none}
+
+## Files the repository already had, left untouched
+${untouched_list:-  - none}
 ${moved:+
 $moved
 }
@@ -266,7 +312,7 @@ $evidence
 \`\`\`
 Re-check from the factory's clone: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
 
-Note: the \`verify\` check of this PR is red (\`scripts/verify-trusted: No such file\`, code 127) because \`main\` has no kit yet; it does not block the merge, because \`factory-bootstrap\` requires no check.
+Note: the \`verify\` check of this PR is red (\`.gate/bin/verify-trusted: No such file\`, code 127) because \`main\` has no kit yet; it does not block the merge, because \`factory-bootstrap\` requires no check.
 
 ## The Human's steps after the merge
 1. From the factory's clone, run \`bin/onboard-owner $slug --id $id --apply\` again: it replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\` and reads back what it set.

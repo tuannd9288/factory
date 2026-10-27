@@ -1,4 +1,4 @@
-// failing-test-edited cannot be allowed by a comment (its finding is a line the file no longer holds), so scripts/rules
+// failing-test-edited cannot be allowed by a comment (its finding is a line the file no longer holds), so .gate/bin/rules
 // prints no gate-allow line for it (#85).
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';

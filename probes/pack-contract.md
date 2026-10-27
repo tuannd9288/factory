@@ -106,5 +106,5 @@ the probe appends the mode, the grants and `--output-format stream-json`.
 
 The scratch repository is a new one, `factory-pack-scratch`, made from `probes/pack-seed.sh`: the kit already on
 `factory-scratch` is older than ours (it lacks the pstack pin, `scripts/live-verify`, the policy check and the four
-required checks' names), and `bin/onboard` keeps every file a repository already has except `AGENTS.md`, `CLAUDE.md`
-and `.githooks/`, so it cannot bring that kit up to date.
+required checks' names), and `bin/onboard` keeps every file a repository already has except `AGENTS.md` and
+`CLAUDE.md`, so it cannot bring that kit up to date.

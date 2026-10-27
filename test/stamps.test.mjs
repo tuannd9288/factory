@@ -1,4 +1,4 @@
-// The pass record (#85): a full scripts/verify and scripts/red-check leave a stamp under the git dir, named for the
+// The pass record (#85): a full .gate/bin/verify and .gate/bin/red-check leave a stamp under the git dir, named for the
 // commits they judged, that scripts/ship reads. Never in the work tree; per worktree.
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
