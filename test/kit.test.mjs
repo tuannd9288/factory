@@ -395,13 +395,13 @@ describe('verify-trusted', () => {
   };
 
   test('passes a good candidate that changes no protected path', () => {
-    const out = candidate({ 'src/math.js': MUL, 'test/mul.test.js': RED_AT_BASE });
+    const out = candidate({ 'src/math.js': MUL, 'test/mul.test.js': RED_AT_BASE }, withBody('Team: team-x\n'));
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /main's verify and red-check pass on the candidate/);
   });
   test('hands the PR body to red-check, so a No-red line passes it there and review judges the reason', () => {
     assert.equal(candidate({ 'src/math.js': MUL }).code, 1);
-    write(r.dir, { 'body.txt': 'Summary\nNo-red: adds a helper nothing calls yet\n' });
+    write(r.dir, { 'body.txt': 'Summary\nTeam: team-x\nNo-red: adds a helper nothing calls yet\n' });
     const out = candidate({ 'src/math.js': MUL }, { GATE_BODY_FILE: join(r.dir, 'body.txt') });
     assert.equal(out.code, 0, out.out);
   });

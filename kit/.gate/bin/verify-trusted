@@ -28,6 +28,16 @@ work=$(mktemp -d) || exit 2
 trap 'git -C "$candidate" worktree prune >/dev/null 2>&1; rm -rf "$work"' EXIT
 status=0
 
+# 0. The pull request names its team, in a line of its own (prbody.mjs). With no body to read it fails: a candidate's own
+# gate.yml, which runs from the pull request, could drop the variable, so absence is never a pass.
+if [ -z "${GATE_BODY_FILE:-}" ]; then
+  status=1
+  echo 'verify-trusted: no pull request body was given, so the line "Team: <name>" cannot be read'
+elif ! team=$(node .gate/bin/lib/prbody.mjs --team "$GATE_BODY_FILE"); then
+  status=1
+  echo "verify-trusted: $team"
+fi
+
 git -C "$candidate" worktree add --detach --quiet "$work/overlay" HEAD || exit 2
 (
   cd "$work/overlay" || exit 2

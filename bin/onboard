@@ -320,5 +320,8 @@ Note: the \`verify\` check of this PR is red (\`.gate/bin/verify-trusted: No suc
 3. Repository variables: \`GATE_RUNNER\` (for example \`["self-hosted","factory"]\`; empty means GitHub's runner), \`GATE_REVIEWER\` (while unset, \`review\` and \`verdict\` are red and nothing merges itself).
 4. Log into the profile: open a new pane in the repository, check \`echo \$CLAUDE_CONFIG_DIR\`, run \`claude\`.
 5. Add the repository to the launchd \`bin/factory-queue sweep\` command (run as the agents' account).
+
+Issue: none
+Team: factory/onboard
 EOF
 )"
