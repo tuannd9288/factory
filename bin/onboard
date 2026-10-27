@@ -112,6 +112,13 @@ fi
 # The repository keeps its own AGENTS.md and CLAUDE.md. The AGENTS.md it gets is checked now, before anything is written:
 # one over the limits, with malformed markers or CRLF, or a CLAUDE.md that does not reach it, is refused and the clone,
 # which this run made, is removed. A file of the repository's is never cut, rewritten or replaced.
+# A link or a folder at AGENTS.md is refused with --own too: the kit writes the file in place, and neither writes through a
+# link nor replaces one (the evidence would fail a mode that changed from 120000).
+if { [ -e "$dest/AGENTS.md" ] || [ -L "$dest/AGENTS.md" ]; } && { [ -L "$dest/AGENTS.md" ] || [ ! -f "$dest/AGENTS.md" ]; }; then
+  rm -rf "$dest"
+  echo "onboard: AGENTS.md is a link or not a regular file, which the kit will not write through or replace, with --own as without it; the clone is removed and nothing else was done"
+  exit 2
+fi
 if [ -z "$own" ]; then
   compose_args=(compose --section "$section" --name "$name")
   { [ -e "$dest/AGENTS.md" ] || [ -L "$dest/AGENTS.md" ]; } && compose_args+=(--agents "$dest/AGENTS.md")
@@ -206,7 +213,6 @@ while IFS= read -r path; do
 done <"$lists/kit"
 # The instruction files: AGENTS.md is the composed text (the repository's own, or --own, with the block in it) written over
 # the file in place, so its mode stays; CLAUDE.md is the repository's own, or the one-line import where it had none.
-[ ! -L AGENTS.md ] || rm -f AGENTS.md
 [ ! -e AGENTS.md ] || echo AGENTS.md >>"$lists/merged"
 cat "$composed" >AGENTS.md
 [ -e CLAUDE.md ] || [ -L CLAUDE.md ] || printf '@AGENTS.md\n' >CLAUDE.md
