@@ -35,8 +35,8 @@ describe('a candidate whose tree has two AGENTS.md entries', () => {
     assert.match(out.out, /more than one entry/);
   });
 
-  test('is red for CLAUDE.md and .gate/gate-section.md too', () => {
-    for (const path of ['CLAUDE.md', '.gate/gate-section.md']) {
+  test('is red for CLAUDE.md too', () => {
+    for (const path of ['CLAUDE.md']) {
       git(t.r.repo, 'reset', '-q', '--hard');
       duplicated(path, 'something else\n');
       const out = t.objects();

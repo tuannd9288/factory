@@ -228,10 +228,12 @@ function git(args, options = {}) {
 export function entryIn(repo, rev, path) {
   const ls = git(['--literal-pathspecs', '-C', repo, 'ls-tree', '-z', rev, '--', path]);
   if (ls.status !== 0) throw new Error(`could not read ${path} at ${rev}: ${String(ls.stderr).trim()}`);
-  const record = ls.stdout.toString('utf8').split('\0').find(Boolean);
-  if (!record) return null;
-  const [meta, name] = record.split('\t');
-  if (name !== path) return null;
+  // A tree can list one name twice (git fsck calls it duplicateEntries): ls-tree lists both, a checkout writes the last. Two
+  // readers of one tree must not read two files, so a name listed twice is a problem and not a choice.
+  const records = ls.stdout.toString('utf8').split('\0').filter(Boolean).filter((r) => r.split('\t')[1] === path);
+  if (records.length > 1) throw Object.assign(new Error(`${path} has more than one entry in the tree of ${rev}; a checkout and this check would read two files`), { treeProblem: true });
+  if (!records.length) return null;
+  const [meta] = records[0].split('\t');
   const [mode, type, oid] = meta.split(' ');
   if (type !== 'blob') return { mode, bytes: Buffer.alloc(0) };
   const cat = git(['-C', repo, 'cat-file', 'blob', oid]);
@@ -267,7 +269,16 @@ function onFirstParent(dir, key) {
  * block, .gate/gate-section.md and .gate/kit-commit as the base has them. A kit update changes them, and the factory's
  * own main must vouch: the commit .gate/kit-commit names is on it, and its kit/.gate/gate-section.md is the candidate's
  * block and file. An update changes nothing else of AGENTS.md or CLAUDE.md. */
-export function objectProblems({ repo, base, head = 'HEAD', url = process.env.GATE_FACTORY_URL || FACTORY_URL }) {
+export function objectProblems(options) {
+  try {
+    return judgeObjects(options);
+  } catch (error) {
+    if (error.treeProblem) return [error.message];
+    throw error;
+  }
+}
+
+function judgeObjects({ repo, base, head = 'HEAD', url = process.env.GATE_FACTORY_URL || FACTORY_URL }) {
   const read = (rev) => ({ agents: entryIn(repo, rev, 'AGENTS.md'), claude: entryIn(repo, rev, 'CLAUDE.md'), section: entryIn(repo, rev, SECTION), commit: entryIn(repo, rev, KIT_COMMIT) });
   const b = read(base);
   const c = read(head);
