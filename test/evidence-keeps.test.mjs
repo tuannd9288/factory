@@ -4,8 +4,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { commit, git, run } from './helpers.mjs';
+import { addDeny } from '../bin/lib/settings.mjs';
 import { EXECUTABLE, OWN, SEED } from './seed-world.mjs';
 import { world } from './world.mjs';
 
@@ -73,6 +74,29 @@ describe('bin/kit-evidence over a repository with its own verify, hooks and sett
       const out = w.evidence();
       assert.equal(out.code, 1, out.out);
       assert.match(out.out, /^ {2}differs: \.gate\/config\.sh \(not the kit's text with the adapter lines for this repository\)$/m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('onboard refuses a settings.json that is not UTF-8, and evidence fails a head that decoded it', () => {
+    // A Latin-1 \u00e9 in a string: read as UTF-8 and written back, the byte becomes U+FFFD.
+    const latin1 = Buffer.concat([Buffer.from('{\n  "permissions": { "deny": ["Bash(rm -rf *)"] },\n  "note": "caf'), Buffer.from([0xe9]), Buffer.from('"\n}\n')]);
+    const w = world({ onboardArgs: null, seedFiles: { ...SEED, '.claude/settings.json': latin1 }, seedExecutable: EXECUTABLE });
+    try {
+      writeFileSync(join(w.dir, 'own.md'), OWN);
+      const out = w.onboard(['--own', join(w.dir, 'own.md')]);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /\.claude\/settings\.json: .*not UTF-8/);
+      assert.ok(!existsSync(w.repo), 'the clone is left behind');
+      const clone = join(w.dir, 'clone');
+      git(w.dir, 'clone', '-q', w.url, clone);
+      git(clone, 'switch', '-q', '-c', 'factory/kit');
+      const kitDeny = JSON.parse(readFileSync(join(w.fac, 'kit/.claude/settings.json'), 'utf8')).permissions.deny;
+      commit(clone, { '.claude/settings.json': addDeny(latin1.toString('utf8'), kitDeny).text }, 'decoded');
+      const ev = run(w.dir, join(w.fac, 'bin/kit-evidence'), ['--factory', w.fac, '--commit', 'HEAD', '--repo', clone, '--base', 'main', '--head', 'factory/kit', '--slug', 'tuannd9288/app', '--id', '1']);
+      assert.equal(ev.code, 1, ev.out);
+      assert.match(ev.out, /^ {2}differs: \.claude\/settings\.json \(.*not UTF-8.*\)$/m);
     } finally {
       w.cleanup();
     }

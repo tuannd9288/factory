@@ -3,7 +3,7 @@
 // anything else is refused with a message.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory, run, write } from './helpers.mjs';
@@ -17,6 +17,9 @@ const SHAPES = {
   'a multi-line deny array indented with tabs': '{\n\t"permissions": {\n\t\t"deny": [\n\t\t\t"Bash(rm -rf *)"\n\t\t]\n\t}\n}\n',
   'a one-line deny array': `{\n  "permissions": { "deny": ["Bash(rm -rf *)"] },\n  ${PIN}\n}\n`,
   'no permissions key': `{\n  ${PIN}\n}\n`,
+  'an empty deny array': `{\n  "permissions": { "deny": [] },\n  ${PIN}\n}\n`,
+  'an empty deny array with a space inside': `{\n  "permissions": { "deny": [ ] },\n  ${PIN}\n}\n`,
+  'an empty deny array across two lines': `{\n  "permissions": {\n    "deny": [\n    ]\n  }\n}\n`,
 };
 
 /** The text with the inserted ranges cut out. */
@@ -56,9 +59,33 @@ describe('addDeny', () => {
     assert.throws(() => addDeny('{ "enabledPlugins": {} }\n', WANT), /one line/);
     assert.throws(() => addDeny('[]\n', WANT), /object/);
   });
+
+  test('refuses bytes that are not UTF-8, and a byte order mark, each with its own message', async () => {
+    const { addDeny } = await load();
+    const latin1 = Buffer.concat([Buffer.from('{\n  "permissions": { "deny": ["a"] },\n  "note": "caf'), Buffer.from([0xe9]), Buffer.from('"\n}\n')]);
+    assert.throws(() => addDeny(latin1, WANT), /not UTF-8/);
+    assert.throws(() => addDeny(Buffer.from(`\uFEFF${SHAPES['a multi-line deny array']}`), WANT), /byte order mark/);
+    assert.throws(() => addDeny(`\uFEFF${SHAPES['a multi-line deny array']}`, WANT), /byte order mark/);
+    assert.doesNotThrow(() => addDeny(Buffer.from(SHAPES['a multi-line deny array']), WANT));
+  });
 });
 
 describe('add <file> <kit file>', () => {
+  test('leaves a file that is not UTF-8 as it was, and says so', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'settings-merge-'));
+    try {
+      const latin1 = Buffer.concat([Buffer.from('{\n  "permissions": { "deny": ["a"] },\n  "note": "caf'), Buffer.from([0xe9]), Buffer.from('"\n}\n')]);
+      writeFileSync(join(dir, 'mine.json'), latin1);
+      write(dir, { 'kit.json': JSON.stringify({ permissions: { deny: WANT } }) });
+      const out = run(dir, 'node', [join(factory, 'bin/lib/settings.mjs'), 'add', join(dir, 'mine.json'), join(dir, 'kit.json')]);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /not UTF-8/);
+      assert.ok(readFileSync(join(dir, 'mine.json')).equals(latin1));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('rewrites the repository\'s file in place, and prints what it added', () => {
     const dir = mkdtempSync(join(tmpdir(), 'settings-merge-'));
     try {
