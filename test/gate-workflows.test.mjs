@@ -28,12 +28,10 @@ describe('the fork guard of review (item 12)', () => {
     assert.deepEqual(Object.keys(guard.env).sort(), ['BASE_REPO', 'HEAD_REPO']);
     assert.equal(guard.env.HEAD_REPO, '${{ github.event.pull_request.head.repo.id }}');
     assert.equal(guard.env.BASE_REPO, '${{ github.event.pull_request.base.repo.id }}');
-    steps.forEach((step, i) => {
-      if (i === 0) return;
-      assert.doesNotMatch(JSON.stringify(step), /secrets\./, `step ${i} holds a secret`);
-    });
+    assert.doesNotMatch(JSON.stringify(guard), /secrets\./);
     const withSecret = steps.findIndex((s) => /secrets\./.test(JSON.stringify(s)));
     assert.ok(withSecret > 0, 'the credential is read by a later step');
+    assert.equal(steps.filter((s) => /secrets\./.test(JSON.stringify(s))).length, 1, 'one step holds the credential');
     assert.ok(steps.findIndex((s) => String(s.uses).startsWith('actions/checkout')) > 0);
     assert.ok(steps.findIndex((s) => /npm ci/.test(String(s.run))) > 0);
   });
