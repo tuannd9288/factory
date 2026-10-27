@@ -80,8 +80,10 @@ if [ "$open_pr" -eq 1 ]; then
     exit 2
   fi
   kit_commit=$(git -C "$factory" rev-parse HEAD)
-  if ! git -C "$factory" merge-base --is-ancestor "$kit_commit" refs/remotes/origin/main 2>/dev/null; then
-    echo "onboard: the factory's commit ${kit_commit:0:7} is not on its origin/main; push it first; nothing done"
+  # On the first-parent line of origin/main: a commit a merge brought in from a side branch is not one main recorded.
+  first_parent=$(git -C "$factory" rev-list --first-parent refs/remotes/origin/main 2>/dev/null) || first_parent=""
+  if ! grep -Fxq "$kit_commit" <<<"$first_parent"; then
+    echo "onboard: the factory's commit ${kit_commit:0:7} is not on its origin/main (its first-parent line); push it first; nothing done"
     exit 2
   fi
 fi

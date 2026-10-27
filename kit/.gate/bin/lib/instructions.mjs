@@ -255,6 +255,14 @@ function fetchFactory(url) {
 
 const isAncestor = (dir, older, newer) => git(['-C', dir, 'merge-base', '--is-ancestor', older, newer]).status === 0;
 
+/** Whether a commit is on the first-parent line of the factory's main. A commit that main reaches only through a merge's
+ * second parent (an intermediate commit of a pull request, rewritten before it merged) is not: only what main itself
+ * recorded, one merge or commit at a time, vouches for a block. A walk that fails is "no". */
+function onFirstParent(dir, key) {
+  const r = git(['-C', dir, 'rev-list', '--first-parent', 'refs/heads/main']);
+  return r.status === 0 && String(r.stdout).split('\n').includes(key);
+}
+
 /** The problems with a candidate commit's instruction files, judged against its base. An ordinary pull request leaves the
  * block, .gate/gate-section.md and .gate/kit-commit as the base has them. A kit update changes them, and the factory's
  * own main must vouch: the commit .gate/kit-commit names is on it, and its kit/.gate/gate-section.md is the candidate's
@@ -285,7 +293,7 @@ export function objectProblems({ repo, base, head = 'HEAD', url = process.env.GA
     }
     if (factory) {
       try {
-        if (!isAncestor(factory.dir, key, 'refs/heads/main')) problems.push(`${KIT_COMMIT} names ${key.slice(0, 7)}, which is not on the factory's main`);
+        if (!onFirstParent(factory.dir, key)) problems.push(`${KIT_COMMIT} names ${key.slice(0, 7)}, which is not on the factory's main (its first-parent line)`);
         else {
           const vouched = git(['-C', factory.dir, 'cat-file', 'blob', `${key}:kit/${SECTION}`]);
           if (vouched.status !== 0) problems.push(`the factory commit ${key.slice(0, 7)} holds no kit/${SECTION}`);

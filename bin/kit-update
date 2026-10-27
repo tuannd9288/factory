@@ -58,7 +58,9 @@ if git -C "$factory" status --porcelain --ignored --untracked-files=all -- kit p
 fi
 kit_commit=$(git -C "$factory" rev-parse HEAD)
 sha7=${kit_commit:0:7}
-git -C "$factory" merge-base --is-ancestor "$kit_commit" refs/remotes/origin/main 2>/dev/null || refuse "the factory's commit $sha7 is not on its origin/main; push it first"
+# On the first-parent line of origin/main: a commit a merge brought in from a side branch is not one main recorded.
+first_parent=$(git -C "$factory" rev-list --first-parent refs/remotes/origin/main 2>/dev/null) || first_parent=""
+grep -Fxq "$kit_commit" <<<"$first_parent" || refuse "the factory's commit $sha7 is not on its origin/main (its first-parent line); push it first"
 branch=factory/kit-$sha7
 
 git -C "$dest" fetch --quiet origin main 2>/dev/null || refuse "could not fetch origin/main of $name"
