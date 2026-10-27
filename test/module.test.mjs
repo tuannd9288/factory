@@ -71,7 +71,7 @@ describe('the factory side', () => {
     for (const [why, kit, names, re] of [
       ['a kit path', { 'modules/demo/kit/.gate/bin/verify': 'x\n' }, ['demo'], /\.gate\/bin\/verify.*module demo.*kit/],
       ['another module\'s path', { 'modules/demo/kit/x.txt': 'a\n', 'modules/other/kit/x.txt': 'b\n' }, ['demo', 'other'], /x\.txt.*modules? (demo|other)/],
-      ['.gate/pack', { 'modules/demo/kit/.gate/pack': 'x\n' }, ['demo'], /\.gate\/pack.*generated/],
+      ['.gate/kit-commit', { 'modules/demo/kit/.gate/kit-commit': 'x\n' }, ['demo'], /\.gate\/kit-commit.*generated/],
       ['.gate/modules', { 'modules/demo/kit/.gate/modules': 'x\n' }, ['demo'], /\.gate\/modules.*generated/],
     ]) {
       const w = world({ kit, onboardArgs: null });

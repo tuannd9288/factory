@@ -112,7 +112,7 @@ describe('bin/kit-evidence with modules', () => {
       assert.match(out.out, /differs: \.gate\/kit-files \(not the kit's inventory\)/);
     });
     // An inventory written to match: the files are then paths the pull request changes outside the inventory.
-    const w = world({ laid: { '.gate/modules': null, '.gate/kit-files': `${['.claude/settings.json', '.github/CODEOWNERS', '.gate/kit-files', '.gate/pack', 'AGENTS.md', 'scripts/verify'].sort().join('\n')}\n` } });
+    const w = world({ laid: { '.gate/modules': null, '.gate/kit-files': `${['.claude/settings.json', '.github/CODEOWNERS', '.gate/kit-files', '.gate/kit-commit', 'scripts/verify'].sort().join('\n')}\n` } });
     try {
       const out = w.evidence();
       assert.equal(out.code, 1, out.out);
