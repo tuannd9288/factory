@@ -16,7 +16,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isTeam, issue as issueLine } from './prbody.mjs';
+import { claim as claimLine, isTeam, issue as issueLine } from './prbody.mjs';
 
 class Stop extends Error {
   constructor(message, code = 1) {
@@ -58,11 +58,11 @@ export function stateOf(n, subject) {
 }
 
 /** The tip of claim n on origin, read from origin itself, with its subject and date; sha is null when there is no claim. */
-export function tipOf(n) {
-  const line = gitOut('ls-remote', 'origin', refOf(n)).split('\n')[0];
+export function tipOf(n, net = []) {
+  const line = gitOut(...net, 'ls-remote', 'origin', refOf(n)).split('\n')[0];
   const sha = line.split(/\s/)[0];
   if (!sha) return { sha: null };
-  gitOut('fetch', '--quiet', 'origin', refOf(n));
+  gitOut(...net, 'fetch', '--quiet', 'origin', refOf(n));
   const [subject, date] = gitOut('log', '-1', '--format=%s%x09%cI', sha).split('\t');
   return { sha, subject, date, ...stateOf(n, subject) };
 }
@@ -175,6 +175,35 @@ function list(all) {
   }
 }
 
+// The git options of the trusted jobs, whose checkout keeps no credential (the helper of gate-trusted.yml's fetch steps).
+const JOB_NET = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
+
+/** The tier job's check of one pull request: its Issue: and Claim: lines against the tip of claim/<n>, read now. */
+export function check(repo, pr) {
+  const view = ghJson('pr', 'view', pr, '--repo', repo, '--json', 'closingIssuesReferences,body');
+  if (typeof view?.body !== 'string' || !Array.isArray(view.closingIssuesReferences)) throw new Stop('tier: the pull request body and closing issues could not be read', 2);
+  const red = (text) => new Stop(`tier: claim: ${text}`);
+  const named = issueLine(view.body);
+  if (!named.ok) throw red('the pull request body needs one line "Issue: #<n>" or "Issue: none"');
+  const here = view.closingIssuesReferences
+    .filter((r) => `${r?.repository?.owner?.login}/${r?.repository?.name}`.toLowerCase() === repo.toLowerCase())
+    .map((r) => r.number);
+  if (named.kind === 'none') {
+    if (here.length) throw red(`the body says "Issue: none" but the pull request closes #${here[0]}`);
+    return console.log('tier: claim: Issue: none, so there is no claim to check');
+  }
+  const n = named.number;
+  const other = here.find((c) => c !== n);
+  if (other) throw red(`the body names #${n} but the pull request closes #${other}; one pull request is for one issue`);
+  const line = claimLine(view.body);
+  if (!line.ok) throw red(`the body needs one line "Claim: <sha>" for #${n}; run .gate/bin/claim ${n} <team>`);
+  const tip = tipOf(n, JOB_NET);
+  if (!tip.sha) throw red(`there is no claim on #${n}; run .gate/bin/claim ${n} <team>`);
+  if (tip.sha !== line.sha) throw red(`Claim: ${short(line.sha)} is not the claim on #${n}: ${refOf(n)} is at ${short(tip.sha)}, "${oneLine(tip.subject)}"`);
+  if (tip.state !== 'claimed' && tip.state !== 'handed-off') throw red(`the claim on #${n} was released ("${oneLine(tip.subject)}")`);
+  console.log(`tier: claim: #${n} is held by ${tip.team} at ${short(tip.sha)}`);
+}
+
 const NUMBER = /^[1-9]\d*$/;
 const USAGE = 'usage: .gate/bin/claim <n> <team> | --release <n> <team|--human> | --handoff <n> <from|--human> <to> | --list [--all]';
 
@@ -188,6 +217,7 @@ export function main(argv) {
     if (!NUMBER.test(s ?? '')) throw new Stop(USAGE, 2);
     return Number(s);
   };
+  if (first === 'check' && rest.length === 4 && rest[0] === '--repo' && rest[2] === '--pr' && /^[\w.-]+\/[\w.-]+$/.test(rest[1]) && NUMBER.test(rest[3])) return check(rest[1], rest[3]);
   if (first === '--list' && rest.length <= 1 && (rest[0] ?? '--all') === '--all') return list(rest[0] === '--all');
   if (first === '--release' && rest.length === 2) {
     const n = number(rest[0]);

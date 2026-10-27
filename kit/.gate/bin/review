@@ -77,6 +77,18 @@ tier_of() {
   [ "$code" -eq 0 ] || { echo "$job: the tier could not be computed, so this check fails closed"; return 1; }
 }
 
+# The pull request's Issue: and Claim: lines against the tip of claim/<n> on origin, read now (claim.mjs check). Red prints
+# why; green keeps the line in $claim_msg, which tier prints with the tier. Only with a pull request (GATE_PR).
+claim_check() {
+  local msg code
+  claim_msg=""
+  [ -n "${GATE_PR:-}" ] || return 0
+  msg=$(node .gate/bin/lib/claim.mjs check --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR")
+  code=$?
+  [ "$code" -eq 0 ] || { echo "$msg"; echo "tier: the claim check is red, so this check fails"; return 1; }
+  claim_msg=$msg
+}
+
 # Waits for the `review` job of this workflow run and reads its result annotation, whatever its conclusion: sets
 # $review_red when it ended red or cancelled, and $did_raise and $raised (one line) when it reported a raise. A review
 # that ended green and left no result annotation is read again GATE_RESULT_TRIES times (the listing may lag the job), then
@@ -149,6 +161,8 @@ case "$job" in
   tier)
     out=$(tier_of) || { echo "$out"; exit 1; }
     n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
+    # A moved claim fails at once, and again after the wait, which can last an hour: the claim is read when tier ends.
+    claim_check || exit 1
     # Paths and labels already giving tier 3, a raise adds nothing: the wait is for the other tiers only. Every line that
     # prints the reviewer's reason starts with a fixed prefix and holds it on one line with `##[` broken.
     if [ "$n" != 3 ] && [ -n "${GATE_PR:-}" ]; then
@@ -184,7 +198,9 @@ case "$job" in
         exit 1
       fi
     fi
+    claim_check || exit 1
     echo "$out"
+    [ -z "$claim_msg" ] || echo "$claim_msg"
     if [ -n "${GATE_PR:-}" ]; then
       gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label "tier-$n" >/dev/null || echo "tier: could not add the label tier-$n, which only shows the tier"
       for k in 1 2 3; do
