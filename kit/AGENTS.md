@@ -2,32 +2,32 @@
 
 <One paragraph: what this repository is, who uses it, where it runs.>
 
-This repository is in the factory (`tuannd9288/factory`). Its gate lives here, in `scripts/`, `.gate/` and
-`.github/`; this file is the rules an agent follows in it. At most 150 lines, and
-`CLAUDE.md` is `@AGENTS.md`, both checked by `scripts/verify`.
+This repository is in the factory (`tuannd9288/factory`). Its gate lives here, in `.gate/` (its commands in
+`.gate/bin/`), `scripts/` and `.github/`; this file is the rules an agent follows in it. At most 150 lines, and
+`CLAUDE.md` is `@AGENTS.md`, both checked by `.gate/bin/verify`.
 
 ## Commands
 
 | Command | Healthy output |
 |---|---|
-| `scripts/setup` | `setup: hooks from .githooks` |
-| `scripts/verify` | `verify: 6 passed in 12s` (prints only failures and this line) |
-| `scripts/verify --fast` | `verify: 2 passed in 1s` (the pre-commit hook runs it) |
-| `scripts/verify --tests <files>` | `verify: 1 passed in 2s`; JUnit in `.gate/report.xml` |
-| `scripts/tier` | `tier 1` (2: load-bearing path or dependency; 3: a path in `.gate/protected`, or label `needs-human`) |
-| `scripts/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
-| `scripts/prove-check --all` | `prove-check: 7 checks fail on their fixtures` |
+| `.gate/bin/setup` | `setup: hooks from .gate/hooks` |
+| `.gate/bin/verify` | `verify: 6 passed in 12s` (prints only failures and this line) |
+| `.gate/bin/verify --fast` | `verify: 2 passed in 1s` (the pre-commit hook runs it) |
+| `.gate/bin/verify --tests <files>` | `verify: 1 passed in 2s`; JUnit in `.gate/report.xml` |
+| `.gate/bin/tier` | `tier 1` (2: load-bearing path or dependency; 3: a path in `.gate/protected`, or label `needs-human`) |
+| `.gate/bin/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
+| `.gate/bin/prove-check --all` | `prove-check: 7 checks fail on their fixtures` |
 | `scripts/live-verify <pr>` | `live-verify: PASS on #12 (head 1a2b3c4, patch 5d6e7f8)`, posted on the pull request |
 | `scripts/ship` | `ship: opened #12 <url>`; run again: `ship: armed #12: a live PASS covers HEAD 1a2b3c4` |
 
-Run `scripts/setup` once per clone. Run `scripts/verify` and `scripts/red-check --base origin/main` before opening
+Run `.gate/bin/setup` once per clone. Run `.gate/bin/verify` and `.gate/bin/red-check --base origin/main` before opening
 the pull request; push as often as you like. CI runs `main`'s copies of both on your change, as the one check `verify`.
 
 ## How a change lands
 
 1. One task is one issue labelled `task`, one branch, one worktree and one pull request whose body says
    `Closes #<issue>`; the ledger counts the task from that label. Never push to `main` or delete it; the ruleset refuses it.
-2. Before writing, run `scripts/tier` on the files you expect to touch. Tier 2 or 3: commit the failing test
+2. Before writing, run `.gate/bin/tier` on the files you expect to touch. Tier 2 or 3: commit the failing test
    first, alone, with the trailer `Failing-test: <test command>`. Later commits never edit those test lines.
 3. Every source change carries a test that fails without it: `red-check` lays the new or changed tests onto
    the base commit and requires them to fail there as tests, not as load errors. A new name in an existing
@@ -84,7 +84,7 @@ A rule with no enforcer goes here as `prose` and gets one, or is deleted, within
 ## Hand-in rule exceptions
 
 A block finding that is wrong for one line is allowed on that line only, in a comment:
-`gate-allow <rule-id>: <why, 20 characters or more>`; `scripts/rules` prints that line, with the id, under a block.
+`gate-allow <rule-id>: <why, 20 characters or more>`; `.gate/bin/rules` prints that line, with the id, under a block.
 The reviewer sees the line in the diff and judges it.
 A deleted test file or lost assertions need one added line naming the test kept in their place and a break that
 turns it red: `gate-allow test-deleted: <path>; kept: <test file> "<test name>"; red: <source file> "<from>" -> "<to>"`
