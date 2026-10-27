@@ -405,6 +405,28 @@ describe('verify-trusted', () => {
     const out = candidate({ 'src/math.js': MUL }, { GATE_BODY_FILE: join(r.dir, 'body.txt') });
     assert.equal(out.code, 0, out.out);
   });
+  // #133: the pull request's own Team: line gates at verify, where the body is (GATE_BODY_FILE).
+  const withBody = (text) => {
+    write(r.dir, { 'team-body.txt': text });
+    return { GATE_BODY_FILE: join(r.dir, 'team-body.txt') };
+  };
+  const GOOD = { 'src/math.js': MUL, 'test/mul.test.js': RED_AT_BASE };
+  test('a body with a Team: line passes; with none, a placeholder, two teams, or no body at all, it fails and says what it needs', () => {
+    assert.equal(candidate(GOOD, withBody('Summary\nTeam: team-x\n')).code, 0);
+    for (const text of ['Summary only\n', 'Team: <your team\'s name, as in claim>\n', 'Team: a\nTeam: b\n']) {
+      const out = candidate(GOOD, withBody(text));
+      assert.equal(out.code, 1, `${text}: ${out.out}`);
+      assert.match(out.out, /Team:/);
+    }
+    const none = candidate(GOOD, {});
+    assert.equal(none.code, 1, none.out);
+  });
+  test('the Team: check does not hide the other failures: a body without it and a focused test report both', () => {
+    const out = candidate({ 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" }, withBody('no team\n'));
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /Team:/);
+    assert.match(out.out, /test-focused/);
+  });
   test('runs main\'s verify on every candidate, not only on a gate change', () => {
     const out = candidate({ 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
     assert.equal(out.code, 1, out.out);

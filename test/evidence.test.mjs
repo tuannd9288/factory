@@ -375,6 +375,10 @@ describe('the kit pull request', () => {
       assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- none$/m);
       assert.match(text, /^## Summary for the Human\n- Purpose: bring app into the factory with the kit of tuannd9288\/factory\.$/m);
       assert.match(text, /^## The Human's steps after the merge\n1\. From the factory's clone, run `bin\/onboard-owner tuannd9288\/app --id 1234 --apply` again/m);
+      // The gate reads two lines of this body (#133): the team that wrote it and that it answers no issue.
+      const lines = run(dir, process.execPath, [join(factory, 'kit/.gate/bin/lib/prbody.mjs'), '--team', body]);
+      assert.equal(lines.code, 0, lines.out);
+      assert.match(text, /^Issue: none$/m);
       // Nothing replaced, no --own: nothing to say about own parts or an old hook.
       assert.doesNotMatch(text, /--own|gate_fast/);
     } finally {

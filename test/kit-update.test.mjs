@@ -309,6 +309,10 @@ describe('bin/kit-update, after review', () => {
       assert.equal(out.code, 0, out.out);
       const body = readFileSync(w.body, 'utf8');
       const lines = body.split('\n');
+      // The gate reads two lines of this body (#133): the team that wrote it and that it answers no issue.
+      const team = run(w.dir, process.execPath, [join(factory, 'kit/.gate/bin/lib/prbody.mjs'), '--team', w.body]);
+      assert.equal(team.code, 0, team.out);
+      assert.match(body, /^Issue: none$/m);
       assert.match(lines[0], /: 1 file added, 1 updated, 1 removed;/);
       // The file already holds every deny line the kit has, so it is merged to itself: nothing says it is kept.
       assert.doesNotMatch(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept/);
