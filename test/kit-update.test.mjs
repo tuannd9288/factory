@@ -21,7 +21,7 @@ describe('bin/kit-update', () => {
     try {
       // What the first hand-made kit pull requests found: the rendered files are the kit's, and .gate/pack is missing.
       const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8').split('\n').filter(Boolean);
-      w.repoCommit({ '.gate/pack': null, '.gate/kit-files': `${inventory.filter((l) => l !== '.gate/pack' && l !== 'scripts/lib/budget.mjs').join('\n')}\n` });
+      w.repoCommit({ '.gate/pack': null, '.gate/kit-files': `${inventory.filter((l) => l !== '.gate/pack' && l !== '.gate/bin/lib/budget.mjs').join('\n')}\n` });
       const base = git(w.repo, 'rev-parse', 'HEAD');
       const before = w.state();
       const sha7 = w.sha7();
@@ -32,7 +32,7 @@ describe('bin/kit-update', () => {
       assert.equal(git(w.repo, 'rev-parse', '--abbrev-ref', 'HEAD'), `factory/kit-${sha7}`);
       const changed = git(w.repo, 'diff', '--name-only', base, 'HEAD').split('\n');
       assert.deepEqual(changed, ['.gate/kit-files', '.gate/pack']);
-      assert.deepEqual(git(w.repo, 'diff', '-U0', base, 'HEAD', '--', '.gate/kit-files').split('\n').filter((l) => /^[+-][^+-]/.test(l)), ['+.gate/pack', '+scripts/lib/budget.mjs']);
+      assert.deepEqual(git(w.repo, 'diff', '-U0', base, 'HEAD', '--', '.gate/kit-files').split('\n').filter((l) => /^[+-][^+-]/.test(l)), ['+.gate/bin/lib/budget.mjs', '+.gate/pack']);
       assert.equal(w.show('HEAD', '.gate/pack'), 'pstack');
       assert.equal(git(w.repo, 'log', '-1', '--format=%s'), `Bring the kit up to factory main ${sha7}`);
       assert.match(git(w.repo, 'log', '-1', '--format=%b'), new RegExp(git(w.fac, 'rev-parse', 'HEAD')));
@@ -57,13 +57,13 @@ describe('bin/kit-update', () => {
       assert.equal(run(w.repo, 'node', [join(w.fac, 'bin/lib/own.mjs'), 'fill', join(w.dir, 'own.md'), join(w.repo, 'AGENTS.md')]).code, 0);
       w.repoCommit({ '.gate/config.sh': `${readFileSync(join(w.repo, '.gate/config.sh'), 'utf8')}# ours\n`, '.gate/old-b.txt': 'ours b\n', '.github/pull_request_template.md': null });
       const base = git(w.repo, 'rev-parse', 'HEAD');
-      const promptWas = blob(w.repo, base, 'scripts/lib/reviewer-prompt.md');
+      const promptWas = blob(w.repo, base, '.gate/bin/lib/reviewer-prompt.md');
       const codeownersWas = blob(w.repo, base, '.github/CODEOWNERS');
       const agentsWas = blob(w.repo, base, 'AGENTS.md');
       // The factory moves on: a changed file, a changed rendered file, a changed AGENTS.md, a new file, two dropped.
       const kitFile = (p) => readFileSync(join(w.fac, p), 'utf8');
       w.facCommit({
-        'kit/scripts/lib/reviewer-prompt.md': `${kitFile('kit/scripts/lib/reviewer-prompt.md')}\nA new line.\n`,
+        'kit/.gate/bin/lib/reviewer-prompt.md': `${kitFile('kit/.gate/bin/lib/reviewer-prompt.md')}\nA new line.\n`,
         'kit/.github/CODEOWNERS': `/docs/ @OWNER\n${kitFile('kit/.github/CODEOWNERS')}`,
         'kit/AGENTS.md': kitFile('kit/AGENTS.md').replace('\n## What the Human keeps', '\nKit marker line.\n\n## What the Human keeps'),
         'kit/.gate/new-c.txt': 'new c\n',
@@ -79,7 +79,7 @@ describe('bin/kit-update', () => {
       const rev = branch;
       assert.match(git(w.dir, '--git-dir', w.url, 'for-each-ref', '--format=%(refname)', 'refs/heads/'), new RegExp(`refs/heads/${branch}`));
       // Stale: replaced by the kit's. Missing: added. Dropped and stale: removed; dropped and the repository's own: kept.
-      assert.equal(w.show(rev, 'scripts/lib/reviewer-prompt.md'), kitFile('kit/scripts/lib/reviewer-prompt.md').trim());
+      assert.equal(w.show(rev, '.gate/bin/lib/reviewer-prompt.md'), kitFile('kit/.gate/bin/lib/reviewer-prompt.md').trim());
       assert.equal(w.show(rev, '.github/pull_request_template.md'), kitFile('kit/.github/pull_request_template.md').trim());
       assert.equal(w.show(rev, '.gate/new-c.txt'), 'new c');
       assert.throws(() => w.show(rev, '.gate/old-a.txt'));
@@ -98,7 +98,7 @@ describe('bin/kit-update', () => {
       const text = readFileSync(w.body, 'utf8');
       for (const seen of [out.out, text]) {
         assert.match(seen, /^kit-evidence: PASS$/m);
-        assert.match(seen, new RegExp(`^ {2}scripts/lib/reviewer-prompt\\.md \\(was ${promptWas}, kit at factory ${sha7}\\)$`, 'm'));
+        assert.match(seen, new RegExp(`^ {2}.gate/bin/lib/reviewer-prompt\\.md \\(was ${promptWas}, kit at factory ${sha7}\\)$`, 'm'));
         assert.match(seen, new RegExp(`^ {2}\\.github/CODEOWNERS \\(was ${codeownersWas}, kit at factory ${sha7}\\)$`, 'm'));
         assert.match(seen, new RegExp(`^ {2}AGENTS\\.md \\(was ${agentsWas}, kit at factory ${sha7}\\)$`, 'm'));
         assert.match(seen, /^kept \(the repository's own, unchanged\):\n(?: {2}.*\n)* {2}\.gate\/config\.sh$/m);
@@ -127,10 +127,10 @@ describe('bin/kit-update', () => {
     }
   });
 
-  test('fails a repository\'s own CLAUDE.md, AGENTS.md or hook, which the kit replaces, and does nothing', () => {
+  test('fails a repository\'s own CLAUDE.md or AGENTS.md, which the kit replaces, and does nothing', () => {
     const w = world();
     try {
-      for (const files of [{ 'CLAUDE.md': 'Our rules.\n' }, { 'AGENTS.md': '# Ours\n\nOur rules.\n' }, { '.githooks/pre-commit': '#!/bin/sh\nmake lint\n' }]) {
+      for (const files of [{ 'CLAUDE.md': 'Our rules.\n' }, { 'AGENTS.md': '# Ours\n\nOur rules.\n' }]) {
         const [path] = Object.keys(files);
         w.repoCommit(files);
         const before = w.state();
@@ -173,7 +173,7 @@ describe('bin/kit-update', () => {
       refuses(/uncommitted changes/);
       git(w.repo, 'checkout', '--', 'README.md');
       // The factory's kit has a change no commit holds, then its HEAD is not on origin/main.
-      const verify = join(w.fac, 'kit/scripts/verify');
+      const verify = join(w.fac, 'kit/.gate/bin/verify');
       const text = readFileSync(verify, 'utf8');
       writeFileSync(verify, `${text}# not committed\n`);
       refuses(/the factory's kit has changes no commit holds/);
@@ -219,12 +219,12 @@ describe('bin/kit-update', () => {
     const w = world();
     try {
       w.repoCommit({ 'src/math.js': 'export function add(a, b) {\n  return a - b;\n}\n' });
-      const kitFile = join(w.fac, 'kit/scripts/lib/reviewer-prompt.md');
-      w.facCommit({ 'kit/scripts/lib/reviewer-prompt.md': `${readFileSync(kitFile, 'utf8')}\nA new line.\n` });
+      const kitFile = join(w.fac, 'kit/.gate/bin/lib/reviewer-prompt.md');
+      w.facCommit({ 'kit/.gate/bin/lib/reviewer-prompt.md': `${readFileSync(kitFile, 'utf8')}\nA new line.\n` });
       const before = w.state();
       const out = w.update(['app']);
       assert.equal(out.code, 1, out.out);
-      assert.match(out.out, /scripts\/verify fails/);
+      assert.match(out.out, /\.gate\/bin\/verify fails/);
       const branch = `factory/kit-${w.sha7()}`;
       assert.equal(git(w.repo, 'log', '-1', '--format=%s', branch), `Bring the kit up to factory main ${w.sha7()}`);
       assert.equal(w.state().remote, before.remote);
@@ -239,8 +239,8 @@ describe('bin/kit-update', () => {
 // Review of 1a13447 (#53).
 describe('bin/kit-update, after review', () => {
   const touch = (w) => {
-    const file = join(w.fac, 'kit/scripts/lib/reviewer-prompt.md');
-    w.facCommit({ 'kit/scripts/lib/reviewer-prompt.md': `${readFileSync(file, 'utf8')}\nA new line.\n` });
+    const file = join(w.fac, 'kit/.gate/bin/lib/reviewer-prompt.md');
+    w.facCommit({ 'kit/.gate/bin/lib/reviewer-prompt.md': `${readFileSync(file, 'utf8')}\nA new line.\n` });
   };
 
   test('goes back to a detached HEAD, and leaves no branch, when there is nothing to do', () => {
