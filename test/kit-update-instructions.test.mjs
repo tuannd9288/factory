@@ -96,6 +96,7 @@ describe('bin/kit-update replaces only the Gate block', () => {
       git(w.repo, 'switch', '-q', 'main');
       git(w.repo, 'merge', '-q', '--ff-only', branch);
       git(w.repo, 'push', '-q', 'origin', 'main');
+      git(w.repo, 'branch', '-q', '-D', branch);
       const again = w.update(['app', '--no-pr']);
       assert.equal(again.code, 0, again.out);
       assert.match(again.out, /already holds the kit/);
