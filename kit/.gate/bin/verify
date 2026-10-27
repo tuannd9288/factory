@@ -40,12 +40,10 @@ run() {
   return 0
 }
 
+# AGENTS.md holds the kit's Gate block at its start, within 150 lines and 32 KiB, and CLAUDE.md reaches it. verify-trusted
+# reads the candidate's git objects with the same library, since this tree's copies are main's once it lays them over.
 check_instructions() {
-  [ -f AGENTS.md ] || { echo "AGENTS.md is missing"; return 1; }
-  local n
-  n=$(wc -l <AGENTS.md | tr -d ' ')
-  [ "$n" -le 150 ] || { echo "AGENTS.md has $n lines; at most 150"; return 1; }
-  [ "$(cat CLAUDE.md 2>/dev/null)" = "@AGENTS.md" ] || { echo "CLAUDE.md must be the single line @AGENTS.md"; return 1; }
+  node .gate/bin/lib/instructions.mjs worktree
 }
 
 check_policy() {

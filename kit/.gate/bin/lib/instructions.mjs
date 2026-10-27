@@ -1,9 +1,11 @@
 // A repository's instruction files, read the same way by .gate/bin/verify (the working tree) and .gate/bin/verify-trusted
 // (the candidate's git objects, before main's protected files are laid over it). The kit owns one marked block at the
 // start of the root AGENTS.md, after an optional title line; the repository owns every byte after it.
+//   node instructions.mjs worktree [dir]   the working tree's AGENTS.md, CLAUDE.md and the kit files the block names
 //   node instructions.mjs section <file>   the kit's gate-section.md is one well-formed block within the kit's budget
 // Exit 0 fine, 1 on a problem, 2 when something cannot be read.
-import { readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const BEGIN = '<!-- factory:gate:begin -->';
@@ -135,7 +137,80 @@ export function sectionProblems(text, { budget = false } = {}) {
   return [];
 }
 
+const GATE_MESSAGES = {
+  missing: 'AGENTS.md has no Gate block: it starts with the kit\'s block, between the lines <!-- factory:gate:begin --> and <!-- factory:gate:end -->',
+  malformed: 'the Gate markers in AGENTS.md are malformed: one begin line and one end line, in that order',
+  duplicate: 'AGENTS.md has more than one Gate marker line; it has one block',
+  'not-at-start': 'the Gate block is not at the start of AGENTS.md: only a title line and blank lines may come before it',
+};
+const regular = (entry) => Boolean(entry) && REGULAR.includes(entry.mode);
+
+/** Every problem with a tree's instruction files, from entries { mode, bytes } (null when missing): `agents`, `claude`,
+ * `targets` (path -> entry, for REQUIRED) and `expected`, the block's bytes the AGENTS.md must hold, or null when none is
+ * known (the problem is reported elsewhere). */
+export function check({ agents, claude, targets, expected }) {
+  const out = [];
+  if (!agents) out.push('AGENTS.md is missing');
+  else if (!regular(agents)) out.push(`AGENTS.md is not a regular file (mode ${agents.mode}); a link or a folder there is refused`);
+  else {
+    let text = null;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(agents.bytes);
+    } catch {
+      out.push('AGENTS.md is not valid UTF-8');
+    }
+    if (text !== null) {
+      const found = splitGate(text);
+      if (!found.ok) out.push(GATE_MESSAGES[found.problem]);
+      else if (expected !== null && found.block !== expected) out.push('the Gate block of AGENTS.md is not .gate/gate-section.md: the kit owns that block, so change the kit\'s file, not this copy');
+      out.push(...sizeProblems(agents.bytes));
+    }
+  }
+  if (expected !== null) out.push(...sectionProblems(expected).map((p) => `.gate/gate-section.md: ${p}`));
+  out.push(...carrierProblems(claude));
+  for (const path of REQUIRED) if (!regular(targets[path])) out.push(`${path} is missing or not a regular file: the Gate block names it`);
+  return out;
+}
+
+/** An entry { mode, bytes } for a path of a working tree, as git would hold it; null when there is none. */
+function entryAt(root, path) {
+  let st;
+  try {
+    st = lstatSync(join(root, path));
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+    throw error;
+  }
+  if (st.isSymbolicLink()) return { mode: '120000', bytes: Buffer.from(readlinkSync(join(root, path))) };
+  if (st.isDirectory()) return { mode: '040000', bytes: Buffer.alloc(0) };
+  if (!st.isFile()) return { mode: '000000', bytes: Buffer.alloc(0) };
+  return { mode: st.mode & 0o111 ? '100755' : '100644', bytes: readFileSync(join(root, path)) };
+}
+
+/** The problems with the instruction files of a working tree, the block judged against the tree's own
+ * .gate/gate-section.md. Whether that copy is the kit's is for verify-trusted, which reads the candidate's objects. */
+export function checkWorktree(root) {
+  const section = entryAt(root, '.gate/gate-section.md');
+  return check({
+    agents: entryAt(root, 'AGENTS.md'),
+    claude: entryAt(root, 'CLAUDE.md'),
+    targets: Object.fromEntries(REQUIRED.map((path) => [path, entryAt(root, path)])),
+    expected: regular(section) ? section.bytes.toString('utf8') : null,
+  });
+}
+
 function main([command, ...rest]) {
+  if (command === 'worktree' && rest.length <= 1) {
+    let problems;
+    try {
+      problems = checkWorktree(rest[0] ?? '.');
+    } catch (error) {
+      console.log(`instructions: ${error.message}`);
+      return 2;
+    }
+    for (const p of problems) console.log(p);
+    return problems.length ? 1 : 0;
+  }
   if (command === 'section' && rest.length === 1) {
     let text;
     try {
@@ -148,7 +223,7 @@ function main([command, ...rest]) {
     for (const p of problems) console.log(`instructions: ${p}`);
     return problems.length ? 1 : 0;
   }
-  console.log('usage: instructions.mjs section <file>');
+  console.log('usage: instructions.mjs worktree [dir] | section <file>');
   return 2;
 }
 
