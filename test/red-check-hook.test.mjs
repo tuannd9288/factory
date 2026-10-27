@@ -111,8 +111,8 @@ describe('prove-check --all with a red-check-* fixture on disk', () => {
   let r;
   before(() => (r = repoWithKit()));
   after(() => r.cleanup());
-  const GOOD = '# Proof: a source change with no test fails red-check.\n# Run: scripts/red-check --base HEAD~1\n# Says: source changed with no new or changed test\nmkdir -p src\necho "export const z = 1;" >src/z.js\ngit add -A\ngit commit -qm z\n';
-  const BAD = GOOD.replace('# Run: scripts/red-check --base HEAD~1', '# Run: true');
+  const GOOD = '# Proof: a source change with no test fails red-check.\n# Run: .gate/bin/red-check --base HEAD~1\n# Says: source changed with no new or changed test\nmkdir -p src\necho "export const z = 1;" >src/z.js\ngit add -A\ngit commit -qm z\n';
+  const BAD = GOOD.replace('# Run: .gate/bin/red-check --base HEAD~1', '# Run: true');
 
   test('runs it with the others, and counts it', () => {
     commit(r.repo, { '.gate/proofs/red-check-demo.sh': GOOD }, 'a fixture a module lays');
