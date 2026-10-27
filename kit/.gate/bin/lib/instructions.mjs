@@ -2,9 +2,13 @@
 // (the candidate's git objects, before main's protected files are laid over it). The kit owns one marked block at the
 // start of the root AGENTS.md, after an optional title line; the repository owns every byte after it.
 //   node instructions.mjs worktree [dir]   the working tree's AGENTS.md, CLAUDE.md and the kit files the block names
+//   node instructions.mjs objects --repo <dir> --base <rev> [--head <rev>]
+//                                          a candidate commit's files as git objects, against its base and the factory's main
 //   node instructions.mjs section <file>   the kit's gate-section.md is one well-formed block within the kit's budget
 // Exit 0 fine, 1 on a problem, 2 when something cannot be read.
-import { lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { lstatSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -199,7 +203,126 @@ export function checkWorktree(root) {
   });
 }
 
+// --- The candidate of a pull request, as git objects --------------------------------------------------------------------
+// verify-trusted lays main's AGENTS.md, CLAUDE.md and .gate/ files over the candidate before main's checks run, so those
+// checks see main's bytes. This reads the candidate's own commit with ls-tree and cat-file, never its checkout.
+
+/** The factory whose main vouches for a kit update. Only an environment main's workflow does not set changes it. */
+export const FACTORY_URL = 'https://github.com/tuannd9288/factory.git';
+const SECTION = '.gate/gate-section.md';
+const KIT_COMMIT = '.gate/kit-commit';
+const COMMIT_LINE = /^([0-9a-f]{40})\n$/;
+
+function git(args, options = {}) {
+  const r = spawnSync('git', args, { maxBuffer: 1 << 28, timeout: 180_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, ...options });
+  if (r.error || r.status === null) throw new Error(`git did not finish (${r.error?.message ?? 'killed'})`);
+  return r;
+}
+
+/** An entry { mode, bytes } for a path at a revision of a repository, from its objects; null when there is none. A
+ * folder or a submodule has no bytes. */
+export function entryIn(repo, rev, path) {
+  const ls = git(['--literal-pathspecs', '-C', repo, 'ls-tree', '-z', rev, '--', path]);
+  if (ls.status !== 0) throw new Error(`could not read ${path} at ${rev}: ${String(ls.stderr).trim()}`);
+  const record = ls.stdout.toString('utf8').split('\0').find(Boolean);
+  if (!record) return null;
+  const [meta, name] = record.split('\t');
+  if (name !== path) return null;
+  const [mode, type, oid] = meta.split(' ');
+  if (type !== 'blob') return { mode, bytes: Buffer.alloc(0) };
+  const cat = git(['-C', repo, 'cat-file', 'blob', oid]);
+  if (cat.status !== 0) throw new Error(`could not read ${path} at ${rev}: ${String(cat.stderr).trim()}`);
+  return { mode, bytes: cat.stdout };
+}
+
+/** The factory's main, fetched into a throwaway bare repository: { dir, done }; throws when it cannot be fetched. */
+function fetchFactory(url) {
+  const dir = mkdtempSync(join(tmpdir(), 'gate-factory-'));
+  const done = () => rmSync(dir, { recursive: true, force: true });
+  for (const args of [['init', '--bare', '-q', dir], ['-C', dir, 'fetch', '--quiet', '--no-tags', url, 'main:refs/heads/main']]) {
+    const r = git(args);
+    if (r.status !== 0) {
+      done();
+      throw new Error(`could not fetch the factory's main from ${url}: ${String(r.stderr).trim().split('\n')[0]}`);
+    }
+  }
+  return { dir, done };
+}
+
+const isAncestor = (dir, older, newer) => git(['-C', dir, 'merge-base', '--is-ancestor', older, newer]).status === 0;
+
+/** The problems with a candidate commit's instruction files, judged against its base. An ordinary pull request leaves the
+ * block, .gate/gate-section.md and .gate/kit-commit as the base has them. A kit update changes them, and the factory's
+ * own main must vouch: the commit .gate/kit-commit names is on it, and its kit/.gate/gate-section.md is the candidate's
+ * block and file. An update changes nothing else of AGENTS.md or CLAUDE.md. */
+export function objectProblems({ repo, base, head = 'HEAD', url = process.env.GATE_FACTORY_URL || FACTORY_URL }) {
+  const read = (rev) => ({ agents: entryIn(repo, rev, 'AGENTS.md'), claude: entryIn(repo, rev, 'CLAUDE.md'), section: entryIn(repo, rev, SECTION), commit: entryIn(repo, rev, KIT_COMMIT) });
+  const b = read(base);
+  const c = read(head);
+  if (!regular(b.section)) return [`the base has no ${SECTION}, so this pull request's Gate block cannot be judged`];
+  const targets = Object.fromEntries(REQUIRED.map((path) => [path, entryIn(repo, head, path)]));
+  const text = (entry) => entry.bytes.toString('utf8');
+  const same = (x, y) => (!x && !y) || Boolean(x && y && x.mode === y.mode && x.bytes.equals(y.bytes));
+  const expectedByBase = text(b.section);
+  const split = regular(c.agents) ? splitGate(text(c.agents)) : { ok: false };
+  const block = split.ok ? split.block : null;
+  if (same(c.section, b.section) && same(c.commit, b.commit) && (block === null || block === expectedByBase)) {
+    return check({ agents: c.agents, claude: c.claude, targets, expected: expectedByBase });
+  }
+  const problems = [];
+  const key = regular(c.commit) ? COMMIT_LINE.exec(text(c.commit))?.[1] : undefined;
+  if (!key) problems.push(`${KIT_COMMIT} must be one full factory commit (40 lowercase hex characters) and a newline: this pull request changes the Gate block, its file or that commit`);
+  else {
+    let factory = null;
+    try {
+      factory = fetchFactory(url);
+    } catch (error) {
+      problems.push(`${error.message}: a kit update cannot be judged`);
+    }
+    if (factory) {
+      try {
+        if (!isAncestor(factory.dir, key, 'refs/heads/main')) problems.push(`${KIT_COMMIT} names ${key.slice(0, 7)}, which is not on the factory's main`);
+        else {
+          const vouched = git(['-C', factory.dir, 'cat-file', 'blob', `${key}:kit/${SECTION}`]);
+          if (vouched.status !== 0) problems.push(`the factory commit ${key.slice(0, 7)} holds no kit/${SECTION}`);
+          else if (!regular(c.section) || text(c.section) !== String(vouched.stdout) || block !== String(vouched.stdout)) {
+            problems.push(`the Gate block and ${SECTION} are not the kit's at factory commit ${key.slice(0, 7)}: only the factory's own file can replace the base's block`);
+          }
+          const was = regular(b.commit) ? COMMIT_LINE.exec(text(b.commit))?.[1] : undefined;
+          if (was && !isAncestor(factory.dir, was, key)) problems.push(`${KIT_COMMIT} goes back: ${key.slice(0, 7)} is older than the base's ${was.slice(0, 7)}`);
+        }
+      } finally {
+        factory.done();
+      }
+    }
+  }
+  const was = regular(b.agents) ? splitGate(text(b.agents)) : { ok: false };
+  if (!was.ok) problems.push(`the base's AGENTS.md has no valid Gate block (${was.problem ?? 'missing'}), so its tail cannot be compared`);
+  else if (split.ok && (was.head !== split.head || was.tail !== split.tail)) {
+    problems.push('a pull request that changes the Gate block leaves the head and the tail of AGENTS.md as the base has them (the tail is the repository\'s); they differ');
+  }
+  if (!same(c.claude, b.claude)) problems.push('a pull request that changes the Gate block leaves CLAUDE.md as the base has it; it differs');
+  // The block is judged by the factory above; what check() adds is the rest: shape, size, carrier, targets.
+  return [...problems, ...check({ agents: c.agents, claude: c.claude, targets, expected: null })];
+}
+
 function main([command, ...rest]) {
+  if (command === 'objects') {
+    const option = (name) => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
+    if (!option('--repo') || !option('--base')) {
+      console.log('usage: instructions.mjs objects --repo <dir> --base <rev> [--head <rev>]');
+      return 2;
+    }
+    let problems;
+    try {
+      problems = objectProblems({ repo: option('--repo'), base: option('--base'), head: option('--head') ?? 'HEAD' });
+    } catch (error) {
+      console.log(`instructions: ${error.message}`);
+      return 2;
+    }
+    for (const p of problems) console.log(p);
+    return problems.length ? 1 : 0;
+  }
   if (command === 'worktree' && rest.length <= 1) {
     let problems;
     try {

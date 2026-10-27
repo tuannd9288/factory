@@ -28,6 +28,15 @@ work=$(mktemp -d) || exit 2
 trap 'git -C "$candidate" worktree prune >/dev/null 2>&1; rm -rf "$work"' EXIT
 status=0
 
+# 0. The candidate's instruction files, as git objects, while they are still the candidate's: the overlay below puts main's
+#    AGENTS.md, CLAUDE.md and .gate/ files over them, and every check after it sees main's copies. A block that differs
+#    from the base's passes only as a kit update the factory's own main vouches for (.gate/bin/lib/instructions.mjs).
+if ! node .gate/bin/lib/instructions.mjs objects --repo "$candidate" --base "$base" >"$work/instructions.out" 2>&1; then
+  status=1
+  echo "verify-trusted: the candidate's instruction files are not what the kit and the base allow:"
+  sed 's/^/  /' "$work/instructions.out"
+fi
+
 git -C "$candidate" worktree add --detach --quiet "$work/overlay" HEAD || exit 2
 (
   cd "$work/overlay" || exit 2
