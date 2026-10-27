@@ -70,3 +70,22 @@ export function replaceGate(text, block) {
   if (!found.ok) throw fail(found.problem, `the file's Gate block is ${found.problem}`);
   return found.head + block + found.tail;
 }
+
+export const MAX_LINES = 150;
+export const MAX_BYTES = 32768;
+
+/** Lines of a text, the last one counted whether or not a newline ends it. */
+export function countLines(text) {
+  const s = Buffer.isBuffer(text) ? text.toString('utf8') : String(text);
+  const newlines = s.split('\n').length - 1;
+  return newlines + (s.length > 0 && !s.endsWith('\n') ? 1 : 0);
+}
+
+/** The problems with the size of the composed AGENTS.md (a string or bytes): at most MAX_LINES lines and MAX_BYTES
+ * UTF-8 bytes. The numbers of both are in the message; the kit never shortens a file. */
+export function sizeProblems(text) {
+  const lines = countLines(text);
+  const bytes = Buffer.isBuffer(text) ? text.length : Buffer.byteLength(String(text));
+  if (lines <= MAX_LINES && bytes <= MAX_BYTES) return [];
+  return [`AGENTS.md has ${lines} lines (at most ${MAX_LINES}) and ${bytes} bytes (at most ${MAX_BYTES}): the kit does not shorten it; the repository does`];
+}
