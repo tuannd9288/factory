@@ -36,3 +36,11 @@ test('with no native verify the check is the one it always was', () => {
   const out = check([]);
   assert.equal(out.code, 0, out.out);
 });
+
+test('a native verify that is not a plain relative path fails, whatever it is later normalised to', () => {
+  for (const native of ['scripts/../tools/verify', '.gate/../tools/verify', '/scripts/verify', './scripts/verify', 'scripts//verify', 'scripts/verify/', '../scripts/verify']) {
+    const out = check(['--native', native]);
+    assert.equal(out.code, 1, `${native}: ${out.out}`);
+    assert.match(out.out, /GATE_NATIVE/);
+  }
+});
