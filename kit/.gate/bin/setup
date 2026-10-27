@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# Makes this clone use the kit's hooks; safe to run again. Git runs them for any agent, a shell or the Human.
-#   .gate/bin/setup        point core.hooksPath at .gate/hooks
+# Makes this clone ready; safe to run again. Git runs the hooks for any agent, a shell or the Human.
+#   .gate/bin/setup        point core.hooksPath at .gate/hooks, unless the repository has hooks of its own (a .githooks
+#                          folder) or somebody set the path; its own scripts/setup is the one that does that
 #   .gate/bin/setup --ci   also make the checkout ready to test (gate_prepare in .gate/config.sh)
 set -uo pipefail
 top=$(git rev-parse --show-toplevel) || exit 2
 cd "$top" || exit 2
-git config core.hooksPath .gate/hooks || exit 1
 chmod +x .gate/hooks/* .gate/bin/verify .gate/bin/verify-trusted .gate/bin/setup .gate/bin/rules .gate/bin/tier .gate/bin/red-check .gate/bin/prove-check .gate/bin/review 2>/dev/null
+if [ -z "$(git config --local --get core.hooksPath)" ] && [ ! -d .githooks ]; then
+  git config core.hooksPath .gate/hooks || exit 1
+  echo "setup: hooks from .gate/hooks"
+else
+  echo "setup: hooks left as they are ($(git config --local --get core.hooksPath || echo "the repository's own"))"
+fi
 if [ "${1:-}" = --ci ]; then
   . .gate/config.sh || exit 2
   gate_prepare "$top" || { echo "setup: gate_prepare failed"; exit 1; }
 fi
-echo "setup: hooks from .gate/hooks"
