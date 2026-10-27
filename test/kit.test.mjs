@@ -1546,7 +1546,7 @@ describe('onboard', () => {
       assert.equal(readFileSync(join(r.repo, '.github/pull_request_template.md'), 'utf8'), '## Our own\n');
       assert.match(r.onboard, /1 kept as they were/);
       assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts\/ +@tuannd9288$/m);
-      assert.equal(git(r.repo, 'config', '--local', 'core.hooksPath'), '.githooks');
+      assert.equal(git(r.repo, 'config', '--local', 'core.hooksPath'), '.gate/hooks');
     } finally {
       r.cleanup();
     }
@@ -1578,7 +1578,7 @@ describe('onboard', () => {
       assert.match(out.out, /verify: failed: tests[\s\S]*the kit is staged on factory\/kit, not committed/);
       const repo = join(dir, 'root/app');
       assert.equal(git(repo, 'rev-parse', 'HEAD'), git(seed, 'rev-parse', 'HEAD'));
-      assert.match(git(repo, 'status', '--porcelain'), /^A {2}scripts\/verify$/m);
+      assert.match(git(repo, 'status', '--porcelain'), /^A {2}\.gate\/bin\/verify$/m);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

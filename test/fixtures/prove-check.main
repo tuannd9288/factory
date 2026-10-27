@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Shows that a check can fail: commits its fixture in a throwaway work tree and requires the check to fail there,
 # saying what the fixture names. A check without a fixture fails, so a check nobody proved cannot pass verify.
-#   scripts/prove-check <check>        the fixture .gate/proofs/<check>.patch (or .sh, a script that makes commits)
-#   scripts/prove-check --all          every check verify runs, plus red-check and tier
+#   .gate/bin/prove-check <check>        the fixture .gate/proofs/<check>.patch (or .sh, a script that makes commits)
+#   .gate/bin/prove-check --all          every check verify runs, plus red-check and tier
 #   --tree <dir>    prove the scripts of another checkout with this checkout's fixtures (verify-trusted does)
 # A fixture's header, before its first "diff --git" (in a .sh fixture, as comments), may set "Run: <command>" (default:
-# scripts/verify --only <check>) and "Says: <regex>" that the failing output must match (default: the check's name).
+# .gate/bin/verify --only <check>) and "Says: <regex>" that the failing output must match (default: the check's name).
 set -uo pipefail
 top=$(git rev-parse --show-toplevel) || exit 2
 cd "$top" || exit 2

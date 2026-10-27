@@ -553,7 +553,7 @@ describe('the pinned install and the workflow', () => {
     const dir = mkdtempSync(join(tmpdir(), 'install-'));
     try {
       mkdirSync(join(dir, 'bin'));
-      mkdirSync(join(dir, 'scripts/lib'), { recursive: true });
+      mkdirSync(join(dir, '.gate/bin/lib'), { recursive: true });
       const pkg = join(dir, '.gate/bin/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64');
       writeFileSync(join(dir, '.gate/bin/lib/reviewer.json'), JSON.stringify({ version: '2.1.308' }));
       const fake = (name, body) => {
@@ -592,7 +592,7 @@ describe('the pinned install and the workflow', () => {
 
   test('review installs it with npm ci --ignore-scripts and holds the token; verdict calls no reviewer and holds neither', () => {
     const review = job('review');
-    assert.match(review, /npm ci --ignore-scripts --prefix scripts\/reviewer/);
+    assert.match(review, /npm ci --ignore-scripts --prefix \.gate\/bin\/reviewer/);
     assert.match(review, /CLAUDE_CODE_OAUTH_TOKEN: \$\{\{ secrets\.CLAUDE_CODE_OAUTH_TOKEN \}\}/);
     assert.match(review, /environment: reviewer/);
     const verdict = job('verdict');
