@@ -5,9 +5,12 @@
 #   bin/onboard <repo-url> [--no-pr] [--own <file>] [--pack <name>] [--module <name>]...
 # This is the agents' half; a repository that already has the kit is brought up to date with bin/kit-update. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
-# The kit replaces the repository's own AGENTS.md, CLAUDE.md and hooks; its own parts the Human approved come in through
+# The kit replaces the repository's own AGENTS.md and CLAUDE.md; its own parts the Human approved come in through
 # --own <file>, which holds the two sections the kit's AGENTS.md ends with (bin/lib/own.mjs), and a repository with its
-# own AGENTS.md or CLAUDE.md is refused without it. Every other file the repository already has is kept.
+# own AGENTS.md or CLAUDE.md is refused without it. Every other file the repository already has is kept, byte for byte:
+# the kit ships no scripts/ file of a repository's and no .githooks/, so its own scripts/verify, helpers and hooks stay.
+# A repository with its own scripts/verify gets the adapter lines at the end of the .gate/config.sh the kit lays
+# (bin/lib/adapter.mjs): GATE_NATIVE names the verify, and gate_fast calls its .githooks/pre-commit.
 # --pack <name> chooses the way of working the kit is composed with (packs/<name>/, bin/lib/pack.mjs), or `none` for the
 # core alone; the default is the repository's own .gate/pack, else pstack. The choice is written to .gate/pack.
 # --module <name> (repeatable) turns on a module (modules/<name>/, bin/lib/module.mjs): its files are copied into the
@@ -170,10 +173,12 @@ trap 'rm -rf "$lists"; rm -f "$composed" "$module_files"' EXIT
 (cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
 : >"$lists/kept"
 : >"$lists/replaced"
+had_config=0
+[ -e .gate/config.sh ] && had_config=1
 while IFS= read -r path; do
   if [ -e "$path" ] || [ -L "$path" ]; then
     case "$path" in
-      AGENTS.md | CLAUDE.md | .githooks/*)
+      AGENTS.md | CLAUDE.md)
         # Removed first: cp would write through a link (a CLAUDE.md linked to AGENTS.md) into the file it names.
         echo "$path" >>"$lists/replaced"
         rm -f "$path"
@@ -196,6 +201,9 @@ while IFS= read -r path; do
       ;;
   esac
 done <"$lists/kit"
+# A repository with its own scripts/verify gets the adapter lines (bin/lib/adapter.mjs), but only in a .gate/config.sh the
+# kit has just laid: one the repository had is its own.
+[ "$had_config" -eq 1 ] || node "$factory/bin/lib/adapter.mjs" "$dest" >>.gate/config.sh
 # A module's files go in after the kit's: none of them is at a path the repository or the kit has (checked above).
 while IFS=$'\t' read -r path m; do
   mkdir -p "$(dirname "$path")"

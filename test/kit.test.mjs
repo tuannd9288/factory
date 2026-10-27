@@ -1613,19 +1613,19 @@ describe('onboard', () => {
   const composedAgents = () => run(factory, 'node', [join(factory, 'bin/lib/pack.mjs'), 'agents', factory, 'pstack']).out;
   const kitLines = () => composedAgents().split('\n').length - 1;
 
-  test("replaces the repository's own AGENTS.md, CLAUDE.md and hooks with the kit's, its approved parts in Layout and Facts", () => {
+  test("replaces the repository's own AGENTS.md and CLAUDE.md with the kit's, its approved parts in Layout and Facts, and leaves its hooks as they were", () => {
     const s = seeded({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n', '.githooks/commit-msg': '#!/bin/sh\nexit 0\n' }, { link: true });
     try {
       const out = s.onboard('--own', s.own(OWN));
       assert.equal(out.code, 0, out.out);
-      assert.match(out.out, /0 kept as they were, 4 replaced by the kit's/);
+      assert.match(out.out, /0 kept as they were, 2 replaced by the kit's/);
       const agents = readFileSync(join(s.repo, 'AGENTS.md'), 'utf8');
       const kit = composedAgents().replace('<repo>', 'app');
       assert.equal(agents, `${kit.slice(0, kit.indexOf('## Layout'))}${OWN}`);
       assert.ok(!lstatSync(join(s.repo, 'CLAUDE.md')).isSymbolicLink(), 'CLAUDE.md is still a link');
       assert.equal(readFileSync(join(s.repo, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
-      for (const hook of ['pre-commit', 'commit-msg']) assert.equal(readFileSync(join(s.repo, '.githooks', hook), 'utf8'), readFileSync(join(factory, 'kit/.githooks', hook), 'utf8'));
-      assert.match(git(s.repo, 'log', '-1', '--format=%B'), /Kept as the repository had them: 0\. Replaced by the kit's: 4 \(\.githooks\/commit-msg, \.githooks\/pre-commit, AGENTS\.md, CLAUDE\.md\)\./);
+      for (const hook of ['pre-commit', 'commit-msg']) assert.equal(readFileSync(join(s.repo, '.githooks', hook), 'utf8'), '#!/bin/sh\nexit 0\n');
+      assert.match(git(s.repo, 'log', '-1', '--format=%B'), /Kept as the repository had them: 0\. Replaced by the kit's: 2 \(AGENTS\.md, CLAUDE\.md\)\./);
     } finally {
       s.cleanup();
     }
