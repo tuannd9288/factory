@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
 import { addDeny } from '../bin/lib/settings.mjs';
+import { EXECUTABLE, OWN, SEED } from './seed-world.mjs';
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const DENY = { permissions: { deny: ['Read(./.env*)'] } };
@@ -318,7 +319,7 @@ function prWorld(files = {}) {
   mkdirSync(seed);
   git(seed, 'init', '-q', '-b', 'main');
   write(seed, { ...APP, ...files });
-  for (const hook of Object.keys(files).filter((p) => p.startsWith('.githooks/'))) chmodSync(join(seed, hook), 0o755);
+  for (const path of Object.keys(files).filter((p) => EXECUTABLE.includes(p) || p.startsWith('.githooks/'))) chmodSync(join(seed, path), 0o755);
   commit(seed, {}, 'start');
   const url = join(dir, 'remote/tuannd9288/app.git');
   git(dir, 'clone', '-q', '--bare', seed, url);
@@ -393,17 +394,25 @@ describe('the kit pull request', () => {
     }
   });
 
-  test("says in its body and its evidence which of the repository's files the kit replaced, and where the old hook's commands go", () => {
-    const w = prWorld({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n' });
+  test("says in its body and its evidence what the kit replaced, merged and left untouched, and where the gate's commands and hooks are", () => {
+    const w = prWorld(SEED);
     try {
-      writeFileSync(join(w.dir, 'own.md'), '## Layout\n\n`src/` holds the app.\n\n## Facts the code cannot tell\n\n- Ships on Fridays.\n');
+      writeFileSync(join(w.dir, 'own.md'), OWN);
       const out = w.onboard('root', '--own', join(w.dir, 'own.md'));
       assert.equal(out.code, 0, out.out);
       const text = readFileSync(w.body, 'utf8');
-      assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- `\.githooks\/pre-commit`\n {2}- `AGENTS\.md`\n/m);
-      assert.match(text, /move into `gate_fast` in `\.gate\/config\.sh`/);
+      assert.match(text, /`\.gate\/bin\/`/);
+      assert.match(text, /`\.gate\/hooks\/`/);
+      assert.match(text, /^## Files the repository already had, replaced by the kit\n {2}- `AGENTS\.md`\n/m);
+      assert.match(text, /^## Files the repository already had, left untouched\n {2}- `\.githooks\/pre-commit`\n {2}- `\.githooks\/pre-push`\n {2}- `scripts\/size\.mjs`\n {2}- `scripts\/verify`\n/m);
+      assert.match(text, /`\.claude\/settings\.json` has the kit's deny lines inserted as text/);
+      assert.match(text, /`GATE_NATIVE=scripts\/verify`.*`gate_fast` in `\.gate\/config\.sh` calls `\.githooks\/pre-commit`/);
+      assert.doesNotMatch(text, /move into `gate_fast`/);
       assert.match(text, /The repository's own parts that the Human approved \(`--own`\)/);
-      assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}\.githooks\/pre-commit \(was [0-9a-f]{12}\)\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
+      assert.match(text, /^kit-evidence: PASS$/m);
+      assert.match(text, /^replaced \(the repository's own at the base, now the kit's\):\n {2}AGENTS\.md \(was [0-9a-f]{12}\)$/m);
+      assert.match(text, /^merged \(.*\):\n {2}\.claude\/settings\.json$/m);
+      assert.match(text, /^untouched \(.*\):\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-push\n {2}scripts\/size\.mjs\n {2}scripts\/verify$/m);
       assert.match(text, /^ {2}AGENTS\.md:\d+: the repository's own Layout \(1 line\):\n {4}\| `src\/` holds the app\.$/m);
     } finally {
       w.cleanup();
