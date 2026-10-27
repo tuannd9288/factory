@@ -173,7 +173,7 @@ fence=$(printf '`%.0s' $(seq 1 $((longest > 2 ? longest + 1 : 3))))
 note=""
 modnote=""
 [ -z "$modules" ] || modnote=" Module \`$(printf '%s' "$modules" | paste -sd, - | sed 's/,/, /g')\` (named in \`.gate/modules\`): the module's files exist only in a repository that turns it on."
-grep -qx '.claude/settings.json' "$lists/updated" && note=" The kit's new deny lines are inserted into the repository's \`.claude/settings.json\` as text; every other byte is the repository's."
+grep -qx '.claude/settings.json' "$lists/updated" && note=" The repository's \`.claude/settings.json\` is updated: a rendering of the kit and the pack is rendered anew; any other file gets the kit's new deny lines inserted as text, every other byte kept."
 grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.github/CODEOWNERS\` is its own, so it is kept: the kit's new lines do not reach this file."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
 gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY

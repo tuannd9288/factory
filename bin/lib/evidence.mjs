@@ -246,7 +246,10 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
       else exact++;
       continue;
     }
-    if (path === SETTINGS && had) {
+    // A base that is a rendering of the kit and the pack (now or older) is judged as rendered below; any other file the
+    // repository had is its own.
+    const settingsAs = path === SETTINGS && had && !chosen.why && had.mode === want.mode ? renderedAs({ factory, fac, path, text: blob(repo, had.oid), name, human, pack: chosen.pack, packName: chosen.name }) : null;
+    if (path === SETTINGS && had && settingsAs === null) {
       // The repository's own file: its bytes with the kit's deny lines inserted as text, and nothing else changed.
       let expected;
       try {

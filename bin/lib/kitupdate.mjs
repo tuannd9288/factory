@@ -56,9 +56,21 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const had = at.get(path);
     if (path === SETTINGS) {
-      // The repository's own file: its bytes with the kit's deny lines it lacks inserted as text. With none, the pack composes it.
+      // With none, the pack composes it; the repository's own file gets the kit's deny lines it lacks inserted as text.
       if (!had) {
         out.add.push(path);
+        out.writes.push({ path, mode: want.mode, text: rendering(path, want) });
+        continue;
+      }
+      // A base that is the rendering of the kit and the pack, now or at an older commit, is rendered anew: a new pin
+      // arrives that way. Any other file is the repository's own.
+      const as = had.mode === want.mode ? renderedAs({ factory, fac, path, text: text(repo, had.oid), name, human, pack, packName }) : null;
+      if (as === 'now') {
+        out.same.push(path);
+        continue;
+      }
+      if (as === 'past') {
+        out.update.push(path);
         out.writes.push({ path, mode: want.mode, text: rendering(path, want) });
         continue;
       }
