@@ -250,14 +250,14 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human })
       // The repository's own file: its bytes with the kit's deny lines inserted as text, and nothing else changed.
       let expected;
       try {
-        expected = addDeny(blob(repo, had.oid), denyOf(blob(factory, want.oid))).text;
+        expected = addDeny(git(repo, ['cat-file', 'blob', had.oid], 'buffer'), denyOf(blob(factory, want.oid))).text;
       } catch (error) {
         fails.push(`differs: ${path} (${error.message})`);
         continue;
       }
       if (!have) fails.push(`missing: ${path}`);
       else if (have.mode !== had.mode) fails.push(`differs: ${path} (mode ${have.mode}, the repository's ${had.mode})`);
-      else if (blob(repo, have.oid) !== expected) fails.push(`differs: ${path} (not the repository's own with only the kit's deny lines added)`);
+      else if (!git(repo, ['cat-file', 'blob', have.oid], 'buffer').equals(Buffer.from(expected, 'utf8'))) fails.push(`differs: ${path} (not the repository's own with only the kit's deny lines added)`);
       else {
         filled.add(path);
         merged.push(path);

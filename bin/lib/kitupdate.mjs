@@ -62,10 +62,11 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
         out.writes.push({ path, mode: want.mode, text: rendering(path, want) });
         continue;
       }
-      const own = text(repo, had.oid);
+      const ownBytes = git(repo, ['cat-file', 'blob', had.oid], 'buffer');
+      const own = ownBytes.toString('utf8');
       let to;
       try {
-        to = addDeny(own, denyOf(text(factory, want.oid))).text;
+        to = addDeny(ownBytes, denyOf(text(factory, want.oid))).text;
       } catch (error) {
         out.conflicts.push(`${path}: ${error.message}`);
         continue;

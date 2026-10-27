@@ -74,7 +74,14 @@ const lineIndent = (text, at) => /^[ \t]*/.exec(text.slice(text.lastIndexOf('\n'
 
 /** `text` with the lines of `wanted` it lacks added to permissions.deny: { text, added, ranges } (ranges: [from, to) of
  * the new text, what was inserted). */
-export function addDeny(text, wanted) {
+export function addDeny(input, wanted) {
+  let text = input;
+  if (Buffer.isBuffer(input)) {
+    text = input.toString('utf8');
+    // Decoding replaces a byte that is not UTF-8, and writing the string back would change it: refuse before that.
+    if (!Buffer.from(text, 'utf8').equals(input)) throw new Error('the file is not UTF-8, so the lines cannot be added without changing other bytes; add them by hand');
+  }
+  if (text.startsWith('\uFEFF')) throw new Error('the file starts with a byte order mark; add the deny lines by hand');
   if (text.includes('\r')) throw new Error('the file has CRLF line ends (CRLF is refused: the new lines would mix them)');
   let root;
   try {
@@ -101,8 +108,9 @@ export function addDeny(text, wanted) {
   const missing = wanted.filter((w) => !have.has(w));
   if (!missing.length) return { text, added: [], ranges: [] };
   if (!deny.items.length) {
-    const add = `[${missing.map(quote).join(', ')}]`;
-    return { text: text.slice(0, deny.start) + add + text.slice(deny.end), added: missing, ranges: [[deny.start, deny.start + add.length]] };
+    // After the `[`, so whatever sits between the brackets stays.
+    const add = missing.map(quote).join(', ');
+    return { text: text.slice(0, deny.start + 1) + add + text.slice(deny.start + 1), added: missing, ranges: [[deny.start + 1, deny.start + 1 + add.length]] };
   }
   const last = deny.items.at(-1);
   const oneLine = !text.slice(deny.start, deny.end).includes('\n');
@@ -118,7 +126,7 @@ function main([verb, file, kit]) {
   }
   try {
     const wanted = JSON.parse(readFileSync(kit, 'utf8')).permissions.deny;
-    const out = addDeny(readFileSync(file, 'utf8'), wanted);
+    const out = addDeny(readFileSync(file), wanted);
     if (out.added.length) writeFileSync(file, out.text);
     console.log(`settings: added ${out.added.length} deny line${out.added.length === 1 ? '' : 's'} to ${file}`);
     return 0;
