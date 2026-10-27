@@ -4,12 +4,14 @@
 //   node instructions.mjs worktree [dir]   the working tree's AGENTS.md, CLAUDE.md and the kit files the block names
 //   node instructions.mjs objects --repo <dir> --base <rev> [--head <rev>]
 //                                          a candidate commit's files as git objects, against its base and the factory's main
+//   node instructions.mjs compose --section <file> --name <repo> [--agents <file>]   the AGENTS.md onboard writes, on stdout
+//   node instructions.mjs carrier <path>   the problems with a CLAUDE.md
 //   node instructions.mjs section <file>   the kit's gate-section.md is one well-formed block within the kit's budget
 // Exit 0 fine, 1 on a problem, 2 when something cannot be read.
 import { spawnSync } from 'node:child_process';
 import { lstatSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const BEGIN = '<!-- factory:gate:begin -->';
@@ -306,7 +308,43 @@ export function objectProblems({ repo, base, head = 'HEAD', url = process.env.GA
   return [...problems, ...check({ agents: c.agents, claude: c.claude, targets, expected: null })];
 }
 
+/** The AGENTS.md bin/onboard writes: the repository's own text with the kit's block put in (or, with none, a title and
+ * the block), within the limits. Throws, with .problem, when it cannot; nothing is cut or rewritten. */
+export function composeAgents(text, section, name) {
+  const out = text === null ? `# ${name}\n\n${section}` : insertGate(text, section);
+  const size = sizeProblems(out);
+  if (size.length) throw fail('size', size[0]);
+  return out;
+}
+
 function main([command, ...rest]) {
+  if (command === 'compose') {
+    const option = (key) => (rest.includes(key) ? rest[rest.indexOf(key) + 1] : undefined);
+    if (!option('--section') || !option('--name')) {
+      console.log('usage: instructions.mjs compose --section <file> --name <repo name> [--agents <file>]');
+      return 2;
+    }
+    try {
+      const section = readFileSync(option('--section'), 'utf8');
+      let text = null;
+      if (option('--agents')) {
+        const entry = entryAt(dirname(resolve(option('--agents'))), basename(option('--agents')));
+        if (!regular(entry)) throw fail('not-a-file', `${option('--agents')} is not a regular file`);
+        text = new TextDecoder('utf-8', { fatal: true }).decode(entry.bytes);
+      }
+      process.stdout.write(composeAgents(text, section, option('--name')));
+      return 0;
+    } catch (error) {
+      // On stderr: the composed text is on stdout, and the caller keeps the two apart.
+      console.error(error.problem ? error.message : `could not compose AGENTS.md: ${error.message}`);
+      return 1;
+    }
+  }
+  if (command === 'carrier' && rest.length === 1) {
+    const problems = carrierProblems(entryAt(dirname(resolve(rest[0])), basename(rest[0])));
+    for (const p of problems) console.log(p);
+    return problems.length ? 1 : 0;
+  }
   if (command === 'objects') {
     const option = (name) => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
     if (!option('--repo') || !option('--base')) {
@@ -346,7 +384,7 @@ function main([command, ...rest]) {
     for (const p of problems) console.log(`instructions: ${p}`);
     return problems.length ? 1 : 0;
   }
-  console.log('usage: instructions.mjs worktree [dir] | section <file>');
+  console.log('usage: instructions.mjs worktree [dir] | objects ... | compose ... | carrier <path> | section <file>');
   return 2;
 }
 

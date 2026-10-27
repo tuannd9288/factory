@@ -1,4 +1,5 @@
-// The pstack pack's pin (moved from test/kit.test.mjs): Claude Code reads these keys and bin/lib/pack.mjs composes them.
+// The pstack pack's pin (moved from test/kit.test.mjs): Claude Code reads these keys from a team's .claude/settings.json,
+// where the team copies them (INSTALL.md); no kit code composes them.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -26,5 +27,11 @@ describe('the pstack pin', () => {
     // One marketplace name per pin: two repositories pinning two commits never share one record in a profile.
     assert.equal(name, `pstack-${plugin.source.sha.slice(0, 7)}`);
     assert.deepEqual(settings.enabledPlugins, { [`pstack@${name}`]: true });
+  });
+
+  test('holds the pin as the installer writes it, two-space JSON in the installer\'s key order, and no permissions', () => {
+    const text = readFileSync(join(factory, 'packs/pstack/settings.json'), 'utf8');
+    assert.equal(text, `${JSON.stringify(settings, null, 2)}\n`);
+    assert.deepEqual(Object.keys(settings), ['enabledPlugins', 'extraKnownMarketplaces']);
   });
 });

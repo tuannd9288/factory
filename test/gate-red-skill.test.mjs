@@ -34,9 +34,8 @@ describe('the skill loads', () => {
     assert.ok(front.compatibility === undefined || front.compatibility.length <= 500);
   });
 
-  test('step 4 of the kit\'s AGENTS.md names a skill path that the kit holds', () => {
-    const step = /^4\. [\s\S]*?(?=^\d+\. |^## )/m.exec(kit('AGENTS.md'))?.[0] ?? '';
-    const named = [...step.matchAll(/`(\.claude\/skills\/[a-z0-9-]+\/SKILL\.md)`/g)].map((m) => m[1]);
+  test('the Gate block names a skill path that the kit holds', () => {
+    const named = [...kit('.gate/gate-section.md').matchAll(/`(\.claude\/skills\/[a-z0-9-]+\/SKILL\.md)`/g)].map((m) => m[1]);
     assert.deepEqual(named, [SKILL]);
     assert.ok(kit(named[0]).length > 0);
   });

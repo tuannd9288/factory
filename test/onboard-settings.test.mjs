@@ -48,12 +48,12 @@ describe('bin/onboard and .claude/settings.json', () => {
     }
   });
 
-  test('composes the file as before for a repository that has none', () => {
+  test('lays the kit\'s own file as it is, deny lines only, for a repository that has none', () => {
     const s = seeded({ '.claude/settings.json': null });
     try {
       const out = s.onboard();
       assert.equal(out.code, 0, out.out);
-      assert.equal(s.read('.claude/settings.json'), run(factory, 'node', [join(factory, 'bin/lib/pack.mjs'), 'settings', factory, 'pstack']).out);
+      assert.equal(s.read('.claude/settings.json'), readFileSync(join(factory, 'kit/.claude/settings.json'), 'utf8'));
     } finally {
       s.cleanup();
     }
