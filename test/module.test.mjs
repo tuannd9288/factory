@@ -55,8 +55,8 @@ describe('the factory side', () => {
       const both = mergedTree(w.fac, fac, ['demo']);
       assert.equal(both.size, kitOnly.size + DEMO_FILES.length);
       assert.deepEqual([...both.keys()].filter((p) => !kitOnly.has(p)).sort(), DEMO_FILES);
-      assert.equal(kitOnly.get('scripts/verify').src, 'kit/scripts/verify');
-      assert.equal(kitOnly.get('scripts/verify').module, undefined);
+      assert.equal(kitOnly.get('.gate/bin/verify').src, 'kit/.gate/bin/verify');
+      assert.equal(kitOnly.get('.gate/bin/verify').module, undefined);
       assert.equal(both.get('scripts/demo-run').src, 'modules/demo/kit/scripts/demo-run');
       assert.equal(both.get('scripts/demo-run').module, 'demo');
       assert.equal(both.get('scripts/demo-run').mode, '100755');
@@ -92,7 +92,7 @@ describe('bin/onboard --module', () => {
       assert.equal(readFileSync(join(w.repo, '.gate/modules'), 'utf8'), 'demo\n');
       assert.notEqual(statSync(join(w.repo, 'scripts/demo-run')).mode & 0o111, 0, 'the mode is kept');
       const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8').split('\n').filter(Boolean);
-      for (const f of [...DEMO_FILES, '.gate/modules', '.gate/pack', '.gate/kit-files', 'scripts/verify']) assert.ok(inventory.includes(f), `${f} is in the inventory`);
+      for (const f of [...DEMO_FILES, '.gate/modules', '.gate/pack', '.gate/kit-files', '.gate/bin/verify']) assert.ok(inventory.includes(f), `${f} is in the inventory`);
       assert.deepEqual([...inventory].sort(), inventory, 'the inventory is sorted');
       assert.ok(!existsSync(join(w.repo, 'modules')) && !existsSync(join(w.repo, 'test/demo.test.mjs')), 'the module\'s tests stay in the factory');
       assert.equal(git(w.repo, 'status', '--porcelain'), '');
