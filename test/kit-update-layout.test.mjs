@@ -107,4 +107,20 @@ describe('bin/kit-update on the new layout', () => {
       w.cleanup();
     }
   });
+
+  test('stops with nothing done on a settings.json shape the lines cannot be added to as text', () => {
+    const w = world();
+    try {
+      w.repoCommit({ '.claude/settings.json': '{\n  // ours\n  "permissions": { "deny": [] }\n}\n' });
+      const before = w.state();
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /\.claude\/settings\.json: .*not plain JSON/);
+      assert.match(out.out, /nothing done/);
+      assert.deepEqual(w.state(), before);
+      assert.deepEqual(w.calls(), []);
+    } finally {
+      w.cleanup();
+    }
+  });
 });

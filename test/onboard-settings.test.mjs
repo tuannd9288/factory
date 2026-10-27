@@ -2,9 +2,9 @@
 // changes; a shape settings.mjs refuses stops onboard before it writes anything; a repository with none gets the composed file.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { factory, run } from './helpers.mjs';
+import { commit, factory, git, run } from './helpers.mjs';
 import { addDeny } from '../bin/lib/settings.mjs';
 import { SETTINGS, seeded } from './seed-world.mjs';
 
@@ -56,6 +56,32 @@ describe('bin/onboard and .claude/settings.json', () => {
       assert.equal(s.read('.claude/settings.json'), run(factory, 'node', [join(factory, 'bin/lib/pack.mjs'), 'settings', factory, 'pstack']).out);
     } finally {
       s.cleanup();
+    }
+  });
+
+  test('refuses a .claude/settings.json that is a link or a directory, before it makes a profile, and removes the clone', () => {
+    const cases = {
+      link: (s) => {
+        mkdirSync(join(s.seed, '.claude'), { recursive: true });
+        symlinkSync('../shared.json', join(s.seed, '.claude/settings.json'));
+        commit(s.seed, { 'shared.json': '{}\n' }, 'link');
+        git(s.seed, 'push', '-q', join(s.dir, 'app.git'), 'main');
+      },
+      directory: () => {},
+    };
+    for (const [kind, prepare] of Object.entries(cases)) {
+      const s = seeded(kind === 'directory' ? { '.claude/settings.json': null, '.claude/settings.json/inner.txt': 'x\n' } : { '.claude/settings.json': null });
+      try {
+        prepare(s);
+        const out = s.onboard();
+        assert.equal(out.code, 2, `${kind}: ${out.out}`);
+        assert.match(out.out, /\.claude\/settings\.json is not a regular file/);
+        assert.match(out.out, /the clone is removed/);
+        assert.ok(!existsSync(s.repo), `${kind}: the clone is left behind`);
+        assert.ok(!existsSync(join(s.dir, 'profiles')), `${kind}: a profile was made`);
+      } finally {
+        s.cleanup();
+      }
     }
   });
 });
