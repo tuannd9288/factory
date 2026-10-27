@@ -421,7 +421,7 @@ settings. A new pin is a new marketplace name, in a tier-3 pull request per repo
 pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-22 (`probes/results.md`, attack 23):
 
 - The install fails with `Plugin "pstack" not found in marketplace` in a folder the profile has not trusted (logged-in
-  writer profile, untrusted `case1/a`). The kit ships `.claude/settings.json` in the order the installer writes: uninstalling
+  writer profile, untrusted `case1/a`). The pstack pack's `packs/pstack/settings.json` is in the order the installer writes: uninstalling
   and installing again in `case2/a` on the same profile left `git status` empty (a first install on a new profile was
   not tried). An uninstall rewrites `enabledPlugins` to `{}`.
 - 53 of 54 pstack skills carry `disable-model-invocation`, so the model's own Skill call is refused; `setup-pstack`

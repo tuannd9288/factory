@@ -3,34 +3,17 @@
 // 32 KiB, and every kit file the block names is in the kit.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { statSync, readFileSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { factory, run } from './helpers.mjs';
+import { factory } from './helpers.mjs';
 
 const lib = () => import('../kit/.gate/bin/lib/instructions.mjs');
 const SECTION = join(factory, 'kit/.gate/gate-section.md');
 const BEGIN = '<!-- factory:gate:begin -->';
 const END = '<!-- factory:gate:end -->';
 
+// The real block's shape and budget are checked once, by scripts/verify (instructions.mjs section); here only what it names.
 describe('kit/.gate/gate-section.md', () => {
-  test('is one well-formed block: the begin marker first, the end marker last, nothing outside', async () => {
-    const { sectionProblems } = await lib();
-    assert.deepEqual(sectionProblems(readFileSync(SECTION, 'utf8')), []);
-  });
-
-  test('fits the budget: at most 26 lines and 3072 bytes', async () => {
-    const { sectionProblems, countLines } = await lib();
-    const text = readFileSync(SECTION, 'utf8');
-    assert.ok(countLines(text) <= 26, `${countLines(text)} lines`);
-    assert.ok(Buffer.byteLength(text) <= 3072);
-    assert.deepEqual(sectionProblems(text, { budget: true }), []);
-  });
-
-  test('the command `section` says so and exits 0 on the kit\'s file', () => {
-    const out = run(factory, process.execPath, [join(factory, 'kit/.gate/bin/lib/instructions.mjs'), 'section', SECTION]);
-    assert.equal(out.code, 0, out.out);
-  });
-
   test('every kit file the block names is a regular file in the kit', async () => {
     const { REQUIRED } = await lib();
     assert.ok(REQUIRED.length >= 7);
