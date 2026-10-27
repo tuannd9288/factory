@@ -41,6 +41,7 @@ describe('a candidate whose tree has two AGENTS.md entries', () => {
       const out = t.objects();
       assert.equal(out.code === 1 || out.code === 2, true, `${path}: ${out.out}`);
       assert.notEqual(out.code, 0, `${path}: ${out.out}`);
+      assert.match(out.out, /more than one entry/);
     }
   });
 });
