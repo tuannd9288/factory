@@ -264,12 +264,18 @@ export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null })
   const raised = events.some((e) => e.__typename === 'LabeledEvent' && e.label?.name === 'raised') || labels.includes('raised');
   let byRule = false;
   if (pr.mergedAt) {
+    let mergedBy = null;
     for (const e of events) {
       if (e.__typename === 'AutoMergeEnabledEvent') byRule = true;
       if (e.__typename === 'AutoMergeDisabledEvent') byRule = false;
-      if (e.__typename === 'MergedEvent') break;
+      if (e.__typename === 'MergedEvent') {
+        mergedBy = e.actor?.login ?? null;
+        break;
+      }
     }
-    if (!byRule) reasons.push('manual merge');
+    // A merge by a team's coordinator, under the agents' login, is a team merge; only the Human's own merge, or one whose
+    // actor GitHub does not name, is his touch.
+    if (!byRule && (mergedBy === null || mergedBy.toLowerCase() === String(human).toLowerCase())) reasons.push('manual merge');
   }
   // A round is a commit the gate judged that someone wrote; the queue's merges of main into the branch are not rounds.
   const judged = pr.commits.nodes
@@ -524,7 +530,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     'API cost: the tokens in the repository\'s Claude Code profile, by the PR\'s branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
     'Cash: the Claude subscription, paid monthly, not split by task; the verifier\'s Codex subscription is the same. The ledger sees no other cash.',
     'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N"; only when its body has no "Reverts" line at all, for any repository, is its title Revert "<title of a merged PR>" read; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
-    'Human touched: the Human reviewed it, the label needs-human, or a merge not made by auto-merge.',
+    'Human touched: the Human reviewed it, the label needs-human, or a merge by the Human\'s own login that was not made by auto-merge (a merge by the agents\' login is a team merge).',
   );
   return `${lines.join('\n')}\n`;
 }
@@ -535,7 +541,7 @@ comments(first:100){nodes{author{login} body}}
 closingIssuesReferences(first:10){nodes{number labels(first:20){nodes{name}}}}
 labels(first:30){nodes{name}}
 reviews(first:50){nodes{author{login} state}}
-timelineItems(first:100,itemTypes:[LABELED_EVENT,AUTO_MERGE_ENABLED_EVENT,AUTO_MERGE_DISABLED_EVENT,MERGED_EVENT]){nodes{__typename ... on LabeledEvent{label{name}} ... on MergedEvent{createdAt}}}
+timelineItems(first:100,itemTypes:[LABELED_EVENT,AUTO_MERGE_ENABLED_EVENT,AUTO_MERGE_DISABLED_EVENT,MERGED_EVENT]){nodes{__typename ... on LabeledEvent{label{name}} ... on MergedEvent{createdAt actor{login}}}}
 commits(first:100){nodes{commit{oid parents{totalCount} checkSuites(first:20){nodes{app{slug} checkRuns(first:40){nodes{name conclusion}}}}}}}}}}`;
 
 const ISSUE = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){issue(number:$n){
