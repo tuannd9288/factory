@@ -1,4 +1,4 @@
-# The repository's gate settings, sourced by scripts/verify, scripts/red-check and scripts/prove-check.
+# The repository's gate settings, sourced by .gate/bin/verify, .gate/bin/red-check and .gate/bin/prove-check.
 # The kit ships defaults for a Node repository that tests with node --test; a repository changes them when it joins.
 
 # Runs the named test files, or every test when none is named, and writes JUnit XML to "$GATE_REPORT".

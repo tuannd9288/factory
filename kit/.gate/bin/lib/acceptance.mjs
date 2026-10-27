@@ -1,5 +1,5 @@
 // The issues a pull request closes, read by main's scripts for the reviewer: the acceptance is the issue's, not only the body's.
-//   node scripts/lib/acceptance.mjs --repo <owner/name> --pr <n> --out <file>
+//   node .gate/bin/lib/acceptance.mjs --repo <owner/name> --pr <n> --out <file>
 //   exit 0  <file> holds { issues: [{ number, title, labels, body, length }], elsewhere: [<owner/name#n>] } and stdout is `acc`,
 //           the first 16 hex characters of a sha256 of that file's content, or `none` when it names no issue at all
 //   exit 3  unreadable (gh failed, or printed what is not the recorded shape): one line `acceptance: <why>`, no file

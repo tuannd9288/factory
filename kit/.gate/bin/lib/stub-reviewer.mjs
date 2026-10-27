@@ -5,7 +5,7 @@
 // The markers (GATE, STUB and a word, joined by hyphens: FINDING, RAISE) are built from parts and never written out in this
 // file, comments included: the stub reads the added lines of the change it judges, and a kit update that adds this file's
 // lines would otherwise be blocked by the stub it carries.
-//   node scripts/lib/stub-reviewer.mjs review <base> <head>   (verdict reads review's result and calls no reviewer)
+//   node .gate/bin/lib/stub-reviewer.mjs review <base> <head>   (verdict reads review's result and calls no reviewer)
 import { execFileSync } from 'node:child_process';
 
 const [job, base, head] = process.argv.slice(2);

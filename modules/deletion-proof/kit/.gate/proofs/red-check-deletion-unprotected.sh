@@ -1,5 +1,5 @@
 # Proof for red-check with the deletion-proof module: a knip config that .gate/protected does not name.
-# Run: PATH="$PWD/.gate-proof-bin:$PATH" scripts/red-check --base HEAD~1
+# Run: PATH="$PWD/.gate-proof-bin:$PATH" .gate/bin/red-check --base HEAD~1
 # Says: config: knip\.json is not in \.gate/protected
 # A fake npx stands in for knip, so the proof reaches no network; it prints the report knip 6.42.1 would, as JSON. The paths
 # are built from parts: a tracked file that names a path is what check 2 looks for, and this file is tracked.

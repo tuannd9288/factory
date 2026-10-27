@@ -20,7 +20,7 @@ git show origin/main:.gate/modules 2>/dev/null | grep -qx deletion-proof ||
   { echo "knip-at-base: the proof is off: .gate/modules on origin/main does not list deletion-proof" >&2; exit 3; }
 base=$(git merge-base HEAD origin/main) || { echo "knip-at-base: no merge-base with origin/main" >&2; exit 2; }
 # The module's own script runs knip as the gate does, so what this prints is what the gate will see.
-out=$(node scripts/lib/deletion.mjs report --base "$base")
+out=$(node .gate/bin/lib/deletion.mjs report --base "$base")
 code=$?
 if [ "$code" -eq 0 ]; then
   printf '%s\n' "$out"

@@ -1,6 +1,6 @@
 // The tier of a change, from the paths it touches: 3 for a path or a manifest line .gate/protected names, 2 for a
 // .gate/load-bearing path, a dependency manifest or a dropped test (a deleted test file, or the proof that lets a test
-// or its assertions go, scripts/lib/proofs.mjs), 1 otherwise. A policy file or a diff that cannot be read is an
+// or its assertions go, .gate/bin/lib/proofs.mjs), 1 otherwise. A policy file or a diff that cannot be read is an
 // error (exit 2), never a tier.
 //   node tier.mjs --rules <dir> --repo <dir> --base <rev> [--head <rev>] [--labels "tier-2,..."]
 // <dir> of --rules holds the policy that decides (CI passes main's checkout); --repo is where the diff is read. The

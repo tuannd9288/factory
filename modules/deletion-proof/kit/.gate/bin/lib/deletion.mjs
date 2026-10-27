@@ -7,8 +7,8 @@
 //   2       no tracked file at the head still names a deleted file, by its path or its basename;
 //   3       knip 6.42.1, run at the base commit with that config after the repository's gate_prepare, listed each deleted
 //           file as unused.
-//   node scripts/lib/deletion.mjs prove --base <rev> --sources <file> --work <dir>   what red-check runs
-//   node scripts/lib/deletion.mjs report --base <rev>   {"base","files":[...]}: what knip lists as unused at the base
+//   node .gate/bin/lib/deletion.mjs prove --base <rev> --sources <file> --work <dir>   what red-check runs
+//   node .gate/bin/lib/deletion.mjs report --base <rev>   {"base","files":[...]}: what knip lists as unused at the base
 // prove prints "red-check: not a pure deletion: <check>: <reason>" lines on a refusal and exits 1, or 2 when it could not
 // run; report exits 4 when knip could not run. <file> lists the changed source paths, one per line (red-check sorts them
 // with paths.mjs).

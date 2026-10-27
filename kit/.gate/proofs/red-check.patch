@@ -1,5 +1,5 @@
 Proof for red-check: a source change whose new test already passes at the base, so it shows nothing.
-Run: scripts/red-check --base HEAD~1
+Run: .gate/bin/red-check --base HEAD~1
 Says: pass at the base
 
 diff --git a/gate-proof/red.mjs b/gate-proof/red.mjs

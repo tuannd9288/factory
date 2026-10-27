@@ -1,10 +1,10 @@
 // The gate's reviewer: Claude Code, headless, Opus at max effort, with Read, Grep and Glob over an extract of the candidate
 // and nothing else. It is the reviewer behind GATE_REVIEWER=claude, called by `review` once per head (a push is a new head;
-// an edit that leaves head, base, the No-red line and the closing issues alone reuses the earlier result: scripts/review);
+// an edit that leaves head, base, the No-red line and the closing issues alone reuses the earlier result: .gate/bin/review);
 // `verdict` reads review's result and makes no call. The issues the pull request closes come from GATE_ACCEPTANCE_FILE, which
-// main's scripts wrote with scripts/lib/acceptance.mjs; a file that is there and not that shape is `unavailable: acceptance`.
-//   node scripts/lib/claude-reviewer.mjs review <base> <head> --out <result file>
-//   exit 0  the result is in <result file>: the JSON of scripts/lib/result.mjs; reviewer, job, base and head are the
+// main's scripts wrote with .gate/bin/lib/acceptance.mjs; a file that is there and not that shape is `unavailable: acceptance`.
+//   node .gate/bin/lib/claude-reviewer.mjs review <base> <head> --out <result file>
+//   exit 0  the result is in <result file>: the JSON of .gate/bin/lib/result.mjs; reviewer, job, base and head are the
 //           script's, never the model's
 //   exit 3  unavailable: no verdict at all (a missing or bad token, a usage limit, a busy API, a timeout, a Claude Code or
 //           context that is not the pinned one, a turn bound, no result); stdout starts with the review-result notice `unavailable: <class>`
@@ -55,7 +55,7 @@ const budget = () =>
   });
 if (!budget()) unavailable('timeout');
 
-/** The issues the pull request closes, as scripts/lib/acceptance.mjs wrote them for GATE_ACCEPTANCE_FILE (no variable: none read).
+/** The issues the pull request closes, as .gate/bin/lib/acceptance.mjs wrote them for GATE_ACCEPTANCE_FILE (no variable: none read).
  * A file that is missing or not that shape means no verdict at all, so it is unavailable (acceptance), never an empty list. */
 function acceptanceRead() {
   const file = process.env.GATE_ACCEPTANCE_FILE;

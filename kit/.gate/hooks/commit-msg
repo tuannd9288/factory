@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The subject line is what the ledger, the digest and git log show. The rules live in .gate/bin/lib/subject.mjs, which
+# `.gate/bin/verify` reads too; this is the fast local copy, so a bad subject is refused before it is pushed.
+exec node "$(dirname "$0")/../bin/lib/subject.mjs" "$1"

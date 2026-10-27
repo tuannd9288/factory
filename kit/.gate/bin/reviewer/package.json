@@ -1,0 +1,8 @@
+{
+  "name": "gate-reviewer",
+  "private": true,
+  "description": "Installs the pinned Claude Code the gate's reviewer runs (.gate/bin/lib/reviewer.json): npm ci --ignore-scripts",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.308"
+  }
+}

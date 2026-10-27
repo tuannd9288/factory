@@ -1,10 +1,10 @@
 // The hand-in rules: seatwork's table (.gate/handin.json) read on the lines a change adds, plus the Failing-test guard.
 // The matcher is ported from sting9k/seatwork at f5373411227c, plugin/server/safety/handin.ts; NOTICE says what was taken.
-//   scripts/rules                 lines added since the merge-base with origin/main, committed or not
-//   scripts/rules --base <rev>    lines added since <rev>
-//   scripts/rules --staged        lines the index adds (the pre-commit hook)
+//   .gate/bin/rules                 lines added since the merge-base with origin/main, committed or not
+//   .gate/bin/rules --base <rev>    lines added since <rev>
+//   .gate/bin/rules --staged        lines the index adds (the pre-commit hook)
 // Exit 0 clean, 1 on a block finding, 2 when it could not run. A deleted test file and lost assertions have no line to
-// allow; the proof for a dropped test (scripts/lib/proofs.mjs), on any added line, allows them.
+// allow; the proof for a dropped test (.gate/bin/lib/proofs.mjs), on any added line, allows them.
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

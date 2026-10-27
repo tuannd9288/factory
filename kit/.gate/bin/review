@@ -2,8 +2,8 @@
 # The jobs of gate-trusted.yml that read the pull request as data: they run in main's checkout, into which the
 # candidate's commits were fetched with no work tree, so nothing of the candidate runs and none of its instruction,
 # hook, skill or settings files is on disk for a reviewer to load.
-#   scripts/review review|verdict|tier --base <sha> --head <sha>
-#   scripts/review rounds
+#   .gate/bin/review review|verdict|tier --base <sha> --head <sha>
+#   .gate/bin/review rounds
 #   review   the reviewer's findings, on every pull request; a No-red line in the PR body (GATE_BODY_FILE) needs the
 #            reviewer's explicit acceptance
 #   verdict  review's verdict from tier 2, read from the review job of its own workflow run (GITHUB_RUN_ID) for this head and
@@ -17,20 +17,20 @@
 #            there (or in any review on this head) labels the pull request raised and tier-3, and a result left absent
 #            fails it. A raise needs an approval given after it. On tier 3 it requires a code owner who is not the
 #            author to have approved the head commit, or a commit whose own patch the head carries unchanged
-#            (scripts/lib/approval.mjs); the queue re-runs it after that approval, so the reviewer never runs again for a
+#            (.gate/bin/lib/approval.mjs); the queue re-runs it after that approval, so the reviewer never runs again for a
 #            click
 #   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3)
 # The tier is main's policy on the diff from the merge-base, raised by every label the pull request ever had (GATE_PR
 # and GITHUB_REPOSITORY, read with gh). GATE_HEAD, the pull request's head, must be the head judged.
 # GATE_REVIEWER picks the reviewer; it is a repository variable, which only an admin sets:
-#   stub    scratch repositories only: scripts/lib/stub-reviewer.mjs, no model
-#   claude  scripts/lib/claude-reviewer.mjs: Claude Code, Opus at max effort, read-only tools, in `review` only, once per head:
+#   stub    scratch repositories only: .gate/bin/lib/stub-reviewer.mjs, no model
+#   claude  .gate/bin/lib/claude-reviewer.mjs: Claude Code, Opus at max effort, read-only tools, in `review` only, once per head:
 #           an earlier review of this head, base, No-red line and closing issues (any run of this workflow) is reused, not asked
-#           again. Before it, main's scripts read the issues the pull request closes (scripts/lib/acceptance.mjs: gh pr view and
+#           again. Before it, main's scripts read the issues the pull request closes (.gate/bin/lib/acceptance.mjs: gh pr view and
 #           gh issue view, this repository's issues only) and hand them to the reviewer as data; their hash is `acc`. Unreadable
 #           is `review-result: unavailable: acceptance`, with no reviewer call. The stub reads none.
 #   unset   fails closed: no reviewer is configured, so nothing merges on this gate
-# A reviewer's result counts only through scripts/lib/result.mjs: a missing, malformed or unbound one fails. After it, `review`
+# A reviewer's result counts only through .gate/bin/lib/result.mjs: a missing, malformed or unbound one fails. After it, `review`
 # prints the annotation `review-verdict` (head=<sha> base=<sha> nored=<hash|none> acc=<hash|none> reviewer=<name> pass|block) that `verdict` reads. A reviewer that gave no
 # verdict at all (a usage limit, a bad token, a timeout, a result result.mjs refuses, a reviewer that crashed or is not
 # configured) leaves `review-result: unavailable: <class>` instead and fails: the check is red, `rounds` does not count the
@@ -49,11 +49,11 @@ while [ "$#" -gt 0 ]; do
   esac
   shift 2
 done
-case "$job" in review | verdict | tier | rounds) ;; *) echo "usage: scripts/review review|verdict|tier --base <sha> --head <sha>, or scripts/review rounds"; exit 2 ;; esac
+case "$job" in review | verdict | tier | rounds) ;; *) echo "usage: .gate/bin/review review|verdict|tier --base <sha> --head <sha>, or .gate/bin/review rounds"; exit 2 ;; esac
 # A red round is a head commit on which a required check other than tier failed; tier waits on the Human, not the writer.
 if [ "$job" = rounds ]; then
-  checks=$(node scripts/lib/policy.mjs checks | grep -vx tier | paste -sd, -) &&
-    n=$(node scripts/lib/history.mjs rounds --repo "${GITHUB_REPOSITORY:-}" --pr "${GATE_PR:-}" --checks "$checks") ||
+  checks=$(node .gate/bin/lib/policy.mjs checks | grep -vx tier | paste -sd, -) &&
+    n=$(node .gate/bin/lib/history.mjs rounds --repo "${GITHUB_REPOSITORY:-}" --pr "${GATE_PR:-}" --checks "$checks") ||
     { echo "rounds: the pull request's rounds could not be read: ${n:-$checks}"; exit 1; }
   echo "rounds: $n head commits judged red"
   [ "$n" -ge 3 ] || exit 0
@@ -71,7 +71,7 @@ fi
 # Prints the tier; returns 1 when it could not be computed, which fails the job closed.
 tier_of() {
   local out code
-  out=$(scripts/tier --base "$fork" --head "$head" --rules "$trusted" ${GATE_PR:+--pr "$GATE_PR"})
+  out=$(.gate/bin/tier --base "$fork" --head "$head" --rules "$trusted" ${GATE_PR:+--pr "$GATE_PR"})
   code=$?
   echo "$out"
   [ "$code" -eq 0 ] || { echo "$job: the tier could not be computed, so this check fails closed"; return 1; }
@@ -87,7 +87,7 @@ wait_review() {
   raised="" did_raise="" review_red="" unavailable=""
   [ -n "${GITHUB_RUN_ID:-}" ] || { echo "tier: GITHUB_RUN_ID is unset, so the review of this run cannot be found, and this check fails closed"; return 1; }
   while :; do
-    state=$(node scripts/lib/history.mjs raise --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head") ||
+    state=$(node .gate/bin/lib/history.mjs raise --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head") ||
       { echo "tier: the review of run $GITHUB_RUN_ID could not be read ($state), so this check fails closed"; return 1; }
     case "$state" in
       pending)
@@ -119,7 +119,7 @@ wait_verdict() {
   local deadline=$((SECONDS + ${GATE_REVIEW_WAIT:-4200})) state tries=0
   [ -n "${GITHUB_RUN_ID:-}" ] || { echo "verdict: GITHUB_RUN_ID is unset, so the review of this run cannot be found, and this check fails closed"; return 1; }
   while :; do
-    state=$(node scripts/lib/history.mjs verdict --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork") ||
+    state=$(node .gate/bin/lib/history.mjs verdict --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork") ||
       { echo "verdict: the review of run $GITHUB_RUN_ID could not be read ($state), so this check fails closed"; return 1; }
     case "$state" in
       pending)
@@ -163,7 +163,7 @@ case "$job" in
         if ! gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label raised >/dev/null 2>&1; then
           # A failed remove is fine when raised is not there. When another account's raised is, tier would add nothing new
           # and leave no event of its own, so it fails closed.
-          have=$(node scripts/lib/history.mjs labels --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") ||
+          have=$(node .gate/bin/lib/history.mjs labels --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") ||
             { echo "tier: the label raised could not be removed, and the labels could not be read ($have), so this check fails closed"; exit 1; }
           case ",$have," in *,raised,*) echo "tier: the label raised is on the pull request and could not be removed, so tier cannot make its own event for the raise, and this check fails closed"; exit 1 ;; esac
         fi
@@ -196,10 +196,10 @@ case "$job" in
     # A raised pull request needs an approval given after the raise: the Human reads the reason, not an earlier head.
     after=""
     if [ -n "${GATE_PR:-}" ]; then
-      after=$(node scripts/lib/history.mjs raised-at --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") || { echo "tier: when the pull request was raised could not be read ($after), so this check fails closed"; exit 1; }
+      after=$(node .gate/bin/lib/history.mjs raised-at --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") || { echo "tier: when the pull request was raised could not be read ($after), so this check fails closed"; exit 1; }
       [ -n "$after" ] || [ -z "${did_raise:-}" ] || after=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     fi
-    printf '%s' "$reviews" | node scripts/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" --base "$base" ${after:+--after "$after"} || exit 1
+    printf '%s' "$reviews" | node .gate/bin/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" --base "$base" ${after:+--after "$after"} || exit 1
     exit 0
     ;;
   verdict)
@@ -220,7 +220,7 @@ esac
 wait_verify() {
   local deadline=$((SECONDS + ${GATE_WAIT:-1800})) state
   while :; do
-    state=$(node scripts/lib/history.mjs check --repo "${GITHUB_REPOSITORY:-}" --head "$head" --name verify) ||
+    state=$(node .gate/bin/lib/history.mjs check --repo "${GITHUB_REPOSITORY:-}" --head "$head" --name verify) ||
       { echo "$job: verify on ${head:0:8} could not be read ($state), so this check fails closed"; return 1; }
     case "$state" in
       success) return 0 ;;
@@ -252,7 +252,7 @@ acc=none
 if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ]; then
   accfile=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/acceptance.XXXXXX") || exit 2
   trap 'rm -f "$result" "$notes" "$accfile"' EXIT
-  if acc=$(node scripts/lib/acceptance.mjs --repo "${GITHUB_REPOSITORY:-}" --pr "${GATE_PR:-}" --out "$accfile"); then
+  if acc=$(node .gate/bin/lib/acceptance.mjs --repo "${GITHUB_REPOSITORY:-}" --pr "${GATE_PR:-}" --out "$accfile"); then
     export GATE_ACCEPTANCE_FILE=$accfile
   else
     echo "::notice title=review-result::unavailable: acceptance"
@@ -261,7 +261,7 @@ if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ]; then
   fi
 fi
 if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
-  if prior=$(node scripts/lib/history.mjs reuse --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork" --nored "$nored" --acc "$acc" --reviewer "${GATE_REVIEWER:-}" 2>&1); then
+  if prior=$(node .gate/bin/lib/history.mjs reuse --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head" --base "$fork" --nored "$nored" --acc "$acc" --reviewer "${GATE_REVIEWER:-}" 2>&1); then
     case "$prior" in
       "reuse "*)
         read -r _ pv rid rest <<<"$prior"
@@ -278,9 +278,9 @@ if [ "$job" = review ] && [ "${GATE_REVIEWER:-}" = claude ] && [ -n "${GITHUB_RU
   fi
 fi
 case "${GATE_REVIEWER:-}" in
-  stub) node scripts/lib/stub-reviewer.mjs "$job" "$fork" "$head" >"$result" ;;
+  stub) node .gate/bin/lib/stub-reviewer.mjs "$job" "$fork" "$head" >"$result" ;;
   claude)
-    node scripts/lib/claude-reviewer.mjs "$job" "$fork" "$head" --out "$result" >"$notes"
+    node .gate/bin/lib/claude-reviewer.mjs "$job" "$fork" "$head" --out "$result" >"$notes"
     code=$?
     if [ "$code" -ne 0 ]; then
       if [ "$code" -ne 3 ] && [ "$code" -ne 4 ]; then
@@ -302,7 +302,7 @@ case "${GATE_REVIEWER:-}" in
     exit 1
     ;;
 esac
-checked=$(node scripts/lib/result.mjs --job "$job" --base "$fork" --head "$head" $claim <"$result")
+checked=$(node .gate/bin/lib/result.mjs --job "$job" --base "$fork" --head "$head" $claim <"$result")
 code=$?
 # A result result.mjs refuses says nothing about the change: unavailable, not a red round.
 [ "$code" -eq 2 ] && { echo "::notice title=review-result::unavailable: malformed"; echo "$job: reviewer unavailable (malformed); the reviewer's result does not count, so this check fails closed"; }

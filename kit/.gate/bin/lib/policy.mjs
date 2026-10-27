@@ -1,9 +1,9 @@
-// The gate's policy files, read the same way by scripts/tier, scripts/verify-trusted and scripts/verify (policy):
+// The gate's policy files, read the same way by .gate/bin/tier, .gate/bin/verify-trusted and .gate/bin/verify (policy):
 // .gate/protected (tier 3), .gate/load-bearing (tier 2), .github/CODEOWNERS. A file that is missing or does not
 // parse throws: a policy nobody can read decides nothing.
-//   node scripts/lib/policy.mjs protected [--rules <dir>]   paths on stdin, the protected ones on stdout
-//   node scripts/lib/policy.mjs check [--rules <dir>]       CODEOWNERS ends with exactly the protected paths, owned
-//   node scripts/lib/policy.mjs checks [--rules <dir>]      the required checks of .gate/ruleset.json, one per line
+//   node .gate/bin/lib/policy.mjs protected [--rules <dir>]   paths on stdin, the protected ones on stdout
+//   node .gate/bin/lib/policy.mjs check [--rules <dir>]       CODEOWNERS ends with exactly the protected paths, owned
+//   node .gate/bin/lib/policy.mjs checks [--rules <dir>]      the required checks of .gate/ruleset.json, one per line
 // Exit 0 fine, 1 on a mismatch, 2 when a policy file cannot be read.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

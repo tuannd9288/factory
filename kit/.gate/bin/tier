@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prints the change's tier and why: 3 touches a .gate/protected path or line, 2 a .gate/load-bearing path or a
 # dependency, else 1. Exit 2 when a policy file or the diff cannot be read.
-#   scripts/tier [--base <rev>] [--head <rev>] [--rules <dir>] [--labels <a,b>] [--pr <n>] [--max <n>]
+#   .gate/bin/tier [--base <rev>] [--head <rev>] [--rules <dir>] [--labels <a,b>] [--pr <n>] [--max <n>]
 # --rules names the checkout whose .gate/ policy decides (CI passes main's); --labels labels the pull request had;
 # --pr adds every label pull request <n> of GITHUB_REPOSITORY ever had, read with gh; --max exits 1 above it.
 set -uo pipefail

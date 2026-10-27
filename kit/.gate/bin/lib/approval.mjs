@@ -1,7 +1,7 @@
 // Whether a tier-3 pull request has the Human's approval of its change, read from the reviews JSON on stdin (GitHub's
 // list of a pull request's reviews; pages from `gh api --paginate --slurp` are flattened). Run in a checkout holding
 // the commits.
-//   node scripts/lib/approval.mjs --owners <CODEOWNERS> --author <login> --head <sha> [--base <sha>] [--after <time>]
+//   node .gate/bin/lib/approval.mjs --owners <CODEOWNERS> --author <login> --head <sha> [--base <sha>] [--after <time>]
 // Approved means: a user named in CODEOWNERS who is not the author, whose latest approving or blocking review is an
 // approval of the head commit, or, with --base, of a commit whose own patch the head carries unchanged: the same
 // `git patch-id --verbatim` of the change from its merge-base with the base, as after the queue merged main into the

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The repository's one gate command. It prints only failures and a one-line summary; a check that cannot run fails.
-#   scripts/verify                 every check, then every check's proof (scripts/prove-check --all)
-#   scripts/verify --fast          the hand-in rules and gate_fast on the staged files (the pre-commit hook)
-#   scripts/verify --only <check>  one check, no proofs (prove-check runs this)
-#   scripts/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
+#   .gate/bin/verify                 every check, then every check's proof (.gate/bin/prove-check --all)
+#   .gate/bin/verify --fast          the hand-in rules and gate_fast on the staged files (the pre-commit hook)
+#   .gate/bin/verify --only <check>  one check, no proofs (prove-check runs this)
+#   .gate/bin/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
 # A full run that passes on a clean work tree (no change, no untracked file) leaves factory/verify-<head> in the git dir, which
 # scripts/ship reads; no other form does, and the stamp is never in the work tree.
 # GATE_BASE names the commit the rules and subjects checks read from (default: the merge-base with origin/main).
@@ -43,22 +43,22 @@ check_instructions() {
 }
 
 check_policy() {
-  node scripts/lib/policy.mjs check
+  node .gate/bin/lib/policy.mjs check
 }
 
 check_rules() {
-  scripts/rules ${GATE_BASE:+--base "$GATE_BASE"}
+  .gate/bin/rules ${GATE_BASE:+--base "$GATE_BASE"}
 }
 
 check_subjects() {
-  node scripts/lib/subject.mjs --base "${GATE_BASE:-}"
+  node .gate/bin/lib/subject.mjs --base "${GATE_BASE:-}"
 }
 
 check_tests() {
   mkdir -p "$(dirname "$GATE_REPORT")" && rm -f "$GATE_REPORT"
   local code=0 summary
   gate_tests "$@" >/dev/null 2>&1 || code=$?
-  summary=$(node scripts/lib/junit.mjs --failures "$GATE_REPORT") || { echo "the JUnit report could not be read"; return 1; }
+  summary=$(node .gate/bin/lib/junit.mjs --failures "$GATE_REPORT") || { echo "the JUnit report could not be read"; return 1; }
   # The report decides as much as the exit code: a runner that exits 0 over failed tests still fails here.
   case "$summary" in
     "tests=0 "*) echo "no tests ran ($(echo "$summary" | head -1))"; return 1 ;;
@@ -75,7 +75,7 @@ known() {
 
 case "${1:-}" in
   --fast)
-    run rules scripts/rules --staged
+    run rules .gate/bin/rules --staged
     staged=$(git diff --cached --name-only --diff-filter=ACMR)
     # shellcheck disable=SC2086
     run fast gate_fast $staged
@@ -92,7 +92,7 @@ case "${1:-}" in
   "")
     full=1
     for name in $BUILTIN $GATE_CHECKS; do run "$name" "check_$name"; done
-    [ -z "$failed" ] && run proofs scripts/prove-check --all
+    [ -z "$failed" ] && run proofs .gate/bin/prove-check --all
     ;;
   *)
     echo "verify: unknown argument $1"

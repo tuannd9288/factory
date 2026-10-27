@@ -20,7 +20,7 @@ const git = (args, input) => execFileSync('git', args, { input, encoding: 'utf8'
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 const has = (oid) => spawnSync('git', ['cat-file', '-e', `${oid}^{commit}`]).status === 0;
 
-/** The patch-id of the head's own change, its diff from its merge-base with the base, as scripts/lib/approval.mjs
+/** The patch-id of the head's own change, its diff from its merge-base with the base, as .gate/bin/lib/approval.mjs
  * computes it; null when it cannot be read. */
 export function patchOf(base, head) {
   try {

@@ -210,12 +210,12 @@ rm -f .gate/pack .gate/kit-files .gate/modules
 printf '%s\n' "$pack" >.gate/pack
 [ "${#modules[@]}" -eq 0 ] || printf '%s\n' "${modules[@]}" | LC_ALL=C sort -u >.gate/modules
 { cat "$lists/kit"; cut -f1 "$module_files"; echo .gate/kit-files; echo .gate/pack; [ ! -f .gate/modules ] || echo .gate/modules; } | LC_ALL=C sort -u >.gate/kit-files
-scripts/setup
+.gate/bin/setup
 git add -A
 # The kit lands only on a repository where the whole gate passes: a commit nobody verified is not a kit pull request.
-if ! GATE_BASE=HEAD scripts/verify; then
-  echo "onboard: the kit is staged on factory/kit, not committed: scripts/verify fails. Fill .gate/config.sh (test"
-  echo "command, fast checks), merge the files the repository already had, run scripts/verify, then commit and open"
+if ! GATE_BASE=HEAD .gate/bin/verify; then
+  echo "onboard: the kit is staged on factory/kit, not committed: .gate/bin/verify fails. Fill .gate/config.sh (test"
+  echo "command, fast checks), merge the files the repository already had, run .gate/bin/verify, then commit and open"
   echo "the pull request."
   exit 1
 fi
@@ -247,7 +247,7 @@ gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, 
 ## Summary for the Human
 - Purpose: bring $name into the factory with the kit of tuannd9288/factory.
 - Change: \`scripts/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review), \`.gate/\` (with \`protected\`: the tier-3 paths), \`.githooks/\`, three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`AGENTS.md\`, \`CLAUDE.md\`; the pack \`$pack\` (named in \`.gate/pack\`) is composed into \`AGENTS.md\` and \`.claude/settings.json\`.
-- Evidence: the full \`scripts/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
+- Evidence: the full \`.gate/bin/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
 - Tier: 3 (touches \`.github/\`, \`scripts/\`, \`.gate/\`).
 - Rollback: revert this PR.
 - Needs the Human: yes — confirm \`.gate/load-bearing\` (tier 2) and \`.gate/protected\` (tier 3); recommendation: approve once the repository's session has filled both lists.
@@ -266,7 +266,7 @@ $evidence
 \`\`\`
 Re-check from the factory's clone: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
 
-Note: the \`verify\` check of this PR is red (\`scripts/verify-trusted: No such file\`, code 127) because \`main\` has no kit yet; it does not block the merge, because \`factory-bootstrap\` requires no check.
+Note: the \`verify\` check of this PR is red (\`.gate/bin/verify-trusted: No such file\`, code 127) because \`main\` has no kit yet; it does not block the merge, because \`factory-bootstrap\` requires no check.
 
 ## The Human's steps after the merge
 1. From the factory's clone, run \`bin/onboard-owner $slug --id $id --apply\` again: it replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\` and reads back what it set.

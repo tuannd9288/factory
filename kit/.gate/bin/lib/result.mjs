@@ -3,14 +3,14 @@
 //     "blocking": [{ "id": "<id>", "claim": "<what is wrong, where>" }, ...],
 //     "noRed": "accepted" | "rejected" | "unjudged",
 //     "raise": { "tier": 3, "why": "<what, where>" } }        optional, review only: the Human reads this one
-//   node scripts/lib/result.mjs --job review|verdict --base <sha> --head <sha> [--no-red]
+//   node .gate/bin/lib/result.mjs --job review|verdict --base <sha> --head <sha> [--no-red]
 // It passes when the result names this job, base and head, holds no blocking finding, and, when the PR body claims
 // No-red (--no-red), accepts that claim explicitly. Exit 0 pass, 1 blocked, 2 a result that is missing, malformed or
 // about another commit: a reviewer that said nothing usable has not passed the change.
 // A raise only ever raises: any tier but 3, a second key, an empty or long reason, or a raise in a verdict is
 // malformed (exit 2). It does not block. The reason is printed after a fixed prefix on one line, and once as the
 // annotation `review-result` (message `none`, or `raise: <why>`) on the review job, always the first line printed, which
-// the tier job reads (scripts/lib/history.mjs raise); a review that reached its result and left none is read as absent.
+// the tier job reads (.gate/bin/lib/history.mjs raise); a review that reached its result and left none is read as absent.
 import { readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);

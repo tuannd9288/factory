@@ -1,6 +1,6 @@
 # Tier 3: the gate and every input that decides what the checks run wait for the Human's approval. GitHub reads this
 # file from the base branch and takes the last line that matches, so these lines come last and equal .gate/protected
-# (scripts/verify checks it). The repository's own owners, if it has any, go above them.
+# (.gate/bin/verify checks it). The repository's own owners, if it has any, go above them.
 /.github/                @OWNER
 /.gate/                  @OWNER
 /.githooks/              @OWNER

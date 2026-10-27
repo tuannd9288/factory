@@ -55,7 +55,7 @@ Progress:
 - [ ] 5. Remove every mention the head still holds: `git grep -n <path>` and `git grep -n <basename>`. A mention in a
       doc or a comment you may delete in the same pull request; a mention in source means the code is used: put the
       file back.
-- [ ] 6. Validate: `scripts/verify`, then `scripts/red-check --base origin/main`. It must print
+- [ ] 6. Validate: `.gate/bin/verify`, then `.gate/bin/red-check --base origin/main`. It must print
       `red-check: passed as a pure deletion`. On `not a pure deletion`, read `references/refusals.md`, fix, run again.
 - [ ] 7. Open the pull request as `AGENTS.md` step 4 says, with no `No-red:` line. Say in the body that it only
       deletes files knip listed at the base, and paste the `red-check` line.
@@ -70,7 +70,7 @@ Progress:
 - A mention under a tier-3 path (`scripts/`, `.github/`, `.gate/`, `.claude/`, `AGENTS.md`) is removed in a tier-3
   pull request: the deletion then waits for the Human. Say so in the body.
 - Tests. A module that a test imports is not unused to knip. Deleting the test too is a deleted test, which
-  `scripts/rules` refuses without its `gate-allow` line; such code takes a test or `No-red:` instead.
+  `.gate/bin/rules` refuses without its `gate-allow` line; such code takes a test or `No-red:` instead.
 - Not yours to change here. `knip.json`, `.gate/protected`, `.gate/modules` and every path under `.gate/`, `scripts/`
   or `.claude/` are tier 3: editing them in a deletion pull request makes it the Human's, and CI judges it with `main`'s
   copies anyway. When the gate asks for one of them, open a separate pull request with your recommended answer.

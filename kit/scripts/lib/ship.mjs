@@ -34,7 +34,7 @@ function open(branch, head, args) {
   const stamps = join(git(['rev-parse', '--absolute-git-dir']), 'factory');
   const dirty = 'if the work tree is not clean, commit or remove what `git status` shows';
   if (!existsSync(join(stamps, `verify-${head}`))) {
-    say(1, `refused: HEAD ${short} has no verify stamp; run scripts/verify on it`);
+    say(1, `refused: HEAD ${short} has no verify stamp; run .gate/bin/verify on it`);
     return say(1, dirty);
   }
   let main;
@@ -45,7 +45,7 @@ function open(branch, head, args) {
   }
   const redStamp = join(stamps, `red-check-${head}-${main}`);
   if (!existsSync(redStamp)) {
-    say(1, `refused: HEAD ${short} has no red-check stamp against origin/main ${main.slice(0, 7)}; run scripts/red-check --base origin/main`);
+    say(1, `refused: HEAD ${short} has no red-check stamp against origin/main ${main.slice(0, 7)}; run .gate/bin/red-check --base origin/main`);
     return say(1, dirty);
   }
   const noRed = readFileSync(redStamp, 'utf8').trim();
@@ -64,17 +64,17 @@ function open(branch, head, args) {
 }
 
 /**
- * Whether the pull request is a tier 3 that waits for the Human: the label tier-3 or raised, or the kit's scripts/tier on
+ * Whether the pull request is a tier 3 that waits for the Human: the label tier-3 or raised, or the kit's .gate/bin/tier on
  * the paths, and a tier check that is anything but a SUCCESS (the kit's job fails at once on a tier 3 without his
- * approval, so a red check is the wait). Returns a string when scripts/tier could not judge. The local scripts/tier is
+ * approval, so a red check is the wait). Returns a string when .gate/bin/tier could not judge. The local .gate/bin/tier is
  * advisory: the branch can edit its own policy. GitHub's tier job runs main's copy and labels every pull request
  * tier-<n>, so the labels are the main signal and GitHub still requires the approval.
  */
 function tierWait(pr) {
   const names = pr.labels.map((l) => l.name);
   if (!names.includes('tier-3') && !names.includes('raised')) {
-    const r = spawnSync('scripts/tier', ['--base', 'origin/main', '--head', 'HEAD', '--labels', names.join(',')], { encoding: 'utf8' });
-    if (r.status !== 0) return `scripts/tier exited ${r.status ?? r.signal}`;
+    const r = spawnSync('.gate/bin/tier', ['--base', 'origin/main', '--head', 'HEAD', '--labels', names.join(',')], { encoding: 'utf8' });
+    if (r.status !== 0) return `.gate/bin/tier exited ${r.status ?? r.signal}`;
     if (!/^tier 3$/m.test(r.stdout ?? '')) return false;
   }
   const tier = (pr.statusCheckRollup ?? []).find((c) => (c.name ?? c.context) === 'tier');

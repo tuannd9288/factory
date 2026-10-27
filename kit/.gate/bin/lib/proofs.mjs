@@ -2,13 +2,13 @@
 // kept in the dropped one's place and a break of the code that turns it red,
 //   gate-allow test-deleted: <path>; kept: <test file> "<test name>"; red: <source file> "<from>" -> "<to>"
 // or gate-allow assertions-removed: the same, for a test file that lost assertions. Strings are JSON string literals.
-// scripts/rules reads it statically, so the pre-commit hook can: the kept file is a test, holds the name, and is not
-// the dropped file; the break edits a source file that holds <from> exactly once. scripts/red-check makes the break in
+// .gate/bin/rules reads it statically, so the pre-commit hook can: the kept file is a test, holds the name, and is not
+// the dropped file; the break edits a source file that holds <from> exactly once. .gate/bin/red-check makes the break in
 // a copy of the head and needs the kept test red under it and green without it.
-//   node scripts/lib/proofs.mjs list <base>          the proofs the head adds since <base>: n, path, kept, name, summary
-//   node scripts/lib/proofs.mjs break <base> <n> <dir>  makes proof n's break in the checkout <dir>
+//   node .gate/bin/lib/proofs.mjs list <base>          the proofs the head adds since <base>: n, path, kept, name, summary
+//   node .gate/bin/lib/proofs.mjs break <base> <n> <dir>  makes proof n's break in the checkout <dir>
 // The proof shows the kept test sensitive to a change, not that it covers what the dropped one did: the reviewer judges
-// that, which is why scripts/tier makes such a change tier 2.
+// that, which is why .gate/bin/tier makes such a change tier 2.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -88,7 +88,7 @@ function main([verb, base, n, dir]) {
     writeFileSync(file, text.replace(p.from, () => p.to));
     return 0;
   }
-  console.log('usage: node scripts/lib/proofs.mjs list <base> | break <base> <n> <dir>');
+  console.log('usage: node .gate/bin/lib/proofs.mjs list <base> | break <base> <n> <dir>');
   return 2;
 }
 

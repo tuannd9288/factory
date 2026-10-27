@@ -8,7 +8,7 @@
 #            `gh issue view`, so `issues: read` and `pull-requests: read`) and hands them over as data. It is told when the
 #            job started and how long it may run (GATE_JOB_START, GATE_JOB_MINUTES), so a call is sized to the time left. The
 #            reviewer's credential (CLAUDE_CODE_OAUTH_TOKEN for GATE_REVIEWER=claude) comes from the environment "reviewer",
-#            whose branch policy admits main alone; Claude Code is the pinned one of scripts/reviewer, installed with
+#            whose branch policy admits main alone; Claude Code is the pinned one of .gate/bin/reviewer, installed with
 #            `npm ci --ignore-scripts`, whose `claude` is the platform package's binary (the .bin link is a placeholder
 #            until a postinstall script, which does not run, replaces it) and which the install step runs for its version.
 #   verdict  makes no reviewer call: from tier 2 it waits for `review` of its own run and passes with its result for the
@@ -78,16 +78,16 @@ jobs:
         run: |
           # A failed install is the reviewer being unavailable, not a finding on the change, and no red round.
           down() { echo "::notice title=review-result::unavailable: not-installed"; echo "review: reviewer unavailable (not-installed); $1"; exit 1; }
-          npm ci --ignore-scripts --prefix scripts/reviewer --no-audit --no-fund || down "npm ci failed"
-          bin="$PWD/scripts/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64"
-          want=$(node -p "require('./scripts/lib/reviewer.json').version")
+          npm ci --ignore-scripts --prefix .gate/bin/reviewer --no-audit --no-fund || down "npm ci failed"
+          bin="$PWD/.gate/bin/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64"
+          want=$(node -p "require('./.gate/bin/lib/reviewer.json').version")
           got=$(PATH="$bin:$PATH" claude --version) || down "the installed claude does not run"
           case "$got" in "$want "*) ;; *) down "the installed claude is '$got', not $want" ;; esac
           echo "$bin" >>"$GITHUB_PATH"
         working-directory: trusted
       - run: |
           printf '%s\n' "$BODY" >"$RUNNER_TEMP/pr-body.txt"
-          GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" scripts/review review --base "$BASE" --head "$HEAD"
+          GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" .gate/bin/review review --base "$BASE" --head "$HEAD"
         working-directory: trusted
         env:
           GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
@@ -119,7 +119,7 @@ jobs:
         working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}
-      - run: scripts/review verdict --base "$BASE" --head "$HEAD"
+      - run: .gate/bin/review verdict --base "$BASE" --head "$HEAD"
         working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,7 +147,7 @@ jobs:
         working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}
-      - run: scripts/review tier --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_STEP_SUMMARY"
+      - run: .gate/bin/review tier --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_STEP_SUMMARY"
         shell: bash
         working-directory: trusted
         env:
@@ -172,7 +172,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - run: scripts/review rounds
+      - run: .gate/bin/review rounds
         working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}

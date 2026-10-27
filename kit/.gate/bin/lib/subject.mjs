@@ -1,5 +1,5 @@
-// The commit subject rules, in one place: .githooks/commit-msg checks a message with them as the commit is made, and
-// scripts/verify (the `subjects` check) checks every commit a change adds. Plain node: the hook runs before any
+// The commit subject rules, in one place: .gate/hooks/commit-msg checks a message with them as the commit is made, and
+// .gate/bin/verify (the `subjects` check) checks every commit a change adds. Plain node: the hook runs before any
 // dependency is installed.
 //   node subject.mjs <message file>   the hook: the first line that is not a comment is the subject
 //   node subject.mjs --base [<rev>]   the commits in <rev>..HEAD with fewer than two parents (default: merge-base with main)

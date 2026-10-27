@@ -1,24 +1,24 @@
 // What a pull request's history on GitHub says, read with gh: every label it ever had, which removing a label does
 // not erase, how many of its head commits the gate judged red, and where a check stands on one commit.
-//   node scripts/lib/history.mjs labels --repo <owner/name> --pr <n>                  the labels, comma-separated
-//   node scripts/lib/history.mjs rounds --repo <owner/name> --pr <n> --checks <a,b>   commits a named check failed on
-//   node scripts/lib/history.mjs check --repo <owner/name> --head <sha> --name <check>
+//   node .gate/bin/lib/history.mjs labels --repo <owner/name> --pr <n>                  the labels, comma-separated
+//   node .gate/bin/lib/history.mjs rounds --repo <owner/name> --pr <n> --checks <a,b>   commits a named check failed on
+//   node .gate/bin/lib/history.mjs check --repo <owner/name> --head <sha> --name <check>
 //     the latest GitHub Actions run of that check on the commit: its conclusion, or pending before it completes
-//   node scripts/lib/history.mjs raised-at --repo <owner/name> --pr <n>     when the Actions bot first added the label raised, or nothing
-//   node scripts/lib/history.mjs raise --repo <owner/name> --run <id> --head <sha>
+//   node .gate/bin/lib/history.mjs raised-at --repo <owner/name> --pr <n>     when the Actions bot first added the label raised, or nothing
+//   node .gate/bin/lib/history.mjs raise --repo <owner/name> --run <id> --head <sha>
 //     `pending` while the `review` job of that run has not completed; then `ok` or `red` (its latest attempt's
 //     conclusion) and `none`, `absent` (it left no result annotation) or `raise <why>`, from its annotation titled
 //     review-result. The job is found through the run, its check run through check_run_url, never by name on the head,
 //     where a candidate's own job may carry the name too. A raise in any completed review of any gate-trusted run on the
 //     head, this run's earlier attempts included, also counts, since an edited event cancels the run whose tier had not
 //     labelled yet; the runs listed for the head must hold this run, or it fails closed.
-//   node scripts/lib/history.mjs verdict --repo <owner/name> --run <id> --head <sha> --base <sha>
+//   node .gate/bin/lib/history.mjs verdict --repo <owner/name> --run <id> --head <sha> --base <sha>
 //     `pending` while the `review` job of that run has not completed; then `ok` or `red` and `pass`, `block`, `mismatch`
 //     (its review-verdict annotation names another head or base), `absent` (it left none) or `unavailable <class>`.
 //     `verdict` passes only on `ok pass`: it makes no reviewer call of its own.
-//   node scripts/lib/history.mjs reuse --repo <owner/name> --run <id> --head <sha> --base <sha> --nored <hash|none> --acc <hash|none> --reviewer <name>
+//   node .gate/bin/lib/history.mjs reuse --repo <owner/name> --run <id> --head <sha> --base <sha> --nored <hash|none> --acc <hash|none> --reviewer <name>
 //     `reuse pass|block <run> <result>` when a completed review of a gate-trusted run on the head already judged this head,
-//     base, No-red line and closing issues (acc: scripts/lib/acceptance.mjs) as this reviewer (its review-verdict annotation
+//     base, No-red line and closing issues (acc: .gate/bin/lib/acceptance.mjs) as this reviewer (its review-verdict annotation
 //     names all five; one written before acc existed names no acc and is another question), `none` otherwise: one call per head.
 //     Only runs of the event pull_request_target are read.
 // Exit 2 when GitHub cannot be read or the history does not fit one page: a history half read decides nothing. One page

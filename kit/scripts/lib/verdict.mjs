@@ -72,7 +72,7 @@ export function brief({ pr, issues, parent, head, driver, worktrees }) {
     '',
     '## What to do',
     '',
-    "1. Re-run the gates in the head's worktree: scripts/verify. Record each command and its last line in gates.",
+    "1. Re-run the gates in the head's worktree: .gate/bin/verify. Record each command and its last line in gates.",
     "2. Prove the load-bearing behaviour live: start the change with the driver's start command and drive it as its",
     '   drive line says, on the parent and on the head. Record in ran each command you ran, at which commit, and what',
     '   you observed. Only what you ran is evidence; the tests, CI and the description are not.',

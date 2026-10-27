@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statS
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requiredChecks } from '../../kit/scripts/lib/policy.mjs';
+import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
 import { coverage } from '../../kit/scripts/lib/verdict.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 

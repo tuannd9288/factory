@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The gate's mechanical check of every pull request, run from main's checkout so the candidate cannot edit it: the
 # `verify` job of gate.yml, on pull_request.
-#   scripts/verify-trusted <candidate-dir> <base-sha>
+#   .gate/bin/verify-trusted <candidate-dir> <base-sha>
 # 1. Main's copy of every .gate/protected path that differs is laid over a copy of the candidate, and main's verify
 #    and red-check run there, from the merge-base: the candidate's code under main's policy.
 # 2. When the candidate itself changes a protected path, its own checks must still fail on main's fixtures
@@ -17,8 +17,8 @@ cd "$trusted" || exit 2
 
 fork=$(git -C "$candidate" merge-base "$base" HEAD) || { echo "verify-trusted: the candidate shares no history with $base"; exit 2; }
 differs=$(git -C "$candidate" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD) || { echo "verify-trusted: could not diff the candidate against $base"; exit 2; }
-overlay=$(printf '%s\n' "$differs" | node scripts/lib/policy.mjs protected) || { echo "verify-trusted: $overlay"; exit 2; }
-own=$(git -C "$candidate" -c core.quotePath=false diff --name-only --no-renames "$fork" HEAD | node scripts/lib/policy.mjs protected) || exit 2
+overlay=$(printf '%s\n' "$differs" | node .gate/bin/lib/policy.mjs protected) || { echo "verify-trusted: $overlay"; exit 2; }
+own=$(git -C "$candidate" -c core.quotePath=false diff --name-only --no-renames "$fork" HEAD | node .gate/bin/lib/policy.mjs protected) || exit 2
 if [ -n "$own" ]; then
   echo "verify-trusted: the change touches protected paths:"
   printf '%s\n' "$own" | sed 's/^/  /'
@@ -47,19 +47,19 @@ git -C "$candidate" worktree add --detach --quiet "$work/overlay" HEAD || exit 2
 gate_prepare "$work/overlay" >/dev/null 2>&1
 
 # 1. Main's checks on the candidate's code.
-if ! (cd "$work/overlay" && GATE_BASE="$fork" scripts/verify) >"$work/verify.out" 2>&1; then
+if ! (cd "$work/overlay" && GATE_BASE="$fork" .gate/bin/verify) >"$work/verify.out" 2>&1; then
   status=1
   echo "verify-trusted: main's verify fails on the candidate's code:"
   tail -n 30 "$work/verify.out" | sed 's/^/  /'
 fi
-if ! (cd "$work/overlay" && scripts/red-check --base "$fork" ${GATE_BODY_FILE:+--body "$GATE_BODY_FILE"}) >"$work/red.out" 2>&1; then
+if ! (cd "$work/overlay" && .gate/bin/red-check --base "$fork" ${GATE_BODY_FILE:+--body "$GATE_BODY_FILE"}) >"$work/red.out" 2>&1; then
   status=1
   echo "verify-trusted: main's red-check fails on the candidate's code:"
   tail -n 20 "$work/red.out" | sed 's/^/  /'
 fi
 
 # 2. The candidate's own checks against main's fixtures.
-if [ -n "$own" ] && ! scripts/prove-check --all --tree "$candidate" >"$work/prove.out" 2>&1; then
+if [ -n "$own" ] && ! .gate/bin/prove-check --all --tree "$candidate" >"$work/prove.out" 2>&1; then
   status=1
   echo "verify-trusted: the candidate's checks no longer fail on main's fixtures:"
   sed 's/^/  /' "$work/prove.out"

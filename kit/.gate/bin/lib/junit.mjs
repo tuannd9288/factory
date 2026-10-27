@@ -1,6 +1,6 @@
 // Reads a JUnit XML report: how many tests ran, failed, errored and were skipped.
-//   node scripts/lib/junit.mjs <report.xml>             prints "tests=N failures=F errors=E skipped=S"
-//   node scripts/lib/junit.mjs --failures <report.xml>  also names each failing or erroring test
+//   node .gate/bin/lib/junit.mjs <report.xml>             prints "tests=N failures=F errors=E skipped=S"
+//   node .gate/bin/lib/junit.mjs --failures <report.xml>  also names each failing or erroring test
 // node --test reports a file that could not load, or that holds no test, as one testcase named after the file as it
 // was given; such a testcase is an error when it failed and no test at all when it passed. A missing or empty report
 // is an error.
