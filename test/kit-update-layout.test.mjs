@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { factory, git, run } from './helpers.mjs';
 import { addDeny } from '../bin/lib/settings.mjs';
-import { EXECUTABLE, SEED, SETTINGS } from './seed-world.mjs';
+import { ADAPTER, EXECUTABLE, SEED, SETTINGS } from './seed-world.mjs';
 import { world } from './world.mjs';
 
 const { 'AGENTS.md': _agents, ...OWN_FILES } = SEED;
@@ -78,6 +78,28 @@ describe('bin/kit-update on the new layout', () => {
       assert.ok(head.includes('pstack-abc1234') && !head.includes('pstack-f713f14'), head);
       assert.equal(head, run(w.fac, 'node', [join(w.fac, 'bin/lib/pack.mjs'), 'settings', w.fac, 'pstack']).out);
       assert.match(out.out, /^updated \(.*\):\n(?: {2}.*\n)* {2}\.claude\/settings\.json \(was /m);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('re-lays a config.sh that is an older kit text plus the adapter block with the new kit text plus the block', () => {
+    const w = seededWorld();
+    try {
+      const kitConfig = readFileSync(join(w.fac, 'kit/.gate/config.sh'), 'utf8');
+      assert.equal(readFileSync(join(w.repo, '.gate/config.sh'), 'utf8'), kitConfig + ADAPTER);
+      w.facCommit({ 'kit/.gate/config.sh': `${kitConfig}# a new default\n` });
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kit-evidence: PASS$/m);
+      assert.equal(readFileSync(join(w.repo, '.gate/config.sh'), 'utf8'), `${kitConfig}# a new default\n${ADAPTER}`);
+      assert.match(out.out, /^updated \(.*\):\n(?: {2}.*\n)* {2}\.gate\/config\.sh \(was /m);
+      // A config.sh the repository edited is still its own, and is kept.
+      w.repoCommit({ '.gate/config.sh': `${readFileSync(join(w.repo, '.gate/config.sh'), 'utf8')}# ours\n` });
+      w.facCommit({ 'kit/.gate/config.sh': `${kitConfig}# a new default\n# and another\n` });
+      const again = w.update(['app', '--no-pr']);
+      assert.equal(again.code, 0, again.out);
+      assert.match(readFileSync(join(w.repo, '.gate/config.sh'), 'utf8'), /# ours\n$/);
     } finally {
       w.cleanup();
     }
