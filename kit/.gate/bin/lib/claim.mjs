@@ -79,7 +79,35 @@ function mainTip() {
 
 /** An empty commit on parent, with this subject. */
 const commitOn = (parent, subject) => gitOut('commit-tree', `${parent}^{tree}`, '-p', parent, '-m', subject);
-const push = (n, sha) => git('push', '--quiet', 'origin', `${sha}:${refOf(n)}`).status === 0;
+
+/** Besides refs/heads/claim/<n> itself, the refs git also takes for that name as a push destination (its strong matches):
+ * refs/<name>, refs/heads/<name> (a branch named refs/heads/claim/<n>) and refs/tags/<name>. None is under refs/heads/claim/**,
+ * so no ruleset covers them, and a push can land on one instead of on the claim ref. */
+const lookalikes = (n) => [`refs/${refOf(n)}`, `refs/heads/${refOf(n)}`, `refs/tags/${refOf(n)}`];
+
+/** The first of those that origin holds, or null. */
+function lookalikeOnOrigin(n) {
+  const names = gitOut('ls-remote', 'origin', refOf(n)).split('\n').map((line) => line.split('\t')[1]);
+  return lookalikes(n).find((ref) => names.includes(ref)) ?? null;
+}
+
+const refuseLookalike = (n, ref) =>
+  new Stop(`claim: origin holds ${ref}, which git also takes for ${refOf(n)} when it pushes, so a claim on #${n} cannot be taken, released or handed off; the Human removes ${ref}`);
+
+/** Pushes sha to the claim ref. True when origin then holds it there, by the exact name; false when the push was refused (the
+ * ref moved: a race). It refuses, before the push, while a look-alike exists, and after it, when the claim ref is not at sha. */
+function push(n, sha) {
+  const before = lookalikeOnOrigin(n);
+  if (before) throw refuseLookalike(n, before);
+  if (git('push', '--quiet', 'origin', `${sha}:${refOf(n)}`).status !== 0) {
+    const late = lookalikeOnOrigin(n);
+    if (late) throw refuseLookalike(n, late);
+    return false;
+  }
+  if (shaOf(gitOut('ls-remote', 'origin', refOf(n)), refOf(n)) === sha) return true;
+  const late = lookalikeOnOrigin(n);
+  throw late ? refuseLookalike(n, late) : new Stop(`claim: the push to ${refOf(n)} reported success but ${refOf(n)} is not at ${short(sha)}; read it with --list`);
+}
 
 const refuseHeld = (n, tip) => {
   if (tip.state === 'invalid') return new Stop(`claim: ${refOf(n)} holds a commit no form of claim wrote ("${oneLine(tip.subject)}", ${short(tip.sha)}); the Human decides, and clears it with .gate/bin/claim --release ${n} --human`);
