@@ -10,6 +10,7 @@ file. What a program enforces: `.gate/enforced-rules.md`.
   land by a merge commit through auto-merge.
 - Run `.gate/bin/setup` once per clone. Before the pull request run `.gate/bin/verify` (it runs the repository's own
   verify too) and `.gate/bin/red-check --base origin/main`; push as often as you like.
+- For a feature new to this repository, search GitHub (`gh search repos`, `gh search code`) and existing products for projects that already do it, and compare their approaches before writing it from scratch. Judge a project by its mechanism, never its stars or age. Adding a library, service or dependency is the Human's choice: propose it with the comparison.
 - A source change carries a test that fails at the base. Where none can, the pull request body says
   `No-red: <why, 20 characters or more>`; the reviewer judges it.
 - `.gate/bin/tier` prints the tier. Tier 2: commit the failing test first, alone, with `Failing-test: <command>`.
