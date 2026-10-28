@@ -5,12 +5,15 @@
 #   .gate/bin/verify (policy) requires .github/CODEOWNERS to end with exactly these paths, each with an owner, so GitHub
 #   asks for the Human's review on them. A key line cannot be put in CODEOWNERS: tier alone guards it, and
 #   verify-trusted keeps the candidate's manifest, since main's copy would undo its dependencies.
+# A directory is written without a trailing "/": then the path itself is protected too, as a file, a directory or a link,
+# in tier and in CODEOWNERS alike. .gate/bin/verify (policy) refuses a line that ends in "/".
 # A repository adds what decides its own checks: a Makefile its gate_tests calls, a conftest.py that skips tests.
-/.github/
-/.gate/
-/.githooks/
-/.claude/
-/scripts/
+/.github
+/.gate
+/.githooks
+/.claude
+/.codex
+/scripts
 /AGENTS.md
 /CLAUDE.md
 .gitattributes
@@ -41,9 +44,9 @@ pyrightconfig.json
 .golangci.y*ml
 clippy.toml
 .gitlab-ci.yml
-.circleci/
+.circleci
 Jenkinsfile
-.husky/
+.husky
 .pre-commit-config.y*ml
 lefthook.y*ml
 key package.json "(pre|post)?(test|lint|check|typecheck|verify)([:-][\w:-]*)?"\s*:

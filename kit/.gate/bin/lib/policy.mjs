@@ -89,7 +89,7 @@ export function requiredChecks(dir) {
 }
 
 /** The problems with .github/CODEOWNERS against .gate/protected: GitHub takes the last matching line, so the protected
- * paths come last, each with an owner, and nothing after them can take one back. */
+ * paths come last, each with an owner, and nothing after them can take one back. No protected path ends in "/". */
 export function ownersProblems(dir) {
   const { paths } = protectedOf(dir);
   const lines = linesOf(join(dir, '.github/CODEOWNERS')).map((l) => l.split(/\s+/));
@@ -98,6 +98,9 @@ export function ownersProblems(dir) {
   const listed = new Set(tail.map((parts) => parts[0]));
   const out = [];
   for (const p of paths) if (!listed.has(p.glob)) out.push(`${p.glob} is not among the last lines of .github/CODEOWNERS`);
+  // A trailing "/" matches only what is under the folder, in GitHub's CODEOWNERS and in globToRegex alike: the path itself,
+  // a file or a link there, would be tier 1 and owned by no one.
+  for (const p of paths) if (p.glob.endsWith('/')) out.push(`${p.glob} ends in "/", so the path ${p.glob.slice(0, -1)} itself, a file or a link there, is not protected; write it without the "/"`);
   for (const [glob, ...owners] of tail) {
     if (!globs.has(glob)) out.push(`${glob} is not a protected path, yet it sits among the protected lines at the end of .github/CODEOWNERS`);
     else if (!owners.some((o) => o.includes('@'))) out.push(`${glob} has no owner in .github/CODEOWNERS`);

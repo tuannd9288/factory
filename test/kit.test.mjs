@@ -282,10 +282,22 @@ describe('tier', () => {
   test('a tier label from an earlier commit only raises the tier', () => {
     assert.match(tierOf({ 'src/math.js': MUL }, ['--labels', 'tier-2,bug']).out, /^tier 2/);
   });
-  test('tier 3 for what decides the checks: a type-check config, a manifest test script, a .gitattributes', () => {
+  test('tier 3 for what decides the checks: a type-check config, a manifest test script, a .gitattributes, what Codex loads', () => {
     assert.match(tierOf({ 'tsconfig.json': '{ "compilerOptions": { "strict": false } }\n' }).out, /^tier 3\n {2}tsconfig\.json \(protected: tsconfig\*\.json\)/);
     assert.match(tierOf({ 'package.json': '{ "name": "app", "private": true, "type": "module", "scripts": { "test": "true" } }\n' }).out, /^tier 3\n {2}package\.json/);
     assert.match(tierOf({ 'src/.gitattributes': '*.js -diff\n' }).out, /^tier 3/);
+    // #134 ("ok codex", 2026-10-28): a trusted repository's .codex/ holds the hooks and config Codex loads. No kit file sits
+    // under it, so the path itself must be protected: a .codex that is a link to an unprotected folder is tier 3 too.
+    assert.match(tierOf({ '.codex/hooks.json': '{}\n' }).out, /^tier 3\n {2}\.codex\/hooks\.json \(protected: \/\.codex\)/);
+    git(r.repo, 'switch', '-q', '-C', 't', 'origin/main');
+    symlinkSync('src/codex', join(r.repo, '.codex'));
+    commit(r.repo, { 'src/codex/hooks.json': '{}\n' }, 't');
+    assert.match(script(r.repo, 'tier', ['--base', 'origin/main']).out, /^tier 3\n {2}\.codex \(protected: \/\.codex\)/);
+    // Every protected directory protects the path itself: a link at .githooks, a folder onboarding does not create, is tier 3.
+    git(r.repo, 'switch', '-q', '-C', 't', 'origin/main');
+    symlinkSync('src/hooks', join(r.repo, '.githooks'));
+    commit(r.repo, { 'src/hooks/pre-commit': '#!/bin/sh\n' }, 't');
+    assert.match(script(r.repo, 'tier', ['--base', 'origin/main']).out, /^tier 3\n {2}\.githooks \(protected: \/\.githooks\)/);
   });
   test('fails closed when a policy file or the diff cannot be read', () => {
     const empty = mkdtempSync(join(tmpdir(), 'no-policy-'));
@@ -309,7 +321,7 @@ describe('tier', () => {
     let out = tierOf({ '.github/CODEOWNERS': '# narrowed\n', '.gate/protected': '/README.md\n', '.gate/load-bearing': '# emptied\n', 'src/auth/x.js': 'export const x = 1;\n' });
     assert.match(out.out, /^tier 1/);
     out = tierOf({ '.github/CODEOWNERS': '# narrowed\n', '.gate/protected': '/README.md\n', '.gate/load-bearing': '# emptied\n', 'src/auth/x.js': 'export const x = 1;\n' }, ['--rules', main]);
-    assert.match(out.out, /^tier 3\n {2}\.gate\/load-bearing \(protected: \/\.gate\/\)/);
+    assert.match(out.out, /^tier 3\n {2}\.gate\/load-bearing \(protected: \/\.gate\)/);
   });
 });
 
@@ -335,6 +347,15 @@ describe('verify and prove-check', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /\* is not a protected path/);
     git(r.repo, 'checkout', '-q', '--', '.github/CODEOWNERS');
+  });
+  test('fails a protected line that ends in "/", which leaves the path itself, a file or a link there, unprotected', () => {
+    const add = (file, line) => write(r.repo, { [file]: `${readFileSync(join(r.repo, file), 'utf8')}${line}\n` });
+    add('.gate/protected', 'docs/');
+    add('.github/CODEOWNERS', 'docs/ @someone');
+    const out = script(r.repo, 'verify', ['--only', 'policy']);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /docs\/ ends in "\/"/);
+    git(r.repo, 'checkout', '-q', '--', '.gate/protected', '.github/CODEOWNERS');
   });
   test('fails an AGENTS.md over 150 lines', () => {
     write(r.repo, { 'AGENTS.md': `${readFileSync(join(r.repo, 'AGENTS.md'), 'utf8')}${'x\n'.repeat(150)}` });
@@ -1693,7 +1714,7 @@ describe('onboard', () => {
       assertWorktreesIgnored(r.repo);
       assert.equal(readFileSync(join(r.repo, '.github/pull_request_template.md'), 'utf8'), '## Our own\n');
       assert.match(r.onboard, /1 kept as they were/);
-      assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts\/ +@tuannd9288$/m);
+      assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts +@tuannd9288$/m);
       assert.equal(git(r.repo, 'config', '--local', 'core.hooksPath'), '.gate/hooks');
     } finally {
       r.cleanup();
