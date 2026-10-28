@@ -36,6 +36,31 @@ describe('the fork guard of review (item 12)', () => {
     assert.ok(steps.findIndex((s) => /npm ci/.test(String(s.run))) > 0);
   });
 
+  /** Why a failing guard would not stop this review job, or '' when it does: the guard cannot continue on error, and no later
+   * step runs after a failure, a cancel or always. */
+  const letsReviewRun = (job) => {
+    if (job['continue-on-error'] !== undefined) return 'the job continues on error';
+    if (job.steps[0]['continue-on-error'] !== undefined) return 'the guard continues on error';
+    const late = job.steps.slice(1).find((step) => /\b(always|failure|cancelled)\s*\(/.test(String(step.if ?? '')));
+    return late ? `step "${late.name ?? late.uses ?? 'run'}" runs after the guard failed` : '';
+  };
+  const mutant = (change) => {
+    const copy = structuredClone(trusted.jobs.review);
+    change(copy);
+    return copy;
+  };
+
+  test('a failing guard stops review: it cannot continue on error, and no later step runs after a failure, a cancel or always', () => {
+    assert.equal(letsReviewRun(trusted.jobs.review), '');
+  });
+
+  test('that test sees the two regressions it exists for: a guard that continues on error, a later step that runs always', () => {
+    assert.match(letsReviewRun(mutant((job) => { job.steps[0]['continue-on-error'] = true; })), /guard continues on error/);
+    assert.match(letsReviewRun(mutant((job) => { job.steps[1].if = 'always()'; })), /runs after the guard failed/);
+    assert.match(letsReviewRun(mutant((job) => { job.steps[2].if = "success() || failure()"; })), /runs after the guard failed/);
+    assert.match(letsReviewRun(mutant((job) => { job['continue-on-error'] = true; })), /job continues/);
+  });
+
   const guarded = (env) => spawnSync('bash', ['-c', guard.run], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
 
   test('the step passes for one repository and fails for another, an empty head (a deleted fork) or no ids at all', () => {
