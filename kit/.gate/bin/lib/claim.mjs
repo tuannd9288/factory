@@ -57,10 +57,13 @@ export function stateOf(n, subject) {
   return { state: 'invalid', team: null };
 }
 
+/** The sha origin gives the ref of exactly this full name, or ''. `git ls-remote origin <pattern>` matches the pattern against the
+ * tail of a ref name, so refs/heads/claim/5 also finds a branch named a/refs/heads/claim/5: only the line whose name is the ref counts. */
+const shaOf = (out, ref) => out.split('\n').map((line) => line.split('\t')).find(([, name]) => name === ref)?.[0] ?? '';
+
 /** The tip of claim n on origin, read from origin itself, with its subject and date; sha is null when there is no claim. */
 export function tipOf(n, net = []) {
-  const line = gitOut(...net, 'ls-remote', 'origin', refOf(n)).split('\n')[0];
-  const sha = line.split(/\s/)[0];
+  const sha = shaOf(gitOut(...net, 'ls-remote', 'origin', refOf(n)), refOf(n));
   if (!sha) return { sha: null };
   gitOut(...net, 'fetch', '--quiet', 'origin', refOf(n));
   const [subject, date] = gitOut('log', '-1', '--format=%s%x09%cI', sha).split('\t');
@@ -68,7 +71,7 @@ export function tipOf(n, net = []) {
 }
 
 function mainTip() {
-  const sha = gitOut('ls-remote', 'origin', 'refs/heads/main').split('\n')[0].split(/\s/)[0];
+  const sha = shaOf(gitOut('ls-remote', 'origin', 'refs/heads/main'), 'refs/heads/main');
   if (!sha) throw new Stop('origin has no main', 2);
   gitOut('fetch', '--quiet', 'origin', 'refs/heads/main');
   return sha;
