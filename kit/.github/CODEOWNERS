@@ -1,12 +1,12 @@
 # Tier 3: the gate and every input that decides what the checks run wait for the Human's approval. GitHub reads this
 # file from the base branch and takes the last line that matches, so these lines come last and equal .gate/protected
 # (.gate/bin/verify checks it). The repository's own owners, if it has any, go above them.
-/.github/                @OWNER
-/.gate/                  @OWNER
-/.githooks/              @OWNER
-/.claude/                @OWNER
+/.github                 @OWNER
+/.gate                   @OWNER
+/.githooks               @OWNER
+/.claude                 @OWNER
 /.codex                  @OWNER
-/scripts/                @OWNER
+/scripts                 @OWNER
 /AGENTS.md               @OWNER
 /CLAUDE.md               @OWNER
 .gitattributes           @OWNER
@@ -37,8 +37,8 @@ pyrightconfig.json       @OWNER
 .golangci.y*ml           @OWNER
 clippy.toml              @OWNER
 .gitlab-ci.yml           @OWNER
-.circleci/               @OWNER
+.circleci                @OWNER
 Jenkinsfile              @OWNER
-.husky/                  @OWNER
+.husky                   @OWNER
 .pre-commit-config.y*ml  @OWNER
 lefthook.y*ml            @OWNER

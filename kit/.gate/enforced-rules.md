@@ -17,7 +17,7 @@ as `prose` and gets one, or is deleted, within 30 days.
 | A failing test committed first is not weakened later | `.gate/bin/rules` (`failing-test-edited`) |
 | Every check is shown failing on a fixture | `.gate/bin/prove-check` in `verify` and `verify-trusted` |
 | Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `.gate/bin/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
-| Tier-3 paths are one list, and CODEOWNERS ends with exactly it | `.gate/protected`; `verify` (`policy`) |
+| Tier-3 paths are one list, and CODEOWNERS ends with exactly it; a directory line has no trailing "/", so the path itself is protected too | `.gate/protected`; `verify` (`policy`) |
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
 | Commit subject present, at most 72 characters, never `wip`, a placeholder, `fixup!` or `squash!` | `verify` (`subjects`, every commit of the change); `.gate/hooks/commit-msg` is the local copy |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |

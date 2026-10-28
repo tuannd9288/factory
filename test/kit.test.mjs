@@ -321,7 +321,7 @@ describe('tier', () => {
     let out = tierOf({ '.github/CODEOWNERS': '# narrowed\n', '.gate/protected': '/README.md\n', '.gate/load-bearing': '# emptied\n', 'src/auth/x.js': 'export const x = 1;\n' });
     assert.match(out.out, /^tier 1/);
     out = tierOf({ '.github/CODEOWNERS': '# narrowed\n', '.gate/protected': '/README.md\n', '.gate/load-bearing': '# emptied\n', 'src/auth/x.js': 'export const x = 1;\n' }, ['--rules', main]);
-    assert.match(out.out, /^tier 3\n {2}\.gate\/load-bearing \(protected: \/\.gate\/\)/);
+    assert.match(out.out, /^tier 3\n {2}\.gate\/load-bearing \(protected: \/\.gate\)/);
   });
 });
 
@@ -1699,7 +1699,7 @@ describe('onboard', () => {
       assertWorktreesIgnored(r.repo);
       assert.equal(readFileSync(join(r.repo, '.github/pull_request_template.md'), 'utf8'), '## Our own\n');
       assert.match(r.onboard, /1 kept as they were/);
-      assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts\/ +@tuannd9288$/m);
+      assert.match(readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8'), /^\/scripts +@tuannd9288$/m);
       assert.equal(git(r.repo, 'config', '--local', 'core.hooksPath'), '.gate/hooks');
     } finally {
       r.cleanup();
