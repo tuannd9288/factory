@@ -15,6 +15,6 @@ describe('the file the reviewer reads', () => {
 
   test('it is under a protected pattern of the kit\'s .gate/protected, which makes a change to it tier 3', () => {
     const lines = readFileSync(join(factory, 'kit/.gate/protected'), 'utf8').split('\n');
-    assert.ok(lines.includes('/.gate/'));
+    assert.ok(lines.includes('/.gate'));
   });
 });
