@@ -5,6 +5,7 @@
 /.gate/                  @OWNER
 /.githooks/              @OWNER
 /.claude/                @OWNER
+/.codex                  @OWNER
 /scripts/                @OWNER
 /AGENTS.md               @OWNER
 /CLAUDE.md               @OWNER
