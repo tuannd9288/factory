@@ -162,7 +162,7 @@ test('the owner script applies, reads back what it set, and on a second run chan
     assert.match(out.out, /read back: every setting as planned/);
     assert.match(out.out, /waiting: tuan9288-agent accepts the invitation/);
     const s = w.state();
-    assert.deepEqual(s.rulesets.map((r) => r.name).sort(), ['factory-bootstrap', 'factory-branches', 'factory-tags']);
+    assert.deepEqual(s.rulesets.map((r) => r.name).sort(), ['factory-bootstrap', 'factory-branches', 'factory-claims', 'factory-tags']);
     assert.deepEqual(s.environment.policies.map((p) => p.name), ['main']);
     w.set({ collaborator: 'write', invitations: [] });
     w.clear();
@@ -188,7 +188,7 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     const gate = writes.findIndex((l) => / -X POST repos\/tuannd9288\/app\/rulesets /.test(l));
     const drop = writes.findIndex((l) => / -X DELETE repos\/tuannd9288\/app\/rulesets\/\d+/.test(l));
     assert.ok(gate >= 0 && drop > gate, writes.join('\n'));
-    assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-gate', 'factory-tags']);
+    assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-claims', 'factory-gate', 'factory-tags']);
   } finally {
     w.cleanup();
   }
@@ -241,6 +241,36 @@ test('a second bypass actor on the live tag ruleset is taken out: exactly one PU
     assert.equal(writes.length, 1, writes.join('\n'));
     assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${tagsId} `));
     assert.deepEqual(w.state().rulesets.find((r) => r.name === 'factory-tags').bypass_actors, [admin]);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('factory-claims: a claim ref cannot be deleted or rewritten, with no bypass, and no other ref is named', () => {
+  const claims = JSON.parse(readFileSync(join(factory, 'bin/rulesets/claims.json'), 'utf8'));
+  assert.equal(claims.name, 'factory-claims');
+  assert.equal(claims.target, 'branch');
+  assert.equal(claims.enforcement, 'active');
+  assert.deepEqual(claims.conditions.ref_name, { include: ['refs/heads/claim/**'], exclude: [] });
+  assert.deepEqual(claims.rules.map((r) => r.type).sort(), ['deletion', 'non_fast_forward']);
+  assert.deepEqual(claims.bypass_actors, []);
+});
+
+test('the owner script sets factory-claims before the kit lands and keeps it after, and a second run changes nothing', () => {
+  const w = world();
+  try {
+    const dry = w.owner(['tuannd9288/app', '--id', '1234']);
+    assert.match(dry.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-claims","target":"branch".*"refs\/heads\/claim\/\*\*".*"deletion"/);
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.ok(w.state().rulesets.some((r) => r.name === 'factory-claims'));
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [] });
+    w.clear();
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.ok(w.state().rulesets.some((r) => r.name === 'factory-claims'));
+    w.clear();
+    const again = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(again.code, 0, again.out);
+    assert.deepEqual(w.writes(), []);
   } finally {
     w.cleanup();
   }

@@ -1,4 +1,9 @@
 Closes #<issue labelled task>
+Issue: #<issue labelled task>
+Claim: <sha printed by .gate/bin/claim>
+Team: <your team's name, as in the claim>
+Session: <session id or URL, or none>
+Cost: <amount and harness, or unknown>
 
 ## Summary for the Human
 - Purpose: (1 sentence)

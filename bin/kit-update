@@ -200,5 +200,8 @@ ${fence}text
 $evidence
 $fence
 Re-check from the factory's clone: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
+
+Issue: none
+Team: factory/kit-update
 BODY
 )"

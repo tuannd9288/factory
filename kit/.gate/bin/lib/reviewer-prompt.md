@@ -94,8 +94,8 @@ Report only what you traced, answer the question directly, write nothing.
 - **No-red.** If the brief quotes a `No-red:` line from the pull request, set `noRed` to `accepted` only when no test could
   fail first for this change, as with a pure refactor or a rename; otherwise set `rejected` and add a blocking finding
   that names the test that could have failed first. With no such line, set `unjudged`.
-- **Acceptance.** The acceptance is what the issues the pull request closes state, as the brief hands them. Where it
-  closes none of this repository, the acceptance is what the body states. You invent no acceptance that neither gives.
+- **Acceptance.** The acceptance is what the issues the pull request closes or names state, as the brief hands them. Where
+  it closes and names none of this repository, the acceptance is what the body states. You invent no acceptance that neither gives.
   A body that contradicts its closing issue's acceptance is a finding.
 - **Raise.** Add `raise` as `{ "tier": 3, "why": "<what, where>" }` (1 to 500 characters) when the change touches what paths
   do not show: data that could be lost or exposed, authentication, secrets or payment, or what deploys, even if every rule is

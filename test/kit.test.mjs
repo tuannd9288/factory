@@ -395,15 +395,37 @@ describe('verify-trusted', () => {
   };
 
   test('passes a good candidate that changes no protected path', () => {
-    const out = candidate({ 'src/math.js': MUL, 'test/mul.test.js': RED_AT_BASE });
+    const out = candidate({ 'src/math.js': MUL, 'test/mul.test.js': RED_AT_BASE }, withBody('Team: team-x\n'));
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /main's verify and red-check pass on the candidate/);
   });
   test('hands the PR body to red-check, so a No-red line passes it there and review judges the reason', () => {
     assert.equal(candidate({ 'src/math.js': MUL }).code, 1);
-    write(r.dir, { 'body.txt': 'Summary\nNo-red: adds a helper nothing calls yet\n' });
+    write(r.dir, { 'body.txt': 'Summary\nTeam: team-x\nNo-red: adds a helper nothing calls yet\n' });
     const out = candidate({ 'src/math.js': MUL }, { GATE_BODY_FILE: join(r.dir, 'body.txt') });
     assert.equal(out.code, 0, out.out);
+  });
+  // #133: the pull request's own Team: line gates at verify, where the body is (GATE_BODY_FILE).
+  const withBody = (text) => {
+    write(r.dir, { 'team-body.txt': text });
+    return { GATE_BODY_FILE: join(r.dir, 'team-body.txt') };
+  };
+  const GOOD = { 'src/math.js': MUL, 'test/mul.test.js': RED_AT_BASE };
+  test('a body with a Team: line passes; with none, a placeholder, two teams, or no body at all, it fails and says what it needs', () => {
+    assert.equal(candidate(GOOD, withBody('Summary\nTeam: team-x\n')).code, 0);
+    for (const text of ['Summary only\n', 'Team: <your team\'s name, as in claim>\n', 'Team: a\nTeam: b\n']) {
+      const out = candidate(GOOD, withBody(text));
+      assert.equal(out.code, 1, `${text}: ${out.out}`);
+      assert.match(out.out, /Team:/);
+    }
+    const none = candidate(GOOD, {});
+    assert.equal(none.code, 1, none.out);
+  });
+  test('the Team: check does not hide the other failures: a body without it and a focused test report both', () => {
+    const out = candidate({ 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" }, withBody('no team\n'));
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /Team:/);
+    assert.match(out.out, /test-focused/);
   });
   test('runs main\'s verify on every candidate, not only on a gate change', () => {
     const out = candidate({ 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
@@ -462,10 +484,12 @@ describe('review, verdict, tier and rounds', () => {
         'case "$*" in *itemTypes:*LABELED_EVENT*) case "$*" in *"actor{login}"*) ;; *) echo "fake gh: the label query does not ask for actor{login}" >&2; exit 1 ;; esac ;; esac',
         'case "$*" in',
         // The review job is found through the run (99) and its annotations through the job's id (501), never by name.
-        // The closing issues, as gh prints them (2026-10-26): porcelain commands only. None unless a test writes closing.json.
-        '  "pr view 7 --repo o/app --json closingIssuesReferences") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; cat "$FAKE/closing.json" 2>/dev/null || echo \'{"closingIssuesReferences":[]}\' ;;',
+        // The body and closing issues, as gh prints them (2026-10-26): porcelain commands only, read by acceptance.mjs and by tier's
+        // claim check (#133). prview.json is a test's own answer; else closing.json; else no closing issue and `Issue: none`.
+        '  "pr view 7 --repo o/app --json closingIssuesReferences,body") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; if [ -e "$FAKE/prview.json" ]; then cat "$FAKE/prview.json"; else cat "$FAKE/closing.json" 2>/dev/null || printf \'%s\\n\' \'{"body":"Issue: none\\n","closingIssuesReferences":[]}\'; fi ;;',
         '  "issue view "*" --repo o/app --json number,title,labels,body") echo "issue view $3" >>"$FAKE/ghlog"; cat "$FAKE/issue-$3.json" ;;',
-        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; cat "$FAKE/jobs.json" ;;',
+        // A test that moves something while a job waits leaves $FAKE/mover.sh, which runs once at the first listing.
+        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
         '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
         '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
         '  *check-runs/777/annotations*) cat "$FAKE/ann777.json" 2>/dev/null || echo "[]" ;;',
@@ -652,6 +676,102 @@ describe('review, verdict, tier and rounds', () => {
     reviewJob('success');
     assert.equal(again('tier', out.head, pr).code, 0);
   });
+  // #133: tier compares the pull request's Claim: line with the tip of claim/<n> on origin, read when tier runs.
+  const dropClaim = () => run(trusted, 'git', ['push', '-q', 'origin', ':refs/heads/claim/7'], quiet);
+  const claimTip = (subject, parent) => {
+    const base = parent ?? git(trusted, 'rev-parse', 'origin/main');
+    const sha = git(trusted, 'commit-tree', `${base}^{tree}`, '-p', base, '-m', subject);
+    git(trusted, 'push', '-q', 'origin', `${sha}:refs/heads/claim/7`);
+    return sha;
+  };
+  const prBody = (text, closing = []) => write(fake, { 'prview.json': JSON.stringify({ body: text, closingIssuesReferences: closing }) });
+  const closes = (number, [owner, name] = ['o', 'app']) => ({ number, repository: { name, owner: { login: owner } } });
+  const tierRun = (files = { 'src/math.js': MUL }) => job('tier', files, pr);
+  beforeEach(() => {
+    write(fake, { 'prview.json': null, 'mover.sh': null });
+    dropClaim();
+  });
+
+  test('tier passes when Claim: is the tip of claim/<n> for the issue named, and says which claim it read', () => {
+    const sha = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${sha}\nTeam: team-x\n`);
+    const out = tierRun();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /team-x/);
+  });
+  test('tier fails when the claim moved after the pull request was opened, naming the new holder', () => {
+    const first = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${first}\nTeam: team-x\n`);
+    assert.equal(tierRun().code, 0);
+    claimTip('handoff 7 team-y', first);
+    const out = tierRun();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /handoff 7 team-y/);
+  });
+  test('tier fails when the claim named was released, though its commit is the tip', () => {
+    const first = claimTip('claim 7 team-x');
+    claimTip('release 7', first);
+    prBody(`Issue: #7\nClaim: ${first}\n`);
+    assert.equal(tierRun().code, 1);
+    prBody(`Issue: #7\nClaim: ${git(trusted, 'ls-remote', 'origin', 'refs/heads/claim/7').split('\t')[0]}\n`);
+    assert.equal(tierRun().code, 1);
+  });
+  test('tier fails when Issue: #<n> has no Claim: line, a Claim: that is not a sha, or no claim on the issue', () => {
+    prBody('Issue: #7\nTeam: team-x\n');
+    assert.equal(tierRun().code, 1);
+    const sha = claimTip('claim 7 team-x');
+    prBody('Issue: #7\nClaim: <sha printed by .gate/bin/claim>\n');
+    assert.equal(tierRun().code, 1);
+    dropClaim();
+    prBody(`Issue: #7\nClaim: ${sha}\n`);
+    assert.equal(tierRun().code, 1);
+  });
+  test('tier fails with no Issue: line, and passes Issue: none that closes nothing here', () => {
+    prBody('Team: team-x\n');
+    assert.equal(tierRun().code, 1);
+    prBody('Issue: none\nTeam: team-x\n');
+    assert.equal(tierRun().code, 0);
+    prBody('Issue: none\n', [closes(9)]);
+    assert.equal(tierRun().code, 1);
+    prBody('Issue: none\n', [closes(9, ['o', 'elsewhere'])]);
+    assert.equal(tierRun().code, 0);
+  });
+  test('tier fails when the pull request closes an issue other than the one it names', () => {
+    const sha = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(9)]);
+    assert.equal(tierRun().code, 1);
+    prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(7)]);
+    assert.equal(tierRun().code, 0);
+    prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(9, ['o', 'elsewhere'])]);
+    assert.equal(tierRun().code, 0);
+  });
+  test('tier fails closed when the body cannot be read', () => {
+    write(fake, { 'prview.json': 'not json' });
+    assert.notEqual(tierRun().code, 0);
+  });
+  test('a tier-3 pull request with a stale claim fails too, whoever approved it', () => {
+    const first = claimTip('claim 7 team-x');
+    claimTip('handoff 7 team-y', first);
+    prBody(`Issue: #7\nClaim: ${first}\n`);
+    reviews([review('tuannd9288', 'APPROVED', 'x'.repeat(40))]);
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /handoff 7 team-y/);
+  });
+  test('tier reads the claim again after it waited for the review: a claim moved during the wait fails it', () => {
+    const first = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${first}\n`);
+    reviewJob('in_progress');
+    const done = JSON.stringify({ jobs: [{ id: 501, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(501), status: 'completed', conclusion: 'success' }], total_count: 1 });
+    write(fake, { 'jobs-done.json': done });
+    const next = git(trusted, 'commit-tree', `${first}^{tree}`, '-p', first, '-m', 'handoff 7 team-y');
+    write(fake, { 'mover.sh': `#!/bin/sh\ngit -C ${JSON.stringify(trusted)} push -q origin ${next}:refs/heads/claim/7\ncp "$FAKE/jobs-done.json" "$FAKE/jobs.json"\n` });
+    chmodSync(join(fake, 'mover.sh'), 0o755);
+    const out = tierRun();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /handoff 7 team-y/);
+  });
+
   test('a raise from a review that passed makes tier 3: tier labels raised and tier-3 and waits for the Human', () => {
     labels();
     reviews([]);
@@ -920,6 +1040,19 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^tier 3\n {2}label needs-human/);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+  });
+  test('review waits for verify as long as .gate/config.sh says it may run, and fails closed on a value it cannot read', () => {
+    const file = join(trusted, '.gate/config.sh');
+    const was = readFileSync(file, 'utf8');
+    try {
+      writeFileSync(file, `${was}\nGATE_VERIFY_TIMEOUT=abc\n`);
+      const out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'stub', ...pr });
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /GATE_VERIFY_TIMEOUT/);
+      assert.doesNotMatch(out.out, /review-verdict/);
+    } finally {
+      writeFileSync(file, was);
+    }
   });
   test('the review wait is GATE_REVIEW_WAIT, which GATE_WAIT for verify does not shorten', () => {
     labels();
@@ -1217,7 +1350,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
   // #96: the issues the pull request closes, read by .gate/bin/review with gh porcelain before the reviewer runs.
   const REF = (number, owner = 'o', name = 'app') => ({ id: `I_${number}`, number, repository: { id: 'R_x', name, owner: { id: 'U_x', login: owner } }, url: `https://github.com/${owner}/${name}/issues/${number}` });
   const ISSUE = (number, extra = {}) => ({ body: '## Acceptance\n\n- Refuse an empty name.\n', labels: [{ id: 'LA_1', name: 'task', description: '', color: 'ffffff' }], number, title: 'Initials', ...extra });
-  const closing = (...refs) => write(fake, { 'closing.json': JSON.stringify({ closingIssuesReferences: refs }), ghlog: '' });
+  const closing = (...refs) => write(fake, { 'closing.json': JSON.stringify({ closingIssuesReferences: refs, body: 'Issue: none\n' }), ghlog: '' });
   const briefSeen = () => readFileSync(join(fake, 'brief'), 'utf8');
   const ghLog = () => readFileSync(join(fake, 'ghlog'), 'utf8').split('\n').filter(Boolean);
   const claudeCalls = () => readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length;
@@ -1488,7 +1621,7 @@ describe('gate-trusted.yml permissions', () => {
   test('review holds no write scope and tier has 75 minutes for its wait', () => {
     const block = (n) => jobs.find((j) => j.startsWith(`${n}:`));
     assert.doesNotMatch(block('review'), /: write$/m);
-    assert.match(block('tier'), /timeout-minutes: 75\n/);
+    assert.match(block('tier'), /timeout-minutes: 105\n/);
   });
   for (const [name, scopes] of Object.entries(NEEDS)) {
     test(`the ${name} job holds the scopes its scripts call`, () => {
@@ -1689,7 +1822,8 @@ describe('workflows and ruleset', () => {
         if (!runsCandidate(j)) continue;
         candidate += 1;
         assert.deepEqual(events(wf), ['pull_request'], `${wf.file} ${id} runs the candidate's code on ${events(wf).join(', ')}`);
-        assert.match(String(j['runs-on']), /^ubuntu-[\w.]+$/, `${wf.file} ${id} runs the candidate's code on ${j['runs-on']}`);
+        // GitHub-hosted Ubuntu, or the repository variable GATE_PR_RUNNER with hosted Ubuntu as its default (test/gate-workflows.test.mjs).
+        assert.match(String(j['runs-on']), /^(ubuntu-[\w.]+|\$\{\{ fromJSON\(vars\.GATE_PR_RUNNER \|\| '"ubuntu-[\w.]+"'\) \}\})$/, `${wf.file} ${id} runs the candidate's code on ${j['runs-on']}`);
         assert.equal(j.environment, undefined, `${wf.file} ${id} runs the candidate's code in an environment`);
         assert.doesNotMatch(JSON.stringify(j), /secrets\./, `${wf.file} ${id} hands the candidate's code a secret`);
         assert.deepEqual(j.permissions ?? wf.permissions, { contents: 'read' }, `${wf.file} ${id} gives the candidate's code more than read`);

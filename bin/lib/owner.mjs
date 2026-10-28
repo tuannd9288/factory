@@ -13,6 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const FILES = {
   branches: join(here, '../rulesets/branches.json'),
   tags: join(here, '../rulesets/tags.json'),
+  claims: join(here, '../rulesets/claims.json'),
   bootstrap: join(here, '../rulesets/bootstrap.json'),
   gate: join(here, '../../kit/.gate/ruleset.json'),
 };
@@ -31,12 +32,13 @@ export function holds(want, have) {
 const sorted = (r) => ({ ...r, rules: [...(r.rules ?? [])].sort((a, b) => a.type.localeCompare(b.type)) });
 
 /** What the repository should hold: before the kit is on its default branch, a ruleset on every branch that refuses a
- * rewrite, one on every tag that refuses creation, update and deletion but for a repository admin, and a bootstrap one
- * on main that asks the Human to approve the last push; after, the kit's gate in place of the bootstrap one. */
+ * rewrite, one on every tag that refuses creation, update and deletion but for a repository admin, one on the claim refs
+ * (claim/<n>) that refuses deletion and rewrite for everyone, and a bootstrap one on main that asks the Human to approve
+ * the last push; after, the kit's gate in place of the bootstrap one. */
 export function wanted({ kitLanded, branch }) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
   return {
-    rulesets: [read(FILES.branches), read(FILES.tags), read(kitLanded ? FILES.gate : FILES.bootstrap)],
+    rulesets: [read(FILES.branches), read(FILES.tags), read(FILES.claims), read(kitLanded ? FILES.gate : FILES.bootstrap)],
     drop: kitLanded ? [read(FILES.bootstrap).name] : [],
     branch,
   };

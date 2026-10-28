@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Takes, releases or hands off a claim on an issue, or lists the claims; see .gate/bin/lib/claim.mjs.
+exec node "$(dirname "$0")/lib/claim.mjs" "$@"

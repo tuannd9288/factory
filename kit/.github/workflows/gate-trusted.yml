@@ -21,8 +21,11 @@
 #            reads the review's result annotation whatever the conclusion; a raise there, or in any review on this head,
 #            makes it label the pull request raised and tier-3 (`pull-requests: write`) and wait for an approval given
 #            after the raise; a result left absent fails it. After his approval the queue re-runs it alone, as a new
-#            attempt of the same run: the labels give tier 3, so no reviewer runs. It waits up to 70 minutes, so its
-#            timeout is 75.
+#            attempt of the same run: the labels give tier 3, so no reviewer runs. It waits up to GATE_REVIEW_WAIT, 6000 s
+#            (100 minutes), so its timeout is 105. The job timeouts follow the largest GATE_VERIFY_TIMEOUT (60 minutes,
+#            .gate/bin/verify-timeout --max): review 90 (its wait for verify and the reviewer's 30), verdict 100, tier 105. A
+#            pull request whose head is in another repository is refused by the first step of `review`, which is red, never
+#            skipped.
 # The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json). No required job here has
 # `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
 # review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
@@ -50,7 +53,7 @@ jobs:
     name: review
     runs-on: ubuntu-latest
     environment: reviewer
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       actions: read
       contents: read
@@ -58,6 +61,20 @@ jobs:
       issues: read
       pull-requests: read
     steps:
+      # First, before the checkout, the install and the step that reads the credential: a pull request whose head is in another
+      # repository (a fork) is refused, red. A job-level `if:` would show the job skipped, and a skipped required job counts as
+      # passing. An empty head (a deleted fork) is a refusal too: the test is "the same repository", not "another one". The
+      # result is the unavailable class `fork`, so `rounds` does not count it as a red head.
+      - name: Refuse a pull request from another repository
+        run: |
+          if [ -z "$HEAD_REPO" ] || [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "::notice title=review-result::unavailable: fork"
+            echo "review: this pull request's head is not in this repository (a fork, or a deleted one), so the reviewer, which holds a credential, does not run on it; open the branch in this repository"
+            exit 1
+          fi
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.id }}
+          BASE_REPO: ${{ github.event.pull_request.base.repo.id }}
       - name: Note when the job started
         run: echo "GATE_JOB_START=$(date +%s)" >>"$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,7 +108,7 @@ jobs:
         working-directory: trusted
         env:
           GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
-          GATE_JOB_MINUTES: '60'
+          GATE_JOB_MINUTES: '90'
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           BODY: ${{ github.event.pull_request.body }}
           GH_TOKEN: ${{ github.token }}
@@ -99,7 +116,7 @@ jobs:
   verdict:
     name: verdict
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 100
     permissions:
       actions: read
       contents: read
@@ -127,7 +144,7 @@ jobs:
   tier:
     name: tier
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 105
     permissions:
       actions: read
       checks: read
