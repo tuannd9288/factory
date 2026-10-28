@@ -139,4 +139,13 @@ describe('verify --only instructions', () => {
     }
     green(check());
   });
+
+  test('the Gate block names .gate/bin/claim, so a kit without it is red, and named', async () => {
+    put(await composed(rulebook(FIVE.E)));
+    const text = readFileSync(at('.gate/bin/claim'));
+    rmSync(at('.gate/bin/claim'));
+    red(check(), /\.gate\/bin\/claim is missing/);
+    writeFileSync(at('.gate/bin/claim'), text, { mode: 0o755 });
+    green(check());
+  });
 });
