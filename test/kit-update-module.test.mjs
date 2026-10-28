@@ -65,7 +65,7 @@ describe('bin/kit-update --module / --no-module', () => {
       assert.equal(out.code, 0, out.out);
       assert.match(out.out, /^kit-evidence: PASS$/m);
       assert.match(out.out, /^modules: demo$/m);
-      assert.deepEqual(changed(w, base), ['.gate/kit-files', 'scripts/demo-run', 'scripts/lib/demo.mjs', 'scripts/lib/more.mjs']);
+      assert.deepEqual(changed(w, base), ['.gate/kit-commit', '.gate/kit-files', 'scripts/demo-run', 'scripts/lib/demo.mjs', 'scripts/lib/more.mjs']);
       assert.equal(w.show('HEAD', 'scripts/lib/demo.mjs'), 'export const demo = 2;');
       assert.equal(w.show('HEAD', '.gate/modules'), 'demo');
       assert.match(out.out, /^updated \(.*\):\n {2}scripts\/lib\/demo\.mjs \(was [0-9a-f]{12}, module demo at factory/m);

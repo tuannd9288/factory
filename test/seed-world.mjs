@@ -1,7 +1,7 @@
 // A repository seeded like the scratch seed, parcel-notes: its own scripts/verify with a helper, its own hooks, and
 // a .claude/settings.json with its own deny lines; bin/onboard runs over it from a local bare origin. Nothing here
 // touches the network.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
@@ -33,13 +33,15 @@ export const EXECUTABLE = ['scripts/verify', '.githooks/pre-commit', '.githooks/
 
 /** The seed with `files` over it (a null value drops one), a bare origin, and `onboard(...args)` that runs bin/onboard
  * --no-pr over it with --own already given unless `own` is false. */
-export function seeded(files = {}, { own = true } = {}) {
+export function seeded(files = {}, { own = true, links = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'seed-world-'));
   const seed = join(dir, 'seed');
   mkdirSync(seed);
   git(seed, 'init', '-q', '-b', 'main');
   const all = { ...APP, ...SEED, ...files };
   write(seed, all);
+  // `links`: path -> target, for a seed that holds a symlink (a CLAUDE.md linked to AGENTS.md).
+  for (const [path, target] of Object.entries(links)) symlinkSync(target, join(seed, path));
   for (const path of EXECUTABLE) if (all[path] != null) chmodSync(join(seed, path), 0o755);
   commit(seed, {}, 'start');
   git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));

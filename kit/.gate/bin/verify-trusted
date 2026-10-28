@@ -28,8 +28,18 @@ work=$(mktemp -d) || exit 2
 trap 'git -C "$candidate" worktree prune >/dev/null 2>&1; rm -rf "$work"' EXIT
 status=0
 
+# 0. The candidate's instruction files, as git objects, while they are still the candidate's: the overlay below puts main's
+#    AGENTS.md, CLAUDE.md and .gate/ files over them, and every check after it sees main's copies. A block that differs
+#    from the base's passes only as a kit update the factory's own main vouches for (.gate/bin/lib/instructions.mjs).
+if ! node .gate/bin/lib/instructions.mjs objects --repo "$candidate" --base "$base" >"$work/instructions.out" 2>&1; then
+  status=1
+  echo "verify-trusted: the candidate's instruction files are not what the kit and the base allow:"
+  sed 's/^/  /' "$work/instructions.out"
+fi
+
 # 0. The pull request names its team, in a line of its own (prbody.mjs). With no body to read it fails: a candidate's own
-# gate.yml, which runs from the pull request, could drop the variable, so absence is never a pass.
+# gate.yml, which runs from the pull request, could drop the variable, so absence is never a pass. A red from this step or
+# the one above is a red; both run before the overlay.
 if [ -z "${GATE_BODY_FILE:-}" ]; then
   status=1
   echo 'verify-trusted: no pull request body was given, so the line "Team: <name>" cannot be read'

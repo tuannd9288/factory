@@ -9,63 +9,26 @@ import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
 
 import { world } from './world.mjs';
 
-
 const OWN = '## Layout\n\n`src/` holds the app.\n\n## Facts the code cannot tell\n\n- Ships on Fridays.\n';
-
 
 const blob = (repo, rev, path) => git(repo, 'rev-parse', `${rev}:${path}`).slice(0, 12);
 
 describe('bin/kit-update', () => {
-  test('on a repository that already holds the kit rendered, adds only .gate/pack and its inventory lines (#53)', () => {
-    const w = world();
-    try {
-      // What the first hand-made kit pull requests found: the rendered files are the kit's, and .gate/pack is missing.
-      const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8').split('\n').filter(Boolean);
-      w.repoCommit({ '.gate/pack': null, '.gate/kit-files': `${inventory.filter((l) => l !== '.gate/pack' && l !== '.gate/bin/lib/budget.mjs').join('\n')}\n` });
-      const base = git(w.repo, 'rev-parse', 'HEAD');
-      const before = w.state();
-      const sha7 = w.sha7();
-      const out = w.update(['app', '--no-pr']);
-      assert.equal(out.code, 0, out.out);
-      assert.match(out.out, /^kit-evidence: PASS$/m);
-      assert.match(out.out, /--no-pr/);
-      assert.equal(git(w.repo, 'rev-parse', '--abbrev-ref', 'HEAD'), `factory/kit-${sha7}`);
-      const changed = git(w.repo, 'diff', '--name-only', base, 'HEAD').split('\n');
-      assert.deepEqual(changed, ['.gate/kit-files', '.gate/pack']);
-      assert.deepEqual(git(w.repo, 'diff', '-U0', base, 'HEAD', '--', '.gate/kit-files').split('\n').filter((l) => /^[+-][^+-]/.test(l)), ['+.gate/bin/lib/budget.mjs', '+.gate/pack']);
-      assert.equal(w.show('HEAD', '.gate/pack'), 'pstack');
-      assert.equal(git(w.repo, 'log', '-1', '--format=%s'), `Bring the kit up to factory main ${sha7}`);
-      assert.match(git(w.repo, 'log', '-1', '--format=%b'), new RegExp(git(w.fac, 'rev-parse', 'HEAD')));
-      // The three rendered files are reported as rendered, and none as kept or replaced.
-      assert.match(out.out, /^ {2}AGENTS\.md:1: /m);
-      assert.match(out.out, /^replaced \(the repository's own at the base, now the kit's\):\n {2}none$/m);
-      assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}none$/m);
-      // --no-pr: nothing pushed, and gh was never asked anything.
-      assert.deepEqual(w.state().remote, before.remote);
-      assert.deepEqual(w.calls(), []);
-    } finally {
-      w.cleanup();
-    }
-  });
 
   test('replaces a stale kit file, adds a missing one, keeps and names the repository\'s own, removes a dropped one, and opens the pull request', () => {
     const w = world({ kit: { 'kit/.gate/old-a.txt': 'old a\n', 'kit/.gate/old-b.txt': 'old b\n' } });
     try {
-      // The repository's own changes at the base: a file it fills in, a dropped kit file it edited, the Layout and Facts
-      // of its AGENTS.md, and a kit file it lacks.
-      writeFileSync(join(w.dir, 'own.md'), OWN);
-      assert.equal(run(w.repo, 'node', [join(w.fac, 'bin/lib/own.mjs'), 'fill', join(w.dir, 'own.md'), join(w.repo, 'AGENTS.md')]).code, 0);
+      // The repository's own changes at the base: a file it fills in, a dropped kit file it edited, and a kit file it lacks.
       w.repoCommit({ '.gate/config.sh': `${readFileSync(join(w.repo, '.gate/config.sh'), 'utf8')}# ours\n`, '.gate/old-b.txt': 'ours b\n', '.github/pull_request_template.md': null });
       const base = git(w.repo, 'rev-parse', 'HEAD');
       const promptWas = blob(w.repo, base, '.gate/bin/lib/reviewer-prompt.md');
       const codeownersWas = blob(w.repo, base, '.github/CODEOWNERS');
-      const agentsWas = blob(w.repo, base, 'AGENTS.md');
       // The factory moves on: a changed file, a changed rendered file, a changed AGENTS.md, a new file, two dropped.
       const kitFile = (p) => readFileSync(join(w.fac, p), 'utf8');
       w.facCommit({
         'kit/.gate/bin/lib/reviewer-prompt.md': `${kitFile('kit/.gate/bin/lib/reviewer-prompt.md')}\nA new line.\n`,
         'kit/.github/CODEOWNERS': `/docs/ @OWNER\n${kitFile('kit/.github/CODEOWNERS')}`,
-        'kit/AGENTS.md': kitFile('kit/AGENTS.md').replace('\n## What the Human keeps', '\nKit marker line.\n\n## What the Human keeps'),
+        'kit/.gate/gate-section.md': kitFile('kit/.gate/gate-section.md').replace('gate-section-v1', 'gate-section-v2'),
         'kit/.gate/new-c.txt': 'new c\n',
         'kit/.gate/old-a.txt': null,
         'kit/.gate/old-b.txt': null,
@@ -86,13 +49,11 @@ describe('bin/kit-update', () => {
       assert.equal(w.show(rev, '.gate/old-b.txt'), 'ours b');
       // The repository's own change to a file the kit does not replace is kept.
       assert.match(w.show(rev, '.gate/config.sh'), /# ours$/);
-      // Rendered files: CODEOWNERS and AGENTS.md come up to date, and AGENTS.md keeps the repository's own parts.
+      // CODEOWNERS comes up to date, and AGENTS.md has the new block and the repository's own text as it was.
       assert.match(w.show(rev, '.github/CODEOWNERS'), /^\/docs\/ @tuannd9288$/m);
-      assert.match(w.show(rev, 'AGENTS.md'), /^Kit marker line\.$/m);
-      assert.match(w.show(rev, 'AGENTS.md'), /^`src\/` holds the app\.$/m);
-      assert.match(w.show(rev, 'AGENTS.md'), /^- Ships on Fridays\.$/m);
+      assert.match(w.show(rev, 'AGENTS.md'), /Gate marker: gate-section-v2/);
       const inventory = w.show(rev, '.gate/kit-files').split('\n');
-      assert.ok(inventory.includes('.gate/new-c.txt') && inventory.includes('.gate/pack'));
+      assert.ok(inventory.includes('.gate/new-c.txt') && inventory.includes('.gate/kit-commit'));
       assert.ok(!inventory.includes('.gate/old-a.txt') && !inventory.includes('.gate/old-b.txt'));
       // The evidence, in the output and in the body.
       const text = readFileSync(w.body, 'utf8');
@@ -100,7 +61,6 @@ describe('bin/kit-update', () => {
         assert.match(seen, /^kit-evidence: PASS$/m);
         assert.match(seen, new RegExp(`^ {2}.gate/bin/lib/reviewer-prompt\\.md \\(was ${promptWas}, kit at factory ${sha7}\\)$`, 'm'));
         assert.match(seen, new RegExp(`^ {2}\\.github/CODEOWNERS \\(was ${codeownersWas}, kit at factory ${sha7}\\)$`, 'm'));
-        assert.match(seen, new RegExp(`^ {2}AGENTS\\.md \\(was ${agentsWas}, kit at factory ${sha7}\\)$`, 'm'));
         assert.match(seen, /^kept \(the repository's own, unchanged\):\n(?: {2}.*\n)* {2}\.gate\/config\.sh$/m);
         assert.match(seen, /^removed \(.*\):\n {2}\.gate\/old-a\.txt \(was [0-9a-f]{12}, no longer in the kit at factory /m);
       }
@@ -110,7 +70,7 @@ describe('bin/kit-update', () => {
       assert.match(git(w.repo, 'log', '-1', '--format=%b', rev), new RegExp(full));
       assert.equal(readFileSync(w.title, 'utf8'), `Bring the kit up to factory main ${sha7}`);
       const lines = text.split('\n');
-      assert.match(lines[0], /: 2 files added, 3 updated, 1 removed;/);
+      assert.match(lines[0], /: 2 files added, 5 updated, 1 removed;/);
       assert.deepEqual(lines.slice(0, 3).map((l) => l.split(':**')[0]), ['**What changed', '**Effect', '**Evidence']);
       // A blank line between, or the rule would turn the third line into a heading.
       assert.deepEqual(lines.slice(3, 5), ['', '---']);
@@ -300,11 +260,10 @@ describe('bin/kit-update, after review', () => {
     try {
       const settings = JSON.parse(readFileSync(join(w.repo, '.claude/settings.json'), 'utf8'));
       settings.permissions.deny.push('Read(./secrets/**)');
-      writeFileSync(join(w.dir, 'own.md'), '## Layout\n\n```text\nsrc/\n```\n\n## Facts the code cannot tell\n\n- Ships on Fridays.\n');
-      assert.equal(run(w.repo, 'node', [join(w.fac, 'bin/lib/own.mjs'), 'fill', join(w.dir, 'own.md'), join(w.repo, 'AGENTS.md')]).code, 0);
       w.repoCommit({ '.claude/settings.json': `${JSON.stringify(settings, null, 2)}\n` });
       touch(w);
-      w.facCommit({ 'kit/.gate/old-a.txt': null, 'kit/.gate/new-d.txt': 'new d\n' });
+      // A CODEOWNERS line with a fence in it comes into the evidence as a rendered line, so the evidence holds a fence.
+      w.facCommit({ 'kit/.gate/old-a.txt': null, 'kit/.gate/new-d.txt': 'new d\n', 'kit/.github/CODEOWNERS': `/docs/ @OWNER # a \`\`\` fence\n${readFileSync(join(w.fac, 'kit/.github/CODEOWNERS'), 'utf8')}` });
       const out = w.update(['app']);
       assert.equal(out.code, 0, out.out);
       const body = readFileSync(w.body, 'utf8');
@@ -313,11 +272,11 @@ describe('bin/kit-update, after review', () => {
       const team = run(w.dir, process.execPath, [join(factory, 'kit/.gate/bin/lib/prbody.mjs'), '--team', w.body]);
       assert.equal(team.code, 0, team.out);
       assert.match(body, /^Issue: none$/m);
-      assert.match(lines[0], /: 1 file added, 1 updated, 1 removed;/);
+      assert.match(lines[0], /: 1 file added, 3 updated, 1 removed;/);
       // The file already holds every deny line the kit has, so it is merged to itself: nothing says it is kept.
       assert.doesNotMatch(lines.slice(0, 3).join('\n'), /`\.claude\/settings\.json`[^\n]*is its own, so it is kept/);
       assert.ok(JSON.parse(w.show(`factory/kit-${w.sha7()}`, '.claude/settings.json')).permissions.deny.includes('Read(./secrets/**)'));
-      assert.equal(lines.filter((l) => /^```(?!`)/.test(l)).length, 0, 'a 3-backtick fence opens the evidence');
+      assert.deepEqual(lines.filter((l) => /^```(?!`)/.test(l)), [], 'a 3-backtick fence opens the evidence');
       assert.equal(lines.filter((l) => l === '````text').length, 1);
       assert.equal(lines.filter((l) => l === '````').length, 1);
       assert.ok(lines.includes('Removed (the kit dropped them; the repository held a past kit version unchanged):'), lines.join('\n'));
@@ -326,46 +285,18 @@ describe('bin/kit-update, after review', () => {
     }
   });
 
-  test('says a merge by hand is needed when an older AGENTS.md has no Layout section', () => {
-    const real = readFileSync(join(factory, 'kit/AGENTS.md'), 'utf8');
-    const w = world({ kit: { 'kit/AGENTS.md': `${real.split('\n## Layout')[0]}\n` } });
-    try {
-      w.facCommit({ 'kit/AGENTS.md': real });
-      const before = w.state();
-      const out = w.update(['app', '--no-pr']);
-      assert.equal(out.code, 2, out.out);
-      assert.match(out.out, /AGENTS\.md.*## Layout.*by hand|by hand.*AGENTS\.md/s);
-      assert.match(out.out, /nothing done/);
-      assert.deepEqual(w.state(), before);
-    } finally {
-      w.cleanup();
-    }
-  });
 
-  test('takes a settings.json equal to the raw kit blob, and an AGENTS.md without the pack\'s section, as the repository\'s own; reads inventory paths literally', () => {
+  test('takes a settings.json equal to the raw kit blob as the repository\'s own; reads inventory paths literally', () => {
     const w = world();
     try {
       touch(w);
-      const section = readFileSync(join(w.fac, 'packs/pstack/AGENTS.md'), 'utf8').replace(/\n+$/, '');
-      const agents = readFileSync(join(w.repo, 'AGENTS.md'), 'utf8');
-      assert.ok(agents.includes(`${section}\n\n`));
-      w.repoCommit({ 'AGENTS.md': agents.replace(`${section}\n\n`, '') });
-      let before = w.state();
-      let out = w.update(['app', '--no-pr']);
-      assert.equal(out.code, 2, out.out);
-      assert.match(out.out, /AGENTS\.md/);
-      assert.match(out.out, /nothing done/);
-      assert.deepEqual(w.state(), before);
-      git(w.repo, 'revert', '--no-edit', 'HEAD');
-      git(w.repo, 'push', '-q', 'origin', 'main');
-      // The pack's keys are out of settings.json, which then equals the kit's raw blob; and the repository lists a file
-      // by a name that globs onto a kit file.
+      // The repository's settings.json equals the kit's raw blob; and it lists a file by a name that globs onto a kit file.
       const raw = readFileSync(join(w.fac, 'kit/.claude/settings.json'), 'utf8');
       const config = readFileSync(join(w.repo, '.gate/config.sh'), 'utf8');
       const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8');
       w.repoCommit({ '.claude/settings.json': raw, '.gate/config?sh': config, '.gate/kit-files': `${inventory}.gate/config?sh\n` });
-      before = w.state();
-      out = w.update(['app', '--no-pr']);
+      const before = w.state();
+      const out = w.update(['app', '--no-pr']);
       assert.equal(out.code, 0, out.out);
       assert.equal(w.show('HEAD', '.claude/settings.json'), raw.trim());
       assert.match(out.out, /^merged \(.*\):\n {2}\.claude\/settings\.json$/m);

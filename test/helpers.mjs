@@ -7,9 +7,17 @@ import { fileURLToPath } from 'node:url';
 
 export const factory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Commits made by the tests name a throwaway author and run no hooks unless a test asks for them.
+// Commits made by the tests name a throwaway author and run no hooks unless a test asks for them. They also start no
+// background gc or maintenance: git's own default starts one detached after a commit, and it can write into a test's
+// folder (objects/info/packs) while the test removes it, which fails the removal with ENOTEMPTY.
 export const quiet = {
-  GIT_CONFIG_COUNT: '3',
+  GIT_CONFIG_COUNT: '6',
+  GIT_CONFIG_KEY_3: 'gc.auto',
+  GIT_CONFIG_VALUE_3: '0',
+  GIT_CONFIG_KEY_4: 'gc.autoDetach',
+  GIT_CONFIG_VALUE_4: 'false',
+  GIT_CONFIG_KEY_5: 'maintenance.auto',
+  GIT_CONFIG_VALUE_5: 'false',
   GIT_CONFIG_KEY_0: 'user.name',
   GIT_CONFIG_VALUE_0: 'test',
   GIT_CONFIG_KEY_1: 'user.email',

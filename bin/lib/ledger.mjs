@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
-import { coverage } from '../../kit/scripts/lib/verdict.mjs';
+import { coverage } from '../../packs/pstack/scripts/lib/verdict.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));

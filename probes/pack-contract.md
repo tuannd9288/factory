@@ -26,7 +26,7 @@ after every item passes, with the Claude Code version and the date in `probes/re
 
 ## S2, pull requests
 
-The pack follows `kit/AGENTS.md` § How a change lands: one branch per task, an issue labelled `task`, `Closes #<n>`, a
+The pack follows the Gate block (`kit/.gate/gate-section.md`): one branch per task, an issue labelled `task`, `Closes #<n>`, a
 `Failing-test:` trailer where a source change needs one, no rewrite of a pushed commit, and a merge commit through
 auto-merge after a live PASS. The probe's session opens a pull request that adds a function to `src/math.js` with its test first (two commits), and the gate judges it; the clauses
 the gate cannot see stay with the checks that already carry them.
