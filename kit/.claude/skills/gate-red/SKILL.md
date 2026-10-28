@@ -1,6 +1,6 @@
 ---
 name: gate-red
-description: Use when a pull request's check is red or pending (`verify`, `review`, `verdict` or `tier`), when `tier` says `review is red; tier follows it` or waits for the Human's approval, when the reviewer's finding looks wrong, or when a push would be the third round. Says how the four checks decide, which jobs to re-run, how to fix or dispute a blocking finding, and when `rounds` hands the pull request to the Human. Not for writing the change or for the local `verify`.
+description: Use when a pull request's check is red or pending (`verify`, `review`, `verdict` or `tier`), when `tier` says `review is red; tier follows it` or waits for the Human's approval, when a check names the body's `Team:`, `Issue:` or `Claim:` line, when the reviewer's finding looks wrong, or when a push would be the third round. Says how the four checks decide, which jobs to re-run, how to fix or dispute a blocking finding, and when `rounds` hands the pull request to the Human. Not for writing the change or for the local `verify`.
 compatibility: Claude Code in a factory repository; the gate's checks run on GitHub Actions.
 ---
 
@@ -24,6 +24,15 @@ approval holds while the patch is unchanged, as when the queue merges `main` in;
 
 - `review is red; tier follows it`: this is not his wait. Re-run the failed jobs, never `review` alone.
 - A `tier` that waits for his approval is his wait. Never re-run it; the queue re-runs it after he approves.
+- A `tier` red on the claim (the body has no `Claim:` line, or it is not the tip of `claim/<n>`): take the issue with
+  `.gate/bin/claim <n> <team>`, which prints the `Claim:` line, or ask the holder to run
+  `.gate/bin/claim --handoff <n> <holder> <team>`. Only the holder or the Human releases a claim; the ref is never deleted.
+
+## The body's lines
+
+`verify` needs one line `Team: <name>`; editing the body runs the checks again. `tier` reads `Issue: #<n>` (or
+`Issue: none`) and `Claim: <sha>`. `Session:` and `Cost:` only inform. A pull request from a fork gets a red `review` by
+design: push the branch to this repository.
 
 ## A blocking finding
 
