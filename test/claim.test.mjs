@@ -293,3 +293,92 @@ describe('.gate/bin/claim', () => {
     assert.equal(git(work, 'status', '--porcelain'), '');
   });
 });
+
+// git matches an ls-remote pattern against the tail of a ref name, so refs/heads/claim/7 also matches the branch
+// a/refs/heads/claim/7, which sorts before it; so does refs/heads/main. The claim ref and main are read by their exact names.
+describe('a look-alike branch is not the claim ref or main', () => {
+  let dir;
+  let origin;
+  let work;
+  let other;
+  let fake;
+  let real;
+  let hostile;
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), 'claim-lookalike-'));
+    origin = join(dir, 'origin.git');
+    fake = join(dir, 'fake');
+    mkdirSync(join(fake, 'bin'), { recursive: true });
+    writeFileSync(join(fake, 'base-gh'), FAKE_GH);
+    writeFileSync(join(fake, 'bin/gh'), '#!/bin/sh\ncase "$1 $2" in\n  "pr view") cat "$FAKE/prview.json" ;;\n  *) exec "$FAKE/base-gh" "$@" ;;\nesac\n');
+    chmodSync(join(fake, 'base-gh'), 0o755);
+    chmodSync(join(fake, 'bin/gh'), 0o755);
+    writeFileSync(join(fake, 'gh-calls'), '');
+    const seed = join(dir, 'seed');
+    mkdirSync(seed);
+    git(seed, 'init', '-q', '-b', 'main');
+    commit(seed, { 'README.md': '# app\n' }, 'start');
+    git(dir, 'clone', '-q', '--bare', seed, origin);
+    work = join(dir, 'work');
+    other = join(dir, 'other');
+    git(dir, 'clone', '-q', origin, work);
+    git(dir, 'clone', '-q', origin, other);
+    // The real claim on 7 is team-x's; the look-alikes are team-y's claim on 7, a claim on 9 that nobody made, and a main.
+    const claim = (...args) => run(work, CLAIM, args, { ...quiet, PATH: `${join(fake, 'bin')}:${process.env.PATH}`, FAKE: fake });
+    assert.equal(claim('7', 'team-x').code, 0);
+    real = git(origin, 'rev-parse', 'refs/heads/claim/7');
+    git(other, 'fetch', '-q', 'origin');
+    const forge = (ref, subject) => {
+      const sha = git(other, 'commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', subject);
+      git(other, 'push', '-q', 'origin', `${sha}:refs/heads/${ref}`);
+      return sha;
+    };
+    hostile = forge('a/refs/heads/claim/7', 'claim 7 team-y');
+    forge('a/refs/heads/claim/9', 'claim 9 team-y');
+    forge('a/refs/heads/main', 'a main that is not main');
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const claim = (...args) => run(work, CLAIM, args, { ...quiet, PATH: `${join(fake, 'bin')}:${process.env.PATH}`, FAKE: fake });
+  const body = (text) => writeFileSync(join(fake, 'prview.json'), JSON.stringify({ body: text, closingIssuesReferences: [] }));
+  const tipOn = (ref) => git(origin, 'rev-parse', `refs/heads/${ref}`);
+
+  test('git does sort the look-alike first, so this world can tell the two apart', () => {
+    const lines = git(work, 'ls-remote', 'origin', 'refs/heads/claim/7').split('\n');
+    assert.equal(lines.length, 2, lines.join('\n'));
+    assert.match(lines[0], /refs\/heads\/a\/refs\/heads\/claim\/7$/);
+  });
+
+  test('take reads the real claim: a second team is refused naming team-x, not the look-alike\'s team-y', () => {
+    const r = claim('7', 'team-z');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /team-x/);
+    assert.doesNotMatch(r.out, /team-y/);
+  });
+
+  test('take with no real claim is not refused because a look-alike exists', () => {
+    const r = claim('9', 'team-x');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(git(origin, 'log', '-1', '--format=%s', tipOn('claim/9')), 'claim 9 team-x');
+  });
+
+  test('a first claim is made on main itself, not on a branch whose name ends in refs/heads/main', () => {
+    const r = claim('8', 'team-x');
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(git(origin, 'log', '-1', '--format=%P', tipOn('claim/8')).split(' '), [tipOn('main')]);
+  });
+
+  test('--list shows the real claim on 7', () => {
+    const row = claim('--list').out.trim().split('\n').map((l) => l.split('\t')).find((r) => r[0] === '7');
+    assert.deepEqual(row.slice(1, 4), ['claimed', 'team-x', real.slice(0, 7)]);
+  });
+
+  test('check reads the real claim: its sha passes and the look-alike\'s is not the claim', () => {
+    body(`Issue: #7\nClaim: ${real}\n`);
+    const ok = claim('check', '--repo', 'o/app', '--pr', '7');
+    assert.equal(ok.code, 0, ok.out);
+    body(`Issue: #7\nClaim: ${hostile}\n`);
+    const bad = claim('check', '--repo', 'o/app', '--pr', '7');
+    assert.equal(bad.code, 1, bad.out);
+    assert.match(bad.out, /team-x/);
+  });
+});
