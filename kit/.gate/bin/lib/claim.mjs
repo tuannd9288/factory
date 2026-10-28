@@ -82,7 +82,7 @@ const commitOn = (parent, subject) => gitOut('commit-tree', `${parent}^{tree}`, 
 const push = (n, sha) => git('push', '--quiet', 'origin', `${sha}:${refOf(n)}`).status === 0;
 
 const refuseHeld = (n, tip) => {
-  if (tip.state === 'invalid') return new Stop(`claim: ${refOf(n)} holds a commit no form of claim wrote ("${oneLine(tip.subject)}", ${short(tip.sha)}); the Human decides`);
+  if (tip.state === 'invalid') return new Stop(`claim: ${refOf(n)} holds a commit no form of claim wrote ("${oneLine(tip.subject)}", ${short(tip.sha)}); the Human decides, and clears it with .gate/bin/claim --release ${n} --human`);
   return new Stop(`claim: #${n} is held by ${tip.team} (${short(tip.sha)}, ${tip.date})`);
 };
 
@@ -119,7 +119,15 @@ function isAdmin() {
   return ghJson('repo', 'view', '--json', 'viewerPermission')?.viewerPermission === 'ADMIN';
 }
 
-function authorize(n, tip, who) {
+/** Whether who may move claim n: the holder, or the Human (--human, admin rights). Only a release by the Human may clear a tip
+ * that no form of claim wrote (invalidOk); no team may, and a handoff of it is refused. */
+function authorize(n, tip, who, { invalidOk = false } = {}) {
+  const stray = tip.sha && tip.state === 'invalid';
+  if (stray && invalidOk && who === '--human') {
+    if (!isAdmin()) throw new Stop(`claim: --human needs admin rights on this repository; only the Human clears a tip no form of claim wrote on #${n}`);
+    return;
+  }
+  if (stray) throw new Stop(`claim: ${refOf(n)} holds a commit no form of claim wrote; the Human clears it with .gate/bin/claim --release ${n} --human`);
   if (!tip.sha || (tip.state !== 'claimed' && tip.state !== 'handed-off')) throw new Stop(`claim: #${n} is held by no one`);
   if (who === '--human') {
     if (!isAdmin()) throw new Stop(`claim: --human needs admin rights on this repository; only the holder (${tip.team}) or the Human releases #${n}`);
@@ -203,6 +211,7 @@ export function check(repo, pr) {
   const tip = tipOf(n, JOB_NET);
   if (!tip.sha) throw red(`there is no claim on #${n}; run .gate/bin/claim ${n} <team>`);
   if (tip.sha !== line.sha) throw red(`Claim: ${short(line.sha)} is not the claim on #${n}: ${refOf(n)} is at ${short(tip.sha)}, "${oneLine(tip.subject)}"`);
+  if (tip.state === 'invalid') throw red(`${refOf(n)} holds a commit no form of claim wrote ("${oneLine(tip.subject)}"), so there is no claim on #${n}; the Human decides`);
   if (tip.state !== 'claimed' && tip.state !== 'handed-off') throw red(`the claim on #${n} was released ("${oneLine(tip.subject)}")`);
   console.log(`tier: claim: #${n} is held by ${tip.team} at ${short(tip.sha)}`);
 }
@@ -226,7 +235,7 @@ export function main(argv) {
     const n = number(rest[0]);
     const who = rest[1] === '--human' ? rest[1] : team(rest[1]);
     const tip = tipOf(n);
-    authorize(n, tip, who);
+    authorize(n, tip, who, { invalidOk: true });
     return move(n, tip, `release ${n}`, `release: ${who === '--human' ? 'the Human' : who} released #${n}`);
   }
   if (first === '--handoff' && rest.length === 3) {
