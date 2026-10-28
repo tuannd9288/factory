@@ -6,6 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory, run } from './helpers.mjs';
+import { issue, team } from '../kit/.gate/bin/lib/prbody.mjs';
 
 const probes = join(factory, 'probes');
 const read = (name) => (existsSync(join(probes, name)) ? readFileSync(join(probes, name), 'utf8') : '');
@@ -15,6 +16,24 @@ test('the driver scripts parse', () => {
     const text = read(name);
     assert.ok(text, `probes/${name} is missing`);
     assert.equal(spawnSync('bash', ['-n', join(probes, name)]).status, 0, `probes/${name} does not parse`);
+  }
+});
+
+// #134 item 3: on the kit since #133 a pull request names its team (verify reads Team:) and its issue (tier reads Issue:).
+// A probe works on no issue, so it takes no claim; the kit's own parser reads the body probe_open sends.
+test('probe_open sends a body with "Team: probe" and "Issue: none", as the kit reads them', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'probe-open-'));
+  try {
+    const out = join(dir, 'body');
+    const script = `PROBE_REPO=o/scratch PROBE_HOME=${JSON.stringify(dir)}; source ${JSON.stringify(join(probes, 'drive.sh'))}
+git() { :; }; gh() { printf '%s' "\${@: -1}" >${JSON.stringify(out)}; }; probe_open probe/c1 'A title' 'What the change does.'`;
+    const r = spawnSync('bash', ['-c', script], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const body = readFileSync(out, 'utf8');
+    assert.deepEqual(team(body), { ok: true, value: 'probe' });
+    assert.deepEqual(issue(body), { ok: true, kind: 'none' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
