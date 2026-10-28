@@ -1,10 +1,16 @@
 # Rules that code enforces
 
-The rows of `AGENTS.md`'s table that a program refuses or flags. The gate's reviewer reads this file from `main` with
-`AGENTS.md`. A path here is tier 3.
+The rules a program refuses or flags, or that the reviewer judges, in the detail the Gate block of `AGENTS.md` leaves out.
+The gate's reviewer reads this file from `main` with `AGENTS.md`. A path here is tier 3. A rule with no enforcer goes here
+as `prose` and gets one, or is deleted, within 30 days.
 
 | Rule | Enforced by |
 |---|---|
+| `AGENTS.md` has the kit's Gate block at its start (after an optional title line), is at most 150 lines and 32 KiB, and `CLAUDE.md` starts with the line `@AGENTS.md` or is a relative symlink to it | `.gate/bin/verify` (`instructions`); `.gate/bin/verify-trusted` reads the candidate's git objects, and a changed block passes only as a kit update the factory's `main` vouches for |
+| Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
+| No rewrite of a pushed commit (rebase, amend) and no force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`), and `.claude/settings.json` deny rules |
+| Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
+| Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or `AGENTS.md`, and review reads it | the reviewer |
 | Checks green on the exact head commit before merge | ruleset: `verify`, `review`, `verdict`, `tier` pinned to GitHub Actions, branch up to date |
 | No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `.gate/bin/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
 | A new test fails at the base and passes at the head | `red-check`, inside `verify` |
@@ -14,9 +20,38 @@ The rows of `AGENTS.md`'s table that a program refuses or flags. The gate's revi
 | Tier-3 paths are one list, and CODEOWNERS ends with exactly it | `.gate/protected`; `verify` (`policy`) |
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
 | Commit subject present, at most 72 characters, never `wip`, a placeholder, `fixup!` or `squash!` | `verify` (`subjects`, every commit of the change); `.gate/hooks/commit-msg` is the local copy |
-| Auto-merge only on a base of `main`; a pull request opens only after a local pass; a tier 3 is armed, then stops until the Human approves; `needs-human` stops before arming | `scripts/ship`, on the stamps a full `verify` and `red-check` leave; a push is never refused |
-| Auto-merge armed only while a live PASS or PASS+NOTES covers the head or its patch; disarmed on the next `ship` once a patch moved past its verdict | `scripts/ship`, on `scripts/live-verify --covered`; the ledger lists each merged pull request no verdict covered |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
 | Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through |
 | No `--no-verify`, tags, releases; no reads of `.env` or of the Human's own Claude Code and Cursor profiles (`~/.claude*`, `~/.cursor/`), whose transcripts are his, or of the verifier's Codex profile, which holds its login | `.claude/settings.json` deny rules, in Claude Code only; for tags, and for a release that would create one, also the ruleset `factory-tags`; a draft is not refused |
 | A candidate's code runs only in `gate.yml`'s `verify`: on `pull_request`, which cannot write `main`'s Actions cache, never under `pull_request_target`; on a GitHub-hosted runner, never on a self-hosted one that also runs `main`'s or a deploy's jobs; with no secret and a read-only token | the factory's tests check the kit's workflows. A pull request that changes `gate.yml` runs its own copy for its `verify`; it is tier 3, and the Human reads that file before approving |
+
+## Commands
+
+| Command | Healthy output |
+|---|---|
+| `.gate/bin/setup` | `setup: hooks from .gate/hooks` |
+| `.gate/bin/verify` | `verify: 6 passed in 12s` (prints only failures and this line) |
+| `.gate/bin/verify --fast` | `verify: 2 passed in 1s` (the pre-commit hook runs it) |
+| `.gate/bin/verify --tests <files>` | `verify: 1 passed in 2s`; JUnit in `.gate/report.xml` |
+| `.gate/bin/tier` | `tier 1` (2: load-bearing path or dependency; 3: a path in `.gate/protected`, or label `needs-human`) |
+| `.gate/bin/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
+| `.gate/bin/prove-check --all` | `prove-check: 7 checks fail on their fixtures` |
+
+Push as often as you like; CI runs `main`'s copies of `verify` and `red-check` on your change, as the one check `verify`.
+Before writing, run `.gate/bin/tier` on the files you expect to touch. Tier 2 or 3: commit the failing test first, alone, with
+the trailer `Failing-test: <test command>`; later commits never edit those test lines.
+
+`red-check` lays the new or changed tests onto the base commit and requires them to fail there as tests, not as load errors.
+A new name in an existing module: import the module (`import * as m from`), not the missing name. A new file: load it inside
+the test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR body:
+`No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
+
+## Exceptions
+
+A block finding that is wrong for one line is allowed on that line only, in a comment:
+`gate-allow <rule-id>: <why, 20 characters or more>`; `.gate/bin/rules` prints that line, with the id, under a block.
+The reviewer sees the line in the diff and judges it.
+A deleted test file or lost assertions need one added line naming the test kept in their place and a break that
+turns it red: `gate-allow test-deleted: <path>; kept: <test file> "<test name>"; red: <source file> "<from>" -> "<to>"`
+(or `assertions-removed`; JSON strings). `red-check` needs the kept test red under the break and green without it,
+for the failing test above; the change is tier 2, and the reviewer judges whether the kept test covers what went.

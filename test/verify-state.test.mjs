@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commit, factory, git } from './helpers.mjs';
 
+const GOOD_SECTION = '<!-- factory:gate:begin -->\n## Gate\n<!-- factory:gate:end -->\n';
 const FOLDERS = ['FACTORY_STATE', 'AGENT_PROFILES', 'FACTORY_ROOT'];
 
 // What bin/factory-queue, bin/onboard and the ledger would leave behind if a test let them use the folders they get.
@@ -28,7 +29,7 @@ function verify(tests, setup = null) {
   try {
     const copy = join(dir, 'factory');
     for (const [path, text] of Object.entries({
-      'kit/AGENTS.md': '# kit\n',
+      'kit/.gate/gate-section.md': GOOD_SECTION,
       '.github/workflows/verify.yml': 'name: verify\n',
       'kit/.github/workflows/gate.yml': 'name: gate\n',
       'test/ok.test.mjs': "import { test } from 'node:test';\ntest('passes', () => {});\n",
@@ -39,10 +40,12 @@ function verify(tests, setup = null) {
     }
     mkdirSync(join(copy, 'scripts'));
     copyFileSync(join(factory, 'scripts/verify'), join(copy, 'scripts/verify'));
-    // The line cap on the composed AGENTS.md runs bin/lib/pack.mjs, which reads the kit's AGENTS.md and imports own.mjs.
+    // The check of the kit's Gate block runs the library the kit's own verify runs.
+    mkdirSync(join(copy, 'kit/.gate/bin/lib'), { recursive: true });
+    copyFileSync(join(factory, 'kit/.gate/bin/lib/instructions.mjs'), join(copy, 'kit/.gate/bin/lib/instructions.mjs'));
     mkdirSync(join(copy, 'bin/lib'), { recursive: true });
     // The modules check (bin/lib/module.mjs) runs once a modules/ folder exists, and reads the kit tree through evidence.mjs, which imports adapter.mjs and settings.mjs.
-    for (const lib of ['pack.mjs', 'own.mjs', 'module.mjs', 'evidence.mjs', 'adapter.mjs', 'settings.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
+    for (const lib of ['module.mjs', 'evidence.mjs', 'legacy.mjs', 'adapter.mjs', 'settings.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
     const caller = Object.fromEntries(FOLDERS.map((name) => [name, join(dir, 'caller', name)]));
     for (const path of Object.values(caller)) mkdirSync(path, { recursive: true });
     const { NODE_TEST_CONTEXT, GATE_BASE, GITHUB_EVENT_NAME, ...outer } = process.env;
@@ -136,12 +139,12 @@ test('scripts/verify checks the modules together: two that lay one path fail the
   assert.equal(verify({ 'modules/a/kit/x.txt': 'a\n', 'modules/b/kit/y.txt': 'b\n' }).code, 0, 'modules that lay different paths pass');
 });
 
-test('scripts/verify fails a composed AGENTS.md of more than 150 lines, and passes one of exactly 150', () => {
-  const agents = (n) => `# kit\n${'x\n'.repeat(n - 1)}`;
-  const r = verify({ 'kit/AGENTS.md': agents(151) });
+test('scripts/verify fails a kit Gate block over its budget of 26 lines, and passes one of exactly 26', () => {
+  const block = (n) => `<!-- factory:gate:begin -->\n${'x\n'.repeat(n - 2)}<!-- factory:gate:end -->\n`;
+  const r = verify({ 'kit/.gate/gate-section.md': block(27) });
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /^verify: the AGENTS.md of pack none has 151 lines; at most 150$/m);
-  assert.equal(verify({ 'kit/AGENTS.md': agents(150) }).code, 0);
+  assert.match(r.out, /^verify: kit\/\.gate\/gate-section\.md: .*27 lines/m);
+  assert.equal(verify({ 'kit/.gate/gate-section.md': block(26) }).code, 0);
 });
 
 test('scripts/verify checks the subject of every commit since GATE_BASE: a bad one fails the run, a good one passes', () => {

@@ -4,18 +4,19 @@
 # <sha7>" from the branch factory/kit-<sha7>.
 #   bin/kit-update <repo-url|name> [--no-pr] [--module <name>]... [--no-module <name>]...
 # From a fresh branch off origin/main, for every path of kit/ at this clone's HEAD (bin/lib/kitupdate.mjs):
-#   - the rendered files (AGENTS.md, CODEOWNERS) are rendered as onboard does; AGENTS.md keeps the two sections of the
-#     repository's own that the base carries, and uses the pack the base's .gate/pack names, else pstack;
+#   - the Gate block of AGENTS.md is replaced and nothing else of it: the repository's head and tail stay byte for byte; the
+#     old kit's composition gets the block in place of its head; a text it does not know, malformed markers, or a result over
+#     150 lines or 32 KiB stops it, to merge by hand. CLAUDE.md is left as it is. CODEOWNERS is rendered as onboard does;
 #   - a .claude/settings.json the repository has gets the kit's deny lines it lacks inserted as text, as onboard does;
 #   - a kit file the repository lacks is added; one it holds as an older kit had it is replaced by the kit's;
-#   - a kit file the repository changed is kept and named, but where the kit replaces whole (CLAUDE.md) or
-#     in AGENTS.md it is a conflict, and kit-update stops before it does anything; the repository's own scripts/ and
-#     .githooks/ are not the kit's and are never touched;
-#   - a file the base lists in .gate/kit-files that kit/ no longer has is removed when it is an older kit file, else kept.
+#   - a kit file the repository changed is kept and named; the repository's own scripts/ and .githooks/ are not the kit's
+#     and are never touched;
+#   - a file the base lists in .gate/kit-files that kit/ no longer has is removed when it is an older kit file, else kept;
+#   - .gate/kit-commit names the factory commit, which verify-trusted checks against the factory's main; the old .gate/pack goes.
 # --module turns a module on and --no-module off (modules/<name>/, bin/lib/module.mjs); with neither the base's
 # .gate/modules stands. A module's files are added, updated and removed like the kit's, but a file the repository changed
 # is a conflict and never kept, and turning a module off removes its files.
-# Then .gate/kit-files, .gate/pack and .gate/modules as onboard writes them, the repository's own .gate/bin/setup and .gate/bin/verify, the
+# Then .gate/kit-files and .gate/modules as onboard writes them, the repository's own .gate/bin/setup and .gate/bin/verify, the
 # commit, and bin/kit-evidence, which must pass. Without --no-pr it then creates the labels, pushes the branch and
 # opens the pull request. A failing verify or evidence leaves the branch committed and nothing pushed.
 # It refuses, doing nothing, when the clone is missing or dirty, origin/main has no .gate/kit-files or lists scripts/verify
@@ -57,7 +58,9 @@ if git -C "$factory" status --porcelain --ignored --untracked-files=all -- kit p
 fi
 kit_commit=$(git -C "$factory" rev-parse HEAD)
 sha7=${kit_commit:0:7}
-git -C "$factory" merge-base --is-ancestor "$kit_commit" refs/remotes/origin/main 2>/dev/null || refuse "the factory's commit $sha7 is not on its origin/main; push it first"
+# On the first-parent line of origin/main: a commit a merge brought in from a side branch is not one main recorded.
+first_parent=$(git -C "$factory" rev-list --first-parent refs/remotes/origin/main 2>/dev/null) || first_parent=""
+grep -Fxq "$kit_commit" <<<"$first_parent" || refuse "the factory's commit $sha7 is not on its origin/main (its first-parent line); push it first"
 branch=factory/kit-$sha7
 
 git -C "$dest" fetch --quiet origin main 2>/dev/null || refuse "could not fetch origin/main of $name"
@@ -89,18 +92,11 @@ else
 fi
 
 # A repository onboarded before the commands moved to .gate/bin has the kit's own scripts/verify among its kit files; what
-# the kit lays now does not fit on it, and its hooks and settings were the kit's: onboard it afresh. (.gate/pack is still
-# written, so it is no sign of the old layout.)
+# the kit lays now does not fit on it, and its hooks and settings were the kit's: onboard it afresh. (A .gate/pack is no sign
+# of the old layout: the old kit with the commands in .gate/bin wrote one, and its AGENTS.md is updated here.)
 if git -C "$dest" show origin/main:.gate/kit-files | grep -qx 'scripts/verify'; then
   refuse "$name has the old layout (scripts/verify is among its kit files); bin/kit-update brings a repository from the new layout to the new one: onboard it afresh"
 fi
-
-# The pack is the repository's own choice, else pstack, as in onboard.
-pack=pstack
-if git -C "$dest" cat-file -e origin/main:.gate/pack 2>/dev/null; then
-  pack=$(git -C "$dest" show origin/main:.gate/pack | head -n 1 | tr -d '[:space:]')
-fi
-why=$(node "$factory/bin/lib/pack.mjs" agents "$factory" "$pack" 2>&1 >/dev/null) || refuse ".gate/pack: $why"
 
 # The modules are the base's own, less --no-module and with --module; one the factory lacks is refused.
 lists=$(mktemp -d)
@@ -111,7 +107,7 @@ if [ -n "$modules" ]; then
   why=$(node "$factory/bin/lib/module.mjs" check "$factory" $modules 2>&1) || refuse "$why"
 fi
 modules_csv=$(printf '%s' "$modules" | paste -sd, -)
-args=(--factory "$factory" --commit "$kit_commit" --repo "$dest" --base origin/main --name "$name" --human "$human" --pack "$pack" --modules "$modules_csv")
+args=(--factory "$factory" --commit "$kit_commit" --repo "$dest" --base origin/main --name "$name" --human "$human" --modules "$modules_csv")
 if ! plan=$(node "$factory/bin/lib/kitupdate.mjs" plan "${args[@]}"); then
   printf '%s\n' "$plan"
   echo "kit-update: nothing done"
@@ -124,16 +120,15 @@ before=$(git rev-parse --abbrev-ref HEAD)
 before_sha=$(git rev-parse HEAD)
 git switch --quiet --no-track -c "$branch" origin/main
 node "$factory/bin/lib/kitupdate.mjs" lay "${args[@]}" --out "$lists"
-# .gate/pack, .gate/modules and .gate/kit-files, as onboard writes them: removed first, so a link the repository holds
-# there cannot take the write outside the clone.
-rm -f .gate/pack .gate/kit-files .gate/modules
-printf '%s\n' "$pack" >.gate/pack
+# .gate/modules and .gate/kit-files, as onboard writes them: removed first, so a link the repository holds there cannot
+# take the write outside the clone. (.gate/kit-commit and the removal of the old .gate/pack are in the plan, above.)
+rm -f .gate/kit-files .gate/modules
 [ -z "$modules" ] || printf '%s\n' "$modules" >.gate/modules
 {
   git -C "$factory" ls-tree -r --name-only "$kit_commit" kit/ | sed 's#^kit/##'
   [ -z "$modules" ] || node "$factory/bin/lib/module.mjs" files "$factory" $modules | cut -f1
   echo .gate/kit-files
-  echo .gate/pack
+  echo .gate/kit-commit
   [ -z "$modules" ] || echo .gate/modules
 } | LC_ALL=C sort -u >.gate/kit-files
 .gate/bin/setup
@@ -173,12 +168,12 @@ fence=$(printf '`%.0s' $(seq 1 $((longest > 2 ? longest + 1 : 3))))
 note=""
 modnote=""
 [ -z "$modules" ] || modnote=" Module \`$(printf '%s' "$modules" | paste -sd, - | sed 's/,/, /g')\` (named in \`.gate/modules\`): the module's files exist only in a repository that turns it on."
-grep -qx '.claude/settings.json' "$lists/updated" && note=" The repository's \`.claude/settings.json\` is updated: a rendering of the kit and the pack is rendered anew; any other file gets the kit's new deny lines inserted as text, every other byte kept."
+grep -qx '.claude/settings.json' "$lists/updated" && note=" The repository's \`.claude/settings.json\` is updated: the kit's new deny lines are inserted as text, every other byte kept."
 grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.github/CODEOWNERS\` is its own, so it is kept: the kit's new lines do not reach this file."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
 gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
 **What changed:** Brings the kit of $name up to factory \`$sha7\`: $(n added) $([ "$(n added)" -eq 1 ] && echo file || echo files) added, $(n updated) updated, $(n removed) removed; $(n kept) of the repository's own files kept as they were.
-**Effect:** Pack \`$pack\` (named in \`.gate/pack\`); \`.gate/kit-files\` is rewritten for the new kit; kit files the repository changed itself are kept, named below, and \`AGENTS.md\` keeps the repository's Layout and Facts sections.$note$modnote
+**Effect:** \`.gate/kit-commit\` names the factory commit; \`.gate/kit-files\` is rewritten for the new kit; kit files the repository changed itself are kept, named below; \`AGENTS.md\` has only its \`## Gate\` block replaced, its head and tail are the repository's, and so is \`CLAUDE.md\`.$note$modnote
 **Evidence:** \`bin/kit-evidence\` PASS for factory commit \`$sha7\`; the full \`.gate/bin/verify\` was green before the push.
 
 ---

@@ -27,10 +27,10 @@ describe('bin/kit-update on the new layout', () => {
       assert.match(out.out, /nothing done/);
       assert.deepEqual(w.state(), before);
       assert.deepEqual(w.calls(), []);
-      // .gate/pack is still written by onboard, so it is no reason to refuse.
+      // .gate/kit-commit is written by onboard, so it is no reason to refuse.
       git(w.repo, 'revert', '--no-edit', 'HEAD');
       git(w.repo, 'push', '-q', 'origin', 'main');
-      assert.ok(readFileSync(join(w.repo, '.gate/pack'), 'utf8').length > 0);
+      assert.ok(readFileSync(join(w.repo, '.gate/kit-commit'), 'utf8').length > 0);
       const again = w.update(['app', '--no-pr']);
       assert.equal(again.code, 0, again.out);
     } finally {
@@ -61,23 +61,6 @@ describe('bin/kit-update on the new layout', () => {
       assert.match(out.out, /^merged \(.*\):\n {2}\.claude\/settings\.json$/m);
       assert.equal(git(w.repo, 'diff', '--name-only', base, 'HEAD', '--', 'scripts', '.githooks'), '');
       assert.match(out.out, /^untouched \(.*\):\n {2}\.githooks\/pre-commit\n {2}\.githooks\/pre-push\n {2}scripts\/size\.mjs\n {2}scripts\/verify$/m);
-    } finally {
-      w.cleanup();
-    }
-  });
-
-  test('renders a settings.json that is a past rendering of the kit and the pack anew, so a new pin still arrives', () => {
-    const w = world();
-    try {
-      const pack = readFileSync(join(w.fac, 'packs/pstack/settings.json'), 'utf8');
-      w.facCommit({ 'packs/pstack/settings.json': pack.replaceAll('f713f14', 'abc1234') });
-      const out = w.update(['app', '--no-pr']);
-      assert.equal(out.code, 0, out.out);
-      assert.match(out.out, /^kit-evidence: PASS$/m);
-      const head = readFileSync(join(w.repo, '.claude/settings.json'), 'utf8');
-      assert.ok(head.includes('pstack-abc1234') && !head.includes('pstack-f713f14'), head);
-      assert.equal(head, run(w.fac, 'node', [join(w.fac, 'bin/lib/pack.mjs'), 'settings', w.fac, 'pstack']).out);
-      assert.match(out.out, /^updated \(.*\):\n(?: {2}.*\n)* {2}\.claude\/settings\.json \(was /m);
     } finally {
       w.cleanup();
     }

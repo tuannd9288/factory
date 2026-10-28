@@ -2,17 +2,21 @@
 // (origin/main) holds against what the kit's history has held. Reads git objects of both sides (ls-tree, cat-file, log);
 // it runs nothing the repository holds. bin/kit-evidence then proves the result against the same commit.
 //   node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <repo name>
-//     --human <login> --pack <name> [--modules <a,b>] [--out <dir>]
+//     --human <login> [--modules <a,b>] [--out <dir>]
 // `plan` only checks; `lay` also writes the files into the repository's working tree and, with --out, one list per
 // kind (added, updated, kept, removed, dropped-kept; one path a line). Per path:
-//   rendered (AGENTS.md, CODEOWNERS): added when missing; left alone when the base is this commit's
-//     rendering (AGENTS.md with the own parts the base carries); rendered anew when the base is an older rendering of
-//     the kit and pack; otherwise the repository's own: CODEOWNERS is kept, AGENTS.md is a conflict;
-//   .claude/settings.json: added (the pack composes it) when missing; otherwise the base's bytes with the kit's deny lines it
+//   .github/CODEOWNERS (rendered): added when missing; left alone when the base is this commit's rendering; rendered anew
+//     when the base is an older rendering of the kit; otherwise the repository's own, and kept;
+//   .claude/settings.json: added as the kit's file when missing; otherwise the base's bytes with the kit's deny lines it
 //     lacks inserted as text (bin/lib/settings.mjs), every other byte kept, a shape the lines cannot be added to a conflict;
 //   other: added when missing; left alone when it is the kit's; replaced by the kit's when it is a blob the kit's history
-//     held; otherwise the repository's own: kept, but a conflict where the kit replaces whole (CLAUDE.md). The repository's own
-//     scripts/ and .githooks/ files are not in kit/, so they are never read.
+//     held; otherwise the repository's own, and kept. The repository's own scripts/ and .githooks/ files are not in kit/, so
+//     they are never read.
+// AGENTS.md and CLAUDE.md are the repository's own. AGENTS.md has only its Gate block replaced, head and tail as they
+// are; the old kit's composition (bin/lib/legacy.mjs) gets the block in place of its head and keeps every byte from
+// `## Layout` on; any other text without a block, a block with malformed markers, or a result over 150 lines or 32 KiB is a
+// conflict, and nothing is cut. CLAUDE.md is added as the one-line import where missing, and otherwise left as it is (a
+// conflict when it does not reach AGENTS.md). .gate/kit-commit records the factory commit; the old .gate/pack is removed.
 // A module's files (bin/lib/module.mjs) are laid with the kit's, from the modules --modules names, and are stricter:
 // added, left alone or updated from a past module blob; the repository's own file at a module path is a conflict, never
 // kept. The files of a module the base had on and --modules leaves out are removed, or a conflict when the repository
@@ -22,15 +26,15 @@ import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:f
 import { dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { FACTS, LAYOUT, LIMIT, fill } from './own.mjs';
-import { CONFIG, FILLED, INVENTORY, REPLACES, SETTINGS, blockFor, denyOf, git, ownOf, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
+import { carrierProblems, replaceGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
+import { legacyCompose } from './legacy.mjs';
+import { CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, KIT_COMMIT, SECTION, SETTINGS, blockFor, denyOf, git, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
 import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
-import { PACK_FILE, composeAgents, composeSettings } from './pack.mjs';
 import { addDeny } from './settings.mjs';
 
 const RENDERED = (path) => Boolean(FILLED[path]);
 
-export function plan({ factory, commit, repo, base, name, human, pack: packName, modules }) {
+export function plan({ factory, commit, repo, base, name, human, modules }) {
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
   const baseSha = git(repo, ['rev-parse', '--verify', `${base}^{commit}`]).trim();
   const names = modules ? modules.split(',') : [];
@@ -46,36 +50,13 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
   } catch (error) {
     lost.push(error.message);
   }
-  const pack = packName === 'none' ? null : { settings: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/settings.json`]).trim()), section: text(factory, git(factory, ['rev-parse', `${fac}:packs/${packName}/AGENTS.md`]).trim()) };
   const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: lost, writes: [], removes: [] };
-  const rendering = (path, want) => {
-    const kitText = text(factory, want.oid);
-    if (path === SETTINGS) return composeSettings(kitText, pack?.settings ?? null);
-    return render(path, path === 'AGENTS.md' ? composeAgents(kitText, pack?.section ?? null) : kitText, { name, human });
-  };
+  const rendering = (path, want) => render(path, text(factory, want.oid), { name, human });
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const had = at.get(path);
-    if (path === SETTINGS) {
-      // With none, the pack composes it; the repository's own file gets the kit's deny lines it lacks inserted as text.
-      if (!had) {
-        out.add.push(path);
-        out.writes.push({ path, mode: want.mode, text: rendering(path, want) });
-        continue;
-      }
-      // A base that is the rendering of the kit and the pack, now or at an older commit, is rendered anew: a new pin
-      // arrives that way. Any other file is the repository's own.
-      const as = had.mode === want.mode ? renderedAs({ factory, fac, path, text: text(repo, had.oid), name, human, pack, packName }) : null;
-      if (as === 'now') {
-        out.same.push(path);
-        continue;
-      }
-      if (as === 'past') {
-        out.update.push(path);
-        out.writes.push({ path, mode: want.mode, text: rendering(path, want) });
-        continue;
-      }
+    if (path === SETTINGS && had) {
+      // The repository's own file: the base's bytes with the kit's deny lines it lacks inserted as text, every other byte kept.
       const ownBytes = git(repo, ['cat-file', 'blob', had.oid], 'buffer');
-      const own = ownBytes.toString('utf8');
       let to;
       try {
         to = addDeny(ownBytes, denyOf(text(factory, want.oid))).text;
@@ -83,7 +64,7 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
         out.conflicts.push(`${path}: ${error.message}`);
         continue;
       }
-      if (to === own) out.same.push(path);
+      if (to === ownBytes.toString('utf8')) out.same.push(path);
       else {
         out.update.push(path);
         out.writes.push({ path, mode: had.mode, text: to });
@@ -97,28 +78,12 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
         out.writes.push({ path, mode: want.mode, text: to });
         continue;
       }
-      const as = had.mode === want.mode ? renderedAs({ factory, fac, path, text: text(repo, had.oid), name, human, pack, packName }) : null;
+      const as = had.mode === want.mode ? renderedAs({ factory, fac, path, text: text(repo, had.oid), name, human }) : null;
       if (as === 'now') out.same.push(path);
       else if (as === 'past') {
-        let final = to;
-        if (path === 'AGENTS.md') {
-          let own;
-          try {
-            own = ownOf(text(repo, had.oid));
-          } catch (error) {
-            out.conflicts.push(`${path}: the repository's ${error.message.startsWith('no section') ? `AGENTS.md has no "${LAYOUT}" section` : `own sections cannot be read (${error.message})`}; merge it by hand (put its own parts under "${LAYOUT}" and "${FACTS}")`);
-            continue;
-          }
-          final = fill(to, own).text;
-          if (final.split('\n').length - 1 > LIMIT) {
-            out.conflicts.push(`${path}: with the repository's own parts it would have ${final.split('\n').length - 1} lines; at most ${LIMIT}`);
-            continue;
-          }
-        }
         out.update.push(path);
-        out.writes.push({ path, mode: want.mode, text: final });
-      } else if (path === 'AGENTS.md') out.conflicts.push(`${path}: the repository's own text, not the kit's with its Layout and Facts sections (${LAYOUT}, ${FACTS})`);
-      else out.keep.push(path);
+        out.writes.push({ path, mode: want.mode, text: to });
+      } else out.keep.push(path);
       continue;
     }
     if (!had) {
@@ -133,7 +98,6 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
       out.update.push(path);
       out.writes.push({ path, mode: want.mode, text: text(factory, want.oid) + blockFor(repo, at) });
     } else if (want.module) out.conflicts.push(`${path}: the repository's own, at a path module ${want.module} lays; a module's file is never kept`);
-    else if (REPLACES(path)) out.conflicts.push(`${path}: the repository's own, which the kit replaces whole`);
     else out.keep.push(path);
   }
   for (const [path, e] of off) {
@@ -144,17 +108,80 @@ export function plan({ factory, commit, repo, base, name, human, pack: packName,
       out.removes.push(path);
     } else out.conflicts.push(`${path}: the repository's own, which module ${e.module} laid and is now off; a module's file is never kept`);
   }
+  instructions({ out, at, repo, factory, fac, name, kit, text });
   // What the base lists as the kit's that kit/ no longer has.
   const listed = at.get(INVENTORY) ? text(repo, at.get(INVENTORY).oid).split('\n').filter(Boolean) : [];
   for (const path of listed) {
     const had = at.get(path);
-    if (kit.has(path) || off.has(path) || path === INVENTORY || path === PACK_FILE || path === MODULES_FILE || !had) continue;
+    if (kit.has(path) || off.has(path) || path === INVENTORY || path === KIT_COMMIT || path === '.gate/pack' || path === MODULES_FILE || INSTRUCTION_FILES.includes(path) || !had) continue;
     if ([`kit/${path}`, ...baseNames.map((n) => `modules/${n}/kit/${path}`)].some((p) => pastBlobs(factory, fac, p).has(had.oid))) {
       out.remove.push(path);
       out.removes.push(path);
     } else out.droppedKept.push(path);
   }
   return { ...out, fac, baseSha, kit, factory };
+}
+
+/** The repository's own instruction files and the commit the kit comes from. AGENTS.md: its block replaced, or put in place of
+ * the old kit's head; CLAUDE.md: left as it is; .gate/kit-commit: the factory commit; the old .gate/pack: removed. */
+function instructions({ out, at, repo, factory, fac, name, kit, text }) {
+  const sectionEntry = kit.get(SECTION);
+  if (!sectionEntry) {
+    out.conflicts.push(`${SECTION}: the kit at ${fac.slice(0, 7)} has none`);
+    return;
+  }
+  const section = text(factory, sectionEntry.oid);
+  const hadA = at.get('AGENTS.md');
+  if (!hadA) {
+    out.add.push('AGENTS.md');
+    out.writes.push({ path: 'AGENTS.md', mode: '100644', text: `# ${name}\n\n${section}` });
+  } else if (!['100644', '100755'].includes(hadA.mode)) out.conflicts.push(`AGENTS.md: it is not a regular file (mode ${hadA.mode}); merge it by hand`);
+  else {
+    const baseText = text(repo, hadA.oid);
+    const found = splitGate(baseText);
+    const packFile = at.get('.gate/pack');
+    let to = null;
+    if (found.ok) to = replaceGate(baseText, section);
+    else if (found.problem !== 'missing') out.conflicts.push(`AGENTS.md: its Gate markers are ${found.problem}; merge it by hand (one begin line and one end line, the block first)`);
+    else {
+      const legacy = legacyCompose({ factory, fac, baseText, name, packName: packFile ? text(repo, packFile.oid).trim() : 'pstack', section });
+      if (legacy) to = legacy.text;
+      else out.conflicts.push("AGENTS.md: it has no Gate block and is not the old kit's composition, so the kit cannot tell where its own text begins; merge it by hand (put the kit's block at its start)");
+    }
+    if (to !== null) {
+      const size = sizeProblems(to);
+      if (size.length) out.conflicts.push(`AGENTS.md: ${size[0]}`);
+      else if (to === baseText) out.same.push('AGENTS.md');
+      else {
+        out.update.push('AGENTS.md');
+        out.writes.push({ path: 'AGENTS.md', mode: hadA.mode, text: to });
+      }
+    }
+  }
+  const hadC = at.get('CLAUDE.md');
+  if (!hadC) {
+    out.add.push('CLAUDE.md');
+    out.writes.push({ path: 'CLAUDE.md', mode: '100644', text: '@AGENTS.md\n' });
+  } else {
+    const bytes = ['100644', '100755', '120000'].includes(hadC.mode) ? git(repo, ['cat-file', 'blob', hadC.oid], 'buffer') : Buffer.alloc(0);
+    for (const problem of carrierProblems({ mode: hadC.mode, bytes })) out.conflicts.push(`CLAUDE.md: ${problem}`);
+  }
+  const hadK = at.get(KIT_COMMIT);
+  const commitText = `${fac}\n`;
+  if (!hadK) {
+    out.add.push(KIT_COMMIT);
+    out.writes.push({ path: KIT_COMMIT, mode: '100644', text: commitText });
+  } else if (hadK.mode !== '100644' || text(repo, hadK.oid) !== commitText) {
+    out.update.push(KIT_COMMIT);
+    out.writes.push({ path: KIT_COMMIT, mode: '100644', text: commitText });
+  }
+  const hadP = at.get('.gate/pack');
+  if (hadP) {
+    if (/^[a-z][a-z0-9-]*\n$/.test(text(repo, hadP.oid))) {
+      out.remove.push('.gate/pack');
+      out.removes.push('.gate/pack');
+    } else out.droppedKept.push('.gate/pack');
+  }
 }
 
 /** Writes a plan's files into the working tree of repo: a link the repository holds there is removed first, since a
@@ -178,8 +205,8 @@ function main(argv) {
   const [verb, ...rest] = argv;
   const opt = {};
   for (let i = 0; i < rest.length; i += 2) opt[rest[i].replace(/^--/, '')] = rest[i + 1];
-  if (!['plan', 'lay'].includes(verb) || ['factory', 'commit', 'repo', 'base', 'name', 'human', 'pack'].some((k) => !opt[k])) {
-    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> --pack <name> [--modules <a,b>] [--out <dir>]');
+  if (!['plan', 'lay'].includes(verb) || ['factory', 'commit', 'repo', 'base', 'name', 'human'].some((k) => !opt[k])) {
+    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> [--modules <a,b>] [--out <dir>]');
     return 2;
   }
   const result = plan(opt);

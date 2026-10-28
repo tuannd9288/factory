@@ -104,6 +104,21 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   as "The live verifier" paragraph below says. Sources:
   https://github.com/tuannd9288/factory/issues/79#issuecomment-6398968431 and
   https://github.com/tuannd9288/factory/issues/95.
+- **The instruction layer (#131, #132), 2026-10-27.** On #131: "Viết từ A (Recommended)" and "Làm F1–F2 ngay, F3 sau 1/11
+  (Recommended)"; that evening, "Ok, cho các đội triển khai đi, song song nếu được." ("Ok, let the teams carry it out, in
+  parallel where possible", Colly's translation), which replaced the wait for 1/11. On #132's instruction layer he answered
+  the three questions of the decision page (https://claude.ai/artifact/SLNEk1B5nTict8swrmbBqD) with "Theo đề xuất của mày",
+  and so took Colly's recommendations: the composed root `AGENTS.md` stays at most 150 lines and gains a 32 KiB cap (K1);
+  neither `ARCHITECTURE.md` nor `docs/` is required (K2); the Gate block states the gate's obligations directly, and
+  `CLAUDE.md` is `@AGENTS.md`, an addendum allowed, or a relative symlink to `AGENTS.md` (K3). He had asked for it after the
+  review: "Cho Astra review lại rồi đề xuất cho đúng thiết kế". This revises two earlier decisions: the pack decision of
+  2026-10-22 (a way of working is a folder a team copies, not a pack a repository chooses by `.gate/pack`) and the scope of
+  "Every lead, worker and reviewer runs through Claude Code" (the instruction file is for any harness; `ship` and the
+  live verifier are the pstack team's, in `packs/pstack/`). 2a and H4 stay as they are, and so does "Cho file một phần đuôi
+  của repo (Recommended)" of 2026-10-25: the kit owns a smaller head, one marked `## Gate` block, and the repository owns the
+  tail, with its own headings. Sources: https://github.com/tuannd9288/factory/issues/131#issuecomment-6445068794 and
+  https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962 (the questions and K1 to K3), and
+  https://github.com/tuannd9288/factory/issues/131#issuecomment-6446708922 (the evening words), all relayed by Colly.
 - **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
 
 ## Tiers
@@ -157,7 +172,7 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, the ledger's canary.
 - **1e Surfaces** [GH2, #68]: the Human's own screens: the Herdr TUI, Paseo's app, Rex on the MacBook (K1 = C, pending his
   check) and Remote Control (T3, pending). Herdr's server and Paseo's daemon stay in 0d.
-- **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines composed.
+- **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
 - **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify`, `red-check`.
@@ -171,7 +186,7 @@ A sublayer may change anything inside it while its contracts hold; a change to a
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
 decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization that does the same.
 
-- **H1**: Work enters through one issue. Checked by: `kit/AGENTS.md:28`, `probes/pack-contract.md:36`.
+- **H1**: Work enters through one issue. Checked by: `kit/.gate/gate-section.md` (the Gate block), `probes/pack-contract.md:36`.
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
   Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-contract.md:36`.
@@ -180,10 +195,10 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:27` (one reviewer call per head).
   Prior art [A8]: "An approval covers one specific commit."
 - **H4**: Knowledge is files in the repository, changed by pull request.
-  Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `scripts/verify:9-16` (the 150-line cap).
+  Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
   Prior art [OA1]: "Repository-local, versioned artifacts (e.g., code, markdown, schemas, executable plans) are all it can see."
 - **H5**: A way of working is a pack of data.
-  Checked by: `probes/pack-contract.md`, `probes/pack-probe.mjs`, `test/pack.test.mjs`.
+  Checked by: `probes/pack-contract.md`, `probes/pack-probe.mjs`, `packs/pstack/test/pstack.test.mjs`.
   Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
 - **H6**: Tools are commands; permissions live outside the instructions.
   Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:22`, `probes/pack-contract.md:62-76` (the `factory` account, #24).
@@ -206,7 +221,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 ## This root
 
 - No `CLAUDE.md` here. With one, Claude Code reads it and skips the `AGENTS.md` of every repository below
-  (tested on Claude Code 2.1.304, 2026-10-20). Each repository keeps a one-line `CLAUDE.md`: `@AGENTS.md`.
+  (tested on Claude Code 2.1.304, 2026-10-20). Each repository's `CLAUDE.md` starts with the line `@AGENTS.md` (prose may
+  follow) or is a relative symlink to `AGENTS.md`.
 - Nothing in a repository points outside it: no links into `~/Desktop/TuanHub`, no user-level skills.
 - This folder stays out of every sync between the Macs. Code moves only through GitHub.
 - `.gitignore` admits only the factory's own files, so every repository folder is ignored.
@@ -222,8 +238,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 
 | Path | What it is |
 |---|---|
-| `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, `AGENTS.md` without any way of working |
-| `packs/` | A way of working, one folder each (`packs/pstack/`): its `settings.json` keys, its `AGENTS.md` section, its NOTICE, tests and attacks; `bin/lib/pack.mjs` composes it with the core |
+| `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
+| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks; nothing composes it |
 | `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
 | `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
@@ -235,7 +251,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
 | `bin/factory-sublayers` | The sublayer check (#82): the 17 `sublayer-<code>` labels exist with their descriptions, and every open issue carries exactly one; the list is `bin/lib/sublayers.mjs`, the template `.github/ISSUE_TEMPLATE/task.md` |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
-| `scripts/verify` | This repository's own checks: the kit's tests in `test/`, each pack's in `packs/*/test/`, and the 150-line cap on every composed `AGENTS.md` |
+| `scripts/verify` | This repository's own checks: the kit's tests in `test/`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
 | `NOTICE` | What was taken from other projects, with the commit |
 
@@ -261,26 +277,31 @@ It refuses any other login, and a `main` without the bootstrap pull request rule
    `direnv allow`; an `.envrc` the repository has is kept, and onboard prints the line to add to it. Either way
    `.claude/worktrees/` joins `.git/info/exclude`: Claude Code's worktrees go there, inside the repository, so they
    find its `.envrc`, and `git add -A` never stages one under the tier-3 `.claude/`;
-4. lays the kit over it: `.gate/` (the commands in `.gate/bin/`, the hooks in `.gate/hooks/`), `scripts/` (`ship`,
-   `live-verify`), the gate workflows, the PR template, `CODEOWNERS`, deny rules, an `AGENTS.md` and the one-line
-   `CLAUDE.md`. The kit ships no `scripts/verify` and no `.githooks/`, so the repository's own `scripts/`, helpers and
+4. lays the kit over it: `.gate/` (the commands in `.gate/bin/`, the hooks in `.gate/hooks/`, the Gate block
+   `gate-section.md`, and `kit-commit`, the factory commit it came from), the gate workflows, the PR template, `CODEOWNERS`
+   and the deny rules. The repository keeps its own `AGENTS.md` and `CLAUDE.md`: the kit puts one marked `## Gate` block
+   at the start of `AGENTS.md`, after an optional title line, and writes the import `@AGENTS.md` as `CLAUDE.md` only where
+   there is none (`kit/.gate/bin/lib/instructions.mjs`). An `AGENTS.md` that would be over 150 lines or 32 KiB with the
+   block, a Gate marker that is malformed, CRLF or a byte-order mark, or a `CLAUDE.md` that neither starts with `@AGENTS.md` nor links to
+   `AGENTS.md` refuses the run and removes the clone; the kit cuts and rewrites nothing. `--own <file>` is a complete
+   `AGENTS.md` the repository prepared, used in place of the clone's and checked the same way. The kit ships no
+   `scripts/verify` and no `.githooks/`, so the repository's own `scripts/`, helpers and
    hooks stay byte for byte. With its own `scripts/verify`, onboard ends the `.gate/config.sh` it lays with the adapter
    block (`bin/lib/adapter.mjs`): `GATE_NATIVE=scripts/verify`, `GATE_CHECKS="${GATE_CHECKS:+$GATE_CHECKS }native"` (it adds to the checks named above it), and `gate_fast() {
    .githooks/pre-commit; }` only when that hook exists and does not call `.gate/bin/verify`; a `.gate/config.sh` the
    repository has is kept. A `.claude/settings.json` the repository has gets the kit's deny lines inserted as text
    (`bin/lib/settings.mjs`) and nothing else changes; a shape it cannot take is refused and the clone removed; where
-   there is none, the pack composes it. The repository's own `AGENTS.md` and `CLAUDE.md` are replaced, since a kept
-   one would switch the kit's off; the parts of them the Human approved come in through
-   `--own <file>`, which holds only the kit `AGENTS.md`'s last two sections, `## Layout` and `## Facts the code cannot
-   tell`, within its 150 lines (`bin/lib/own.mjs`). A repository with its own `AGENTS.md` or `CLAUDE.md` and no
-   `--own` is refused and its clone removed. Every other file the repository already has is kept. The kept, replaced
-   and untouched lists go in the pull request, kept ones for its session to merge by hand;
+   there is none, the kit's own file is laid as it is, deny lines only, with no pin: the Human's rule that the pstack pin
+   stays in the repository, one for each repository, keeps a pin that exists byte for byte, and a repository with none is
+   not made to take one (a team brings it in its own pull request). Every other file the repository already has is kept.
+   The kept and untouched lists go in the pull request, kept ones for its session to merge by hand;
 5. runs the full `.gate/bin/verify`, which runs the repository's own verify as the `native` check, and only when it
    passes commits the kit and opens its pull request, authored by
    the agents' account. When it fails the kit stays staged on `factory/kit` for the repository's session to finish.
    The pull request carries `bin/kit-evidence`'s result: every managed file against the kit at the factory commit
-   (contents, modes, symlinks), the two rendered files line by line with the `--own` parts in full, the files the
-   kit replaced with the blob each had, the files the repository kept, `.claude/settings.json` as merged (its bytes
+   (contents, modes, symlinks), `CODEOWNERS` line by line, `AGENTS.md` as the repository's own text with the block
+   inserted (an `--own` file's text in full) and `CLAUDE.md` as the repository's own, `.gate/kit-commit` as the factory
+   commit, the files the repository kept, `.claude/settings.json` as merged (its bytes
    plus the kit's deny lines), `.gate/config.sh` as the kit's text plus the adapter block, the repository's own
    `scripts/` and `.githooks/` files as untouched, and nothing else changed, bound to that commit, the kit's tree, the repository's id, base and head. Onboard opens it only from a
    factory commit on `origin/main` whose `kit/` has no uncommitted, untracked or ignored file, since it lays the kit
@@ -291,14 +312,24 @@ later move of an onboarded repository to a newer factory commit; onboard keeps e
 cannot bring a stale kit file up to date. Kit-update works on the clone onboard made, under the same refusals
 (a clean factory commit on `origin/main`, the agents' login, the pull request rule) and the same verify and evidence,
 and does nothing when the clone is dirty or `factory/kit-<sha7>` exists. It adds a missing kit file, replaces a kit file
-the repository holds as an older kit had it, renders `AGENTS.md` and `CODEOWNERS` anew, inserts the kit's new deny lines
-into a `settings.json` the repository has, removes a file the kit dropped when it is unchanged, and keeps and names what
-the repository changed. A repository's own `CLAUDE.md` or `AGENTS.md` text outside the two sections stops it, to merge
-by hand; a `CODEOWNERS` the repository changed is kept (named in the pull request), so the kit's newer lines do not
-reach it. It refuses a repository whose `.gate/kit-files` lists `scripts/verify`: that is the old layout, where the kit
-shipped its commands in `scripts/` and replaced the repository's hooks, and the Human is told to onboard it afresh
-(`.gate/pack` is no sign of it). Its evidence names each updated file with the blob it had, and fails a pull request
-that rewrites the repository's own Layout or Facts.
+the repository holds as an older kit had it, replaces the Gate block of `AGENTS.md` and nothing else of it (the head and
+the tail stay byte for byte, and so does `CLAUDE.md`), renders `CODEOWNERS` anew, writes `.gate/kit-commit`, inserts the
+kit's new deny lines into a `settings.json` the repository has, removes a file the kit dropped when it is unchanged, and
+keeps and names what the repository changed. An `AGENTS.md` with malformed Gate markers, one with no block that is not
+the old kit's composition (a head, a pack section, then `## Layout` and `## Facts the code cannot tell`: it gets the block
+in place of that head, keeps every byte from `## Layout` on, and loses `.gate/pack`), a `CLAUDE.md` that does not reach
+it, or a result over 150 lines or 32 KiB stops it, to merge by hand. A `CODEOWNERS` the repository changed is kept (named
+in the pull request), so the kit's newer lines do not reach it. It refuses a repository whose `.gate/kit-files` lists
+`scripts/verify`: that is the old layout, where the kit shipped its commands in `scripts/` and replaced the repository's
+hooks, and the Human is told to onboard it afresh. Its evidence names each updated file with the blob it had, and fails a
+pull request that changes the repository's head or tail of `AGENTS.md`. The gate judges the block of such a pull request
+too: `.gate/bin/verify-trusted` reads the candidate's git objects before it lays `main`'s protected files over them, and a
+block, `.gate/gate-section.md` or `.gate/kit-commit` that differs from the base's passes only when the commit
+`.gate/kit-commit` names is on the first-parent line of the main of `tuannd9288/factory` (public: it is fetched, and a
+fetch that fails is red; onboard and kit-update ask the same of `origin/main`), holds that block, is not older than the
+base's, and leaves the tail and `CLAUDE.md` as they were. A deliberate roll back of the kit is refused by that rule; it
+waits until the factory's main has moved on. A block that main reverted later still passes while it is not older than the
+base's. The variable `GATE_FACTORY_URL` is for tests and takes only an absolute local folder.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (the bootstrap rule asks
@@ -365,16 +396,15 @@ allowed command that reads a file can print it, such as `git -C <dir> grep --no-
 rules cover the `Read` tool, `env` and `printenv`, not those. So the researcher, which reads untrusted pages and can
 send them out, never runs on seat 1.
 
-A pack is what the kit holds only for one way of working. The repository names its pack in one line of `.gate/pack` (a
-tier-3 path), and `bin/onboard --pack <name>` chooses it (`none` for the core alone; the default is the repository's
-`.gate/pack`, else `pstack`). `bin/onboard` and `bin/kit-evidence` build `AGENTS.md` and `.claude/settings.json` from the
-core and that pack; the deny rules stay in the core.
+A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
+holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
+own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
+chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
 
 A module is what the factory holds only for the repositories that turn it on (#71): `modules/<name>/kit/` holds the
 files it adds, at repository paths (a skill among them, at `.claude/skills/<name>/`), and `modules/<name>/test/` its
 tests. The repository lists its modules in `.gate/modules`, one name a line (a tier-3 path; absent means none), and
-`bin/onboard --module <name>` and `bin/kit-update --module <name>` / `--no-module <name>` write it, as `--pack` writes
-`.gate/pack`. A module's files are copied only where it is on, never over a file the repository has (a conflict, not a
+`bin/onboard --module <name>` and `bin/kit-update --module <name>` / `--no-module <name>` write it. A module's files are copied only where it is on, never over a file the repository has (a conflict, not a
 "kept"), and removed when it is turned off; `bin/kit-evidence` judges them against the module at the factory commit and
 treats `.gate/modules` as generated. The kit's only part in a module is two hooks, both inert without it: `red-check` runs
 `.gate/bin/lib/deletion.mjs` first on a source change with no test where the file exists, and `prove-check --all` also runs
@@ -393,14 +423,14 @@ settings. A new pin is a new marketplace name, in a tier-3 pull request per repo
 pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-22 (`probes/results.md`, attack 23):
 
 - The install fails with `Plugin "pstack" not found in marketplace` in a folder the profile has not trusted (logged-in
-  writer profile, untrusted `case1/a`). The kit ships `.claude/settings.json` in the order the installer writes: uninstalling
+  writer profile, untrusted `case1/a`). The pstack pack's `packs/pstack/settings.json` is in the order the installer writes: uninstalling
   and installing again in `case2/a` on the same profile left `git status` empty (a first install on a new profile was
   not tried). An uninstall rewrites `enabledPlugins` to `{}`.
 - 53 of 54 pstack skills carry `disable-model-invocation`, so the model's own Skill call is refused; `setup-pstack`
   does not. The agents `pstack:poteto-agent` and `pstack:comment-sicko` have no guard: a model may spawn them, and with
   poteto-agent poteto-mode's playbook, in a run nobody typed (#8 decides whether to forbid that).
 - `claude -p "/pstack:poteto-mode …"` starts the skill; a prompt that only names it does not. So an unattended prompt
-  starts a skill explicitly with `/pstack:<skill>` at its start; without that the run follows the kit's `AGENTS.md`
+  starts a skill explicitly with `/pstack:<skill>` at its start; without that the run follows the repository's `AGENTS.md`
   and whatever the model spawns.
 - Two pins under two marketplace names share one profile, each folder loading its own.
 
@@ -409,7 +439,7 @@ pstack is a Cursor plugin; in Claude Code its texts run, and these parts do not,
 - `/setup-pstack`: it writes `~/.cursor/rules/pstack-models.mdc`, a Cursor rule for the whole machine that Claude
   Code never loads. Every role keeps its default model.
 - Autopilot's owners and swarm of verifiers: Cursor cloud agents. Shipping's one verifier per pull request is taken,
-  on the Codex CLI instead (`scripts/live-verify`, kit `AGENTS.md` § The live verifier); its verdict is no gate
+  on the Codex CLI instead (`packs/pstack/scripts/live-verify`, `packs/pstack/section.md`); its verdict is no gate
   input, so the gate's reviewer (`review`, `verdict`) stays the only judge the merge waits for.
 - The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): they read
   `~/.cursor/projects/<slug>/agent-transcripts/`, where Claude Code writes nothing. Adapted, they would read the

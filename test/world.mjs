@@ -96,5 +96,5 @@ export function world({ kit = {}, executable = [], onboardArgs = [], seedFiles =
     remote: git(dir, '--git-dir', url, 'for-each-ref', '--format=%(refname) %(objectname)'),
   });
   const show = (rev, path) => git(repo, 'show', `${rev}:${path}`);
-  return { dir, fac, repo, url, env, onboard, body, title, update, repoCommit, facCommit, sha7, calls, state, show, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, fac, repo, url, env, onboard, body, title, update, repoCommit, facCommit, sha7, calls, state, show, cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 5 }) };
 }

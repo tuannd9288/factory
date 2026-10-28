@@ -1608,68 +1608,6 @@ describe('onboard', () => {
     };
     return { dir, repo: join(dir, 'root/app'), onboard, own, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
   };
-  const OWN = '## Layout\n\n`src/` holds the app; `test/` its tests.\n\n## Facts the code cannot tell\n\n- 2026-10-01, the Human: the app ships on Fridays.\n';
-  // The AGENTS.md a repository gets by default: the kit's with the pstack pack's section, before its own parts.
-  const composedAgents = () => run(factory, 'node', [join(factory, 'bin/lib/pack.mjs'), 'agents', factory, 'pstack']).out;
-  const kitLines = () => composedAgents().split('\n').length - 1;
-
-  test("replaces the repository's own AGENTS.md and CLAUDE.md with the kit's, its approved parts in Layout and Facts, and leaves its hooks as they were", () => {
-    const s = seeded({ 'AGENTS.md': '# Our map\n\nOur rules.\n', '.githooks/pre-commit': '#!/bin/sh\nexit 0\n', '.githooks/commit-msg': '#!/bin/sh\nexit 0\n' }, { link: true });
-    try {
-      const out = s.onboard('--own', s.own(OWN));
-      assert.equal(out.code, 0, out.out);
-      assert.match(out.out, /0 kept as they were, 2 replaced by the kit's/);
-      const agents = readFileSync(join(s.repo, 'AGENTS.md'), 'utf8');
-      const kit = composedAgents().replace('<repo>', 'app');
-      assert.equal(agents, `${kit.slice(0, kit.indexOf('## Layout'))}${OWN}`);
-      assert.ok(!lstatSync(join(s.repo, 'CLAUDE.md')).isSymbolicLink(), 'CLAUDE.md is still a link');
-      assert.equal(readFileSync(join(s.repo, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
-      for (const hook of ['pre-commit', 'commit-msg']) assert.equal(readFileSync(join(s.repo, '.githooks', hook), 'utf8'), '#!/bin/sh\nexit 0\n');
-      assert.match(git(s.repo, 'log', '-1', '--format=%B'), /Kept as the repository had them: 0\. Replaced by the kit's: 2 \(AGENTS\.md, CLAUDE\.md\)\./);
-    } finally {
-      s.cleanup();
-    }
-  });
-  test("refuses a repository with its own AGENTS.md or CLAUDE.md and no --own, and leaves no clone or profile behind", () => {
-    for (const files of [{ 'AGENTS.md': '# Our map\n' }, { 'CLAUDE.md': '@AGENTS.md\n\nOur rules.\n' }]) {
-      const s = seeded(files);
-      try {
-        const out = s.onboard();
-        assert.equal(out.code, 2, out.out);
-        assert.match(out.out, /has its own (AGENTS|CLAUDE)\.md[\s\S]*--own <file>/);
-        assert.ok(!existsSync(s.repo), 'the clone is left behind');
-        assert.ok(!existsSync(join(s.dir, 'profiles')), 'a profile was made');
-      } finally {
-        s.cleanup();
-      }
-    }
-    const s = seeded({ 'CLAUDE.md': '@AGENTS.md\n' });
-    try {
-      assert.equal(s.onboard().code, 0);
-    } finally {
-      s.cleanup();
-    }
-  });
-  test('refuses an --own file over the line budget, with a heading of its own, or without both sections, before cloning', () => {
-    const s = seeded({ 'AGENTS.md': '# Our map\n' });
-    try {
-      const budget = 150 - (kitLines() - 2);
-      const long = `## Layout\n\n${'- a line\n'.repeat(budget)}\n## Facts the code cannot tell\n\n- one more\n`;
-      let out = s.onboard('--own', s.own(long));
-      assert.equal(out.code, 2, out.out);
-      assert.match(out.out, new RegExp(`its two bodies are ${budget + 1} lines; the kit's AGENTS\\.md leaves room for ${budget} \\(at most 150 lines\\)`));
-      assert.ok(!existsSync(s.repo), 'cloned before refusing');
-      out = s.onboard('--own', s.own(OWN.replace('its tests.', 'its tests.\n# Our rules win')));
-      assert.equal(out.code, 2, out.out);
-      assert.match(out.out, /line 2 of Layout is a heading \(# Our rules win\)/);
-      out = s.onboard('--own', s.own('## Layout\n\n`src/` holds the app.\n'));
-      assert.equal(out.code, 2, out.out);
-      assert.match(out.out, /no section "## Facts the code cannot tell"/);
-      assert.ok(!existsSync(s.repo), 'cloned before refusing');
-    } finally {
-      s.cleanup();
-    }
-  });
   test('refuses a folder that exists', () => {
     const r = repoWithKit();
     try {

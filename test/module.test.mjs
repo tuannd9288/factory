@@ -71,7 +71,7 @@ describe('the factory side', () => {
     for (const [why, kit, names, re] of [
       ['a kit path', { 'modules/demo/kit/.gate/bin/verify': 'x\n' }, ['demo'], /\.gate\/bin\/verify.*module demo.*kit/],
       ['another module\'s path', { 'modules/demo/kit/x.txt': 'a\n', 'modules/other/kit/x.txt': 'b\n' }, ['demo', 'other'], /x\.txt.*modules? (demo|other)/],
-      ['.gate/pack', { 'modules/demo/kit/.gate/pack': 'x\n' }, ['demo'], /\.gate\/pack.*generated/],
+      ['.gate/kit-commit', { 'modules/demo/kit/.gate/kit-commit': 'x\n' }, ['demo'], /\.gate\/kit-commit.*generated/],
       ['.gate/modules', { 'modules/demo/kit/.gate/modules': 'x\n' }, ['demo'], /\.gate\/modules.*generated/],
     ]) {
       const w = world({ kit, onboardArgs: null });
@@ -92,7 +92,7 @@ describe('bin/onboard --module', () => {
       assert.equal(readFileSync(join(w.repo, '.gate/modules'), 'utf8'), 'demo\n');
       assert.notEqual(statSync(join(w.repo, 'scripts/demo-run')).mode & 0o111, 0, 'the mode is kept');
       const inventory = readFileSync(join(w.repo, '.gate/kit-files'), 'utf8').split('\n').filter(Boolean);
-      for (const f of [...DEMO_FILES, '.gate/modules', '.gate/pack', '.gate/kit-files', '.gate/bin/verify']) assert.ok(inventory.includes(f), `${f} is in the inventory`);
+      for (const f of [...DEMO_FILES, '.gate/modules', '.gate/kit-commit', '.gate/kit-files', '.gate/bin/verify']) assert.ok(inventory.includes(f), `${f} is in the inventory`);
       assert.deepEqual([...inventory].sort(), inventory, 'the inventory is sorted');
       assert.ok(!existsSync(join(w.repo, 'modules')) && !existsSync(join(w.repo, 'test/demo.test.mjs')), 'the module\'s tests stay in the factory');
       assert.equal(git(w.repo, 'status', '--porcelain'), '');

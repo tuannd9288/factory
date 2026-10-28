@@ -6,11 +6,12 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { commit, factory, git, run, write } from './helpers.mjs';
 
-const KEEPS = '## What the Human keeps\n\n- Tier 3.\n';
+const BLOCK = readFileSync(join(factory, 'kit/.gate/gate-section.md'), 'utf8');
 const KIT = {
-  'kit/AGENTS.md': `# <repo>\n\nRules for <repo>.\n\n${KEEPS}`,
+  'kit/.gate/gate-section.md': BLOCK,
   'kit/.claude/settings.json': '{\n  "permissions": {\n    "deny": [\n      "Read(./.env*)"\n    ]\n  }\n}\n',
   'kit/.github/CODEOWNERS': '* @OWNER\n/.gate/ @OWNER\n',
   'kit/scripts/verify': '#!/usr/bin/env bash\necho ok\n',
@@ -40,14 +41,16 @@ function world({ on = ['demo'], old = null, had = {}, laid = {} } = {}) {
   git(repo, 'switch', '-q', '-c', 'factory/kit');
   const files = { demo: DEMO, other: OTHER };
   const modules = Object.fromEntries(on.flatMap((m) => Object.entries(files[m])));
-  const inventory = [...Object.keys(KIT).map((p) => p.slice(4)), ...Object.keys(modules), '.gate/kit-files', '.gate/pack', ...(on.length ? ['.gate/modules'] : [])].sort();
+  const inventory = [...Object.keys(KIT).map((p) => p.slice(4)), ...Object.keys(modules), '.gate/kit-files', '.gate/kit-commit', ...(on.length ? ['.gate/modules'] : [])].sort();
   write(repo, {
-    'AGENTS.md': `# app\n\nRules for app.\n\n${KEEPS}`,
+    'AGENTS.md': `# app\n\n${BLOCK}`,
+    'CLAUDE.md': '@AGENTS.md\n',
+    '.gate/gate-section.md': BLOCK,
     '.claude/settings.json': KIT['kit/.claude/settings.json'],
     '.github/CODEOWNERS': '* @tuannd9288\n/.gate/ @tuannd9288\n',
     'scripts/verify': KIT['kit/scripts/verify'],
     ...modules,
-    '.gate/pack': 'none\n',
+    '.gate/kit-commit': `${kit}\n`,
     ...(on.length ? { '.gate/modules': `${on.join('\n')}\n` } : {}),
     ...laid,
     '.gate/kit-files': `${inventory.join('\n')}\n`,
@@ -81,14 +84,14 @@ describe('bin/kit-evidence with modules', () => {
       assert.equal(out.code, 0, out.out);
       assert.match(out.out, /^kit-evidence: PASS$/m);
       assert.match(out.out, /^modules: demo$/m);
-      assert.match(out.out, /^managed files: 9: 3 as in the kit, 3 rendered, 0 kept, 3 generated$/m);
+      assert.match(out.out, /^managed files: 9: 5 as in the kit, 1 rendered, 0 kept, 3 generated$/m);
     }));
 
   test('says nothing of modules for a repository that turns none on', () =>
     given({ on: [] }, (out) => {
       assert.equal(out.code, 0, out.out);
       assert.doesNotMatch(out.out, /modules:/);
-      assert.match(out.out, /^managed files: 6: 1 as in the kit, 3 rendered, 0 kept, 2 generated$/m);
+      assert.match(out.out, /^managed files: 6: 3 as in the kit, 1 rendered, 0 kept, 2 generated$/m);
     }));
 
   test('passes two modules, sorted', () =>
@@ -109,7 +112,7 @@ describe('bin/kit-evidence with modules', () => {
       assert.match(out.out, /differs: \.gate\/kit-files \(not the kit's inventory\)/);
     });
     // An inventory written to match: the files are then paths the pull request changes outside the inventory.
-    const w = world({ laid: { '.gate/modules': null, '.gate/kit-files': `${['.claude/settings.json', '.github/CODEOWNERS', '.gate/kit-files', '.gate/pack', 'AGENTS.md', 'scripts/verify'].sort().join('\n')}\n` } });
+    const w = world({ laid: { '.gate/modules': null, '.gate/kit-files': `${['.claude/settings.json', '.github/CODEOWNERS', '.gate/kit-files', '.gate/kit-commit', 'scripts/verify'].sort().join('\n')}\n` } });
     try {
       const out = w.evidence();
       assert.equal(out.code, 1, out.out);

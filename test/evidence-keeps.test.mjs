@@ -13,8 +13,7 @@ import { world } from './world.mjs';
 /** The seeded repository onboarded from a copy of this factory; evidence() runs bin/kit-evidence on factory/kit. */
 function onboarded() {
   const w = world({ onboardArgs: null, seedFiles: SEED, seedExecutable: EXECUTABLE });
-  writeFileSync(join(w.dir, 'own.md'), OWN);
-  const out = w.onboard(['--own', join(w.dir, 'own.md')]);
+  const out = w.onboard([]);
   assert.equal(out.code, 0, out.out);
   const base = git(w.repo, 'rev-parse', 'main');
   const evidence = () =>
@@ -84,8 +83,7 @@ describe('bin/kit-evidence over a repository with its own verify, hooks and sett
     const latin1 = Buffer.concat([Buffer.from('{\n  "permissions": { "deny": ["Bash(rm -rf *)"] },\n  "note": "caf'), Buffer.from([0xe9]), Buffer.from('"\n}\n')]);
     const w = world({ onboardArgs: null, seedFiles: { ...SEED, '.claude/settings.json': latin1 }, seedExecutable: EXECUTABLE });
     try {
-      writeFileSync(join(w.dir, 'own.md'), OWN);
-      const out = w.onboard(['--own', join(w.dir, 'own.md')]);
+      const out = w.onboard([]);
       assert.equal(out.code, 2, out.out);
       assert.match(out.out, /\.claude\/settings\.json: .*not UTF-8/);
       assert.ok(!existsSync(w.repo), 'the clone is left behind');

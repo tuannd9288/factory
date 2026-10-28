@@ -1,7 +1,7 @@
 // A module is what the factory holds only for the repositories that turn it on, as a pack is what it holds only for one
 // way of working: modules/<name>/kit/ holds the files it adds, at repository paths, and modules/<name>/test/ the
 // factory's tests for it. A repository names its modules in .gate/modules, one name a line, sorted; the file is tier 3,
-// and absent means none. bin/onboard and bin/kit-update write it as they write .gate/pack, so bin/kit-evidence can
+// and absent means none. bin/onboard and bin/kit-update write it as they write .gate/kit-commit, so bin/kit-evidence can
 // prove it. A module's files are copied into a repository only when it names the module; they may not be at a kit
 // path, at another module's path, or at a file onboard and kit-update generate.
 //   node bin/lib/module.mjs check <factory> <name>...   the working tree's modules exist and collide with nothing
@@ -13,10 +13,10 @@ import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tree } from './evidence.mjs';
-import { NAME } from './pack.mjs';
+export const NAME = /^[a-z][a-z0-9-]*$/;
 
 export const MODULES_FILE = '.gate/modules';
-const GENERATED = ['.gate/pack', '.gate/kit-files', MODULES_FILE];
+const GENERATED = ['.gate/kit-commit', '.gate/kit-files', MODULES_FILE];
 
 /** The names a .gate/modules holds: text is null or empty for none; else one sorted, unique name a line, newline last. */
 export function parseModules(text) {
