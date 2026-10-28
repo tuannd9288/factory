@@ -294,6 +294,77 @@ describe('.gate/bin/claim', () => {
   });
 });
 
+// A tip that no form of claim wrote (a raw push) is the Human's to clear: he releases it with --human, no team does, and
+// tier says what the tip is rather than that it was released.
+describe('a claim ref whose tip no form of claim wrote', () => {
+  let dir;
+  let origin;
+  let work;
+  let fake;
+  let stray;
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), 'claim-invalid-'));
+    origin = join(dir, 'origin.git');
+    fake = join(dir, 'fake');
+    mkdirSync(join(fake, 'bin'), { recursive: true });
+    writeFileSync(join(fake, 'base-gh'), FAKE_GH);
+    writeFileSync(join(fake, 'bin/gh'), '#!/bin/sh\ncase "$1 $2" in\n  "pr view") cat "$FAKE/prview.json" ;;\n  *) exec "$FAKE/base-gh" "$@" ;;\nesac\n');
+    chmodSync(join(fake, 'base-gh'), 0o755);
+    chmodSync(join(fake, 'bin/gh'), 0o755);
+    const seed = join(dir, 'seed');
+    mkdirSync(seed);
+    git(seed, 'init', '-q', '-b', 'main');
+    commit(seed, { 'README.md': '# app\n' }, 'start');
+    git(dir, 'clone', '-q', '--bare', seed, origin);
+    work = join(dir, 'work');
+    git(dir, 'clone', '-q', origin, work);
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  beforeEach(() => {
+    git(origin, 'update-ref', '-d', 'refs/heads/claim/7');
+    for (const f of ['gh-calls', 'perm.json']) rmSync(join(fake, f), { force: true });
+    writeFileSync(join(fake, 'gh-calls'), '');
+    stray = git(work, 'commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', 'hello');
+    git(work, 'push', '-q', 'origin', `${stray}:refs/heads/claim/7`);
+  });
+  const claim = (...args) => run(work, CLAIM, args, { ...quiet, PATH: `${join(fake, 'bin')}:${process.env.PATH}`, FAKE: fake });
+  const admin = () => writeFileSync(join(fake, 'perm.json'), '{"viewerPermission":"ADMIN"}');
+  const body = (text) => writeFileSync(join(fake, 'prview.json'), JSON.stringify({ body: text, closingIssuesReferences: [] }));
+  const tip = () => git(origin, 'rev-parse', 'refs/heads/claim/7');
+
+  test('the Human releases it with --human, as a fast-forward commit on the stray tip', () => {
+    admin();
+    const r = claim('--release', '7', '--human');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(git(origin, 'log', '-1', '--format=%s', tip()), 'release 7');
+    assert.equal(git(origin, 'log', '-1', '--format=%P', tip()), stray);
+    const again = claim('7', 'team-x');
+    assert.equal(again.code, 0, again.out);
+  });
+
+  test('no team releases it, and --human without admin rights does not', () => {
+    assert.equal(claim('--release', '7', 'team-x').code, 1);
+    assert.equal(claim('--release', '7', '--human').code, 1);
+    admin();
+    assert.equal(claim('--handoff', '7', '--human', 'team-y').code, 1);
+    assert.equal(tip(), stray);
+  });
+
+  test('tier says the tip is not a claim, and that the Human decides; a released tip it still calls released', () => {
+    body(`Issue: #7\nClaim: ${stray}\n`);
+    const bad = claim('check', '--repo', 'o/app', '--pr', '7');
+    assert.equal(bad.code, 1, bad.out);
+    assert.doesNotMatch(bad.out, /released/);
+    assert.match(bad.out, /Human/);
+    admin();
+    claim('--release', '7', '--human');
+    body(`Issue: #7\nClaim: ${tip()}\n`);
+    const released = claim('check', '--repo', 'o/app', '--pr', '7');
+    assert.equal(released.code, 1, released.out);
+    assert.match(released.out, /released/);
+  });
+});
+
 // git matches an ls-remote pattern against the tail of a ref name, so refs/heads/claim/7 also matches the branch
 // a/refs/heads/claim/7, which sorts before it; so does refs/heads/main. The claim ref and main are read by their exact names.
 describe('a look-alike branch is not the claim ref or main', () => {
