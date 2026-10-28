@@ -282,10 +282,17 @@ describe('tier', () => {
   test('a tier label from an earlier commit only raises the tier', () => {
     assert.match(tierOf({ 'src/math.js': MUL }, ['--labels', 'tier-2,bug']).out, /^tier 2/);
   });
-  test('tier 3 for what decides the checks: a type-check config, a manifest test script, a .gitattributes', () => {
+  test('tier 3 for what decides the checks: a type-check config, a manifest test script, a .gitattributes, what Codex loads', () => {
     assert.match(tierOf({ 'tsconfig.json': '{ "compilerOptions": { "strict": false } }\n' }).out, /^tier 3\n {2}tsconfig\.json \(protected: tsconfig\*\.json\)/);
     assert.match(tierOf({ 'package.json': '{ "name": "app", "private": true, "type": "module", "scripts": { "test": "true" } }\n' }).out, /^tier 3\n {2}package\.json/);
     assert.match(tierOf({ 'src/.gitattributes': '*.js -diff\n' }).out, /^tier 3/);
+    // #134 ("ok codex", 2026-10-28): a trusted repository's .codex/ holds the hooks and config Codex loads. No kit file sits
+    // under it, so the path itself must be protected: a .codex that is a link to an unprotected folder is tier 3 too.
+    assert.match(tierOf({ '.codex/hooks.json': '{}\n' }).out, /^tier 3\n {2}\.codex\/hooks\.json \(protected: \/\.codex\)/);
+    git(r.repo, 'switch', '-q', '-C', 't', 'origin/main');
+    symlinkSync('src/codex', join(r.repo, '.codex'));
+    commit(r.repo, { 'src/codex/hooks.json': '{}\n' }, 't');
+    assert.match(script(r.repo, 'tier', ['--base', 'origin/main']).out, /^tier 3\n {2}\.codex \(protected: \/\.codex\)/);
   });
   test('fails closed when a policy file or the diff cannot be read', () => {
     const empty = mkdtempSync(join(tmpdir(), 'no-policy-'));
