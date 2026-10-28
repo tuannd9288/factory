@@ -217,7 +217,9 @@ function list(all) {
 // The git options of the trusted jobs, whose checkout keeps no credential (the helper of gate-trusted.yml's fetch steps).
 const JOB_NET = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 
-/** The tier job's check of one pull request: its Issue: and Claim: lines against the tip of claim/<n>, read now. */
+/** The tier job's check of one pull request: the issue its Issue: line names is open, and its Claim: line is the tip of
+ * claim/<n>, both read now. A claim can outlive its issue (a handoff after another team's pull request closed it), so the
+ * issue's state is read here, not trusted to the ref. */
 export function check(repo, pr) {
   const view = ghJson('pr', 'view', pr, '--repo', repo, '--json', 'closingIssuesReferences,body');
   if (typeof view?.body !== 'string' || !Array.isArray(view.closingIssuesReferences)) throw new Stop('tier: the pull request body and closing issues could not be read', 2);
@@ -234,6 +236,8 @@ export function check(repo, pr) {
   const n = named.number;
   const other = here.find((c) => c !== n);
   if (other) throw red(`the body names #${n} but the pull request closes #${other}; one pull request is for one issue`);
+  const state = ghJson('issue', 'view', String(n), '--repo', repo, '--json', 'state')?.state;
+  if (state !== 'OPEN') throw red(`#${n} is not open (${oneLine(state ?? 'no state')}); a pull request is for an open issue`);
   const line = claimLine(view.body);
   if (!line.ok) throw red(`the body needs one line "Claim: <sha>" for #${n}; run .gate/bin/claim ${n} <team>`);
   const tip = tipOf(n, JOB_NET);

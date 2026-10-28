@@ -509,6 +509,8 @@ describe('review, verdict, tier and rounds', () => {
         // claim check (#133). prview.json is a test's own answer; else closing.json; else no closing issue and `Issue: none`.
         '  "pr view 7 --repo o/app --json closingIssuesReferences,body") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; if [ -e "$FAKE/prview.json" ]; then cat "$FAKE/prview.json"; else cat "$FAKE/closing.json" 2>/dev/null || printf \'%s\\n\' \'{"body":"Issue: none\\n","closingIssuesReferences":[]}\'; fi ;;',
         '  "issue view "*" --repo o/app --json number,title,labels,body") echo "issue view $3" >>"$FAKE/ghlog"; cat "$FAKE/issue-$3.json" ;;',
+        // tier's claim check reads the named issue's state (#133): open unless the test leaves state-<n>.json.
+        '  "issue view "*" --repo o/app --json state") cat "$FAKE/state-$3.json" 2>/dev/null || echo \'{"state":"OPEN"}\' ;;',
         // A test that moves something while a job waits leaves $FAKE/mover.sh, which runs once at the first listing.
         '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
         '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
@@ -709,7 +711,7 @@ describe('review, verdict, tier and rounds', () => {
   const closes = (number, [owner, name] = ['o', 'app']) => ({ number, repository: { name, owner: { login: owner } } });
   const tierRun = (files = { 'src/math.js': MUL }) => job('tier', files, pr);
   beforeEach(() => {
-    write(fake, { 'prview.json': null, 'mover.sh': null });
+    write(fake, { 'prview.json': null, 'mover.sh': null, 'state-7.json': null });
     dropClaim();
   });
 
@@ -765,6 +767,19 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(tierRun().code, 0);
     prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(9, ['o', 'elsewhere'])]);
     assert.equal(tierRun().code, 0);
+  });
+  // Scratch #11 (2026-10-28): team-x's merged pull request closed #8, the claim was then handed to team-y, and team-y's
+  // pull request on #8 passed every check. tier is the guard, however the claim was moved.
+  test('tier fails when the issue it names is not open, naming the issue and its state, though Claim: is the tip', () => {
+    const tip = claimTip('handoff 7 team-y', claimTip('claim 7 team-x'));
+    prBody(`Issue: #7\nClaim: ${tip}\nTeam: team-y\n`);
+    assert.equal(tierRun().code, 0);
+    write(fake, { 'state-7.json': '{"state":"CLOSED"}\n' });
+    const out = tierRun();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /#7 is not open \(CLOSED\)/);
+    write(fake, { 'state-7.json': 'not json' });
+    assert.notEqual(tierRun().code, 0);
   });
   test('tier fails closed when the body cannot be read', () => {
     write(fake, { 'prview.json': 'not json' });
