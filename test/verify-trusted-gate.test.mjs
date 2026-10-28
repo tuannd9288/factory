@@ -155,7 +155,12 @@ describe('verify-trusted reads the candidate\'s Gate block as objects', () => {
   });
 
   describe('end to end', () => {
-    const verifyTrusted = (env = {}) => run(trusted, join(trusted, '.gate/bin/verify-trusted'), [r.repo, baseSha], { GATE_FACTORY_URL: factory, ...env });
+    // A pull request body with the line verify-trusted requires (#133): these tests are about the Gate block, not the team.
+    const verifyTrusted = (env = {}) => {
+      const body = join(r.dir, 'team-body.txt');
+      writeFileSync(body, 'Team: team-x\n');
+      return run(trusted, join(trusted, '.gate/bin/verify-trusted'), [r.repo, baseSha], { GATE_FACTORY_URL: factory, GATE_BODY_FILE: body, ...env });
+    };
 
     test('a forged pair is red at verify-trusted, with main\'s other checks still run', async () => {
       candidate(await update(FORGED, `${HEX('b')}\n`));
