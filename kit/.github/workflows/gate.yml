@@ -42,10 +42,16 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # A main whose kit predates #133 has no verify-timeout; its own gate.yml gave verify 30 minutes. One that is there and
+      # fails, fails the job.
       - id: cfg
         name: Read the verify timeout from main's .gate/config.sh
         run: |
-          minutes=$(.gate/bin/verify-timeout) || exit 1
+          if [ -e .gate/bin/verify-timeout ]; then
+            minutes=$(.gate/bin/verify-timeout) || exit 1
+          else
+            minutes=30
+          fi
           echo "minutes=$minutes" >>"$GITHUB_OUTPUT"
         working-directory: trusted
       - run: |
