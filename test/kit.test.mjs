@@ -293,6 +293,11 @@ describe('tier', () => {
     symlinkSync('src/codex', join(r.repo, '.codex'));
     commit(r.repo, { 'src/codex/hooks.json': '{}\n' }, 't');
     assert.match(script(r.repo, 'tier', ['--base', 'origin/main']).out, /^tier 3\n {2}\.codex \(protected: \/\.codex\)/);
+    // Every protected directory protects the path itself: a link at .githooks, a folder onboarding does not create, is tier 3.
+    git(r.repo, 'switch', '-q', '-C', 't', 'origin/main');
+    symlinkSync('src/hooks', join(r.repo, '.githooks'));
+    commit(r.repo, { 'src/hooks/pre-commit': '#!/bin/sh\n' }, 't');
+    assert.match(script(r.repo, 'tier', ['--base', 'origin/main']).out, /^tier 3\n {2}\.githooks \(protected: \/\.githooks\)/);
   });
   test('fails closed when a policy file or the diff cannot be read', () => {
     const empty = mkdtempSync(join(tmpdir(), 'no-policy-'));
@@ -342,6 +347,15 @@ describe('verify and prove-check', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /\* is not a protected path/);
     git(r.repo, 'checkout', '-q', '--', '.github/CODEOWNERS');
+  });
+  test('fails a protected line that ends in "/", which leaves the path itself, a file or a link there, unprotected', () => {
+    const add = (file, line) => write(r.repo, { [file]: `${readFileSync(join(r.repo, file), 'utf8')}${line}\n` });
+    add('.gate/protected', 'docs/');
+    add('.github/CODEOWNERS', 'docs/ @someone');
+    const out = script(r.repo, 'verify', ['--only', 'policy']);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /docs\/ ends in "\/"/);
+    git(r.repo, 'checkout', '-q', '--', '.gate/protected', '.github/CODEOWNERS');
   });
   test('fails an AGENTS.md over 150 lines', () => {
     write(r.repo, { 'AGENTS.md': `${readFileSync(join(r.repo, 'AGENTS.md'), 'utf8')}${'x\n'.repeat(150)}` });
