@@ -129,6 +129,7 @@ export const REQUIRED = [
   '.gate/bin/verify',
   '.gate/bin/red-check',
   '.gate/bin/tier',
+  '.gate/bin/claim',
   '.gate/enforced-rules.md',
   '.gate/gate-section.md',
   '.claude/skills/gate-red/SKILL.md',
