@@ -453,3 +453,83 @@ describe('a look-alike branch is not the claim ref or main', () => {
     assert.match(bad.out, /team-x/);
   });
 });
+
+// git matches a push destination by its own rules, not by exact name: for refs/heads/claim/7 it also takes, as a strong
+// match, refs/refs/heads/claim/7, a branch named refs/heads/claim/7 (refs/heads/refs/heads/claim/7) and a tag of that name.
+// None is under refs/heads/claim/**, so no ruleset covers it. A push must never land on one of them, nor be blamed on a race.
+describe('a ref git would take for the claim ref when it pushes', () => {
+  const SHAPES = {
+    'refs/refs/heads/claim/7': 'refs/refs/heads/claim/7',
+    'a branch named refs/heads/claim/7': 'refs/heads/refs/heads/claim/7',
+    'a tag named refs/heads/claim/7': 'refs/tags/refs/heads/claim/7',
+  };
+  let dir;
+  let origin;
+  let work;
+  let forger;
+  let fake;
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), 'claim-pushmatch-'));
+    origin = join(dir, 'origin.git');
+    fake = join(dir, 'fake');
+    mkdirSync(join(fake, 'bin'), { recursive: true });
+    writeFileSync(join(fake, 'bin/gh'), FAKE_GH);
+    chmodSync(join(fake, 'bin/gh'), 0o755);
+    const seed = join(dir, 'seed');
+    mkdirSync(seed);
+    git(seed, 'init', '-q', '-b', 'main');
+    commit(seed, { 'README.md': '# app\n' }, 'start');
+    git(dir, 'clone', '-q', '--bare', seed, origin);
+    work = join(dir, 'work');
+    forger = join(dir, 'forger');
+    git(dir, 'clone', '-q', origin, work);
+    git(dir, 'clone', '-q', origin, forger);
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  beforeEach(() => {
+    for (const ref of git(origin, 'for-each-ref', '--format=%(refname)').split('\n').filter((r) => r && r !== 'refs/heads/main')) git(origin, 'update-ref', '-d', ref);
+    for (const f of ['gh-calls', 'perm.json']) rmSync(join(fake, f), { force: true });
+    writeFileSync(join(fake, 'gh-calls'), '');
+  });
+  const claim = (...args) => run(work, CLAIM, args, { ...quiet, PATH: `${join(fake, 'bin')}:${process.env.PATH}`, FAKE: fake });
+  const refs = () => git(origin, 'for-each-ref', '--format=%(refname) %(objectname)');
+  const ghCalls = () => readFileSync(join(fake, 'gh-calls'), 'utf8');
+  /** Puts ref on origin, at main's tip or at a commit of its own. */
+  const forge = (ref, own) => {
+    git(forger, 'fetch', '-q', 'origin');
+    const sha = own ? git(forger, 'commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', 'claim 7 team-y') : git(forger, 'rev-parse', 'origin/main');
+    git(forger, 'push', '-q', 'origin', `${sha}:${ref}`);
+  };
+
+  for (const [name, ref] of Object.entries(SHAPES)) {
+    for (const own of [false, true]) {
+      test(`${name}, made before the claim ${own ? 'at a commit of its own' : "at main's tip"}: take refuses, names it, and changes no ref`, () => {
+        forge(ref, own);
+        const before = refs();
+        const r = claim('7', 'team-x');
+        assert.equal(r.code, 1, r.out);
+        assert.ok(r.out.includes(ref), r.out);
+        assert.equal(refs(), before, 'a ref on origin moved or appeared');
+        assert.doesNotMatch(ghCalls(), /issue comment/);
+      });
+    }
+
+    for (const [form, args] of [
+      ['--release', ['--release', '7', 'team-x']],
+      ['--handoff', ['--handoff', '7', 'team-x', 'team-y']],
+      ['--release --human', ['--release', '7', '--human']],
+    ]) {
+      test(`${name}, made after the claim: ${form} refuses, names it, and is not called a race`, () => {
+        assert.equal(claim('7', 'team-x').code, 0);
+        forge(ref, false);
+        writeFileSync(join(fake, 'perm.json'), '{"viewerPermission":"ADMIN"}');
+        const before = refs();
+        const r = claim(...args);
+        assert.equal(r.code, 1, r.out);
+        assert.ok(r.out.includes(ref), r.out);
+        assert.doesNotMatch(r.out, /moved/);
+        assert.equal(refs(), before);
+      });
+    }
+  }
+});
