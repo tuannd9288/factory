@@ -121,6 +121,42 @@ describe('.gate/bin/verify-timeout (item 9)', () => {
   });
 });
 
+describe('gate.yml\'s cfg step in main\'s checkout (item 9)', () => {
+  // GitHub runs the candidate's gate.yml against main's checkout, so a kit update from a kit older than #133 runs this step
+  // where main has no .gate/bin/verify-timeout (factory-onboard-scratch#5).
+  const cfg = gate.jobs.verify.steps.find((s) => s.id === 'cfg');
+  const dir = mkdtempSync(join(tmpdir(), 'gate-cfg-'));
+  const step = (files) => {
+    rmSync(join(dir, '.gate'), { recursive: true, force: true });
+    mkdirSync(join(dir, '.gate/bin'), { recursive: true });
+    for (const [path, [body, mode]] of Object.entries(files)) {
+      writeFileSync(join(dir, path), body);
+      chmodSync(join(dir, path), mode);
+    }
+    const output = join(dir, 'output');
+    writeFileSync(output, '');
+    const r = spawnSync('bash', ['-e', '-c', cfg.run], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH, GITHUB_OUTPUT: output } });
+    return { code: r.status, output: readFileSync(output, 'utf8') };
+  };
+  const timeout = (mode = 0o755) => [readFileSync(TIMEOUT, 'utf8'), mode];
+
+  test('a main whose kit has no verify-timeout gets 30 minutes, the limit its own gate.yml gave', () => {
+    assert.deepEqual(step({ '.gate/config.sh': ['GATE_CHECKS=""\n', 0o644] }), { code: 0, output: 'minutes=30\n' });
+  });
+
+  test('a main with verify-timeout gets its value, and the step fails when it cannot read or run it', () => {
+    assert.deepEqual(step({ '.gate/config.sh': ['GATE_VERIFY_TIMEOUT=45\n', 0o644], '.gate/bin/verify-timeout': timeout() }), { code: 0, output: 'minutes=45\n' });
+    for (const config of ['GATE_VERIFY_TIMEOUT=abc\n', 'this is not shell (\n']) {
+      const r = step({ '.gate/config.sh': [config, 0o644], '.gate/bin/verify-timeout': timeout() });
+      assert.notEqual(r.code, 0, config);
+      assert.equal(r.output, '', config);
+    }
+    const r = step({ '.gate/config.sh': ['GATE_VERIFY_TIMEOUT=45\n', 0o644], '.gate/bin/verify-timeout': timeout(0o644) });
+    assert.notEqual(r.code, 0, 'a verify-timeout that is there but cannot run');
+    assert.equal(r.output, '');
+  });
+});
+
 describe('the ceilings that follow the timeout (item 9)', () => {
   const max = Number(run(factory, TIMEOUT, ['--max']).out.trim());
   const jobs = { ...gate.jobs, ...trusted.jobs };
