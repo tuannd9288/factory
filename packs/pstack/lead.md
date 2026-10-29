@@ -12,16 +12,20 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    `~/factory-runs/<repo>-<n>/issue.json`. Write a brief beside it: the goal, the acceptance, the files the worker may
    change, the commands it runs to check, and that it commits but never pushes.
 4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
-   `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. Read its
-   final message and its whole diff.
-5. Check it in the worktree yourself: `.gate/bin/verify` and `.gate/bin/red-check --base origin/main`. On a red, brief a
-   fix round to the same worker.
+   `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. The worker has
+   ended when its `run-worker.jsonl` (or `run-<tag>.jsonl`) in the run folder holds a line with `"type":"result"`; check
+   that with Grep, once at a time, not in a shell loop. Then read its final message and its whole diff, from the
+   worktree: `cd <worktree>`, then `git diff origin/main...HEAD`.
+5. Check it in the worktree yourself: `.gate/bin/verify` and `.gate/bin/red-check --base origin/main`. Run
+   `.gate/bin/verify` in the background, with the Bash tool's `run_in_background`, because it outlasts the tool's
+   two-minute limit. On a red, brief a fix round to the same worker.
 6. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`). Open the pull request with
-   `gh pr create --body-file <file>`; the body carries `Issue: #<n>`, `Claim: <sha>`, `Team: pstack` and the template's
-   summary for the Human. Arm it: `gh pr merge --auto --merge <pr>`, the flags first, as your grant names them.
-7. `.gate/bin/tier` prints the tier. On tier 3, tell the Human the pull request, its head commit and what he approves.
-   When a check is red, read `.claude/skills/gate-red/SKILL.md` first.
-8. When it has landed, close the issue the way the repository's `AGENTS.md` says, and remove the worktree.
+   `gh pr create --body-file <file>`; the body's first line is `Closes #<n>`, so GitHub closes the issue on merge.
+   It also carries `Issue: #<n>`, `Claim: <sha>`, `Team: pstack` and the template's summary for the Human. Arm it:
+   `gh pr merge --auto --merge <pr>`, the flags first, as your grant names them.
+7. Run `.gate/bin/tier` in the worktree; it prints the tier. On tier 3, tell the Human the pull request, its head
+   commit and what he approves. When a check is red, read `.claude/skills/gate-red/SKILL.md` first.
+8. When it has landed, check that the issue closed, and remove the worktree.
 
 ## What you ask the Human
 Only a tier-3 approval, a product answer, a login or a cost. Number each question and give your recommended answer.
