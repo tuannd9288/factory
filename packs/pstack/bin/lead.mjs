@@ -2,6 +2,7 @@
 // claude, the plugins missing, the refusals) and the start. Nothing here reads a credential or logs in.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { constants as osConstants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
@@ -62,6 +63,13 @@ export function missingPlugins(settingsJson, listOutput) {
   return enabledPlugins(settingsJson).filter((id) => !listOutput.includes(id));
 }
 
+/** The exit code for a finished child: its status, or 128 plus the signal's number when a signal ended it. */
+export function exitCodeOf({ status, signal }) {
+  if (typeof status === 'number') return status;
+  const n = signal ? osConstants.signals[signal] : undefined;
+  return n ? 128 + n : 1;
+}
+
 function readSettings(cwd) {
   const path = join(cwd, '.claude/settings.json');
   return existsSync(path) ? readFileSync(path, 'utf8') : '{}';
@@ -110,8 +118,9 @@ function main(argv, env) {
     }
   }
 
-  const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit' });
-  return r.status ?? 1;
+  // Ctrl-C reaches this process as well as claude, which uses it itself; like system(), ignore SIGINT and SIGQUIT while the child runs.
+  for (const s of ['SIGINT', 'SIGQUIT']) process.on(s, () => {});
+  return exitCodeOf(spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit' }));
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

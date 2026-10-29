@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { leadArgs, missingPlugins, refusal } from '../bin/lead.mjs';
+import { exitCodeOf, leadArgs, missingPlugins, refusal } from '../bin/lead.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
 
 const home = '/home/factory';
@@ -107,5 +107,19 @@ describe('missingPlugins', () => {
   });
   test('settings with no enabledPlugins want nothing', () => {
     assert.deepEqual(missingPlugins('{}', listed), []);
+  });
+});
+
+describe('exitCodeOf', () => {
+  test('a status is the code', () => {
+    assert.equal(exitCodeOf({ status: 0, signal: null }), 0);
+    assert.equal(exitCodeOf({ status: 3, signal: null }), 3);
+  });
+  test('a signal is 128 plus its number', () => {
+    assert.equal(exitCodeOf({ status: null, signal: 'SIGINT' }), 130);
+    assert.equal(exitCodeOf({ status: null, signal: 'SIGTERM' }), 143);
+  });
+  test('neither is 1', () => {
+    assert.equal(exitCodeOf({ status: null, signal: null }), 1);
   });
 });
