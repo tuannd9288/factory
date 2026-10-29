@@ -36,6 +36,9 @@
 # verify, tier and Entire Gates (bin/onboard-owner writes that ruleset from the variable). No required job here has
 # `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
 # review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
+# Every job runs on the repository variable GATE_TRUSTED_RUNNER (a JSON label list, as gate.yml's GATE_PR_RUNNER),
+# GitHub-hosted Ubuntu when unset: never a runner a candidate's, main's or a deploy's job uses, nor one another workflow
+# can reach, for these jobs hold the reviewer's credential and a token that writes labels (.gate/enforced-rules.md).
 name: gate-trusted
 
 on:
@@ -58,7 +61,7 @@ env:
 jobs:
   review:
     name: review
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '"ubuntu-latest"') }}
     environment: reviewer
     timeout-minutes: 90
     permissions:
@@ -122,7 +125,7 @@ jobs:
 
   verdict:
     name: verdict
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 100
     permissions:
       actions: read
@@ -150,7 +153,7 @@ jobs:
 
   tier:
     name: tier
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 105
     permissions:
       actions: read
@@ -188,7 +191,7 @@ jobs:
     name: rounds
     needs: [review, verdict]
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 10
     permissions:
       contents: read
