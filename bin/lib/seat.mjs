@@ -47,7 +47,7 @@ const builderAllow = (run) => [
 export const PRESETS = {
   worker: {
     model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, budget: 20, web: false,
-    allow: (run) => [...builderAllow(run), 'Write', 'Edit', 'Bash(cp:*)', 'Bash(sed:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(cmp:*)'],
+    allow: (run) => [...builderAllow(run), 'Write', 'Edit', 'Bash(cp:*)', 'Bash(sed:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(cmp:*)', 'Bash(mv:*)'],
   },
   reviewer: {
     model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, budget: 15, web: false,
@@ -69,7 +69,9 @@ export const ROLES = Object.keys(PRESETS);
 
 /** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories and run its
  * `sv`); skills become Skill(<name>) grants and allow is a run's own extra grants; seat and tokenPath add seat 1's
- * deny rule; deny is a run's own extra deny rules (#92), which come after the role's and before seat 1's. */
+ * deny rule; deny is a run's own extra deny rules (#92), which come after the role's and before seat 1's. The mode is
+ * default: with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set, Claude Code 2.1.308 forces it whatever is asked (#188), so each
+ * command a role runs, mv among them, needs a grant. */
 export function buildArgs({ role, run, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, seat = null, tokenPath = null }) {
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
@@ -77,7 +79,7 @@ export function buildArgs({ role, run, home, resume = null, skills = [], allow =
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
-    '--max-budget-usd', String(p.budget), '--permission-mode', 'acceptEdits',
+    '--max-budget-usd', String(p.budget), '--permission-mode', 'default',
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
     '--allowedTools', ...p.allow(run), 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
