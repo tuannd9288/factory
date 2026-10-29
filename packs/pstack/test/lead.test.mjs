@@ -20,7 +20,7 @@ describe('refusal', () => {
   test('refuses a name that is not a plain folder name', () => {
     const root = tmp();
     try {
-      for (const bad of ['', 'a/b', '..', '../x', 'a/../b', '-x', '--x']) assert.match(refusal(bad, root), /\S/, JSON.stringify(bad));
+      for (const bad of ['', 'a/b', '..', '../x', 'a/../b', '-x', '--x', 'a b', 'a[b]', 'a*', 'zalo-gateway ']) assert.match(refusal(bad, root), /not a plain folder name/, JSON.stringify(bad));
     } finally {
       rmSync(root, { recursive: true });
     }

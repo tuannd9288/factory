@@ -28,7 +28,8 @@ const denyOf = (cwd) => [
 
 /** The reason to refuse a start, or null: repo is a plain folder name and root/repo is a real folder with .git, .gate/ and .envrc. */
 export function refusal(repo, root) {
-  if (typeof repo !== 'string' || repo === '' || repo === '.' || repo.startsWith('-') || repo.includes('/') || repo.includes('..')) {
+  // GitHub's own name characters only: the name goes into the deny rules' paths, where a glob character would bend them.
+  if (typeof repo !== 'string' || !/^[A-Za-z0-9._-]+$/.test(repo) || repo === '.' || repo.startsWith('-') || repo.includes('..')) {
     return `bin/lead: "${repo ?? ''}" is not a plain folder name`;
   }
   const dir = join(root, repo);
