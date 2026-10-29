@@ -187,3 +187,53 @@ describe('the ceilings that follow the timeout (item 9)', () => {
     for (const w of waits) assert.ok(w / 60 + 5 <= jobs.tier['timeout-minutes'], `tier ends before a wait of ${w}`);
   });
 });
+
+describe('the repository\'s own Node and pnpm (#155)', () => {
+  // gate.yml reads them from the candidate, which runs on them anyway; main.yml from main. One step, in both.
+  const main = yaml('main.yml');
+  const tools = (wf) => wf.jobs.verify.steps.find((s) => s.id === 'tools');
+  const dir = mkdtempSync(join(tmpdir(), 'gate-tools-'));
+  const read = (files) => {
+    for (const f of ['.node-version', 'package.json']) rmSync(join(dir, f), { force: true });
+    for (const [path, body] of Object.entries(files)) writeFileSync(join(dir, path), body);
+    const output = join(dir, 'output');
+    writeFileSync(output, '');
+    const r = spawnSync('bash', ['-e', '-c', tools(gate).run], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH, GITHUB_OUTPUT: output } });
+    return { code: r.status, output: readFileSync(output, 'utf8') };
+  };
+
+  test('both workflows set up the Node and pnpm one step reads, before any step runs the kit', () => {
+    for (const [wf, cwd] of [[gate, 'candidate'], [main, undefined]]) {
+      const steps = wf.jobs.verify.steps;
+      const at = steps.findIndex((s) => s.id === 'tools');
+      const node = steps.findIndex((s) => String(s.uses).startsWith('actions/setup-node@'));
+      const pnpm = steps.findIndex((s) => String(s.uses).startsWith('pnpm/action-setup@'));
+      const kit = steps.findIndex((s) => /\.gate\/bin/.test(String(s.run)));
+      assert.ok(at >= 0 && node > at && pnpm > node && kit > pnpm, `${wf.name}: tools ${at}, node ${node}, pnpm ${pnpm}, kit ${kit}`);
+      assert.equal(steps[at].run, tools(gate).run, wf.name);
+      assert.equal(steps[at].shell, 'bash', wf.name);
+      assert.equal(steps[at]['working-directory'], cwd, wf.name);
+      assert.equal(steps[node].with['node-version'], '${{ steps.tools.outputs.node }}', wf.name);
+      assert.match(steps[pnpm].uses, /^pnpm\/action-setup@[0-9a-f]{40}$/, wf.name);
+      assert.equal(steps[pnpm].if, "steps.tools.outputs.pnpm != ''", wf.name);
+      assert.deepEqual(steps[pnpm].with, { version: '${{ steps.tools.outputs.pnpm }}' }, wf.name);
+    }
+  });
+
+  test('Node is 24 without .node-version, else the plain version it holds; anything else fails the step and sets nothing', () => {
+    assert.deepEqual(read({}), { code: 0, output: 'node=24\npnpm=\n' });
+    assert.deepEqual(read({ '.node-version': '26.3.0\n' }), { code: 0, output: 'node=26.3.0\npnpm=\n' });
+    assert.deepEqual(read({ '.node-version': 'v22\n' }), { code: 0, output: 'node=22\npnpm=\n' });
+    for (const bad of ['lts/*\n', '', '26.3.0\npnpm=1\n', 'latest\n', '26.3.0.1\n']) assert.deepEqual(read({ '.node-version': bad }), { code: 1, output: '' }, JSON.stringify(bad));
+  });
+
+  test('pnpm is the plain version package.json\'s packageManager names, without its hash; none for another manager or none named', () => {
+    const pkg = (pm) => ({ 'package.json': `{\n  "name": "app",\n  "packageManager": "${pm}",\n  "private": true\n}\n` });
+    assert.deepEqual(read(pkg('pnpm@11.1.2')), { code: 0, output: 'node=24\npnpm=11.1.2\n' });
+    assert.deepEqual(read(pkg('pnpm@11.1.2+sha512.0123abcdef')), { code: 0, output: 'node=24\npnpm=11.1.2\n' });
+    assert.deepEqual(read({ 'package.json': '{"packageManager":"pnpm@10.4.1"}' }), { code: 0, output: 'node=24\npnpm=10.4.1\n' });
+    assert.deepEqual(read(pkg('yarn@4.1.0')), { code: 0, output: 'node=24\npnpm=\n' });
+    assert.deepEqual(read({ 'package.json': '{ "name": "app" }\n' }), { code: 0, output: 'node=24\npnpm=\n' });
+    for (const bad of ['pnpm@latest', 'pnpm@^11.1', 'pnpm@11.1.2\\nnode=1']) assert.deepEqual(read(pkg(bad)), { code: 1, output: '' }, bad);
+  });
+});
