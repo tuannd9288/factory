@@ -49,13 +49,14 @@ const leadLogin = (repo) => `cd ~/WORKSPACES/${repo} && direnv exec . claude aut
 
 const timeoutMs = (env) => Number(env.FACTORY_AUTH_TIMEOUT_MS) || 15000;
 
-/** One vendor command with a time limit. { code, out, error } where error is 'timed out' or the spawn error's code. */
+/** One vendor command with a time limit. { code, out, stdout, error }: out is stdout then stderr (gh auth status prints on stderr),
+ * stdout alone holds claude auth status's JSON (direnv and ssh print on stderr); error is 'timed out' or the spawn error's code. */
 function call(cmd, args, { extra = {}, cwd, env, timeout }) {
   const childEnv = { ...env };
   for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CLAUDE_CODE_OAUTH_TOKEN']) delete childEnv[k];
   const r = spawnSync(cmd, args, { cwd, env: { ...childEnv, ...extra }, encoding: 'utf8', timeout, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'] });
   const error = r.error ? (r.error.code === 'ETIMEDOUT' ? 'timed out' : `${cmd}: ${r.error.code ?? 'failed'}`) : null;
-  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, error };
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, stdout: r.stdout ?? '', error };
 }
 
 /** What claude auth status prints, reduced to the logged-in flag, the local part of the address and the plan; the rest is dropped. */
@@ -91,7 +92,7 @@ function check(p, ctx) {
   const r = call(p.check.cmd, p.check.args, { extra: p.check.env, cwd: p.check.cwd, env: ctx.env, timeout: ctx.timeout });
   if (r.error) return { loggedIn: null, account: null, plan: null, note: r.error };
   if (p.kind === 'codex') return { loggedIn: r.code === 0, account: null, plan: null, note: '' };
-  const read = p.kind === 'gh' ? readGh(r.out) : readClaude(r.out);
+  const read = p.kind === 'gh' ? readGh(r.out) : readClaude(r.stdout);
   return read ? { ...read, note: '' } : { loggedIn: null, account: null, plan: null, note: `${p.check.cmd} printed nothing readable` };
 }
 
@@ -165,7 +166,7 @@ export function readPiggery(ctx) {
   const down = probes.find(({ r }) => r.code === 255 || r.error);
   if (down) return [unreachable('piggery', down.r)];
   return probes.map(({ p, r }) => {
-    const read = p.kind === 'codex' ? { loggedIn: r.code === 0, account: null, plan: null } : readClaude(r.out);
+    const read = p.kind === 'codex' ? { loggedIn: r.code === 0, account: null, plan: null } : readClaude(r.stdout);
     return blank('piggery', p, read ?? { loggedIn: null, account: null, plan: null }, read ? '' : 'pig printed nothing readable');
   });
 }
