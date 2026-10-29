@@ -13,6 +13,7 @@
 /.githooks
 /.claude
 /.codex
+/.entire
 /scripts
 /AGENTS.md
 /CLAUDE.md

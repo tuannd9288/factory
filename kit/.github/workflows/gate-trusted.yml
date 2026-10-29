@@ -28,7 +28,12 @@
 #            .gate/bin/verify-timeout --max): review 90 (its wait for verify and the reviewer's 30), verdict 100, tier 105. A
 #            pull request whose head is in another repository is refused by the first step of `review`, which is red, never
 #            skipped.
-# The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json). No required job here has
+#   With GATE_REVIEWER=entire (#155) Entire reviews outside Actions: `review` passes at once and `verdict` on its verdict,
+#   and `tier`, which waits for nothing, passes only once Entire's "Entire Gates" check of the App the rules in force on
+#   the base branch pin (GATE_BASE_REF; the rules need only metadata, which every token reads) concluded success on the
+#   head; a No-red line in the body makes it tier 3. The queue re-runs it once that check concludes.
+# The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json); with GATE_REVIEWER=entire,
+# verify, tier and Entire Gates (bin/onboard-owner writes that ruleset from the variable). No required job here has
 # `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
 # review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
 name: gate-trusted
@@ -167,11 +172,16 @@ jobs:
         working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}
-      - run: .gate/bin/review tier --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_STEP_SUMMARY"
+      - run: |
+          printf '%s\n' "$BODY" >"$RUNNER_TEMP/pr-body.txt"
+          GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" .gate/bin/review tier --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_STEP_SUMMARY"
         shell: bash
         working-directory: trusted
         env:
           GATE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
+          GATE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BODY: ${{ github.event.pull_request.body }}
           GH_TOKEN: ${{ github.token }}
 
   rounds:

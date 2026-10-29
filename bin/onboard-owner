@@ -3,7 +3,8 @@
 #   bin/onboard-owner <owner/name> --id <repository id>            show what it would change, and change nothing
 #   bin/onboard-owner <owner/name> --id <repository id> --apply    invite the agents' account (write), set the
 #        factory's rulesets (no rewrite on any branch; on main, a bootstrap one until the kit lands, then the kit's
-#        gate), create the reviewer environment, and read it all back
+#        gate, which with the repository variable GATE_REVIEWER=entire requires verify, tier and Entire's check
+#        Entire Gates instead of review and verdict), create the reviewer environment, and read it all back
 # The id is the repository's own (gh api repos/<owner>/<name> --jq .id), so a typo or a renamed repository is refused.
 # Run it again with --apply once the kit pull request has merged, to put the kit's gate in. It never runs git or
 # anything the repository holds. FACTORY_AGENT (default: tuan9288-agent) names the agents' account.

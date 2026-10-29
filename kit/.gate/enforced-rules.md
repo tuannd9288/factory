@@ -11,7 +11,7 @@ as `prose` and gets one, or is deleted, within 30 days.
 | No rewrite of a pushed commit (rebase, amend) and no force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`), and `.claude/settings.json` deny rules |
 | Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
 | Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or `AGENTS.md`, and review reads it | the reviewer |
-| Checks green on the exact head commit before merge | ruleset: `verify`, `review`, `verdict`, `tier` pinned to GitHub Actions, branch up to date |
+| Checks green on the exact head commit before merge | ruleset: `verify`, `review`, `verdict`, `tier` pinned to GitHub Actions, branch up to date. With the repository variable `GATE_REVIEWER=entire`, `verify` and `tier`, and Entire's `Entire Gates` pinned to its App (`bin/onboard-owner` writes that ruleset from the variable); `tier` passes only on that check's success, since GitHub counts its neutral and skipped as passing, and fails while the rules in force pin no such App |
 | No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `.gate/bin/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
 | A new test fails at the base and passes at the head | `red-check`, inside `verify` |
 | A failing test committed first is not weakened later | `.gate/bin/rules` (`failing-test-edited`) |
@@ -48,7 +48,8 @@ the trailer `Failing-test: <test command>`; later commits never edit those test 
 `red-check` lays the new or changed tests onto the base commit and requires them to fail there as tests, not as load errors.
 A new name in an existing module: import the module (`import * as m from`), not the missing name. A new file: load it inside
 the test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR body:
-`No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason.
+`No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason. Where Entire reviews
+(`GATE_REVIEWER=entire`), `tier` makes the change tier 3 instead: the Human judges the reason.
 
 ## Exceptions
 
