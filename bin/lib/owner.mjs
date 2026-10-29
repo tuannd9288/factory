@@ -1,7 +1,8 @@
 // The Human's half of taking a repository in, run by him from the factory clone, logged into gh as the repository's
 // owner: it checks the repository is the one he names, by name and id, shows every change, and with --apply invites
 // the agents' account (write), sets the factory's rulesets and creates the reviewer environment, then reads back what
-// it set. It calls only gh against GitHub's API, with the factory's own files: never git, never the target's .envrc,
+// it set; the gate's ruleset follows the repository variable GATE_REVIEWER (#155: entire has its own). It calls only
+// gh against GitHub's API, with the factory's own files: never git, never the target's .envrc,
 // scripts or hooks, so nothing the target holds runs with his authority. A second run changes nothing.
 // See bin/onboard-owner for the arguments.
 import { execFileSync } from 'node:child_process';
@@ -20,6 +21,32 @@ const FILES = {
 const ENV = 'reviewer';
 const CALL_MS = 60_000;
 const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
+/** #155: Entire's GitHub App, which posts the check "Entire Gates": read by the Human on 2026-10-29 from that check on
+ * factory-onboard-scratch's head 485678f. An App's id never changes; main() asks GitHub that the slug still names it. */
+export const ENTIRE_APP = { slug: 'entire', id: 2626939, check: 'Entire Gates' };
+
+/** The kit's gate for a repository whose GATE_REVIEWER is entire: Entire reviews outside Actions, so review and verdict
+ * judge nothing and are not required, and Entire's check is, pinned to its App. tier, which passes only on that check's
+ * success (GitHub counts its neutral as passing), stays required. */
+export function entireGate(gate) {
+  return {
+    ...gate,
+    rules: gate.rules.map((r) =>
+      r.type !== 'required_status_checks'
+        ? r
+        : {
+            ...r,
+            parameters: {
+              ...r.parameters,
+              required_status_checks: [
+                ...r.parameters.required_status_checks.filter((c) => c.context !== 'review' && c.context !== 'verdict'),
+                { context: ENTIRE_APP.check, integration_id: ENTIRE_APP.id },
+              ],
+            },
+          },
+    ),
+  };
+}
 
 /** Whether every field of want holds in have; a field GitHub adds of its own is no difference. */
 export function holds(want, have) {
@@ -34,11 +61,12 @@ const sorted = (r) => ({ ...r, rules: [...(r.rules ?? [])].sort((a, b) => a.type
 /** What the repository should hold: before the kit is on its default branch, a ruleset on every branch that refuses a
  * rewrite, one on every tag that refuses creation, update and deletion but for a repository admin, one on the claim refs
  * (claim/<n>) that refuses deletion and rewrite for everyone, and a bootstrap one on main that asks the Human to approve
- * the last push; after, the kit's gate in place of the bootstrap one. */
-export function wanted({ kitLanded, branch }) {
+ * the last push; after, the kit's gate in place of the bootstrap one, in its Entire variant when the reviewer is entire. */
+export function wanted({ kitLanded, branch, reviewer }) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
+  const gate = () => (reviewer === 'entire' ? entireGate(read(FILES.gate)) : read(FILES.gate));
   return {
-    rulesets: [read(FILES.branches), read(FILES.tags), read(FILES.claims), read(kitLanded ? FILES.gate : FILES.bootstrap)],
+    rulesets: [read(FILES.branches), read(FILES.tags), read(FILES.claims), kitLanded ? gate() : read(FILES.bootstrap)],
     drop: kitLanded ? [read(FILES.bootstrap).name] : [],
     branch,
   };
@@ -130,9 +158,21 @@ function main(argv) {
   }
   const branch = repo.default_branch;
   const kitLanded = maybe(`repos/${slug}/contents/.gate/kit-files?ref=${encodeURIComponent(branch)}`) !== null;
-  const want = wanted({ kitLanded, branch });
+  // The gate follows the repository variable GATE_REVIEWER, which the jobs read too, so a later run cannot put back a
+  // ruleset that requires review and verdict while they judge nothing.
+  const reviewer = (gh(['variable', 'list', '--repo', slug, '--json', 'name,value']) ?? []).find((v) => v.name === 'GATE_REVIEWER')?.value ?? '';
+  if (reviewer === 'entire' && kitLanded) {
+    const app = maybe(`apps/${ENTIRE_APP.slug}`);
+    if (app?.id !== ENTIRE_APP.id) {
+      console.error(`onboard-owner: Entire's App ${ENTIRE_APP.slug} is ${app ? `id ${app.id}` : 'unknown to GitHub'}, not id ${ENTIRE_APP.id}: the gate would pin another App's check, so nothing changes`);
+      return 2;
+    }
+  }
+  const want = wanted({ kitLanded, branch, reviewer });
   const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
   console.log(`onboard-owner: ${slug} (id ${repo.id}, default branch ${branch}); the kit is ${kitLanded ? '' : 'not '}on ${branch}`);
+  if (reviewer === 'entire')
+    console.log(`onboard-owner: GATE_REVIEWER is entire: the gate requires verify, tier and ${ENTIRE_APP.check} from App ${ENTIRE_APP.slug} (id ${ENTIRE_APP.id}), not review or verdict`);
   const calls = plan(slug, agent, current(slug, agent, names), want);
   for (const c of calls) console.log(`  change  ${c.what}: ${show(c)}`);
   if (!calls.length) console.log('  nothing to change');
