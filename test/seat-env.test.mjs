@@ -25,3 +25,13 @@ test('the caller\'s GH_TOKEN, GITHUB_TOKEN and ANTHROPIC_API_KEY do not reach cl
   await until(() => w.records().length === 2, 'both records');
   for (const tag of ['two', 'one']) assert.deepEqual([w.saw(tag).env.GH_TOKEN, w.saw(tag).env.GITHUB_TOKEN, w.saw(tag).env.ANTHROPIC_API_KEY], [false, false, false], tag);
 }));
+
+test('every session runs with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1, on either seat, whatever the caller set (#181)', () => world(async (w) => {
+  // Claude Code then takes credentials out of the environment of each command, hook and MCP server it starts.
+  for (const [seat, tag] of [['2', 'two'], ['1', 'one']]) {
+    const r = w.start('worker', ['--resume', 'sid-1', '--seat', seat, '--tag', tag], { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '0', FAKE_OUT: w.out(tag) });
+    assert.equal(r.code, 0, r.out + r.err);
+  }
+  await until(() => w.records().length === 2, 'both records');
+  for (const tag of ['two', 'one']) assert.equal(w.saw(tag).env.scrub, '1', tag);
+}));

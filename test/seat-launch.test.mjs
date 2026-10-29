@@ -120,7 +120,7 @@ test('seat 1: the token is in the session\'s environment and in no argv, log, re
   const tokenFile = join(w.profiles, 'seats/1/oauth-token');
   const i = saw.argv.indexOf('--disallowedTools');
   const denied = saw.argv.slice(i + 1, saw.argv.indexOf('--output-format'));
-  assert.deepEqual(denied.slice(-3), ['Bash(env:*)', 'Bash(printenv:*)', `Read(/${tokenFile})`]);
+  assert.deepEqual(denied.slice(-1), [`Read(/${tokenFile})`]);
   for (const [file, text] of [...filesUnder(w.run), ...filesUnder(w.state)]) assert.ok(!text.includes(TOKEN), `${file} holds the token`);
   assert.ok(!(r.out + r.err).includes(TOKEN));
 }));
