@@ -231,3 +231,45 @@ test('--all: a place it cannot reach is one row with the last line of the ssh er
     s.done();
   }
 });
+
+// direnv exec prints its loading line on stderr before the command's output, and pig or ssh may print a warning there.
+test('a line on stderr does not hide a lead\'s login', () => {
+  const s = sandbox();
+  try {
+    writeFileSync(join(s.dir, 'bin/direnv'), `#!/bin/sh
+echo "direnv: loading $PWD/.envrc" >&2
+shift 2
+CLAUDE_CONFIG_DIR="$FAKE/lead-$(basename "$PWD")" exec "$@"
+`);
+    s.w('claude-lead-alpha.json', claudeJson('lead.alpha@secret-corp.example', 'pro'));
+    s.env.USER_PLACE = 'factory';
+    s.env.FACTORY_AUTH_USER = 'factory';
+    mkdirSync(join(s.env.FACTORY_ROOT, 'alpha'), { recursive: true });
+    for (const f of ['.gate', '.envrc']) writeFileSync(join(s.env.FACTORY_ROOT, 'alpha', f), '');
+    const rows = JSON.parse(s.auth('status', '--json').out);
+    const lead = rows.find((x) => x.profile === 'factory/lead-alpha');
+    assert.equal(lead.loggedIn, true);
+    assert.equal(lead.account, 'lead.alpha');
+  } finally {
+    s.done();
+  }
+});
+
+test('a line on stderr does not hide piggery\'s login', () => {
+  const s = sandbox();
+  try {
+    writeFileSync(join(s.dir, 'bin/pig'), `#!/bin/sh
+echo "pig: a warning" >&2
+c="$1"; shift
+if [ "$c" = claude ]; then CLAUDE_CONFIG_DIR="$FAKE/piggery-claude" exec claude "$@"; else CODEX_HOME="$FAKE/piggery-codex" exec codex "$@"; fi
+`);
+    s.w('claude-piggery-claude.json', claudeJson('pig.one@secret-corp.example', 'max'));
+    s.w('ssh-factory.error', 'ssh: Could not resolve hostname tuans-mac-mini\n');
+    const rows = JSON.parse(s.auth('status', '--all', '--json').out);
+    const pig = rows.find((x) => x.profile === 'piggery/claude');
+    assert.equal(pig.loggedIn, true);
+    assert.equal(pig.account, 'pig.one');
+  } finally {
+    s.done();
+  }
+});
