@@ -6,8 +6,9 @@
 //     the latest GitHub Actions run of that check on the commit: its conclusion, or pending before it completes
 //   node .gate/bin/lib/history.mjs entire --repo <owner/name> --branch <name> --head <sha>
 //     #155: `unpinned` unless every "Entire Gates" check the rules in force on the branch require names one and the same
-//     App (integration_id); else that App's latest "Entire Gates" check run on the commit: its conclusion, or pending
-//     before it completes or while there is none. Another App's check of that name counts for nothing.
+//     App (integration_id); else that App's "Entire Gates" check run created last on the commit, the one with the highest
+//     id: its conclusion, or pending before it completes or while there is none. Another App's check of that name counts
+//     for nothing.
 //   node .gate/bin/lib/history.mjs raised-at --repo <owner/name> --pr <n>     when the Actions bot first added the label raised, or nothing
 //   node .gate/bin/lib/history.mjs raise --repo <owner/name> --run <id> --head <sha>
 //     `pending` while the `review` job of that run has not completed; then `ok` or `red` (its latest attempt's
@@ -116,7 +117,10 @@ try {
       const listing = api(`${base}/commits/${opt('--head')}/check-runs?check_name=${encodeURIComponent(ENTIRE)}&app_id=${app}&filter=all&per_page=100`);
       if (!Array.isArray(listing.check_runs) || listing.total_count !== listing.check_runs.length) throw new Error(`the ${ENTIRE} check runs are more than one page, or unreadable`);
       const runs = listing.check_runs.filter((c) => c.app?.id === app && c.name === ENTIRE);
-      const last = runs.sort((a, b) => String(a.started_at).localeCompare(String(b.started_at))).at(-1);
+      // By id, not started_at: Entire left a second run in progress, started in the same second as its completed one,
+      // and never completed it (zalo-gateway#199, 2026-10-29, #167); a queued run has no started_at at all.
+      if (runs.some((c) => !Number.isSafeInteger(c.id))) throw new Error(`an ${ENTIRE} check run has no id`);
+      const last = runs.sort((a, b) => a.id - b.id).at(-1);
       console.log(last?.status === 'completed' ? last.conclusion : 'pending');
     }
   } else if (args[0] === 'raise') {

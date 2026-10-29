@@ -1650,7 +1650,8 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
   // (factory-onboard-scratch#23, 2026-10-29), and GitHub counts neutral and skipped as passing.
   const ENTIRE_APP = 4242;
   /** The rules in force on main, pinning "Entire Gates" to the Apps named (null: no integration_id), and the
-   * "Entire Gates" check runs on the head, each [conclusion or in_progress, App id, started_at]. */
+   * "Entire Gates" check runs on the head, each [conclusion, in_progress or queued, App id, started_at, id]; the id is
+   * the run's place in the list unless given. */
   const entire = (runs, pinned = [ENTIRE_APP]) =>
     write(fake, {
       'rules.json': JSON.stringify([
@@ -1659,7 +1660,10 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
       ]),
       'entire.json': JSON.stringify({
         total_count: runs.length,
-        check_runs: runs.map(([state, app = ENTIRE_APP, started = '2026-10-29T10:00:00Z']) => ({ name: 'Entire Gates', app: { id: app, slug: 'entire' }, started_at: started, status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state })),
+        check_runs: runs.map(([state, app = ENTIRE_APP, started = '2026-10-29T10:00:00Z', id], i) => {
+          const open = state === 'in_progress' || state === 'queued';
+          return { id: id === undefined ? i + 1 : id, name: 'Entire Gates', app: { id: app, slug: 'entire' }, started_at: started, status: open ? state : 'completed', conclusion: open ? null : state };
+        }),
       }),
     });
   const onEntire = { ...pr, GATE_REVIEWER: 'entire', GATE_BASE_REF: 'main' };
@@ -1701,6 +1705,41 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
       assert.equal(out.code, 1, `${JSON.stringify(runs)}: ${out.out}`);
       assert.match(out.out, /tier: Entire Gates has not concluded on [0-9a-f]{8}; the queue re-runs this check when it does/);
     }
+  });
+
+  // #167: Entire left a second run in progress on the head, started in the same second as its completed one, and never
+  // completed it (zalo-gateway#199, 8ebbb6c, 2026-10-29); GitHub listed the higher id first. A queued run has no start.
+  test('with Entire, tier reads the run created last, by id, whatever the start times and the order they are listed in', () => {
+    entire([['success']]);
+    const { head } = job('tier', { 'src/math.js': MUL }, onEntire);
+    const at = '2026-10-29T11:43:14Z';
+    for (const runs of [
+      [['success', ENTIRE_APP, at, 123426028064], ['in_progress', ENTIRE_APP, at, 123426027030]],
+      [['in_progress', ENTIRE_APP, at, 123426027030], ['success', ENTIRE_APP, at, 123426028064]],
+      [['success', ENTIRE_APP, at, 6], ['queued', ENTIRE_APP, null, 5]],
+    ]) {
+      entire(runs);
+      const out = again('tier', head, onEntire);
+      assert.equal(out.code, 0, `${JSON.stringify(runs)}: ${out.out}`);
+      assert.match(out.out, /tier: Entire Gates passed/);
+    }
+    // The run created last still decides when it is truly open, or red.
+    for (const [runs, why] of [
+      [[['in_progress', ENTIRE_APP, at, 8], ['success', ENTIRE_APP, at, 7]], /has not concluded/],
+      [[['queued', ENTIRE_APP, null, 8], ['success', ENTIRE_APP, at, 7]], /has not concluded/],
+      [[['failure', ENTIRE_APP, at, 8], ['success', ENTIRE_APP, at, 7]], /is failure on/],
+      [[['success', ENTIRE_APP, '2026-10-29T12:00:00Z', 7], ['failure', ENTIRE_APP, at, 8]], /is failure on/],
+    ]) {
+      entire(runs);
+      const out = again('tier', head, onEntire);
+      assert.equal(out.code, 1, `${JSON.stringify(runs)}: ${out.out}`);
+      assert.match(out.out, why);
+    }
+    // A run with no id cannot be placed, so the check fails closed.
+    entire([['success', ENTIRE_APP, at, null]]);
+    const out = again('tier', head, onEntire);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier: Entire's check on [0-9a-f]{8} could not be read/);
   });
 
   test('with Entire, tier fails closed unless the rules in force pin Entire Gates to one App', () => {
