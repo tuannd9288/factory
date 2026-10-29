@@ -913,6 +913,23 @@ describe('review, verdict, tier and rounds', () => {
       assert.equal(check({ ...good, raise }).status, 2, JSON.stringify(raise));
     assert.equal(check({ ...good, job: 'verdict', raise: { tier: 3, why: 'w' } }, 'verdict').status, 2);
   });
+  // #171, the Human (2026-10-29): a bug whose two scores, how often and how bad, multiply to less than 5 is filed as an issue.
+  test('a finding for an issue never blocks; one scored 5 or more, or off the 1 to 10 scale, is malformed', () => {
+    const check = (result, job = 'review') =>
+      spawnSync('node', [join(factory, 'kit/.gate/bin/lib/result.mjs'), '--job', job, '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], { input: JSON.stringify(result), encoding: 'utf8' });
+    const good = { reviewer: 'x', job: 'review', base: 'b'.repeat(40), head: 'h'.repeat(40), blocking: [], noRed: 'unjudged' };
+    const note = { id: 'n1', claim: 'src/a.js:3 an empty name ::error::x', often: 2, harm: 2 };
+    const ok = check({ ...good, forIssue: [note] });
+    assert.equal(ok.status, 0, ok.stdout);
+    assert.match(ok.stdout, /^review \(x\): for an issue \(2 x 2\): n1: src\/a\.js:3 an empty name ::error::x\nreview \(x\): passes/m);
+    assert.equal(check({ ...good, job: 'verdict', forIssue: [note] }, 'verdict').status, 0);
+    assert.equal(check({ ...good, forIssue: [note], blocking: [{ id: 'f1', claim: 'off by one' }] }).status, 1);
+    const { often, ...unscored } = note;
+    for (const bad of [{ ...note, often: 1, harm: 5 }, { ...note, often: 3, harm: 2 }, { ...note, often: 0, harm: 1 }, { ...note, often: 1, harm: 11 },
+      { ...note, often: 1.5, harm: 1 }, { ...note, often: '1', harm: 1 }, unscored, { ...note, claim: '' }, { ...note, claim: ' ' }, { ...note, id: 1 }, { ...note, extra: 1 }])
+      assert.equal(check({ ...good, forIssue: [bad] }).status, 2, JSON.stringify(bad));
+    assert.equal(check({ ...good, forIssue: note }).status, 2);
+  });
   test('the reason is one line and a command can only be the single notice result.mjs prints', () => {
     for (const why of ['::error::x', '%0A::warning::y', 'a\n::add-mask::z']) {
       const r = spawnSync('node', [join(factory, 'kit/.gate/bin/lib/result.mjs'), '--job', 'review', '--base', 'b'.repeat(40), '--head', 'h'.repeat(40)], {
