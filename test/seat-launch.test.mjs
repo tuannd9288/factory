@@ -93,7 +93,7 @@ test('the session gets its preset, the brief on stdin, the work folder as cwd, a
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => existsSync(w.out()) && w.records().length === 1, 'the session');
   const saw = w.saw();
-  assert.deepEqual(saw.argv, buildArgs({ role: 'worker', run: w.run, home: w.home, skills: ['deletion-proof'], allow: [`Bash(${w.run}/other)`], seat: 2 }));
+  assert.deepEqual(saw.argv, buildArgs({ role: 'worker', run: w.run, home: w.home, work: w.work, skills: ['deletion-proof'], allow: [`Bash(${w.run}/other)`], seat: 2 }));
   assert.equal(saw.stdin, 'the brief\n');
   assert.equal(saw.cwd, readlinkReal(w.work));
   assert.equal(saw.env.gh, join(w.run, '.gh-empty'));
