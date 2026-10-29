@@ -38,7 +38,10 @@
 # review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
 # Every job runs on the repository variable GATE_TRUSTED_RUNNER (a JSON label list, as gate.yml's GATE_PR_RUNNER),
 # GitHub-hosted Ubuntu when unset: never a runner a candidate's, main's or a deploy's job uses, nor one another workflow
-# can reach, for these jobs hold the reviewer's credential and a token that writes labels (.gate/enforced-rules.md).
+# can reach, for these jobs hold the reviewer's credential and a token that writes labels (.gate/enforced-rules.md,
+# which names the Human's one exception, with GATE_REVIEWER=entire). With the Claude reviewer, verdict and tier wait
+# for review and review for verify, so runners shared with verify must take four jobs at once; with Entire, only
+# verdict waits, for review, and two do.
 name: gate-trusted
 
 on:
