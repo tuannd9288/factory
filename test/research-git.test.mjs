@@ -225,3 +225,12 @@ test('with the real git, a folder made to look like a clone runs nothing: a bare
   assert.match(r.out, /not a git repository/);
   assert.equal(existsSync(marker), false, 'the textconv ran');
 }));
+
+// git runs gpg, which the factory machine has, to check a signature: on --show-signature, and on a format that holds %G.
+test('an option that has git run gpg is refused: --show-signature, a prefix of it, or a format that holds %G', () => world((w) => {
+  w.ok(['r', 'log', '--format=%H %s']);
+  for (const args of [['log', '--show-signature'], ['show', '--show-signature', 'HEAD'], ['log', '--show-sig'], ['log', '--format=%G?'],
+    ['log', '--pretty=format:%GS'], ['log', '--format', '%GK'], ['rev-list', '--format=%G?', 'HEAD'], ['show', '-s', '--pretty=tformat:%GG', 'HEAD']]) {
+    refused(w, ['r', ...args]);
+  }
+}));
