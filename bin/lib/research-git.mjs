@@ -19,10 +19,10 @@ import { fileURLToPath } from 'node:url';
 const READS = ['log', 'show', 'diff-tree', 'ls-files', 'rev-parse', 'rev-list', 'blame'];
 // Options that write the file they name (--output), read one (--no-index; ls-files' --exclude-from and
 // --exclude-per-directory; rev-parse's --resolve-git-dir; blame's --contents and --ignore-revs-file), or run another program
-// (--textconv, --ext-diff). blame and ls-files also take any unambiguous prefix of their own long options (git 2.54:
+// (--textconv, --ext-diff; --show-signature runs gpg, which the factory machine has, as a format with %G does). blame and ls-files also take any unambiguous prefix of their own long options (git 2.54:
 // `blame --ignore-revs-f=<file>` printed the file's first line), so a prefix of one of these is refused as well. --exclude
 // is an option of its own, which git takes before a prefix.
-const REFUSED_LONG = ['--output', '--no-index', '--textconv', '--ext-diff', '--exclude-from', '--exclude-per-directory', '--resolve-git-dir', '--contents', '--ignore-revs-file'];
+const REFUSED_LONG = ['--output', '--no-index', '--textconv', '--ext-diff', '--show-signature', '--exclude-from', '--exclude-per-directory', '--resolve-git-dir', '--contents', '--ignore-revs-file'];
 const NOT_A_PREFIX = ['--exclude'];
 // Short options that read the file they name: -O (the order of a diff) for every subcommand, -X for ls-files and -S for blame
 // (log's -S is the pickaxe), alone or in a cluster such as -pO<file>.
@@ -52,6 +52,7 @@ function checkRead(sub, args) {
     if (long) throw new Refused(`${name}: git takes it for ${long}, which writes a file, reads one the caller names or runs another program`);
     const letter = ['O', REFUSED_SHORT[sub]].find((l) => l && /^-[^-]/.test(a) && a.includes(l));
     if (letter) throw new Refused(`${a}: ${sub} -${letter} reads the file it names`);
+    if (a.includes('%G')) throw new Refused(`${a}: a format with %G has git run gpg`);
   }
 }
 
