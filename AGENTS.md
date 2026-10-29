@@ -405,11 +405,12 @@ every role is denied `env` and `printenv` (#181). The scrub also drops `GH_CONFI
 (probe, 2.1.308), so a `gh` started inside a command finds the `factory` user's own login; `gh` itself stays denied. The
 researcher is denied `git` itself; its git is `bin/research-git`, named in its brief by absolute path, which takes clone
 over https, `log`, `show`, `diff-tree`, `ls-files` and `rev-parse`, refuses each option that runs a program or reads or
-writes a file it names, and runs git with no configuration but the repository's own. Known limit: the token file sits on
-disk. Claude Code refuses `cat`, `grep` or `git -C` on a path outside the session's folders (probe, 2.1.308), but the
-worker and the reviewer may run `node` and `git -c`, which read any file the `factory` user can; seat 1's deny rule
-covers the `Read` tool only (#183 puts their commands in a sandbox). So the researcher, which reads untrusted pages and
-can send them out, never runs on seat 1.
+writes a file it names, refuses a folder git would take for a bare repository, clones only into a new folder under the
+current one, and runs git with no configuration but the repository's own. Known limit: the token file sits on disk.
+Claude Code refuses `cat`, `grep` or `git -C` on a path outside the session's folders (probe, 2.1.308), but the worker
+and the reviewer may run `node` and `git -c`, which read any file the `factory` user can; seat 1's deny rule covers the
+`Read` tool only (#183 puts their commands in a sandbox). So the researcher, which reads untrusted pages and can send
+them out, never runs on seat 1.
 
 A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's

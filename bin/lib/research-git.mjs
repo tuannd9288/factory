@@ -1,10 +1,11 @@
 // bin/research-git [-C <folder>] <subcommand> [arguments] (#181): the researcher's only way to run git. Bash rules match
 // command text, so a rule such as `Bash(git log:*)` also admits `-c`, an alias or `--output` after it. This script takes
 // clone over https and the subcommands a researcher reads with, refuses each option that makes git run a program or read
-// or write a file it names, and runs git with no configuration but the repository's own. Exits 2 on a refusal, else with
-// git's own code.
+// or write a file it names, refuses a folder git would take for a bare repository, and runs git with no configuration but
+// the repository's own. Exits 2 on a refusal, else with git's own code.
 import { spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // No diff: outside a repository, or with a path outside it, git diff compares any two files as --no-index does.
@@ -41,9 +42,31 @@ function checkClone(args) {
     words.push(a);
   }
   const [url, folder, ...rest] = words;
-  if (!url?.startsWith('https://') || rest.length) throw new Refused('clone takes one https:// URL and a folder');
-  // A folder elsewhere could put a skill or a hook where a later session loads it.
-  if (folder !== undefined && (folder.startsWith('/') || folder.split('/').includes('..'))) throw new Refused(`clone ${folder}: the folder must be under the current one`);
+  if (!url?.startsWith('https://') || folder === undefined || rest.length) throw new Refused('clone takes one https:// URL and a new folder');
+  // A folder elsewhere could put a skill or a hook where a later session loads it. Claude Code keeps the current folder
+  // inside the session's own (probe, run-probe-cd.jsonl); a symlink under it is resolved here (review of #184, B2).
+  let exists = true;
+  try {
+    lstatSync(folder);
+  } catch {
+    exists = false;
+  }
+  let up = resolve(folder);
+  while (!existsSync(up)) up = dirname(up);
+  const here = realpathSync(process.cwd());
+  const there = realpathSync(up);
+  if (exists || (there !== here && !there.startsWith(here + sep))) throw new Refused(`clone ${folder}: the folder must be new and under the current one`);
+}
+
+/** The folder git would take for a bare repository, looking up from start the way git does, or null when git would find a
+ * .git first. Such a folder's config can run a program (diff.<driver>.textconv), and the Write tool can make one from
+ * plain files; it may not write a .git (review of #184, B1). */
+function bareFrom(start) {
+  for (let d = resolve(start); ; d = dirname(d)) {
+    if (existsSync(join(d, '.git'))) return null;
+    if (['HEAD', 'objects', 'refs'].every((n) => existsSync(join(d, n)))) return d;
+    if (dirname(d) === d) return null;
+  }
 }
 
 /** The git arguments and environment for the script's own arguments, or a Refused error. */
@@ -59,8 +82,11 @@ export function plan(argv, env = process.env) {
   if (sub === 'clone') {
     if (dir !== null) throw new Refused('clone takes no -C: it clones under the current folder');
     checkClone(args);
-  } else if (READS.includes(sub)) checkRead(args);
-  else throw new Refused(`${sub === undefined ? 'no subcommand' : sub}: the subcommands are clone, ${READS.join(', ')}`);
+  } else if (READS.includes(sub)) {
+    checkRead(args);
+    const bare = bareFrom(dir ?? '.');
+    if (bare !== null) throw new Refused(`${bare}: git would take it for a bare repository, whose config can run a program`);
+  } else throw new Refused(`${sub === undefined ? 'no subcommand' : sub}: the subcommands are clone, ${READS.join(', ')}`);
   return {
     args: ['--no-pager', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...(dir === null ? [] : ['-C', dir]), sub, ...args],
     env: { PATH: env.PATH ?? '', HOME: env.HOME ?? '', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_ALLOW_PROTOCOL: 'https' },
