@@ -17,8 +17,8 @@ file. What a program enforces: `.gate/enforced-rules.md`.
   Tier 3 (a path in `.gate/protected`, this block included): the Human approves the head commit.
 - Four checks decide on the exact head commit, from `main`'s copies: `verify`, `review`, `verdict`, `tier` (where Entire
   reviews, `tier` needs its check `Entire Gates` to be success). When one is red, read `.claude/skills/gate-red/SKILL.md` first.
-- Never rewrite a pushed commit or force-push. After three red rounds the pull request is `needs-human`, with your
-  recommended answer in it.
+- The Human (2026-10-29), to the reviewer: "Rate each bug from 1 to 10 on how often it would happen and how bad it would be. If the two scores multiplied are below 5, just file it as an issue and leave the code alone." To the writer: "Do not design for rare or future cases nobody asked about."
+- Never rewrite a pushed commit or force-push. After three red rounds the pull request is `needs-human`, with your recommended answer in it.
 - Every deploy is the Human's; decide and report anything else that can be undone, and a reversible question never
   blocks the work. Secrets live only in the environment `reviewer`. A rules finding wrong for one line:
   `gate-allow <rule-id>: <why>` (syntax in the file above).

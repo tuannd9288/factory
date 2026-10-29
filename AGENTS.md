@@ -235,6 +235,11 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 - Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or AGENTS.md, and review
   reads it. A test that reads text stays only when a program in this repository reads those bytes: a parser, a hash a
   script compares, or a file `onboard` or `kit-update` writes (#112).
+- The Human (2026-10-29, #171), to every reviewer: "Rate each bug from 1 to 10 on how often it would happen and how bad it
+  would be. If the two scores multiplied are below 5, just file it as an issue and leave the code alone." To every writer:
+  "Do not design for rare or future cases nobody asked about." Claude Code reads this file in a project with no
+  `CLAUDE.md`, as every factory worktree is. The kit's Gate block holds both; its reviewer reports such a bug in
+  `forIssue`, which never blocks, and the Lead files the issue.
 
 | Path | What it is |
 |---|---|
