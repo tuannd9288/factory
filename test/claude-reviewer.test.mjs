@@ -186,6 +186,17 @@ describe('claude-reviewer', () => {
     assert.deepEqual(JSON.parse(out.result), { reviewer: 'claude-opus-5-5', job: 'review', base, head, blocking: [{ id: 'f1', claim: 'off by one' }], noRed: 'rejected', raise: { tier: 3, why: 'auth' } });
   });
 
+  // #171: a finding scored below 5 is reported for an issue, with both scores, and never blocks (result.mjs).
+  test('the result carries the findings for an issue the model gives, scored as the schema holds them', () => {
+    const forIssue = [{ id: 'n1', claim: 'src/a.js:3 an empty name', often: 2, harm: 2 }];
+    const out = review({ output: { blocking: [], noRed: 'unjudged', forIssue } });
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(JSON.parse(out.result).forIssue, forIssue);
+    const schema = JSON.parse(callsOf()[0].argv[callsOf()[0].argv.indexOf('--json-schema') + 1]);
+    for (const score of ['often', 'harm']) assert.deepEqual(schema.properties.forIssue.items.properties[score], { type: 'integer', minimum: 1, maximum: 10 });
+    assert.ok(!schema.required.includes('forIssue'));
+  });
+
   test('text with no structured output is unavailable (no-result), not a result for result.mjs to refuse', () => {
     const out = review({ text: 'I think it is fine.' });
     assert.equal(out.code, 3, out.out);

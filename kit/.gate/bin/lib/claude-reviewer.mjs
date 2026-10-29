@@ -164,6 +164,8 @@ const schema = {
     blocking: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'claim'], properties: { id: { type: 'string' }, claim: { type: 'string', minLength: 1 } } } },
     noRed: { type: 'string', enum: ['accepted', 'rejected', 'unjudged'] },
     raise: { type: 'object', additionalProperties: false, required: ['tier', 'why'], properties: { tier: { type: 'integer', enum: [3] }, why: { type: 'string', minLength: 1, maxLength: 500, pattern: '\\S' } } },
+    // #171: findings scored below 5, for an issue; result.mjs refuses one scored 5 or more.
+    forIssue: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'claim', 'often', 'harm'], properties: { id: { type: 'string' }, claim: { type: 'string', minLength: 1 }, often: { type: 'integer', minimum: 1, maximum: 10 }, harm: { type: 'integer', minimum: 1, maximum: 10 } } } },
   },
 };
 const settings = {
@@ -314,7 +316,7 @@ if (why) unavailable(why, [...(why === 'unclean-context' ? [`reviewer: unclean i
 const final = events.findLast((e) => e.type === 'result');
 const answer = final.structured_output;
 if (!answer || typeof answer !== 'object' || Array.isArray(answer)) unavailable('no-result', spent);
-const written = JSON.stringify({ reviewer: pin.name, job, base, head, blocking: answer.blocking, noRed: answer.noRed, ...(answer.raise !== undefined ? { raise: answer.raise } : {}) });
+const written = JSON.stringify({ reviewer: pin.name, job, base, head, blocking: answer.blocking, noRed: answer.noRed, ...(answer.raise !== undefined ? { raise: answer.raise } : {}), ...(answer.forIssue !== undefined ? { forIssue: answer.forIssue } : {}) });
 // The forms a secret could take in text: as it is, hex, and base64 after none, one or two other bytes. Of those the group
 // that holds the other bytes is dropped, and so is the last, whose end depends on the byte after the secret: what is
 // left is whole groups of base64 that only the secret decides.
