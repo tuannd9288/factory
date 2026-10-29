@@ -427,9 +427,10 @@ pstack, per repository: the pstack pack's `packs/pstack/settings.json` pins it t
 commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository
 and profile, after the Human has opened `claude` in the repository and trusted the folder, install it from the
 repository root with `claude plugin install pstack@pstack-f713f14 --scope project`. Never at user scope: no install
-without `--scope project`, and never the `--marketplace` form, which declares the marketplace in the profile's user
-settings. A new pin is a new marketplace name, in a tier-3 pull request per repository; attack 23 checks that two
-pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-22 (`probes/results.md`, attack 23):
+without `--scope project` (or `--scope local`, which `packs/pstack/bin/lead` uses), and never the `--marketplace` form,
+which declares the marketplace in the profile's user settings. A new pin is a new marketplace name, in a tier-3 pull
+request per repository; attack 23 checks that two pins share one profile without clashing. Found on Claude Code 2.1.308,
+2026-10-22 (`probes/results.md`, attack 23):
 
 - The install fails with `Plugin "pstack" not found in marketplace` in a folder the profile has not trusted (logged-in
   writer profile, untrusted `case1/a`). The pstack pack's `packs/pstack/settings.json` is in the order the installer writes: uninstalling

@@ -12,13 +12,16 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    `~/factory-runs/<repo>-<n>/issue.json`. Write a brief beside it: the goal, the acceptance, the files the worker may
    change, the commands it runs to check, and that it commits but never pushes.
 4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
-   `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. The worker has
-   ended when its `run-worker.jsonl` (or `run-<tag>.jsonl`) in the run folder holds a line with `"type":"result"`; check
-   that with Grep, once at a time, not in a shell loop. Then read its final message and its whole diff, from the
-   worktree: `cd <worktree>`, then `git diff origin/main...HEAD`.
-5. Check it in the worktree yourself: `.gate/bin/verify` and `.gate/bin/red-check --base origin/main`. Run
-   `.gate/bin/verify` in the background, with the Bash tool's `run_in_background`, because it outlasts the tool's
-   two-minute limit. On a red, brief a fix round to the same worker.
+   `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
+   the background, and has ended only when `~/.local/state/factory/sessions.jsonl` holds its record, a line with
+   `"tag":"worker","run":"/Users/factory/factory-runs/<repo>-<n>"`; a `"type":"result"` line in its log is not the
+   end. Check with Grep, once at a time, not in a shell loop. The record's `structured` is its final message, and
+   `session` and `seat` are what a fix round resumes. Then read its whole diff, from the worktree: `cd <worktree>`, then
+   `git diff origin/main...HEAD`.
+5. Check it in the worktree yourself: `.gate/bin/verify` and `.gate/bin/red-check --base origin/main`, each with the
+   Bash tool's `run_in_background`, because they outlast the tool's two-minute limit. On a red, brief a fix round to the
+   same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; wait for the
+   record with `"tag":"fix<k>"` the same way.
 6. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`). Open the pull request with
    `gh pr create --body-file <file>`; the body's first line is `Closes #<n>`, so GitHub closes the issue on merge.
    It also carries `Issue: #<n>`, `Claim: <sha>`, `Team: pstack` and the template's summary for the Human. Arm it:
