@@ -414,9 +414,9 @@ option that runs a program or reads or writes a file the caller names, and runs 
 clone's own. So a brief that needs a repository's history gives its https URL and a pushed commit, never a path, the
 factory's own repository included. Known limit: the token file sits on disk. Claude Code refuses `cat`, `grep` or
 `git -C` on a path outside the session's folders (probe, 2.1.308), but the worker and the reviewer may run `node` and
-`git -c`, which read and write any file the `factory` user can; seat 1's deny rule covers the `Read` tool only (#183
-puts their commands in a sandbox). So the researcher, which reads untrusted pages and can send them out, never runs on
-seat 1.
+`git -c`, which read and write any file the `factory` user can, and the worker's `sed` can write any such file too; seat
+1's deny rule covers the `Read` tool only (#183 puts their commands in a sandbox). So the researcher, which reads
+untrusted pages and can send them out, never runs on seat 1.
 
 A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
