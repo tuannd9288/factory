@@ -239,7 +239,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | Path | What it is |
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
-| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks; nothing composes it |
+| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
 | `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
 | `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
@@ -403,6 +403,12 @@ A pack is what the factory holds only for one way of working, and a team copies 
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
 own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
 chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
+The Human starts a repository's pstack Lead, an interactive session, as `factory` with
+`~/WORKSPACES/packs/pstack/bin/lead <repo>`, and resumes it with `--continue` (#163); `--dry-run` prints the folder,
+the plugin plan and the command and runs nothing. It runs the repository's `.gate/bin/setup` first, installs the
+plugins the repository's own settings enable with `--scope local`, so the committed pin stays byte for byte, and never
+adds a pin; its role text is the pack's `lead.md`. It never logs in: on the first run the Human logs in to the
+repository's profile and trusts the folder.
 
 A module is what the factory holds only for the repositories that turn it on (#71): `modules/<name>/kit/` holds the
 files it adds, at repository paths (a skill among them, at `.claude/skills/<name>/`), and `modules/<name>/test/` its
@@ -421,9 +427,10 @@ pstack, per repository: the pstack pack's `packs/pstack/settings.json` pins it t
 commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository
 and profile, after the Human has opened `claude` in the repository and trusted the folder, install it from the
 repository root with `claude plugin install pstack@pstack-f713f14 --scope project`. Never at user scope: no install
-without `--scope project`, and never the `--marketplace` form, which declares the marketplace in the profile's user
-settings. A new pin is a new marketplace name, in a tier-3 pull request per repository; attack 23 checks that two
-pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-22 (`probes/results.md`, attack 23):
+without `--scope project` (or `--scope local`, which `packs/pstack/bin/lead` uses), and never the `--marketplace` form,
+which declares the marketplace in the profile's user settings. A new pin is a new marketplace name, in a tier-3 pull
+request per repository; attack 23 checks that two pins share one profile without clashing. Found on Claude Code 2.1.308,
+2026-10-22 (`probes/results.md`, attack 23):
 
 - The install fails with `Plugin "pstack" not found in marketplace` in a folder the profile has not trusted (logged-in
   writer profile, untrusted `case1/a`). The pstack pack's `packs/pstack/settings.json` is in the order the installer writes: uninstalling
