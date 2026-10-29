@@ -239,7 +239,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | Path | What it is |
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
-| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks; nothing composes it |
+| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
 | `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
 | `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
@@ -403,10 +403,12 @@ A pack is what the factory holds only for one way of working, and a team copies 
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
 own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
 chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
-The Human starts a repository's pstack Lead, an interactive session, as `factory` with `~/WORKSPACES/packs/pstack/bin/lead <repo>`,
-and resumes it with `--continue` (#163). It runs the repository's `.gate/bin/setup` first, installs the plugins the
-repository's own settings enable and never adds a pin; its role text is the pack's `lead.md`. It never logs in: on the first run
-the Human logs in to the repository's profile and trusts the folder.
+The Human starts a repository's pstack Lead, an interactive session, as `factory` with
+`~/WORKSPACES/packs/pstack/bin/lead <repo>`, and resumes it with `--continue` (#163); `--dry-run` prints the folder,
+the plugin plan and the command and runs nothing. It runs the repository's `.gate/bin/setup` first, installs the
+plugins the repository's own settings enable with `--scope local`, so the committed pin stays byte for byte, and never
+adds a pin; its role text is the pack's `lead.md`. It never logs in: on the first run the Human logs in to the
+repository's profile and trusts the folder.
 
 A module is what the factory holds only for the repositories that turn it on (#71): `modules/<name>/kit/` holds the
 files it adds, at repository paths (a skill among them, at `.claude/skills/<name>/`), and `modules/<name>/test/` its
