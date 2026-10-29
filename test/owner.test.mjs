@@ -28,8 +28,11 @@ const repo = 'repos/' + state.repo.full_name;
 const agent = state.agent;
 const kept = (kind) => state.ignore !== kind;
 path = path.replace(/^\//, '');
+// #155: the repository's Actions variables, as gh variable list --json name,value prints them.
+if (args[0] === 'variable' && args[1] === 'list') done(state.variables ?? []);
 if (args[0] !== 'api') process.exit(1);
 if (path === 'user') done({ login: state.login });
+if (path.startsWith('apps/')) state.apps?.[path.slice(5)] ? done(state.apps[path.slice(5)]) : missing();
 if (path === repo) done(state.repo);
 if (path.startsWith(repo + '/contents/.gate/kit-files')) state.kitLanded ? done({ path: '.gate/kit-files' }) : missing();
 if (path === repo + '/collaborators/' + agent + '/permission') {
@@ -191,6 +194,46 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-claims', 'factory-gate', 'factory-tags']);
   } finally {
     w.cleanup();
+  }
+});
+
+test('with GATE_REVIEWER=entire the gate requires verify, tier and Entire Gates from Entire\'s App, not review or verdict (#155)', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  const app = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
+  const w = world({ kitLanded: true, collaborator: 'write', variables: [{ name: 'GATE_REVIEWER', value: 'entire' }], apps: app });
+  try {
+    let out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /GATE_REVIEWER is entire/);
+    assert.match(out.out, /read back: every setting as planned/);
+    const gate = w.state().rulesets.find((r) => r.name === 'factory-gate');
+    const checks = gate.rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks;
+    assert.deepEqual(checks, [{ context: 'verify', integration_id: 15368 }, { context: 'tier', integration_id: 15368 }, { context: 'Entire Gates', integration_id: ENTIRE_APP.id }]);
+    // A second run changes nothing; the kit's own ruleset, with review and verdict, comes back only with the variable gone.
+    w.clear();
+    out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(w.writes(), []);
+    w.set({ variables: [] });
+    out = w.owner(['tuannd9288/app', '--id', '1234']);
+    assert.match(out.out, /PUT repos\/tuannd9288\/app\/rulesets\/\d+ \{"name":"factory-gate".*"context":"review"/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('an Entire App that GitHub does not know by that slug and id is refused before anything changes', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  for (const apps of [{}, { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id + 1, slug: ENTIRE_APP.slug } }]) {
+    const w = world({ kitLanded: true, collaborator: 'write', variables: [{ name: 'GATE_REVIEWER', value: 'entire' }], apps });
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, new RegExp(`Entire's App ${ENTIRE_APP.slug}`));
+      assert.deepEqual(w.writes(), []);
+    } finally {
+      w.cleanup();
+    }
   }
 });
 

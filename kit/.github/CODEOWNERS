@@ -6,6 +6,7 @@
 /.githooks               @OWNER
 /.claude                 @OWNER
 /.codex                  @OWNER
+/.entire                 @OWNER
 /scripts                 @OWNER
 /AGENTS.md               @OWNER
 /CLAUDE.md               @OWNER

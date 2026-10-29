@@ -4,6 +4,10 @@
 //   node .gate/bin/lib/history.mjs rounds --repo <owner/name> --pr <n> --checks <a,b>   commits a named check failed on
 //   node .gate/bin/lib/history.mjs check --repo <owner/name> --head <sha> --name <check>
 //     the latest GitHub Actions run of that check on the commit: its conclusion, or pending before it completes
+//   node .gate/bin/lib/history.mjs entire --repo <owner/name> --branch <name> --head <sha>
+//     #155: `unpinned` unless every "Entire Gates" check the rules in force on the branch require names one and the same
+//     App (integration_id); else that App's latest "Entire Gates" check run on the commit: its conclusion, or pending
+//     before it completes or while there is none. Another App's check of that name counts for nothing.
 //   node .gate/bin/lib/history.mjs raised-at --repo <owner/name> --pr <n>     when the Actions bot first added the label raised, or nothing
 //   node .gate/bin/lib/history.mjs raise --repo <owner/name> --run <id> --head <sha>
 //     `pending` while the `review` job of that run has not completed; then `ok` or `red` (its latest attempt's
@@ -32,6 +36,7 @@ timelineItems(first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes{.
 const ROUNDS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
 commits(last:100){pageInfo{hasPreviousPage} nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{databaseId name conclusion}}}}}}}}}}`;
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE']);
+const ENTIRE = 'Entire Gates';
 
 const args = process.argv.slice(2);
 const opt = (name) => {
@@ -99,6 +104,21 @@ try {
     const runs = JSON.parse(out).check_runs.filter((c) => c.app?.slug === 'github-actions' && c.name === opt('--name'));
     const last = runs.sort((a, b) => String(a.started_at).localeCompare(String(b.started_at))).at(-1);
     console.log(last?.status === 'completed' ? last.conclusion : 'pending');
+  } else if (args[0] === 'entire') {
+    if (!opt('--branch') || !opt('--head')) throw new Error('--branch and --head are needed');
+    const rules = api(`${base}/rules/branches/${encodeURIComponent(opt('--branch'))}`);
+    if (!Array.isArray(rules)) throw new Error('the rules in force on the branch are unreadable');
+    const wanted = rules.filter((r) => r.type === 'required_status_checks').flatMap((r) => r.parameters?.required_status_checks ?? []).filter((c) => c.context === ENTIRE);
+    const apps = new Set(wanted.map((c) => c.integration_id));
+    const app = [...apps][0];
+    if (apps.size !== 1 || !Number.isInteger(app)) console.log('unpinned');
+    else {
+      const listing = api(`${base}/commits/${opt('--head')}/check-runs?check_name=${encodeURIComponent(ENTIRE)}&app_id=${app}&filter=all&per_page=100`);
+      if (!Array.isArray(listing.check_runs) || listing.total_count !== listing.check_runs.length) throw new Error(`the ${ENTIRE} check runs are more than one page, or unreadable`);
+      const runs = listing.check_runs.filter((c) => c.app?.id === app && c.name === ENTIRE);
+      const last = runs.sort((a, b) => String(a.started_at).localeCompare(String(b.started_at))).at(-1);
+      console.log(last?.status === 'completed' ? last.conclusion : 'pending');
+    }
   } else if (args[0] === 'raise') {
     const ownAll = reviewsOf(opt('--run'));
     const own = ownAll.at(-1);
@@ -179,7 +199,7 @@ try {
       commit.checkSuites.nodes.some((s) => s.app?.slug === 'github-actions' && s.checkRuns.nodes.some((c) => checks.has(c.name) && RED.has(c.conclusion) && !onlyUnavailable(c))),
     );
     console.log(red.length);
-  } else throw new Error('usage: history.mjs labels|raised-at|rounds|check|raise|verdict|reuse --repo owner/name --pr n|--head sha|--run id [--checks a,b] [--name c]');
+  } else throw new Error('usage: history.mjs labels|raised-at|rounds|check|entire|raise|verdict|reuse --repo owner/name --pr n|--head sha|--run id [--checks a,b] [--name c] [--branch b]');
 } catch (error) {
   console.log(`history: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
   process.exit(2);

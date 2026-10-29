@@ -12,11 +12,11 @@ file. What a program enforces: `.gate/enforced-rules.md`.
   verify too) and `.gate/bin/red-check --base origin/main`; push as often as you like.
 - For a feature new to this repository, search GitHub (`gh search repos`, `gh search code`) and existing products for projects that already do it, and compare their approaches before writing it from scratch. Judge a project by its mechanism, never its stars or age. Adding a library, service or dependency is the Human's choice: propose it with the comparison.
 - A source change carries a test that fails at the base. Where none can, the pull request body says
-  `No-red: <why, 20 characters or more>`; the reviewer judges it.
+  `No-red: <why, 20 characters or more>`; the reviewer judges it (where Entire reviews, the Human: tier 3).
 - `.gate/bin/tier` prints the tier. Tier 2: commit the failing test first, alone, with `Failing-test: <command>`.
   Tier 3 (a path in `.gate/protected`, this block included): the Human approves the head commit.
-- Four checks decide on the exact head commit, from `main`'s copies: `verify`, `review`, `verdict`, `tier`. When one is
-  red, read `.claude/skills/gate-red/SKILL.md` first.
+- Four checks decide on the exact head commit, from `main`'s copies: `verify`, `review`, `verdict`, `tier` (where Entire
+  reviews, `tier` needs its check `Entire Gates` to be success). When one is red, read `.claude/skills/gate-red/SKILL.md` first.
 - Never rewrite a pushed commit or force-push. After three red rounds the pull request is `needs-human`, with your
   recommended answer in it.
 - Every deploy is the Human's; decide and report anything else that can be undone, and a reversible question never

@@ -518,6 +518,9 @@ describe('review, verdict, tier and rounds', () => {
         '  *check-runs/777/annotations*) cat "$FAKE/ann777.json" 2>/dev/null || echo "[]" ;;',
         '  *actions/runs/98/jobs?filter=all*) cat "$FAKE/jobs98.json" ;;',
         '  *actions/workflows/gate-trusted.yml/runs?head_sha=*) echo runs >>"$FAKE/calls"; cat "$FAKE/runs.json" ;;',
+        // #155: the rules in force on main and the "Entire Gates" check runs, for GATE_REVIEWER=entire; the app_id is asked for.
+        '  *rules/branches/main) echo rules >>"$FAKE/calls"; cat "$FAKE/rules.json" ;;',
+        '  *"check-runs?check_name=Entire%20Gates&app_id="*) echo entire >>"$FAKE/calls"; cat "$FAKE/entire.json" ;;',
         '  *check-runs*) cat "$FAKE/verify.json" ;;',
         // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
@@ -588,7 +591,7 @@ describe('review, verdict, tier and rounds', () => {
     annotations();
     labels();
     reviews([]);
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': null, 'entire.json': null });
   });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
 
@@ -1641,6 +1644,97 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     again('review', head, reviewEnv);
     assert.equal(readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length, 1, 'an unavailable run was reused');
     annotations();
+  });
+
+  // #155: Entire (entire.com) reviews outside Actions. Its check "Entire Gates" concluded neutral while a gate blocked
+  // (factory-onboard-scratch#23, 2026-10-29), and GitHub counts neutral and skipped as passing.
+  const ENTIRE_APP = 4242;
+  /** The rules in force on main, pinning "Entire Gates" to the Apps named (null: no integration_id), and the
+   * "Entire Gates" check runs on the head, each [conclusion or in_progress, App id, started_at]. */
+  const entire = (runs, pinned = [ENTIRE_APP]) =>
+    write(fake, {
+      'rules.json': JSON.stringify([
+        { type: 'pull_request', parameters: {} },
+        ...pinned.map((id) => ({ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'verify', integration_id: 15368 }, { context: 'tier', integration_id: 15368 }, { context: 'Entire Gates', ...(id === null ? {} : { integration_id: id }) }] } })),
+      ]),
+      'entire.json': JSON.stringify({
+        total_count: runs.length,
+        check_runs: runs.map(([state, app = ENTIRE_APP, started = '2026-10-29T10:00:00Z']) => ({ name: 'Entire Gates', app: { id: app, slug: 'entire' }, started_at: started, status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state })),
+      }),
+    });
+  const onEntire = { ...pr, GATE_REVIEWER: 'entire', GATE_BASE_REF: 'main' };
+
+  test('with Entire, review passes at once, waiting for no verify and calling no reviewer, and verdict passes on its verdict', () => {
+    verify('in_progress');
+    const out = job('review', { 'src/auth/t.js': 'export const t = 1;\n' }, { GATE_REVIEWER: 'entire', GATE_WAIT: '0' });
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /review: Entire reviews this repository/);
+    const base = git(trusted, 'merge-base', 'origin/main', out.head);
+    const line = `head=${out.head} base=${base} reviewer=entire pass`;
+    assert.ok(out.out.includes(`::notice title=review-verdict::${line}\n`), out.out);
+    // verdict, which knows no reviewer, reads that verdict from review's annotations, as for any reviewer (tier 2 here).
+    write(fake, { 'annotations.json': JSON.stringify([{ title: 'review-verdict', message: line, annotation_level: 'notice' }]) });
+    const verdict = again('verdict', out.head, { ...pr, GATE_REVIEWER: '' });
+    assert.equal(verdict.code, 0, verdict.out);
+    assert.match(verdict.out, /verdict: review passed/);
+  });
+
+  test('with Entire, tier passes only on success of the Entire Gates check of the App the rules in force pin', () => {
+    entire([['success']]);
+    let out = job('tier', { 'src/math.js': MUL }, onEntire);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^tier 1\n/);
+    assert.match(out.out, /tier: Entire Gates passed/);
+    assert.doesNotMatch(out.calls, /jobs/, 'tier waited for the review job');
+    const { head } = out;
+    // The latest run decides; neutral and skipped, which GitHub counts as passing, are red here.
+    for (const c of ['neutral', 'skipped', 'failure', 'cancelled', 'timed_out', 'action_required', 'stale']) {
+      entire([['success', ENTIRE_APP, '2026-10-29T09:00:00Z'], [c, ENTIRE_APP, '2026-10-29T10:00:00Z']]);
+      out = again('tier', head, onEntire);
+      assert.equal(out.code, 1, `${c}: ${out.out}`);
+      assert.match(out.out, new RegExp(`tier: Entire Gates is ${c} on ${head.slice(0, 8)}; only success passes`));
+    }
+    // Not concluded, not there yet, or only another App's check of that name: the queue re-runs tier once it concludes.
+    for (const runs of [[['in_progress']], [], [['success', 7]], [['success', ENTIRE_APP, '2026-10-29T09:00:00Z'], ['in_progress', ENTIRE_APP, '2026-10-29T10:00:00Z']]]) {
+      entire(runs);
+      out = again('tier', head, onEntire);
+      assert.equal(out.code, 1, `${JSON.stringify(runs)}: ${out.out}`);
+      assert.match(out.out, /tier: Entire Gates has not concluded on [0-9a-f]{8}; the queue re-runs this check when it does/);
+    }
+  });
+
+  test('with Entire, tier fails closed unless the rules in force pin Entire Gates to one App', () => {
+    const first = job('tier', { 'src/math.js': MUL }, onEntire);
+    for (const pinned of [[null], [], [ENTIRE_APP, 7], [ENTIRE_APP, null]]) {
+      entire([['success']], pinned);
+      const out = again('tier', first.head, onEntire);
+      assert.equal(out.code, 1, `${JSON.stringify(pinned)}: ${out.out}`);
+      assert.match(out.out, /tier: the rules in force on main do not require Entire Gates from one App/);
+      assert.doesNotMatch(out.calls, /entire/, 'a check run was read with no App to pin it to');
+    }
+    entire([['success']], [ENTIRE_APP, ENTIRE_APP]);
+    assert.equal(again('tier', first.head, onEntire).code, 0, 'two rulesets that pin the same App');
+    const out = again('tier', first.head, { ...onEntire, GATE_BASE_REF: '' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier: Entire's check on [0-9a-f]{8} could not be read/);
+  });
+
+  test('with Entire, a No-red line makes the change tier 3, which waits for the Human\'s approval of the head', () => {
+    entire([['success']]);
+    write(r.dir, { 'body-entire.txt': 'Summary\nNo-red: renames a local variable, nothing to fail\n' });
+    const env = { ...onEntire, GATE_BODY_FILE: join(r.dir, 'body-entire.txt') };
+    reviews([]);
+    let out = job('tier', { 'src/math.js': MUL }, env);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^tier 3\n {2}a No-red line, which no reviewer judges under Entire: the Human does\n/);
+    assert.match(out.edits, /--add-label tier-3/);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    reviews([review('tuannd9288', 'APPROVED', out.head)]);
+    out = again('tier', out.head, env);
+    assert.equal(out.code, 0, out.out);
+    // Approved, but Entire's check is not success: still red.
+    entire([['neutral']]);
+    assert.equal(again('tier', out.head, env).code, 1);
   });
 });
 

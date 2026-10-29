@@ -16,17 +16,22 @@ import { fileURLToPath } from 'node:url';
 
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
 const CALL_MS = 60_000;
+const ENTIRE = 'Entire Gates';
 
 /** The pull request to update now, or null: the oldest one waiting on auto-merge behind its base whose required
  * checks did not fail (a failing one needs a new commit, which the gate judges anyway; a red tier check only waits on
  * the Human), unless another one waiting on auto-merge is up to date and still being judged. One that conflicts with
  * its base is not being judged: pull_request never runs on it, so its verify stays missing, and it cannot land until
  * its owner resolves the conflict. A tier-3 one waits behind until its tier check passed, the Human's approval given:
- * his approval then holds on the updated head, whose patch is unchanged, and he is asked once. */
+ * his approval then holds on the updated head, whose patch is unchanged, and he is asked once. A required check of
+ * another App (#155: Entire's) is read from `apps`; one it concluded other than success has failed: Entire is neutral
+ * while it blocks, and an update would only buy another review. */
 export function pickUpdate(prs, required) {
   const waiting = prs.filter((p) => p.autoMerge && !p.isDraft);
-  const judging = (p) => required.some((name) => !p.checks[name] || p.checks[name].state === 'PENDING');
-  const failed = (p) => required.some((name) => name !== 'tier' && RED.has(p.checks[name]?.state));
+  const check = (p, name) => p.checks[name] ?? p.apps?.[name];
+  const judging = (p) => required.some((name) => !check(p, name) || check(p, name).state === 'PENDING');
+  const failed = (p) =>
+    required.some((name) => name !== 'tier' && (p.checks[name] ? RED.has(p.checks[name].state) : Boolean(p.apps?.[name]) && !['SUCCESS', 'PENDING'].includes(p.apps[name].state)));
   const unapproved = (p) => p.labels.some((l) => l === 'tier-3' || l === 'needs-human') && p.checks.tier?.state !== 'SUCCESS';
   if (waiting.some((p) => !['BEHIND', 'DIRTY'].includes(p.mergeStateStatus) && judging(p))) return null;
   const behind = waiting
@@ -37,18 +42,24 @@ export function pickUpdate(prs, required) {
 
 /** The tier jobs to re-run, alone, so no reviewer runs again for a click: a failed tier check on a pull request that
  * someone other than its author approved on the head commit after that check started, so an approval landing while
- * the job ran is not lost. The tier check itself decides whether the approver may approve. */
+ * the job ran is not lost, or (#155) whose Entire Gates check, of an App other than Actions, concluded after it
+ * started. The tier check itself decides whether the approver may approve, and what Entire's conclusion means; it
+ * pins Entire's App, so a copy of that name only costs one re-run. */
 export function pickReruns(prs) {
   return prs
     .filter((p) => RED.has(p.checks.tier?.state) && p.checks.tier.jobId)
-    .filter((p) => p.approvals.some((a) => a.login !== p.author && a.oid === p.head && a.at > p.checks.tier.startedAt))
+    .filter(
+      (p) =>
+        p.approvals.some((a) => a.login !== p.author && a.oid === p.head && a.at > p.checks.tier.startedAt) ||
+        (Boolean(p.apps?.[ENTIRE]?.completedAt) && p.apps[ENTIRE].completedAt > p.checks.tier.startedAt),
+    )
     .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId }));
 }
 
 const QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100){nodes{
 number isDraft createdAt mergeStateStatus autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
-commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name status conclusion startedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
+commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
 
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS });
 
@@ -59,10 +70,15 @@ function openPulls(repo) {
   const [owner, name] = repo.split('/');
   const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`]));
   return data.data.repository.pullRequests.nodes.map((p) => {
-    const runs = (p.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).filter((c) => c.name && c.checkSuite?.app?.slug === 'github-actions');
+    const all = (p.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).filter((c) => c.name);
+    const byStart = (a, b) => String(a.startedAt).localeCompare(String(b.startedAt));
     const checks = {};
-    for (const run of runs.sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt))))
+    for (const run of all.filter((c) => c.checkSuite?.app?.slug === 'github-actions').sort(byStart))
       checks[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', jobId: /\/job\/(\d+)/.exec(run.detailsUrl ?? '')?.[1] };
+    // Other Apps' checks, by name (#155: Entire Gates): the latest started wins.
+    const apps = {};
+    for (const run of all.filter((c) => c.checkSuite?.app?.slug !== 'github-actions').sort(byStart))
+      apps[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', completedAt: run.completedAt ?? '' };
     return {
       number: p.number,
       isDraft: p.isDraft,
@@ -74,6 +90,7 @@ function openPulls(repo) {
       labels: p.labels.nodes.map((l) => l.name),
       approvals: p.reviews.nodes.map((r) => ({ login: r.author?.login, oid: r.commit?.oid, at: r.submittedAt })),
       checks,
+      apps,
     };
   });
 }
@@ -90,7 +107,7 @@ function sweep(repo) {
   const prs = openPulls(repo);
   for (const { number, jobId } of pickReruns(prs)) {
     gh(['run', 'rerun', '--job', jobId, '--repo', repo]);
-    console.log(`queue: re-ran the tier check of ${repo}#${number} after its approval`);
+    console.log(`queue: re-ran the tier check of ${repo}#${number} after its approval or Entire's check`);
   }
   const pr = pickUpdate(prs, required);
   if (!pr) return;

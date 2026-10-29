@@ -29,6 +29,13 @@
 #           again. Before it, main's scripts read the issues the pull request closes (.gate/bin/lib/acceptance.mjs: gh pr view and
 #           gh issue view, this repository's issues only) and hand them to the reviewer as data; their hash is `acc`. Unreadable
 #           is `review-result: unavailable: acceptance`, with no reviewer call. The stub reads none.
+#   entire  Entire (entire.com) reviews, outside Actions (#155): `review` passes at once, with no wait for verify and no
+#           reviewer, and leaves the verdict `verdict` reads; the ruleset onboard-owner writes for it requires neither.
+#           `tier` passes only once the "Entire Gates" check of the App the rules in force on the base branch
+#           (GATE_BASE_REF) pin concluded success on the head: neutral and skipped, which GitHub counts as passing, are
+#           red. Under the kit's own ruleset that pins no such App, tier is red, so nothing merges unreviewed. A No-red line
+#           in the body (GATE_BODY_FILE), which no reviewer judges here, makes the change tier 3. The queue re-runs tier
+#           once that check concludes after it started.
 #   unset   fails closed: no reviewer is configured, so nothing merges on this gate
 # A reviewer's result counts only through .gate/bin/lib/result.mjs: a missing, malformed or unbound one fails. After it, `review`
 # prints the annotation `review-verdict` (head=<sha> base=<sha> nored=<hash|none> acc=<hash|none> reviewer=<name> pass|block) that `verdict` reads. A reviewer that gave no
@@ -124,6 +131,20 @@ wait_review() {
   done
 }
 
+# Under Entire, the "Entire Gates" check on this head of the App the rules in force on the base branch pin, read now:
+# only success passes. Entire concluded neutral while a gate blocked (factory-onboard-scratch#23, 2026-10-29).
+entire_check() {
+  local state
+  state=$(node .gate/bin/lib/history.mjs entire --repo "${GITHUB_REPOSITORY:-}" --branch "${GATE_BASE_REF:-}" --head "$head") ||
+    { echo "tier: Entire's check on ${head:0:8} could not be read ($state), so this check fails closed"; return 1; }
+  case "$state" in
+    success) echo "tier: Entire Gates passed ${head:0:8}" ;;
+    unpinned) echo "tier: the rules in force on $GATE_BASE_REF do not require Entire Gates from one App, so its check cannot be told from a copy, and this check fails closed; the owner runs bin/onboard-owner --apply with GATE_REVIEWER=entire"; return 1 ;;
+    pending) echo "tier: Entire Gates has not concluded on ${head:0:8}; the queue re-runs this check when it does"; return 1 ;;
+    *) echo "tier: Entire Gates is $state on ${head:0:8}; only success passes (Entire is neutral while a gate blocks), so this check fails"; return 1 ;;
+  esac
+}
+
 # Waits for the `review` job of this workflow run and passes only with a review that passed for this head and base: its
 # review-verdict annotation names both. A result for another head or base, a blocking or absent one, or a review that
 # ended without one fails closed. Prints the unavailable notice first when review had no verdict.
@@ -163,9 +184,17 @@ case "$job" in
     n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
     # A moved claim fails at once, and again after the wait, which can last an hour: the claim is read when tier ends.
     claim_check || exit 1
+    entire=""
+    [ "${GATE_REVIEWER:-}" = entire ] && entire=1
+    if [ -n "$entire" ] && [ "$n" != 3 ] && [ -n "${GATE_BODY_FILE:-}" ] && grep -Eq '^No-red: .{20,}' "$GATE_BODY_FILE"; then
+      out="tier 3
+  a No-red line, which no reviewer judges under Entire: the Human does"
+      n=3
+    fi
     # Paths and labels already giving tier 3, a raise adds nothing: the wait is for the other tiers only. Every line that
-    # prints the reviewer's reason starts with a fixed prefix and holds it on one line with `##[` broken.
-    if [ "$n" != 3 ] && [ -n "${GATE_PR:-}" ]; then
+    # prints the reviewer's reason starts with a fixed prefix and holds it on one line with `##[` broken. Entire's
+    # review is read below, not waited for.
+    if [ "$n" != 3 ] && [ -n "${GATE_PR:-}" ] && [ -z "$entire" ]; then
       wait_review || exit 1
       if [ -n "$unavailable" ]; then
         echo "$out"
@@ -207,6 +236,7 @@ case "$job" in
         [ "$k" -lt "$n" ] && gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label "tier-$k" >/dev/null 2>&1
       done
     fi
+    [ -z "$entire" ] || entire_check || exit 1
     [ "$n" = 3 ] || exit 0
     reviews=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/pulls/${GATE_PR:-}/reviews") || { echo "tier: tier 3 needs the Human's approval, and the reviews could not be read"; exit 1; }
     # A raised pull request needs an approval given after the raise: the Human reads the reason, not an earlier head.
@@ -251,6 +281,11 @@ wait_verify() {
     esac
   done
 }
+if [ "${GATE_REVIEWER:-}" = entire ]; then
+  echo "review: Entire reviews this repository (GATE_REVIEWER=entire), outside Actions, so this check judges nothing; tier passes only on Entire's own check"
+  echo "::notice title=review-verdict::head=$head base=$fork reviewer=entire pass"
+  exit 0
+fi
 wait_verify || exit 1
 
 claim=""
@@ -317,7 +352,7 @@ case "${GATE_REVIEWER:-}" in
     ;;
   *)
     echo "::notice title=review-result::unavailable: no-reviewer"
-    echo "$job: reviewer unavailable (no-reviewer); unknown reviewer '$GATE_REVIEWER' (known: stub, claude), so this check fails closed"
+    echo "$job: reviewer unavailable (no-reviewer); unknown reviewer '$GATE_REVIEWER' (known: stub, claude, entire), so this check fails closed"
     exit 1
     ;;
 esac
