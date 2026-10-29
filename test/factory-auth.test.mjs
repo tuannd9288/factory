@@ -277,3 +277,29 @@ if [ "$c" = claude ]; then CLAUDE_CONFIG_DIR="$FAKE/piggery-claude" exec claude 
     s.done();
   }
 });
+
+test('a credential in the caller\'s environment reaches no vendor command', () => {
+  const s = sandbox();
+  try {
+    const bin = join(s.dir, 'bin');
+    for (const name of ['claude', 'gh']) {
+      writeFileSync(join(bin, `${name}.real`), readFileSync(join(bin, name)));
+      chmodSync(join(bin, `${name}.real`), 0o755);
+      writeFileSync(join(bin, name), `#!/bin/sh
+echo "$(basename "$0") GH_TOKEN=\${GH_TOKEN:+set} GITHUB_TOKEN=\${GITHUB_TOKEN:+set} ANTHROPIC_API_KEY=\${ANTHROPIC_API_KEY:+set} ANTHROPIC_AUTH_TOKEN=\${ANTHROPIC_AUTH_TOKEN:+set} CLAUDE_CODE_OAUTH_TOKEN=\${CLAUDE_CODE_OAUTH_TOKEN:+set}" >> "$FAKE/env.log"
+exec "$0.real" "$@"
+`);
+    }
+    s.w('claude-claude.json', claudeJson(EMAIL));
+    s.w('gh-macbook', 'humangh');
+    for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) s.env[name] = 'fake-credential';
+    const r = s.auth('status');
+    assert.equal(r.code, 0, r.out);
+    const log = readFileSync(join(s.fake, 'env.log'), 'utf8');
+    assert.match(log, /^claude /m);
+    assert.match(log, /^gh /m);
+    assert.doesNotMatch(log, /=set/);
+  } finally {
+    s.done();
+  }
+});
