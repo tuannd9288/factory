@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# bin/research-git [-C <folder>] <subcommand> [arguments] (#181): the researcher's only way to run git: clone over https,
+# log, show, diff-tree, ls-files and rev-parse, with no option that runs a program or reads or writes a file it names, and
+# no configuration but the repository's own. Exits 2 on a refusal. See bin/lib/research-git.mjs.
+exec node "$(dirname "$0")/lib/research-git.mjs" "$@"
