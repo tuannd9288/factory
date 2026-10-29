@@ -403,6 +403,10 @@ A pack is what the factory holds only for one way of working, and a team copies 
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
 own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
 chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
+The Human starts a repository's pstack Lead, an interactive session, as `factory` with `~/WORKSPACES/packs/pstack/bin/lead <repo>`,
+and resumes it with `--continue` (#163). It runs the repository's `.gate/bin/setup` first, installs the plugins the
+repository's own settings enable and never adds a pin; its role text is the pack's `lead.md`. It never logs in: on the first run
+the Human logs in to the repository's profile and trusts the folder.
 
 A module is what the factory holds only for the repositories that turn it on (#71): `modules/<name>/kit/` holds the
 files it adds, at repository paths (a skill among them, at `.claude/skills/<name>/`), and `modules/<name>/test/` its

@@ -22,7 +22,7 @@ export const SCHEMA = {
 };
 
 // The deny list every launcher shared. WebFetch and WebSearch are denied for every role but the researcher.
-const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
+export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
 const denyOf = (home, web) => [
   'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead,
