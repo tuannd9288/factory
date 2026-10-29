@@ -53,7 +53,8 @@ const timeoutMs = (env) => Number(env.FACTORY_AUTH_TIMEOUT_MS) || 15000;
  * stdout alone holds claude auth status's JSON (direnv and ssh print on stderr); error is 'timed out' or the spawn error's code. */
 function call(cmd, args, { extra = {}, cwd, env, timeout }) {
   const childEnv = { ...env };
-  for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CLAUDE_CODE_OAUTH_TOKEN']) delete childEnv[k];
+  // The profile folders, and the credentials bin/seat strips too (lib/seat.mjs): a vendor command reports its own login.
+  for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete childEnv[k];
   const r = spawnSync(cmd, args, { cwd, env: { ...childEnv, ...extra }, encoding: 'utf8', timeout, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'] });
   const error = r.error ? (r.error.code === 'ETIMEDOUT' ? 'timed out' : `${cmd}: ${r.error.code ?? 'failed'}`) : null;
   return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, stdout: r.stdout ?? '', error };
