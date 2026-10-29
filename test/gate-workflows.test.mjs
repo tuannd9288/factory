@@ -1,5 +1,6 @@
 // #133: what GitHub and bash read in the kit's workflows and in .gate/bin/verify-timeout: the fork guard of `review`, the
-// timeout that comes from .gate/config.sh, and the runner a candidate's code gets. Nothing here reads the wording of a rule.
+// timeout that comes from .gate/config.sh, the runner a candidate's code gets and the runner of gate-trusted's jobs. Nothing
+// here reads the wording of a rule.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -84,6 +85,16 @@ describe('the runner of the candidate\'s code (item 10)', () => {
     assert.ok(m, runsOn);
     assert.equal(JSON.parse(m[1]), 'ubuntu-latest');
     assert.doesNotMatch(JSON.stringify(gate), /self-hosted/);
+  });
+});
+
+describe('the runner of gate-trusted\'s jobs (#154)', () => {
+  test('every job reads GATE_TRUSTED_RUNNER, and with it unset the runner is GitHub-hosted', () => {
+    for (const [id, job] of Object.entries(trusted.jobs)) {
+      const m = /^\$\{\{ fromJSON\(vars\.GATE_TRUSTED_RUNNER \|\| '(.+)'\) \}\}$/.exec(job['runs-on']);
+      assert.ok(m, `${id} runs on ${job['runs-on']}`);
+      assert.equal(JSON.parse(m[1]), 'ubuntu-latest', id);
+    }
   });
 });
 
