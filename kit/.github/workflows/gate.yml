@@ -5,7 +5,8 @@
 # the Human's approval. The runner is the repository variable GATE_PR_RUNNER (a JSON label list, as main.yml's
 # GATE_RUNNER), GitHub-hosted Ubuntu when unset; never a runner that holds a secret or runs main's or a deploy's jobs, and
 # a self-hosted one only when it is ephemeral and the two-job canary proved it clean (.gate/enforced-rules.md). The verify
-# step's timeout is GATE_VERIFY_TIMEOUT in main's .gate/config.sh, read by the step before it.
+# step's timeout is GATE_VERIFY_TIMEOUT in main's .gate/config.sh, read by the step before it. Node and pnpm are the ones
+# the candidate names (.node-version, else 24; package.json's packageManager), since its code runs on them anyway (#155).
 name: gate
 
 on:
@@ -39,9 +40,28 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
+      # The repository's own Node and pnpm (#155): Node from .node-version, else 24, and pnpm from package.json's
+      # packageManager. The kit's scripts need Node 24 or later. A version that is not plain fails the step.
+      - id: tools
+        name: Read the Node and pnpm versions the repository names
+        shell: bash
+        run: |
+          node=24
+          if [ -f .node-version ]; then node=$(tr -d ' \t\r\n' <.node-version); node=${node#v}; fi
+          pnpm=""
+          if [ -f package.json ]; then pnpm=$(sed -n 's/.*"packageManager" *: *"pnpm@\([^"]*\)".*/\1/p' package.json | head -n 1); pnpm=${pnpm%%+*}; fi
+          plain='^[0-9]+(\.[0-9]+){0,2}$'
+          [[ $node =~ $plain ]] || { echo "gate: .node-version holds no plain Node version, such as 24 or 26.3.0"; exit 1; }
+          [ -z "$pnpm" ] || [[ $pnpm =~ $plain ]] || { echo "gate: package.json's packageManager names no plain pnpm version, such as pnpm@11.1.2"; exit 1; }
+          printf 'node=%s\npnpm=%s\n' "$node" "$pnpm" >>"$GITHUB_OUTPUT"
+        working-directory: candidate
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: ${{ steps.tools.outputs.node }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: steps.tools.outputs.pnpm != ''
+        with:
+          version: ${{ steps.tools.outputs.pnpm }}
       # A main whose kit predates #133 has no verify-timeout; its own gate.yml gave verify 30 minutes. One that is there and
       # fails, fails the job.
       - id: cfg
