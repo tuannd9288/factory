@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commit, factory, git, run } from './helpers.mjs';
@@ -95,3 +96,49 @@ test('with the real git, a global file or the caller\'s environment that changes
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Review of #184, B1: git takes a folder holding HEAD, objects/ and refs/ for a bare repository and reads its config,
+// which can name a program (diff.<driver>.textconv). The Write tool can make such a folder from plain files; it may not
+// write a .git file or folder (probe, ~/factory-runs/issue-181/run-probe-cd.jsonl).
+test('a folder git would take for a bare repository is refused before git runs, so its config runs nothing', () => {
+  const root = mkdtempSync(join(tmpdir(), 'research-git-bare-'));
+  try {
+    const clone = join(root, 'clone');
+    mkdirSync(clone);
+    git(clone, 'init', '-q', '-b', 'main');
+    const head = commit(clone, { 'f.txt': 'x\n' }, 'first');
+    const evil = join(clone, 'evil');
+    const marker = join(root, 'RAN');
+    for (const d of ['refs/heads', 'objects/info', 'info']) mkdirSync(join(evil, d), { recursive: true });
+    writeFileSync(join(evil, 'HEAD'), 'ref: refs/heads/main\n');
+    writeFileSync(join(evil, 'refs/heads/main'), `${head}\n`);
+    writeFileSync(join(evil, 'objects/info/alternates'), `${join(clone, '.git/objects')}\n`);
+    writeFileSync(join(evil, 'info/attributes'), '* diff=x\n');
+    writeFileSync(join(evil, 'config'), `[core]\n\trepositoryformatversion = 0\n\tbare = true\n[diff "x"]\n\ttextconv = touch ${marker}\n`);
+    run(evil, 'git', ['show', 'main']);
+    assert.ok(existsSync(marker), 'plain git runs the folder\'s textconv');
+    rmSync(marker);
+    for (const [cwd, args] of [[root, ['-C', evil, 'show', 'main']], [join(evil, 'refs'), ['log', '-p', '-1', 'main']]]) {
+      const r = run(cwd, RG, args);
+      assert.equal(r.code, 2, `${args.join(' ')}: ${r.out}`);
+      assert.match(r.out, /^research-git: refused: .*bare repository/m);
+      assert.equal(existsSync(marker), false, `${args.join(' ')}: the textconv ran`);
+    }
+    const r = run(clone, RG, ['log', '-1', '--format=%s']);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.out.trim(), 'first');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Review of #184, B2: a symlink under the current folder sent a clone outside it.
+test('clone takes a folder that does not exist yet and is under the current folder once symlinks are resolved', () => world((w) => {
+  const outside = mkdtempSync(join(tmpdir(), 'research-git-outside-'));
+  try {
+    symlinkSync(outside, join(w.root, 'link'));
+    for (const args of [['clone', 'https://h/r'], ['clone', 'https://h/r', 'link/planted'], ['clone', 'https://h/r', 'link'], ['clone', 'https://h/r', 'bin']]) refused(w, args);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+}));
