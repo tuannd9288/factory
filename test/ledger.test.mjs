@@ -177,6 +177,31 @@ test('the queue re-runs the failed tier job alone once someone other than the au
   assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }], { state: 'SUCCESS', startedAt: '2026-10-21T10:00:00Z', jobId: '42' })]), []);
 });
 
+test('the queue re-runs a failed tier job once another App\'s Entire Gates check on the head concluded after it started (#155)', async () => {
+  const { pickReruns } = await import('../bin/lib/queue.mjs');
+  const pr = (entire, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', jobId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals: [], checks: checks({ tier }), apps: entire ? { 'Entire Gates': entire } : {} });
+  assert.deepEqual(pickReruns([pr({ state: 'SUCCESS', completedAt: '2026-10-21T10:03:00Z' })]), [{ number: 7, jobId: '42' }]);
+  // tier decides what a conclusion means; the queue only re-runs it once.
+  assert.deepEqual(pickReruns([pr({ state: 'NEUTRAL', completedAt: '2026-10-21T10:03:00Z' })]), [{ number: 7, jobId: '42' }]);
+  assert.deepEqual(pickReruns([pr({ state: 'SUCCESS', completedAt: '2026-10-21T09:59:00Z' })]), []);
+  assert.deepEqual(pickReruns([pr({ state: 'PENDING', completedAt: '' })]), []);
+  assert.deepEqual(pickReruns([pr(null)]), []);
+  assert.deepEqual(pickReruns([pr({ state: 'SUCCESS', completedAt: '2026-10-21T10:03:00Z' }, { state: 'SUCCESS', startedAt: '2026-10-21T10:00:00Z', jobId: '42' })]), []);
+});
+
+test('the queue reads a required check of another App, Entire Gates, when it picks the pull request to update (#155)', async () => {
+  const { pickUpdate } = await import('../bin/lib/queue.mjs');
+  const required = ['verify', 'tier', 'Entire Gates'];
+  const p = (number, mergeStateStatus, entire) => ({ number, createdAt: `2026-10-21T0${number}`, mergeStateStatus, autoMerge: true, isDraft: false, labels: [], checks: checks(), apps: entire ? { 'Entire Gates': entire } : {} });
+  assert.equal(pickUpdate([p(1, 'BEHIND', { state: 'SUCCESS' })], required)?.number, 1);
+  // An up-to-date one whose Entire check runs is being judged; one Entire concluded on is not.
+  assert.equal(pickUpdate([p(1, 'BEHIND', { state: 'SUCCESS' }), p(2, 'BLOCKED', { state: 'PENDING' })], required), null);
+  assert.equal(pickUpdate([p(1, 'BEHIND', { state: 'SUCCESS' }), p(2, 'BLOCKED', { state: 'NEUTRAL' })], required)?.number, 1);
+  // Entire concluded on it, and not success: it needs a fix or a dismissal first, and an update would only buy a review.
+  assert.equal(pickUpdate([p(1, 'BEHIND', { state: 'NEUTRAL' })], required), null);
+  assert.equal(pickUpdate([p(1, 'BEHIND', { state: 'FAILURE' })], required), null);
+});
+
 test('a sweep runs once, alone, never as the Human, and leaves a failure report until a sweep succeeds', () => {
   const dir = mkdtempSync(join(tmpdir(), 'queue-'));
   try {
