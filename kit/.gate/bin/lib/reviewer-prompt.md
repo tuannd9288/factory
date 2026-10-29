@@ -79,6 +79,10 @@ read, a short summary, the blocking findings and the notes.
   the command that shows it, a command to run and what it prints, or the path you traced from input
   to failure.
 - **Notes:** anything else, with its file, line and summary. A finding you cannot prove is a note.
+- **For an issue** (the Human, 2026-10-29): "Rate each bug from 1 to 10 on how often it would happen and how bad it would
+  be. If the two scores multiplied are below 5, just file it as an issue and leave the code alone." Such a bug neither
+  blocks nor is a note: report it for an issue, with both scores. You are read-only, so the Lead files the issue from
+  your result.
 - Approve only with no blocking finding; reject only with one. The commit shows nothing, or the
   question rests on a premise the code contradicts: reject, with that as a blocking finding and its
   proof, and your best reading in the summary.
@@ -89,8 +93,10 @@ Report only what you traced, answer the question directly, write nothing.
 
 <!-- Not from agent-desk: the output shape is kit/.gate/bin/lib/result.mjs, and these rules are the gate's own. -->
 - **Output.** Answer with the JSON the schema asks for and nothing else: `blocking`, a list of `{ "id", "claim" }` (one per
-  blocking finding, the claim naming file, line, failure and proof in one line); `noRed`; and `raise` only when the rule
-  below applies. `approve` is an empty `blocking`, `reject` a non-empty one. Notes are not reported.
+  blocking finding, the claim naming file, line, failure and proof in one line); `noRed`; `raise` only when the rule
+  below applies; and `forIssue` only for a bug whose two scores multiply to less than 5: a list of
+  `{ "id", "claim", "often", "harm" }`, the claim naming file, line and failure in one line, `often` and `harm` its two
+  scores. `approve` is an empty `blocking`, `reject` a non-empty one. Notes are not reported.
 - **No-red.** If the brief quotes a `No-red:` line from the pull request, set `noRed` to `accepted` only when no test could
   fail first for this change, as with a pure refactor or a rename; otherwise set `rejected` and add a blocking finding
   that names the test that could have failed first. With no such line, set `unjudged`.
