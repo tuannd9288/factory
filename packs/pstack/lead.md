@@ -8,7 +8,7 @@ repository's `AGENTS.md` and its Gate block are the rules; this text adds only h
    refused claim belongs to another team; take another issue.
 2. Make its run folder and worktree from `main`: `mkdir -p ~/factory-runs/<repo>-<n>`, `git fetch origin`, then
    `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w origin/main`.
-3. Save the issue in the run folder (`gh issue view <n> --json body,comments > ~/factory-runs/<repo>-<n>/issue.json`)
+3. Save the issue in the run folder (read it with `gh issue view <n> --json body,comments` and write that output to `~/factory-runs/<repo>-<n>/issue.json`)
    and write a brief beside it: the goal, the acceptance, the files the worker may change, the commands it runs to
    check, and that it commits but never pushes.
 4. Start the worker: `~/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. Read
