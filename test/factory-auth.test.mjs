@@ -303,3 +303,21 @@ exec "$0.real" "$@"
     s.done();
   }
 });
+
+test('no part of seat 1\'s token reaches the table or the JSON', () => {
+  const s = sandbox();
+  try {
+    const token = 'sk-ant-oat01-Q7xP2mK9vL4nR8tW3yZ6hJ5c';
+    const seat1 = join(s.home, '.agent-profiles/seats/1');
+    mkdirSync(seat1, { recursive: true });
+    writeFileSync(join(seat1, 'oauth-token'), token);
+    chmodSync(join(seat1, 'oauth-token'), 0o600);
+    s.env.USER_PLACE = 'factory';
+    s.env.FACTORY_AUTH_USER = 'factory';
+    const out = `${s.auth('status').out}\n${s.auth('status', '--json').out}`;
+    assert.match(out, /mode 600/);
+    for (let i = 0; i + 8 <= token.length; i += 1) assert.ok(!out.includes(token.slice(i, i + 8)), `a slice of the token at ${i}`);
+  } finally {
+    s.done();
+  }
+});
