@@ -238,7 +238,7 @@ export function tableText(rows, { now = Date.now() } = {}) {
     out.push('', `${pad('QUOTA', qw)}  ${pad('5H USE @RESET (UTC)', 21)}  ${pad('7D USE @RESET (UTC)', 21)}  AS OF (UTC)`);
     for (const r of quota) out.push(`${pad(r.profile, qw)}  ${pad(windowCell(r.five_hour, now), 21)}  ${pad(windowCell(r.seven_day, now), 21)}  ${r.asOf ? utc(r.asOf) : '–'}`);
   }
-  out.push('', 'Quota is reported for the seats only, from their run logs; every other row: not reported. * = the expected account (a local file), not one read.');
+  out.push('', 'Quota is reported for the seats only, from their run logs; every other row: not reported.', '* = the expected account (a local file), not one read.');
   const out_ = normal.filter((r) => r.loggedIn !== true);
   if (out_.length) {
     out.push('', 'Not logged in or not readable:');
