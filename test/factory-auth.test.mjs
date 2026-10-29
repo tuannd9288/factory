@@ -8,6 +8,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run, factory } from './helpers.mjs';
 
+// scripts/verify sets AGENT_PROFILES for the whole suite, and run() passes the outer environment on; these tests keep each
+// profile under its sandbox's HOME, so the outer value goes.
+delete process.env.AGENT_PROFILES;
+
 const EMAIL = 'ann.example@secret-corp.example';
 const ORG = 'org-00000000-1111-2222-3333-444444444444';
 const claudeJson = (email, plan = 'max') => JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email, orgId: ORG, orgName: 'Secret Corp', subscriptionType: plan });
