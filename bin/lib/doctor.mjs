@@ -166,7 +166,7 @@ function checkEvidence(ctx) {
   const commitFile = entryOf(ctx.clone, head, '.gate/kit-commit');
   const commit = regular(commitFile) ? /^([0-9a-f]{40})\n$/.exec(commitFile.bytes.toString('utf8'))?.[1] : undefined;
   if (!commit) return { ok: false, result: `pull request #${kit.number}: .gate/kit-commit at its head is not one factory commit`, reads };
-  const r = spawnSync(join(factory, 'bin/kit-evidence'), ['--factory', factory, '--commit', commit, '--repo', ctx.clone, '--base', base, '--head', head, '--slug', ctx.slug, '--id', String(ctx.id)], {
+  const r = spawnSync(join(factory, 'bin/kit-evidence'), ['--factory', factory, '--commit', commit, '--repo', ctx.clone, '--base', base, '--head', head, '--slug', ctx.slug, '--id', String(ctx.id), '--human', process.env.FACTORY_HUMAN || 'tuannd9288'], {
     encoding: 'utf8',
     maxBuffer: 1 << 28,
     timeout: 300_000,

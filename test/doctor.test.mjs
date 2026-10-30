@@ -311,3 +311,18 @@ test('settings: a line red with many calls left prints every call whole, over mo
   assert.ok(/\[[^\]]+\]$/.test(block[0]), 'the reads stay on the first line');
   assert.ok(!r.out.includes('…'));
 });
+
+test('kit-evidence is called with --human, as bin/onboard and bin/kit-update call it', () => {
+  const stub = makeFactory(join(dir, 'stub'), ['bin', 'kit']);
+  writeFileSync(join(stub, 'bin/kit-evidence'), '#!/usr/bin/env bash\necho "$@" >>"$EVIDENCE_ARGS"\necho kit-evidence: PASS\n');
+  git(stub, 'add', '-A');
+  git(stub, 'commit', '-qm', 'a kit-evidence that records its arguments');
+  git(stub, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  for (const [env, human] of [[{}, 'tuannd9288'], [{ FACTORY_HUMAN: 'someone-else' }, 'someone-else']]) {
+    const args = join(dir, `evidence-args-${human}`);
+    writeFileSync(args, '');
+    const r = doctor({ held: state(kitMerge), bin: stub, env: { ...env, EVIDENCE_ARGS: args } });
+    assert.equal(mark(r.lines['kit-evidence']), 'ok', r.out);
+    assert.match(readFileSync(args, 'utf8'), new RegExp(` --human ${human}$`, 'm'));
+  }
+});
