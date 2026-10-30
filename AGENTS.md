@@ -384,7 +384,7 @@ the Supervisor's own settings on the MacBook is installed by Colly, not here.
 
 The live verifier runs on one Codex profile for every repository, `~/.agent-profiles/verifier/codex`, which only
 the Human logs in: `mkdir -p ~/.agent-profiles/verifier/codex`, then `CODEX_HOME=~/.agent-profiles/verifier/codex`
-before Codex's own login command. Until he has, every live verdict is BLOCKED and nothing auto-merges.
+before Codex's own login command. Until he has, every live verdict is BLOCKED and nothing auto-merges, but for a repository whose `main` has no driver, where `scripts/ship` arms on its "no driver" note in place of a verdict.
 
 Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
 `cd <root>/<repo> && direnv exec . claude -p "…" --permission-mode acceptEdits --allowedTools "Bash(git branch work-*)" "Bash(git add *)" …`.

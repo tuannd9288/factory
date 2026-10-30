@@ -6,8 +6,12 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
 `skills/poteto-mode/playbooks/` unless a path says otherwise):
 
 - **Force-push** (`shipping.md:8`, `babysit.md:10`, `autopilot-full.md:12`: `--force-with-lease`). The factory never
-  rewrites a pushed branch: `factory-branches` refuses a non-fast-forward push on every branch, and the seat denies
-  `git *push *--force*` (`kit/.claude/settings.json:4`). Fix forward with a new commit.
+  rewrites a pushed branch: `factory-branches` refuses a non-fast-forward push on every branch; the repository's own deny
+  rule `Bash(git *push *--force*)` (`kit/.claude/settings.json:4`) binds every session in it; and `bin/seat` denies every
+  `git push` (`bin/lib/seat.mjs:35`). Fix forward with a new commit.
+- **Stacked pull requests** (`opening-a-pr.md:28`, `autopilot-stack.md:6`, `multi-phase-plan.md:57`: a base that is the
+  parent's branch; `shipping.md:8`: retarget to trunk with `gh pr edit --base`). `scripts/ship` opens with `--base main`
+  (`ship.mjs:64`) and refuses to arm any other base (`ship.mjs:172`): no stack.
 - **Merge by hand** (`shipping.md:8`: `gh pr merge <pr> --squash`). `factory-gate` allows merge commits only
   (`kit/.gate/ruleset.json:18`), and `scripts/ship` arms `--auto --merge`; nobody merges by hand.
 - **The pull request's title and body** (`opening-a-pr.md:11`, `:13`: a Conventional Commits title, a body that becomes
@@ -17,7 +21,7 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
   has 34 lines and no such sentence, and a search of the plugin's `*.md` for it found none. Not checked beyond that search.
 - **Babysit's `watch-pr`** (`babysit.md:12`; `shipping.md:9`). It runs `gh api graphql` inside, only to read. The Human
   allowed it on 2026-10-30 ("theo đề xuất", Factory Map v18 item 3); the grant is #182's work, not made yet. Babysit's
-  replies through `gh api` (`babysit.md:20`) are not used: an agent runs no `gh api` without the Human's approval.
+  replies through `gh api` (`babysit.md:20`) are not used: the Human's decision on #182 (2026-10-30).
 - **`AskUserQuestion`** (`docs/harness/claude-code.md:10`: "In `-p` mode it is absent, so ask in plain text"). A `-p`
   seat's tool list in its log (#203's `run-yields-2.jsonl`, line 3) holds no `AskUserQuestion`, so a seat asks in its
   report. `bin/seat`'s code says nothing of it. An interactive Lead: not checked.
@@ -36,8 +40,9 @@ changes nothing; its apply mode changes a repository only through pull requests 
   `recall` and `reflect` read the copies instead: a seat's `run-<tag>.jsonl` in its run folder, and a Lead's
   `~/factory-runs/<repo>-lead/transcripts/`, which seats are denied. That a profile keeps them under `projects/`, where
   the Lead's hook copies from, is checked by the Lead's live run on 2.1.308 after #185 merges; until then, not checked.
-- **Rules.** The factory writes no rules into any profile; `setup-pstack`, their only writer, is not used. So the
-  `~/.claude/rules/pstack-models.md` of the adapter does not exist here, and every role runs on its skill's default. A
+- **Rules.** The factory writes no rules into any profile; `setup-pstack`, their only writer, is not used. So nothing
+  the factory runs writes the adapter's `~/.claude/rules/pstack-models.md`; without it, a role uses its skill's default
+  slug (`docs/harness/claude-code.md:37`). A
   project's `.claude/rules/` loads in a seat session on 2.1.308: a probe's session quoted a marker line from
   `.claude/rules/factory-probe.md` with no tool call (#203's `run-rules-1.jsonl`). A profile's
   own `rules/` is per the docs, not probed: a probe would need a write into a profile's folder, which no agent makes.
