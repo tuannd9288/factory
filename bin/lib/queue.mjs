@@ -232,7 +232,7 @@ function preflight(state, human) {
   return 2;
 }
 
-const LABEL = 'com.tuanhub.factory.queue';
+const LABEL = 'io.github.tuannd9288.factory.queue';
 
 /** The first executable `name` on a PATH, or null. */
 function which(name, path) {
@@ -275,7 +275,7 @@ export function job(repos, env = process.env, daemon = false, as = {}) {
   };
 }
 
-/** The job as a property list, for ~/Library/LaunchAgents/com.tuanhub.factory.queue.plist, or with a user for
+/** The job as a property list, for ~/Library/LaunchAgents/io.github.tuannd9288.factory.queue.plist, or with a user for
  * /Library/LaunchDaemons/, which the Human loads with sudo. Never KeepAlive: a sweep exits after each run. */
 export function plist(j) {
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
