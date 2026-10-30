@@ -66,6 +66,15 @@ test('a kit clone whose .git file points at a missing gitdir is skipped by name,
   });
 });
 
+test('an origin with a trailing slash is swept as owner/name, and its files are written at the right path', () => {
+  withRoot(({ dir, root, queue }) => {
+    clone(root, 'app', 'https://github.com/o/app/', true);
+    const r = queue('sweep');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(readdirSync(join(dir, 'state')).filter((f) => f.endsWith('.ok')), ['queue-o-app.ok']);
+  });
+});
+
 test('sweep with no --repo and no repository taken in logs that and is not an error', () => {
   withRoot(({ dir, root, queue }) => {
     clone(root, 'plain', 'https://github.com/o/plain.git', false);
