@@ -2,7 +2,7 @@
 // exits 2 and starts nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fill, until, world } from './seat-world.mjs';
 
@@ -15,6 +15,39 @@ test('a value of --allow, --add-dir or --resume that starts with a dash is refus
     assert.match(r.err, new RegExp(`${extra[0]} .*starts with a dash`));
   }
   assert.deepEqual(started(w), []);
+}));
+
+test('a --run, --work or --add-dir with a glob character is refused, naming the option and the value, since its Edit rule is a gitignore pattern (#192)', () => world((w) => {
+  for (const name of ['a*b', 'a?b', 'issue-[12]']) {
+    const bad = join(w.root, name);
+    for (const flag of ['--run', '--work', '--add-dir']) {
+      const args = flag === '--add-dir' ? w.args('worker', [flag, bad]) : w.args('worker').map((a, i, all) => (all[i - 1] === flag ? bad : a));
+      const r = w.seat(args);
+      assert.equal(r.code, 2, `${flag} ${bad}: ${r.out}${r.err}`);
+      assert.ok(r.err.includes(`${flag} ${bad}`), `${flag} ${bad}: ${r.err}`);
+    }
+  }
+  assert.deepEqual(started(w), []);
+}));
+
+test('a --run, --work or --add-dir that is relative, or not its own real path, is refused, naming the option and the value (#192)', () => world((w) => {
+  const link = join(w.root, 'link');
+  symlinkSync(w.work, link);
+  for (const bad of ['work', '../work', `${w.work}/`, `${w.work}/../work`, link]) {
+    for (const flag of ['--run', '--work', '--add-dir']) {
+      const args = flag === '--add-dir' ? w.args('worker', [flag, bad]) : w.args('worker').map((a, i, all) => (all[i - 1] === flag ? bad : a));
+      const r = w.seat(args);
+      assert.equal(r.code, 2, `${flag} ${bad}: ${r.out}${r.err}`);
+      assert.ok(r.err.includes(`${flag} ${bad}`), `${flag} ${bad}: ${r.err}`);
+    }
+  }
+  assert.deepEqual(started(w), []);
+}));
+
+test('a real absolute --run, --work and --add-dir are accepted (#192)', () => world(async (w) => {
+  const r = w.start('worker', ['--add-dir', w.fake]);
+  assert.equal(r.code, 0, r.out + r.err);
+  await until(() => w.records().length === 1, 'the record');
 }));
 
 test('a pid file that is empty or not a number is not a live session: it does not count, and its tag is free', () => world(async (w) => {
