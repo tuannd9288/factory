@@ -366,6 +366,22 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
 
+/** The repository (`owner/name`, from a GitHub https or ssh URL of origin) and the branch of a work folder, null where git
+ * cannot tell: a folder that is not a clone, another host, a detached HEAD. Read when the session ends, since a worker may
+ * make its branch during the session (#205). */
+function placeOf(dir) {
+  const git = (...args) => {
+    try {
+      return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000 }).trim();
+    } catch {
+      return null;
+    }
+  };
+  const repo = /^(?:https:\/\/|git@|ssh:\/\/git@)github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(git('remote', 'get-url', 'origin') ?? '')?.[1] ?? null;
+  const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
+  return { repo, branch: branch && branch !== 'HEAD' ? branch : null };
+}
+
 /** The record of a session that has ended: spec is what launch decided, text the session's log, end how it ended. */
 export function recordOf(spec, events, { code, signal, error = null, end = new Date() }) {
   const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
@@ -377,7 +393,7 @@ export function recordOf(spec, events, { code, signal, error = null, end = new D
   const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
   return {
     session: result?.session_id ?? init?.session_id ?? spec.resume ?? null,
-    role: spec.role, seat: spec.seat, tag: spec.tag, run: spec.run,
+    role: spec.role, seat: spec.seat, tag: spec.tag, run: spec.run, ...placeOf(spec.cwd),
     model: models.length ? models.join(',') : (init?.model ?? spec.model),
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
     turns: sum('num_turns'), duration_ms: sum('duration_ms'), total_cost_usd: result?.total_cost_usd ?? null,
