@@ -487,6 +487,26 @@ test('macos-mini is self-hosted: the same one for main\'s and the trusted runner
   }
 });
 
+test('the candidate\'s runner may not reach main\'s: equal, contained or sharing a label is refused (#210)', () => {
+  const refused = [
+    ['--runner', '["self-hosted","macOS","main"]', '--pr-runner', '["self-hosted","macOS","main"]'],
+    ['--runner', '["self-hosted","macOS"]', '--pr-runner', '["self-hosted","macOS","pr"]'],
+    ['--runner', '["self-hosted","macOS","main"]', '--pr-runner', '["self-hosted","macOS"]'],
+    ['--runner', '["self-hosted","macOS","ci-box","a"]', '--pr-runner', '["self-hosted","linux","ci-box","b"]'],
+  ];
+  for (const extra of refused) {
+    const w = world();
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, '--apply']);
+      assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+      assert.match(out.out, /GATE_PR_RUNNER/);
+      assert.deepEqual(w.writes(), []);
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
