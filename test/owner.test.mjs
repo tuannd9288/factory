@@ -342,6 +342,17 @@ test('a variable that holds another value is changed by a PATCH of its name, and
   }
 });
 
+test('a variable GitHub accepts and drops leaves the onboarding incomplete (#210)', () => {
+  const w = world({ ignore: 'variables' });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--reviewer', 'claude', '--apply']);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /incomplete: .*variable GATE_REVIEWER/);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
