@@ -210,6 +210,19 @@ test('settings: red names each gate variable that is unset, not a runs-on value,
   }
 });
 
+test('settings: shared runners under entire are green, the #155 exception; the same runners under claude are red (#210)', () => {
+  const shared = '["self-hosted","zz-shared-label"]';
+  const runners = { GATE_RUNNER: shared, GATE_PR_RUNNER: shared, GATE_TRUSTED_RUNNER: shared };
+  const entire = wanted({ kitLanded: true, branch: 'main', reviewer: 'entire' }).rulesets.map((r, i) => ({ ...r, id: 100 + i }));
+  let r = doctor({ held: state(kitMerge, { rulesets: entire, variables: gateVariables({ ...runners, GATE_REVIEWER: 'entire' }) }) });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(mark(r.lines.settings), 'ok', r.out);
+  r = doctor({ held: state(kitMerge, { variables: gateVariables({ ...runners, GATE_REVIEWER: 'claude' }) }) });
+  assert.equal(mark(r.lines.settings), 'RED', r.out);
+  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_TRUSTED_RUNNER is self-hosted and shares a runner with GATE_RUNNER/);
+  assert.ok(!r.out.includes('zz-shared-label'), r.out);
+});
+
 test('gate-block: red when the block is not .gate/gate-section.md byte for byte, or is gone', () => {
   const text = readFileSync(join(dir, 'root/app/AGENTS.md'), 'utf8');
   for (const [name, agents] of [['edited', text.replace('## Gate', '## Gate!')], ['gone', '# app\n']]) {
