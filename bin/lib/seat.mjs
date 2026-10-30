@@ -37,6 +37,10 @@ const builderAllow = (run) => [
   'Read', 'Glob', 'Grep', 'Bash(node:*)', 'Bash(git:*)', `Bash(${run}/sv)`, 'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(cd:*)', 'Bash(mktemp:*)', 'Bash(grep:*)', 'Bash(diff:*)',
 ];
 
+// The filesystem commands acceptEdits approved in the session's folders, which the default mode bin/seat runs in does not
+// (#188). The researcher gets none of them, nor cp or sed, so it cannot move or remove the folder research-git clones into.
+const fsCommands = ['Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)'];
+
 /** The presets. turns is a new session's --max-turns, resumeTurns a resumed one's. The budget is the Lead's choice
  * (#91); whether it stops a session on a subscription seat is not known yet.
  * worker: run-90.sh worker (sonnet, medium, 400 turns); its fix rounds (run-90fix.sh) resume with 200.
@@ -47,18 +51,18 @@ const builderAllow = (run) => [
 export const PRESETS = {
   worker: {
     model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, budget: 20, web: false,
-    allow: (run) => [...builderAllow(run), 'Write', 'Edit', 'Bash(cp:*)', 'Bash(sed:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(cmp:*)'],
+    allow: (run) => [...builderAllow(run), 'Bash(cp:*)', 'Bash(sed:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(cmp:*)', ...fsCommands],
   },
   reviewer: {
     model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, budget: 15, web: false,
-    allow: (run) => [...builderAllow(run), 'Write'],
+    allow: (run) => [...builderAllow(run), 'Bash(cp:*)', ...fsCommands],
   },
   researcher: {
     // The Lead's proposal (review of #91, #6), agreed by Colly on 2026-10-26: the researcher reads untrusted pages and can send
     // them out with WebFetch, so it never runs on seat 1, which holds a token.
     model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, budget: 15, web: true, seats: [2],
     allow: () => [
-      'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${RESEARCH_GIT}:*)`,
+      'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${RESEARCH_GIT}:*)`,
       'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)',
     ],
     deny: ['Bash(git:*)'],
@@ -69,17 +73,20 @@ export const ROLES = Object.keys(PRESETS);
 
 /** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories and run its
  * `sv`); skills become Skill(<name>) grants and allow is a run's own extra grants; seat and tokenPath add seat 1's
- * deny rule; deny is a run's own extra deny rules (#92), which come after the role's and before seat 1's. */
-export function buildArgs({ role, run, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, seat = null, tokenPath = null }) {
+ * deny rule; deny is a run's own extra deny rules (#92), which come after the role's and before seat 1's. The mode is
+ * default: with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set, Claude Code 2.1.308 forces it whatever is asked (#188). Write, Edit
+ * and redirects reach the session's own folders only (run, work and each --add-dir), as acceptEdits limited them. */
+export function buildArgs({ role, run, work = null, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, seat = null, tokenPath = null }) {
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
+  const edits = [...new Set([run, work, ...addDirs].filter(Boolean))].map((d) => `Edit(/${d}/**)`);
   const deny = [...denyOf(home, p.web), ...(p.deny ?? []), ...extraDeny, ...(seat === 1 ? [`Read(/${tokenPath})`] : [])];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
-    '--max-budget-usd', String(p.budget), '--permission-mode', 'acceptEdits',
+    '--max-budget-usd', String(p.budget), '--permission-mode', 'default',
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
-    '--allowedTools', ...p.allow(run), 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
+    '--allowedTools', ...p.allow(run), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
     '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA),
   ];
@@ -332,7 +339,7 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   // The researcher's git clones under its run folder, and only there (bin/research-git).
   if (o.role === 'researcher') child.FACTORY_RESEARCH_CLONES = join(run, 'clones');
   mkdirSync(child.GH_CONFIG_DIR, { recursive: true });
-  const args = buildArgs({ role: o.role, run, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
+  const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
     childFile: join(run, `run-${tag}.child`), tokenPath: seat === 1 ? tokenPath : null, role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
