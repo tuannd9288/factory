@@ -90,6 +90,28 @@ test('an enabled plugin with no settings pin is refused before any call', () => 
   refuse({ ...PSTACK_SETTINGS, extraKnownMarketplaces: { 'pstack-4dd1d05': { source: { source: 'github', repo: 'a/b' } } } }, /no settings marketplace pin/);
 }));
 
+// A marketplace name becomes a folder under the install config and an argument of claude, and a plugin name an argument, so a
+// name from the work folder's settings is a name of letters, digits, dot, dash and underscore that starts with a letter or digit.
+for (const bad of ['..', '../../../.agent-profiles/seats/1', 'a/b', '-x', '--accept-command', '.hidden', '']) {
+  test(`a marketplace name ${JSON.stringify(bad)} is refused before any folder or call`, () => world(async (w) => {
+    const { installPlugins, PluginError } = await lib();
+    const plugins = [{ name: 'p', source: './' }];
+    w.settings({ enabledPlugins: { [`p@${bad}`]: true }, extraKnownMarketplaces: { [bad]: { source: { source: 'settings', plugins } } } });
+    assert.throws(() => installPlugins(setup(w)), (e) => e instanceof PluginError && /name/.test(e.message));
+    assert.equal(w.pluginCalls().length, 0);
+    assert.ok(!existsSync(join(w.home, '.local')), 'no folder was made');
+    assert.deepEqual(readdirSync(w.profiles), ['seats']);
+  }));
+
+  test(`a plugin name ${JSON.stringify(bad)} is refused before any folder or call`, () => world(async (w) => {
+    const { installPlugins, PluginError } = await lib();
+    w.settings({ enabledPlugins: { [`${bad}@mk`]: true }, extraKnownMarketplaces: { mk: { source: { source: 'settings', plugins: [{ name: bad, source: './' }] } } } });
+    assert.throws(() => installPlugins(setup(w)), PluginError);
+    assert.equal(w.pluginCalls().length, 0);
+    assert.ok(!existsSync(join(w.home, '.local')), 'no folder was made');
+  }));
+}
+
 test('a config dir outside the profiles folder is refused', () => world(async (w) => {
   const { installPlugins, PluginError } = await lib();
   assert.throws(() => installPlugins({ ...setup(w), config: join(w.home, 'elsewhere') }), PluginError);
