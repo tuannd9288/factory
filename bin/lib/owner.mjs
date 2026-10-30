@@ -95,15 +95,16 @@ export function plan(slug, agent, have, want) {
   return calls;
 }
 
-function gh(args, input) {
+export function gh(args, input) {
   const out = execFileSync('gh', args, { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: CALL_MS });
   return out.trim() ? JSON.parse(out) : null;
 }
 
-/** A GET that answers null on 404 and throws on any other failure. */
-function maybe(path) {
+/** A GET that answers null on 404 and throws on any other failure. `read` makes the call: bin/onboard-doctor passes one
+ * that refuses anything but a read. */
+export function maybe(path, read = gh) {
   try {
-    return gh(['api', path]);
+    return read(['api', path]);
   } catch (error) {
     if (/\(HTTP 404\)/.test(String(error.stderr))) return null;
     throw error;
@@ -111,18 +112,51 @@ function maybe(path) {
 }
 
 /** What the repository holds now, of what the factory sets. */
-function current(slug, agent, names) {
+export function current(slug, agent, names, read = gh) {
   const repo = `repos/${slug}`;
-  const invitations = gh(['api', `${repo}/invitations`]) ?? [];
-  const list = gh(['api', `${repo}/rulesets?per_page=100`]) ?? [];
-  const environment = maybe(`${repo}/environments/${ENV}`);
+  const invitations = read(['api', `${repo}/invitations`]) ?? [];
+  const list = read(['api', `${repo}/rulesets?per_page=100`]) ?? [];
+  const environment = maybe(`${repo}/environments/${ENV}`, read);
   return {
     // GitHub may answer 404 for an account that is not a collaborator yet, the case the invitation is for.
-    collaborator: maybe(`${repo}/collaborators/${agent}/permission`)?.permission ?? 'none',
+    collaborator: maybe(`${repo}/collaborators/${agent}/permission`, read)?.permission ?? 'none',
     invited: invitations.some((i) => i.invitee?.login?.toLowerCase() === agent.toLowerCase() && i.permissions === 'write'),
-    rulesets: list.filter((r) => names.has(r.name)).map((r) => gh(['api', `${repo}/rulesets/${r.id}`])),
+    rulesets: list.filter((r) => names.has(r.name)).map((r) => read(['api', `${repo}/rulesets/${r.id}`])),
     environment,
-    policies: environment ? (gh(['api', `${repo}/environments/${ENV}/deployment-branch-policies`])?.branch_policies ?? []) : [],
+    policies: environment ? (read(['api', `${repo}/environments/${ENV}/deployment-branch-policies`])?.branch_policies ?? []) : [],
+  };
+}
+
+/** What the repository still lacks of `want`: the plan's calls by name, and an environment that also deploys from a
+ * branch other than the default. onboard-owner's read-back and the doctor both ask it. */
+export function left(slug, agent, have, want) {
+  const calls = plan(slug, agent, have, want).map((c) => c.what);
+  const extra = have.policies.filter((p) => p.name !== want.branch).map((p) => p.name);
+  if (extra.length) calls.push(`environment ${ENV} also deploys from ${extra.join(', ')}: take that out by hand`);
+  return calls;
+}
+
+/** What both bin/onboard-owner and bin/onboard-doctor settle before they trust the repository named: not the agents'
+ * login, the id the repository has, its name as it is now, an admin right. `who` is the command's name in its messages.
+ * Returns { refusal } or { login, repo }. */
+export function identify(who, { slug, id, agent, read = gh }) {
+  const login = read(['api', 'user']).login;
+  if (login.toLowerCase() === agent.toLowerCase()) return { refusal: `${who}: runs as the Human, the repository's owner, not as the agents' account (${agent})` };
+  const repo = read(['api', `repos/${slug}`]);
+  if (String(repo.id) !== id) return { refusal: `${who}: ${slug} has repository id ${repo.id}, not ${id}: check the name and the id before anything changes` };
+  if (repo.full_name.toLowerCase() !== slug.toLowerCase() || repo.owner.login.toLowerCase() !== slug.split('/')[0].toLowerCase())
+    return { refusal: `${who}: ${slug} answers as ${repo.full_name}: it was renamed or moved; name it as it is now` };
+  if (!repo.permissions?.admin) return { refusal: `${who}: ${login} has no admin right on ${slug}; the repository's owner runs this` };
+  return { login, repo };
+}
+
+/** Whether the kit is on the branch (its inventory is) and the repository variable GATE_REVIEWER, which the gate's
+ * ruleset follows; the jobs read it too, so a later run cannot put back a ruleset that requires review and verdict
+ * while they judge nothing. The caller keeps the value to itself. */
+export function gateState(slug, branch, read = gh) {
+  return {
+    kitLanded: maybe(`repos/${slug}/contents/.gate/kit-files?ref=${encodeURIComponent(branch)}`, read) !== null,
+    reviewer: (read(['variable', 'list', '--repo', slug, '--json', 'name,value']) ?? []).find((v) => v.name === 'GATE_REVIEWER')?.value ?? '',
   };
 }
 
@@ -138,29 +172,14 @@ function main(argv) {
     return 2;
   }
   const agent = process.env.FACTORY_AGENT ?? 'tuan9288-agent';
-  const login = gh(['api', 'user']).login;
-  if (login.toLowerCase() === agent.toLowerCase()) {
-    console.error(`onboard-owner: runs as the Human, the repository's owner, not as the agents' account (${agent})`);
+  const who = identify('onboard-owner', { slug, id, agent });
+  if (who.refusal) {
+    console.error(who.refusal);
     return 2;
   }
-  const repo = gh(['api', `repos/${slug}`]);
-  if (String(repo.id) !== id) {
-    console.error(`onboard-owner: ${slug} has repository id ${repo.id}, not ${id}: check the name and the id before anything changes`);
-    return 2;
-  }
-  if (repo.full_name.toLowerCase() !== slug.toLowerCase() || repo.owner.login.toLowerCase() !== slug.split('/')[0].toLowerCase()) {
-    console.error(`onboard-owner: ${slug} answers as ${repo.full_name}: it was renamed or moved; name it as it is now`);
-    return 2;
-  }
-  if (!repo.permissions?.admin) {
-    console.error(`onboard-owner: ${login} has no admin right on ${slug}; the repository's owner runs this`);
-    return 2;
-  }
+  const { repo } = who;
   const branch = repo.default_branch;
-  const kitLanded = maybe(`repos/${slug}/contents/.gate/kit-files?ref=${encodeURIComponent(branch)}`) !== null;
-  // The gate follows the repository variable GATE_REVIEWER, which the jobs read too, so a later run cannot put back a
-  // ruleset that requires review and verdict while they judge nothing.
-  const reviewer = (gh(['variable', 'list', '--repo', slug, '--json', 'name,value']) ?? []).find((v) => v.name === 'GATE_REVIEWER')?.value ?? '';
+  const { kitLanded, reviewer } = gateState(slug, branch);
   if (reviewer === 'entire' && kitLanded) {
     const app = maybe(`apps/${ENTIRE_APP.slug}`);
     if (app?.id !== ENTIRE_APP.id) {
@@ -186,11 +205,9 @@ function main(argv) {
     console.log(`  done    ${c.what}`);
   }
   const have = current(slug, agent, names);
-  const left = plan(slug, agent, have, want).map((c) => c.what);
-  const extra = have.policies.filter((p) => p.name !== branch).map((p) => p.name);
-  if (extra.length) left.push(`environment ${ENV} also deploys from ${extra.join(', ')}: take that out by hand`);
-  if (left.length) {
-    console.log(`onboard-owner: incomplete: ${left.join('; ')}`);
+  const undone = left(slug, agent, have, want);
+  if (undone.length) {
+    console.log(`onboard-owner: incomplete: ${undone.join('; ')}`);
     return 1;
   }
   console.log('onboard-owner: read back: every setting as planned');
