@@ -309,6 +309,25 @@ test('the variables are set before the gate\'s ruleset, which follows the GATE_R
   }
 });
 
+test('an option left out keeps the value held and the dry run says so; no other variable\'s value is printed (#210)', () => {
+  const held = [{ name: 'GATE_RUNNER', value: '["self-hosted","zz-held-runner"]' }, { name: 'OTHER', value: 'zz-other-value' }];
+  const w = world({ variables: held });
+  try {
+    for (const args of [['--reviewer', 'claude'], ['--reviewer', 'claude', '--apply']]) {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', ...args]);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /--runner not given: GATE_RUNNER stays as it is/);
+      assert.match(out.out, /--pr-runner not given: GATE_PR_RUNNER stays unset/);
+      assert.match(out.out, /--trusted-runner not given: GATE_TRUSTED_RUNNER stays unset/);
+      assert.doesNotMatch(out.out, /--reviewer not given/);
+      for (const secret of ['zz-held-runner', 'zz-other-value']) assert.ok(!out.out.includes(secret), `${secret} printed:\n${out.out}`);
+    }
+    assert.deepEqual(w.state().variables, [...held, { name: 'GATE_REVIEWER', value: 'claude' }]);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
