@@ -271,6 +271,26 @@ test('the owner script names the four gate variables among the changes it would 
   }
 });
 
+test('the owner script sets the four gate variables, reads them back, and a second run with the same values changes nothing (#210)', () => {
+  const w = world();
+  try {
+    let out = w.owner(['tuannd9288/app', '--id', '1234', ...FOUR, '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /done {4}variable GATE_RUNNER/);
+    assert.match(out.out, /read back: every setting as planned/);
+    const held = Object.fromEntries(w.state().variables.map((v) => [v.name, v.value]));
+    assert.deepEqual(held, { GATE_RUNNER: MAIN, GATE_PR_RUNNER: PR, GATE_TRUSTED_RUNNER: TRUSTED, GATE_REVIEWER: 'claude' });
+    w.set({ collaborator: 'write', invitations: [] });
+    w.clear();
+    out = w.owner(['tuannd9288/app', '--id', '1234', ...FOUR, '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(w.writes(), []);
+    assert.match(out.out, /nothing to change/);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
