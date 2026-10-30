@@ -20,7 +20,8 @@ describe('the pstack pin', () => {
     const [plugin] = source.plugins;
     assert.equal(plugin.name, 'pstack');
     assert.equal(plugin.source.source, 'git-subdir');
-    assert.equal(plugin.source.path, 'pstack');
+    // Upstream's Claude Code build, not the Cursor tree at `pstack` (#182).
+    assert.equal(plugin.source.path, 'harness/pstack/claude-code');
     assert.match(plugin.source.url, /^(https:\/\/github\.com\/)?cursor\/plugins(\.git)?$/);
     assert.match(plugin.source.sha, /^[0-9a-f]{40}$/);
     assert.equal(plugin.source.ref, undefined, 'a branch or tag would move');

@@ -88,7 +88,7 @@ It needs, in order: the repository taken in (`bin/onboard`: clone, profile, `.en
 **merged** (`gate-trusted.yml` runs from `main`; without it `review`, `verdict` and `tier` never appear); the
 second `bin/onboard-owner --apply`; on a scratch repository the repository variable `GATE_REVIEWER=stub`, so `review` and
 `verdict` pass a tier-1 change without a model; its profile logged in and the folder trusted; and the pstack install
-(`claude plugin install pstack@pstack-f713f14 --scope project`, AGENTS.md § pstack). gh's active account must be
+(`claude plugin install pstack@pstack-<sha7> --scope project`, the repository's own pin, AGENTS.md § pstack). gh's active account must be
 `tuan9288-agent`: the probe refuses any other, a dirty clone and an existing `.env`.
 
 A model may decline `git tag x` or the `.env` read itself because `AGENTS.md` forbids them (first live run, 2026-10-23): the

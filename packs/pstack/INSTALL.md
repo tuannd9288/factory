@@ -10,5 +10,5 @@ checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.ga
 3. Append the two rows of `enforced-rules.rows.md` to `.gate/enforced-rules.md`.
 4. Add what `section.md` says to the repository's own `AGENTS.md`, after the Gate block, within 150 lines and 32 KiB.
 5. Add `packs/pstack/settings.json`'s keys to `.claude/settings.json` (one pin for each repository), then, once per
-   repository and profile, `claude plugin install pstack@pstack-f713f14 --scope project` (the factory `AGENTS.md`,
+   repository and profile, `claude plugin install pstack@pstack-4dd1d05 --scope project` (the factory `AGENTS.md`,
    "pstack, per repository").
