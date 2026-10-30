@@ -1,6 +1,7 @@
 // bin/seat (#91): which seat a session runs on, ported from factory:~/factory-runs/seat.zsh. A new session tries seat 2, then
-// seat 1; at most four live sessions a seat, counted from run*.pid and run*.seat under FACTORY_RUNS; seat 2 stops at 0.90
-// of seven_day and seat 1 at 0.70, read from the newest rate_limit_event of that seat's logs; a resume stays on its seat.
+// seat 1; at most four live sessions a seat, counted from run*.pid and run*.seat under FACTORY_RUNS; a seat is passed over
+// for its use only while Claude Code has rejected it, until the reset it gave, as the newest rate_limit_event of that seat's
+// logs says (#194); a resume stays on its seat.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +12,18 @@ import { join } from 'node:path';
 const lib = () => import('../bin/lib/seat.mjs');
 
 const rate = (u) => `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: u === null ? {} : { utilization: u } } } })}\n`;
+const HOUR = 3600;
+const nowSec = () => Math.floor(Date.now() / 1000);
+/** An event with status rejected, shaped as the two recorded cut-offs are (#194): the window rateLimitType names is used up and
+ * resets in inSeconds, at the event's own resetsAt; the week is at 0.35, under any stop. */
+function rejected(type, inSeconds) {
+  const resetsAt = nowSec() + inSeconds;
+  const w = { five_hour: { utilization: 0.4, resetsAt: nowSec() + 2 * HOUR }, seven_day: { utilization: 0.35, resetsAt: nowSec() + 50 * HOUR } };
+  w[type] = { utilization: 1, resetsAt };
+  return `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt, rateLimitType: type, unifiedWindows: w } })}\n`;
+}
+const resetOf = (line) => JSON.parse(line).rate_limit_info.resetsAt;
+const at = (line) => new Date(resetOf(line) * 1000).toISOString().slice(0, 16).replace('T', ' ');
 const deadPid = () => spawnSync(process.execPath, ['-e', '0']).pid;
 
 function world(body) {
@@ -75,41 +88,47 @@ test('no seat free: null, with a reason for each seat', async () => {
   });
 });
 
-test('seat 2 stops at 0.90 of seven_day, and seat 1 at 0.70', async () => {
+test('a seat is never passed over for its use: seven-day 0.95 on seat 2 and 0.99 on seat 1 stop neither (#194)', async () => {
   const { chooseSeat } = await lib();
   world((runs, add) => {
-    add(2, { live: false, log: rate(0.89) });
-    assert.equal(chooseSeat({ runs }).seat, 2);
-  });
-  world((runs, add) => {
-    add(2, { live: false, log: rate(0.9) });
-    assert.deepEqual(chooseSeat({ runs }), { seat: 1, reasons: ['seat 2: seven-day use 0.9, stops at 0.90'] });
-  });
-  world((runs, add) => {
     add(2, { live: false, log: rate(0.95) });
-    add(1, { live: false, log: rate(0.7) });
-    assert.deepEqual(chooseSeat({ runs }), { seat: null, reasons: ['seat 2: seven-day use 0.95, stops at 0.90', 'seat 1: seven-day use 0.7, stops at 0.70'] });
-  });
-  world((runs, add) => {
-    add(2, { live: false, log: rate(0.95) });
-    add(1, { live: false, log: rate(0.69) });
-    assert.equal(chooseSeat({ runs }).seat, 1);
+    assert.deepEqual(chooseSeat({ runs }), { seat: 2, reasons: [] });
+    for (let i = 0; i < 4; i += 1) add(2);
+    add(1, { live: false, log: rate(0.99) });
+    assert.deepEqual(chooseSeat({ runs }), { seat: 1, reasons: ['seat 2: 4 live sessions, at most 4'] });
   });
 });
 
-test('the use is read from the newest log of that seat that has one, and the last rate_limit_event in it', async () => {
+test('a seat Claude Code rejected is passed over until the reset it gave, and the reason names the window and the reset', async () => {
   const { chooseSeat } = await lib();
   world((runs, add) => {
-    add(2, { live: false, log: rate(0.95), age: 100 });
+    const hour = rejected('five_hour', HOUR);
+    add(2, { live: false, log: hour });
+    assert.deepEqual(chooseSeat({ runs }), { seat: 1, reasons: [`seat 2: rejected by Claude Code (five-hour window) until ${at(hour)} UTC`] });
+    const week = rejected('seven_day', 2 * HOUR);
+    add(1, { live: false, log: week });
+    assert.deepEqual(chooseSeat({ runs }), { seat: null, reasons: [
+      `seat 2: rejected by Claude Code (five-hour window) until ${at(hour)} UTC`,
+      `seat 1: rejected by Claude Code (seven-day window) until ${at(week)} UTC`,
+    ] });
+    assert.equal(chooseSeat({ runs, now: resetOf(hour) * 1000 - 1 }).seat, null, 'a millisecond before its reset seat 2 is still out, and seat 1 too');
+    assert.deepEqual(chooseSeat({ runs, now: resetOf(hour) * 1000 }), { seat: 2, reasons: [] }, 'at its reset seat 2 is back');
+  });
+});
+
+test('the seat\'s state is read from the newest log of that seat with a seven-day use, and the last rate_limit_event in it', async () => {
+  const { chooseSeat } = await lib();
+  world((runs, add) => {
+    add(2, { live: false, log: rejected('five_hour', HOUR), age: 100 });
     add(2, { live: false, log: rate(0.1), age: 50 });
-    assert.equal(chooseSeat({ runs }).seat, 2, 'the newer log says 0.1');
+    assert.equal(chooseSeat({ runs }).seat, 2, 'the newer log is not rejected');
   });
   world((runs, add) => {
-    add(2, { live: false, log: rate(0.1) + rate(0.95), age: 10 });
-    assert.equal(chooseSeat({ runs }).seat, 1, 'the last event of the log says 0.95');
+    add(2, { live: false, log: rate(0.1) + rejected('five_hour', HOUR), age: 10 });
+    assert.equal(chooseSeat({ runs }).seat, 1, 'the last event of the log is rejected');
   });
   world((runs, add) => {
-    add(2, { live: false, log: rate(0.95), age: 100 });
+    add(2, { live: false, log: rejected('five_hour', HOUR), age: 100 });
     add(2, { live: false, log: '{"type":"system"}\n', age: 5 });
     add(2, { live: false, log: rate(null), age: 1 });
     assert.equal(chooseSeat({ runs }).seat, 1, 'a newer log with no use is passed over');
@@ -119,19 +138,25 @@ test('the use is read from the newest log of that seat that has one, and the las
 test('the logs of the other seat, and logs with no seat file, are not read', async () => {
   const { chooseSeat } = await lib();
   world((runs, add) => {
-    add(1, { live: false, log: rate(0.99) });
-    add(null, { live: false, log: rate(0.99) });
+    add(1, { live: false, log: rejected('five_hour', HOUR) });
+    add(null, { live: false, log: rejected('five_hour', HOUR) });
     assert.equal(chooseSeat({ runs }).seat, 2);
   });
 });
 
-test('a resume stays on its seat: the other seat is not tried, and a full seat is refused', async () => {
+test('a resume stays on its seat: the other seat is not tried, and a full seat, or one rejected until its reset, is refused', async () => {
   const { chooseSeat } = await lib();
   world((runs, add) => {
     assert.deepEqual(chooseSeat({ runs, resumeSeat: 1 }), { seat: 1, reasons: [] });
     for (let i = 0; i < 4; i += 1) add(1);
     assert.deepEqual(chooseSeat({ runs, resumeSeat: 1 }), { seat: null, reasons: ['seat 1: 4 live sessions, at most 4'] });
     assert.equal(chooseSeat({ runs, resumeSeat: 2 }).seat, 2);
+  });
+  world((runs, add) => {
+    const hour = rejected('five_hour', HOUR);
+    add(1, { live: false, log: hour });
+    assert.deepEqual(chooseSeat({ runs, resumeSeat: 1 }), { seat: null, reasons: [`seat 1: rejected by Claude Code (five-hour window) until ${at(hour)} UTC`] });
+    assert.deepEqual(chooseSeat({ runs, resumeSeat: 1, now: resetOf(hour) * 1000 }), { seat: 1, reasons: [] }, 'after the reset the resume goes ahead');
   });
 });
 

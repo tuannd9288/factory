@@ -39,19 +39,18 @@ Start the probe:
 
     node probes/research-eval/run.mjs --set probe --run <results folder> --work <work folder> --go
 
-The probe is what fits in $24: the researcher runs on seat 2 only, never on seat 1, which holds a token. Its job is to prove the
-harness and to measure what one session costs, not to compare the arms. With the researcher preset's $15 budget the ceiling
-below lets a second session start only when the first cost $9 or less. On 2026-10-26 a probe session cost $0.19 to $0.34, so
-the whole probe fits (#92, issuecomment-6415387868). A larger probe, and the
+The probe runs under a $24 limit: the researcher runs on seat 2 only, never on seat 1, which holds a token. Its job is to prove
+the harness and to measure what one session costs, not to compare the arms. On 2026-10-26 a probe session cost $0.19 to $0.34,
+so the whole probe fits (#92, issuecomment-6415387868). A larger probe, and the
 40-run set (10 tasks, both arms, 2 runs: `--set full --go --limit-usd <dollars>`), are for the Human to fund once he has the
 measured cost of a session.
 
 ## Limits and stops
 
-- **The limit is a ceiling.** The default is $24. A session counts at `PRESETS.researcher.budget` (`bin/lib/seat.mjs`) until it
-  ends, and none starts when the spend so far plus that budget would pass the limit (exit 3). The $15 is the preset's request to
-  claude (`--max-budget-usd`), not a proven limit on a subscription seat (`bin/lib/seat.mjs:36-37`). A session whose result has no
-  cost counts at that budget too.
+- **The limit is the Human's ceiling on what he funds.** The default is $24. After each session the runner adds the cost its
+  result recorded (`total_cost_usd`), and starts no new session once the spend reaches the limit (exit 3). Nothing is projected
+  and nothing stops a running session, so one session can run past the limit by its own cost. A result with no recorded cost
+  stops the set (exit 3), since the spend is then unknown (#194).
 - **Arm B must be without helpers.** The runner stops (exit 4) when a B session has no init event, lists a helper tool, started a
   helper, or has an event with a `parent_tool_use_id`. Arm A counts `Workflow` calls among its helpers.
 - **One model.** The runner keeps each run's model and stops (exit 6) when it changes within a set.

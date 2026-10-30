@@ -24,10 +24,10 @@ const EDITS = ['Edit(//r/issue-1/**)', 'Edit(//r/w/**)'];
 
 const tail = ['--output-format', 'stream-json', '--verbose', '--json-schema', SCHEMA];
 
-test('worker: sonnet, medium effort, 400 turns, $20, the worker allow list and the common deny list', async () => {
+test('worker: sonnet, medium effort, 400 turns, the worker allow list and the common deny list', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'worker', run: RUN, home: HOME, work: WORK }), [
-    '-p', '--model', 'sonnet', '--effort', 'medium', '--max-turns', '400', '--max-budget-usd', '20', '--permission-mode', 'default',
+    '-p', '--model', 'sonnet', '--effort', 'medium', '--max-turns', '400', '--permission-mode', 'default',
     '--add-dir', RUN,
     '--allowedTools', ...WORKER_ALLOW, ...EDITS, 'StructuredOutput',
     '--disallowedTools', ...DENY,
@@ -35,10 +35,10 @@ test('worker: sonnet, medium effort, 400 turns, $20, the worker allow list and t
   ]);
 });
 
-test('reviewer: opus, high effort, 300 turns, $15, the base allow list, cp and the commands acceptEdits approved, edits in its folders', async () => {
+test('reviewer: opus, high effort, 300 turns, the base allow list, cp and the commands acceptEdits approved, edits in its folders', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'reviewer', run: RUN, home: HOME, work: WORK }), [
-    '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--max-budget-usd', '15', '--permission-mode', 'default',
+    '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'default',
     '--add-dir', RUN,
     '--allowedTools', ...BASE, 'Bash(cp:*)', 'Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)', ...EDITS, 'StructuredOutput',
     '--disallowedTools', ...DENY,
@@ -46,10 +46,10 @@ test('reviewer: opus, high effort, 300 turns, $15, the base allow list, cp and t
   ]);
 });
 
-test('researcher: opus, high effort, 300 turns, $15, the web and git only through bin/research-git, and no WebFetch or WebSearch deny', async () => {
+test('researcher: opus, high effort, 300 turns, the web and git only through bin/research-git, and no WebFetch or WebSearch deny', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'researcher', run: RUN, home: HOME, work: WORK }), [
-    '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--max-budget-usd', '15', '--permission-mode', 'default',
+    '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'default',
     '--add-dir', RUN,
     '--allowedTools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${join(factory, 'bin/research-git')}:*)`,
     'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)', ...EDITS, 'StructuredOutput',

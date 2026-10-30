@@ -7,7 +7,6 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync,
 import { setTimeout as sleep } from 'node:timers/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PRESETS } from '../../bin/lib/seat.mjs';
 import { grade } from './grade.mjs';
 import { outsidePaths, realOf } from './paths.mjs';
 import { briefOf, loadTasks, validateTask, verifyTask } from './keys.mjs';
@@ -231,7 +230,7 @@ async function main(argv, env) {
   if (reaching.length) throw new Refused(`a readable folder reaches an answer, so nothing was started:\n${reaching.join('\n')}`, EXIT_GUARD);
   if (!o.go) {
     for (const e of plan) console.log(`dry: ${e.tag}: bin/seat ${seatArgs(e, opts).join(' ')}`);
-    console.log(`not started: add --go to run these ${plan.length} sessions, one at a time; none starts that could take the spend past ${usd(o.limit)}, counting each at the researcher preset's ${usd(PRESETS.researcher.budget)} budget, which is a request to claude and not a proven limit on a subscription seat`);
+    console.log(`not started: add --go to run these ${plan.length} sessions, one at a time; none starts once the recorded spend reaches ${usd(o.limit)}, and one session can run past it by its own cost`);
     return 0;
   }
   if (!o.skipKeyCheck) {
@@ -252,12 +251,6 @@ async function main(argv, env) {
     code = c;
   };
   for (const e of plan) {
-    // The limit is a ceiling: a session counts at the preset's budget, which is a request to claude and not a proven limit
-    // on a subscription seat, so none starts that could take the spend past the limit.
-    if (spent + PRESETS.researcher.budget > o.limit) {
-      stop(`the next session could pass the limit: spent ${usd(spent)} plus the preset's budget ${usd(PRESETS.researcher.budget)} would pass ${usd(o.limit)}, before ${e.tag}`, 3);
-      break;
-    }
     const p = sessionPaths(e, opts);
     mkdirSync(p.run, { recursive: true });
     mkdirSync(p.work, { recursive: true });
@@ -286,10 +279,10 @@ async function main(argv, env) {
     const invalid = text === null ? [{ tool: '-', path: '(its log could not be read)' }]
       : outsidePaths(text, { cwd: p.work, inside: [p.run, p.work, ...(e.task.readable ?? []).map((r) => join(runsRoot, r))], home: env.HOME });
     const g = invalid.length ? null : grade(e.task, rec.structured);
-    const cost = rec.total_cost_usd ?? PRESETS.researcher.budget;
-    spent += cost;
+    const cost = rec.total_cost_usd ?? null;
+    spent += cost ?? 0;
     results.push({ tag: e.tag, task: e.task.id, arm: e.arm, rep: e.rep, points: g?.points ?? null, max: g?.max ?? null, score: g?.score ?? null, ...(invalid.length ? { invalid } : {}), cost, minutes: rec.minutes, tokensIn: m.tokensIn, tokensOut: m.tokensOut, helpers: m.helpers, ended: rec.ended, model: rec.model, tools: m.tools });
-    console.log(`${e.tag} ${g ? `score ${g.points}/${g.max}` : `INVALID: not scored; read outside its folders: ${invalid.map((x) => x.path).join(', ')}`} tokens ${m.tokensIn} in ${m.tokensOut} out minutes ${rec.minutes} cost ${usd(cost)} helpers ${m.helpers} ended ${rec.ended}${rec.ended === 'success' ? '' : ' (cut or failed, not a low score)'}${rec.total_cost_usd == null ? ' (cost unknown, counted at the cap)' : ''}`);
+    console.log(`${e.tag} ${g ? `score ${g.points}/${g.max}` : `INVALID: not scored; read outside its folders: ${invalid.map((x) => x.path).join(', ')}`} tokens ${m.tokensIn} in ${m.tokensOut} out minutes ${rec.minutes} cost ${cost === null ? 'unknown' : usd(cost)} helpers ${m.helpers} ended ${rec.ended}${rec.ended === 'success' ? '' : ' (cut or failed, not a low score)'}`);
     // Arm B must be without helpers: it stops the set when the log cannot show that, or shows a helper.
     const leaked = HELPER_TOOLS.find((t) => m.tools.includes(t));
     const broken = e.arm !== 'B' ? null
@@ -310,8 +303,14 @@ async function main(argv, env) {
       stop(`${e.tag} read outside its folders: ${invalid.map((x) => x.path).join(', ')}`, EXIT_INVALID);
       break;
     }
-    if (spent > o.limit) {
-      stop(`spend ${usd(spent)} passed the limit of ${usd(o.limit)} after ${e.tag}`, 3);
+    // The limit is the Human's ceiling on what he funds (#194): only recorded costs count, and none starts once they reach it;
+    // a result with no cost leaves the spend unknown, so nothing starts after it.
+    if (cost === null) {
+      stop(`${e.tag} recorded no cost, so the spend is unknown and no session starts after it`, 3);
+      break;
+    }
+    if (spent >= o.limit) {
+      stop(`spend ${usd(spent)} reached the limit of ${usd(o.limit)} after ${e.tag}`, 3);
       break;
     }
   }

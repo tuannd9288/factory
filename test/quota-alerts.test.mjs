@@ -1,7 +1,6 @@
-// bin/factory-alerts and the quota (#63): at session start it names a rejected window, and a window at or above a threshold
-// that has not yet reset. A seat's seven-day threshold is the stop bin/seat uses (SEATS: 0.70 for seat 1, 0.90 for seat 2),
-// since that is when the seat is no longer started; the five-hour window, which bin/seat does not stop on, and a status-line
-// row, which names no seat, use 0.90. A window that was never reported, or has reset since, gives nothing.
+// bin/factory-alerts and the quota (#63): at session start it names a window Claude Code rejected, and one Claude Code itself
+// warns of, while it has not yet reset. A use alone, however high, gives nothing: the factory keeps no threshold of its own
+// (#194). A window that was never reported, or has reset since, gives nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -46,41 +45,24 @@ function world(body) {
   }
 }
 
-test('a rejected window is named with its seat, and the seven-day use above the seat\'s stop is a line of its own', () => {
+test('a rejected window is named with its seat, and nothing else: its seven-day use of 0.74 gives no line', () => {
   world(({ log, alerts }) => {
     log(1, eventLine('synthetic-rejected-event.jsonl', {}));
     const r = alerts();
     assert.equal(r.code, 0, r.err);
-    assert.equal(r.lines.length, 2, r.out);
-    assert.ok(r.lines.some((l) => /seat 1/.test(l) && /five-hour/.test(l) && /rejected/.test(l)), r.out);
-    assert.ok(r.lines.some((l) => /seat 1/.test(l) && /seven-day/.test(l) && /74%/.test(l) && /70%/.test(l)), r.out);
+    assert.equal(r.lines.length, 1, r.out);
+    assert.match(r.lines[0], /seat 1.*five-hour.*rejected/);
   });
 });
 
-test('the seven-day threshold is the seat\'s own stop: 0.74 is over seat 1\'s 0.70 and under seat 2\'s 0.90', () => {
+test('a use alone gives no line on either seat, in either window: 0.99 of the week, then 0.99 of five hours (#194)', () => {
   world(({ log, alerts }) => {
-    log(2, eventLine('synthetic-high-week-event.jsonl', {}));
-    assert.deepEqual(alerts(), { code: 0, out: '', err: '', lines: [] });
-    log(1, eventLine('synthetic-high-week-event.jsonl', {}));
-    assert.equal(alerts().lines.length, 1);
-  });
-});
-
-test('seat 2 is named at its stop of 0.90 and not at 0.89', () => {
-  world(({ log, alerts }) => {
-    log(2, eventLine('synthetic-high-week-event.jsonl', { seven: 0.89 }));
-    assert.equal(alerts().out, '');
-    log(2, eventLine('synthetic-high-week-event.jsonl', { seven: 0.9 }));
-    assert.match(alerts().out, /seat 2.*seven-day.*90%/);
-  });
-});
-
-test('the five-hour window is named from 0.90', () => {
-  world(({ log, alerts }) => {
-    log(2, eventLine('synthetic-high-week-event.jsonl', { five: 0.89, seven: 0.1 }));
-    assert.equal(alerts().out, '');
-    log(2, eventLine('synthetic-high-week-event.jsonl', { five: 0.9, seven: 0.1 }));
-    assert.match(alerts().out, /seat 2.*five-hour.*90%/);
+    for (const seatNo of [1, 2]) {
+      log(seatNo, eventLine('synthetic-high-week-event.jsonl', { seven: 0.99, five: 0.1 }));
+      assert.deepEqual(alerts(), { code: 0, out: '', err: '', lines: [] });
+      log(seatNo, eventLine('synthetic-high-week-event.jsonl', { seven: 0.1, five: 0.99 }));
+      assert.deepEqual(alerts(), { code: 0, out: '', err: '', lines: [] });
+    }
   });
 });
 
@@ -97,16 +79,14 @@ test('a seat that no session has run on gives nothing: no guess', () => {
   });
 });
 
-test('a status-line file that was given is read too: its five-hour 93% is named, its seven-day 41% is not', () => {
+test('a status-line file gives no line for its use: its five-hour 93% is not named (#194)', () => {
   world(({ dir, alerts }) => {
     const file = join(dir, 'sl.jsonl');
     const r0 = JSON.parse(readFileSync(fixturePath('synthetic-statusline.jsonl'), 'utf8'));
     r0.rate_limits.five_hour.resets_at = nowSec() + HOUR;
     r0.rate_limits.seven_day.resets_at = nowSec() + 24 * HOUR;
     writeFileSync(file, `${JSON.stringify(r0)}\n`);
-    const r = alerts(['--text'], { FACTORY_STATUSLINE: file });
-    assert.equal(r.lines.length, 1, r.out);
-    assert.match(r.lines[0], /sl\.jsonl.*five-hour.*93%/);
+    assert.deepEqual(alerts(['--text'], { FACTORY_STATUSLINE: file }), { code: 0, out: '', err: '', lines: [] });
   });
 });
 
@@ -145,7 +125,7 @@ function warningLine({ seven = 0.78, five = 0.3, sevenIn = 24 * HOUR }) {
   return `${JSON.stringify(e)}\n`;
 }
 
-test('an allowed_warning window is named once, with its seat, window and reset, though it is under the seat\'s stop', () => {
+test('an allowed_warning window is named once, with its seat, window and reset', () => {
   world(({ log, alerts }) => {
     log(2, warningLine({}));
     const r = alerts();
@@ -154,29 +134,9 @@ test('an allowed_warning window is named once, with its seat, window and reset, 
   });
 });
 
-test('an allowed_warning window over the seat\'s stop is one line, not a warning line and a threshold line', () => {
-  world(({ log, alerts }) => {
-    log(1, warningLine({}));
-    assert.equal(alerts().lines.length, 1);
-  });
-});
-
 test('the warning line goes away once the window\'s reset has passed', () => {
   world(({ log, alerts }) => {
     log(2, warningLine({ sevenIn: -HOUR }));
-    assert.equal(alerts().out, '');
-  });
-});
-
-test('both windows of a seat alert at that seat\'s own stop: seat 1 from 0.70, seat 2 from 0.90, five-hour included', () => {
-  world(({ log, alerts }) => {
-    log(1, eventLine('synthetic-high-week-event.jsonl', { five: 0.69, seven: 0.1 }));
-    assert.equal(alerts().out, '');
-    log(1, eventLine('synthetic-high-week-event.jsonl', { five: 0.7, seven: 0.1 }));
-    assert.match(alerts().out, /seat 1.*five-hour.*70%/);
-  });
-  world(({ log, alerts }) => {
-    log(2, eventLine('synthetic-high-week-event.jsonl', { five: 0.79, seven: 0.1 }));
     assert.equal(alerts().out, '');
   });
 });

@@ -51,11 +51,11 @@ test('--go runs the probe one session at a time and prints each run\'s score, to
   assert.match(r.out, /^spent \$5\.00 of the \$24\.00 limit$/m);
 }));
 
-test('a session that costs more than its cap takes the spend past the limit: the runner stops after it, with exit 3', () => evalWorld((w) => {
+test('a session that costs more than the limit takes the spend past it: the runner stops after it, with exit 3', () => evalWorld((w) => {
   const r = w.eval(['--set', 'probe', '--go'], [{ cost: 30 }]);
   assert.equal(r.code, 3, r.out + r.err);
   assert.equal(w.calls().length, 1);
-  assert.match(r.out, /^stopped: spend \$30\.00 passed the limit of \$24\.00 after re-knip-reader-A-1$/m);
+  assert.match(r.out, /^stopped: spend \$30\.00 reached the limit of \$24\.00 after re-knip-reader-A-1$/m);
 }));
 
 test('--limit-usd moves the limit', () => evalWorld((w) => {

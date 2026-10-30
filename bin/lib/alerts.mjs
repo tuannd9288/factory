@@ -1,6 +1,6 @@
 // The SessionStart hook behind bin/factory-alerts (#24): a *.failed file in the state folder is a job (the queue, the
 // Claude canary) telling the Human it failed. A session in the agents' account says so before anything else, rather
-// than the weekly digest. It also names a rejected quota window, or one over its threshold (#63). Claude Code reads the JSON on stdout (code.claude.com/docs/en/hooks): `systemMessage` is
+// than the weekly digest. It also names a quota window Claude Code rejected or warns of (#63, #194). Claude Code reads the JSON on stdout (code.claude.com/docs/en/hooks): `systemMessage` is
 // shown to the Human, `additionalContext` goes to Claude. It always exits 0, so a hook never blocks a session.
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -36,12 +36,13 @@ export function lines(state) {
   };
 }
 
-/** The quota alerts (#63): the seats' newest rate_limit_event under FACTORY_RUNS (default ~/factory-runs) and the status-line
- * files of FACTORY_STATUSLINE. A runs folder that cannot be read gives none: the hook never fails a session. */
+/** The quota alerts (#63): the seats' newest rate_limit_event under FACTORY_RUNS (default ~/factory-runs). A status line
+ * reports no rejection or warning, only a use, so the hook reads none (#194). A runs folder that cannot be read gives none:
+ * the hook never fails a session. */
 export function quotaLines(env) {
   try {
     const runs = env.FACTORY_RUNS ?? join(env.HOME ?? homedir(), 'factory-runs');
-    return alertLines(quotaRows({ runs, statusFiles: (env.FACTORY_STATUSLINE ?? '').split(':').filter(Boolean) }));
+    return alertLines(quotaRows({ runs }));
   } catch {
     return [];
   }
