@@ -1,9 +1,9 @@
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one repository. This file holds the pure parts (the arguments of
 // claude, the enabled plugins, the refusals) and the start. Nothing here reads a credential or logs in.
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { accessSync, constants, existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
@@ -49,12 +49,29 @@ export function refusal(repo, root) {
 
 const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 
+/** The first `node` that PATH names, as PATH names it (a link stays a link: brew upgrade keeps /opt/homebrew/bin/node and removes
+ * the Cellar path behind it), or null. Only absolute folders count. */
+export function findNode(PATH) {
+  for (const dir of (PATH ?? '').split(':')) {
+    if (!isAbsolute(dir)) continue;
+    const path = join(dir, 'node');
+    try {
+      accessSync(path, constants.X_OK);
+      if (statSync(path).isFile()) return path;
+    } catch {
+      // not here
+    }
+  }
+  return null;
+}
+
 /** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
  * hook is the command of the Stop and SessionEnd hooks, which copy the session's own transcript to ~/factory-runs/<repo>-lead/
- * transcripts, outside every profile (#185); it runs the script through node, so the script needs no exec bit. */
-export function leadArgs({ repo, home, root, roleText, resume = false }) {
+ * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
+ * exec bit. */
+export function leadArgs({ repo, home, root, roleText, node, resume = false }) {
   const cwd = join(root, repo);
-  const hook = [process.execPath, join(root, 'packs/pstack/bin/transcript-copy.mjs'), join(home, 'factory-runs', `${repo}-lead`, 'transcripts')].map(quote).join(' ');
+  const hook = [node, join(root, 'packs/pstack/bin/transcript-copy.mjs'), join(home, 'factory-runs', `${repo}-lead`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
   return {
     cwd,
@@ -125,7 +142,12 @@ function main(argv, env) {
     return 2;
   }
   const resume = flags.includes('--continue');
-  const { cwd, argv: command, hook } = leadArgs({ repo, home: env.HOME, root, roleText, resume });
+  const node = findNode(env.PATH);
+  if (!node) {
+    process.stderr.write('bin/lead: no node on PATH, which the transcript hook needs\n');
+    return 2;
+  }
+  const { cwd, argv: command, hook } = leadArgs({ repo, home: env.HOME, root, roleText, node, resume });
   const wanted = enabledPlugins(readSettings(cwd));
   // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
   const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
@@ -141,7 +163,7 @@ function main(argv, env) {
   }
 
   if (flags.includes('--dry-run')) {
-    const shown = leadArgs({ repo, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', resume }).argv;
+    const shown = leadArgs({ repo, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
     process.stdout.write(`plugin root: ${pluginRoot}\n`);

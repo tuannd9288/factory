@@ -1,12 +1,12 @@
 // packs/pstack/bin/lead (#163): what the launcher refuses and the arguments it gives claude. No live claude, no network.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { enabledPlugins, exitCodeOf, leadArgs, refusal } from '../bin/lead.mjs';
+import { enabledPlugins, exitCodeOf, findNode, leadArgs, refusal } from '../bin/lead.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
 
 const home = '/home/factory';
@@ -62,7 +62,8 @@ describe('refusal', () => {
 describe('leadArgs', () => {
   const root = '/fx/WORKSPACES';
   const roleText = '# the role\nline two';
-  const { cwd, argv } = leadArgs({ repo: 'zalo-gateway', home, root, roleText });
+  const node = '/opt/homebrew/bin/node';
+  const { cwd, argv } = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node });
   const after = (flag) => argv[argv.indexOf(flag) + 1];
   const list = (flag) => {
     const out = [];
@@ -88,7 +89,7 @@ describe('leadArgs', () => {
 
   test('--continue only when resume is set', () => {
     assert.ok(!argv.includes('--continue'));
-    assert.ok(leadArgs({ repo: 'zalo-gateway', home, root, roleText, resume: true }).argv.includes('--continue'));
+    assert.ok(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: true }).argv.includes('--continue'));
   });
 
   test('the allow list is exactly the Lead\'s, with no blanket gh or git', () => {
@@ -113,10 +114,10 @@ describe('leadArgs', () => {
 
   test('--settings holds the transcript hook on Stop and SessionEnd, run through node with each part quoted', () => {
     const { hooks } = JSON.parse(after('--settings'));
-    const command = `'${process.execPath}' '${root}/packs/pstack/bin/transcript-copy.mjs' '${home}/factory-runs/zalo-gateway-lead/transcripts'`;
+    const command = `'${node}' '${root}/packs/pstack/bin/transcript-copy.mjs' '${home}/factory-runs/zalo-gateway-lead/transcripts'`;
     assert.deepEqual(Object.keys(hooks).sort(), ['SessionEnd', 'Stop']);
     for (const event of ['Stop', 'SessionEnd']) assert.deepEqual(hooks[event], [{ hooks: [{ type: 'command', command }] }]);
-    assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText }).hook, command);
+    assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).hook, command);
   });
 
   test('the hook command runs the script with no exec bit, even where the paths hold a space and a quote', () => {
@@ -129,7 +130,7 @@ describe('leadArgs', () => {
       const source = join(config, 'projects/p/s.jsonl');
       writeFileSync(source, 'line\n');
       assert.equal(statSync(join(real, 'packs/pstack/bin/transcript-copy.mjs')).mode & 0o111, 0);
-      const { hook } = leadArgs({ repo: 'r', home: odd, root: real, roleText });
+      const { hook } = leadArgs({ repo: 'r', home: odd, root: real, roleText, node: process.execPath });
       const r = spawnSync('sh', ['-c', hook], { input: JSON.stringify({ transcript_path: source }), encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: config } });
       assert.equal(r.status, 0, r.stderr);
       assert.equal(readFileSync(join(odd, 'factory-runs/r-lead/transcripts/s.jsonl'), 'utf8'), 'line\n');
@@ -142,6 +143,23 @@ describe('leadArgs', () => {
     const deny = list('--disallowedTools');
     assert.ok(deny.includes('Edit(//fx/WORKSPACES/zalo-gateway/**)'));
     assert.ok(deny.includes('Write(//fx/WORKSPACES/zalo-gateway/**)'));
+  });
+});
+
+describe('findNode', () => {
+  test('is the first node on PATH as PATH names it: a link stays a link, a relative folder and a folder without node are skipped', () => {
+    const dir = tmp();
+    try {
+      mkdirSync(join(dir, 'empty'));
+      mkdirSync(join(dir, 'brew'));
+      symlinkSync(process.execPath, join(dir, 'brew/node'));
+      assert.equal(findNode(`relative:${join(dir, 'empty')}:${join(dir, 'brew')}:${join(dir, 'missing')}`), join(dir, 'brew/node'));
+      assert.notEqual(findNode(join(dir, 'brew')), realpathSync(process.execPath));
+      assert.equal(findNode(`${join(dir, 'empty')}:`), null);
+      assert.equal(findNode(undefined), null);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
   });
 });
 

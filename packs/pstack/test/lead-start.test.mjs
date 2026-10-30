@@ -3,7 +3,7 @@
 // root as its plugin cache.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -44,6 +44,7 @@ function world(body, { settings = PSTACK } = {}) {
   writeFileSync(join(repo, '.gate/bin/setup'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(repo, '.claude/settings.json'), JSON.stringify(settings));
   for (const [n, text] of [['direnv', DIRENV], ['claude', CLAUDE]]) writeFileSync(join(w.bin, n), text, { mode: 0o755 });
+  symlinkSync(process.execPath, join(w.bin, 'node')); // like /opt/homebrew/bin/node, a link to a Cellar path
   w.config = join(w.home, '.agent-profiles/o/zalo/claude');
   w.pluginRoot = join(w.home, '.local/share/factory/plugins/o/zalo/claude');
   w.lead = (args = [], extra = {}) => {
@@ -68,10 +69,21 @@ describe('lead --dry-run', () => {
     assert.equal(lines[0], join(w.tree, 'zalo'));
     assert.equal(lines[1], 'plugins to ensure: pstack@pstack-4dd1d05');
     assert.equal(lines[2], `plugin root: ${w.pluginRoot}`);
-    assert.equal(lines[3], `transcript hook: '${process.execPath}' '${w.tree}/packs/pstack/bin/transcript-copy.mjs' '${w.home}/factory-runs/zalo-lead/transcripts'`);
+    assert.equal(lines[3], `transcript hook: '${w.bin}/node' '${w.tree}/packs/pstack/bin/transcript-copy.mjs' '${w.home}/factory-runs/zalo-lead/transcripts'`);
     assert.match(lines[4], /^direnv exec \. claude --model opus .* --settings \{"hooks":\{"Stop":/);
     assert.deepEqual(w.log(), []);
     assert.ok(!existsSync(w.pluginRoot));
+  }));
+
+  test('the hook names the node link PATH holds, not the file behind it; with no node on PATH it refuses to start', () => world((w) => {
+    const r = w.lead(['--dry-run']);
+    assert.ok(r.out.includes(`"command":"'${w.bin}/node' `), 'the hooks name the link');
+    assert.ok(!r.out.includes(realpathSync(process.execPath)) || realpathSync(process.execPath) === join(w.bin, 'node'));
+    const none = w.lead(['--dry-run'], { PATH: join(w.root, 'nowhere') });
+    assert.equal(none.code, 2);
+    assert.match(none.err, /bin\/lead: no node on PATH/);
+    assert.equal(w.lead([], { PATH: join(w.root, 'nowhere') }).code, 2);
+    assert.deepEqual(w.log(), []);
   }));
 
   test('refuses, with exit 1, a profile outside the profiles folder and a repository direnv gives none for', () => world((w) => {
