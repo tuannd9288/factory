@@ -76,6 +76,13 @@ test('--skill adds Skill(<name>) and --allow a run\'s own rule, after the preset
   assert.deepEqual(allowed, [...WORKER_ALLOW, ...EDITS, 'Edit(//x/**)', 'StructuredOutput', 'Skill(deletion-proof)', 'Bash(/r/issue-1/other:*)']);
 });
 
+test('with no work folder, the only Edit rule is the run folder\'s: no rule for a missing folder (#192)', async () => {
+  const { buildArgs } = await lib();
+  const args = buildArgs({ role: 'worker', run: RUN, home: HOME });
+  const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
+  assert.deepEqual(allowed.filter((r) => r.startsWith('Edit(')), ['Edit(//r/issue-1/**)']);
+});
+
 test('seat 1 adds one deny rule, the token file by absolute path; seat 2 adds none', async () => {
   const { buildArgs } = await lib();
   const denied = (args) => args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--output-format'));
