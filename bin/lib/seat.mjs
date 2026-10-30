@@ -93,8 +93,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
 }
 
 // The seats, as factory:~/factory-runs/seat.zsh has them (the Human, 2026-10-26): at most four live sessions a seat. A new
-// session tries seat 2 first. A seat has no stop at a share of its quota (the Human, 2026-10-30, #194): "Các thiết lập này
-// là không phù hợp, rà soát lại và loại bỏ đi."
+// session tries seat 2 first. A seat has no stop at a share of its quota (the Human, 2026-10-30, #194).
 export const SEATS = { 1: { cap: 4 }, 2: { cap: 4 } };
 const ORDER = [2, 1];
 
