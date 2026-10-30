@@ -187,10 +187,10 @@ A sublayer may change anything inside it while its contracts hold; a change to a
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
 decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization that does the same.
 
-- **H1**: Work enters through one issue. Checked by: `kit/.gate/gate-section.md` (the Gate block), `probes/pack-contract.md:36`.
+- **H1**: Work enters through one issue. Checked by: `kit/.gate/gate-section.md` (the Gate block), `probes/pack-probe.mjs` (`judge`: the items `task label and Closes #n on the pull request` and `the issue the session created carries the label task`).
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
-  Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-contract.md:36`.
+  Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-probe.mjs` (`judge`: the item `pull request opened and accepted by the gate`).
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
   Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:27` (one reviewer call per head).
@@ -199,10 +199,10 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
   Prior art [OA1]: "Repository-local, versioned artifacts (e.g., code, markdown, schemas, executable plans) are all it can see."
 - **H5**: A way of working is a pack of data.
-  Checked by: `probes/pack-contract.md`, `probes/pack-probe.mjs`, `packs/pstack/test/pstack.test.mjs`.
+  Checked by: `probes/pack-contract.md:58-71` (§ Start, next step, one session per issue), `probes/pack-probe.mjs`, `packs/pstack/test/pstack.test.mjs`.
   Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
 - **H6**: Tools are commands; permissions live outside the instructions.
-  Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:22`, `probes/pack-contract.md:62-76` (the `factory` account, #24).
+  Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:38` (check 6, the `.env` deny rule on `bin/seat`'s path), `probes/pack-contract.md:73-88` (the `factory` account, #24).
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
@@ -216,7 +216,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   prompt, so agents do not type into another pane: `herdr agent send-keys`, `herdr pane send-keys`, `rex send` and
   `rex send-key` are denied, which is #76 and not yet in the kit's deny rules; (5) with every surface stopped, the
   factory still runs. Checked by: none yet. The check will be a test that stops every surface process and shows that a
-  `bin/factory-queue` sweep (the merge queue) and a `probes/pack-probe.mjs` run (the pack probe) still pass.
+  `bin/factory-queue` sweep (the merge queue) and a `bin/claude-canary` run on a fake `bin/seat` (the canary) still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
 
 ## This root
@@ -258,7 +258,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
 | `bin/factory-sublayers` | The sublayer check (#82): the 17 `sublayer-<code>` labels exist with their descriptions, and every open issue carries exactly one; the list is `bin/lib/sublayers.mjs`, the template `.github/ISSUE_TEMPLATE/task.md` |
-| `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
+| `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is the canary's oracle (what a new Claude Code keeps on `bin/seat`'s path), `probes/canary-brief.md` its brief, and `probes/pack-probe.mjs` supplies the canary's parser |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
 | `test/` | The kit's tests; each check is shown failing on a bad input |
 | `NOTICE` | What was taken from other projects, with the commit |
@@ -400,9 +400,11 @@ loads it with `sudo launchctl bootstrap system <that path>` and stops it with
 `sudo launchctl bootout system/io.github.tuannd9288.factory.queue`. `tuannd9288/factory` itself
 is not swept: its ruleset dismisses an approval on any push, so an update would ask the Human twice.
 
-Claude Code updates itself on the stable channel, and a new version runs only after the pack probe passes on it
-(#24). `bin/claude-canary run --repo <owner/repo>` finds the newest version in `~/.local/share/claude/versions`, runs
-`probes/pack-probe.mjs --no-pr` on it, and only on a pass writes the launcher `~/.local/bin/claude` (a script that
+Claude Code updates itself on the stable channel, and a new version runs only after the canary passes it (#24).
+`bin/claude-canary run --repo <owner/repo>` finds the newest version in `~/.local/share/claude/versions`, runs it through
+`bin/seat` (a worker, in a worktree of the repository's clone at `origin/main`) behind a shim `claude` first on `PATH`, so
+the session has `bin/seat`'s grants, `default` mode and scrub, checks the log against `probes/pack-contract.md` (exit 0
+passes, 1 fails, 2 could not judge and rejects nothing), and only on a pass writes the launcher `~/.local/bin/claude` (a script that
 `exec`s that version; Claude Code leaves a launcher of ours in place and keeps every installed version, per
 code.claude.com/docs/en/setup), then removes versions older than the previous one. A failed version is rejected
 (`claude-rejected`) until a newer one arrives and the launcher stays. `bin/claude-canary plist --daemon --repo
@@ -416,12 +418,8 @@ The live verifier runs on one Codex profile for every repository, `~/.agent-prof
 the Human logs in: `mkdir -p ~/.agent-profiles/verifier/codex`, then `CODEX_HOME=~/.agent-profiles/verifier/codex`
 before Codex's own login command. Until he has, every live verdict is BLOCKED and nothing auto-merges.
 
-Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`; run them as
-`cd <root>/<repo> && direnv exec . claude -p "…" --permission-mode acceptEdits --allowedTools "Bash(git branch work-*)" "Bash(git add *)" …`.
-`direnv exec DIR` loads DIR's `.envrc` but keeps the caller's directory (from `/` it printed `/`, 2026-10-22), so
-without the `cd` Claude starts outside the repository: on the right profile, but without its deny rules and its
-`AGENTS.md`. With no permission mode `claude -p` starts in `default` and denies every call that needs approval
-(2.1.308, 2026-10-22: `git branch x` gave "This command requires approval"); name the mode and the exact commands the
+Unattended runs (launchd, `herdr pane run`) start no shell and never load `.envrc`. With no permission mode
+`claude -p` starts in `default` and denies every call that needs approval (2.1.308, 2026-10-22: `git branch x` gave "This command requires approval"); name the mode and the exact commands the
 run may use (code.claude.com/docs/en/permissions, fetched 2026-10-22). A rule matches the text before its first `*`
 as written, so a blanket `git` or `gh` grant also allows `git -C . tag y` and `gh -R x pr merge`, and a
 trailing `*` admits any arguments, a refspec included (`git push origin b:refs/tags/y`): grant a push with no `*`. A
