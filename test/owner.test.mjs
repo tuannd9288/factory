@@ -378,6 +378,29 @@ test('a value of the wrong form is refused before any call is made (#210)', () =
   }
 });
 
+test('a self-hosted trusted runner that is, or shares a label with, another job\'s runner is refused with nothing done (#210)', () => {
+  const refused = [
+    [['--runner', '["self-hosted","macOS"]', '--trusted-runner', '["self-hosted","macOS"]'], {}],
+    [['--pr-runner', '["self-hosted","macOS","a"]', '--trusted-runner', '["a","macOS","self-hosted"]'], {}],
+    [['--runner', '["self-hosted","macOS","ci-box"]', '--trusted-runner', '["self-hosted","linux","ci-box"]'], {}],
+    [['--trusted-runner', '["self-hosted","linux","ci-box"]'], { variables: [{ name: 'GATE_PR_RUNNER', value: '["ci-box"]' }] }],
+    [['--trusted-runner', '"my-runner"', '--runner', '"my-runner"'], {}],
+  ];
+  for (const [extra, over] of refused) {
+    const w = world(over);
+    try {
+      for (const apply of [[], ['--apply']]) {
+        const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, ...apply]);
+        assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+        assert.match(out.out, /GATE_TRUSTED_RUNNER/);
+        assert.deepEqual(w.writes(), []);
+      }
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
