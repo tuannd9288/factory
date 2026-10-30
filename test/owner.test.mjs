@@ -419,6 +419,23 @@ test('GitHub-hosted runners may be the same for all three jobs, and a self-hoste
   }
 });
 
+const SHARED = '["self-hosted","macOS"]';
+
+test('the #155 exception lets the three runners be shared under entire, and one line names its condition (#210)', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
+  const w = world({ kitLanded: true, collaborator: 'write', apps });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--runner', SHARED, '--pr-runner', SHARED, '--trusted-runner', SHARED, '--reviewer', 'entire', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /#155/);
+    assert.match(out.out, /no reviewer secret in the environment reviewer/);
+    assert.equal(w.state().variables.find((v) => v.name === 'GATE_TRUSTED_RUNNER').value, SHARED);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
