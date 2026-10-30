@@ -554,15 +554,25 @@ function gh(args) {
 }
 
 /** The factory's clones under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose
- * `origin` is on github.com. The merge queue (bin/lib/queue.mjs) finds the repositories taken in by the same rule. */
-export function clonesUnder(root) {
+ * `origin` is on github.com. The merge queue (bin/lib/queue.mjs) finds the repositories taken in by the same rule.
+ * The name is the origin less one trailing `/` and a trailing `.git`, as bin/onboard takes it. A kit clone whose origin
+ * cannot be read, or whose name is not owner/name, is left out and `skip(folder, why)` is called for it. */
+export function clonesUnder(root, skip = () => {}) {
   const out = new Map();
   for (const name of existsSync(root) ? readdirSync(root) : []) {
     const dir = join(root, name);
     if (!existsSync(join(dir, '.gate/config.sh')) || !existsSync(join(dir, '.git'))) continue;
-    const url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim();
-    const m = /github\.com[:/](.+?)(\.git)?$/.exec(url);
-    if (m) out.set(m[1], dir);
+    let url;
+    try {
+      url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    } catch (error) {
+      skip(dir, `origin cannot be read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
+      continue;
+    }
+    const m = /github\.com[:/](.+)$/.exec(url.replace(/\/$/, '').replace(/\.git$/, ''));
+    if (!m) continue;
+    if (/^[\w.-]+\/[\w.-]+$/.test(m[1])) out.set(m[1], dir);
+    else skip(dir, `origin ${url} does not name owner/name`);
   }
   return out;
 }
@@ -656,7 +666,7 @@ function main(argv) {
   const root = process.env.FACTORY_ROOT ?? join(here, '..', '..');
   const profiles = profilesDir;
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
-  const clones = clonesUnder(root);
+  const clones = clonesUnder(root, (folder, why) => console.error(`ledger: skipped ${folder}: ${why}`));
   if (!opts.repos.length) opts.repos = [...clones.keys()];
   if (!opts.repos.length) throw new Error(`no repository under ${root}; pass --repo owner/name`);
 

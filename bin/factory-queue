@@ -9,6 +9,7 @@
 # With no --repo, which is how the job runs, a sweep covers every repository taken in (#211), so one with the kit
 # needs no new install. The rule is the ledger's (clonesUnder in bin/lib/ledger.mjs): a folder of the factory's root
 # ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its origin on github.com.
+# A kit clone whose origin cannot be read or does not name owner/name is skipped with a line that names its folder.
 # None found is a sweep of nothing that says so, not an error. --repo gives an explicit list in place of the search.
 # A rollback is a revert pull request through the gate. Turning the ruleset off is the Human's emergency step alone,
 # with auto-merge off on every open pull request first: with the ruleset off, every one of them would land unjudged.

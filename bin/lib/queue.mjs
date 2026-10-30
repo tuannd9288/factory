@@ -370,7 +370,8 @@ function main(argv) {
     const refused = preflight(state, human);
     if (refused) return refused;
     // No --repo: the repositories taken in, found as the ledger finds them (#211).
-    const swept = repos.length ? repos : [...clonesUnder(process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..')).keys()];
+    const skip = (folder, why) => console.log(`queue: skipped ${folder}: ${why}`);
+    const swept = repos.length ? repos : [...clonesUnder(process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'), skip).keys()];
     if (!swept.length) console.log('queue: no repository taken in under the factory root; nothing swept');
     let failed = 0;
     for (const repo of swept) {
