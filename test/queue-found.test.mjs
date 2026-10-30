@@ -53,6 +53,19 @@ test('a kit clone with no origin is skipped by name, and the others are still sw
   });
 });
 
+test('a kit clone whose .git file points at a missing gitdir is skipped by name, and the others are still swept', () => {
+  withRoot(({ dir, root, queue }) => {
+    clone(root, 'app', 'https://github.com/o/app.git', true);
+    mkdirSync(join(root, 'moved/.gate'), { recursive: true });
+    writeFileSync(join(root, 'moved/.git'), 'gitdir: /nonexistent/gitdir\n');
+    writeFileSync(join(root, 'moved/.gate/config.sh'), '');
+    const r = queue('sweep');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /skipped .*moved/);
+    assert.ok(existsSync(join(dir, 'state/queue-o-app.ok')), 'the good clone was not swept');
+  });
+});
+
 test('sweep with no --repo and no repository taken in logs that and is not an error', () => {
   withRoot(({ dir, root, queue }) => {
     clone(root, 'plain', 'https://github.com/o/plain.git', false);
