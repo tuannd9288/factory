@@ -40,6 +40,16 @@ function withRoot(body) {
   }
 }
 
+test('sweep with no --repo and no repository taken in logs that and is not an error', () => {
+  withRoot(({ dir, root, queue }) => {
+    clone(root, 'plain', 'https://github.com/o/plain.git', false);
+    const r = queue('sweep');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /no repository taken in under /);
+    assert.ok(!existsSync(join(dir, 'state/queue-run.failed')), 'an empty list left a failure');
+  });
+});
+
 test('sweep with no --repo sweeps each clone under the root that holds the kit, and no other', () => {
   withRoot(({ dir, root, queue }) => {
     clone(root, 'app', 'https://github.com/o/app.git', true);
