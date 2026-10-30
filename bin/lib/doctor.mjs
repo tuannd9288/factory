@@ -74,13 +74,23 @@ const entryOf = (clone, rev, path) => entryIn(clone, rev, path);
 const regular = (entry) => Boolean(entry) && REGULAR.includes(entry.mode);
 const reasons = (list) => list.join('; ');
 
-/** One line: the mark, the label, the result, and in brackets what it read. The result gives way to the reads. */
+/** A check's line: the mark, the label, the result, and in brackets what it read. The result is never cut: what does
+ * not fit on the first line goes on the lines after it, under the result's column. A list of items breaks between its
+ * items, so each stays whole; a text breaks between words. */
 function format(ok, label, result, reads) {
   const head = `${ok ? 'ok' : 'RED'}`.padEnd(4) + label.padEnd(LABEL) + ' ';
   const tail = `  [${reads}]`;
-  const room = Math.max(10, WIDTH - head.length - tail.length);
-  const text = result.length > room ? `${result.slice(0, room - 1)}…` : result;
-  return head + text.padEnd(room) + tail;
+  const units = Array.isArray(result) ? result.map((item, i) => (i < result.length - 1 ? `${item};` : item)) : result.split(' ');
+  const lines = [''];
+  for (const unit of units) {
+    const room = lines.length === 1 ? WIDTH - head.length - tail.length : WIDTH - head.length;
+    const last = lines[lines.length - 1];
+    if (last === '') lines[lines.length - 1] = unit;
+    else if (last.length + 1 + unit.length <= room) lines[lines.length - 1] = `${last} ${unit}`;
+    else lines.push(unit);
+  }
+  const first = lines[0].padEnd(Math.max(0, WIDTH - head.length - tail.length));
+  return [head + first + tail, ...lines.slice(1).map((l) => ' '.repeat(head.length) + l)].join('\n');
 }
 
 function checkSettings(ctx) {
@@ -90,7 +100,7 @@ function checkSettings(ctx) {
   const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
   const undone = left(slug, agent, current(slug, agent, names, get), want);
   const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...undone];
-  return { ok: !problems.length, result: problems.length ? reasons(problems) : 'every ruleset, the reviewer environment and the agents\' access as the kit\'s gate wants', reads };
+  return { ok: !problems.length, result: problems.length ? problems : 'every ruleset, the reviewer environment and the agents\' access as the kit\'s gate wants', reads };
 }
 
 function checkGateBlock(ctx) {

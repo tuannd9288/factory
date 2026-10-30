@@ -296,3 +296,18 @@ test('DOCTOR_CLONE_URL takes only an absolute local folder', () => {
     assert.equal(r.code, 2, `${url}: ${r.out}`);
   }
 });
+
+test('settings: a line red with many calls left prints every call whole, over more lines, none cut', () => {
+  const held = state(kitMerge, { rulesets: [], environment: null, collaborator: 'none' });
+  const r = doctor({ held });
+  assert.equal(r.code, 1, r.out);
+  const whats = ['collaborator tuan9288-agent (write)', 'environment reviewer', 'environment reviewer deploys from main', ...wanted({ kitLanded: true, branch: 'main', reviewer: '' }).rulesets.map((x) => `ruleset ${x.name}`)];
+  assert.ok(whats.length >= 3);
+  for (const what of whats) assert.ok(r.out.includes(what), `${what} is not in:\n${r.out}`);
+  const start = r.out.split('\n').findIndex((l) => /^RED\s+settings\s/.test(l));
+  const block = r.out.split('\n').slice(start, start + 1 + r.out.split('\n').slice(start + 1).findIndex((l) => /^\S/.test(l)));
+  assert.ok(block.length > 1, 'it goes on the lines after');
+  for (const line of block) assert.ok(line.length <= 120, line);
+  assert.ok(/\[[^\]]+\]$/.test(block[0]), 'the reads stay on the first line');
+  assert.ok(!r.out.includes('…'));
+});
