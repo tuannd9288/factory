@@ -5,8 +5,8 @@
 //     `gh pr list` and `gh pr checks`, and any -X, --method, -f, -F, --field, --raw-field or --input; a query is in the path;
 //   - it runs only from a commit on the first-parent line of origin/main, with no uncommitted, untracked or ignored
 //     file under bin/ or kit/, as bin/onboard asks of its clone;
-//   - it prints no token, secret or variable value: the variable GATE_REVIEWER is read to choose the gate's ruleset,
-//     as onboard-owner does, and its value is used and never shown;
+//   - it prints no token, secret or variable value: the four variables the kit reads (#210) are read, GATE_REVIEWER to
+//     choose the gate's ruleset as onboard-owner does, and their values are used and never shown;
 //   - each line names what it read, and the end lists every gh call that ran.
 // The repository's files come from git objects of a bare clone in the system's temporary folder, removed at the end:
 // nothing the repository holds runs. DOCTOR_CLONE_URL (an absolute local folder, for tests) replaces the clone's URL.
@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_BYTES, MAX_LINES, carrierProblems, countLines, entryIn, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
-import { current, gateState, gh, identify, left, wanted } from './owner.mjs';
+import { current, gateState, gh, identify, left, variableProblems, wanted } from './owner.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WIDTH = 120;
@@ -106,8 +106,8 @@ function checkSettings(ctx) {
   const { slug, agent, branch, kitLanded, reviewer } = ctx;
   const want = wanted({ kitLanded: true, branch, reviewer });
   const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
-  const undone = left(slug, agent, current(slug, agent, names, get), want);
-  const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...undone];
+  const have = current(slug, agent, names, get);
+  const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...left(slug, agent, have, want), ...variableProblems(have.variables)];
   return { ok: !problems.length, result: problems.length ? problems : 'all as the kit\'s gate wants', reads };
 }
 
