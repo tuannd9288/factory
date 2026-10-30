@@ -424,6 +424,16 @@ factory's own repository included. Known limit: the token file sits on disk. Cla
 1's deny rule covers the `Read` tool only (#183 puts their commands in a sandbox). So the researcher, which reads
 untrusted pages and can send them out, never runs on seat 1.
 
+What a session may read under a profile is nothing: the deny list holds `Read(~/.agent-profiles/**)` whole (#185). Claude
+Code caches a plugin under the profile's `CLAUDE_CONFIG_DIR`, so the cache is moved out: each profile has its own plugin
+root, `~/.local/share/factory/plugins/<path of the profile's config dir under ~/.agent-profiles>`, mode 700, which
+`bin/seat` and `packs/pstack/bin/lead` set as `CLAUDE_CODE_PLUGIN_CACHE_DIR`. Both install the work folder's enabled
+plugins into it before the session (`bin/lib/plugins.mjs`), through a throwaway config folder of their own under
+`~/.local/share/factory/plugin-install/`, so no profile's folder is touched; a failed install, or an enabled plugin the
+settings do not pin, stops the start. A session reads its own earlier transcripts from copies outside every profile: a
+seat's `run-<tag>.jsonl` in its run folder, and a Lead's `~/factory-runs/<repo>-lead/transcripts/`, which a Stop and
+SessionEnd hook of the launcher (`packs/pstack/bin/transcript-copy.mjs`) fills with the one transcript its input names.
+
 A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
 own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
