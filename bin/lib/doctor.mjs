@@ -172,8 +172,11 @@ function checkEvidence(ctx) {
     timeout: 300_000,
   });
   if (r.status === 0) return { ok: true, result: `pull request #${kit.number} carries the kit at factory ${commit.slice(0, 7)} (kit-evidence passes)`, reads };
-  const failing = String(r.stdout ?? '').split('\n').filter((l) => /^(missing|differs|extra|left):/.test(l));
-  const why = failing.length ? `${failing[0]}${failing.length > 1 ? ` (+${failing.length - 1})` : ''}` : `kit-evidence exit ${r.status ?? 'none'}: ${String(r.stderr ?? '').trim().split('\n')[0]}`;
+  // kit-evidence prints "failures:" and then each failure indented by two spaces, up to the next line that is not.
+  const out = String(r.stdout ?? '').split('\n');
+  const from = out.indexOf('failures:');
+  const failing = from < 0 ? [] : out.slice(from + 1).reduce((all, l) => (all.done || !l.startsWith('  ') ? { ...all, done: true } : { ...all, list: [...all.list, l.trim()] }), { list: [], done: false }).list;
+  const why = failing.length ? `${failing[0]}${failing.length > 1 ? ` (+${failing.length - 1} more)` : ''}` : `kit-evidence exit ${r.status ?? 'none'}: ${String(r.stderr ?? '').trim().split('\n')[0]}`;
   return { ok: false, result: `pull request #${kit.number} against factory ${commit.slice(0, 7)}: ${why}`, reads };
 }
 
