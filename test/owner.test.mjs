@@ -475,6 +475,18 @@ test('a trusted runner whose labels are contained in the other job\'s, or hold t
   }
 });
 
+test('macos-mini is self-hosted: the same one for main\'s and the trusted runner is refused (#210)', () => {
+  const w = world();
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--runner', '"macos-mini"', '--trusted-runner', '"macos-mini"', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /GATE_TRUSTED_RUNNER/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
