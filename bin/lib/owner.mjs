@@ -24,7 +24,8 @@ const ENV = 'reviewer';
 const OPTIONS = [['--runner', 'GATE_RUNNER'], ['--pr-runner', 'GATE_PR_RUNNER'], ['--trusted-runner', 'GATE_TRUSTED_RUNNER'], ['--reviewer', 'GATE_REVIEWER']];
 const REVIEWERS = ['claude', 'entire'];
 const LABEL = /^[\w.-]+$/;
-const HOSTED = /^(ubuntu|macos|windows)-[\w.-]+$/i;
+/** GitHub-hosted: one label, an OS name and then `latest` or a version (ubuntu-24.04-arm, macos-15-xlarge); macos-mini is not. */
+const HOSTED = /^(ubuntu|macos|windows)-(latest|\d[\w.]*)(-[\w.]+)?$/i;
 /** Labels every self-hosted runner of one kind carries: sharing them is no sharing of a runner. */
 const GENERIC = new Set(['self-hosted', 'linux', 'macos', 'windows', 'x86', 'x64', 'arm', 'arm64']);
 const CALL_MS = 60_000;
@@ -95,32 +96,44 @@ export function parseRunner(text) {
   return { labels, text: JSON.stringify(value) };
 }
 
-/** The runner rule of kit/.gate/enforced-rules.md, as far as this command can know it: a self-hosted trusted runner
- * (any value but one GitHub-hosted label) is neither the runner of main's jobs nor of the candidate's, and shares no label
- * with them beyond self-hosted, the operating system and the architecture. GitHub-hosted runners are fresh for each job,
- * so the same one for all three is fine. A deploy's runner is not known here. `held` maps the variables' names to their
- * values; a value that is not a runs-on one is for another check. Returns reasons that name variables, never values. */
-export function runnerProblems(held) {
-  const trusted = parseRunner(held.GATE_TRUSTED_RUNNER ?? '"ubuntu-latest"');
-  if (!trusted || (trusted.labels.length === 1 && HOSTED.test(trusted.labels[0]))) return [];
-  const mine = new Set(trusted.labels.map((l) => l.toLowerCase()));
+const selfHosted = (runner) => !(runner.labels.length === 1 && HOSTED.test(runner.labels[0]));
+
+/** Whether a job on runner `a` can land on a machine that serves runner `b`, or the reverse: GitHub gives a job to any
+ * runner that carries every label of its runs-on, so one label set inside the other reaches the same machine; so does a
+ * label both hold beyond self-hosted, the operating system and the architecture. */
+function reaches(a, b) {
+  const [x, y] = [a, b].map((r) => new Set(r.labels.map((l) => l.toLowerCase())));
+  const inside = (s, t) => [...s].every((l) => t.has(l));
+  return inside(x, y) || inside(y, x) || [...x].some((l) => y.has(l) && !GENERIC.has(l));
+}
+
+/** The runner rule of kit/.gate/enforced-rules.md as far as this command can know it, without the #155 exception: of the
+ * trusted runner, the candidate's and main's, no two self-hosted ones reach the same machine. GitHub-hosted runners are
+ * fresh for each job, so the same one for all three is fine. A deploy's runner is not known here. `held` maps the
+ * variables' names to their values; an unset or non-runs-on value is for another check. Reasons name variables, never values. */
+export function sharedRunners(held) {
+  const runner = (name) => (held[name] === undefined ? null : parseRunner(held[name]));
   const problems = [];
-  for (const name of ['GATE_RUNNER', 'GATE_PR_RUNNER']) {
-    const other = parseRunner(held[name] ?? '"ubuntu-latest"');
-    if (!other) continue;
-    const theirs = new Set(other.labels.map((l) => l.toLowerCase()));
-    const same = mine.size === theirs.size && [...mine].every((l) => theirs.has(l));
-    if (same || [...mine].some((l) => theirs.has(l) && !GENERIC.has(l))) problems.push(`GATE_TRUSTED_RUNNER is self-hosted and shares a runner with ${name}`);
+  for (const [a, b] of [['GATE_TRUSTED_RUNNER', 'GATE_RUNNER'], ['GATE_TRUSTED_RUNNER', 'GATE_PR_RUNNER'], ['GATE_PR_RUNNER', 'GATE_RUNNER']]) {
+    const [x, y] = [runner(a), runner(b)];
+    if (x && y && selfHosted(x) && selfHosted(y) && reaches(x, y)) problems.push(`${a} is self-hosted and shares a runner with ${b}`);
   }
   return problems;
 }
 
-/** What the doctor says of the four variables: each set, the runners in a form `runs-on` reads, and the runner rule. */
-export function variableProblems(held) {
+/** The runner rule with the Human's exception (#155): with GATE_REVIEWER=entire and no reviewer secret in the environment
+ * `reviewer`, the jobs hold no reviewer credential and may share self-hosted runners. This command reads no secret, so the
+ * condition is the Human's to keep, and the commands say so. */
+export const runnerProblems = (held) => (held.GATE_REVIEWER === 'entire' ? [] : sharedRunners(held));
+
+/** What the doctor says of the four variables: each set (a runner only on a private repository, since hosted Ubuntu, the
+ * kit's default, costs a public one nothing), the runners in a form `runs-on` reads, and the runner rule. */
+export function variableProblems(held, { isPrivate = true } = {}) {
   const problems = [];
   for (const [, name] of OPTIONS) {
-    if (held[name] === undefined) problems.push(`${name} is not set`);
-    else if (name.endsWith('RUNNER') && !parseRunner(held[name])) problems.push(`${name} is not a JSON runs-on value`);
+    if (held[name] === undefined) {
+      if (isPrivate || name === 'GATE_REVIEWER') problems.push(`${name} is not set`);
+    } else if (name.endsWith('RUNNER') && !parseRunner(held[name])) problems.push(`${name} is not a JSON runs-on value`);
   }
   return [...problems, ...runnerProblems(held)];
 }
@@ -279,11 +292,14 @@ function main(argv) {
   // The variables as they will stand: the gate's ruleset follows GATE_REVIEWER as it will be, and so does the runner rule.
   const after = { ...held, ...given };
   const reviewer = after.GATE_REVIEWER ?? '';
-  // A runner already held that breaks the rule is the doctor's to name; only a run that sets a runner is refused for it.
-  const broken = OPTIONS.some(([flag, name]) => flag.endsWith('runner') && given[name] !== undefined) ? runnerProblems(after) : [];
+  // A runner already held that breaks the rule is the doctor's to name; a run is refused for it only when it sets a runner
+  // or ends the #155 exception by moving GATE_REVIEWER off entire.
+  const setsRunner = OPTIONS.some(([flag, name]) => flag.endsWith('runner') && given[name] !== undefined);
+  const leavesEntire = held.GATE_REVIEWER === 'entire' && reviewer !== 'entire';
+  const broken = setsRunner || leavesEntire ? runnerProblems(after) : [];
   if (broken.length) {
-    console.error(`onboard-owner: ${broken.join('; ')}: the trusted runner holds the reviewer's credential and is never one that ` +
-      'a candidate\'s or main\'s job uses (kit/.gate/enforced-rules.md), so nothing changes');
+    console.error(`onboard-owner: ${broken.join('; ')}: two of the three jobs (the trusted runner's, main's, the candidate's) ` +
+      'never reach the same self-hosted machine (kit/.gate/enforced-rules.md), so nothing changes');
     return 2;
   }
   if (reviewer === 'entire' && kitLanded) {
@@ -300,6 +316,9 @@ function main(argv) {
     if (given[name] === undefined) console.log(`onboard-owner: ${flag} not given: ${name} stays ${held[name] === undefined ? 'unset' : 'as it is'}`);
   if (reviewer === 'entire')
     console.log(`onboard-owner: GATE_REVIEWER is entire: the gate requires verify, tier and ${ENTIRE_APP.check} from App ${ENTIRE_APP.slug} (id ${ENTIRE_APP.id}), not review or verdict`);
+  if (reviewer === 'entire' && sharedRunners(after).length)
+    console.log('onboard-owner: the runners are shared under the Human\'s exception (#155, kit/.gate/enforced-rules.md), which holds ' +
+      'only while there is no reviewer secret in the environment reviewer; this command does not read secrets, so that is his to keep');
   const calls = plan(slug, agent, current(slug, agent, names), want);
   for (const c of calls) console.log(`  change  ${c.what}: ${show(c)}`);
   if (!calls.length) console.log('  nothing to change');

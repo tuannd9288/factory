@@ -103,11 +103,11 @@ function format(ok, label, result, reads) {
 
 function checkSettings(ctx) {
   const reads = 'rulesets env collab invites kit vars';
-  const { slug, agent, branch, kitLanded, reviewer } = ctx;
+  const { slug, agent, branch, kitLanded, reviewer, isPrivate } = ctx;
   const want = wanted({ kitLanded: true, branch, reviewer });
   const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
   const have = current(slug, agent, names, get);
-  const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...left(slug, agent, have, want), ...variableProblems(have.variables)];
+  const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...left(slug, agent, have, want), ...variableProblems(have.variables, { isPrivate })];
   return { ok: !problems.length, result: problems.length ? problems : 'all as the kit\'s gate wants', reads };
 }
 
@@ -235,6 +235,8 @@ function main(argv) {
     let merged;
     const ctx = {
       slug, id, agent, branch, clone, rev, head, ...state,
+      // A repository GitHub does not call public is taken as private.
+      isPrivate: repo.private !== false,
       mergedPrs: () => (merged ??= get(['pr', 'list', '--repo', slug, '--state', 'merged', '--base', branch, '--limit', '200', '--json', 'number,headRefName,mergeCommit,mergedAt']) ?? []),
     };
     console.log(`onboard-doctor: ${slug} (id ${repo.id}), ${branch} at ${head.slice(0, 7)}, read as ${login}, from factory ${git(['-C', factory, 'rev-parse', '--short', 'HEAD']).stdout.trim()}`);
