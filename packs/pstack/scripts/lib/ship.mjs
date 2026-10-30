@@ -93,18 +93,20 @@ function driverOf(pr) {
 const noteLine = (head) => `not run as a user: no driver (head ${head})`;
 
 /**
- * Whether a note for the head stands: a comment by the pull request's author, the agents' login, as live-verify's coverage
- * counts a verdict, never edited since (gh's includesCreatedEdit), whose first line is exactly the note. Anyone can comment,
- * so any other comment, an edited one included, stands for nothing.
+ * The pull request's head and its author, and whether a note for that head stands: a comment by the pull request's
+ * author, the agents' login, as live-verify's coverage counts a verdict, never edited since (gh's includesCreatedEdit),
+ * whose first line is exactly the note. The head is gh's headRefOid, the head coverage() judges a verdict on, not the local
+ * HEAD. Anyone can comment, so any other comment, an edited one included, stands for nothing.
  */
-function noted(n, head) {
-  const view = JSON.parse(gh(['pr', 'view', String(n), '--json', 'author,comments']));
-  const author = String(view.author?.login ?? '').toLowerCase();
-  return Boolean(author) && (view.comments ?? []).some((c) => (
-    String(c.author?.login ?? '').toLowerCase() === author &&
+function noteOf(n) {
+  const view = JSON.parse(gh(['pr', 'view', String(n), '--json', 'author,headRefOid,comments']));
+  const author = String(view.author?.login ?? '');
+  const stands = Boolean(author) && (view.comments ?? []).some((c) => (
+    String(c.author?.login ?? '').toLowerCase() === author.toLowerCase() &&
     c.includesCreatedEdit === false &&
-    String(c.body ?? '').replace(/\r/g, '').split('\n')[0] === noteLine(head)
+    String(c.body ?? '').replace(/\r/g, '').split('\n')[0] === noteLine(view.headRefOid)
   ));
+  return { head: view.headRefOid, author, stands };
 }
 
 function postNote(n, head) {
@@ -123,7 +125,7 @@ function step(pr, head, branch) {
   const armed = Boolean(pr.autoMergeRequest);
   const driver = driverOf(pr);
   if (driver === undefined) return say(2, `could not read .gate/driver.json: the base ${String(pr.baseRefOid).slice(0, 7)} is not here and could not be fetched`);
-  const covered = () => (driver ? spawnSync('scripts/live-verify', ['--covered', String(n)], { stdio: 'ignore' }).status === 0 : noted(n, head));
+  const covered = () => (driver ? spawnSync('scripts/live-verify', ['--covered', String(n)], { stdio: 'ignore' }).status === 0 : noteOf(n).stands);
   const how = driver ? 'a live verdict covers it' : 'a no-driver note covers it';
   const known = quietGit(['cat-file', '-e', `${pr.headRefOid}^{commit}`]);
   const ahead = head !== pr.headRefOid && known && !quietGit(['merge-base', '--is-ancestor', head, pr.headRefOid]);
@@ -145,9 +147,18 @@ function step(pr, head, branch) {
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);
 
-  // No driver: live-verify would only answer BLOCKED. The note stands for the head in its place, once, and the run goes on.
-  if (!driver && !covered()) postNote(n, head);
-  else if (driver && !covered()) {
+  // No driver: live-verify would only answer BLOCKED. The note stands for the pull request's head in its place, once, and
+  // the run goes on. Never arm a head nobody checked: a local HEAD that is not the pull request's head is refused, and a
+  // note that does not count once posted (the author is not this login) stops the run before the arming.
+  if (!driver) {
+    const note = noteOf(n);
+    if (note.head !== head) return say(1, `refused: HEAD ${short} is not the pull request's head ${String(note.head).slice(0, 7)}; pull or push so they agree`);
+    if (!note.stands) {
+      postNote(n, note.head);
+      const posted = noteOf(n);
+      if (!posted.stands) return say(1, `stopped on #${n}: the note it posted does not count: the pull request's author (${posted.author}) is not ship's login; nothing was armed`);
+    }
+  } else if (!covered()) {
     const r = spawnSync('scripts/live-verify', [String(n)], { encoding: 'utf8', maxBuffer: 64 << 20 });
     process.stdout.write(r.stdout ?? '');
     process.stderr.write(r.stderr ?? '');
