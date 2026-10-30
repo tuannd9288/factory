@@ -399,8 +399,13 @@ deny rule still wins over a grant; a command holding a variable or `$(…)` is d
 (2.1.308, grants-check): use `--body-file`, a plain `-m '…'`.
 Every unattended session of a role (worker, the Lead's reviewer, researcher; not the gate's reviewer) starts through
 `bin/seat <role> <brief> --run <folder> --work <folder>` (#91), run from the factory checkout, not through a
-repository's `direnv exec`. It picks the seat, sets the role's model, grants, budget and report shape, loads seat 1's
-token into the child's environment only, and records the session. Every session runs with
+repository's `direnv exec`. It picks the seat, sets the role's model, grants and report shape, loads seat 1's
+token into the child's environment only, and records the session. It passes a seat over only at its cap of four live
+sessions, or while Claude Code has rejected it: the last `rate_limit_event` of the seat's newest log has status
+`rejected`, until that event's `resetsAt`. No share of a window stops a seat (#194). A session the limit cut off is
+resumed by the Lead after that reset, which the refusal names and `bin/factory-auth status` shows, with `bin/seat <role>
+<brief> --run <folder> --work <folder> --resume <session id> --seat <n>`; nothing resumes it in the background. Every
+session runs with
 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, so its commands, hooks and MCP servers get no credential from the environment, and
 every role is denied `env` and `printenv` (#181). With the scrub set, Claude Code forces the `default` permission mode,
 so bin/seat asks for it. Every role's `Write` and `Edit` tools and output redirects reach only the session's own folders

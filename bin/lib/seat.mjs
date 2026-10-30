@@ -41,8 +41,8 @@ const builderAllow = (run) => [
 // (#188). The researcher gets none of them, nor cp or sed, so it cannot move or remove the folder research-git clones into.
 const fsCommands = ['Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)'];
 
-/** The presets. turns is a new session's --max-turns, resumeTurns a resumed one's. The budget is the Lead's choice
- * (#91); whether it stops a session on a subscription seat is not known yet.
+/** The presets. turns is a new session's --max-turns, resumeTurns a resumed one's. No preset has a spend cap: a figure the
+ * factory picked, on a subscription that bills no dollars, is a stop of the kind #194 removed; --max-turns guards a runaway.
  * worker: run-90.sh worker (sonnet, medium, 400 turns); its fix rounds (run-90fix.sh) resume with 200.
  * reviewer: run-90.sh reviewer (opus, high, 300 turns); its rounds (run-90rr family) resume with 300 or 200, 300 here.
  * researcher: run-79.sh, run-71.sh and run-58.sh (opus, high, 300 turns, the web and read-only git); resumed with 200
@@ -50,17 +50,17 @@ const fsCommands = ['Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)'
  * deny is a role's own deny rules, after the common ones. */
 export const PRESETS = {
   worker: {
-    model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, budget: 20, web: false,
+    model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, web: false,
     allow: (run) => [...builderAllow(run), 'Bash(cp:*)', 'Bash(sed:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(cmp:*)', ...fsCommands],
   },
   reviewer: {
-    model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, budget: 15, web: false,
+    model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, web: false,
     allow: (run) => [...builderAllow(run), 'Bash(cp:*)', ...fsCommands],
   },
   researcher: {
     // The Lead's proposal (review of #91, #6), agreed by Colly on 2026-10-26: the researcher reads untrusted pages and can send
     // them out with WebFetch, so it never runs on seat 1, which holds a token.
-    model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, budget: 15, web: true, seats: [2],
+    model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, web: true, seats: [2],
     allow: () => [
       'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${RESEARCH_GIT}:*)`,
       'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)',
@@ -84,7 +84,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
-    '--max-budget-usd', String(p.budget), '--permission-mode', 'default',
+    '--permission-mode', 'default',
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
     '--allowedTools', ...p.allow(run), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
@@ -92,9 +92,10 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
   ];
 }
 
-// The seats, as factory:~/factory-runs/seat.zsh has them (the Human, 2026-10-26): at most four live sessions a seat; seat 1
-// stops at 70% of its week, seat 2 at 90%. A new session tries seat 2 first.
-export const SEATS = { 1: { cap: 4, stop: '0.70' }, 2: { cap: 4, stop: '0.90' } };
+// The seats, as factory:~/factory-runs/seat.zsh has them (the Human, 2026-10-26): at most four live sessions a seat. A new
+// session tries seat 2 first. A seat has no stop at a share of its quota (the Human, 2026-10-30, #194): "Các thiết lập này
+// là không phù hợp, rà soát lại và loại bỏ đi."
+export const SEATS = { 1: { cap: 4 }, 2: { cap: 4 } };
 const ORDER = [2, 1];
 
 /** The run*<ext> files of the run folders under runs (one level down). */
@@ -167,7 +168,7 @@ export function liveCount(runs, seat) {
 }
 
 /** The rate_limit_info that the newest log of the seat reporting a seven-day use gives (its last rate_limit_event), with the
- * log's time, or null. The one reader of a seat's quota: seatUse and the ledger's table (bin/lib/quota.mjs) both use it. */
+ * log's time, or null. The one reader of a seat's quota: seatOut and the ledger's table (bin/lib/quota.mjs) both use it. */
 export function seatEvent(runs, seat) {
   const logs = runFiles(runs, '.jsonl').filter((f) => seatOf(f) === String(seat)).map((f) => ({ f, t: statSync(f).mtimeMs })).sort((a, b) => b.t - a.t);
   for (const { f, t } of logs) {
@@ -185,23 +186,35 @@ export function seatEvent(runs, seat) {
   return null;
 }
 
-/** The seven-day use of the seat (see seatEvent), or null. */
-export const seatUse = (runs, seat) => seatEvent(runs, seat)?.info.unifiedWindows.seven_day.utilization ?? null;
+/** Whether a reset time, in seconds, has passed at now (ms): the one comparison bin/seat and the quota notices make. */
+export const resetPassed = (resetsAt, now) => resetsAt != null && resetsAt * 1000 <= now;
 
-/** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is under its cap and its
- * stop. reasons say why each seat that was tried was passed over; with seat null, none was free. With claim, a function that
+const WINDOW = { five_hour: 'five-hour', seven_day: 'seven-day' };
+
+/** Why the seat is out, or null: Claude Code rejected its newest event (see seatEvent), and the reset that event gives has not
+ * passed. This is the only signal of a limit hit (#194): the two recorded cut-offs, factory-runs/issue-149 and issue-167, each
+ * carry this event before their result ("You've hit your session limit · resets …", api_error_status 429). */
+export function seatOut(runs, seat, now = Date.now()) {
+  const info = seatEvent(runs, seat)?.info;
+  if (info?.status !== 'rejected' || info.resetsAt == null || resetPassed(info.resetsAt, now)) return null;
+  const until = new Date(info.resetsAt * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  return `rejected by Claude Code (${WINDOW[info.rateLimitType] ?? info.rateLimitType} window) until ${until} UTC`;
+}
+
+/** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is under its cap and not out
+ * (seatOut). reasons say why each seat that was tried was passed over; with seat null, none was free. With claim, a function that
  * writes this start's own pid file for a seat and returns the function that removes it, the count runs after the claim and
  * includes it: two starts at the same moment cannot both pass a seat at its cap minus one, since each counts the other's
  * claim (both may back off). The claim of the seat chosen stays. */
-export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = null }) {
+export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = null, now = Date.now() }) {
   if (resumeSeat !== null && !Object.hasOwn(SEATS, resumeSeat)) throw new Error(`seat ${resumeSeat} does not exist; the seats are 1 and 2`);
   const reasons = [];
   for (const seat of resumeSeat === null ? seats : [resumeSeat]) {
     const unclaim = claim ? claim(seat) : () => {};
     const n = liveCount(runs, seat);
-    const use = seatUse(runs, seat);
+    const out = seatOut(runs, seat, now);
     if (n > SEATS[seat].cap - (claim ? 0 : 1)) reasons.push(`seat ${seat}: ${n - (claim ? 1 : 0)} live sessions, at most ${SEATS[seat].cap}`);
-    else if (use !== null && !(Number(use) < Number(SEATS[seat].stop))) reasons.push(`seat ${seat}: seven-day use ${use}, stops at ${SEATS[seat].stop}`);
+    else if (out) reasons.push(`seat ${seat}: ${out}`);
     else return { seat, reasons };
     unclaim();
   }

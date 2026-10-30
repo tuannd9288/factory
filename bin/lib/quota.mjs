@@ -3,7 +3,7 @@
 // profile or the network; a window that was not reported is null, never a guess.
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { SEATS, seatEvent } from './seat.mjs';
+import { SEATS, resetPassed, seatEvent } from './seat.mjs';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -75,7 +75,7 @@ export function quotaRows({ runs, statusFiles = [] }) {
 
 const fmt = (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ');
 const percent = (use) => `${Math.round(use * 1000) / 10}%`;
-const over = (w, now) => w?.resetsAt != null && w.resetsAt * 1000 <= now;
+const over = (w, now) => resetPassed(w?.resetsAt, now);
 
 /** The section of the digest and of `bin/factory-ledger --quota`: the table and what it cannot show. */
 export function quotaSection(rows, { now = Date.now() } = {}) {
@@ -101,16 +101,14 @@ export function quotaSection(rows, { now = Date.now() } = {}) {
 }
 
 /** The alert lines for the rows, at most one for each window, while its reset time has not passed: the window Claude Code
- * rejected; else one at or above the seat's stop in bin/seat (SEATS), the point where no new session starts on it, for the
- * five-hour window as for the seven-day one; else one Claude Code itself warns of (status allowed_warning). A status-line row
- * names no seat and uses 0.90, the Human's seat-2 figure. A row with no windows gives nothing. */
+ * rejected, else one Claude Code itself warns of (status allowed_warning). A use alone gives none, however high: the factory
+ * keeps no threshold of its own (#194). A row with no windows, or one Claude Code neither rejected nor warned of, gives nothing. */
 export function alertLines(rows, { now = Date.now() } = {}) {
   const out = [];
   const name = { five_hour: 'five-hour', seven_day: 'seven-day' };
   for (const r of rows) {
     const w = r.windows;
     if (!w) continue;
-    const stop = r.seat !== null ? Number(SEATS[r.seat].stop) : 0.9;
     const when = (x) => (x?.resetsAt != null ? ` (resets ${fmt(x.resetsAt * 1000)} UTC)` : '');
     // The rejected or warned window is the event's rateLimitType; one of another type has no window of its own, and falls back to the event's resetsAt.
     const flagged = w.rejected || w.status === 'allowed_warning';
@@ -120,7 +118,6 @@ export function alertLines(rows, { now = Date.now() } = {}) {
       const x = w[key];
       if (!x || over(x, now)) continue;
       if (w.rejected && w.type === key) out.push(`factory: quota: ${r.profile}: ${name[key]} window rejected${when(x)}`);
-      else if (x.use >= stop) out.push(`factory: quota: ${r.profile}: ${name[key]} window at ${percent(x.use)}, at or over ${r.seat !== null ? "bin/seat's stop of " : ''}${percent(stop)}${when(x)}`);
       else if (w.status === 'allowed_warning' && w.type === key) out.push(`factory: quota: ${r.profile}: ${name[key]} window under a warning from Claude Code, at ${percent(x.use)}${when(x)}`);
     }
   }
