@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# bin/research-git clone [options] <https URL> <name> | bin/research-git <name> <subcommand> [arguments] (#181): the
+# researcher's only way to run git. It clones over https into FACTORY_RESEARCH_CLONES/<name> and reads only those clones,
+# by name: log, show, diff-tree, ls-files, rev-parse, rev-list and blame, with no option that runs another program or reads
+# or writes a file the caller names, and no configuration but the clone's own. Exits 2 on a refusal. See
+# bin/lib/research-git.mjs.
+exec node "$(dirname "$0")/lib/research-git.mjs" "$@"

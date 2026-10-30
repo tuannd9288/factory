@@ -93,7 +93,7 @@ test('the session gets its preset, the brief on stdin, the work folder as cwd, a
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => existsSync(w.out()) && w.records().length === 1, 'the session');
   const saw = w.saw();
-  assert.deepEqual(saw.argv, buildArgs({ role: 'worker', run: w.run, home: w.home, skills: ['deletion-proof'], allow: [`Bash(${w.run}/other)`], seat: 2 }));
+  assert.deepEqual(saw.argv, buildArgs({ role: 'worker', run: w.run, home: w.home, work: w.work, skills: ['deletion-proof'], allow: [`Bash(${w.run}/other)`], seat: 2 }));
   assert.equal(saw.stdin, 'the brief\n');
   assert.equal(saw.cwd, readlinkReal(w.work));
   assert.equal(saw.env.gh, join(w.run, '.gh-empty'));
@@ -120,7 +120,7 @@ test('seat 1: the token is in the session\'s environment and in no argv, log, re
   const tokenFile = join(w.profiles, 'seats/1/oauth-token');
   const i = saw.argv.indexOf('--disallowedTools');
   const denied = saw.argv.slice(i + 1, saw.argv.indexOf('--output-format'));
-  assert.deepEqual(denied.slice(-3), ['Bash(env:*)', 'Bash(printenv:*)', `Read(/${tokenFile})`]);
+  assert.deepEqual(denied.slice(-1), [`Read(/${tokenFile})`]);
   for (const [file, text] of [...filesUnder(w.run), ...filesUnder(w.state)]) assert.ok(!text.includes(TOKEN), `${file} holds the token`);
   assert.ok(!(r.out + r.err).includes(TOKEN));
 }));

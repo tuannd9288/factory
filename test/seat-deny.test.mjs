@@ -13,9 +13,9 @@ test('deny rules come after the preset\'s own, and before seat 1\'s; the grants 
   const withDeny = buildArgs({ role: 'researcher', run: '/r', home: '/h', seat: 1, tokenPath: '/p/seats/1/oauth-token', deny: ['Agent', 'Task'] });
   const base = denied(plain);
   const rules = denied(withDeny);
-  assert.deepEqual(rules.slice(0, base.length - 3), base.slice(0, -3));
-  assert.deepEqual(rules.slice(base.length - 3, base.length - 1), ['Agent', 'Task']);
-  assert.deepEqual(rules.slice(base.length - 1), base.slice(-3));
+  assert.deepEqual(rules.slice(0, base.length - 1), base.slice(0, -1));
+  assert.deepEqual(rules.slice(base.length - 1, base.length + 1), ['Agent', 'Task']);
+  assert.deepEqual(rules.slice(base.length + 1), base.slice(-1));
   assert.deepEqual(withDeny.slice(0, withDeny.indexOf('--disallowedTools')), plain.slice(0, plain.indexOf('--disallowedTools')));
 });
 

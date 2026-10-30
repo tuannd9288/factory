@@ -28,7 +28,8 @@ process.stdin.on('end', () => {
   fs.writeFileSync(e.FAKE_OUT, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), cwd: process.cwd(), stdin: Buffer.concat(chunks).toString(),
     parentHasToken: parent.includes('CLAUDE_CODE_OAUTH_TOKEN'), parentSeen: parent.includes('PATH='),
     env: { gh: e.GH_CONFIG_DIR, config: e.CLAUDE_CONFIG_DIR, token: e.CLAUDE_CODE_OAUTH_TOKEN ?? null, spec: e.FACTORY_SEAT_SUPERVISE ?? null,
-      GH_TOKEN: 'GH_TOKEN' in e, GITHUB_TOKEN: 'GITHUB_TOKEN' in e, ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' in e, ANTHROPIC_AUTH_TOKEN: 'ANTHROPIC_AUTH_TOKEN' in e } }));
+      GH_TOKEN: 'GH_TOKEN' in e, GITHUB_TOKEN: 'GITHUB_TOKEN' in e, ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' in e, ANTHROPIC_AUTH_TOKEN: 'ANTHROPIC_AUTH_TOKEN' in e,
+      scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null, clones: e.FACTORY_RESEARCH_CLONES ?? null } }));
   const line = (o) => console.log(JSON.stringify(o));
   const sid = e.FAKE_SID ?? 'sess-1';
   line({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-sonnet-5-5' });
