@@ -20,6 +20,12 @@ export function pluginPaths(config, { home, profiles }) {
   return { root: join(base, 'plugins', rel), installConfig: join(base, 'plugin-install', rel) };
 }
 
+/** A name from the work folder's settings: letters, digits, dot, dash and underscore, starting with a letter or digit, so it is
+ * no path (no slash, no ..) and no option of claude. Anything else is a PluginError. */
+function plain(name, what) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new PluginError(`the ${what} name ${JSON.stringify(name)} is not a plain name (letters, digits, dot, dash, underscore; not starting with a dot or dash)`);
+}
+
 /** Makes a folder with mode 700, or sets 700 on one that exists. Nothing is ever deleted. */
 function privateDir(dir) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -54,8 +60,6 @@ function run(args, { work, env, config, root, timeoutMs }) {
  * a login prompt is a PluginError. A work folder that enables none installs nothing. */
 export function installPlugins({ work, config, home, profiles, env = process.env, timeoutMs = TIMEOUT_MS }) {
   const { root, installConfig } = pluginPaths(config, { home, profiles });
-  privateDir(root);
-  privateDir(installConfig);
   const path = join(work, '.claude/settings.json');
   let settings = {};
   if (existsSync(path)) {
@@ -67,13 +71,19 @@ export function installPlugins({ work, config, home, profiles, env = process.env
   }
   const wanted = Object.entries(settings.enabledPlugins ?? {}).filter(([, on]) => on === true).map(([id]) => id);
   const pins = pinsOf(settings);
+  // Every name is checked before any folder is made: a marketplace name becomes a folder and a plugin name an argument of claude.
+  for (const name of pins.keys()) plain(name, 'marketplace');
   const marketplaces = new Set();
   for (const id of wanted) {
     const at = id.lastIndexOf('@');
     const [plugin, name] = [id.slice(0, at), id.slice(at + 1)];
+    plain(plugin, 'plugin');
+    plain(name, 'marketplace');
     if (at < 1 || !pins.get(name)?.some((p) => p?.name === plugin)) throw new PluginError(`${id} is enabled, but ${path} has no settings marketplace pin ${name} that lists ${plugin}`);
     marketplaces.add(name);
   }
+  privateDir(root);
+  privateDir(installConfig);
   const opts = { work, env, config: installConfig, root, timeoutMs };
   for (const name of marketplaces) {
     const folder = join(installConfig, 'marketplaces', name);
