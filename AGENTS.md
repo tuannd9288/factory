@@ -434,8 +434,8 @@ factory's own pin, `packs/pstack/settings.json` of the checkout that runs, never
 candidate branch and would otherwise re-point the root every later session on the profile shares. The work folder decides
 only whether to install: its `.claude/settings.json` must enable the pin's `pstack@<name>` and no other plugin, and declare
 no marketplace but the pin, with the pin's own source; anything else (an older pin included: take the kit update), a
-name that is not plain letters, digits, dot, dash and underscore, or a failed install stops the start before any folder is
-made or any `claude` call is run. A session reads its own earlier transcripts from copies outside every profile: a
+name that is not plain letters, digits, dot, dash and underscore, stops the start before any folder is made or any `claude`
+call is run, and so does a failed install. A session reads its own earlier transcripts from copies outside every profile: a
 seat's `run-<tag>.jsonl` in its run folder, and a Lead's `~/factory-runs/<repo>-lead/transcripts/`, which a Stop and
 SessionEnd hook of the launcher (`packs/pstack/bin/transcript-copy.mjs`) fills with the one transcript its input names.
 The hook runs it with the `node` that `PATH` names when `lead` starts (`/opt/homebrew/bin/node`, a link `brew upgrade`
