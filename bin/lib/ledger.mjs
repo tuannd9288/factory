@@ -412,9 +412,6 @@ export function revertCount(rows, { since, until }) {
 
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
-/** The title of the digests posted before #98 (#1), which were Vietnamese. A period posted under it is updated, not
- * posted again. */
-export const oldDigestTitle = (since, until) => `Bản tin xưởng ${since} → ${until}`;
 
 /** The records bin/seat appended to sessions.jsonl in the state folder (#91), none when the file is absent. */
 export function readSessions(dir) {
@@ -714,12 +711,11 @@ function main(argv) {
   writeFileSync(file, text);
   gh(['label', 'create', 'digest', '--repo', opts.post, '--force']);
   const title = digestTitle(opts.since, opts.until);
-  const titles = [title, oldDigestTitle(opts.since, opts.until)];
   // Neither --search nor --label: both go through GitHub's search index, which lags behind a new issue. A plain list
   // reads the repository, and the titles are compared here.
   const all = JSON.parse(gh(['issue', 'list', '--repo', opts.post, '--state', 'all', '--limit', '1000', '--json', 'number,title']));
   if (all.length >= 1000) throw new Error(`${opts.post} has 1000 issues or more, so the list may be cut short and a digest could be posted twice; nothing posted`);
-  const found = all.filter((i) => titles.includes(i.title));
+  const found = all.filter((i) => i.title === title);
   if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}" or the older title of that period: ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
