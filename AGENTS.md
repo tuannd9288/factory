@@ -324,10 +324,8 @@ and does nothing when the clone is dirty or `factory/kit-<sha7>` exists. It adds
 the repository holds as an older kit had it, replaces the Gate block of `AGENTS.md` and nothing else of it (the head and
 the tail stay byte for byte, and so does `CLAUDE.md`), renders `CODEOWNERS` anew, writes `.gate/kit-commit`, inserts the
 kit's new deny lines into a `settings.json` the repository has, removes a file the kit dropped when it is unchanged, and
-keeps and names what the repository changed. An `AGENTS.md` with malformed Gate markers, one with no block that is not
-the old kit's composition (a head, a pack section, then `## Layout` and `## Facts the code cannot tell`: it gets the block
-in place of that head, keeps every byte from `## Layout` on, and loses `.gate/pack`), a `CLAUDE.md` that does not reach
-it, or a result over 150 lines or 32 KiB stops it, to merge by hand. A `CODEOWNERS` the repository changed is kept (named
+keeps and names what the repository changed. An `AGENTS.md` with malformed Gate markers or with no block, a `CLAUDE.md`
+that does not reach it, or a result over 150 lines or 32 KiB stops it, to merge by hand. A `CODEOWNERS` the repository changed is kept (named
 in the pull request), so the kit's newer lines do not reach it. It refuses a repository whose `.gate/kit-files` lists
 `scripts/verify`: that is the old layout, where the kit shipped its commands in `scripts/` and replaced the repository's
 hooks, and the Human is told to onboard it afresh. Its evidence names each updated file with the blob it had, and fails a

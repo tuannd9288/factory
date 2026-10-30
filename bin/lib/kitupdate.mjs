@@ -13,8 +13,7 @@
 //     held; otherwise the repository's own, and kept. The repository's own scripts/ and .githooks/ files are not in kit/, so
 //     they are never read.
 // AGENTS.md and CLAUDE.md are the repository's own. AGENTS.md has only its Gate block replaced, head and tail as they
-// are; the old kit's composition (bin/lib/legacy.mjs) gets the block in place of its head and keeps every byte from
-// `## Layout` on; any other text without a block, a block with malformed markers, or a result over 150 lines or 32 KiB is a
+// are; any text without a block, a block with malformed markers, or a result over 150 lines or 32 KiB is a
 // conflict, and nothing is cut. CLAUDE.md is added as the one-line import where missing, and otherwise left as it is (a
 // conflict when it does not reach AGENTS.md). .gate/kit-commit records the factory commit; the old .gate/pack is removed.
 // A module's files (bin/lib/module.mjs) are laid with the kit's, from the modules --modules names, and are stricter:
@@ -27,7 +26,6 @@ import { dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { carrierProblems, replaceGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
-import { legacyCompose } from './legacy.mjs';
 import { CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, KIT_COMMIT, SECTION, SETTINGS, blockFor, denyOf, git, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
 import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { addDeny } from './settings.mjs';
@@ -139,15 +137,10 @@ function instructions({ out, at, repo, factory, fac, name, kit, text }) {
   else {
     const baseText = text(repo, hadA.oid);
     const found = splitGate(baseText);
-    const packFile = at.get('.gate/pack');
     let to = null;
     if (found.ok) to = replaceGate(baseText, section);
     else if (found.problem !== 'missing') out.conflicts.push(`AGENTS.md: its Gate markers are ${found.problem}; merge it by hand (one begin line and one end line, the block first)`);
-    else {
-      const legacy = legacyCompose({ factory, fac, baseText, name, packName: packFile ? text(repo, packFile.oid).trim() : 'pstack', section });
-      if (legacy) to = legacy.text;
-      else out.conflicts.push("AGENTS.md: it has no Gate block and is not the old kit's composition, so the kit cannot tell where its own text begins; merge it by hand (put the kit's block at its start)");
-    }
+    else out.conflicts.push("AGENTS.md: it has no Gate block, so the kit cannot tell where its own text begins; merge it by hand (put the kit's block at its start)");
     if (to !== null) {
       const size = sizeProblems(to);
       if (size.length) out.conflicts.push(`AGENTS.md: ${size[0]}`);

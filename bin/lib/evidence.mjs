@@ -15,8 +15,7 @@
 //
 // AGENTS.md and CLAUDE.md are the repository's own and no kit file. AGENTS.md is the base's text with the kit's Gate block
 // put in (a title line and the block where the base had none; with --own, any text the repository prepared, shown in full),
-// or, where the base had a block, the base's head and tail with the block of the kit at this factory commit; where the base
-// is the old kit's composition (bin/lib/legacy.mjs) the block replaces that head and every byte from `## Layout` on is kept.
+// or, where the base had a block, the base's head and tail with the block of the kit at this factory commit.
 // CLAUDE.md is the base's, byte for byte and mode, or the one-line import where there was none. A managed file that is none
 // of these, one missing, or a path the pull request changes outside the inventory fails it. The result names the factory
 // commit, the kit's tree, the repository's id, base and head, so it holds for those and nothing else. See bin/kit-evidence
@@ -26,7 +25,6 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { MODULES_FILE, mergedTree, offFiles, parseModules } from './module.mjs';
 import { carrierProblems, insertGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
-import { legacyCompose } from './legacy.mjs';
 import { HOOK, NATIVE, adapterBlock } from './adapter.mjs';
 import { addDeny } from './settings.mjs';
 
@@ -136,9 +134,8 @@ export function renderedAs({ factory, fac, path, text, name, human }) {
  * the kit's at the factory commit, and the composed file is within the limits. What the base was decides what else:
  *   - a base with a block: the head and the tail are the base's, only the block is the kit's;
  *   - no AGENTS.md: a title line and the block;
- *   - the old kit's composition (legacy.mjs): the block in place of its head, every byte from `## Layout` on kept;
  *   - another text: that text with the block inserted, or with --own anything the repository prepared. */
-function judgeAgents({ text, baseText, section, name, own, legacy }) {
+function judgeAgents({ text, baseText, section, name, own }) {
   const found = splitGate(text);
   if (!found.ok) return { fails: [`the Gate block is ${found.problem}`] };
   if (found.block !== section) return { fails: ["the Gate block is not the kit's at this factory commit"] };
@@ -150,7 +147,6 @@ function judgeAgents({ text, baseText, section, name, own, legacy }) {
     return base.head === found.head && base.tail === found.tail ? { fails: [] } : { fails: ["a change of the block leaves the head and the tail as the base has them; they differ (the tail is the repository's)"] };
   }
   if (base.problem !== 'missing') return { fails: [`the base's Gate markers are ${base.problem}`] };
-  if (legacy) return text === legacy.text ? { fails: [] } : { fails: ["the old kit's head is replaced by the block and every byte from ## Layout on is kept; this is not that"] };
   const shown = [...found.head.split('\n').slice(0, -1), ...found.tail.split('\n')];
   if (own) return { fails: [], shown };
   try {
@@ -295,14 +291,11 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   else if (!['100644', '100755'].includes(haveA.mode) || (hadA && hadA.mode !== haveA.mode)) fails.push(`differs: AGENTS.md (mode ${haveA.mode}${hadA ? `, the repository's ${hadA.mode}` : ''}; a regular file, as the repository had it)`);
   else if (section !== null) {
     const baseText = hadA && ['100644', '100755'].includes(hadA.mode) ? blob(repo, hadA.oid) : null;
-    const packText = at.get('.gate/pack') ? blob(repo, at.get('.gate/pack').oid).trim() : 'pstack';
-    let legacy = null;
-    if (baseText !== null && !splitGate(baseText).ok) legacy = legacyCompose({ factory, fac, baseText, name, packName: packText, section });
     const text = blob(repo, haveA.oid);
-    const verdict = judgeAgents({ text, baseText, section, name, own, legacy });
+    const verdict = judgeAgents({ text, baseText, section, name, own });
     for (const f of verdict.fails) fails.push(`differs: AGENTS.md (${f})`);
     if (!verdict.fails.length) {
-      const how = baseText === null ? 'a title line and the block' : legacy ? "the old kit's head replaced by the block, the tail kept" : verdict.shown ? 'the repository\'s own text, from --own, with the block inserted' : "the repository's own text with the block, the rest as the base had it";
+      const how = baseText === null ? 'a title line and the block' : verdict.shown ? 'the repository\'s own text, from --own, with the block inserted' : "the repository's own text with the block, the rest as the base had it";
       instructions.push(`AGENTS.md: ${how} (${text.split('\n').length - (text.endsWith('\n') ? 1 : 0)} lines, ${Buffer.byteLength(text)} bytes)`);
       if (verdict.shown) instructions.push(`AGENTS.md: the repository's own text, ${verdict.shown.length} lines, shown in full (was ${hadA ? hadA.oid.slice(0, 12) : 'none'}):`, ...verdict.shown.map((l) => `  | ${l}`));
     }
