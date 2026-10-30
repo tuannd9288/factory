@@ -406,7 +406,7 @@ Claude Code updates itself on the stable channel, and a new version runs only af
 which nothing removes) behind a shim `claude` first on `PATH`, so
 the session has `bin/seat`'s grants, `default` mode and scrub, checks the log against `probes/pack-contract.md` (twelve
 checks, among them a granted `git` and `node` command that must run, a `git tag` and a `gh` command that a rule must refuse,
-and the scrub, tested on both seats through the variables `bin/seat` sets on each; exit 0 passes, 1 fails, 2 could not judge and rejects nothing; "no seat free" and a rate limit are only
+and the scrub, tested on both seats through the token and `CLAUDE_CONFIG_DIR`, which `bin/seat` sets and the scrub removes; exit 0 passes, 1 fails, 2 could not judge and rejects nothing; "no seat free" and a rate limit are only
 logged, until a version has gone 24 h ungraded since it was first seen, then `claude-canary.failed` names it; any other
 error in a run writes it too, with its message). The `--repo` needs the kit, the pstack pin installed through #185 and a
 `CLAUDE.md` that brings in `AGENTS.md`. The canary covers `bin/seat`'s path only: a new version's first run in
