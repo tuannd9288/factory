@@ -61,6 +61,19 @@ if (one) {
   if (r.target === 'tag') done({ ...read, current_user_can_bypass: 'never', bypass_actors: read.bypass_actors.map((b) => ({ ...b, actor_name: 'admin' })), rules: read.rules.map((x) => (x.type === 'update' ? { ...x, parameters: { update_allows_fetch_and_merge: false } } : x)) });
   done(read);
 }
+// #210: an Actions variable is created by a POST and changed by a PATCH of its name.
+if (path === repo + '/actions/variables' && method === 'POST') {
+  state.variables ??= [];
+  if (kept('variables')) state.variables.push({ name: body.name, value: body.value });
+  done();
+}
+const named = /\/actions\/variables\/(\w+)$/.exec(path);
+if (named && path.startsWith(repo) && method === 'PATCH') {
+  const v = (state.variables ?? []).find((x) => x.name === named[1]);
+  if (!v) missing();
+  if (kept('variables')) v.value = body.value;
+  done();
+}
 const env = repo + '/environments/reviewer';
 if (path === env) {
   if (method === 'PUT') { if (kept('environment')) state.environment = { name: 'reviewer', ...body }; done(state.environment ?? {}); }
@@ -234,6 +247,27 @@ test('an Entire App that GitHub does not know by that slug and id is refused bef
     } finally {
       w.cleanup();
     }
+  }
+});
+
+// #210: the four values, one option each, as bin/onboard-owner takes them.
+const MAIN = '["self-hosted","macOS","main"]';
+const PR = '["self-hosted","macOS","pr"]';
+const TRUSTED = '["self-hosted","macOS","trusted"]';
+const FOUR = ['--runner', MAIN, '--pr-runner', PR, '--trusted-runner', TRUSTED, '--reviewer', 'claude'];
+const variable = (name, value) => `POST repos/tuannd9288/app/actions/variables ${JSON.stringify({ name, value })}`;
+
+test('the owner script names the four gate variables among the changes it would make, and makes none without --apply (#210)', () => {
+  const w = world();
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', ...FOUR]);
+    assert.equal(out.code, 0, out.out);
+    for (const [name, value] of [['GATE_RUNNER', MAIN], ['GATE_PR_RUNNER', PR], ['GATE_TRUSTED_RUNNER', TRUSTED], ['GATE_REVIEWER', 'claude']])
+      assert.ok(out.out.includes(variable(name, value)), `${name} not among the changes:\n${out.out}`);
+    assert.match(out.out, /dry run: nothing changed; rerun with --apply/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
   }
 });
 
