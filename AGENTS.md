@@ -468,18 +468,21 @@ request per repository; attack 23 checks that two pins share one profile without
 
 pstack's skills use Cursor's names. 23 of its 58 skills point to its adapter, `docs/harness/claude-code.md`, which maps
 Cursor's tools, subagent fields, models and paths to Claude Code's, and skips, with one line, a step that needs Cursor
-Automations, Bugbot or a Cursor cloud agent itself. The factory does not use these parts:
+Automations, Bugbot or a Cursor cloud agent itself. No factory session can read the adapter yet: the plugin is cached
+under the session's profile, in `~/.agent-profiles/`, which `bin/seat` and `packs/pstack/bin/lead` deny (`secretsRead`,
+#185). Until then the model maps Cursor's names itself, and not always as the adapter says (#193's seat run). The
+factory does not use these parts:
 
 - `/setup-pstack`: it writes `~/.claude/rules/pstack-models.md`, which the factory's deny rules hide; whether Claude
-  Code loads a profile's own `$CLAUDE_CONFIG_DIR/rules/` instead is not checked (#182). Without that file each pstack
-  role runs on its skill's default slug as the adapter maps it: a Claude slug to its `model` and `effort`, a `grok-*`
-  or `gpt-*` slug to the session model. So every step that asks for another model family runs on Claude until #182
-  sends it to Codex.
+  Code loads a profile's own `$CLAUDE_CONFIG_DIR/rules/` instead is not checked (#182). Without that file, once a
+  session reads the adapter, each pstack role runs on its skill's default slug as the adapter maps it: a Claude slug
+  to its `model` and `effort`, a `grok-*` or `gpt-*` slug to the session model. So every step that asks for another
+  model family runs on Claude until #182 sends it to Codex.
 - Autopilot's owners and swarm of verifiers: the adapter runs a Cursor cloud agent as a worktree subagent of the
   session, outside `bin/seat` (#182). Shipping's one verifier per pull request is taken, on the Codex CLI instead
   (`packs/pstack/scripts/live-verify`, `packs/pstack/section.md`); its verdict is no gate
   input, so the gate's reviewer (`review`, `verdict`) stays the only judge the merge waits for.
 - The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): the adapter points them
-  at `~/.claude/projects/<slug>/`, but a factory profile keeps its transcripts under its own `CLAUDE_CONFIG_DIR`, in
-  `~/.agent-profiles/`, which the kit's deny rules refuse (#182).
+  at `~/.claude/projects/<slug>/`, which the kit's deny rules refuse. A factory profile keeps its transcripts under its
+  own `CLAUDE_CONFIG_DIR`, in `~/.agent-profiles/`, which `bin/seat` and `packs/pstack/bin/lead` deny (#185).
 - `cursor-team-kit`'s `deslop`, `control-ui` and `control-cli`: they ship in another Cursor plugin, not in pstack.
