@@ -123,8 +123,9 @@ function within(cwd, folder) {
 
 /** Cost per git branch of one repository: the entries of the extra profile folders whose working directory is the
  * repository's folder <root>/<name> or under it (a worktree), each once, plus `seat`, the branch rows of its seat sessions
- * (seatCosts). No repository profile is read (#205). Null when there is no folder to read and no seat session. */
-export function repoCosts({ extra = [], root, name, seat = null }) {
+ * (seatCosts). A session in `recorded` (the ids of the seat records) is charged from its record only: its entries in the
+ * folders are skipped, whether or not the record names a repository. No repository profile is read (#205). Null when there is no folder to read and no seat session. */
+export function repoCosts({ extra = [], root, name, seat = null, recorded = new Set() }) {
   const dir = real(join(root, name));
   const byBranch = new Map();
   const seen = new Set();
@@ -132,7 +133,7 @@ export function repoCosts({ extra = [], root, name, seat = null }) {
   for (const folder of extra) {
     if (!existsSync(folder)) continue;
     any = true;
-    for (const entry of assistantEntries(folder)) if (within(entry.cwd, dir)) charge(byBranch, seen, entry);
+    for (const entry of assistantEntries(folder)) if (!recorded.has(entry.sessionId) && within(entry.cwd, dir)) charge(byBranch, seen, entry);
   }
   for (const [branch, s] of seat ?? []) {
     any = true;
@@ -679,6 +680,7 @@ function main(argv) {
   const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
   const sessions = readSessions(state);
   const seat = seatCosts(sessions);
+  const recorded = new Set(sessions.map((r) => r.session).filter(Boolean));
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
   const clones = clonesUnder(root);
   if (!opts.repos.length) opts.repos = [...clones.keys()];
@@ -689,7 +691,7 @@ function main(argv) {
   const to = Date.parse(`${opts.until}T23:59:59Z`);
   for (const repo of opts.repos) {
     const [owner, name] = repo.split('/');
-    const costs = repoCosts({ extra: opts.profileDirs, root, name, seat: seat.get(repo) });
+    const costs = repoCosts({ extra: opts.profileDirs, root, name, seat: seat.get(repo), recorded });
     const graphql = (query, n) => JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `n=${n}`])).data.repository;
     const list = (path) => JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/${path}`])).flat().filter((x) => inWindow(x.created_at, x.closed_at, from, to));
     const pulls = new Map();
