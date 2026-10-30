@@ -14,4 +14,5 @@ checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.ga
    "pstack, per repository").
 6. `mkdir -p .claude/skills && cp -R $FACTORY/packs/pstack/skills/repo-refresh .claude/skills/`: the Human's
    `repo-refresh` skill (#19), as a project skill, unedited. A session runs it only when it names it
-   (`/repo-refresh`), as the skill's own rule says; `.claude/` is tier 3.
+   (`/repo-refresh`), as the skill's own rule says, and step 5's `skillOverrides` is what keeps it user-only;
+   `.claude/` is tier 3.
