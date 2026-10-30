@@ -12,3 +12,6 @@ checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.ga
 5. Add `packs/pstack/settings.json`'s keys to `.claude/settings.json` (one pin for each repository), then, once per
    repository and profile, `claude plugin install pstack@pstack-4dd1d05 --scope project` (the factory `AGENTS.md`,
    "pstack, per repository").
+6. `mkdir -p .claude/skills && cp -R $FACTORY/packs/pstack/skills/repo-refresh .claude/skills/`: the Human's
+   `repo-refresh` skill (#19), as a project skill, unedited. A session runs it only when it names it
+   (`/repo-refresh`), as the skill's own rule says; `.claude/` is tier 3.
