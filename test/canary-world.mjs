@@ -11,11 +11,11 @@ const INIT = JSON.parse(readFileSync(join(here, 'fixtures/init-2.1.309-run2-pr.j
 
 // The wording the Read tool had under acceptEdits in a live probe run (probes/results.md:190).
 export const READ_DENIED = '<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>';
-export const NODE_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.CLAUDE_CONFIG_DIR || process.env.GH_CONFIG_DIR)))"';
+export const NODE_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.CLAUDE_CONFIG_DIR)))"';
 // The command of round 3, which tested the token alone: only seat 1's claude has it, so on seat 2 it prints false with or without the scrub.
 export const TOKEN_ONLY_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)))"';
 // What bin/seat puts in the child's environment (seat.mjs:349) and the scrub must keep out of a Bash subprocess; the first only on seat 1.
-const SCRUBBED = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'GH_CONFIG_DIR'];
+const SCRUBBED = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR'];
 export const OUTPUT = { conclusion: 'Done', evidence: ['edit ok', 'env refused'], couldNotRead: [], needsHuman: [] };
 /** What Claude Code 2.1.308 says when a rule refuses a Bash command, and a Read (the words of a refused Grep). */
 export const bashDenied = (command) => `Permission to use Bash with command ${command} has been denied.`;

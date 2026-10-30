@@ -87,10 +87,13 @@ test('the node command must be the exact one, run, and print false: true, other 
   assert.doesNotMatch(JSON.stringify(leaked.items), /sk-ant-oat01-abc/, 'a value that reached the log is never repeated');
 });
 
-test('the scrub is judged on every seat: a variable bin/seat sets on seat 2 too (CLAUDE_CONFIG_DIR, GH_CONFIG_DIR) reaching Bash fails', async () => {
-  // issue-181/run-probe-after.jsonl:8-9 (seat 2, default mode, 2.1.308): with the scrub on, a Bash subprocess has neither.
+test('the scrub is judged on every seat: a credential or CLAUDE_CONFIG_DIR reaching Bash fails, GH_CONFIG_DIR (not in the docs table) does not', async () => {
+  // issue-181/run-probe-after.jsonl:8-9 (a seat-1 run, default mode, 2.1.308): with the scrub on, a Bash subprocess has none of them.
   assert.equal((await judge({ leaks: [] })).code, 0);
-  for (const leaked of [['CLAUDE_CONFIG_DIR'], ['GH_CONFIG_DIR'], ['CLAUDE_CODE_OAUTH_TOKEN'], ['CLAUDE_CONFIG_DIR', 'GH_CONFIG_DIR']]) {
+  // Claude Code's table of what the scrub removes names CLAUDE_CONFIG_DIR and not GH_CONFIG_DIR: a sound version may keep it.
+  const gh = await judge({ leaks: ['GH_CONFIG_DIR'] });
+  assert.equal(gh.code, 0, JSON.stringify(failed(gh)));
+  for (const leaked of [['CLAUDE_CONFIG_DIR'], ['CLAUDE_CODE_OAUTH_TOKEN'], ['CLAUDE_CONFIG_DIR', 'GH_CONFIG_DIR']]) {
     const r = await judge({ leaks: leaked });
     assert.deepEqual(failed(r), [NODE], leaked.join());
     assert.match(r.items.find((i) => !i.ok).evidence, /scrub did not keep/);
