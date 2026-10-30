@@ -31,7 +31,7 @@ export function profilesOf(place, { home, agentProfiles, root }) {
       .filter((n) => !n.startsWith('.') && existsSync(join(root, n, '.gate')) && existsSync(join(root, n, '.envrc')))
       .map((n) => ({ profile: `factory/lead-${n}`, role: 'Lead', kind: 'claude', check: { cmd: 'direnv', args: ['exec', '.', 'claude', 'auth', 'status'], env: {}, cwd: join(root, n) }, login: leadLogin(n) }));
     return [
-      { profile: 'factory/seat-1', role: 'seat 1 (bin/seat)', kind: 'claude', tokenFile: join(agentProfiles, 'seats/1/oauth-token'), login: `claude setup-token (on a machine with a browser; #91), then\nssh -t factory@${HOST}\nread -rs t; umask 077; f=~/.agent-profiles/seats/1/oauth-token; printf '%s' "$t" > "$f.new" && mv "$f.new" "$f"; unset t` },
+      { profile: 'factory/seat-1', role: 'seat 1 (bin/seat)', kind: 'claude', tokenFile: join(agentProfiles, 'seats/1/oauth-token'), login: `On a machine with a browser, run \`claude setup-token\` (#91). Then \`ssh -t factory@${HOST}\` and paste this line:\nread -rs t; umask 077; f=~/.agent-profiles/seats/1/oauth-token; printf '%s' "$t" > "$f.new" && mv "$f.new" "$f"; unset t` },
       claude('factory/seat-2', 'seat 2 (bin/seat)', { CLAUDE_CONFIG_DIR: seat2 }, `ssh -t factory@${HOST}\nCLAUDE_CONFIG_DIR=~/.agent-profiles/seats/2/claude claude auth login`),
       ...leads,
       { profile: 'factory/verifier', role: 'live verifier', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: { CODEX_HOME: join(agentProfiles, 'verifier/codex') } }, login: 'CODEX_HOME=~/.agent-profiles/verifier/codex codex login --device-auth' },
