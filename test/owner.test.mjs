@@ -291,6 +291,24 @@ test('the owner script sets the four gate variables, reads them back, and a seco
   }
 });
 
+test('the variables are set before the gate\'s ruleset, which follows the GATE_REVIEWER being set (#210, #155)', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
+  const w = world({ kitLanded: true, collaborator: 'write', apps });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', ...FOUR.slice(0, 6), '--reviewer', 'entire', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const writes = w.writes();
+    const last = writes.map((l, i) => (/\/actions\/variables/.test(l) ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
+    const gate = writes.findIndex((l) => / -X POST repos\/tuannd9288\/app\/rulesets /.test(l));
+    assert.ok(last >= 0 && gate > last, writes.join('\n'));
+    const checks = w.state().rulesets.find((r) => r.name === 'factory-gate').rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks;
+    assert.ok(checks.some((c) => c.context === ENTIRE_APP.check), JSON.stringify(checks));
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
