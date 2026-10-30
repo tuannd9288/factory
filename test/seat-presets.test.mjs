@@ -2,6 +2,8 @@
 // hand-written launchers of ~/factory-runs (worker and reviewer from run-90.sh, researcher from run-79.sh and run-71.sh).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { factory } from './helpers.mjs';
 
 const lib = () => import('../bin/lib/seat.mjs');
 
@@ -11,7 +13,7 @@ const SCHEMA = '{"type":"object","additionalProperties":false,"required":["concl
 
 const DENY = [
   'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
-  'Bash(herdr:*)', 'Bash(/h/.local/bin/herdr:*)', 'WebFetch', 'WebSearch',
+  'Bash(herdr:*)', 'Bash(/h/.local/bin/herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'WebFetch', 'WebSearch',
   'Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)',
 ];
 const BASE = ['Read', 'Glob', 'Grep', 'Bash(node:*)', 'Bash(git:*)', 'Bash(/r/issue-1/sv)', 'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(cd:*)', 'Bash(mktemp:*)', 'Bash(grep:*)', 'Bash(diff:*)'];
@@ -41,15 +43,14 @@ test('reviewer: opus, high effort, 300 turns, $15, the base allow list with Writ
   ]);
 });
 
-test('researcher: opus, high effort, 300 turns, $15, the web and read-only git, and no WebFetch or WebSearch deny', async () => {
+test('researcher: opus, high effort, 300 turns, $15, the web and git only through bin/research-git, and no WebFetch or WebSearch deny', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'researcher', run: RUN, home: HOME }), [
     '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--max-budget-usd', '15', '--permission-mode', 'acceptEdits',
     '--add-dir', RUN,
-    '--allowedTools', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Bash(git clone:*)', 'Bash(git -C:*)', 'Bash(git log:*)',
-    'Bash(git show:*)', 'Bash(git rev-parse:*)', 'Bash(git ls-files:*)', 'Bash(git grep:*)', 'Bash(git diff:*)',
+    '--allowedTools', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${join(factory, 'bin/research-git')}:*)`,
     'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)', 'StructuredOutput',
-    '--disallowedTools', ...DENY.filter((r) => r !== 'WebFetch' && r !== 'WebSearch'),
+    '--disallowedTools', ...DENY.filter((r) => r !== 'WebFetch' && r !== 'WebSearch'), 'Bash(git:*)',
     ...tail,
   ]);
 });
@@ -72,11 +73,11 @@ test('--skill adds Skill(<name>) and --allow a run\'s own rule, after the preset
   assert.deepEqual(allowed, [...WORKER_ALLOW, 'Skill(deletion-proof)', 'Bash(/r/issue-1/other:*)']);
 });
 
-test('seat 1 adds three deny rules, one of them the token file by absolute path; seat 2 adds none', async () => {
+test('seat 1 adds one deny rule, the token file by absolute path; seat 2 adds none', async () => {
   const { buildArgs } = await lib();
   const denied = (args) => args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--output-format'));
   const one = denied(buildArgs({ role: 'worker', run: RUN, home: HOME, seat: 1, tokenPath: '/p/seats/1/oauth-token' }));
-  assert.deepEqual(one, [...DENY, 'Bash(env:*)', 'Bash(printenv:*)', 'Read(//p/seats/1/oauth-token)']);
+  assert.deepEqual(one, [...DENY, 'Read(//p/seats/1/oauth-token)']);
   assert.deepEqual(denied(buildArgs({ role: 'worker', run: RUN, home: HOME, seat: 2, tokenPath: '/p/seats/2/oauth-token' })), DENY);
 });
 
