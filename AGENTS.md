@@ -199,10 +199,10 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
   Prior art [OA1]: "Repository-local, versioned artifacts (e.g., code, markdown, schemas, executable plans) are all it can see."
 - **H5**: A way of working is a pack of data.
-  Checked by: `probes/pack-contract.md:58-71` (§ Start, next step, one session per issue), `probes/pack-probe.mjs`, `packs/pstack/test/pstack.test.mjs`.
+  Checked by: `probes/pack-contract.md:61-74` (§ Start, next step, one session per issue), `probes/pack-probe.mjs`, `packs/pstack/test/pstack.test.mjs`.
   Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
 - **H6**: Tools are commands; permissions live outside the instructions.
-  Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:38` (check 6, the `.env` deny rule on `bin/seat`'s path), `probes/pack-contract.md:73-88` (the `factory` account, #24).
+  Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:38` (check 6, the `.env` deny rule on `bin/seat`'s path), `probes/pack-contract.md:76-91` (the `factory` account, #24).
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
@@ -402,9 +402,11 @@ is not swept: its ruleset dismisses an approval on any push, so an update would 
 
 Claude Code updates itself on the stable channel, and a new version runs only after the canary passes it (#24).
 `bin/claude-canary run --repo <owner/repo>` finds the newest version in `~/.local/share/claude/versions`, runs it through
-`bin/seat` (a worker, in a worktree of the repository's clone at `origin/main`) behind a shim `claude` first on `PATH`, so
+`bin/seat` (a worker, in a worktree of the repository's clone at `origin/main`, in the run folder `~/factory-runs/canary-<version>`,
+which nothing removes) behind a shim `claude` first on `PATH`, so
 the session has `bin/seat`'s grants, `default` mode and scrub, checks the log against `probes/pack-contract.md` (exit 0
-passes, 1 fails, 2 could not judge and rejects nothing), and only on a pass writes the launcher `~/.local/bin/claude` (a script that
+passes, 1 fails, 2 could not judge and rejects nothing; "no seat free" and a rate limit are only logged, until a version has
+gone 24 h ungraded since it was first seen, then `claude-canary.failed` names it), and only on a pass writes the launcher `~/.local/bin/claude` (a script that
 `exec`s that version; Claude Code leaves a launcher of ours in place and keeps every installed version, per
 code.claude.com/docs/en/setup), then removes versions older than the previous one. A failed version is rejected
 (`claude-rejected`) until a newer one arrives and the launcher stays. `bin/claude-canary plist --daemon --repo

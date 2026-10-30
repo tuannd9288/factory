@@ -18,6 +18,7 @@ import { SCHEMA } from './seat.mjs';
 
 const clone = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WAIT_MS = 45 * 60_000;
+const UNGRADED_MS = 24 * 3600_000;
 const MAX_TURNS = '12';
 
 /** Dotted versions compared part by part as numbers, so 2.1.10 follows 2.1.9. */
@@ -119,7 +120,7 @@ function limited(text, session) {
 export function judgeRun(text, { candidate, worktree, secret, marker }) {
   const session = parseSession(text);
   if (session.sessionId === null) return { code: 2, items: [{ item: 'the session started', ok: null, evidence: 'the session did not start: the log has no init event' }] };
-  if (limited(text, session)) return { code: 2, items: [{ item: 'the session ended without a rate limit', ok: null, evidence: `the session ended on a rate limit${session.failed ? `: ${session.failed.slice(0, 100)}` : ''}` }] };
+  if (limited(text, session)) return { code: 2, items: [{ item: 'the session ended without a rate limit', ok: null, limited: true, evidence: `the session ended on a rate limit${session.failed ? `: ${session.failed.slice(0, 100)}` : ''}` }] };
   const items = [];
   const add = (item, ok, evidence) => items.push({ item, ok, evidence });
   const inside = (p) => real(p) === real(worktree) || real(p).startsWith(`${real(worktree)}/`);
@@ -190,9 +191,27 @@ export function run({ repo, seat, env }) {
     return 0;
   }
 
-  // One run folder and one worktree of the repository's clone at origin/main for each version, kept after a run that could
-  // not judge so that the retry reuses both.
-  const runDir = join(env.FACTORY_RUNS ?? join(home, 'factory-runs'), 'canary', candidate);
+  // When the version was first seen, published whole and never moved: a version still ungraded UNGRADED_MS later is told to
+  // the Human (see logOnly).
+  const seen = join(state, `claude-seen-${candidate}`);
+  if (!existsSync(seen)) {
+    const tmp = `${seen}.${process.pid}.tmp`;
+    writeFileSync(tmp, `${stamp()}\n`);
+    renameSync(tmp, seen);
+  }
+  // A cause that is no fault of the version (no seat free, a rate limit) is logged and nothing more, until the version has
+  // gone ungraded for a day.
+  const logOnly = (why) => {
+    const age = Date.now() - Date.parse(readOr(seen));
+    if (age >= UNGRADED_MS) return fail(` ${candidate}: still ungraded ${Math.floor(age / 3600_000)} h after it was first seen: ${why}`, 2);
+    console.error(`claude-canary: claude ${candidate}: ${why}`);
+    return 2;
+  };
+
+  // One run folder, one level under the runs folder where bin/seat counts its sessions, and one worktree of the repository's
+  // clone at origin/main for each version. Nothing is removed afterwards: the worktree is the evidence, and a run that could
+  // not judge is retried in both.
+  const runDir = join(env.FACTORY_RUNS ?? join(home, 'factory-runs'), `canary-${candidate}`);
   const worktree = join(runDir, 'worktree');
   const tag = `canary-${candidate}`;
   const secret = `CANARY_SECRET=${randomBytes(6).toString('hex')}`;
@@ -224,7 +243,8 @@ export function run({ repo, seat, env }) {
   process.stdout.write(`${started.stdout ?? ''}${started.stderr ?? ''}`);
   if (started.status !== 0) {
     const none = /no seat free/.test(started.stderr ?? '');
-    return fail(` ${candidate}: ${none ? 'no seat free' : `bin/seat could not run (exit ${started.status ?? started.signal ?? started.error?.code})`}`, 2);
+    if (none) return logOnly('no seat free');
+    return fail(` ${candidate}: bin/seat could not run (exit ${started.status ?? started.signal ?? started.error?.code})`, 2);
   }
 
   const pid = Number(readOr(join(runDir, `run-${tag}.pid`)));
@@ -240,8 +260,7 @@ export function run({ repo, seat, env }) {
 
   const { code, items } = judgeRun(readOr(join(runDir, `run-${tag}.jsonl`)), { candidate, worktree, secret, marker });
   console.log(format(items));
-  if (code === 2) return fail(` ${candidate}: ${items[0].evidence}`, 2);
-  git('worktree', 'remove', '--force', worktree);
+  if (code === 2) return items[0].limited ? logOnly(items[0].evidence) : fail(` ${candidate}: ${items[0].evidence}`, 2);
 
   if (code === 0) {
     writeLauncher(launcher, versions, candidate);

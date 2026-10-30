@@ -1,6 +1,8 @@
 // The pack conformance probe: drives a pack's launcher (default: plain Claude Code behind direnv) and gh in a scratch
-// repository the factory has taken in, and prints PASS or FAIL for each item of probes/pack-contract.md,
-// and for one property of Claude Code the contract does not list (the quota windows in the stream).
+// repository the factory has taken in, and prints PASS or FAIL for each of its own items,
+// and for one property of Claude Code (the quota windows in the stream). The canary (bin/lib/canary.mjs) grades a new
+// Claude Code with this file's exported functions (parseSession, pickMarker, byRule), against probes/pack-contract.md;
+// the script itself runs by hand.
 //   node probes/pack-probe.mjs --repo owner/name [--root <factory root>] [--profiles <dir>] [--log-dir <dir>]
 //     [--claude "direnv exec . claude"] [--ledger bin/factory-ledger] [--max-turns 8] [--max-turns-pr 25] [--no-pr]
 //     [--poll-seconds 20] [--timeout-minutes 20] [--agent tuan9288-agent] [--env-prefix "direnv exec ."]

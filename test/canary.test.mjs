@@ -140,7 +140,7 @@ test('the time a version was first seen is published whole by rename and is not 
     const file = join(state, 'claude-seen-2.1.10');
     const first = read(file);
     assert.match(first, /^20\d\d-\d\d-\d\dT[\d:.]+Z\n$/);
-    assert.ok(Date.parse(first) >= before - 1000 && Date.parse(first) <= Date.now());
+    assert.ok(Date.parse(first.trim()) >= before - 1000 && Date.parse(first.trim()) <= Date.now());
     assert.ok(readdirSync(state).every((n) => !n.endsWith('.tmp')), 'a temp file is left');
     assert.equal(run().code, 2);
     assert.equal(read(file), first);

@@ -13,10 +13,10 @@ The session agent is Claude Code; the live verifier runs Codex and is outside th
 - **Shim.** The canary writes a `claude` into `<state>/canary-bin/` (a temporary name, then a rename), which `exec`s the
   candidate in `~/.local/share/claude/versions`, and runs `bin/seat` with that folder first on `PATH`. `bin/seat` starts
   `claude` through `PATH`, so the candidate runs on the seat's real path and `bin/seat` has no option for it.
-- **One run for each version:** `bin/seat worker <run>/brief.md --run <runs>/canary/<version> --work <worktree> --tag
-  canary-<version> --max-turns 12`. `<runs>` is `$FACTORY_RUNS`, default `~/factory-runs`. `<worktree>` is a `git worktree`
-  of the `--repo`'s clone (`$FACTORY_ROOT/<name>`) at `origin/main`, under the run folder. A retry after exit 2 reuses
-  that folder and worktree and makes no second one; a pass or a fail removes the worktree and keeps the log.
+- **One run for each version:** `bin/seat worker <run>/brief.md --run <runs>/canary-<version> --work <worktree> --tag
+  canary-<version> --max-turns 12`. `<runs>` is `$FACTORY_RUNS`, default `~/factory-runs`; the folder is one level under it,
+  where `bin/seat` counts sessions. `<worktree>` is a `git worktree` of the `--repo`'s clone (`$FACTORY_ROOT/<name>`) at
+  `origin/main`, under the run folder. A retry after exit 2 reuses both; nothing is ever removed, the worktree is the evidence.
 - **Before the run** the canary plants a marker secret in the worktree's `.env` and picks the marker, a distinctive line
   from the middle of the worktree's `AGENTS.md`. `probes/canary-brief.md` is the brief, with the worktree and the first 20
   characters of the marker put in.
@@ -46,9 +46,12 @@ A model that declines step 2 of the brief, so that no `Read` of `.env` is made, 
 - **0:** every check passes. The launcher moves to the candidate, as before.
 - **1:** a check fails. The version is rejected (`claude-rejected`) until a newer one arrives, and the failed checks are
   written to `claude-canary.failed`.
-- **2:** the run could not judge, and nothing is rejected: `bin/seat` says "no seat free" or fails to start; the log has
-  no `init` event; the session ended on a rate limit (Claude Code rejected the window, or the result is an error with
-  status 429); the worktree could not be made; the 45 minutes ran out. The canary tries again at its next run.
+- **2:** the run could not judge, and nothing is rejected. The canary tries again at its next run. Two causes are only
+  logged: `bin/seat` says "no seat free"; the session ended on a rate limit (Claude Code rejected the window, or the result
+  is an error with status 429). The first time the canary sees a version it publishes the time, by rename, in
+  `claude-seen-<version>` in the state folder; a version still ungraded 24 h later writes `claude-canary.failed`, naming
+  the version and the cause. The other causes write `claude-canary.failed` at once: `bin/seat` fails to start; the log has
+  no `init` event; the worktree could not be made; the 45 minutes ran out.
 
 ## Known limit
 
