@@ -161,9 +161,17 @@ function filePidAlive(file) {
  * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
 const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
 
-/** How many sessions of a seat have a live process. */
-export function liveCount(runs, seat) {
-  return runFiles(runs, '.pid').filter((p) => seatOf(p, '2') === String(seat) && runLive(p)).length;
+/** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
+ * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off adds run-<tag>.pid and
+ * removes run-<tag>.claim.pid, so none can finish between two equal listings; one seen half done counts that start twice at
+ * worst, which only makes a start back off. list is the listing, passed in so a test can force the interleaving. */
+export function liveCount(runs, seat, list = runFiles) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const before = list(runs, '.pid').sort();
+    const n = before.filter((p) => seatOf(p, '2') === String(seat) && runLive(p)).length;
+    if (before.join('\n') === list(runs, '.pid').sort().join('\n')) return n;
+  }
+  return Infinity;
 }
 
 /** The rate_limit_info that the newest log of the seat reporting a seven-day use gives (its last rate_limit_event), with the
@@ -212,7 +220,7 @@ export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = nul
     const unclaim = claim ? claim(seat) : () => {};
     const n = liveCount(runs, seat);
     const out = seatOut(runs, seat, now);
-    if (n > SEATS[seat].cap - (claim ? 0 : 1)) reasons.push(`seat ${seat}: ${n - (claim ? 1 : 0)} live sessions, at most ${SEATS[seat].cap}`);
+    if (n > SEATS[seat].cap - (claim ? 0 : 1)) reasons.push(n === Infinity ? `seat ${seat}: its run folders kept changing while its sessions were counted` : `seat ${seat}: ${n - (claim ? 1 : 0)} live sessions, at most ${SEATS[seat].cap}`);
     else if (out) reasons.push(`seat ${seat}: ${out}`);
     else return { seat, reasons };
     unclaim();
