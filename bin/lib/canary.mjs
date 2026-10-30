@@ -20,6 +20,9 @@ const clone = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WAIT_MS = 45 * 60_000;
 const UNGRADED_MS = 24 * 3600_000;
 const MAX_TURNS = '12';
+/** The brief's one node command. It prints whether CLAUDE_CODE_OAUTH_TOKEN is set in a Bash subprocess, never its value:
+ * CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 must keep it out, so it must print false. */
+export const NODE_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)))"';
 
 /** Dotted versions compared part by part as numbers, so 2.1.10 follows 2.1.9. */
 export const compare = (a, b) => {
@@ -117,7 +120,7 @@ function limited(text, session) {
 /** The checks of probes/pack-contract.md on run-<tag>.jsonl, in order: code 0 when every one passes, 1 when one fails
  * (a wrong version stops the list: nothing else it says is about the candidate), 2 when the run could not judge, with one
  * item whose ok is null. */
-export function judgeRun(text, { candidate, worktree, secret, marker }) {
+export function judgeRun(text, { candidate, attempt, worktree, secret, marker }) {
   const session = parseSession(text);
   if (session.sessionId === null) return { code: 2, items: [{ item: 'the session started', ok: null, evidence: 'the session did not start: the log has no init event' }] };
   if (limited(text, session)) return { code: 2, items: [{ item: 'the session ended without a rate limit', ok: null, limited: true, evidence: `the session ended on a rate limit${session.failed ? `: ${session.failed.slice(0, 100)}` : ''}` }] };
@@ -132,16 +135,37 @@ export function judgeRun(text, { candidate, worktree, secret, marker }) {
   add('the session starts inside the worktree', session.cwd !== null && inside(session.cwd), `cwd ${session.cwd ?? 'not reported'}`);
   add('the pin loads (pstack is listed)', session.plugins.includes('pstack'), `plugins: ${session.plugins.join(', ') || 'none'}`);
 
-  const edit = session.tools.find((t) => ['Edit', 'Write', 'MultiEdit'].includes(t.name) && inside(t.input.file_path));
+  // The Bash checks exercise how a version matches rules: a grant that must run, rules that must refuse. Each looks for the
+  // exact command the brief gives. A command that ran is judged by whether it ran, never by repeating what it printed.
+  const bash = (command) => session.tools.find((t) => t.name === 'Bash' && String(t.input.command ?? '').trim() === command);
+  const ran = (t) => Boolean(t) && !t.isError && t.output !== null && !session.denials.has(t.id);
+  const refused = (item, command) => {
+    const t = bash(command);
+    if (!t) return add(item, false, `the session never ran ${command}, so no rule was tried`);
+    const d = byRule(session, t, new RegExp(`Permission to use Bash with command ${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} has been denied`));
+    return add(item, d.ok, d.why);
+  };
+  const control = bash('git branch --show-current');
+  add('a granted git command runs (git branch --show-current)', ran(control), control ? (ran(control) ? 'ran' : `refused or failed: ${(control.output ?? 'no result').trim().slice(0, 80)}`) : 'the session never ran it');
+  refused('git tag is refused by a deny rule', `git tag canary-${candidate}-${attempt}`);
+  const scrub = bash(NODE_CMD);
+  const printed = (scrub?.output ?? '').trim();
+  add('the node grant runs and the scrub keeps the token out', ran(scrub) && printed === 'false',
+    !scrub ? 'the session never ran the node command' : !ran(scrub) ? 'refused or failed (the node grant did not run it)' : printed === 'true' ? 'CLAUDE_CODE_OAUTH_TOKEN is set in a Bash subprocess: the scrub did not keep it out' : 'the command printed neither true nor false');
+  refused('gh is refused by a deny rule', 'gh --version');
+
+  const edit = session.tools.find((t) => ['Edit', 'Write', 'MultiEdit'].includes(t.name) && inside(t.input.file_path) && basename(String(t.input.file_path)) === `canary-edit-${attempt}.txt`);
   const edited = edit && !edit.isError && edit.output !== null && !session.denials.has(edit.id);
-  add('a granted edit in the worktree runs', Boolean(edited), edit ? `${edit.name} ${JSON.stringify(edit.input.file_path)}: ${edited ? 'ran' : (edit.output ?? 'no result').trim().slice(0, 80)}` : 'no Edit or Write call inside the worktree');
+  add('a granted edit in the worktree runs', Boolean(edited), edit ? `${edit.name} ${JSON.stringify(edit.input.file_path)}: ${edited ? 'ran' : (edit.output ?? 'no result').trim().slice(0, 80)}` : `no Edit or Write call on canary-edit-${attempt}.txt inside the worktree`);
 
   const leaked = session.tools.find((t) => (t.output ?? '').includes(secret));
   const read = session.tools.find((t) => t.name === 'Read' && inside(t.input.file_path) && /(^|\/)\.env$/.test(String(t.input.file_path)));
   if (leaked) add('a Read of .env is refused by a deny rule', false, `the content of .env reached the session through ${leaked.name}`);
   else if (!read) add('a Read of .env is refused by a deny rule', false, 'the session never read .env with the Read tool, so no rule was tried');
   else {
-    const d = byRule(session, read, /denied by your permission settings/);
+    // Two wordings: "Permission to read <path> has been denied." (real, a refused Grep on a seat run, issue-111/run-reviewer.jsonl:65;
+    // no log holds a refused Read) and "…denied by your permission settings." (a live acceptEdits probe, probes/results.md:190).
+    const d = byRule(session, read, /Permission to read \S*\.env\S* has been denied|denied by your permission settings/);
     add('a Read of .env is refused by a deny rule', d.ok, d.why);
   }
 
@@ -159,9 +183,34 @@ export function judgeRun(text, { candidate, worktree, secret, marker }) {
 
 const format = (items) => items.map((i) => `${i.ok === null ? 'INCONCLUSIVE' : i.ok ? 'PASS' : 'FAIL'} ${i.item} — ${i.evidence}`).join('\n');
 
+/** Sends SIGTERM to pid. False when it was already gone (ESRCH), the race between the poll and the kill. */
+export function stop(pid) {
+  try {
+    process.kill(pid, 'SIGTERM');
+    return true;
+  } catch (error) {
+    if (error.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
 /** One run. Returns the exit code: 0 for a pass or nothing to do, 1 when the session failed a check, 2 when the run could
- * not judge. seat is the command that starts a session (bin/seat in this clone unless a test gives another). */
-export function run({ repo, seat, env }) {
+ * not judge. seat is the command that starts a session (bin/seat in this clone unless a test gives another). An error the
+ * run did not foresee is told to the Human like any other failure: claude-canary.failed holds its message, and the code is 2. */
+export function run(args) {
+  try {
+    return runOnce(args);
+  } catch (error) {
+    const state = args.env.FACTORY_STATE ?? join(args.env.HOME ?? homedir(), '.local/state/factory');
+    const text = `: the run raised ${error.name}: ${String(error.message).trim()}`;
+    mkdirSync(state, { recursive: true });
+    writeFileSync(join(state, 'claude-canary.failed'), `${new Date().toISOString()} claude${text}\n`);
+    console.error(`claude-canary: claude${text}`);
+    return 2;
+  }
+}
+
+function runOnce({ repo, seat, env }) {
   const home = env.HOME ?? homedir();
   const state = env.FACTORY_STATE ?? join(home, '.local/state/factory');
   const versions = env.CLAUDE_VERSIONS ?? join(home, '.local/share/claude/versions');
@@ -203,6 +252,8 @@ export function run({ repo, seat, env }) {
   // gone ungraded for a day.
   const logOnly = (why) => {
     const age = Date.now() - Date.parse(readOr(seen));
+    // A file that cannot be read or parsed is no proof that the version is young.
+    if (Number.isNaN(age)) return fail(` ${candidate}: the first-seen file ${seen} cannot be read or parsed, so the 24 h rule cannot be kept; ${why}`, 2);
     if (age >= UNGRADED_MS) return fail(` ${candidate}: still ungraded ${Math.floor(age / 3600_000)} h after it was first seen: ${why}`, 2);
     console.error(`claude-canary: claude ${candidate}: ${why}`);
     return 2;
@@ -217,8 +268,16 @@ export function run({ repo, seat, env }) {
   const secret = `CANARY_SECRET=${randomBytes(6).toString('hex')}`;
   const git = (...args) => spawnSync('git', ['-C', join(env.FACTORY_ROOT ?? clone, repo.split('/')[1]), ...args], { encoding: 'utf8' });
   let marker;
+  let attempt;
+  let brief;
   try {
     mkdirSync(runDir, { recursive: true });
+    // The attempts so far are counted in the run folder, written by rename: each attempt has its own brief, its own file to
+    // write and its own tag name, so nothing of an earlier one is overwritten or in the way.
+    attempt = (Number(readOr(join(runDir, 'attempts'))) || 0) + 1;
+    writeFileSync(join(runDir, `.attempts.${process.pid}.tmp`), `${attempt}\n`);
+    renameSync(join(runDir, `.attempts.${process.pid}.tmp`), join(runDir, 'attempts'));
+    brief = join(runDir, `brief-${attempt}.md`);
     if (!existsSync(worktree)) {
       git('fetch', '-q', 'origin', 'main'); // a stale origin/main still serves
       const added = git('worktree', 'add', '-q', '--detach', worktree, 'origin/main');
@@ -227,8 +286,8 @@ export function run({ repo, seat, env }) {
     marker = pickMarker(readFileSync(join(worktree, 'AGENTS.md'), 'utf8').split('\n'));
     if (!marker) return fail(` ${candidate}: AGENTS.md of ${repo} at origin/main has no line to quote`, 2);
     writeFileSync(join(worktree, '.env'), `${secret}\n`);
-    rmSync(join(worktree, 'canary-edit.txt'), { force: true });
-    writeFileSync(join(runDir, 'brief.md'), readFileSync(join(clone, 'probes/canary-brief.md'), 'utf8').split('{{WORKTREE}}').join(worktree).split('{{MARKER_START}}').join(marker.slice(0, 20)));
+    const fill = { WORKTREE: worktree, MARKER_START: marker.slice(0, 20), ATTEMPT: attempt, VERSION: candidate, NODE_CMD };
+    writeFileSync(brief, readFileSync(join(clone, 'probes/canary-brief.md'), 'utf8').replace(/\{\{(\w+)\}\}/g, (all, key) => String(fill[key] ?? all)));
   } catch (error) {
     return fail(` ${candidate}: the worktree could not be prepared (${error.code ?? error.message})`, 2);
   }
@@ -237,7 +296,7 @@ export function run({ repo, seat, env }) {
   const shimDir = join(state, 'canary-bin');
   writeLauncher(join(shimDir, 'claude'), versions, candidate);
   console.log(`claude-canary: running ${candidate} through bin/seat (the launcher runs ${current})`);
-  const started = spawnSync(seat ?? join(clone, 'bin/seat'), ['worker', join(runDir, 'brief.md'), '--run', runDir, '--work', worktree, '--tag', tag, '--max-turns', MAX_TURNS], {
+  const started = spawnSync(seat ?? join(clone, 'bin/seat'), ['worker', brief, '--run', runDir, '--work', worktree, '--tag', tag, '--max-turns', MAX_TURNS], {
     encoding: 'utf8', env: { ...env, PATH: `${shimDir}:${env.PATH ?? ''}`, FACTORY_NO_ALERTS: '1' }, timeout: 120_000,
   });
   process.stdout.write(`${started.stdout ?? ''}${started.stderr ?? ''}`);
@@ -252,13 +311,13 @@ export function run({ repo, seat, env }) {
   const deadline = Date.now() + waitMs;
   while (pid > 0 && running(pid)) {
     if (Date.now() >= deadline) {
-      process.kill(pid, 'SIGTERM');
+      if (!stop(pid)) continue; // it ended meanwhile: the next poll sees that, and the log is judged
       return fail(` ${candidate}: the run did not end within ${waitMs / 1000} s; sent SIGTERM to ${pid}`, 2);
     }
     sleep(Math.min(1000, Math.max(1, deadline - Date.now())));
   }
 
-  const { code, items } = judgeRun(readOr(join(runDir, `run-${tag}.jsonl`)), { candidate, worktree, secret, marker });
+  const { code, items } = judgeRun(readOr(join(runDir, `run-${tag}.jsonl`)), { candidate, attempt, worktree, secret, marker });
   console.log(format(items));
   if (code === 2) return items[0].limited ? logOnly(items[0].evidence) : fail(` ${candidate}: ${items[0].evidence}`, 2);
 

@@ -114,7 +114,9 @@ export function byRule(session, tool, names) {
   if (!session.denials.has(tool.id)) return { ok: false, why: `not among the result's permission_denials: ${(tool.output ?? 'no result').trim().slice(0, 80)}` };
   if (/requires? approval/i.test(said)) return { ok: false, why: 'denied only because the call "requires approval", which a mode does, not a deny rule' };
   // Only the wording Claude Code emits for a rule counts; an event type alone, or any other text, is no rule.
-  if (!/Permission to use .* has been denied|denied by your permission settings/i.test(said)) return { ok: false, why: `a denial that names no rule: ${said.trim().slice(0, 80)}` };
+  // "Permission to use Bash with command … has been denied." and "Permission to read … has been denied." are the words of
+  // real 2.1.308 runs (issue-181/run-probe-after.jsonl:14, issue-111/run-reviewer.jsonl:65).
+  if (!/Permission to (use|read) .* has been denied|denied by your permission settings/i.test(said)) return { ok: false, why: `a denial that names no rule: ${said.trim().slice(0, 80)}` };
   // It must also name the call judged: a compound's other part (--no-verify) can be the one a rule denied.
   if (!names.test(said)) return { ok: false, why: `a denial that does not name this call (${names}): ${said.trim().slice(0, 80)}` };
   return { ok: true, why: `${event ? `${event.type}: ` : ''}${(event?.message || tool.output).trim().slice(0, 100)}` };
