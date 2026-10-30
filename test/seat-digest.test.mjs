@@ -28,6 +28,7 @@ test('the sessions block: one line per session with its role, model, cost and mi
     '- reviewer rev, claude-opus-5-5, $1.25, 10.5 min',
     '- worker fix, claude-sonnet-5-5, $3.50, 4.0 min',
     '- Total: $4.75 over 2 sessions (the last record of each; a resumed session\'s cost is cumulative, so its records are not added)',
+    '- 2 sessions ($4.75 at API prices) charged to no task, because the record names no repository and branch',
   ].join('\n'));
 });
 
