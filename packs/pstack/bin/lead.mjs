@@ -1,10 +1,11 @@
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one repository. This file holds the pure parts (the arguments of
-// claude, the plugins missing, the refusals) and the start. Nothing here reads a credential or logs in.
+// claude, the enabled plugins, the refusals) and the start. Nothing here reads a credential or logs in.
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
 
 const USAGE = 'usage: packs/pstack/bin/lead <repo> [--continue] [--dry-run]';
@@ -46,11 +47,18 @@ export function refusal(repo, root) {
   return null;
 }
 
-/** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text. */
+const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
+
+/** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
+ * hook is the command of the Stop and SessionEnd hooks, which copy the session's own transcript to ~/factory-runs/<repo>-lead/
+ * transcripts, outside every profile (#185); it runs the script through node, so the script needs no exec bit. */
 export function leadArgs({ repo, home, root, roleText, resume = false }) {
   const cwd = join(root, repo);
+  const hook = [process.execPath, join(root, 'packs/pstack/bin/transcript-copy.mjs'), join(home, 'factory-runs', `${repo}-lead`, 'transcripts')].map(quote).join(' ');
+  const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
   return {
     cwd,
+    hook,
     argv: [
       'direnv', 'exec', '.', 'claude',
       '--model', 'opus', '--effort', 'high',
@@ -58,6 +66,7 @@ export function leadArgs({ repo, home, root, roleText, resume = false }) {
       '--permission-mode', 'acceptEdits',
       '--add-dir', join(home, 'factory-runs'),
       '--name', `${repo}-lead`,
+      '--settings', JSON.stringify({ hooks: { Stop: hooks, SessionEnd: hooks } }),
       ...(resume ? ['--continue'] : []),
       '--allowedTools', ...allowOf(root),
       '--disallowedTools', ...denyOf(cwd),
@@ -69,11 +78,6 @@ export function leadArgs({ repo, home, root, roleText, resume = false }) {
 export function enabledPlugins(settingsJson) {
   const enabled = JSON.parse(settingsJson).enabledPlugins ?? {};
   return Object.entries(enabled).filter(([, on]) => on === true).map(([id]) => id);
-}
-
-/** The enabled plugins whose id does not appear, as a quoted string, in the output of `claude plugin list --json`. */
-export function missingPlugins(settingsJson, listOutput) {
-  return enabledPlugins(settingsJson).filter((id) => !listOutput.includes(JSON.stringify(id)));
 }
 
 /** The exit code for a finished child: its status, or 128 plus the signal's number when a signal ended it. */
@@ -88,7 +92,14 @@ function readSettings(cwd) {
   return existsSync(path) ? readFileSync(path, 'utf8') : '{}';
 }
 
-const direnvClaude = (cwd, args) => spawnSync('direnv', ['exec', '.', 'claude', ...args], { cwd, encoding: 'utf8' });
+/** The Lead profile's config dir, as the repository's .envrc sets it: a path, not a secret. Throws a PluginError when direnv gives none. */
+function profileConfig(cwd) {
+  const r = spawnSync('direnv', ['exec', '.', 'printenv', 'CLAUDE_CONFIG_DIR'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const config = lastLine(r.stdout);
+  if (r.status !== 0 || !config) throw new PluginError(`direnv gave no CLAUDE_CONFIG_DIR in ${cwd}${r.error ? ` (${r.error.message})` : ''}`);
+  return config;
+}
+
 const claudeDirt = (cwd) => spawnSync('git', ['status', '--porcelain', '--', '.claude/'], { cwd, encoding: 'utf8' }).stdout ?? '';
 const lastLine = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '';
 
@@ -114,13 +125,27 @@ function main(argv, env) {
     return 2;
   }
   const resume = flags.includes('--continue');
-  const { cwd, argv: command } = leadArgs({ repo, home: env.HOME, root, roleText, resume });
+  const { cwd, argv: command, hook } = leadArgs({ repo, home: env.HOME, root, roleText, resume });
   const wanted = enabledPlugins(readSettings(cwd));
+  // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
+  const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
+  let config;
+  let pluginRoot;
+  try {
+    config = profileConfig(cwd);
+    pluginRoot = pluginPaths(config, { home: env.HOME, profiles }).root;
+  } catch (e) {
+    if (!(e instanceof PluginError)) throw e;
+    process.stderr.write(`bin/lead: ${e.message}\n`);
+    return 1;
+  }
 
   if (flags.includes('--dry-run')) {
     const shown = leadArgs({ repo, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', resume }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
+    process.stdout.write(`plugin root: ${pluginRoot}\n`);
+    process.stdout.write(`transcript hook: ${hook}\n`);
     process.stdout.write(`${shown.join(' ')}\n`);
     return 0;
   }
@@ -135,24 +160,21 @@ function main(argv, env) {
     return setup.status ?? 1;
   }
 
-  if (wanted.length) {
-    const before = claudeDirt(cwd);
-    const listed = direnvClaude(cwd, ['plugin', 'list', '--json']);
-    for (const id of missingPlugins(readSettings(cwd), listed.status === 0 ? listed.stdout : '')) {
-      // Local scope records the install in the git-ignored .claude/settings.local.json, so the committed pin stays as it is.
-      const r = direnvClaude(cwd, ['plugin', 'install', id, '--scope', 'local']);
-      if (r.status !== 0) {
-        process.stderr.write(`bin/lead: ${id} is not installed; it installs once the Human has logged in to the profile and trusted the folder, so run again\n`);
-        const detail = r.error ? r.error.message : lastLine(r.stderr);
-        if (detail) process.stderr.write(`  ${detail}\n`);
-      }
-    }
-    if (claudeDirt(cwd) !== before) process.stderr.write(`bin/lead: the install changed .claude/ in ${cwd}; check git status there\n`);
+  // Local scope records the install in the git-ignored .claude/settings.local.json, so the committed pin stays as it is. A failed
+  // install stops the start.
+  const before = claudeDirt(cwd);
+  try {
+    installPlugins({ work: cwd, config, home: env.HOME, profiles, env });
+  } catch (e) {
+    if (!(e instanceof PluginError)) throw e;
+    process.stderr.write(`bin/lead: plugins: ${e.message}\n`);
+    return 1;
   }
+  if (claudeDirt(cwd) !== before) process.stderr.write(`bin/lead: the install changed .claude/ in ${cwd}; check git status there\n`);
 
   // Ctrl-C reaches this process as well as claude, which uses it itself; like system(), ignore SIGINT and SIGQUIT while the child runs.
   for (const s of ['SIGINT', 'SIGQUIT']) process.on(s, () => {});
-  const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit' });
+  const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit', env: { ...env, CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginRoot } });
   if (r.error) {
     process.stderr.write(`bin/lead: ${command[0]}: ${r.error.message}\n`);
     return 1;

@@ -1,10 +1,12 @@
 // packs/pstack/bin/lead (#163): what the launcher refuses and the arguments it gives claude. No live claude, no network.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exitCodeOf, leadArgs, missingPlugins, refusal } from '../bin/lead.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { enabledPlugins, exitCodeOf, leadArgs, refusal } from '../bin/lead.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
 
 const home = '/home/factory';
@@ -109,6 +111,33 @@ describe('leadArgs', () => {
     for (const d of ['Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
   });
 
+  test('--settings holds the transcript hook on Stop and SessionEnd, run through node with each part quoted', () => {
+    const { hooks } = JSON.parse(after('--settings'));
+    const command = `'${process.execPath}' '${root}/packs/pstack/bin/transcript-copy.mjs' '${home}/factory-runs/zalo-gateway-lead/transcripts'`;
+    assert.deepEqual(Object.keys(hooks).sort(), ['SessionEnd', 'Stop']);
+    for (const event of ['Stop', 'SessionEnd']) assert.deepEqual(hooks[event], [{ hooks: [{ type: 'command', command }] }]);
+    assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText }).hook, command);
+  });
+
+  test('the hook command runs the script with no exec bit, even where the paths hold a space and a quote', () => {
+    const dir = tmp();
+    try {
+      const real = fileURLToPath(new URL('../../..', import.meta.url));
+      const odd = join(dir, "a b's");
+      const config = join(dir, 'profile');
+      mkdirSync(join(config, 'projects/p'), { recursive: true });
+      const source = join(config, 'projects/p/s.jsonl');
+      writeFileSync(source, 'line\n');
+      assert.equal(statSync(join(real, 'packs/pstack/bin/transcript-copy.mjs')).mode & 0o111, 0);
+      const { hook } = leadArgs({ repo: 'r', home: odd, root: real, roleText });
+      const r = spawnSync('sh', ['-c', hook], { input: JSON.stringify({ transcript_path: source }), encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: config } });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(readFileSync(join(odd, 'factory-runs/r-lead/transcripts/s.jsonl'), 'utf8'), 'line\n');
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
   test('the deny list keeps Edit and Write out of the live clone, by an absolute path', () => {
     const deny = list('--disallowedTools');
     assert.ok(deny.includes('Edit(//fx/WORKSPACES/zalo-gateway/**)'));
@@ -116,24 +145,10 @@ describe('leadArgs', () => {
   });
 });
 
-describe('missingPlugins', () => {
-  const settings = (enabled) => JSON.stringify({ enabledPlugins: enabled });
-  const listed = JSON.stringify([{ id: 'present@mk' }]);
-
-  test('an enabled plugin absent from the list is missing', () => {
-    assert.deepEqual(missingPlugins(settings({ 'pstack@pstack-f713f14': true }), listed), ['pstack@pstack-f713f14']);
-  });
-  test('an enabled plugin in the list is not', () => {
-    assert.deepEqual(missingPlugins(settings({ 'present@mk': true }), listed), []);
-  });
-  test('an id inside a longer listed id is still missing', () => {
-    assert.deepEqual(missingPlugins(settings({ 'pstack@mk': true }), JSON.stringify([{ id: 'pstack@mk-2' }])), ['pstack@mk']);
-  });
-  test('a plugin set to false is not wanted', () => {
-    assert.deepEqual(missingPlugins(settings({ 'off@mk': false }), listed), []);
-  });
-  test('settings with no enabledPlugins want nothing', () => {
-    assert.deepEqual(missingPlugins('{}', listed), []);
+describe('enabledPlugins', () => {
+  test('the plugins set to true, by id', () => {
+    assert.deepEqual(enabledPlugins(JSON.stringify({ enabledPlugins: { 'a@mk': true, 'off@mk': false } })), ['a@mk']);
+    assert.deepEqual(enabledPlugins('{}'), []);
   });
 });
 
