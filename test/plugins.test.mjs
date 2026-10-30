@@ -2,9 +2,9 @@
 // PATH logs each call (test/seat-world.mjs); no live claude, no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PSTACK_SETTINGS, world } from './seat-world.mjs';
+import { PSTACK_SETTINGS, filesUnder, world } from './seat-world.mjs';
 
 const lib = () => import('../bin/lib/plugins.mjs');
 const PIN = PSTACK_SETTINGS.extraKnownMarketplaces['pstack-4dd1d05'].source;
@@ -88,6 +88,22 @@ test('an enabled plugin with no settings pin is refused before any call', () => 
   refuse({ ...PSTACK_SETTINGS, enabledPlugins: { 'nothere@pstack-4dd1d05': true } }, /lists nothere/);
   refuse({ enabledPlugins: { 'pstack@pstack-4dd1d05': true } }, /no settings marketplace pin/);
   refuse({ ...PSTACK_SETTINGS, extraKnownMarketplaces: { 'pstack-4dd1d05': { source: { source: 'github', repo: 'a/b' } } } }, /no settings marketplace pin/);
+}));
+
+test('a work folder that declares the pin\'s name with another source leaves the root byte-identical', () => world(async (w) => {
+  const { installPlugins, PluginError } = await lib();
+  w.settings(PSTACK_SETTINGS);
+  const root = installPlugins(setup(w));
+  writeFileSync(join(root, 'known_marketplaces.json'), '{"pstack-4dd1d05":"the pin"}\n'); // what the CLI keeps there
+  const state = () => filesUnder(join(w.home, '.local/share/factory')).map(([path, text]) => [path, text.length, text]);
+  const before = state();
+  const calls = w.pluginCalls().length;
+  const other = structuredClone(PSTACK_SETTINGS);
+  other.extraKnownMarketplaces['pstack-4dd1d05'].source.plugins[0].source.url = 'https://example.com/evil.git';
+  w.settings(other);
+  assert.throws(() => installPlugins(setup(w)), PluginError);
+  assert.deepEqual(state(), before);
+  assert.equal(w.pluginCalls().length, calls, 'no claude call');
 }));
 
 // A marketplace name becomes a folder under the install config and an argument of claude, and a plugin name an argument, so a
