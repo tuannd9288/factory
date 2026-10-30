@@ -11,7 +11,11 @@ const INIT = JSON.parse(readFileSync(join(here, 'fixtures/init-2.1.309-run2-pr.j
 
 // The wording the Read tool had under acceptEdits in a live probe run (probes/results.md:190).
 export const READ_DENIED = '<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>';
-export const NODE_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)))"';
+export const NODE_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.CLAUDE_CONFIG_DIR || process.env.GH_CONFIG_DIR)))"';
+// The command of round 3, which tested the token alone: only seat 1's claude has it, so on seat 2 it prints false with or without the scrub.
+export const TOKEN_ONLY_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)))"';
+// What bin/seat puts in the child's environment (seat.mjs:349) and the scrub must keep out of a Bash subprocess; the first only on seat 1.
+const SCRUBBED = ['CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'GH_CONFIG_DIR'];
 export const OUTPUT = { conclusion: 'Done', evidence: ['edit ok', 'env refused'], couldNotRead: [], needsHuman: [] };
 /** What Claude Code 2.1.308 says when a rule refuses a Bash command, and a Read (the words of a refused Grep). */
 export const bashDenied = (command) => `Permission to use Bash with command ${command} has been denied.`;
@@ -22,7 +26,7 @@ const say = (text) => ev({ type: 'assistant', message: { content: [{ type: 'text
 const out = (id, content, isError = false) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } });
 
 /** A good run of bin/seat's session in `work`, as the canary's brief asks for it. Each option breaks one thing. */
-export function stream({ work, secret, marker, candidate = '2.1.309', attempt = 1, version = candidate, mode = 'default', cwd = work, plugins = ['pstack'], git = 'ok', tag = 'denied', node = 'false', gh = 'denied', edit = 'ok', env = 'denied', quote = 'context', subtype = 'success', structured = OUTPUT, rate = 'allowed', init = true }) {
+export function stream({ work, secret, marker, candidate = '2.1.309', attempt = 1, version = candidate, mode = 'default', cwd = work, plugins = ['pstack'], git = 'ok', tag = 'denied', node = null, leaks = [], gh = 'denied', edit = 'ok', env = 'denied', quote = 'context', subtype = 'success', structured = OUTPUT, rate = 'allowed', init = true }) {
   const denials = [];
   const lines = [];
   // A refused call: the permission_denied event, the error result, and the entry of the result's permission_denials.
@@ -54,7 +58,9 @@ export function stream({ work, secret, marker, candidate = '2.1.309', attempt = 
     const c = bash('b3', NODE_CMD);
     if (node === 'approval') approval(c.id, 'Bash', c.input);
     else if (node === 'other') lines.push(use(c.id, 'Bash', { command: 'node -e 0' }), out(c.id, 'false'));
-    else lines.push(use(c.id, 'Bash', c.input), out(c.id, node));
+    else if (node === 'tokenOnly') lines.push(use(c.id, 'Bash', { command: TOKEN_ONLY_CMD }), out(c.id, String(leaks.includes('CLAUDE_CODE_OAUTH_TOKEN'))));
+    // Without a given output the command prints what it would: true when any variable the scrub should drop reaches it.
+    else lines.push(use(c.id, 'Bash', c.input), out(c.id, node ?? String(SCRUBBED.some((v) => leaks.includes(v)))));
   }
   if (gh !== 'none') {
     const c = bash('b4', 'gh --version');

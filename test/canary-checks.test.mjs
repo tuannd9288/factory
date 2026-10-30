@@ -56,7 +56,7 @@ test('the granted edit must run in the worktree: refused, never made, or made el
 
 const GIT = 'a granted git command runs (git branch --show-current)';
 const TAG = 'git tag is refused by a deny rule';
-const NODE = 'the node grant runs and the scrub keeps the token out';
+const NODE = "the node grant runs and the scrub keeps bin/seat's variables out";
 const GH = 'gh is refused by a deny rule';
 
 test('the git control must run: refused for approval, or never made, fails (every git would need approval)', async () => {
@@ -66,6 +66,9 @@ test('the git control must run: refused for approval, or never made, fails (ever
 
 test('git tag must be refused by a rule: made, sent to approval, refused for another command, or never tried all fail', async () => {
   assert.deepEqual(failed(await judge({ tag: 'allowed' })), [TAG]);
+  const left = (await judge({ tag: 'allowed' })).items.find((i) => !i.ok).evidence;
+  assert.match(left, /canary-2\.1\.309-1/, 'the failure names the tag that was left');
+  assert.match(left, /clone.*never pushed|never pushed.*clone/s);
   assert.deepEqual(failed(await judge({ tag: 'approval' })), [TAG]);
   const wrong = await judge({ tag: 'wrong' });
   assert.deepEqual(failed(wrong), [TAG]);
@@ -82,6 +85,31 @@ test('the node command must be the exact one, run, and print false: true, other 
   assert.deepEqual(failed(await judge({ node: 'none' })), [NODE]);
   const leaked = await judge({ node: 'sk-ant-oat01-abc' });
   assert.doesNotMatch(JSON.stringify(leaked.items), /sk-ant-oat01-abc/, 'a value that reached the log is never repeated');
+});
+
+test('the scrub is judged on every seat: a variable bin/seat sets on seat 2 too (CLAUDE_CONFIG_DIR, GH_CONFIG_DIR) reaching Bash fails', async () => {
+  // issue-181/run-probe-after.jsonl:8-9 (seat 2, default mode, 2.1.308): with the scrub on, a Bash subprocess has neither.
+  assert.equal((await judge({ leaks: [] })).code, 0);
+  for (const leaked of [['CLAUDE_CONFIG_DIR'], ['GH_CONFIG_DIR'], ['CLAUDE_CODE_OAUTH_TOKEN'], ['CLAUDE_CONFIG_DIR', 'GH_CONFIG_DIR']]) {
+    const r = await judge({ leaks: leaked });
+    assert.deepEqual(failed(r), [NODE], leaked.join());
+    assert.match(r.items.find((i) => !i.ok).evidence, /scrub did not keep/);
+  }
+  // The round-3 command tested the token alone, which seat 2 never has: a run of it is not this check, whatever it printed.
+  const old = await judge({ node: 'tokenOnly', leaks: ['CLAUDE_CONFIG_DIR'] });
+  assert.deepEqual(failed(old), [NODE]);
+  assert.match(old.items.find((i) => !i.ok).evidence, /never ran/);
+});
+
+test('a passing check says why it passed: its evidence is the reason, for each of the twelve', async () => {
+  const r = await judge();
+  assert.equal(r.code, 0);
+  const reason = [/init reports "2\.1\.309", the candidate is 2\.1\.309/, /permissionMode "default"/, /^cwd /, /plugins: pstack/, /^ran$/, /has been denied/, /^ran and printed false$/, /has been denied/, /\bran$/, /has been denied/, /quoted by the session itself/, /^success, with conclusion, evidence, couldNotRead and needsHuman$/];
+  assert.equal(r.items.length, reason.length);
+  r.items.forEach((i, n) => {
+    assert.match(i.evidence, reason[n], `${i.item}: ${i.evidence}`);
+    assert.doesNotMatch(i.evidence, /never|neither|did not|refused or failed|no Edit|lacks|not among/, `${i.item} gives the reason of a failure on a pass: ${i.evidence}`);
+  });
 });
 
 test('gh must be refused by a rule: run, sent to approval or never tried fails', async () => {
