@@ -37,7 +37,7 @@ const DISALLOWED = ['Bash(gh pr merge:*)', 'Bash(scripts/live-verify:*)', 'Bash(
  * tool call with its result, the denials the result reports, the permission_denied events and the quota windows of each
  * rate_limit_event (null for an event without them). */
 export function parseSession(text) {
-  const session = { cwd: null, plugins: [], permissionMode: null, model: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, failed: null, text: '', loaded: null, rateLimits: [] };
+  const session = { cwd: null, plugins: [], permissionMode: null, model: null, claudeCodeVersion: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, failed: null, text: '', loaded: null, rateLimits: [] };
   const byId = new Map();
   for (const line of text.split('\n')) {
     let e;
@@ -47,7 +47,7 @@ export function parseSession(text) {
       continue;
     }
     if (e.type === 'system' && e.subtype === 'init') {
-      Object.assign(session, { cwd: e.cwd ?? null, permissionMode: e.permissionMode ?? null, model: e.model ?? null, sessionId: e.session_id ?? null, plugins: (e.plugins ?? []).map((p) => p.name) });
+      Object.assign(session, { cwd: e.cwd ?? null, permissionMode: e.permissionMode ?? null, model: e.model ?? null, claudeCodeVersion: e.claude_code_version ?? null, sessionId: e.session_id ?? null, plugins: (e.plugins ?? []).map((p) => p.name) });
       session.loaded = { servers: e.mcp_servers ?? [], tools: e.tools ?? [], plugins: e.plugins ?? [], skills: e.skills ?? [] };
     } else if (e.type === 'system' && e.subtype === 'permission_denied') {
       session.deniedEvents.set(e.tool_use_id, { type: e.decision_reason_type ?? null, message: e.message ?? e.decision_reason ?? '' });
@@ -106,7 +106,7 @@ const commandOf = (t) => (t.name === 'Bash' ? String(t.input.command ?? '') : ''
 /** Whether a tool call was denied by a deny rule, and the words that show it. Only the result's permission_denials
  * and the permission_denied events count: a call that "requires approval" is the mode refusing it, not a rule, and
  * a model's own words are no denial. */
-function byRule(session, tool, names) {
+export function byRule(session, tool, names) {
   const event = session.deniedEvents.get(tool.id);
   const said = `${tool.output ?? ''} ${event?.message ?? ''}`;
   if (!session.denials.has(tool.id)) return { ok: false, why: `not among the result's permission_denials: ${(tool.output ?? 'no result').trim().slice(0, 80)}` };
