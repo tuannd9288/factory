@@ -48,27 +48,30 @@ test('two starts at the same moment on a seat with one place left never both run
   }
 });
 
-// An ended run: a dead pid, its seat, and a log whose last rate_limit_event gives use, with an mtime minutes ago.
-function ended(dir, tag, seat, use, minutesAgo) {
+// An ended run: a dead pid, its seat, and a log whose last rate_limit_event has status (its windows reset in an hour, the
+// week at 0.35), with an mtime minutes ago.
+function ended(dir, tag, seat, status, minutesAgo) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `run-${tag}.pid`), `${spawnSync(process.execPath, ['-e', '']).pid}\n`);
   writeFileSync(join(dir, `run-${tag}.seat`), `${seat}\n`);
   const log = join(dir, `run-${tag}.jsonl`);
-  writeFileSync(log, `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: { utilization: use } } } })}\n`);
+  const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+  const unifiedWindows = { five_hour: { utilization: 1, resetsAt }, seven_day: { utilization: 0.35, resetsAt } };
+  writeFileSync(log, `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status, resetsAt, rateLimitType: 'five_hour', unifiedWindows } })}\n`);
   const t = new Date(Date.now() - minutesAgo * 60000);
   utimesSync(log, t, t);
 }
 
-test('a refused start leaves the earlier run\'s .seat, so its log stays on its seat and seat 1 keeps its stop', () => world(async (w) => {
+test('a refused start leaves the earlier run\'s .seat, so its log stays on its seat and seat 1 stays rejected', () => world(async (w) => {
   fill(w, 2, 4);
-  ended(w.run, 'worker', 1, 0.75, 1); // the worker's last run ended on seat 1, now past its stop of 0.70
-  ended(join(w.runs, 'issue-3'), 'old', 1, 0.10, 60);
+  ended(w.run, 'worker', 1, 'rejected', 1); // the worker's last run ended on seat 1, cut off by Claude Code
+  ended(join(w.runs, 'issue-3'), 'old', 1, 'allowed', 60);
   const first = w.start('worker');
   assert.equal(first.code, 2, first.out + first.err);
   assert.equal(readFileSync(join(w.run, 'run-worker.seat'), 'utf8'), '1\n');
   const other = w.start('worker', ['--tag', 'other']);
   assert.equal(other.code, 2, other.out + other.err);
-  assert.match(other.err, /seat 1: seven-day use 0\.75/);
+  assert.match(other.err, /seat 1: rejected by Claude Code \(five-hour window\) until /);
 }));
 
 test('a start that fails after it chose a seat leaves no claim behind', () => world(async (w) => {

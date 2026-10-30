@@ -1,6 +1,6 @@
 // The quota windows (#63, K2 option B): what Claude Code itself reports, read from two sources only. Source 1 is the
 // rate_limit_event of a stream-json log (utilization 0 to 1), source 3 the status line's rate_limits (used_percentage). One
-// reader of a seat's log serves bin/seat's stop and the ledger's table. The fixtures are recorded lines; the ones named
+// reader of a seat's log serves bin/seat's pick and the ledger's table. The fixtures are recorded lines; the ones named
 // synthetic are made from them, since no recorded event has a status other than "allowed".
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -70,8 +70,8 @@ function withRuns(logs, body) {
   }
 }
 
-test('seatEvent is the newest log of the seat that reports a seven-day use, with the log\'s time; seatUse reads it', async () => {
-  const { seatEvent, seatUse } = await seat();
+test('seatEvent is the newest log of the seat that reports a seven-day use, with the log\'s time', async () => {
+  const { seatEvent } = await seat();
   withRuns([
     ['issue-1', 'old', 2, 'real-event.jsonl', '2026-10-20T00:00:00Z'],
     ['issue-2', 'new', 2, 'synthetic-high-week-event.jsonl', '2026-10-25T00:00:00Z'],
@@ -80,13 +80,11 @@ test('seatEvent is the newest log of the seat that reports a seven-day use, with
     const e = seatEvent(runs, 2);
     assert.equal(e.info.unifiedWindows.seven_day.utilization, 0.74);
     assert.equal(e.asOf, Date.parse('2026-10-25T00:00:00Z'));
-    assert.equal(seatUse(runs, 2), 0.74);
-    assert.equal(seatUse(runs, 1), 0.74);
+    assert.equal(seatEvent(runs, 1).info.unifiedWindows.seven_day.utilization, 0.74);
     assert.equal(seatEvent(runs, 1).info.status, 'rejected');
   });
   withRuns([], (runs) => {
     assert.equal(seatEvent(runs, 2), null);
-    assert.equal(seatUse(runs, 2), null);
   });
 });
 
