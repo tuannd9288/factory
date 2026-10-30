@@ -257,8 +257,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
 | `bin/factory-sublayers` | The sublayer check (#82): the 17 `sublayer-<code>` labels exist with their descriptions, and every open issue carries exactly one; the list is `bin/lib/sublayers.mjs`, the template `.github/ISSUE_TEMPLATE/task.md` |
 | `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is what a way of working keeps, `probes/pack-probe.mjs` proves it |
-| `scripts/verify` | This repository's own checks: the kit's tests in `test/`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
-| `test/` | The kit's tests; each check is shown failing on a bad input |
+| `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs` (not `test/parked/`), each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
+| `test/` | The kit's tests; each check is shown failing on a bad input. `test/parked/` holds the parked proof of the probe programme, `factory-sublayers` and the stub reviewer, which `scripts/verify` does not run (#203, #153); run it by hand with `node --test test/parked/*.test.mjs` (`node --test test/parked/` fails on Node 26.3.0) |
 | `NOTICE` | What was taken from other projects, with the commit |
 
 ## Taking a repository in
