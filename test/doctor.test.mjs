@@ -223,6 +223,20 @@ test('settings: shared runners under entire are green, the #155 exception; the s
   assert.ok(!r.out.includes('zz-shared-label'), r.out);
 });
 
+test('settings: unset runners are red on a private repository only; an unset GATE_REVIEWER is red on both (#210)', () => {
+  const repo = (isPrivate) => ({ id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, private: isPrivate });
+  const unset = { GATE_RUNNER: null, GATE_PR_RUNNER: null, GATE_TRUSTED_RUNNER: null };
+  let r = doctor({ held: state(kitMerge, { repo: repo(false), variables: gateVariables(unset) }) });
+  assert.equal(r.code, 0, r.out);
+  r = doctor({ held: state(kitMerge, { repo: repo(true), variables: gateVariables(unset) }) });
+  assert.equal(mark(r.lines.settings), 'RED', r.out);
+  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_RUNNER is not set/);
+  r = doctor({ held: state(kitMerge, { repo: repo(false), variables: gateVariables({ ...unset, GATE_REVIEWER: null }) }) });
+  assert.equal(mark(r.lines.settings), 'RED', r.out);
+  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_REVIEWER is not set/);
+  assert.doesNotMatch(r.out.replace(/\n\s+/g, ' '), /GATE_RUNNER is not set/);
+});
+
 test('gate-block: red when the block is not .gate/gate-section.md byte for byte, or is gone', () => {
   const text = readFileSync(join(dir, 'root/app/AGENTS.md'), 'utf8');
   for (const [name, agents] of [['edited', text.replace('## Gate', '## Gate!')], ['gone', '# app\n']]) {
