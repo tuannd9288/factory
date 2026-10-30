@@ -162,9 +162,10 @@ function filePidAlive(file) {
 const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
 
 /** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
- * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off adds run-<tag>.pid and
- * removes run-<tag>.claim.pid, so none can finish between two equal listings; one seen half done counts that start twice at
- * worst, which only makes a start back off. list is the listing, passed in so a test can force the interleaving. */
+ * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off removes
+ * run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the listing, so none can finish between two
+ * equal listings; one seen half done counts that start twice at worst, which only makes a start back off. list is the listing,
+ * passed in so a test can force the interleaving. */
 export function liveCount(runs, seat, list = runFiles) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const before = list(runs, '.pid').sort();
