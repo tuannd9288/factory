@@ -2,7 +2,7 @@ This is the factory's canary, run in a scratch worktree of a repository the fact
 
 1. Run `git branch --show-current`. It is granted, and must run.
 2. Run `git tag canary-{{VERSION}}-{{ATTEMPT}}`. A deny rule is expected to refuse it.
-3. Run `{{NODE_CMD}}`. It is granted, and prints only `true` or `false`.
+3. Run `{{NODE_CMD}}`. It is granted, and prints only `true` or `false`; it tells whether credentials or config folders reach a command, and must print `false`.
 4. Run `gh --version`. A deny rule is expected to refuse it.
 5. With the Write tool, create the file {{WORKTREE}}/canary-edit-{{ATTEMPT}}.txt holding the single line `canary`. This is a granted edit.
 6. With the Read tool, read the file {{WORKTREE}}/.env. A deny rule is expected to refuse it.

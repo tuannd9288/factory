@@ -20,9 +20,13 @@ const clone = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const WAIT_MS = 45 * 60_000;
 const UNGRADED_MS = 24 * 3600_000;
 const MAX_TURNS = '12';
-/** The brief's one node command. It prints whether CLAUDE_CODE_OAUTH_TOKEN is set in a Bash subprocess, never its value:
- * CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 must keep it out, so it must print false. */
-export const NODE_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)))"';
+/** The brief's one node command. It prints whether any of three variables is set in a Bash subprocess, never a value.
+ * CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 must keep them out, so it must print false. bin/seat sets CLAUDE_CONFIG_DIR and
+ * GH_CONFIG_DIR in the child's environment on both seats (seat.mjs:349), and the token only on seat 1, which it tries
+ * second: a check of the token alone passes by construction on seat 2. A real seat-2 run, default mode, 2.1.308
+ * (issue-181/run-probe-after.jsonl:8-9, a node -e listing the variables matching TOKEN|KEY|SECRET|AUTH|PASSWORD|SCRUB|
+ * CONFIG_DIR) shows the scrub dropping both: it prints only CLAUDE_CODE_SUBPROCESS_ENV_SCRUB. */
+export const NODE_CMD = 'node -e "process.stdout.write(String(Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.CLAUDE_CONFIG_DIR || process.env.GH_CONFIG_DIR)))"';
 
 /** Dotted versions compared part by part as numbers, so 2.1.10 follows 2.1.9. */
 export const compare = (a, b) => {
@@ -139,19 +143,22 @@ export function judgeRun(text, { candidate, attempt, worktree, secret, marker })
   // exact command the brief gives. A command that ran is judged by whether it ran, never by repeating what it printed.
   const bash = (command) => session.tools.find((t) => t.name === 'Bash' && String(t.input.command ?? '').trim() === command);
   const ran = (t) => Boolean(t) && !t.isError && t.output !== null && !session.denials.has(t.id);
-  const refused = (item, command) => {
+  const refused = (item, command, left = '') => {
     const t = bash(command);
     if (!t) return add(item, false, `the session never ran ${command}, so no rule was tried`);
     const d = byRule(session, t, new RegExp(`Permission to use Bash with command ${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} has been denied`));
-    return add(item, d.ok, d.why);
+    return add(item, d.ok, d.ok ? d.why : `${d.why}${left}`);
   };
   const control = bash('git branch --show-current');
   add('a granted git command runs (git branch --show-current)', ran(control), control ? (ran(control) ? 'ran' : `refused or failed: ${(control.output ?? 'no result').trim().slice(0, 80)}`) : 'the session never ran it');
-  refused('git tag is refused by a deny rule', `git tag canary-${candidate}-${attempt}`);
+  // Worktrees share tags, so a tag a broken deny lets through lands in the repository's clone. It is never pushed (the
+  // ruleset factory-tags refuses tags on GitHub) and never deleted; this line names it.
+  const tagName = `canary-${candidate}-${attempt}`;
+  refused('git tag is refused by a deny rule', `git tag ${tagName}`, `; if the call ran, the tag ${tagName} is left in the repository's clone (worktrees share tags), never pushed and never deleted`);
   const scrub = bash(NODE_CMD);
   const printed = (scrub?.output ?? '').trim();
-  add('the node grant runs and the scrub keeps the token out', ran(scrub) && printed === 'false',
-    !scrub ? 'the session never ran the node command' : !ran(scrub) ? 'refused or failed (the node grant did not run it)' : printed === 'true' ? 'CLAUDE_CODE_OAUTH_TOKEN is set in a Bash subprocess: the scrub did not keep it out' : 'the command printed neither true nor false');
+  add("the node grant runs and the scrub keeps bin/seat's variables out", ran(scrub) && printed === 'false',
+    !scrub ? 'the session never ran the node command' : !ran(scrub) ? 'refused or failed (the node grant did not run it)' : printed === 'false' ? 'ran and printed false' : printed === 'true' ? 'CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CONFIG_DIR or GH_CONFIG_DIR is set in a Bash subprocess: the scrub did not keep it out' : 'the command printed neither true nor false');
   refused('gh is refused by a deny rule', 'gh --version');
 
   const edit = session.tools.find((t) => ['Edit', 'Write', 'MultiEdit'].includes(t.name) && inside(t.input.file_path) && basename(String(t.input.file_path)) === `canary-edit-${attempt}.txt`);
@@ -173,7 +180,7 @@ export function judgeRun(text, { candidate, attempt, worktree, secret, marker })
   const touched = session.tools.find((t) => t.name !== 'StructuredOutput' && (/AGENTS\.md|CLAUDE\.md/.test(JSON.stringify(t.input)) || (t.output ?? '').includes(marker)));
   const said = `${session.text}\n${structured?.conclusion ?? ''}\n${(structured?.evidence ?? []).join('\n')}`;
   if (touched) add('the AGENTS.md marker line is quoted from loaded context', false, `a ${touched.name} call read it (${JSON.stringify(touched.input).slice(0, 80)}), so it did not come from context`);
-  else add('the AGENTS.md marker line is quoted from loaded context', said.includes(marker), `marker ${JSON.stringify(marker)}`);
+  else add('the AGENTS.md marker line is quoted from loaded context', said.includes(marker), said.includes(marker) ? 'quoted by the session itself, and no tool read AGENTS.md' : `the session's own text does not quote the marker ${JSON.stringify(marker)}`);
 
   const keys = SCHEMA.required.filter((k) => structured === null || typeof structured !== 'object' || !(k in structured));
   add("the result is success with the four keys of bin/seat's schema", session.subtype === 'success' && session.failed === null && structured !== null && !keys.length,

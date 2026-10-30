@@ -2,7 +2,7 @@
   "about": "Refusals as Claude Code 2.1.308 wrote them in real runs, copied from the lines named in source (the files are under ~/factory-runs). The tool_use line of each case is not kept: the test builds one with the same id and command. permission_denials is the shape of issue-181/run-probe-after.jsonl:27.",
   "cases": [
     {
-      "source": "issue-181/run-probe-after.jsonl:14-15, permissionMode default, claude_code_version 2.1.308 (a bin/seat worker run; a plain command refused by a rule)",
+      "source": "issue-181/run-probe-after.jsonl:14-15, permissionMode default, claude_code_version 2.1.308, model claude-sonnet-5-5, cwd issue-181/probe-w (a probe session of #181 in default mode; its own log does not hold its arguments, so which rule refused the command is not known; the wording is what is used)",
       "id": "toolu_01BuUt4kcUFvSLQTzTJRUWtv",
       "command": "git -C /Users/factory/factory-runs/issue-181/probe-w log -1 --oneline",
       "event": "{\"type\":\"system\",\"subtype\":\"permission_denied\",\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01BuUt4kcUFvSLQTzTJRUWtv\",\"decision_reason_type\":\"subcommandResults\",\"message\":\"Permission to use Bash with command git -C /Users/factory/factory-runs/issue-181/probe-w log -1 --oneline has been denied.\",\"uuid\":\"227a335e-c3b5-4234-8982-a66a68dfe347\",\"session_id\":\"2820a677-7f40-4611-8bb7-a04888859450\"}",
