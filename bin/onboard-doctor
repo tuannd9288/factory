@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Reads a repository the factory has taken in and prints one line per check, green or red; it changes nothing:
+#   bin/onboard-doctor <owner/name> --id <repository id>
+# The checks: the rulesets and settings the kit's gate wants, the Gate block of AGENTS.md against .gate/gate-section.md,
+# verify on the default branch's head, CLAUDE.md, the size of AGENTS.md, and the kit pull request's evidence. Run it logged
+# into gh as the repository's owner, as bin/onboard-owner, from a commit on main: it refuses any other, and refuses what
+# onboard-owner refuses. Every gh call is a read, each line names what it read, and no token or variable value is printed.
+# Exit 0 when every line is green, 1 when any is red, 2 on a refusal. FACTORY_AGENT (default: tuan9288-agent) names the
+# agents' account.
+exec node "$(dirname "$0")/lib/doctor.mjs" "$@"
