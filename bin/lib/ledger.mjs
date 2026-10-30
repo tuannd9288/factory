@@ -553,8 +553,9 @@ function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-/** The factory's clones under root, by owner/name. */
-function clonesUnder(root) {
+/** The factory's clones under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose
+ * `origin` is on github.com. The merge queue (bin/lib/queue.mjs) finds the repositories taken in by the same rule. */
+export function clonesUnder(root) {
   const out = new Map();
   for (const name of existsSync(root) ? readdirSync(root) : []) {
     const dir = join(root, name);

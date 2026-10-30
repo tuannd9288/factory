@@ -374,8 +374,10 @@ for his approval). Once it merged, Colly runs `bin/onboard-owner … --apply` ag
 the reviewer's secret into `reviewer` where the repository uses the kit's Claude reviewer (Entire needs none, #155),
 and logs into the profile in a new pane opened in the repository (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
 
-Run `bin/factory-queue sweep --repo <owner/repo>...` from launchd every minute, logged into `gh` as the agents'
-account (it refuses the Human's): the ruleset requires a branch to be up to date, GitHub updates none by itself, and
+Run `bin/factory-queue sweep` from launchd every minute, logged into `gh` as the agents'
+account (it refuses the Human's). It finds the repositories itself (#211): each clone under the root that holds the kit,
+as the ledger finds them, so a repository taken in later is swept with no new install; `--repo` gives an explicit
+list instead. The ruleset requires a branch to be up to date, GitHub updates none by itself, and
 without the queue every auto-merge pull request strands when another lands. Each run is one sweep under a lock; a
 repository whose sweep failed keeps `~/.local/state/factory/queue-<owner>-<repo>.failed` until one succeeds; a run that
 fails before its repository loop keeps `queue-run.failed` until a run gets past it; a clean sweep writes
@@ -386,11 +388,11 @@ ruleset off, after taking auto-merge off every open pull request, since with the
 The queue leaves a tier-3 pull request behind `main` until the Human approved it, then updates it once; his approval
 holds on the updated head, whose patch is unchanged (`git patch-id`), so he is asked once.
 
-`bin/factory-queue plist --repo <owner/repo>...` prints that job, `com.tuanhub.factory.queue`: every 60 s from this
+`bin/factory-queue plist` prints that job, `com.tuanhub.factory.queue`, which lists no repository: every 60 s from this
 clone, with the `gh` and `node` the shell finds, logging to `~/Library/Logs/factory/queue.log`. With `--daemon` it is
 a LaunchDaemon run by the account that printed it, `factory`, with that account's `HOME`, and never `KeepAlive`: a
 sweep exits after each run, so it would restart at once, in a loop. Before loading it, run `bin/factory-queue check`
-with the same repositories from the same shell: it runs one sweep in the job's environment, makes the log's folder,
+from the same shell: it runs one sweep in the job's environment, makes the log's folder,
 which launchd does not, and says whether the job is ready. `factory`'s gh login keeps its token in a file
 (`gh auth login --insecure-storage`), since the keychain is locked over SSH and under launchd. The Human installs the
 plist with `sudo install -o root -g wheel -m 644 <plist> /Library/LaunchDaemons/com.tuanhub.factory.queue.plist`,

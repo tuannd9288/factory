@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # The factory's merge queue, for repositories where GitHub offers none, run once per call by launchd as the agents'
 # GitHub account (it refuses the Human's):
-#   bin/factory-queue sweep --repo owner/name...   update the oldest auto-merge PR left behind main, and re-run a
+#   bin/factory-queue sweep [--repo owner/name...] update the oldest auto-merge PR left behind main, and re-run a
 #                                                  tier check after the Human approved its head
-#   bin/factory-queue plist --repo owner/name...   print the launchd job that runs that sweep every minute
+#   bin/factory-queue plist [--repo owner/name...] print the launchd job that runs that sweep every minute
 #     [--daemon]                                   as a LaunchDaemon run by this account (#24), for the Human to load
-#   bin/factory-queue check --repo owner/name...   run one sweep in that job's environment, before the Human loads it
+#   bin/factory-queue check [--repo owner/name...] run one sweep in that job's environment, before the Human loads it
+# With no --repo, which is how the job runs, a sweep covers every repository taken in (#211), so one with the kit
+# needs no new install. The rule is the ledger's (clonesUnder in bin/lib/ledger.mjs): a folder of the factory's root
+# ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its origin on github.com.
+# None found is a sweep of nothing that says so, not an error. --repo gives an explicit list in place of the search.
 # A rollback is a revert pull request through the gate. Turning the ruleset off is the Human's emergency step alone,
 # with auto-merge off on every open pull request first: with the ruleset off, every one of them would land unjudged.
 exec node "$(dirname "$0")/lib/queue.mjs" "$@"
