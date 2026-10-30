@@ -429,10 +429,18 @@ Code caches a plugin under the profile's `CLAUDE_CONFIG_DIR`, so the cache is mo
 root, `~/.local/share/factory/plugins/<path of the profile's config dir under ~/.agent-profiles>`, mode 700, which
 `bin/seat` and `packs/pstack/bin/lead` set as `CLAUDE_CODE_PLUGIN_CACHE_DIR`. Both install the work folder's enabled
 plugins into it before the session (`bin/lib/plugins.mjs`), through a throwaway config folder of their own under
-`~/.local/share/factory/plugin-install/`, so no profile's folder is touched; a failed install, or an enabled plugin the
-settings do not pin, stops the start. A session reads its own earlier transcripts from copies outside every profile: a
+`~/.local/share/factory/plugin-install/`, so no profile's folder is touched. The marketplace comes only from the
+factory's own pin, `packs/pstack/settings.json` of the checkout that runs, never from the work folder, which may be a
+candidate branch and would otherwise re-point the root every later session on the profile shares. The work folder decides
+only whether to install: its `.claude/settings.json` must enable the pin's `pstack@<name>` and no other plugin, and declare
+no marketplace but the pin, with the pin's own source; anything else (an older pin included: take the kit update), a
+name that is not plain letters, digits, dot, dash and underscore, or a failed install stops the start before any folder is
+made or any `claude` call is run. A session reads its own earlier transcripts from copies outside every profile: a
 seat's `run-<tag>.jsonl` in its run folder, and a Lead's `~/factory-runs/<repo>-lead/transcripts/`, which a Stop and
 SessionEnd hook of the launcher (`packs/pstack/bin/transcript-copy.mjs`) fills with the one transcript its input names.
+The hook runs it with the `node` that `PATH` names when `lead` starts (`/opt/homebrew/bin/node`, a link `brew upgrade`
+keeps, not its Cellar path), and `lead` refuses to start with none. Only the Lead reads those copies: every seat role is
+denied `Read(~/factory-runs/*-lead/transcripts/**)`.
 
 A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
