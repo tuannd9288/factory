@@ -401,6 +401,24 @@ test('a self-hosted trusted runner that is, or shares a label with, another job\
   }
 });
 
+test('GitHub-hosted runners may be the same for all three jobs, and a self-hosted one may share only the OS and architecture labels (#210)', () => {
+  const allowed = [
+    ['--runner', '"ubuntu-latest"', '--pr-runner', '"ubuntu-latest"', '--trusted-runner', '"ubuntu-latest"'],
+    ['--runner', '["self-hosted","macOS","ARM64","a"]', '--pr-runner', '["self-hosted","macOS","ARM64","b"]', '--trusted-runner', '["self-hosted","macOS","ARM64","t"]'],
+    ['--runner', '["self-hosted","macOS","a"]', '--trusted-runner', '"ubuntu-latest"'],
+  ];
+  for (const extra of allowed) {
+    const w = world();
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, '--apply']);
+      assert.equal(out.code, 0, `${extra.join(' ')}\n${out.out}`);
+      assert.match(out.out, /done {4}variable GATE_TRUSTED_RUNNER/);
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
