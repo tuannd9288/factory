@@ -454,6 +454,27 @@ test('leaving entire brings the shared-runner check back, with no runner option 
   }
 });
 
+test('a trusted runner whose labels are contained in the other job\'s, or hold them, is refused with nothing done (#210)', () => {
+  const refused = [
+    ['--pr-runner', '["self-hosted","macOS"]', '--trusted-runner', '["self-hosted","macOS","trusted"]'],
+    ['--runner', '["self-hosted","macOS","main"]', '--trusted-runner', '["self-hosted","macOS"]'],
+    ['--runner', '["self-hosted","main"]', '--trusted-runner', '"self-hosted"'],
+  ];
+  for (const extra of refused) {
+    const w = world();
+    try {
+      for (const apply of [[], ['--apply']]) {
+        const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, ...apply]);
+        assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+        assert.match(out.out, /GATE_TRUSTED_RUNNER/);
+        assert.deepEqual(w.writes(), []);
+      }
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
