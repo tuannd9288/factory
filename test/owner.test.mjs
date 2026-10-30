@@ -436,6 +436,24 @@ test('the #155 exception lets the three runners be shared under entire, and one 
   }
 });
 
+test('leaving entire brings the shared-runner check back, with no runner option given (#210)', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
+  const held = [{ name: 'GATE_REVIEWER', value: 'entire' }, ...['GATE_RUNNER', 'GATE_PR_RUNNER', 'GATE_TRUSTED_RUNNER'].map((name) => ({ name, value: SHARED }))];
+  const w = world({ kitLanded: true, collaborator: 'write', apps, variables: held });
+  try {
+    let out = w.owner(['tuannd9288/app', '--id', '1234', '--reviewer', 'entire', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    w.clear();
+    out = w.owner(['tuannd9288/app', '--id', '1234', '--reviewer', 'claude', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /GATE_TRUSTED_RUNNER/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
