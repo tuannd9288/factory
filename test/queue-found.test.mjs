@@ -40,6 +40,19 @@ function withRoot(body) {
   }
 }
 
+test('a kit clone with no origin is skipped by name, and the others are still swept', () => {
+  withRoot(({ dir, root, queue }) => {
+    clone(root, 'app', 'https://github.com/o/app.git', true);
+    clone(root, 'stray', 'https://github.com/o/stray.git', true);
+    execFileSync('git', ['-C', join(root, 'stray'), 'remote', 'remove', 'origin']);
+    const r = queue('sweep');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /skipped .*stray/);
+    assert.ok(existsSync(join(dir, 'state/queue-o-app.ok')), 'the good clone was not swept');
+    assert.ok(!existsSync(join(dir, 'state/queue-run.failed')), 'the odd clone failed the run');
+  });
+});
+
 test('sweep with no --repo and no repository taken in logs that and is not an error', () => {
   withRoot(({ dir, root, queue }) => {
     clone(root, 'plain', 'https://github.com/o/plain.git', false);
