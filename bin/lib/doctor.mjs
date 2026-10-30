@@ -55,6 +55,14 @@ function factoryProblem() {
   return null;
 }
 
+/** The calls made so far, for the Human to see what ran on his login: on every exit after the first one. */
+function listCalls(login, what) {
+  if (!calls.size) return;
+  console.log(`onboard-doctor: ${what}; calls on ${login ?? 'the'} gh login, every one a read:`);
+  for (const c of calls) console.log(`  ${c}`);
+}
+let asLogin;
+
 /** Where the repository is cloned from: its URL on GitHub, through gh's own credential helper, unless DOCTOR_CLONE_URL
  * names a local folder as an absolute path. Anything else that variable holds is a refusal and not a fallback. */
 function cloneSource(slug) {
@@ -94,13 +102,13 @@ function format(ok, label, result, reads) {
 }
 
 function checkSettings(ctx) {
-  const reads = 'rulesets, env, collaborator, vars';
+  const reads = 'rulesets env collab invites kit vars';
   const { slug, agent, branch, kitLanded, reviewer } = ctx;
   const want = wanted({ kitLanded: true, branch, reviewer });
   const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
   const undone = left(slug, agent, current(slug, agent, names, get), want);
   const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...undone];
-  return { ok: !problems.length, result: problems.length ? problems : 'every ruleset, the reviewer environment and the agents\' access as the kit\'s gate wants', reads };
+  return { ok: !problems.length, result: problems.length ? problems : 'all as the kit\'s gate wants', reads };
 }
 
 function checkGateBlock(ctx) {
@@ -206,14 +214,17 @@ function main(argv) {
   const who = identify('onboard-doctor', { slug, id, agent, read: get });
   if (who.refusal) {
     console.error(who.refusal);
+    listCalls(undefined, 'refused');
     return 2;
   }
   const { login, repo } = who;
+  asLogin = login;
   const branch = repo.default_branch;
   const source = cloneSource(slug);
   const folder = mkdtempSync(join(tmpdir(), 'doctor-'));
   try {
     const clone = join(folder, 'repo.git');
+    if (!process.env.DOCTOR_CLONE_URL) calls.add(`git clone ${source.url}, read with ${login}'s credentials, through gh auth git-credential`);
     const cloned = git([...source.options, 'clone', '--quiet', '--bare', '--no-tags', source.url, clone]);
     if (cloned.status !== 0) throw new Refusal(`could not clone ${slug}: ${cloned.stderr.trim().split('\n')[0]}`);
     const rev = `refs/heads/${branch}`;
@@ -238,8 +249,7 @@ function main(argv) {
       if (!r.ok) red += 1;
       console.log(format(r.ok, label, r.result, r.reads));
     }
-    console.log(`onboard-doctor: ${red ? `${red} of ${CHECKS.length} red` : 'every check green'}; calls on ${login}'s gh login, every one a read:`);
-    for (const c of calls) console.log(`  ${c}`);
+    listCalls(`${login}'s`, red ? `${red} of ${CHECKS.length} red` : 'every check green');
     return red ? 1 : 0;
   } finally {
     rmSync(folder, { recursive: true, force: true });
@@ -252,6 +262,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
     console.error(`onboard-doctor: ${String(error.stderr || error.message).trim()}`);
+    listCalls(asLogin && `${asLogin}'s`, 'stopped');
     process.exitCode = 2;
   }
 }

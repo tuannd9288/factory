@@ -342,7 +342,7 @@ test('a green settings line is one line, and its tag names every read it makes',
   const lines = r.out.split('\n');
   const at = lines.findIndex((l) => /^ok\s+settings\s/.test(l));
   assert.ok(lines[at].length <= 120 && /^ok\s/.test(lines[at + 1]), r.out);
-  for (const read of ['rulesets', 'environment', 'collaborator', 'invitations', 'kit-files', 'variables']) assert.ok(lines[at].includes(read), `${read}: ${lines[at]}`);
+  for (const read of ['rulesets', 'env', 'collab', 'invites', 'kit', 'vars']) assert.ok(lines[at].includes(read), `${read}: ${lines[at]}`);
 });
 
 test('kit-evidence is called with --human, as bin/onboard and bin/kit-update call it', () => {
