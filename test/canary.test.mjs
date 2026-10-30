@@ -5,12 +5,13 @@
 // fake bin/seat that writes the stream a session would (test/canary-world.mjs). The checks themselves: canary-checks.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory, git } from './helpers.mjs';
-import { FAKE_SEAT } from './canary-world.mjs';
+import { FAKE_SEAT, NODE_CMD } from './canary-world.mjs';
 
 const read = (path) => readFileSync(path, 'utf8');
 const launcherText = (versions, v) => `#!/bin/sh\nexec '${join(versions, v)}' "$@"\n`;
@@ -85,7 +86,7 @@ test('the candidate runs through bin/seat, as a worker, behind a shim written wh
     assert.equal(run().code, 0);
     const [call] = seatCalls();
     const runDir = join(runs, 'canary-2.1.309');
-    assert.deepEqual(call.args, ['worker', join(runDir, 'brief.md'), '--run', runDir, '--work', join(runDir, 'worktree'), '--tag', 'canary-2.1.309', '--max-turns', '12']);
+    assert.deepEqual(call.args, ['worker', join(runDir, 'brief-1.md'), '--run', runDir, '--work', join(runDir, 'worktree'), '--tag', 'canary-2.1.309', '--max-turns', '12']);
     const shimDir = join(state, 'canary-bin');
     assert.equal(call.path.split(':')[0], shimDir, 'the shim comes before every other claude');
     assert.equal(call.shim, join(shimDir, 'claude'), 'claude resolves to the shim');
@@ -106,7 +107,8 @@ test('the brief the seat runs is the repository\'s probes/canary-brief.md with t
     assert.ok(!/\{\{/.test(brief), 'a placeholder is left');
     assert.ok(brief.includes(join(runs, 'canary-2.1.309', 'worktree')));
     assert.ok(brief.includes(`begins with "${MARKER.slice(0, 20)}"`));
-    assert.ok(template.includes('{{WORKTREE}}') && template.includes('{{MARKER_START}}'));
+    for (const exact of [NODE_CMD, 'git tag canary-2.1.309-1', 'git branch --show-current', 'gh --version', 'canary-edit-1.txt']) assert.ok(brief.includes(exact), `${exact} is not in the brief`);
+    for (const p of ['{{WORKTREE}}', '{{MARKER_START}}', '{{ATTEMPT}}', '{{VERSION}}', '{{NODE_CMD}}']) assert.ok(template.includes(p), `${p} is not in the template`);
   });
 });
 
@@ -116,7 +118,7 @@ test('one run for each version, one level under the runs folder where bin/seat c
     assert.equal(seatCalls().length, 1);
     assert.deepEqual(readdirSync(runs), ['canary-2.1.10']);
     const names = readdirSync(join(runs, 'canary-2.1.10'));
-    for (const n of ['run-canary-2.1.10.jsonl', 'run-canary-2.1.10.pid', 'brief.md', 'worktree']) assert.ok(names.includes(n), `${n} is not in the run folder`);
+    for (const n of ['run-canary-2.1.10.jsonl', 'run-canary-2.1.10.pid', 'brief-1.md', 'attempts', 'worktree']) assert.ok(names.includes(n), `${n} is not in the run folder`);
   });
 });
 
@@ -182,6 +184,10 @@ test('a run that could not judge keeps its folder and worktree, and the retry re
     assert.equal(first.args[first.args.indexOf('--work') + 1], wt);
     assert.equal(second.args[second.args.indexOf('--work') + 1], wt);
     assert.equal(second.kept, true, 'the retry ran in the first worktree');
+    assert.ok(first.args[1].endsWith('brief-1.md') && second.args[1].endsWith('brief-2.md'), 'each attempt has its own brief and file name');
+    assert.ok(existsSync(first.args[1]), 'the first attempt\'s brief is kept');
+    assert.equal(read(join(runs, 'canary-2.1.10/attempts')), '2\n', 'attempts are counted in the run folder');
+    assert.ok(second.brief.includes('git tag canary-2.1.10-2') && second.brief.includes('canary-edit-2.txt'));
     assert.deepEqual(readdirSync(runs), ['canary-2.1.10']);
   });
 });
@@ -328,6 +334,41 @@ test('a launcher that is neither our script nor the installer\'s symlink is an e
     assert.notEqual(r.code, 0, 'a missing launcher');
     assert.equal(seatCalls().length, 0);
   });
+});
+
+// --- fail loudly: an error is never only a line in the log ---
+
+test('an error inside the run writes claude-canary.failed with its message and exits 2, rejecting nothing: a structured_output of the wrong shape', () => {
+  withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9', over: { structured: { conclusion: 'x', evidence: 'not a list', couldNotRead: [], needsHuman: [] } } }, ({ state, launcher, run }) => {
+    const before = read(launcher);
+    const r = run();
+    assert.equal(r.code, 2, r.out);
+    assert.equal(read(launcher), before);
+    assert.ok(!existsSync(join(state, 'claude-rejected')));
+    assert.match(read(join(state, 'claude-canary.failed')), /claude: the run raised TypeError: .*join is not a function/);
+  });
+});
+
+test('a session that ends between the poll and the kill at the timeout is not an error: stop() says it was gone', async () => {
+  const { stop } = await import(join(factory, 'bin/lib/canary.mjs'));
+  const dead = spawnSync('true').pid;
+  assert.equal(stop(dead), false);
+  const live = spawn('sleep', ['30']);
+  assert.equal(stop(live.pid), true);
+  await once(live, 'exit');
+});
+
+test('a first-seen file that is empty or unparsable counts as failed: .failed names it, instead of "not 24 h yet"', () => {
+  for (const text of ['', 'garbage\n']) {
+    withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9' }, ({ state, run, setSeat }) => {
+      setSeat({ refuse: true });
+      writeFileSync(join(state, 'claude-seen-2.1.10'), text);
+      const r = run();
+      assert.equal(r.code, 2, r.out);
+      assert.ok(!existsSync(join(state, 'claude-rejected')));
+      assert.match(read(join(state, 'claude-canary.failed')), /claude 2\.1\.10: .*claude-seen-2\.1\.10.*(cannot be read|parsed)/);
+    });
+  }
 });
 
 // --- the launchd job ---

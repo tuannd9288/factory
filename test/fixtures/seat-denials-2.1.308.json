@@ -1,0 +1,23 @@
+{
+  "about": "Refusals as Claude Code 2.1.308 wrote them in real runs, copied from the lines named in source (the files are under ~/factory-runs). The tool_use line of each case is not kept: the test builds one with the same id and command. permission_denials is the shape of issue-181/run-probe-after.jsonl:27.",
+  "cases": [
+    {
+      "source": "issue-181/run-probe-after.jsonl:14-15, permissionMode default, claude_code_version 2.1.308 (a bin/seat worker run; a plain command refused by a rule)",
+      "id": "toolu_01BuUt4kcUFvSLQTzTJRUWtv",
+      "command": "git -C /Users/factory/factory-runs/issue-181/probe-w log -1 --oneline",
+      "event": "{\"type\":\"system\",\"subtype\":\"permission_denied\",\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01BuUt4kcUFvSLQTzTJRUWtv\",\"decision_reason_type\":\"subcommandResults\",\"message\":\"Permission to use Bash with command git -C /Users/factory/factory-runs/issue-181/probe-w log -1 --oneline has been denied.\",\"uuid\":\"227a335e-c3b5-4234-8982-a66a68dfe347\",\"session_id\":\"2820a677-7f40-4611-8bb7-a04888859450\"}",
+      "result": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"content\":\"Permission to use Bash with command git -C /Users/factory/factory-runs/issue-181/probe-w log -1 --oneline has been denied.\",\"is_error\":true,\"tool_use_id\":\"toolu_01BuUt4kcUFvSLQTzTJRUWtv\"}]},\"session_id\":\"2820a677-7f40-4611-8bb7-a04888859450\"}"
+    },
+    {
+      "source": "zgw-t4/run-worker.jsonl:8-10, permissionMode acceptEdits, claude_code_version 2.1.308 (gh refused by Bash(gh:*))",
+      "id": "toolu_014VhJCHGdRWmkTKf7sCQXkA",
+      "command": "gh issue view 198 -R tuannd9288/zalo-gateway --json body --jq .body",
+      "event": "{\"type\":\"system\",\"subtype\":\"permission_denied\",\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_014VhJCHGdRWmkTKf7sCQXkA\",\"decision_reason_type\":\"subcommandResults\",\"message\":\"Permission to use Bash with command gh issue view 198 -R tuannd9288/zalo-gateway --json body --jq .body has been denied.\",\"uuid\":\"386c29d5-7b60-4751-9cfb-6df673d90c30\",\"session_id\":\"d32de9b9-cb35-4ba7-90a3-175f737a8f91\"}",
+      "result": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"content\":\"Permission to use Bash with command gh issue view 198 -R tuannd9288/zalo-gateway --json body --jq .body has been denied.\",\"is_error\":true,\"tool_use_id\":\"toolu_014VhJCHGdRWmkTKf7sCQXkA\"}]},\"session_id\":\"d32de9b9-cb35-4ba7-90a3-175f737a8f91\"}"
+    }
+  ],
+  "read": {
+    "source": "issue-111/run-reviewer.jsonl:65, permission_denied of the Grep tool, decision_reason_type rule, a seat 2 reviewer run (no log holds a refusal of the Read tool)",
+    "message": "Permission to read /Users/factory/.agent-profiles/seats/2/claude/projects/-Users-factory-factory-runs-issue-111-w111/92f46acd-3112-4f85-be98-81afcbd2366f/tool-results/bvnjblb60.txt has been denied."
+  }
+}

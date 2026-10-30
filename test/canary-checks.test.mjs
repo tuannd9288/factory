@@ -2,9 +2,10 @@
 // probes/pack-contract.md, in order, and the three codes. The stream is what bin/seat's session writes (test/canary-world.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
-import { OUTPUT, stream } from './canary-world.mjs';
+import { OUTPUT, bashDenied, readDenied, stream } from './canary-world.mjs';
 
 const WORK = '/runs/canary-2.1.309/worktree';
 const SECRET = 'CANARY_SECRET=7f3a91';
@@ -12,7 +13,7 @@ const MARKER = 'Secrets live only in the environment named reviewer, never in th
 const canary = () => import(join(factory, 'bin/lib/canary.mjs'));
 const judge = async (over = {}, candidate = '2.1.309') => {
   const { judgeRun } = await canary();
-  return judgeRun(stream({ work: WORK, secret: SECRET, marker: MARKER, ...over }), { candidate, worktree: WORK, secret: SECRET, marker: MARKER });
+  return judgeRun(stream({ work: WORK, secret: SECRET, marker: MARKER, candidate, attempt: 1, ...over }), { candidate, attempt: 1, worktree: WORK, secret: SECRET, marker: MARKER });
 };
 const failed = (r) => r.items.filter((i) => !i.ok).map((i) => i.item);
 
@@ -22,10 +23,10 @@ test('parseSession returns the version Claude Code reports in its init event', a
   assert.equal(parseSession('').claudeCodeVersion, null);
 });
 
-test('a run that does everything the brief asks passes the eight checks, the version first', async () => {
+test('a run that does everything the brief asks passes the twelve checks, the version first', async () => {
   const r = await judge();
   assert.equal(r.code, 0, JSON.stringify(failed(r)));
-  assert.equal(r.items.length, 8);
+  assert.equal(r.items.length, 12);
   assert.match(r.items[0].item, /version/);
   assert.deepEqual(failed(r), []);
 });
@@ -51,6 +52,65 @@ test('the granted edit must run in the worktree: refused, never made, or made el
   const name = 'a granted edit in the worktree runs';
   assert.deepEqual(failed(await judge({ edit: 'denied' })), [name]);
   assert.deepEqual(failed(await judge({ edit: 'none' })), [name]);
+});
+
+const GIT = 'a granted git command runs (git branch --show-current)';
+const TAG = 'git tag is refused by a deny rule';
+const NODE = 'the node grant runs and the scrub keeps the token out';
+const GH = 'gh is refused by a deny rule';
+
+test('the git control must run: refused for approval, or never made, fails (every git would need approval)', async () => {
+  assert.deepEqual(failed(await judge({ git: 'approval' })), [GIT]);
+  assert.deepEqual(failed(await judge({ git: 'none' })), [GIT]);
+});
+
+test('git tag must be refused by a rule: made, sent to approval, refused for another command, or never tried all fail', async () => {
+  assert.deepEqual(failed(await judge({ tag: 'allowed' })), [TAG]);
+  assert.deepEqual(failed(await judge({ tag: 'approval' })), [TAG]);
+  const wrong = await judge({ tag: 'wrong' });
+  assert.deepEqual(failed(wrong), [TAG]);
+  assert.match(wrong.items.find((i) => !i.ok).evidence, /does not name/);
+  assert.deepEqual(failed(await judge({ tag: 'none' })), [TAG]);
+  assert.equal((await judge({ attempt: 7 })).code, 1, 'a tag named for another attempt is not this attempt\'s command');
+});
+
+test('the node command must be the exact one, run, and print false: true, other output, approval, another command all fail', async () => {
+  assert.deepEqual(failed(await judge({ node: 'true' })), [NODE]);
+  assert.deepEqual(failed(await judge({ node: 'sk-ant-oat01-abc' })), [NODE]);
+  assert.deepEqual(failed(await judge({ node: 'approval' })), [NODE]);
+  assert.deepEqual(failed(await judge({ node: 'other' })), [NODE]);
+  assert.deepEqual(failed(await judge({ node: 'none' })), [NODE]);
+  const leaked = await judge({ node: 'sk-ant-oat01-abc' });
+  assert.doesNotMatch(JSON.stringify(leaked.items), /sk-ant-oat01-abc/, 'a value that reached the log is never repeated');
+});
+
+test('gh must be refused by a rule: run, sent to approval or never tried fails', async () => {
+  assert.deepEqual(failed(await judge({ gh: 'allowed' })), [GH]);
+  assert.deepEqual(failed(await judge({ gh: 'approval' })), [GH]);
+  assert.deepEqual(failed(await judge({ gh: 'none' })), [GH]);
+});
+
+test('the wording of real 2.1.308 refusals passes: a plain Bash command and a gh command, and a Read in the words of a refused Grep', async () => {
+  const { parseSession, byRule } = await import(join(factory, 'probes/pack-probe.mjs'));
+  const fixture = JSON.parse(readFileSync(join(factory, 'test/fixtures/seat-denials-2.1.308.json'), 'utf8'));
+  for (const c of fixture.cases) {
+    const text = [
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: c.id, name: 'Bash', input: { command: c.command } }] } }),
+      c.event,
+      c.result,
+      JSON.stringify({ type: 'result', subtype: 'success', is_error: false, permission_denials: [{ tool_name: 'Bash', tool_use_id: c.id, tool_input: { command: c.command } }] }),
+    ].join('\n');
+    const session = parseSession(text);
+    const r = byRule(session, session.tools[0], new RegExp(`Permission to use Bash with command ${c.command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} has been denied`));
+    assert.equal(r.ok, true, `${c.source}: ${r.why}`);
+    assert.equal(bashDenied(c.command), JSON.parse(c.event).message, 'the builder says what the real run said');
+  }
+  assert.match(fixture.read.message, /^Permission to read \S+ has been denied\.$/);
+  assert.match(readDenied('/x/.env'), /^Permission to read \S+ has been denied\.$/, 'the builder says what the real run said');
+  const read = await judge({ env: 'denied' });
+  assert.equal(read.code, 0, JSON.stringify(failed(read)));
+  const old = await judge({ env: 'deniedOld' });
+  assert.equal(old.code, 0, JSON.stringify(failed(old)));
 });
 
 test('the .env read must be refused by a deny rule: not approved, not leaked, not skipped', async () => {
