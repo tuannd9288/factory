@@ -50,6 +50,17 @@ test('sweep with no --repo and no repository taken in logs that and is not an er
   });
 });
 
+test('plist --daemon with no --repo prints a job whose arguments list no repository', () => {
+  withRoot(({ dir, queue }) => {
+    const r = queue('plist', '--daemon');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    writeFileSync(join(dir, 'job.plist'), r.stdout);
+    const p = spawnSync('python3', ['-I', '-c', 'import json, plistlib, sys; print(json.dumps(plistlib.load(open(sys.argv[1], "rb"))))', join(dir, 'job.plist')], { encoding: 'utf8' });
+    assert.equal(p.status, 0, p.stderr);
+    assert.deepEqual(JSON.parse(p.stdout).ProgramArguments, [join(factory, 'bin/factory-queue'), 'sweep']);
+  });
+});
+
 test('sweep with no --repo sweeps each clone under the root that holds the kit, and no other', () => {
   withRoot(({ dir, root, queue }) => {
     clone(root, 'app', 'https://github.com/o/app.git', true);
