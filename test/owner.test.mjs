@@ -328,6 +328,20 @@ test('an option left out keeps the value held and the dry run says so; no other 
   }
 });
 
+test('a variable that holds another value is changed by a PATCH of its name, and read back (#210)', () => {
+  const w = world({ variables: [{ name: 'GATE_REVIEWER', value: 'claude' }, { name: 'GATE_RUNNER', value: '"ubuntu-latest"' }] });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--runner', MAIN, '--reviewer', 'claude', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const patches = w.writes().filter((l) => /\/actions\/variables/.test(l));
+    assert.deepEqual(patches, ['api -X PATCH repos/tuannd9288/app/actions/variables/GATE_RUNNER --input -']);
+    assert.equal(w.state().variables.find((v) => v.name === 'GATE_RUNNER').value, MAIN);
+    assert.match(out.out, /read back: every setting as planned/);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
