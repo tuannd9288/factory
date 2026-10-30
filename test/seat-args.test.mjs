@@ -2,7 +2,7 @@
 // exits 2 and starts nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fill, until, world } from './seat-world.mjs';
 
@@ -19,12 +19,15 @@ test('a value of --allow, --add-dir or --resume that starts with a dash is refus
 
 test('a --run, --work or --add-dir with a glob character is refused, naming the option and the value, since its Edit rule is a gitignore pattern (#192)', () => world((w) => {
   for (const name of ['a*b', 'a?b', 'issue-[12]']) {
+    // The folder exists and is its own real path, so only the glob check can refuse it.
     const bad = join(w.root, name);
+    mkdirSync(bad);
     for (const flag of ['--run', '--work', '--add-dir']) {
       const args = flag === '--add-dir' ? w.args('worker', [flag, bad]) : w.args('worker').map((a, i, all) => (all[i - 1] === flag ? bad : a));
       const r = w.seat(args);
       assert.equal(r.code, 2, `${flag} ${bad}: ${r.out}${r.err}`);
       assert.ok(r.err.includes(`${flag} ${bad}`), `${flag} ${bad}: ${r.err}`);
+      assert.match(r.err, /a folder with a glob character/, `${flag} ${bad}: ${r.err}`);
     }
   }
   assert.deepEqual(started(w), []);

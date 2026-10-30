@@ -411,7 +411,8 @@ every role is denied `env` and `printenv` (#181). With the scrub set, Claude Cod
 so bin/seat asks for it. Every role's `Write` and `Edit` tools and output redirects reach only the session's own folders
 (run, work and each `--add-dir`), through one `Edit` rule a folder, as `acceptEdits` limited them; the worker and the
 reviewer also get the filesystem commands `acceptEdits` approved (`mv`, `cp`, `rm`, `rmdir`, `touch`, and the worker
-`sed`), and the researcher none of them, so it cannot move or remove the folder `research-git` clones into (#188). Each folder must be a real absolute path with no glob character, because its rule is a gitignore pattern (#192). The
+`sed`), and the researcher none of them, so it cannot move or remove the folder `research-git` clones into (#188).
+Each folder must be a real absolute path with no glob character, because its rule is a gitignore pattern (#192). The
 scrub also drops `GH_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` there (probe, 2.1.308), so a `gh` started inside a command
 finds the `factory` user's own login; `gh` itself stays denied. The researcher is denied `git` itself; its git is
 `bin/research-git`, named in its brief by absolute path. It clones over https into `<run>/clones/<name>` and reads only
