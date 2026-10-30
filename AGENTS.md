@@ -429,10 +429,11 @@ the skill's first step reports the proof as off here. The first module,
 `deletion-proof` (step 1 of #17), proves a pull request whose only source change deletes whole files knip 6.42.1 listed
 as unused; no repository turns it on until #72 (a repository's knip config must be in its `.gate/protected`) lands.
 
-pstack, per repository: the pstack pack's `packs/pstack/settings.json` pins it through a `settings` marketplace named for the
-commit (`pstack-f713f14`, a `git-subdir` source at the full SHA) and enables it at project scope. Once per repository
-and profile, after the Human has opened `claude` in the repository and trusted the folder, install it from the
-repository root with `claude plugin install pstack@pstack-f713f14 --scope project`. Never at user scope: no install
+pstack, per repository: the pstack pack's `packs/pstack/settings.json` pins upstream's Claude Code build of it (#182: a
+`git-subdir` source, path `harness/pstack/claude-code` of `cursor/plugins`, at the full SHA) through a `settings`
+marketplace named for the commit (`pstack-4dd1d05`) and enables it at project scope. Once per repository and profile,
+after the Human has opened `claude` in the repository and trusted the folder, install it from the repository root with
+`claude plugin install pstack@pstack-4dd1d05 --scope project`. Never at user scope: no install
 without `--scope project` (or `--scope local`, which `packs/pstack/bin/lead` uses), and never the `--marketplace` form,
 which declares the marketplace in the profile's user settings. A new pin is a new marketplace name, in a tier-3 pull
 request per repository; attack 23 checks that two pins share one profile without clashing. Found on Claude Code 2.1.308,
@@ -442,22 +443,29 @@ request per repository; attack 23 checks that two pins share one profile without
   writer profile, untrusted `case1/a`). The pstack pack's `packs/pstack/settings.json` is in the order the installer writes: uninstalling
   and installing again in `case2/a` on the same profile left `git status` empty (a first install on a new profile was
   not tried). An uninstall rewrites `enabledPlugins` to `{}`.
-- 53 of 54 pstack skills carry `disable-model-invocation`, so the model's own Skill call is refused; `setup-pstack`
-  does not. The agents `pstack:poteto-agent` and `pstack:comment-sicko` have no guard: a model may spawn them, and with
+- 53 of 54 pstack skills carry `disable-model-invocation` (57 of 58 at `4dd1d05`), so the model's own Skill call is
+  refused; `setup-pstack` does not. The agents `pstack:poteto-agent` and `pstack:comment-sicko` have no guard: a model
+  may spawn them, and with
   poteto-agent poteto-mode's playbook, in a run nobody typed (#8 decides whether to forbid that).
 - `claude -p "/pstack:poteto-mode …"` starts the skill; a prompt that only names it does not. So an unattended prompt
   starts a skill explicitly with `/pstack:<skill>` at its start; without that the run follows the repository's `AGENTS.md`
   and whatever the model spawns.
 - Two pins under two marketplace names share one profile, each folder loading its own.
 
-pstack is a Cursor plugin; in Claude Code its texts run, and these parts do not, so the factory does not use them:
+pstack's skills use Cursor's names. 23 of its 58 skills point to its adapter, `docs/harness/claude-code.md`, which maps
+Cursor's tools, subagent fields, models and paths to Claude Code's, and skips, with one line, a step that needs Cursor
+Automations, Bugbot or a Cursor cloud agent itself. The factory does not use these parts:
 
-- `/setup-pstack`: it writes `~/.cursor/rules/pstack-models.mdc`, a Cursor rule for the whole machine that Claude
-  Code never loads. Every role keeps its default model.
-- Autopilot's owners and swarm of verifiers: Cursor cloud agents. Shipping's one verifier per pull request is taken,
-  on the Codex CLI instead (`packs/pstack/scripts/live-verify`, `packs/pstack/section.md`); its verdict is no gate
+- `/setup-pstack`: it writes `~/.claude/rules/pstack-models.md`, which the factory's deny rules hide; whether Claude
+  Code loads a profile's own `$CLAUDE_CONFIG_DIR/rules/` instead is not checked (#182). Without that file each pstack
+  role runs on its skill's default slug as the adapter maps it: a Claude slug to its `model` and `effort`, a `grok-*`
+  or `gpt-*` slug to the session model. So every step that asks for another model family runs on Claude until #182
+  sends it to Codex.
+- Autopilot's owners and swarm of verifiers: the adapter runs a Cursor cloud agent as a worktree subagent of the
+  session, outside `bin/seat` (#182). Shipping's one verifier per pull request is taken, on the Codex CLI instead
+  (`packs/pstack/scripts/live-verify`, `packs/pstack/section.md`); its verdict is no gate
   input, so the gate's reviewer (`review`, `verdict`) stays the only judge the merge waits for.
-- The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): they read
-  `~/.cursor/projects/<slug>/agent-transcripts/`, where Claude Code writes nothing. Adapted, they would read the
-  Human's own profile, which the kit's deny rules refuse.
+- The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): the adapter points them
+  at `~/.claude/projects/<slug>/`, but a factory profile keeps its transcripts under its own `CLAUDE_CONFIG_DIR`, in
+  `~/.agent-profiles/`, which the kit's deny rules refuse (#182).
 - `cursor-team-kit`'s `deslop`, `control-ui` and `control-cli`: they ship in another Cursor plugin, not in pstack.

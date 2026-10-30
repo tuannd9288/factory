@@ -3,7 +3,10 @@ The pstack pack takes the following from another project.
 pstack (https://github.com/cursor/plugins, path pstack), commit f713f14203cd6420cec13cd7c55c32d598dbab68
 (version 0.15.25). MIT License, Copyright (c) 2026 Lauren Tan. No code is copied; these contracts are ported.
 
-  packs/pstack/AGENTS.md       how a session reaches pstack's playbooks; no point is left where pstack
-  ("Where pstack yields")      yields to the gate. packs/pstack/settings.json pins pstack itself at this commit.
+  packs/pstack/section.md      how a session reaches pstack's playbooks; no point is left where pstack
+  ("Where pstack yields")      yields to the gate.
+
+packs/pstack/settings.json pins pstack itself, upstream's Claude Code build (path harness/pstack/claude-code), at
+commit 4dd1d05818d19792e7cd6e818f1667f95f7e1dbe (version 0.15.36), under the same license.
 
 The core's ports of pstack (packs/pstack/scripts/live-verify and its libraries) are in the root NOTICE.
