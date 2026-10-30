@@ -26,10 +26,12 @@ if (a[0] === 'pr' && a[1] === 'create') {
 // The comments are $SH/comments.json; a comment gh posts is by the pull request's author ($SH/author, else agent).
 const comments = () => (fs.existsSync(sh + '/comments.json') ? JSON.parse(fs.readFileSync(sh + '/comments.json', 'utf8')) : []);
 const author = () => (fs.existsSync(sh + '/author') ? fs.readFileSync(sh + '/author', 'utf8').trim() : 'agent');
-if (a[0] === 'pr' && a[1] === 'view') out(JSON.stringify({ author: { login: author() }, comments: comments() }));
+// $SH/login is the login gh runs as, when it is not the pull request's author.
+const login = () => (fs.existsSync(sh + '/login') ? fs.readFileSync(sh + '/login', 'utf8').trim() : author());
+if (a[0] === 'pr' && a[1] === 'view') out(JSON.stringify({ author: { login: author() }, headRefOid: read().headRefOid, comments: comments() }));
 if (a[0] === 'pr' && a[1] === 'comment') {
   const body = fs.readFileSync(a[a.indexOf('--body-file') + 1], 'utf8');
-  fs.writeFileSync(sh + '/comments.json', JSON.stringify([...comments(), { author: { login: author() }, body, includesCreatedEdit: false }]));
+  fs.writeFileSync(sh + '/comments.json', JSON.stringify([...comments(), { author: { login: login() }, body, includesCreatedEdit: false }]));
   out('https://github.com/o/app/pull/7#issuecomment-1\n');
 }
 if (a[0] === 'pr' && a[1] === 'merge') {
@@ -672,6 +674,36 @@ describe('a repository with no driver on main', () => {
     assert.equal(out.code, 0, out.out);
     assert.equal(posts(w).length, 1);
     assert.equal(notes(w).at(-1).body.split('\n')[0], noteFor(w.head()));
+  });
+
+  test('stops without arming when the note it posted does not count: the pull request\'s author is not its login', () => {
+    const w = opened();
+    writeFileSync(join(w.sh, 'author'), 'human');
+    writeFileSync(join(w.sh, 'login'), 'agent');
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: stopped on #7: .*author \(human\) is not ship's login/m);
+    assert.equal(posts(w).length, 1);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
+  });
+
+  test('judges the note on the pull request\'s head: an armed one whose head moved past the note is disarmed', () => {
+    const w = opened();
+    assert.equal(w.ship().code, 0);
+    w.pr({ headRefOid: 'e'.repeat(40) });
+    const out = w.ship();
+    assert.match(out.out, /^ship: disarmed #7: no no-driver note covers HEAD/m);
+    assert.equal(w.calls().at(-1), 'pr merge 7 --disable-auto');
+  });
+
+  test('refuses, posting and arming nothing, when the local HEAD is not the pull request\'s head', () => {
+    const w = opened();
+    w.pr({ headRefOid: 'e'.repeat(40) });
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} is not the pull request's head eeeeeee; pull or push so they agree$/m);
+    assert.equal(posts(w).length, 0);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
   });
 
   test('disarms an armed pull request when the only note is a forged one', () => {
