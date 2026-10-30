@@ -39,7 +39,7 @@ function fetched(view) {
 }
 
 /** Main's driver, read from the base commit, never the candidate's: a pull request cannot redefine its own proof. */
-function driverAt(base) {
+export function driverAt(base) {
   try {
     const d = JSON.parse(git(['show', `${base}:.gate/driver.json`]));
     return String(d.name ?? '').trim() && String(d.drive ?? '').trim() ? { name: d.name, start: d.start ?? '', drive: d.drive, network: d.network === true } : null;
