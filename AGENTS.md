@@ -379,7 +379,8 @@ code.claude.com/docs/en/setup), then removes versions older than the previous on
 <owner/repo>` prints its LaunchDaemon, `com.tuanhub.factory.claude-canary`, every six hours, loaded like the queue's. Every
 `*.failed` file in the state folder (`claude-canary.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
 the Human at once, at the start of each Claude session in this account, by `bin/factory-alerts`, the SessionStart hook
-in each profile's `settings.json`; `FACTORY_NO_ALERTS=1` silences it, and the probe and the canary set it. The hook in
+in each profile's `settings.json` and in the settings `bin/seat` passes to every session it starts (`--settings`);
+`FACTORY_NO_ALERTS=1` silences it, and the probe and the canary set it. The hook in
 the Supervisor's own settings on the MacBook is installed by Colly, not here.
 
 The live verifier runs on one Codex profile for every repository, `~/.agent-profiles/verifier/codex`, which only
