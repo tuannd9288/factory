@@ -312,6 +312,39 @@ test('settings: a line red with many calls left prints every call whole, over mo
   assert.ok(!r.out.includes('…'));
 });
 
+test('kit-evidence: a red line names the first failing path and counts the others', () => {
+  const tampered = git(target, 'rev-parse', 'refs/heads/tampered');
+  const url = join(dir, 'tampered-named.git');
+  git(dir, 'clone', '-q', '--bare', target, url);
+  git(url, 'update-ref', 'refs/heads/main', tampered);
+  const held = state(tampered);
+  held.prs.push({ number: 6, headRefName: 'factory/kit-bad', mergeCommit: { oid: tampered }, mergedAt: '2026-10-03T00:00:00Z' });
+  held.checks[6] = [{ name: 'verify', state: 'SUCCESS' }];
+  const r = doctor({ held, url });
+  assert.equal(mark(r.lines['kit-evidence']), 'RED', r.out);
+  assert.ok(r.out.includes('.gate/bin/verify'), r.out);
+});
+
+test('an exit after a gh call lists the calls already made: a refusal, and a clone that fails', () => {
+  let r = doctor({ held: state(kitMerge), args: ['tuannd9288/app', '--id', '9999'] });
+  assert.equal(r.code, 2, r.out);
+  assert.ok(r.out.includes('gh api user') && r.out.includes('gh api repos/tuannd9288/app\n'), r.out);
+  const empty = join(dir, 'not-a-repository');
+  mkdirSync(empty);
+  r = doctor({ held: state(kitMerge), url: empty });
+  assert.equal(r.code, 2, r.out);
+  assert.ok(r.out.includes('gh api user') && r.out.includes('gh api repos/tuannd9288/app\n'), r.out);
+  assert.deepEqual(r.left, []);
+});
+
+test('a green settings line is one line, and its tag names every read it makes', () => {
+  const r = doctor({ held: state(kitMerge) });
+  const lines = r.out.split('\n');
+  const at = lines.findIndex((l) => /^ok\s+settings\s/.test(l));
+  assert.ok(lines[at].length <= 120 && /^ok\s/.test(lines[at + 1]), r.out);
+  for (const read of ['rulesets', 'environment', 'collaborator', 'invitations', 'kit-files', 'variables']) assert.ok(lines[at].includes(read), `${read}: ${lines[at]}`);
+});
+
 test('kit-evidence is called with --human, as bin/onboard and bin/kit-update call it', () => {
   const stub = makeFactory(join(dir, 'stub'), ['bin', 'kit']);
   writeFileSync(join(stub, 'bin/kit-evidence'), '#!/usr/bin/env bash\necho "$@" >>"$EVIDENCE_ARGS"\necho kit-evidence: PASS\n');
