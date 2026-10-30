@@ -84,7 +84,7 @@ test('the candidate runs through bin/seat, as a worker, behind a shim written wh
   withMachine({ versions: ['2.1.309'], current: '2.1.309' }, ({ dir, versions, state, runs, run, seatCalls }) => {
     assert.equal(run().code, 0);
     const [call] = seatCalls();
-    const runDir = join(runs, 'canary', '2.1.309');
+    const runDir = join(runs, 'canary-2.1.309');
     assert.deepEqual(call.args, ['worker', join(runDir, 'brief.md'), '--run', runDir, '--work', join(runDir, 'worktree'), '--tag', 'canary-2.1.309', '--max-turns', '12']);
     const shimDir = join(state, 'canary-bin');
     assert.equal(call.path.split(':')[0], shimDir, 'the shim comes before every other claude');
@@ -104,27 +104,76 @@ test('the brief the seat runs is the repository\'s probes/canary-brief.md with t
     const [{ brief }] = seatCalls();
     const template = read(join(factory, 'probes/canary-brief.md'));
     assert.ok(!/\{\{/.test(brief), 'a placeholder is left');
-    assert.ok(brief.includes(join(runs, 'canary', '2.1.309', 'worktree')));
+    assert.ok(brief.includes(join(runs, 'canary-2.1.309', 'worktree')));
     assert.ok(brief.includes(`begins with "${MARKER.slice(0, 20)}"`));
     assert.ok(template.includes('{{WORKTREE}}') && template.includes('{{MARKER_START}}'));
   });
 });
 
-test('one run for each version: its folder and a worktree at origin/main, removed with the verdict', () => {
-  withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9', over: { version: '2.1.10' } }, ({ clone, runs, run, seatCalls }) => {
+test('one run for each version, one level under the runs folder where bin/seat counts it, with a worktree at origin/main', () => {
+  withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9', over: { version: '2.1.10' } }, ({ runs, run, seatCalls }) => {
     assert.equal(run().code, 0);
     assert.equal(seatCalls().length, 1);
-    assert.deepEqual(readdirSync(join(runs, 'canary')), ['2.1.10']);
-    assert.ok(existsSync(join(runs, 'canary/2.1.10/run-canary-2.1.10.jsonl')), 'the log stays');
-    assert.equal(worktrees(clone).length, 1, 'the worktree is removed once the version is judged');
+    assert.deepEqual(readdirSync(runs), ['canary-2.1.10']);
+    const names = readdirSync(join(runs, 'canary-2.1.10'));
+    for (const n of ['run-canary-2.1.10.jsonl', 'run-canary-2.1.10.pid', 'brief.md', 'worktree']) assert.ok(names.includes(n), `${n} is not in the run folder`);
   });
+});
+
+test('nothing is removed after a pass or a fail: the worktree, its .env and the log are the evidence', () => {
+  for (const over of [{ version: '2.1.10' }, { version: '2.1.10', env: 'approval' }]) {
+    withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9', over }, ({ clone, runs, run }) => {
+      assert.ok([0, 1].includes(run().code));
+      const dir = join(runs, 'canary-2.1.10');
+      assert.equal(worktrees(clone).length, 2, 'the worktree was removed');
+      assert.ok(existsSync(join(dir, 'worktree/AGENTS.md')) && existsSync(join(dir, 'worktree/.env')));
+      assert.ok(existsSync(join(dir, 'run-canary-2.1.10.jsonl')));
+    });
+  }
+});
+
+test('the time a version was first seen is published whole by rename and is not moved by a later run', () => {
+  withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9' }, ({ state, run, setSeat }) => {
+    setSeat({ refuse: true });
+    const before = Date.now();
+    assert.equal(run().code, 2);
+    const file = join(state, 'claude-seen-2.1.10');
+    const first = read(file);
+    assert.match(first, /^20\d\d-\d\d-\d\dT[\d:.]+Z\n$/);
+    assert.ok(Date.parse(first) >= before - 1000 && Date.parse(first) <= Date.now());
+    assert.ok(readdirSync(state).every((n) => !n.endsWith('.tmp')), 'a temp file is left');
+    assert.equal(run().code, 2);
+    assert.equal(read(file), first);
+  });
+});
+
+test('a version nobody could grade is only logged for 24 h after it was first seen, then writes claude-canary.failed naming it and why', () => {
+  const hours = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+  const causes = [
+    [{ refuse: true }, /no seat free/],
+    [{ over: { rate: 'rejected', subtype: 'error_during_execution', structured: null } }, /rate limit/],
+  ];
+  for (const [seat, why] of causes) {
+    for (const [age, expectFailed] of [[23.9, false], [24.1, true]]) {
+      withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9' }, ({ state, run, setSeat }) => {
+        setSeat(seat);
+        writeFileSync(join(state, 'claude-seen-2.1.10'), `${hours(age)}\n`);
+        const r = run();
+        assert.equal(r.code, 2, r.out);
+        assert.match(r.out, why, 'the cause is logged either way');
+        assert.ok(!existsSync(join(state, 'claude-rejected')));
+        assert.equal(existsSync(join(state, 'claude-canary.failed')), expectFailed, `${age} h`);
+        if (expectFailed) assert.match(read(join(state, 'claude-canary.failed')), new RegExp(`claude 2\\.1\\.10: .*ungraded.*${why.source}`));
+      });
+    }
+  }
 });
 
 test('a run that could not judge keeps its folder and worktree, and the retry reuses both and makes no second', () => {
   withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9' }, ({ clone, runs, run, setSeat, seatCalls }) => {
     setSeat({ refuse: true });
     assert.equal(run().code, 2);
-    const wt = join(runs, 'canary/2.1.10/worktree');
+    const wt = join(runs, 'canary-2.1.10/worktree');
     assert.equal(worktrees(clone).length, 2);
     writeFileSync(join(wt, 'keep.txt'), 'x\n');
     setSeat({ over: { version: '2.1.10' } });
@@ -133,7 +182,7 @@ test('a run that could not judge keeps its folder and worktree, and the retry re
     assert.equal(first.args[first.args.indexOf('--work') + 1], wt);
     assert.equal(second.args[second.args.indexOf('--work') + 1], wt);
     assert.equal(second.kept, true, 'the retry ran in the first worktree');
-    assert.deepEqual(readdirSync(join(runs, 'canary')), ['2.1.10']);
+    assert.deepEqual(readdirSync(runs), ['canary-2.1.10']);
   });
 });
 
@@ -196,11 +245,11 @@ test('a version newer than the candidate is kept when it is rejected-skipped, no
 
 test('a run that could not judge exits 2, says why and rejects nothing: no seat free, a rate limit, a session that never started', () => {
   const cases = [
-    [{ refuse: true }, /no seat free/],
-    [{ over: { rate: 'rejected', subtype: 'error_during_execution', structured: null } }, /rate limit/],
-    [{ over: { init: false } }, /did not start/],
+    [{ refuse: true }, /no seat free/, false],
+    [{ over: { rate: 'rejected', subtype: 'error_during_execution', structured: null } }, /rate limit/, false],
+    [{ over: { init: false } }, /did not start/, true],
   ];
-  for (const [seat, why] of cases) {
+  for (const [seat, why, written] of cases) {
     withMachine({ versions: ['2.1.9', '2.1.10'], current: '2.1.9', script: true, probed: '2.1.9' }, ({ state, launcher, run, setSeat }) => {
       setSeat(seat);
       const before = read(launcher);
@@ -208,8 +257,9 @@ test('a run that could not judge exits 2, says why and rejects nothing: no seat 
       assert.equal(r.code, 2, r.out);
       assert.equal(read(launcher), before);
       assert.ok(!existsSync(join(state, 'claude-rejected')));
-      assert.match(read(join(state, 'claude-canary.failed')), why);
-      assert.match(read(join(state, 'claude-canary.failed')), /claude 2\.1\.10/);
+      assert.match(r.out, why);
+      assert.equal(existsSync(join(state, 'claude-canary.failed')), written, 'only a run that did not start is told to the Human at once');
+      if (written) assert.match(read(join(state, 'claude-canary.failed')), /claude 2\.1\.10: .*did not start/);
     });
   }
 });
@@ -230,7 +280,7 @@ test('a run that outlasts its time is sent SIGTERM at the pid in run-<tag>.pid a
     assert.equal(r.code, 2, r.out);
     assert.ok(!existsSync(join(state, 'claude-rejected')));
     assert.match(read(join(state, 'claude-canary.failed')), /claude 2\.1\.10: .*did not end/);
-    pid = Number(read(join(runs, 'canary/2.1.10/run-canary-2.1.10.pid')));
+    pid = Number(read(join(runs, 'canary-2.1.10/run-canary-2.1.10.pid')));
   });
   for (let i = 0; i < 50 && sleeping(pid); i += 1) await new Promise((res) => setTimeout(res, 100));
   assert.equal(sleeping(pid), false, 'the session was not sent SIGTERM');

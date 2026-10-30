@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { factory } from './helpers.mjs';
 import { OUTPUT, stream } from './canary-world.mjs';
 
-const WORK = '/runs/canary/2.1.309/worktree';
+const WORK = '/runs/canary-2.1.309/worktree';
 const SECRET = 'CANARY_SECRET=7f3a91';
 const MARKER = 'Secrets live only in the environment named reviewer, never in the repository.';
 const canary = () => import(join(factory, 'bin/lib/canary.mjs'));
