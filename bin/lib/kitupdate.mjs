@@ -120,8 +120,7 @@ export function plan({ factory, commit, repo, base, name, human, modules }) {
   return { ...out, fac, baseSha, kit, factory };
 }
 
-/** The repository's own instruction files and the commit the kit comes from. AGENTS.md: its block replaced, or put in place of
- * the old kit's head; CLAUDE.md: left as it is; .gate/kit-commit: the factory commit; the old .gate/pack: removed. */
+/** The repository's own instruction files and the commit the kit comes from. AGENTS.md: its block replaced; CLAUDE.md: left as it is; .gate/kit-commit: the factory commit; the old .gate/pack: removed. */
 function instructions({ out, at, repo, factory, fac, name, kit, text }) {
   const sectionEntry = kit.get(SECTION);
   if (!sectionEntry) {
