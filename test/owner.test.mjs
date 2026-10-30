@@ -353,6 +353,31 @@ test('a variable GitHub accepts and drops leaves the onboarding incomplete (#210
   }
 });
 
+test('a value of the wrong form is refused before any call is made (#210)', () => {
+  const bad = [
+    ['--runner', 'ubuntu-latest'],
+    ['--runner', '[]'],
+    ['--runner', '[1]'],
+    ['--runner', '{"group":"x"}'],
+    ['--pr-runner', '["a b"]'],
+    ['--trusted-runner', '""'],
+    ['--reviewer', 'gpt'],
+    ['--runner'],
+    ['--runer', '"ubuntu-latest"'],
+  ];
+  for (const extra of bad) {
+    const w = world();
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, '--apply']);
+      assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+      assert.match(out.out, /usage|--runner|--pr-runner|--trusted-runner|--reviewer|--runer/, out.out);
+      assert.equal(readFileSync(join(w.dir, 'calls'), 'utf8'), '', `${extra.join(' ')} reached GitHub`);
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
