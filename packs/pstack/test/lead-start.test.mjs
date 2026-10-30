@@ -34,6 +34,7 @@ function world(body, { settings = PSTACK } = {}) {
   for (const d of [w.home, w.bin, join(w.tree, 'bin'), join(w.tree, 'packs/pstack/bin')]) mkdirSync(d, { recursive: true });
   cpSync(join(real, 'bin/lib'), join(w.tree, 'bin/lib'), { recursive: true });
   cpSync(join(real, 'packs/pstack/bin/lead.mjs'), join(w.tree, 'packs/pstack/bin/lead.mjs'));
+  cpSync(join(real, 'packs/pstack/settings.json'), join(w.tree, 'packs/pstack/settings.json')); // the factory's pin
   writeFileSync(join(w.tree, 'packs/pstack/lead.md'), '# role\n');
   const repo = join(w.tree, 'zalo');
   mkdirSync(join(repo, '.git'), { recursive: true });
@@ -103,10 +104,11 @@ describe('lead start', () => {
     assert.deepEqual(w.log().map((c) => c.argv[0]), ['plugin']);
   }));
 
-  test('an enabled plugin with no pin stops the start', () => world((w) => {
+  test('an enabled plugin that is not the factory\'s pin stops the start, with nothing installed', () => world((w) => {
     const r = w.lead();
     assert.equal(r.code, 1);
-    assert.match(r.err, /no settings marketplace pin/);
+    assert.match(r.err, /bin\/lead: plugins: .* enables other@mk, but only the factory's pin/);
     assert.deepEqual(w.log(), []);
-  }, { settings: { enabledPlugins: { 'pstack@pstack-4dd1d05': true } } }));
+    assert.ok(!existsSync(join(w.home, '.local')));
+  }, { settings: { enabledPlugins: { 'other@mk': true } } }));
 });

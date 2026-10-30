@@ -5,6 +5,8 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 export class PluginError extends Error {}
 
@@ -54,11 +56,31 @@ function run(args, { work, env, config, root, timeoutMs }) {
   if (LOGIN.test(text)) throw new PluginError(`${what} asks to log in`);
 }
 
-/** Makes the profile's root and installs into it the plugins the work folder's .claude/settings.json enables, each from the
- * marketplace the settings pin: writes that marketplace as a folder in the install config, then `marketplace add` and `install`
- * in the work folder at local scope, every time (both are idempotent). Returns the root. A plugin with no pin, a failed call or
- * a login prompt is a PluginError. A work folder that enables none installs nothing. */
-export function installPlugins({ work, config, home, profiles, env = process.env, timeoutMs = TIMEOUT_MS }) {
+/** The factory's own pin: packs/pstack/settings.json of the checkout (factoryRoot) whose code is running, which is reviewed. The
+ * work folder may be a candidate branch, so it never says what the marketplace is. Returns { name, source, ids }. */
+function factoryPin(factoryRoot) {
+  const path = join(factoryRoot, 'packs/pstack/settings.json');
+  let settings;
+  try {
+    settings = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new PluginError(`the factory's pin ${path} is missing or not JSON`);
+  }
+  const pins = [...pinsOf(settings)];
+  if (pins.length !== 1) throw new PluginError(`the factory's pin ${path} must declare exactly one settings marketplace`);
+  const [name] = pins[0];
+  plain(name, 'marketplace');
+  const ids = Object.entries(settings.enabledPlugins ?? {}).filter(([, on]) => on === true).map(([id]) => id);
+  return { name, source: settings.extraKnownMarketplaces[name].source, ids };
+}
+
+/** Makes the profile's root and installs into it the plugins the work folder's .claude/settings.json enables. The marketplace
+ * comes only from the factory's pin (factoryPin): the work folder decides only whether to install, and only when it enables
+ * the pin's plugin ids and declares no marketplace but the pin, with the pin's own source; anything else is refused before any
+ * folder is made or any call run. The marketplace is written as a folder in the install config, then `marketplace add` and
+ * `install` run in the work folder at local scope, every time (both are idempotent). Returns the root. A failed call or a login
+ * prompt is a PluginError. A work folder that enables none installs nothing. */
+export function installPlugins({ work, config, home, profiles, env = process.env, timeoutMs = TIMEOUT_MS, factoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..') }) {
   const { root, installConfig } = pluginPaths(config, { home, profiles });
   const path = join(work, '.claude/settings.json');
   let settings = {};
@@ -70,30 +92,37 @@ export function installPlugins({ work, config, home, profiles, env = process.env
     }
   }
   const wanted = Object.entries(settings.enabledPlugins ?? {}).filter(([, on]) => on === true).map(([id]) => id);
-  const pins = pinsOf(settings);
-  // Every name is checked before any folder is made: a marketplace name becomes a folder and a plugin name an argument of claude.
-  for (const name of pins.keys()) plain(name, 'marketplace');
-  const marketplaces = new Set();
+  // Every check is made before any folder is made. A name from the work folder is a plain name, a second guard: a marketplace name
+  // would become a folder and a plugin name an argument of claude.
+  const declared = Object.keys(settings.extraKnownMarketplaces ?? {});
+  for (const name of declared) plain(name, 'marketplace');
   for (const id of wanted) {
     const at = id.lastIndexOf('@');
-    const [plugin, name] = [id.slice(0, at), id.slice(at + 1)];
-    plain(plugin, 'plugin');
-    plain(name, 'marketplace');
-    if (at < 1 || !pins.get(name)?.some((p) => p?.name === plugin)) throw new PluginError(`${id} is enabled, but ${path} has no settings marketplace pin ${name} that lists ${plugin}`);
-    marketplaces.add(name);
+    plain(id.slice(0, at), 'plugin');
+    plain(id.slice(at + 1), 'marketplace');
+  }
+  const pin = wanted.length ? factoryPin(factoryRoot) : null;
+  if (pin) {
+    const kit = 'take the kit update if the repository\'s pin is older than the factory\'s';
+    for (const id of wanted) {
+      if (!pin.ids.includes(id)) throw new PluginError(`${path} enables ${id}, but only the factory's pin ${pin.ids.join(', ')} may be enabled; ${kit}`);
+    }
+    for (const name of declared) {
+      if (name !== pin.name) throw new PluginError(`${path} declares the marketplace ${name}, but only the factory's pin ${pin.name} may be; ${kit}`);
+      if (!isDeepStrictEqual(settings.extraKnownMarketplaces[name]?.source, pin.source)) throw new PluginError(`${path} declares the marketplace ${name} with a source that is not the factory's pin`);
+    }
   }
   privateDir(root);
   privateDir(installConfig);
+  if (!pin) return root;
   const opts = { work, env, config: installConfig, root, timeoutMs };
-  for (const name of marketplaces) {
-    const folder = join(installConfig, 'marketplaces', name);
-    const file = join(folder, '.claude-plugin/marketplace.json');
-    privateDir(dirname(file));
-    const tmp = `${file}.tmp-${process.pid}`;
-    writeFileSync(tmp, `${JSON.stringify({ name, owner: { name: 'factory' }, plugins: pins.get(name) }, null, 2)}\n`, { mode: 0o600 });
-    renameSync(tmp, file);
-    run(['marketplace', 'add', folder, '--scope', 'local', '--json'], opts);
-    for (const id of wanted.filter((i) => i.endsWith(`@${name}`))) run(['install', id, '--scope', 'local'], opts);
-  }
+  const folder = join(installConfig, 'marketplaces', pin.name);
+  const file = join(folder, '.claude-plugin/marketplace.json');
+  privateDir(dirname(file));
+  const tmp = `${file}.tmp-${process.pid}`;
+  writeFileSync(tmp, `${JSON.stringify({ name: pin.name, owner: { name: 'factory' }, plugins: pin.source.plugins }, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmp, file);
+  run(['marketplace', 'add', folder, '--scope', 'local', '--json'], opts);
+  for (const id of wanted) run(['install', id, '--scope', 'local'], opts);
   return root;
 }

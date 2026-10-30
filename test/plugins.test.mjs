@@ -77,17 +77,47 @@ test('output that asks to log in stops it, though the exit is 0', () => world(as
   assert.throws(() => installPlugins(setup(w)), (e) => e instanceof PluginError && /asks to log in/.test(e.message));
 }));
 
-test('an enabled plugin with no settings pin is refused before any call', () => world(async (w) => {
+// The marketplace is the factory's own pin (packs/pstack/settings.json of the running checkout); the work folder, which may be a
+// candidate branch, decides only whether to install.
+test('a work folder that enables or declares anything but the factory\'s pin is refused: no folder, no call', () => world(async (w) => {
   const { installPlugins, PluginError } = await lib();
+  const pin = PSTACK_SETTINGS.extraKnownMarketplaces['pstack-4dd1d05'];
   const refuse = (settings, re) => {
     w.settings(settings);
-    assert.throws(() => installPlugins(setup(w)), (e) => e instanceof PluginError && re.test(e.message));
+    assert.throws(() => installPlugins(setup(w)), (e) => e instanceof PluginError && re.test(e.message), re.source);
     assert.equal(w.pluginCalls().length, 0);
+    assert.ok(!existsSync(join(w.home, '.local')), 'no folder was made');
   };
-  refuse({ ...PSTACK_SETTINGS, enabledPlugins: { 'pstack@other': true } }, /no settings marketplace pin other/);
-  refuse({ ...PSTACK_SETTINGS, enabledPlugins: { 'nothere@pstack-4dd1d05': true } }, /lists nothere/);
-  refuse({ enabledPlugins: { 'pstack@pstack-4dd1d05': true } }, /no settings marketplace pin/);
-  refuse({ ...PSTACK_SETTINGS, extraKnownMarketplaces: { 'pstack-4dd1d05': { source: { source: 'github', repo: 'a/b' } } } }, /no settings marketplace pin/);
+  // Another plugin of the pin, a plugin of another marketplace, and an older pin's name (the repository needs the kit update).
+  refuse({ ...PSTACK_SETTINGS, enabledPlugins: { 'nothere@pstack-4dd1d05': true } }, /enables nothere@pstack-4dd1d05, but only the factory's pin pstack@pstack-4dd1d05/);
+  refuse({ ...PSTACK_SETTINGS, enabledPlugins: { 'pstack@pstack-4dd1d05': true, 'other@mk': true } }, /enables other@mk/);
+  refuse({ ...PSTACK_SETTINGS, enabledPlugins: { 'pstack@pstack-f713f14': true } }, /pstack@pstack-f713f14.*take the kit update/);
+  // A marketplace declared besides the pin, and the pin's name with another source (a git source, and another plugin list).
+  refuse({ ...PSTACK_SETTINGS, extraKnownMarketplaces: { ...PSTACK_SETTINGS.extraKnownMarketplaces, evil: pin } }, /declares the marketplace evil, but only the factory's pin pstack-4dd1d05/);
+  refuse({ ...PSTACK_SETTINGS, extraKnownMarketplaces: { 'pstack-4dd1d05': { source: { source: 'github', repo: 'a/b' } } } }, /pstack-4dd1d05 with a source that is not the factory's pin/);
+  refuse({ ...PSTACK_SETTINGS, extraKnownMarketplaces: { 'pstack-4dd1d05': { source: { ...pin.source, plugins: [] } } } }, /with a source that is not the factory's pin/);
+  // The pin's id with no pin in the work folder is fine: the pin is the factory's.
+  w.settings({ enabledPlugins: { 'pstack@pstack-4dd1d05': true } });
+  installPlugins(setup(w));
+  assert.equal(w.pluginCalls().length, 2);
+}));
+
+test('the marketplace is built from the factory\'s pin, whatever the work folder says it is', () => world(async (w) => {
+  const { installPlugins } = await lib();
+  const factoryRoot = join(w.root, 'factory');
+  mkdirSync(join(factoryRoot, 'packs/pstack'), { recursive: true });
+  const mine = structuredClone(PSTACK_SETTINGS);
+  mine.extraKnownMarketplaces['pstack-4dd1d05'].source.plugins[0].source.sha = 'f'.repeat(40);
+  writeFileSync(join(factoryRoot, 'packs/pstack/settings.json'), JSON.stringify(mine));
+  w.settings({ enabledPlugins: { 'pstack@pstack-4dd1d05': true } });
+  installPlugins({ ...setup(w), factoryRoot });
+  const file = join(w.home, '.local/share/factory/plugin-install/seats/2/claude/marketplaces/pstack-4dd1d05/.claude-plugin/marketplace.json');
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).plugins, mine.extraKnownMarketplaces['pstack-4dd1d05'].source.plugins);
+  // A work folder with the repository's own copy of the old pin is not the factory's pin any more.
+  w.settings(PSTACK_SETTINGS);
+  assert.throws(() => installPlugins({ ...setup(w), factoryRoot }), /is not the factory's pin/);
+  // A factory with no pin is no install.
+  assert.throws(() => installPlugins({ ...setup(w), factoryRoot: w.root }), /factory's pin .* is missing/);
 }));
 
 test('a work folder that declares the pin\'s name with another source leaves the root byte-identical', () => world(async (w) => {
