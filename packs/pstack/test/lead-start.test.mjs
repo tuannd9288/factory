@@ -3,9 +3,9 @@
 // root as its plugin cache.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -34,6 +34,7 @@ function world(body, { settings = PSTACK } = {}) {
   for (const d of [w.home, w.bin, join(w.tree, 'bin'), join(w.tree, 'packs/pstack/bin')]) mkdirSync(d, { recursive: true });
   cpSync(join(real, 'bin/lib'), join(w.tree, 'bin/lib'), { recursive: true });
   cpSync(join(real, 'packs/pstack/bin/lead.mjs'), join(w.tree, 'packs/pstack/bin/lead.mjs'));
+  cpSync(join(real, 'packs/pstack/bin/lead'), join(w.tree, 'packs/pstack/bin/lead'));
   cpSync(join(real, 'packs/pstack/settings.json'), join(w.tree, 'packs/pstack/settings.json')); // the factory's pin
   writeFileSync(join(w.tree, 'packs/pstack/lead.md'), '# role\n');
   const repo = join(w.tree, 'zalo');
@@ -47,11 +48,17 @@ function world(body, { settings = PSTACK } = {}) {
   symlinkSync(process.execPath, join(w.bin, 'node')); // like /opt/homebrew/bin/node, a link to a Cellar path
   w.config = join(w.home, '.agent-profiles/o/zalo/claude');
   w.pluginRoot = join(w.home, '.local/share/factory/plugins/o/zalo/claude');
+  w.env = (extra = {}) => ({ PATH: `${w.bin}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: w.home, FAKE_CONFIG: w.config, ...extra });
   w.lead = (args = [], extra = {}) => {
-    const r = spawnSync(process.execPath, [join(w.tree, 'packs/pstack/bin/lead.mjs'), 'zalo', ...args], {
-      encoding: 'utf8', env: { PATH: `${w.bin}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: w.home, FAKE_CONFIG: w.config, ...extra }, timeout: 20000,
-    });
+    const r = spawnSync(process.execPath, [join(w.tree, 'packs/pstack/bin/lead.mjs'), 'zalo', ...args], { encoding: 'utf8', env: w.env(extra), timeout: 20000 });
     return { code: r.status, out: r.stdout, err: r.stderr };
+  };
+  // a transcript copy as bin/transcript-copy.mjs leaves it, with the given mtime (seconds)
+  w.copy = (name, mtime, repo = 'zalo') => {
+    const dir = join(w.home, 'factory-runs', `${repo}-lead`, 'transcripts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, name), 'x\n');
+    utimesSync(join(dir, name), mtime, mtime);
   };
   w.log = () => (existsSync(join(w.bin, 'log.jsonl')) ? readFileSync(join(w.bin, 'log.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
   try {
@@ -92,6 +99,95 @@ describe('lead --dry-run', () => {
     const r = w.lead(['--dry-run'], { FAKE_CONFIG: '' });
     assert.equal(r.code, 1);
     assert.match(r.err, /direnv gave no CLAUDE_CONFIG_DIR/);
+  }));
+});
+
+const A = '11111111-1111-4111-8111-111111111111';
+const B = '22222222-2222-4222-8222-222222222222';
+const resumed = (call) => (call.argv.includes('--resume') ? call.argv[call.argv.indexOf('--resume') + 1] : null);
+
+describe('lead resumes by default', () => {
+  test('--dry-run says it would resume the newest copy by mtime, and why', () => world((w) => {
+    w.copy(`${A}.jsonl`, 2000);
+    w.copy(`${B}.jsonl`, 3000);
+    w.copy('33333333-3333-4333-8333-333333333333.jsonl', 1000);
+    const r = w.lead(['--dry-run']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, new RegExp(`^session: resume ${B} \\(newest of 3 copies in ${join(w.home, 'factory-runs/zalo-lead/transcripts')}\\)$`, 'm'));
+    assert.match(r.out, new RegExp(` --resume ${B} `));
+    assert.ok(!r.out.includes('--continue'));
+  }));
+
+  test('a start gives claude --resume <id> of the newest copy', () => world((w) => {
+    w.copy(`${B}.jsonl`, 3000);
+    w.copy(`${A}.jsonl`, 4000);
+    const r = w.lead();
+    assert.equal(r.code, 0, r.err);
+    const start = w.log().at(-1);
+    assert.equal(resumed(start), A);
+    assert.ok(!start.argv.includes('--continue'));
+  }));
+
+  test('with no copy it starts a new session, and --dry-run says so', () => world((w) => {
+    const r = w.lead(['--dry-run']);
+    assert.match(r.out, /^session: new \(no copy in /m);
+    assert.ok(!r.out.includes('--resume'));
+    assert.equal(w.lead().code, 0);
+    assert.equal(resumed(w.log().at(-1)), null);
+  }));
+
+  test('--new starts a new session although a copy exists', () => world((w) => {
+    w.copy(`${A}.jsonl`, 2000);
+    const r = w.lead(['--dry-run', '--new']);
+    assert.match(r.out, /^session: new \(--new\)$/m);
+    assert.ok(!r.out.includes('--resume'));
+    assert.equal(w.lead(['--new']).code, 0);
+    assert.equal(resumed(w.log().at(-1)), null);
+  }));
+
+  test('--continue is no option any more: exit 2, naming --new', () => world((w) => {
+    const r = w.lead(['--continue']);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /unknown option --continue/);
+    assert.match(r.err, /--new/);
+    assert.deepEqual(w.log(), []);
+  }));
+
+  test('a newer entry that is not a plain session id is never resumed', () => world((w) => {
+    w.copy(`${A}.jsonl`, 1000);
+    w.copy('not-an-id.jsonl', 5000);
+    w.copy(`${B}.jsonl.tmp-123`, 6000);
+    w.copy(`--${B}.jsonl`, 7000);
+    mkdirSync(join(w.home, 'factory-runs/zalo-lead/transcripts', `${B}.jsonl`));
+    const r = w.lead(['--dry-run']);
+    assert.match(r.out, new RegExp(`^session: resume ${A} `, 'm'));
+    const none = join(w.home, 'factory-runs/zalo-lead/transcripts', `${A}.jsonl`);
+    rmSync(none);
+    assert.match(w.lead(['--dry-run']).out, /^session: new /m);
+  }));
+
+  test('another repository\'s copies are not this one\'s', () => world((w) => {
+    w.copy(`${A}.jsonl`, 2000, 'other');
+    assert.match(w.lead(['--dry-run']).out, /^session: new /m);
+  }));
+});
+
+describe('lead through a symlink', () => {
+  test('the shim finds lead.mjs by the real path: absolute link, relative link, a link to a link, from another cwd', () => world((w) => {
+    const target = join(w.tree, 'packs/pstack/bin/lead');
+    const bin = join(w.home, '.local/bin');
+    mkdirSync(bin, { recursive: true });
+    symlinkSync(target, join(bin, 'lead'));
+    symlinkSync(relative(bin, target), join(bin, 'rel'));
+    symlinkSync(join(bin, 'lead'), join(bin, 'chain'));
+    const elsewhere = join(w.root, 'elsewhere');
+    mkdirSync(elsewhere);
+    for (const name of ['lead', 'rel', 'chain']) {
+      const r = spawnSync(join(bin, name), ['zalo', '--dry-run'], { cwd: elsewhere, encoding: 'utf8', env: w.env(), timeout: 20000 });
+      assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+      assert.equal(r.stdout.split('\n')[0], join(w.tree, 'zalo'), name);
+    }
+    assert.deepEqual(w.log(), []);
   }));
 });
 

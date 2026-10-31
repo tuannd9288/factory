@@ -87,9 +87,12 @@ describe('leadArgs', () => {
     assert.equal(after('--name'), 'zalo-gateway-lead');
   });
 
-  test('--continue only when resume is set', () => {
-    assert.ok(!argv.includes('--continue'));
-    assert.ok(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: true }).argv.includes('--continue'));
+  test('--resume <id> only when a session id is given, never --continue', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    assert.ok(!argv.includes('--resume') && !argv.includes('--continue'));
+    const withId = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id }).argv;
+    assert.equal(withId[withId.indexOf('--resume') + 1], id);
+    assert.ok(!withId.includes('--continue'));
   });
 
   test('the allow list is exactly the Lead\'s, with no blanket gh or git', () => {
