@@ -84,7 +84,7 @@ describe('leadArgs', () => {
     assert.equal(after('--effort'), 'high');
     assert.equal(after('--append-system-prompt'), roleText);
     assert.ok(!argv.includes('--append-system-prompt-file'));
-    assert.equal(after('--permission-mode'), 'acceptEdits');
+    assert.equal(after('--permission-mode'), 'auto');
     assert.equal(after('--add-dir'), join(home, 'factory-runs'));
     assert.equal(after('--name'), 'zalo-gateway-lead');
   });
