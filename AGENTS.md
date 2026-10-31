@@ -272,9 +272,10 @@ Six steps, run by Colly and a team:
 2. Colly runs `bin/onboard-owner` without `--apply`, from the factory's clone on the MacBook, on the Human's `gh`
    login, and sends him the changes it prints. He approves once; Colly runs it with `--apply`. For a private
    repository, Colly also takes the runner's registration token (the Human's standing exception, 2026-10-29), never
-   printed. The agents' account accepts the invitation itself. The changes he approves name the four repository
-   variables the kit reads (`GATE_RUNNER`, `GATE_PR_RUNNER`, `GATE_TRUSTED_RUNNER`, `GATE_REVIEWER`) with their
-   values; Colly sets them in this step, before the second `--apply`, which reads `GATE_REVIEWER`.
+   printed. The agents' account accepts the invitation itself. `bin/onboard-owner` sets the four repository
+   variables the kit reads (`GATE_RUNNER`, `GATE_PR_RUNNER`, `GATE_TRUSTED_RUNNER`, `GATE_REVIEWER`), one option
+   each, before the gate's ruleset, which follows `GATE_REVIEWER`; the changes he approves name their values, and
+   Colly sets none by hand (#210).
 3. A team claims the issue and runs `bin/onboard <repo-url>`. The kit pull request carries its evidence
    (`bin/kit-evidence`). Until `main` holds the kit, its `verify` is red (code 127), and the bootstrap rule requires
    no check (`bin/onboard`'s own note in the kit pull request body). He approves it as tier 3 from its "Summary for
