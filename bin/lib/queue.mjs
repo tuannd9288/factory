@@ -16,7 +16,9 @@ import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync,
 import { hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ROOT, checkPlists, followMain } from './checkout.mjs';
 import { clonesUnder } from './ledger.mjs';
+import { liveRuns } from './seat.mjs';
 
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
 const CALL_MS = 60_000;
@@ -232,6 +234,33 @@ function preflight(state, human) {
   return 2;
 }
 
+/** The first step of a sweep (#257): the checkout the daemons and bin/seat run from follows main, and the installed plists are
+ * compared with what the code renders. The checkout is $FACTORY_CHECKOUT, else this clone when it is ~/WORKSPACES, so a clone
+ * anywhere else (a developer's, a test's) is never moved. A refusal or a failure is told in queue-checkout.failed and never stops
+ * the sweep. */
+function followCheckout(state) {
+  const home = process.env.HOME;
+  let root = process.env.FACTORY_CHECKOUT || null;
+  try {
+    if (!root && home && realpathSync(join(home, 'WORKSPACES')) === realpathSync(ROOT)) root = ROOT;
+  } catch {
+    // no ~/WORKSPACES
+  }
+  if (!root) return;
+  try {
+    const r = followMain({ root, state, live: () => liveRuns(process.env.FACTORY_RUNS ?? join(home, 'factory-runs')) });
+    if (r.status === 'updated') console.log(`queue: checkout ${r.from.slice(0, 7)}..${r.to.slice(0, 7)} (${r.behind} commits)`);
+    else if (r.status === 'refused') console.log(`queue: checkout not moved: ${r.why}`);
+    else if (r.status !== 'current') console.log(`queue: checkout ${r.status}`);
+    const differ = checkPlists({ root, state, plistDir: process.env.FACTORY_PLIST_DIR ?? '/Library/LaunchDaemons' }).differ;
+    if (differ.length) console.log(`queue: installed plist differs from the code's: ${differ.join(' ')}`);
+  } catch (error) {
+    mkdirSync(state, { recursive: true });
+    writeFileSync(join(state, 'queue-checkout.failed'), `${new Date().toISOString()} the update raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    console.error(`queue: checkout: ${error.message}`);
+  }
+}
+
 const LABEL = 'io.github.tuannd9288.factory.queue';
 
 /** The first executable `name` on a PATH, or null. */
@@ -368,6 +397,7 @@ function main(argv) {
     return console.log(`queue: another sweep is running${other ? ` (pid ${other.pid}, started ${other.start})` : ''}; nothing done`);
   }
   try {
+    followCheckout(state);
     const refused = preflight(state, human);
     if (refused) return refused;
     // No --repo: the repositories taken in, found as the ledger finds them (#211).
