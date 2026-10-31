@@ -2,7 +2,7 @@
 // and every name below is invented. The fake ssh runs `factory store` of the Mac mini for real, in a home of its own ($FAKE/far).
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
 
@@ -53,7 +53,7 @@ cmd=$(printf '%s' "$last" | sed -n "s/^zsh -lc '\\(.*\\)'$/\\1/p")
 case "$cmd" in
   *"factory store "*)
     rest=\${cmd#\\~/WORKSPACES/bin/factory}
-    FACTORY_USER=factory HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" exec "$FACTORY_BIN" $rest;;
+    FACTORY_HOST_USER="$FAR_USER" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" exec "$FACTORY_BIN" $rest;;
 esac
 if [ -f "$FAKE/ssh-factory.stderr" ]; then cat "$FAKE/ssh-factory.stderr" >&2; fi
 if [ "$user" = factory ]; then cat "$FAKE/ssh-factory.json"; exit 0; fi
@@ -82,7 +82,10 @@ export function sandbox() {
     FACTORY_ROOT: join(home, 'WORKSPACES'),
     FACTORY_RUNS: join(home, 'factory-runs'),
     FACTORY_SEAT_ACCOUNTS: '',
-    FACTORY_USER: 'tuannguyen',
+    // The factory host is where the caller's user is FACTORY_HOST_USER: the MacBook here, the Mac mini after onHost() and in the
+    // fake ssh's far side (FAR_USER).
+    FACTORY_HOST_USER: 'nobody-here',
+    FAR_USER: userInfo().username,
     USER_PLACE: 'macbook',
   };
   const w = (name, text) => writeFileSync(join(fake, name), text);
@@ -94,7 +97,7 @@ export function sandbox() {
   const calls = () => (existsSync(join(fake, 'calls.log')) ? readFileSync(join(fake, 'calls.log'), 'utf8') : '');
   const onHost = () => {
     env.USER_PLACE = 'factory';
-    env.FACTORY_USER = 'factory';
+    env.FACTORY_HOST_USER = userInfo().username;
   };
   // The files under the sandbox that hold these bytes, relative to it.
   const holders = (bytes) => {

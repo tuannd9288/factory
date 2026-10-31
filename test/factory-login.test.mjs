@@ -2,7 +2,7 @@
 // folders. No live claude, ssh or Keychain. The token below is invented, and distinct so that its bytes can be searched for.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { sandbox } from './factory-world.mjs';
 
@@ -193,6 +193,61 @@ test('store: reads the token from stdin on the factory host, with the same refus
     // store takes no flag and no second word
     assert.notEqual(s.facIn(`${TOKEN}\n`, 'store', 'bob', '--no-setup').code, 0);
     assert.deepEqual(readdirSync(s.tokens()), ['ann']);
+  } finally {
+    s.done();
+  }
+});
+
+test('spaces and tabs around a pasted token are trimmed; whitespace inside it is refused and nothing is written', () => {
+  const s = sandbox();
+  try {
+    s.onHost();
+    const bad = s.facIn(`${TOKEN} ${KILL}\n`, 'login', 'bob', '--no-setup');
+    assert.notEqual(bad.code, 0);
+    assert.ok(!existsSync(s.tokens()));
+    const ok = s.facIn(`  \t${TOKEN}\t \r\n`, 'login', 'ann', '--no-setup');
+    assert.equal(ok.code, 0, ok.out);
+    assert.equal(readFileSync(join(s.tokens(), 'ann'), 'utf8'), `${TOKEN}\n`);
+  } finally {
+    s.done();
+  }
+});
+
+test('a tokens folder that is a symlink is refused, and its target is neither written into nor changed', () => {
+  const s = sandbox();
+  try {
+    s.onHost();
+    const target = join(s.dir, 'elsewhere');
+    mkdirSync(target, { mode: 0o755 });
+    chmodSync(target, 0o755);
+    mkdirSync(s.env.AGENT_PROFILES, { recursive: true });
+    symlinkSync(target, s.tokens());
+    for (const args of [['login', 'ann', '--no-setup'], ['store', 'ann']]) {
+      const r = s.facIn(`${TOKEN}\n`, ...args);
+      assert.notEqual(r.code, 0, args[0]);
+      assert.match(r.out, /symlink/);
+      assert.ok(!r.out.includes(TOKEN));
+    }
+    assert.deepEqual(readdirSync(target), []);
+    assert.equal(s.modeOf(target), '755');
+    assert.deepEqual(s.holders(TOKEN), []);
+  } finally {
+    s.done();
+  }
+});
+
+// The place is decided by the user the command runs as, against the user the Mac mini's setting names; a FACTORY_USER in the
+// environment claims nothing.
+test('a stray FACTORY_USER=factory on the MacBook does not make it the factory host', () => {
+  const s = sandbox();
+  try {
+    s.env.FACTORY_USER = 'factory';
+    const r = s.facIn(`${TOKEN}\n`, 'login', 'ann', '--no-setup');
+    assert.equal(r.code, 0, r.out);
+    assert.ok(!existsSync(s.tokens()), 'nothing written on the MacBook');
+    assert.ok(s.calls().includes('ssh '), 'the token went over ssh');
+    assert.ok(existsSync(join(s.fake, 'far/.agent-profiles/tokens/ann')));
+    assert.notEqual(s.facIn(`${TOKEN}\n`, 'store', 'bob').code, 0, 'store refuses on the MacBook');
   } finally {
     s.done();
   }
