@@ -4,9 +4,9 @@
 # <sha7>" from the branch factory/kit-<sha7>.
 #   bin/kit-update <repo-url|name> [--no-pr] [--module <name>]... [--no-module <name>]...
 # From a fresh branch off origin/main, for every path of kit/ at this clone's HEAD (bin/lib/kitupdate.mjs):
-#   - the Gate block of AGENTS.md is replaced and nothing else of it: the repository's head and tail stay byte for byte; the
-#     old kit's composition gets the block in place of its head; a text it does not know, malformed markers, or a result over
-#     150 lines or 32 KiB stops it, to merge by hand. CLAUDE.md is left as it is. CODEOWNERS is rendered as onboard does;
+#   - the Gate block of AGENTS.md is replaced and nothing else of it: the repository's head and tail stay byte for byte;
+#     a text with no block, malformed markers, or a result over 150 lines or 32 KiB stops it, to merge by hand.
+#     CLAUDE.md is left as it is. CODEOWNERS is rendered as onboard does;
 #   - a .claude/settings.json the repository has gets the kit's deny lines it lacks inserted as text, as onboard does;
 #   - a kit file the repository lacks is added; one it holds as an older kit had it is replaced by the kit's;
 #   - a kit file the repository changed is kept and named; the repository's own scripts/ and .githooks/ are not the kit's
@@ -94,7 +94,7 @@ fi
 
 # A repository onboarded before the commands moved to .gate/bin has the kit's own scripts/verify among its kit files; what
 # the kit lays now does not fit on it, and its hooks and settings were the kit's: onboard it afresh. (A .gate/pack is no sign
-# of the old layout: the old kit with the commands in .gate/bin wrote one, and its AGENTS.md is updated here.)
+# of the old layout: the old kit with the commands in .gate/bin wrote one.)
 if git -C "$dest" show origin/main:.gate/kit-files | grep -qx 'scripts/verify'; then
   refuse "$name has the old layout (scripts/verify is among its kit files); bin/kit-update brings a repository from the new layout to the new one: onboard it afresh"
 fi
