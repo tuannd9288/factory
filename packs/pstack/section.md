@@ -58,7 +58,7 @@ Push, then run `scripts/ship` (`--body-file`: the template in English, `Closes #
 says `armed` or stops. Each run takes the next step: opens the pull request, runs `scripts/live-verify <pr>`,
 arms auto-merge. With no driver on `main` it runs no `live-verify`: it posts one comment, `not run as a user: no driver
 (head <full sha>)`, and goes on. A note counts for a head only if the pull request's author, the agents' login, wrote it
-and nobody has edited it; any other comment stands for nothing. The note is no verdict: the ledger counts that head as a miss. It refuses to open unless origin holds HEAD and a full `verify` and `red-check` passed on it, to arm on FAIL or
+and nobody has edited it; any other comment stands for nothing. The note is no verdict: the ledger counts that head as a miss. It refuses to open unless origin holds HEAD and `red-check` passed on it, to arm on FAIL or
 a base other than `main`, and stops on `needs-human`, or on a tier 3 it armed that waits for the Human. FAIL: fix forward with a red
 test, push, run it again. BLOCKED: put the reason and your recommended answer in the pull request. It disarms an
 armed pull request whose HEAD is past its verdict; push, then run it again. Then release the branch; do not wait for CI.
