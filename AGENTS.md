@@ -17,7 +17,7 @@ repository's own `AGENTS.md` governs.
 - No change auto-merges in a repository until its gate has passed the attacks and the 20 seeded + 20 clean probes
   on a scratch repository against two bars (the Human, 2026-10-21): the mechanical bar, every mechanical defect
   caught; and the full-gate bar, with the real reviewer, at least 18/20 seeded caught, every load-bearing one caught,
-  at most 1/20 clean blocked. `probes/plan.md` states both; `probes/results.md` has the first run's numbers.
+  at most 1/20 clean blocked. `probes/plan.md` states both; `probes/results.md` has the first run's numbers (both at the tag `before-271`).
 - agent-desk stays parked. Every lead, worker and reviewer runs through Claude Code. (In this section since 2026-10-21,
   `1b319ee`.)
 
@@ -207,7 +207,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
-  Checked by: `.github/CODEOWNERS:4`, `probes/score.mjs`, `probes/plan.md`.
+  Checked by: `.github/CODEOWNERS:4`.
   Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
   factory's unattended sessions; 0d does; (2) the record of a task stays on GitHub (1b) and in 0d's panes, and a surface
@@ -263,10 +263,9 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH: `~/.local/bin/factory` becomes a symlink to this clone's `bin/factory`; he runs it on the MacBook and as `factory` on the Mac mini; it can be run again and replaces nothing that is not already that symlink |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
-| `bin/factory-sublayers` | The sublayer check (#82): the 17 `sublayer-<code>` labels exist with their descriptions, and every open issue carries exactly one; the list is `bin/lib/sublayers.mjs`, the template `.github/ISSUE_TEMPLATE/task.md` |
-| `probes/` | The gate's attacks and the 20 seeded + 20 clean probes on factory-scratch: plan, driver, results, `score.mjs` (scores the heads, costs per job, stops at the first unavailable reviewer); `probes/pack-contract.md` is the canary's oracle (what a new Claude Code keeps on `bin/seat`'s path), `probes/canary-brief.md` its brief, and `probes/pack-probe.mjs` supplies the canary's parser |
-| `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs` (not `test/parked/`), each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
-| `test/` | The kit's tests; each check is shown failing on a bad input. `test/parked/` holds the parked proof of the probe programme, `factory-sublayers` and the stub reviewer, which `scripts/verify` does not run (#203, #153); run it by hand with `node --test test/parked/*.test.mjs` (`node --test test/parked/` fails on Node 26.3.0) |
+| `probes/` | The canary's files: `probes/pack-contract.md` is the canary's oracle (what a new Claude Code keeps on `bin/seat`'s path), `probes/canary-brief.md` its brief, and `probes/pack-probe.mjs` supplies the canary's parser |
+| `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
+| `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
 
 ## Taking a repository in
@@ -561,7 +560,7 @@ after the Human has opened `claude` in the repository and trusted the folder, in
 without `--scope project` (or `--scope local`, which `packs/pstack/bin/lead` uses), and never the `--marketplace` form,
 which declares the marketplace in the profile's user settings. A new pin is a new marketplace name, in a tier-3 pull
 request per repository; attack 23 checks that two pins share one profile without clashing. Found on Claude Code 2.1.308,
-2026-10-22 (`probes/results.md`, attack 23):
+2026-10-22 (attack 23; `probes/results.md` at the tag `before-271`):
 
 - The install fails with `Plugin "pstack" not found in marketplace` in a folder the profile has not trusted (logged-in
   writer profile, untrusted `case1/a`). The pstack pack's `packs/pstack/settings.json` is in the order the installer writes: uninstalling
