@@ -1,11 +1,13 @@
 // scripts/ship: step 4 of "How a change lands" as one command, idempotent on the branch. Each run finds the branch's
 // pull request, or opens one, and takes the next step; it refuses a wrong step with the reason. See scripts/ship.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { driverAt } from './live-verify.mjs';
 
 const PLACEHOLDER = '<issue labelled task>';
-const FIELDS = 'number,url,baseRefName,headRefOid,labels,autoMergeRequest,statusCheckRollup';
+const FIELDS = 'number,url,baseRefName,baseRefOid,headRefOid,labels,autoMergeRequest,statusCheckRollup';
 
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -81,11 +83,50 @@ function tierWait(pr) {
   return !(tier && (tier.conclusion === 'SUCCESS' || tier.state === 'SUCCESS'));
 }
 
+/** Main's driver at the pull request's base: an object, null when main names none, undefined when the base is not here. */
+function driverOf(pr) {
+  const here = () => quietGit(['cat-file', '-e', `${pr.baseRefOid}^{commit}`]);
+  if (!here()) spawnSync('git', ['fetch', '--quiet', 'origin', pr.baseRefName], { stdio: 'ignore' });
+  return here() ? driverAt(pr.baseRefOid) : undefined;
+}
+
+const noteLine = (head) => `not run as a user: no driver (head ${head})`;
+
+/**
+ * The pull request's head and its author, and whether a note for that head stands: a comment by the pull request's
+ * author, the agents' login, as live-verify's coverage counts a verdict, never edited since (gh's includesCreatedEdit),
+ * whose first line is exactly the note. The head is gh's headRefOid, the head coverage() judges a verdict on, not the local
+ * HEAD. Anyone can comment, so any other comment, an edited one included, stands for nothing.
+ */
+function noteOf(n) {
+  const view = JSON.parse(gh(['pr', 'view', String(n), '--json', 'author,headRefOid,comments']));
+  const author = String(view.author?.login ?? '');
+  const stands = Boolean(author) && (view.comments ?? []).some((c) => (
+    String(c.author?.login ?? '').toLowerCase() === author.toLowerCase() &&
+    c.includesCreatedEdit === false &&
+    String(c.body ?? '').replace(/\r/g, '').split('\n')[0] === noteLine(view.headRefOid)
+  ));
+  return { head: view.headRefOid, author, stands };
+}
+
+function postNote(n, head) {
+  const dir = mkdtempSync(join(tmpdir(), 'ship-'));
+  try {
+    writeFileSync(join(dir, 'note.md'), `${noteLine(head)}\n\n.gate/driver.json on main names no driver, so no live verdict was run. The ledger counts this head as a miss.\n`);
+    gh(['pr', 'comment', String(n), '--body-file', join(dir, 'note.md')]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function step(pr, head, branch) {
   const n = pr.number;
   const short = head.slice(0, 7);
   const armed = Boolean(pr.autoMergeRequest);
-  const covered = () => spawnSync('scripts/live-verify', ['--covered', String(n)], { stdio: 'ignore' }).status === 0;
+  const driver = driverOf(pr);
+  if (driver === undefined) return say(2, `could not read .gate/driver.json: the base ${String(pr.baseRefOid).slice(0, 7)} is not here and could not be fetched`);
+  const covered = () => (driver ? spawnSync('scripts/live-verify', ['--covered', String(n)], { stdio: 'ignore' }).status === 0 : noteOf(n).stands);
+  const how = driver ? 'a live verdict covers it' : 'a no-driver note covers it';
   const known = quietGit(['cat-file', '-e', `${pr.headRefOid}^{commit}`]);
   const ahead = head !== pr.headRefOid && known && !quietGit(['merge-base', '--is-ancestor', head, pr.headRefOid]);
 
@@ -94,19 +135,30 @@ function step(pr, head, branch) {
     return say(0, `disarmed #${n}: ${why}`);
   };
   if (armed && ahead) return disarm(`HEAD ${short} is past what was verified; push it, then run ship again`);
-  if (armed && !covered()) return disarm(`no live verdict covers HEAD ${short}; run ship again once it is pushed`);
+  if (armed && !covered()) return disarm(`no ${driver ? 'live verdict' : 'no-driver note'} covers HEAD ${short}; run ship again once it is pushed`);
 
   if (pr.labels.some((l) => l.name === 'needs-human')) return say(1, `stopped on #${n}: it carries needs-human; the Human decides`);
   const wait = tierWait(pr);
   if (typeof wait === 'string') return say(2, `could not judge the tier (${wait})`);
   const stop = () => (wait ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval`) : 0);
-  if (armed) return stop() || say(0, `#${n} is armed and a live verdict covers it; nothing to do`);
+  if (armed) return stop() || say(0, `#${n} is armed and ${how}; nothing to do`);
   if (ahead) return say(1, `refused: HEAD ${short} has commits #${n} lacks; git push first`);
 
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);
 
-  if (!covered()) {
+  // No driver: live-verify would only answer BLOCKED. The note stands for the pull request's head in its place, once, and
+  // the run goes on. Never arm a head nobody checked: a local HEAD that is not the pull request's head is refused, and a
+  // note that does not count once posted (the author is not this login) stops the run before the arming.
+  if (!driver) {
+    const note = noteOf(n);
+    if (note.head !== head) return say(1, `refused: HEAD ${short} is not the pull request's head ${String(note.head).slice(0, 7)}; pull or push so they agree`);
+    if (!note.stands) {
+      postNote(n, note.head);
+      const posted = noteOf(n);
+      if (!posted.stands) return say(1, `stopped on #${n}: the note it posted does not count: the pull request's author (${posted.author}) is not ship's login; nothing was armed`);
+    }
+  } else if (!covered()) {
     const r = spawnSync('scripts/live-verify', [String(n)], { encoding: 'utf8', maxBuffer: 64 << 20 });
     process.stdout.write(r.stdout ?? '');
     process.stderr.write(r.stderr ?? '');
@@ -119,7 +171,7 @@ function step(pr, head, branch) {
   }
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
   gh(['pr', 'merge', String(n), '--auto', '--merge']);
-  say(0, `armed #${n}: a live PASS covers HEAD ${short}`);
+  say(0, driver ? `armed #${n}: a live PASS covers HEAD ${short}` : `armed #${n}: not run as a user, no driver; the note covers HEAD ${short}`);
   return stop();
 }
 

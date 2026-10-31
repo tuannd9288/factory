@@ -8,7 +8,7 @@
 # 2. an armed pull request whose HEAD is past what was verified, or no longer covered: disarms it first.
 # 3. stops while the pull request carries needs-human; arms a tier 3 (labels, or .gate/bin/tier on the paths) by the same
 #    rule, then stops with "tier 3 waits for the Human's approval" until its tier check ends.
-# 4. runs scripts/live-verify <pr>, and arms auto-merge (--auto --merge) only on PASS or PASS+NOTES and a base of main;
+# 4. runs scripts/live-verify <pr>, and arms auto-merge (--auto --merge) only on PASS or PASS+NOTES (with no driver on main: the author's "no driver" note in place of a verdict) and a base of main;
 #    when scripts/live-verify --covered already passes, it arms again without a new run.
 # Exit 0 a step taken or nothing to do, 1 refused or stopped, 2 could not run.
 set -uo pipefail
