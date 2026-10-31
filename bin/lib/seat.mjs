@@ -24,6 +24,12 @@ export const SCHEMA = {
 // The researcher's only git (#181).
 export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta.url));
 
+// The settings every session gets with --settings (#205): bin/factory-alerts at its start, from this checkout, so no profile
+// has to hold the hook.
+export const ALERTS_SETTINGS = JSON.stringify({
+  hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: fileURLToPath(new URL('../factory-alerts', import.meta.url)), timeout: 10 }] }] },
+});
+
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
 export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
@@ -85,6 +91,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
     '--permission-mode', 'default',
+    '--settings', ALERTS_SETTINGS,
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
     '--allowedTools', ...p.allow(run), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
@@ -161,9 +168,18 @@ function filePidAlive(file) {
  * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
 const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
 
-/** How many sessions of a seat have a live process. */
-export function liveCount(runs, seat) {
-  return runFiles(runs, '.pid').filter((p) => seatOf(p, '2') === String(seat) && runLive(p)).length;
+/** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
+ * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off removes
+ * run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the listing, so none can finish between two
+ * equal listings; one seen half done counts that start twice at worst, which only makes a start back off. list is the listing,
+ * passed in so a test can force the interleaving. */
+export function liveCount(runs, seat, list = runFiles) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const before = list(runs, '.pid').sort();
+    const n = before.filter((p) => seatOf(p, '2') === String(seat) && runLive(p)).length;
+    if (before.join('\n') === list(runs, '.pid').sort().join('\n')) return n;
+  }
+  return Infinity;
 }
 
 /** The rate_limit_info that the newest log of the seat reporting a seven-day use gives (its last rate_limit_event), with the
@@ -212,7 +228,7 @@ export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = nul
     const unclaim = claim ? claim(seat) : () => {};
     const n = liveCount(runs, seat);
     const out = seatOut(runs, seat, now);
-    if (n > SEATS[seat].cap - (claim ? 0 : 1)) reasons.push(`seat ${seat}: ${n - (claim ? 1 : 0)} live sessions, at most ${SEATS[seat].cap}`);
+    if (n > SEATS[seat].cap - (claim ? 0 : 1)) reasons.push(n === Infinity ? `seat ${seat}: its run folders kept changing while its sessions were counted` : `seat ${seat}: ${n - (claim ? 1 : 0)} live sessions, at most ${SEATS[seat].cap}`);
     else if (out) reasons.push(`seat ${seat}: ${out}`);
     else return { seat, reasons };
     unclaim();
@@ -366,6 +382,22 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
 
+/** The repository (`owner/name`, from a GitHub https or ssh URL of origin) and the branch of a work folder, null where git
+ * cannot tell: a folder that is not a clone, another host, a detached HEAD. Read when the session ends, since a worker may
+ * make its branch during the session (#205). */
+function placeOf(dir) {
+  const git = (...args) => {
+    try {
+      return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000 }).trim();
+    } catch {
+      return null;
+    }
+  };
+  const repo = /^(?:https:\/\/|git@|ssh:\/\/git@)github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(git('remote', 'get-url', 'origin') ?? '')?.[1] ?? null;
+  const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
+  return { repo, branch: branch && branch !== 'HEAD' ? branch : null };
+}
+
 /** The record of a session that has ended: spec is what launch decided, text the session's log, end how it ended. */
 export function recordOf(spec, events, { code, signal, error = null, end = new Date() }) {
   const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
@@ -377,7 +409,7 @@ export function recordOf(spec, events, { code, signal, error = null, end = new D
   const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
   return {
     session: result?.session_id ?? init?.session_id ?? spec.resume ?? null,
-    role: spec.role, seat: spec.seat, tag: spec.tag, run: spec.run,
+    role: spec.role, seat: spec.seat, tag: spec.tag, run: spec.run, ...placeOf(spec.cwd),
     model: models.length ? models.join(',') : (init?.model ?? spec.model),
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
     turns: sum('num_turns'), duration_ms: sum('duration_ms'), total_cost_usd: result?.total_cost_usd ?? null,
