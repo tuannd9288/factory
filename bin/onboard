@@ -3,7 +3,8 @@
 # with a settings.json that keeps out what the logged-in claude.ai account would load, writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
 # the Human's.
 #   bin/onboard <repo-url> [--no-pr] [--own <file>] [--module <name>]...
-# This is the agents' half; a repository that already has the kit is brought up to date with bin/kit-update. The Human's half, bin/onboard-owner, runs first; without --no-pr, onboard refuses until
+# The team that claimed the issue runs it; a repository that already has the kit is brought up to date with
+# bin/kit-update. bin/onboard-owner runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
 # The repository keeps its own AGENTS.md and CLAUDE.md. The kit puts one marked Gate block at the start of AGENTS.md, after
 # an optional title line (kit/.gate/bin/lib/instructions.mjs compose), and writes the one-line import where there is no
@@ -71,7 +72,8 @@ if [ "$open_pr" -eq 1 ]; then
     exit 2
   fi
   if ! gh api "repos/$owner/$name/rules/branches/main" | grep -Eq '"type": ?"pull_request"'; then
-    echo "onboard: main has no pull request rule: the Human runs bin/onboard-owner first; nothing done"
+    echo "onboard: main has no pull request rule: bin/onboard-owner runs first (Colly, on the Human's login)"
+    echo "onboard: nothing done"
     exit 2
   fi
   # The kit is laid from this clone's working tree, and its evidence names a commit: the two must be one, on main.
@@ -300,12 +302,23 @@ Re-check from the factory's clone: \`bin/kit-evidence --factory <factory> --comm
 
 Note: the \`verify\` check of this PR is red (\`.gate/bin/verify-trusted: No such file\`, code 127) because \`main\` has no kit yet; it does not block the merge, because \`factory-bootstrap\` requires no check.
 
-## The Human's steps after the merge
-1. From the factory's clone, run \`bin/onboard-owner $slug --id $id --apply\` again: it replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\` and reads back what it set.
-2. Set the reviewer's secrets in the environment \`reviewer\` (branch \`main\` only; set no repository-level secret: the \`pull_request\` jobs of every branch can read it).
-3. Repository variables: \`GATE_RUNNER\` (for example \`["self-hosted","factory"]\`; empty means GitHub's runner), \`GATE_REVIEWER\` (while unset, \`review\` and \`verdict\` are red and nothing merges itself).
-4. Log into the profile: open a new pane in the repository, check \`echo \$CLAUDE_CONFIG_DIR\`, run \`claude\`.
-5. Add the repository to the launchd \`bin/factory-queue sweep\` command (run as the agents' account).
+## After the merge
+1. Colly runs \`bin/onboard-owner $slug --id $id --apply\` again, on the Human's login; his approval of this pull
+   request covers it. It replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\` and reads back what
+   it set.
+2. Where the repository uses the kit's Claude reviewer, the Human pastes the reviewer's secret into the environment
+   \`reviewer\` (branch \`main\` only; set no repository-level secret: the \`pull_request\` jobs of every branch can
+   read it). Entire needs none (#155).
+3. Log into the profile: open a new pane in the repository, check \`echo \$CLAUDE_CONFIG_DIR\`, run \`claude\`.
+
+Colly set the repository variables in step 2 of taking the repository in, under the Human's approval. An empty value
+means GitHub's runner.
+- \`GATE_RUNNER\`: the runner of \`main\`'s jobs.
+- \`GATE_PR_RUNNER\`: the runner of the candidate's \`verify\`.
+- \`GATE_TRUSTED_RUNNER\`: the runner of the jobs that hold the reviewer's credential. It is never a runner that a
+  candidate's, \`main\`'s or a deploy's job uses.
+- \`GATE_REVIEWER\`: which reviewer the gate runs. While it is unset, \`review\` and \`verdict\` are red and nothing
+  merges itself.
 
 Issue: none
 Team: factory/onboard
