@@ -17,18 +17,21 @@ const DENY = [
   'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', 'Bash(/h/.local/bin/herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'WebFetch', 'WebSearch',
   'Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)',
+  'Read(~/factory-runs/*-lead/transcripts/**)',
 ];
 const BASE = ['Read', 'Glob', 'Grep', 'Bash(node:*)', 'Bash(git:*)', 'Bash(/r/issue-1/sv)', 'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(cd:*)', 'Bash(mktemp:*)', 'Bash(grep:*)', 'Bash(diff:*)'];
 const WORKER_ALLOW = [...BASE, 'Bash(cp:*)', 'Bash(sed:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(cmp:*)', 'Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)'];
 // Write, Edit and redirects only in the session's own folders: the run folder and the work folder (#188).
 const EDITS = ['Edit(//r/issue-1/**)', 'Edit(//r/w/**)'];
 
+const ALERTS = JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: join(factory, 'bin/factory-alerts'), timeout: 10 }] }] } });
 const tail = ['--output-format', 'stream-json', '--verbose', '--json-schema', SCHEMA];
 
 test('worker: sonnet, medium effort, 400 turns, the worker allow list and the common deny list', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'worker', run: RUN, home: HOME, work: WORK }), [
     '-p', '--model', 'sonnet', '--effort', 'medium', '--max-turns', '400', '--permission-mode', 'default',
+    '--settings', ALERTS,
     '--add-dir', RUN,
     '--allowedTools', ...WORKER_ALLOW, ...EDITS, 'StructuredOutput',
     '--disallowedTools', ...DENY,
@@ -40,6 +43,7 @@ test('reviewer: opus, high effort, 300 turns, the base allow list, cp and the co
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'reviewer', run: RUN, home: HOME, work: WORK }), [
     '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'default',
+    '--settings', ALERTS,
     '--add-dir', RUN,
     '--allowedTools', ...BASE, 'Bash(cp:*)', 'Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)', ...EDITS, 'StructuredOutput',
     '--disallowedTools', ...DENY,
@@ -51,6 +55,7 @@ test('researcher: opus, high effort, 300 turns, the web and git only through bin
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'researcher', run: RUN, home: HOME, work: WORK }), [
     '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'default',
+    '--settings', ALERTS,
     '--add-dir', RUN,
     '--allowedTools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${join(factory, 'bin/research-git')}:*)`,
     'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)', ...EDITS, 'StructuredOutput',
@@ -75,6 +80,13 @@ test('--skill adds Skill(<name>) and --allow a run\'s own rule, after the preset
   assert.deepEqual(args.slice(args.indexOf('--add-dir'), args.indexOf('--allowedTools')), ['--add-dir', RUN, '--add-dir', '/x']);
   const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
   assert.deepEqual(allowed, [...WORKER_ALLOW, ...EDITS, 'Edit(//x/**)', 'StructuredOutput', 'Skill(deletion-proof)', 'Bash(/r/issue-1/other:*)']);
+});
+
+test('with no work folder, the only Edit rule is the run folder\'s: no rule for a missing folder (#192)', async () => {
+  const { buildArgs } = await lib();
+  const args = buildArgs({ role: 'worker', run: RUN, home: HOME });
+  const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
+  assert.deepEqual(allowed.filter((r) => r.startsWith('Edit(')), ['Edit(//r/issue-1/**)']);
 });
 
 test('seat 1 adds one deny rule, the token file by absolute path; seat 2 adds none', async () => {

@@ -5,7 +5,7 @@
 // changes no profile. The committed profile list below holds no account name: the factory repository is public, and an
 // account is an email local part. The account a profile is expected to have is in $FACTORY_STATE/accounts, local to a machine.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +18,8 @@ const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
 
 const claude = (profile, role, env, login) => ({ profile, role, kind: 'claude', check: { cmd: 'claude', args: ['auth', 'status'], env }, login });
 
-/** The profiles of a place, from the committed list. leads: the repository folders that hold .gate/ and .envrc. */
-export function profilesOf(place, { home, agentProfiles, root }) {
+/** The profiles of a place, from the committed list. */
+export function profilesOf(place, { home, agentProfiles }) {
   if (place === 'macbook') {
     return [
       claude('macbook/claude', 'Colly', {}, 'claude auth login'),
@@ -30,14 +30,10 @@ export function profilesOf(place, { home, agentProfiles, root }) {
   }
   if (place === 'factory') {
     const seat2 = join(agentProfiles, 'seats/2/claude');
-    const leads = (existsSync(root) ? readdirSync(root).sort() : [])
-      .filter((n) => !n.startsWith('.') && existsSync(join(root, n, '.gate')) && existsSync(join(root, n, '.envrc')))
-      .map((n) => ({ profile: `factory/lead-${n}`, role: 'Lead', kind: 'claude', check: { cmd: 'direnv', args: ['exec', '.', 'claude', 'auth', 'status'], env: {}, cwd: join(root, n) }, login: `cd ~/WORKSPACES/${n} && direnv exec . claude auth login` }));
     const tokens = tokenAccounts(agentProfiles).map((a) => ({ profile: `factory/token-${a}`, role: 'token file', kind: 'claude', tokenFile: join(tokenDir(agentProfiles), a), named: a, login: `factory login ${a}` }));
     return [
       { profile: 'factory/seat-1', role: 'seat 1 (bin/seat)', kind: 'claude', tokenFile: join(agentProfiles, 'seats/1/oauth-token'), login: 'factory login <account>, then copy ~/.agent-profiles/tokens/<account> to ~/.agent-profiles/seats/1/oauth-token with mode 600 (until #178)' },
       claude('factory/seat-2', 'seat 2 (bin/seat)', { CLAUDE_CONFIG_DIR: seat2 }, `ssh -t factory@${HOST}\nCLAUDE_CONFIG_DIR=~/.agent-profiles/seats/2/claude claude auth login`),
-      ...leads,
       ...tokens,
       { profile: 'factory/verifier', role: 'live verifier', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: { CODEX_HOME: join(agentProfiles, 'verifier/codex') } }, login: 'CODEX_HOME=~/.agent-profiles/verifier/codex codex login --device-auth' },
       { profile: 'factory/gh', role: 'agents gh', kind: 'gh', check: { cmd: 'gh', args: ['auth', 'status'], env: {} }, login: 'gh auth login --insecure-storage' },
@@ -95,7 +91,7 @@ function check(p, ctx) {
     const mode = (s.mode & 0o777).toString(8);
     return { loggedIn: true, account: p.named ?? null, plan: null, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, modified ${s.mtime.toISOString().slice(0, 10)}` };
   }
-  const r = call(p.check.cmd, p.check.args, { extra: p.check.env, cwd: p.check.cwd, env: ctx.env, timeout: ctx.timeout });
+  const r = call(p.check.cmd, p.check.args, { extra: p.check.env, env: ctx.env, timeout: ctx.timeout });
   if (r.error) return { loggedIn: null, account: null, plan: null, note: r.error };
   if (p.kind === 'codex') {
     const read = readCodex(r.code);
@@ -129,7 +125,6 @@ export function contextOf(env = process.env) {
     home,
     state: env.FACTORY_STATE ?? join(home, '.local/state/factory'),
     agentProfiles: env.AGENT_PROFILES ?? join(home, '.agent-profiles'),
-    root: resolve(env.FACTORY_ROOT ?? join(home, 'WORKSPACES')),
     runs: resolve(env.FACTORY_RUNS ?? join(home, 'factory-runs')),
     timeout: timeoutMs(env),
   };
@@ -193,7 +188,7 @@ function blank(place, p, read, note) {
   return { place, profile: p.profile, role: p.role, kind: KINDS[p.kind], loggedIn: read.loggedIn, account: read.account, accountFrom: read.account ? 'read' : null, plan: read.plan, five_hour: null, seven_day: null, asOf: null, live: null, shared: [], login: p.login, note };
 }
 
-/** The factory rows from the Mac mini: its own `status --json`, run in a login shell over ssh. */
+/** The factory rows from the Mac mini: its own `factory --json`, run in a login shell over ssh. */
 export function readFactory(ctx) {
   const r = call('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, "zsh -lc '~/WORKSPACES/bin/factory --json'"], { env: ctx.env, timeout: ctx.timeout * 4 });
   if (r.error || r.code !== 0) return [unreachable('factory', r)];

@@ -1,11 +1,25 @@
 #!/usr/bin/env bash
-# The Human's half of taking a repository in; run it first, from this clone, logged into gh as the repository's owner:
+# The admin step of taking a repository in; Colly runs it from this clone, on the Human's gh login, first without
+# --apply, then with it after his one approval of the changes it prints:
 #   bin/onboard-owner <owner/name> --id <repository id>            show what it would change, and change nothing
 #   bin/onboard-owner <owner/name> --id <repository id> --apply    invite the agents' account (write), set the
 #        factory's rulesets (no rewrite on any branch; on main, a bootstrap one until the kit lands, then the kit's
 #        gate, which with the repository variable GATE_REVIEWER=entire requires verify, tier and Entire's check
 #        Entire Gates instead of review and verdict), create the reviewer environment, and read it all back
+#   options, one for each repository variable the kit reads (#210), set before the gate's ruleset, which follows the
+#   reviewer being set; a value is printed only for the four, and an option left out leaves its variable as it is:
+#        --runner <json>          GATE_RUNNER          the runner of main's jobs
+#        --pr-runner <json>       GATE_PR_RUNNER       the runner of the candidate's verify
+#        --trusted-runner <json>  GATE_TRUSTED_RUNNER  the runner of the jobs that hold the reviewer's credential
+#        --reviewer claude|entire GATE_REVIEWER        which reviewer the gate runs
+#   A runner is JSON, as fromJSON(vars.X) reads it in the workflows: "ubuntu-latest" or ["self-hosted","macOS"]. It
+#   refuses, with nothing done, two of the trusted, main's and the candidate's self-hosted runners whose labels hold one
+#   another or share a label beyond self-hosted, the system and the architecture (kit/.gate/enforced-rules.md); a runner
+#   is GitHub-hosted only as one label, an OS name and then latest or a version. With GATE_REVIEWER=entire they may be
+#   shared (the Human's exception, #155, which needs no reviewer secret in the environment reviewer; this reads no secret).
+#   It does not know a repository's deploy jobs, so that half of the rule, no deploy on these runners, stays with the Human.
 # The id is the repository's own (gh api repos/<owner>/<name> --jq .id), so a typo or a renamed repository is refused.
-# Run it again with --apply once the kit pull request has merged, to put the kit's gate in. It never runs git or
-# anything the repository holds. FACTORY_AGENT (default: tuan9288-agent) names the agents' account.
+# Colly runs it with --apply again once the kit pull request has merged, to put the kit's gate in; his approval of
+# the kit pull request covers that. It never runs git or anything the repository holds. FACTORY_AGENT (default:
+# tuan9288-agent) names the agents' account.
 exec node "$(dirname "$0")/lib/owner.mjs" "$@"

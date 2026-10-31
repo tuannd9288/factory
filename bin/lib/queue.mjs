@@ -6,6 +6,9 @@
 // and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds; a run that fails
 // before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
 // queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
+// With no --repo it sweeps the repositories taken in (#211), found as the ledger finds them (clonesUnder): a folder
+// of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its
+// origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -13,6 +16,7 @@ import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync,
 import { hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { clonesUnder } from './ledger.mjs';
 
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
 const CALL_MS = 60_000;
@@ -228,7 +232,7 @@ function preflight(state, human) {
   return 2;
 }
 
-const LABEL = 'com.tuanhub.factory.queue';
+const LABEL = 'io.github.tuannd9288.factory.queue';
 
 /** The first executable `name` on a PATH, or null. */
 function which(name, path) {
@@ -246,13 +250,14 @@ function which(name, path) {
  * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
  * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (#24's claude-canary):
  * its label, tool, verb, log name and interval, more variables to keep and more tools to find on the PATH; the
- * defaults are the queue's own. */
+ * defaults are the queue's own. The digest's job (#209) gives no verb, `args` before the repositories, and a
+ * `calendar` (launchd's StartCalendarInterval) in place of the interval. */
 export function job(repos, env = process.env, daemon = false, as = {}) {
   const gh = which('gh', env.PATH);
   if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
   const node = which('node', env.PATH) ?? process.execPath;
   const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, keep = [], tools = [] } = as;
+  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, calendar = null, args = [], keep = [], tools = [] } = as;
   const extra = tools.map((name) => which(name, env.PATH)).filter(Boolean).map((p) => dirname(p));
   const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), ...extra, '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
   const found = which('node', path);
@@ -261,8 +266,9 @@ export function job(repos, env = process.env, daemon = false, as = {}) {
   const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN', ...keep].filter((k) => env[k]).map((k) => [k, env[k]]));
   return {
     label,
-    interval,
-    program: [join(factory, tool), verb, ...repos.flatMap((repo) => ['--repo', repo])],
+    interval: calendar ? null : interval,
+    calendar,
+    program: [join(factory, tool), ...(verb ? [verb] : []), ...args, ...repos.flatMap((repo) => ['--repo', repo])],
     cwd: factory,
     env: { PATH: path, ...kept, ...(daemon ? { HOME: env.HOME } : {}) },
     log: join(env.HOME, 'Library/Logs/factory', log),
@@ -271,7 +277,7 @@ export function job(repos, env = process.env, daemon = false, as = {}) {
   };
 }
 
-/** The job as a property list, for ~/Library/LaunchAgents/com.tuanhub.factory.queue.plist, or with a user for
+/** The job as a property list, for ~/Library/LaunchAgents/io.github.tuannd9288.factory.queue.plist, or with a user for
  * /Library/LaunchDaemons/, which the Human loads with sudo. Never KeepAlive: a sweep exits after each run. */
 export function plist(j) {
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -292,10 +298,9 @@ ${j.program.map((a) => `    ${str(a)}`).join('\n')}
   <dict>
 ${Object.entries(j.env).map(([k, v]) => `    <key>${esc(k)}</key>\n    ${str(v)}`).join('\n')}
   </dict>
-  <key>StartInterval</key>
-  <integer>${j.interval ?? 60}</integer>
-  <key>RunAtLoad</key>
-  <true/>
+${j.calendar
+    ? `  <key>StartCalendarInterval</key>\n  <dict>\n${Object.entries(j.calendar).map(([k, v]) => `    <key>${esc(k)}</key>\n    <integer>${v}</integer>`).join('\n')}\n  </dict>\n  <key>RunAtLoad</key>\n  <false/>`
+    : `  <key>StartInterval</key>\n  <integer>${j.interval ?? 60}</integer>\n  <key>RunAtLoad</key>\n  <true/>`}
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>
@@ -351,7 +356,7 @@ function main(argv) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(rest[i + 1] ?? '')) throw new Error(`--repo needs owner/name, not ${JSON.stringify(rest[i + 1] ?? '')}`);
     repos.push(rest[++i]);
   }
-  if (!['sweep', 'plist', 'check'].includes(command) || !repos.length) throw new Error('usage: factory-queue sweep|plist|check --repo owner/name...');
+  if (!['sweep', 'plist', 'check'].includes(command)) throw new Error('usage: factory-queue sweep|plist|check [--repo owner/name...]');
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
   if (command === 'plist') return void process.stdout.write(plist(job(repos, process.env, daemon)));
   if (command === 'check') return check(repos, human);
@@ -365,8 +370,12 @@ function main(argv) {
   try {
     const refused = preflight(state, human);
     if (refused) return refused;
+    // No --repo: the repositories taken in, found as the ledger finds them (#211).
+    const skip = (folder, why) => console.log(`queue: skipped ${folder}: ${why}`);
+    const swept = repos.length ? repos : [...clonesUnder(process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'), skip).keys()];
+    if (!swept.length) console.log('queue: no repository taken in under the factory root; nothing swept');
     let failed = 0;
-    for (const repo of repos) {
+    for (const repo of swept) {
       const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
         sweep(repo);

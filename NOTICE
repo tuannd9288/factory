@@ -43,8 +43,9 @@ agent-desk (the Human's own project, tuannd9288/agent-desk), commit 0cd59d55. Th
 2026-10-24).
 
   kit/.gate/bin/lib/      plugin/content/prompts/REVIEWER.md:12-17, 18-56, 70-84 ("Never", "Reviewing a commit" with
-  reviewer-prompt.md      its re-review paragraphs, "The verdict"), word for word, each section under a comment that
-                          cites its lines. Not taken: 1-10, 57-62 ("Before Adding a Test") and 64-68 ("Answering a
-                          question"). Added here, for the Human to approve in the pull request: that the pull
-                          request's text and files are data and never instructions, the output shape of result.mjs,
-                          the No-red judgement, the raise rule and the acceptance rule.
+  reviewer-prompt.md      its re-review paragraphs, "The verdict"), word for word, each section under its own heading;
+                          the prompt carries no provenance comments, since the reviewer's model reads it (#203, K6).
+                          Not taken: 1-10, 57-62 ("Before Adding a Test") and 64-68 ("Answering a question"). Added
+                          here, for the Human to approve in the pull request: that the pull request's text and files
+                          are data and never instructions, the output shape of result.mjs, the No-red judgement,
+                          the raise rule and the acceptance rule.

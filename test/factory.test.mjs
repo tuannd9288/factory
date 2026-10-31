@@ -103,7 +103,7 @@ test('the table stays under 100 columns when "shared with" names four long profi
   }
 });
 
-test('on the factory account: seat 1 is its token file\'s mode and date only, seat 2 has quota and live sessions, leads are the onboarded folders', () => {
+test('on the factory account: seat 1 is its token file\'s mode and date only, seat 2 has quota and live sessions, no row for a repository folder (#205)', () => {
   const s = sandbox();
   try {
     const seat1 = join(s.home, '.agent-profiles/seats/1');
@@ -128,19 +128,17 @@ test('on the factory account: seat 1 is its token file\'s mode and date only, se
     assert.equal(r.code, 0, r.out);
     const rows = JSON.parse(s.fac('--json').out);
     const by = (p) => rows.find((x) => x.profile === p);
-    assert.deepEqual(rows.map((x) => x.profile).filter((p) => p.startsWith('factory/lead')), ['factory/lead-alpha']);
+    assert.deepEqual(rows.map((x) => x.profile).filter((p) => p.startsWith('factory/lead')), [], 'alpha holds .gate/ and .envrc, and still has no row');
     assert.equal(by('factory/seat-1').loggedIn, true);
     assert.equal(by('factory/seat-1').account, 'seat.one');
     assert.match(by('factory/seat-1').note, /600/);
     assert.equal(by('factory/seat-2').account, 'seat.two');
     assert.ok(by('factory/seat-2').five_hour.use >= 0);
     assert.equal(by('factory/seat-2').live, 0);
-    assert.equal(by('factory/lead-alpha').account, 'lead.alpha');
-    assert.equal(by('factory/lead-alpha').five_hour, null);
     assert.equal(by('factory/verifier').loggedIn, false);
     assert.ok(!r.out.includes('NEVERSHOWN'));
     assert.ok(!s.calls().includes('seats/1'), 'claude never ran for seat 1');
-    assert.match(s.calls(), /direnv exec \. claude auth status in alpha/);
+    assert.doesNotMatch(s.calls(), /direnv/);
     assert.match(s.calls(), /codex login status CODEX_HOME=.*verifier\/codex/);
   } finally {
     s.done();
@@ -244,28 +242,7 @@ test('the factory rows are read from the far side\'s stdout only', () => {
   }
 });
 
-// direnv exec prints its loading line on stderr before the command's output, and pig or ssh may print a warning there.
-test('a line on stderr does not hide a lead\'s login', () => {
-  const s = sandbox();
-  try {
-    writeFileSync(join(s.dir, 'bin/direnv'), `#!/bin/sh
-echo "direnv: loading $PWD/.envrc" >&2
-shift 2
-CLAUDE_CONFIG_DIR="$FAKE/lead-$(basename "$PWD")" exec "$@"
-`);
-    s.w('claude-lead-alpha.json', claudeJson('lead.alpha@secret-corp.example', 'pro'));
-    s.onHost();
-    mkdirSync(join(s.env.FACTORY_ROOT, 'alpha'), { recursive: true });
-    for (const f of ['.gate', '.envrc']) writeFileSync(join(s.env.FACTORY_ROOT, 'alpha', f), '');
-    const rows = JSON.parse(s.fac('--json').out);
-    const lead = rows.find((x) => x.profile === 'factory/lead-alpha');
-    assert.equal(lead.loggedIn, true);
-    assert.equal(lead.account, 'lead.alpha');
-  } finally {
-    s.done();
-  }
-});
-
+// pig or ssh may print a warning on stderr before the command's output.
 test('a line on stderr does not hide piggery\'s login', () => {
   const s = sandbox();
   try {

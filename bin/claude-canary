@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Claude Code updates itself on the stable channel into ~/.local/share/claude/versions/<version>; the launcher
 # ~/.local/bin/claude decides which one runs (code.claude.com/docs/en/setup). The canary keeps that launcher on a
-# version the pack probe passed (#24), run as the agents' account by launchd every six hours:
-#   bin/claude-canary run --repo owner/name [--probe <command>]   probe the newest version; move the launcher to it
-#                                                                 only if the probe passes
+# version that passed a session through bin/seat (#24, #203), run as the agents' account by launchd every six hours:
+#   bin/claude-canary run --repo owner/name [--seat <command>]    run the newest version through bin/seat (or
+#                                                                 <command>) and move the launcher to it only if
+#                                                                 the checks of probes/pack-contract.md pass
 #   bin/claude-canary plist --daemon --repo owner/name            print the LaunchDaemon that runs it, for the Human
 # State is in $FACTORY_STATE (default ~/.local/state/factory); $CLAUDE_VERSIONS and $CLAUDE_LAUNCHER name the two
 # paths above. A failure leaves claude-canary.failed there, which bin/factory-alerts shows at the next session start.

@@ -1,5 +1,5 @@
-// The Human's half of taking a repository in, bin/onboard-owner, against a fake GitHub that keeps the repository's
-// settings in a file; and the agent's half, bin/onboard, refusing to open the kit pull request out of turn. No network.
+// The admin step of taking a repository in, bin/onboard-owner, against a fake GitHub that keeps the repository's
+// settings in a file; and the team's step, bin/onboard, refusing to open the kit pull request out of turn. No network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -60,6 +60,19 @@ if (one) {
   // So does the tag ruleset: a bypass actor with a field of its own, a parameter on the update rule, a top-level field.
   if (r.target === 'tag') done({ ...read, current_user_can_bypass: 'never', bypass_actors: read.bypass_actors.map((b) => ({ ...b, actor_name: 'admin' })), rules: read.rules.map((x) => (x.type === 'update' ? { ...x, parameters: { update_allows_fetch_and_merge: false } } : x)) });
   done(read);
+}
+// #210: an Actions variable is created by a POST and changed by a PATCH of its name.
+if (path === repo + '/actions/variables' && method === 'POST') {
+  state.variables ??= [];
+  if (kept('variables')) state.variables.push({ name: body.name, value: body.value });
+  done();
+}
+const named = /\/actions\/variables\/(\w+)$/.exec(path);
+if (named && path.startsWith(repo) && method === 'PATCH') {
+  const v = (state.variables ?? []).find((x) => x.name === named[1]);
+  if (!v) missing();
+  if (kept('variables')) v.value = body.value;
+  done();
 }
 const env = repo + '/environments/reviewer';
 if (path === env) {
@@ -237,6 +250,263 @@ test('an Entire App that GitHub does not know by that slug and id is refused bef
   }
 });
 
+// #210: the four values, one option each, as bin/onboard-owner takes them.
+const MAIN = '["self-hosted","macOS","main"]';
+const PR = '["self-hosted","macOS","pr"]';
+const TRUSTED = '["self-hosted","macOS","trusted"]';
+const FOUR = ['--runner', MAIN, '--pr-runner', PR, '--trusted-runner', TRUSTED, '--reviewer', 'claude'];
+const variable = (name, value) => `POST repos/tuannd9288/app/actions/variables ${JSON.stringify({ name, value })}`;
+
+test('the owner script names the four gate variables among the changes it would make, and makes none without --apply (#210)', () => {
+  const w = world();
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', ...FOUR]);
+    assert.equal(out.code, 0, out.out);
+    for (const [name, value] of [['GATE_RUNNER', MAIN], ['GATE_PR_RUNNER', PR], ['GATE_TRUSTED_RUNNER', TRUSTED], ['GATE_REVIEWER', 'claude']])
+      assert.ok(out.out.includes(variable(name, value)), `${name} not among the changes:\n${out.out}`);
+    assert.match(out.out, /dry run: nothing changed; rerun with --apply/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the owner script sets the four gate variables, reads them back, and a second run with the same values changes nothing (#210)', () => {
+  const w = world();
+  try {
+    let out = w.owner(['tuannd9288/app', '--id', '1234', ...FOUR, '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /done {4}variable GATE_RUNNER/);
+    assert.match(out.out, /read back: every setting as planned/);
+    const held = Object.fromEntries(w.state().variables.map((v) => [v.name, v.value]));
+    assert.deepEqual(held, { GATE_RUNNER: MAIN, GATE_PR_RUNNER: PR, GATE_TRUSTED_RUNNER: TRUSTED, GATE_REVIEWER: 'claude' });
+    w.set({ collaborator: 'write', invitations: [] });
+    w.clear();
+    out = w.owner(['tuannd9288/app', '--id', '1234', ...FOUR, '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(w.writes(), []);
+    assert.match(out.out, /nothing to change/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the variables are set before the gate\'s ruleset, which follows the GATE_REVIEWER being set (#210, #155)', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
+  const w = world({ kitLanded: true, collaborator: 'write', apps });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', ...FOUR.slice(0, 6), '--reviewer', 'entire', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const writes = w.writes();
+    const last = writes.map((l, i) => (/\/actions\/variables/.test(l) ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
+    const gate = writes.findIndex((l) => / -X POST repos\/tuannd9288\/app\/rulesets /.test(l));
+    assert.ok(last >= 0 && gate > last, writes.join('\n'));
+    const checks = w.state().rulesets.find((r) => r.name === 'factory-gate').rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks;
+    assert.ok(checks.some((c) => c.context === ENTIRE_APP.check), JSON.stringify(checks));
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('an option left out keeps the value held and the dry run says so; no other variable\'s value is printed (#210)', () => {
+  const held = [{ name: 'GATE_RUNNER', value: '["self-hosted","zz-held-runner"]' }, { name: 'OTHER', value: 'zz-other-value' }];
+  const w = world({ variables: held });
+  try {
+    for (const args of [['--reviewer', 'claude'], ['--reviewer', 'claude', '--apply']]) {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', ...args]);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /--runner not given: GATE_RUNNER stays as it is/);
+      assert.match(out.out, /--pr-runner not given: GATE_PR_RUNNER stays unset/);
+      assert.match(out.out, /--trusted-runner not given: GATE_TRUSTED_RUNNER stays unset/);
+      assert.doesNotMatch(out.out, /--reviewer not given/);
+      for (const secret of ['zz-held-runner', 'zz-other-value']) assert.ok(!out.out.includes(secret), `${secret} printed:\n${out.out}`);
+    }
+    assert.deepEqual(w.state().variables, [...held, { name: 'GATE_REVIEWER', value: 'claude' }]);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a variable that holds another value is changed by a PATCH of its name, and read back (#210)', () => {
+  const w = world({ variables: [{ name: 'GATE_REVIEWER', value: 'claude' }, { name: 'GATE_RUNNER', value: '"ubuntu-latest"' }] });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--runner', MAIN, '--reviewer', 'claude', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const patches = w.writes().filter((l) => /\/actions\/variables/.test(l));
+    assert.deepEqual(patches, ['api -X PATCH repos/tuannd9288/app/actions/variables/GATE_RUNNER --input -']);
+    assert.equal(w.state().variables.find((v) => v.name === 'GATE_RUNNER').value, MAIN);
+    assert.match(out.out, /read back: every setting as planned/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a variable GitHub accepts and drops leaves the onboarding incomplete (#210)', () => {
+  const w = world({ ignore: 'variables' });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--reviewer', 'claude', '--apply']);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /incomplete: .*variable GATE_REVIEWER/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a value of the wrong form is refused before any call is made (#210)', () => {
+  const bad = [
+    ['--runner', 'ubuntu-latest'],
+    ['--runner', '[]'],
+    ['--runner', '[1]'],
+    ['--runner', '{"group":"x"}'],
+    ['--pr-runner', '["a b"]'],
+    ['--trusted-runner', '""'],
+    ['--reviewer', 'gpt'],
+    ['--runner'],
+    ['--runer', '"ubuntu-latest"'],
+  ];
+  for (const extra of bad) {
+    const w = world();
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, '--apply']);
+      assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+      assert.match(out.out, /usage|--runner|--pr-runner|--trusted-runner|--reviewer|--runer/, out.out);
+      assert.equal(readFileSync(join(w.dir, 'calls'), 'utf8'), '', `${extra.join(' ')} reached GitHub`);
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
+test('a self-hosted trusted runner that is, or shares a label with, another job\'s runner is refused with nothing done (#210)', () => {
+  const refused = [
+    [['--runner', '["self-hosted","macOS"]', '--trusted-runner', '["self-hosted","macOS"]'], {}],
+    [['--pr-runner', '["self-hosted","macOS","a"]', '--trusted-runner', '["a","macOS","self-hosted"]'], {}],
+    [['--runner', '["self-hosted","macOS","ci-box"]', '--trusted-runner', '["self-hosted","linux","ci-box"]'], {}],
+    [['--trusted-runner', '["self-hosted","linux","ci-box"]'], { variables: [{ name: 'GATE_PR_RUNNER', value: '["ci-box"]' }] }],
+    [['--trusted-runner', '"my-runner"', '--runner', '"my-runner"'], {}],
+  ];
+  for (const [extra, over] of refused) {
+    const w = world(over);
+    try {
+      for (const apply of [[], ['--apply']]) {
+        const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, ...apply]);
+        assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+        assert.match(out.out, /GATE_TRUSTED_RUNNER/);
+        assert.deepEqual(w.writes(), []);
+      }
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
+test('GitHub-hosted runners may be the same for all three jobs, and a self-hosted one may share only the OS and architecture labels (#210)', () => {
+  const allowed = [
+    ['--runner', '"ubuntu-latest"', '--pr-runner', '"ubuntu-latest"', '--trusted-runner', '"ubuntu-latest"'],
+    ['--runner', '["self-hosted","macOS","ARM64","a"]', '--pr-runner', '["self-hosted","macOS","ARM64","b"]', '--trusted-runner', '["self-hosted","macOS","ARM64","t"]'],
+    ['--runner', '["self-hosted","macOS","a"]', '--trusted-runner', '"ubuntu-latest"'],
+  ];
+  for (const extra of allowed) {
+    const w = world();
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, '--apply']);
+      assert.equal(out.code, 0, `${extra.join(' ')}\n${out.out}`);
+      assert.match(out.out, /done {4}variable GATE_TRUSTED_RUNNER/);
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
+const SHARED = '["self-hosted","macOS"]';
+
+test('the #155 exception lets the three runners be shared under entire, and one line names its condition (#210)', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
+  const w = world({ kitLanded: true, collaborator: 'write', apps });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--runner', SHARED, '--pr-runner', SHARED, '--trusted-runner', SHARED, '--reviewer', 'entire', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /#155/);
+    assert.match(out.out, /no reviewer secret in the environment reviewer/);
+    assert.equal(w.state().variables.find((v) => v.name === 'GATE_TRUSTED_RUNNER').value, SHARED);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('leaving entire brings the shared-runner check back, with no runner option given (#210)', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
+  const held = [{ name: 'GATE_REVIEWER', value: 'entire' }, ...['GATE_RUNNER', 'GATE_PR_RUNNER', 'GATE_TRUSTED_RUNNER'].map((name) => ({ name, value: SHARED }))];
+  const w = world({ kitLanded: true, collaborator: 'write', apps, variables: held });
+  try {
+    let out = w.owner(['tuannd9288/app', '--id', '1234', '--reviewer', 'entire', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    w.clear();
+    out = w.owner(['tuannd9288/app', '--id', '1234', '--reviewer', 'claude', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /GATE_TRUSTED_RUNNER/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a trusted runner whose labels are contained in the other job\'s, or hold them, is refused with nothing done (#210)', () => {
+  const refused = [
+    ['--pr-runner', '["self-hosted","macOS"]', '--trusted-runner', '["self-hosted","macOS","trusted"]'],
+    ['--runner', '["self-hosted","macOS","main"]', '--trusted-runner', '["self-hosted","macOS"]'],
+    ['--runner', '["self-hosted","main"]', '--trusted-runner', '"self-hosted"'],
+  ];
+  for (const extra of refused) {
+    const w = world();
+    try {
+      for (const apply of [[], ['--apply']]) {
+        const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, ...apply]);
+        assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+        assert.match(out.out, /GATE_TRUSTED_RUNNER/);
+        assert.deepEqual(w.writes(), []);
+      }
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
+test('macos-mini is self-hosted: the same one for main\'s and the trusted runner is refused (#210)', () => {
+  const w = world();
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--runner', '"macos-mini"', '--trusted-runner', '"macos-mini"', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /GATE_TRUSTED_RUNNER/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the candidate\'s runner may not reach main\'s: equal, contained or sharing a label is refused (#210)', () => {
+  const refused = [
+    ['--runner', '["self-hosted","macOS","main"]', '--pr-runner', '["self-hosted","macOS","main"]'],
+    ['--runner', '["self-hosted","macOS"]', '--pr-runner', '["self-hosted","macOS","pr"]'],
+    ['--runner', '["self-hosted","macOS","main"]', '--pr-runner', '["self-hosted","macOS"]'],
+    ['--runner', '["self-hosted","macOS","ci-box","a"]', '--pr-runner', '["self-hosted","linux","ci-box","b"]'],
+  ];
+  for (const extra of refused) {
+    const w = world();
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, '--apply']);
+      assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+      assert.match(out.out, /GATE_PR_RUNNER/);
+      assert.deepEqual(w.writes(), []);
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
 test('on the first run GitHub may answer 404 for the permission of an account not yet a collaborator', () => {
   // GitHub's docs give this endpoint two answers, 200 and 404 "Resource not found".
   const w = world({ permission404: true });
@@ -354,7 +624,7 @@ test('the factory\'s rulesets: no rewrite on any branch, and one approval of the
   assert.deepEqual(pr.allowed_merge_methods, ['merge']);
 });
 
-test('the agent\'s half opens the kit pull request only as the agents\' account, after the owner script ran', () => {
+test('onboard opens the kit pull request only as the agents\' account, after the owner script ran', () => {
   const dir = mkdtempSync(join(tmpdir(), 'onboard-turn-'));
   try {
     writeFileSync(
@@ -372,7 +642,7 @@ test('the agent\'s half opens the kit pull request only as the agents\' account,
     assert.match(out.stdout + out.stderr, /opens the kit pull request as the agents' account \(tuan9288-agent\), not as tuannd9288/);
     out = onboard({ LOGIN: 'tuan9288-agent', RULES: '[]' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
-    assert.match(out.stdout + out.stderr, /main has no pull request rule: the Human runs bin\/onboard-owner first/);
+    assert.match(out.stdout + out.stderr, /main has no pull request rule: bin\/onboard-owner runs first/);
     assert.ok(!existsSync(join(dir, 'root/app')), 'cloned before refusing');
   } finally {
     rmSync(dir, { recursive: true, force: true });
