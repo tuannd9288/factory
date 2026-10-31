@@ -1,10 +1,10 @@
-// The Human's half of taking a repository in, run by him from the factory clone, logged into gh as the repository's
-// owner: it checks the repository is the one he names, by name and id, shows every change, and with --apply invites
-// the agents' account (write), sets the factory's rulesets and creates the reviewer environment, then reads back what
-// it set; the gate's ruleset follows the repository variable GATE_REVIEWER (#155: entire has its own). It calls only
-// gh against GitHub's API, with the factory's own files: never git, never the target's .envrc,
-// scripts or hooks, so nothing the target holds runs with his authority. A second run changes nothing.
-// See bin/onboard-owner for the arguments.
+// The admin step of taking a repository in, run by Colly from the factory clone, on the Human's gh login, after his
+// one approval of what it prints: it checks the repository is the one he names, by name and id, shows every change,
+// and with --apply invites the agents' account (write), sets the factory's rulesets and creates the reviewer
+// environment, then reads back what it set; the gate's ruleset follows the repository variable GATE_REVIEWER (#155:
+// entire has its own). It calls only gh against GitHub's API, with the factory's own files: never git, never the
+// target's .envrc, scripts or hooks, so nothing the target holds runs with his authority. A second run changes
+// nothing. See bin/onboard-owner for the arguments.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -212,8 +212,11 @@ function main(argv) {
   }
   console.log('onboard-owner: read back: every setting as planned');
   if (have.collaborator !== 'write')
-    console.log(`onboard-owner: waiting: ${agent} accepts the invitation, logged in as itself; then its half, bin/onboard, opens the kit pull request`);
-  else if (!kitLanded) console.log(`onboard-owner: next: the agents' half, bin/onboard, opens the kit pull request`);
+    console.log(`onboard-owner: waiting: ${agent} accepts the invitation, logged in as itself; then the team that ` +
+      'claimed the issue runs bin/onboard, which opens the kit pull request');
+  else if (!kitLanded)
+    console.log('onboard-owner: next: the team that claimed the issue runs bin/onboard, ' +
+      'which opens the kit pull request');
   else console.log(`onboard-owner: the kit's gate is in force on ${branch}`);
   return 0;
 }

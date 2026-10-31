@@ -5,8 +5,8 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory, run } from './helpers.mjs';
-import { issue, team } from '../kit/.gate/bin/lib/prbody.mjs';
+import { factory, run } from '../helpers.mjs';
+import { issue, team } from '../../kit/.gate/bin/lib/prbody.mjs';
 
 const probes = join(factory, 'probes');
 const read = (name) => (existsSync(join(probes, name)) ? readFileSync(join(probes, name), 'utf8') : '');
