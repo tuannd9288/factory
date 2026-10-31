@@ -227,7 +227,7 @@ function shape(p, { record, role, name, issue, folder, seat, live, mtime, start,
 }
 
 /** Every session: the run folders' logs, and each Lead's process with its transcript copies. */
-export function gatherSessions({ runs, state, now, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn, origins = new Map() }) {
+export function gatherSessions({ runs, state, now, root = null, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn, origins = new Map() }) {
   // A work folder's origin, asked of git once for as long as `origins` lives (the caller clears it at each GitHub refresh).
   const originCached = (cwd) => {
     if (!origins.has(cwd)) origins.set(cwd, originOf(cwd));
@@ -297,6 +297,14 @@ export function gatherSessions({ runs, state, now, clones = new Map(), live = ru
     if (s.repo || !s.folder) continue;
     const known = new Set(out.filter((o) => o.folder === s.folder && o.repo).map((o) => o.repo));
     if (known.size === 1) s.repo = [...known][0];
+  }
+  // Still none: the run folder's name says. `issue-<n>` is a factory run, the checkout's own repository; `<short>-<n>` is a pstack
+  // Lead's (packs/pstack/lead.md), where <short> is the name of a known repository.
+  const names = new Set([...clones.keys(), ...out.map((o) => o.repo).filter(Boolean)]);
+  for (const s of out) {
+    if (s.repo || !s.folder) continue;
+    const m = /^(.+)-\d+$/.exec(s.folder);
+    s.repo = m?.[1] === 'issue' ? (root ? originCached(root) : null) : ([...names].find((r) => r.split('/')[1] === m?.[1]) ?? null);
   }
   const rank = (s) => ROLE_ORDER.indexOf(s.role) === -1 ? ROLE_ORDER.length : ROLE_ORDER.indexOf(s.role);
   return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { numeric: true }));
@@ -439,13 +447,12 @@ export async function snapshot(opts = {}) {
   const clones = opts.clones ?? clonesUnder(root);
   const cache = opts.cache ?? {};
   if (!cache.origins || now - cache.origins.at >= GH_MS) cache.origins = { at: now, map: new Map() };
-  const sessions = gatherSessions({ runs, state, now, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map });
+  const sessions = gatherSessions({ runs, state, now, root, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map });
   // Every repository a session names has its issues read too, not only the clones.
   const repos = [...new Set([...(opts.repos ?? clones.keys()), ...sessions.map((s) => s.repo).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r ?? ''))])];
   const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache });
-  const names = [...new Set([...repos, ...sessions.map((s) => s.repo ?? '?')])];
-  const byRepo = names.map((repo) => {
-    const mine = sessions.filter((s) => (s.repo ?? '?') === repo);
+  const byRepo = [...new Set([...repos, ...sessions.map((s) => s.repo).filter(Boolean)])].map((repo) => {
+    const mine = sessions.filter((s) => s.repo === repo);
     const gh = github.repos[repo];
     const numbers = new Set([...(gh?.issues ?? []).map((i) => i.number), ...mine.map((s) => s.issue).filter((n) => n !== null)]);
     const groups = [...numbers].sort((a, b) => a - b).map((n) => groupOf(repo, n, gh, mine.filter((s) => s.issue === n), startOfDay(now)));
@@ -560,7 +567,7 @@ export function tabsOf(snap) {
   const shown = (r) => r.groups.filter((g) => !g.done).flatMap((g) => g.sessions).concat(r.other).filter((s) => s.state !== 'gone');
   return [
     { label: 'All', kind: 'all' },
-    ...snap.repos.filter((r) => r.repo !== '?' || r.other.length || r.groups.length).map((r) => ({ label: `${r.repo.split('/').pop()} ${shown(r).length}`, kind: 'repo', repo: r.repo })),
+    ...snap.repos.map((r) => ({ label: `${r.repo.split('/').pop()} ${shown(r).length}`, kind: 'repo', repo: r.repo })),
     { label: `Done ${snap.repos.reduce((n, r) => n + r.groups.filter((g) => g.done).length, 0)}`, kind: 'done' },
   ];
 }
@@ -614,6 +621,9 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
     if (folded) lines.push(`  ${folded} ended before today`);
     if (older) lines.push(`  ${older} older`);
   }
+  // A session no repository could be found for is no block and no tab: All counts it in one line.
+  const unplaced = t.kind === 'all' ? sessions.filter((s) => !s.repo && s.state !== 'gone').length : 0;
+  if (unplaced) lines.push(`  ${unplaced} ${unplaced === 1 ? 'session' : 'sessions'} with no repository`);
   const tree = lines.splice(top);
   const win = (label, w) => (w ? `${label} ${Math.round(w.use * 1000) / 10}%${w.resetsAt == null ? '' : resetPassed(w.resetsAt, now) ? ' (reset since)' : ` resets ${local(w.resetsAt * 1000, now)}`}` : `${label} ?`);
   const nameW = Math.max(0, ...snap.accounts.map((a) => a.name.length));
