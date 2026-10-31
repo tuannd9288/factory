@@ -197,12 +197,16 @@ test('--full adds the engineering columns to every session row, and a header for
   assert.ok(!render(snap, { width: 200 }).split('\n').some((l) => l.startsWith('NAME')));
 });
 
-test('under a block, sessions that ended before today fold into one "N ended before today" row', async () => {
+test('a block folds the sessions that ended before today of all its issues into one "N ended before today" row, at its end', async () => {
   const w = world();
+  const cwd = join(w.root, 'WORKSPACES/factory/.claude/worktrees/w');
+  session(w.opts.runs, 'issue-170', 'old', { log: init(cwd) + assistant('m1', { input_tokens: 1, output_tokens: 1 }), ageSecs: 90000 });
   const lines = (await frame(w, 0)).text.split('\n');
-  const group = lines.findIndex((l) => /#174 factory top/.test(l));
-  const folded = lines.findIndex((l, i) => i > group && /^\s+1 ended before today$/.test(l));
-  assert.ok(folded > group, 'the folded row sits under #174');
+  const folded = lines.flatMap((l, i) => (/ended before today/.test(l) ? [i] : []));
+  assert.deepEqual(folded.map((i) => lines[i]), ['  2 ended before today'], 'one row for the block: 174-old and 170-old');
+  const last = lines.findIndex((l) => /^ {4}beaver /.test(l));
+  assert.ok(folded[0] > last, 'it comes after the issues\' rows');
+  assert.match(lines[folded[0] + 1], /^ {2}2 older$/);
   assert.ok(!lines.some((l) => /^\s*174-old /.test(l)));
 });
 
