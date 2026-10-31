@@ -7,24 +7,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
+import { matches, rulesAfter as rules } from './bash-rule.mjs';
 
 const lib = () => import('../bin/lib/seat.mjs');
 const RG = join(factory, 'bin/research-git');
 
-const esc = (s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-function matches(rule, command) {
-  const m = /^Bash\((.*)\)$/s.exec(rule);
-  if (!m) return false;
-  const p = m[1].endsWith(':*') ? `${m[1].slice(0, -2)} *` : m[1];
-  if (p.endsWith(' *') && p.indexOf('*') === p.length - 1 && command === p.slice(0, -2)) return true;
-  return new RegExp(`^${p.split('*').map(esc).join('.*')}$`, 's').test(command);
-}
-const rules = (args, flag) => {
-  const from = args.indexOf(flag) + 1;
-  let to = from;
-  while (to < args.length && !args[to].startsWith('--')) to++;
-  return args.slice(from, to);
-};
 const denied = (args, command) => rules(args, '--disallowedTools').some((r) => matches(r, command));
 const allowed = (args, command) => !denied(args, command) && rules(args, '--allowedTools').some((r) => matches(r, command));
 
