@@ -97,8 +97,11 @@ export function findNode(PATH) {
   return null;
 }
 
+// The hooks that run transcript-copy.mjs: it copies the transcript on Stop and SessionEnd, and on all five tells `top` the Lead's state (#286).
+const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop', 'SessionEnd'];
+
 /** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
- * hook is the command of the Stop and SessionEnd hooks, which copy the session's own transcript to ~/factory-runs/<repo>-lead/
+ * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-lead/
  * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
  * exec bit. */
 export function leadArgs({ repo, home, root, roleText, node, resume = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
@@ -115,7 +118,7 @@ export function leadArgs({ repo, home, root, roleText, node, resume = null, hook
       '--permission-mode', 'auto',
       '--add-dir', join(home, 'factory-runs'),
       '--name', `${repo}-lead`,
-      '--settings', JSON.stringify({ hooks: { Stop: hooks, SessionEnd: hooks } }),
+      '--settings', JSON.stringify({ hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])) }),
       ...(resume ? ['--resume', resume] : []),
       '--allowedTools', ...allowOf(root),
       '--disallowedTools', ...denyOf(cwd),
