@@ -1,4 +1,4 @@
-// The factory's ledger: one row per task, from GitHub and the repository's Claude Code profile, with no model; and the
+// The factory's ledger: one row per task, from GitHub and the records of bin/seat, with no model; and the
 // weekly digest built from those rows, every rate with its count and its 95% Wilson interval. A task is an
 // issue labelled task, from its assignment (the label) to its close, with every pull request that closes it; a pull
 // request that closes no task is a task of its own, from its opening. Cost is API-equivalent usage, never cash.
@@ -121,22 +121,26 @@ function within(cwd, folder) {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-/** Cost per git branch of one repository: every entry of its own profile (today's one profile per repository), plus the
- * entries of the extra profile folders whose working directory is the repository's folder <root>/<name> or under it
- * (a worktree). An entry in two places counts once; null when there is no profile folder to read at all. */
-export function repoCosts({ own, extra = [], root, name }) {
+/** Cost per git branch of one repository: the entries of the extra profile folders whose working directory is the
+ * repository's folder <root>/<name> or under it (a worktree), each once, plus `seat`, the branch rows of its seat sessions
+ * (seatCosts). A session in `recorded` (the ids of the seat records) is charged from its record only: its entries in the
+ * folders are skipped, whether or not the record names a repository. No repository profile is read (#205). Null when there is no folder to read and no seat session. */
+export function repoCosts({ extra = [], root, name, seat = null, recorded = new Set() }) {
   const dir = real(join(root, name));
   const byBranch = new Map();
   const seen = new Set();
   let any = false;
-  if (own && existsSync(own)) {
-    any = true;
-    for (const entry of assistantEntries(own)) charge(byBranch, seen, entry);
-  }
   for (const folder of extra) {
     if (!existsSync(folder)) continue;
     any = true;
-    for (const entry of assistantEntries(folder)) if (within(entry.cwd, dir)) charge(byBranch, seen, entry);
+    for (const entry of assistantEntries(folder)) if (!recorded.has(entry.sessionId) && within(entry.cwd, dir)) charge(byBranch, seen, entry);
+  }
+  for (const [branch, s] of seat ?? []) {
+    any = true;
+    const row = byBranch.get(branch) ?? { dollars: 0, models: new Set(), unpriced: new Set() };
+    row.dollars += s.dollars;
+    for (const m of s.models) row.models.add(m);
+    byBranch.set(branch, row);
   }
   return any ? byBranch : null;
 }
@@ -412,9 +416,6 @@ export function revertCount(rows, { since, until }) {
 
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
-/** The title of the digests posted before #98 (#1), which were Vietnamese. A period posted under it is updated, not
- * posted again. */
-export const oldDigestTitle = (since, until) => `Bản tin xưởng ${since} → ${until}`;
 
 /** The records bin/seat appended to sessions.jsonl in the state folder (#91), none when the file is absent. */
 export function readSessions(dir) {
@@ -433,9 +434,37 @@ export function readSessions(dir) {
  * session counts once, by its last record; the records of one session are never added (#89). */
 export function keptSessions(records, since, until) {
   const [from, to] = [Date.parse(`${since}T00:00:00Z`), Date.parse(`${until}T23:59:59Z`)];
+  return lastRecords(records.filter((x) => inWindow(x.start, x.end, from, to)));
+}
+
+/** One record for each session, its last, in the order the sessions started. */
+function lastRecords(records) {
   const last = new Map();
-  for (const r of records.filter((x) => inWindow(x.start, x.end, from, to)).sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(r.session ?? `${r.run}#${r.tag}`, r);
+  for (const r of [...records].sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(r.session ?? `${r.run}#${r.tag}`, r);
   return [...last.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+}
+
+/** The cost of the seat sessions that name a repository and a branch, from every record there is: owner/name, then branch,
+ * to { dollars, models } as repoCosts takes it. A session counts once, by its last record (#89); a record with no repository
+ * or no branch, or no cost, is charged to nothing (#205). */
+export function seatCosts(records) {
+  const byRepo = new Map();
+  for (const r of lastRecords(records)) {
+    if (!r.repo || !r.branch || typeof r.total_cost_usd !== 'number') continue;
+    const branches = byRepo.get(r.repo) ?? new Map();
+    const row = branches.get(r.branch) ?? { dollars: 0, models: new Set() };
+    row.dollars += r.total_cost_usd;
+    for (const m of String(r.model ?? '').split(',').filter(Boolean)) row.models.add(m);
+    branches.set(r.branch, row);
+    byRepo.set(r.repo, branches);
+  }
+  return byRepo;
+}
+
+/** The sessions of the period that no task is charged for, because the record names no repository or no branch. */
+export function unchargedSessions(records, since, until) {
+  const kept = keptSessions(records, since, until).filter((r) => !r.repo || !r.branch);
+  return { count: kept.length, dollars: kept.reduce((sum, r) => sum + (typeof r.total_cost_usd === 'number' ? r.total_cost_usd : 0), 0) };
 }
 
 /** One line for each session that ran in the period, and the total cost. */
@@ -510,7 +539,9 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
   }
   if (sessions) {
     const { lines: ran, total } = sessionLines(sessions, since, until);
+    const uncharged = unchargedSessions(sessions, since, until);
     lines.push('', '## Sessions (bin/seat)', '', ...(ran.length ? [...ran, `- Total: $${total.toFixed(2)} over ${ran.length} ${ran.length === 1 ? 'session' : 'sessions'} (the last record of each; a resumed session's cost is cumulative, so its records are not added)`] : ['- None.']));
+    if (uncharged.count) lines.push(`- ${uncharged.count} ${uncharged.count === 1 ? 'session' : 'sessions'} ($${uncharged.dollars.toFixed(2)} at API prices) charged to no task, because the record names no repository and branch`);
   }
   if (quota) lines.push('', ...(quota.error ? ['## Quota windows (what Claude Code itself reports)', '', `- ${quota.error}`] : quotaSection(quota.rows, { now: quota.now })), '', '## Role, model and seat (bin/seat)', '', ...roleMapLines(keptSessions(sessions ?? [], since, until), accounts));
   if (queue) {
@@ -527,7 +558,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
   lines.push(
     '',
     'Task: an issue labelled task, from the label to the close, with every PR that closes it; a PR that closes no task is a task of its own, from its opening.',
-    'API cost: the tokens in the repository\'s Claude Code profile, by the PR\'s branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
+    'API cost: the cost of the bin/seat sessions that ran on the PR\'s branch, as their records name the repository and branch, plus the tokens of the --profile-dir folders by the same branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
     'Cash: the Claude subscription, paid monthly, not split by task; the verifier\'s Codex subscription is the same. The ledger sees no other cash.',
     'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N"; only when its body has no "Reverts" line at all, for any repository, is its title Revert "<title of a merged PR>" read; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
     'Human touched: the Human reviewed it, the label needs-human, or a merge by the Human\'s own login that was not made by auto-merge (a merge by the agents\' login is a team merge).',
@@ -581,16 +612,6 @@ function patchIn(dir) {
   };
 }
 
-/** The profile folders the ledger reads: every `<profiles>/<owner>/<repo>/claude`, plus the extra folders named. */
-function profileFolders(profiles, extra) {
-  const own = [];
-  if (existsSync(profiles))
-    for (const owner of readdirSync(profiles))
-      for (const name of existsSync(join(profiles, owner)) ? readdirSync(join(profiles, owner)) : [])
-        if (existsSync(join(profiles, owner, name, 'claude'))) own.push(join(profiles, owner, name, 'claude'));
-  return [...new Set([...own, ...extra])];
-}
-
 /** `--check`: the canary, printed. Exit 1 when a field the ledger reads is missing or stale, or there is nothing to read. */
 function check(dirs, latest, extra) {
   const r = inspect(dirs, { latest });
@@ -630,9 +651,9 @@ function main(argv) {
     else if (a === '--profile-dir') opts.profileDirs.push(argv[++i]);
     else throw new Error(`unknown argument ${a}`);
   }
-  const profilesDir = process.env.AGENT_PROFILES ?? join(process.env.HOME, '.agent-profiles');
+  const folders = [...new Set(opts.profileDirs)];
   if (opts.check) {
-    process.exitCode = check(profileFolders(profilesDir, opts.profileDirs), opts.latest, opts.profileDirs);
+    process.exitCode = check(folders, opts.latest, opts.profileDirs);
     return;
   }
   // The quota is read only by --quota and the digest; a run log that cannot be read gives one line, not a failed ledger.
@@ -653,7 +674,10 @@ function main(argv) {
   opts.until ??= day(new Date());
   opts.since ??= day(new Date(Date.parse(opts.until) - 7 * 864e5));
   const root = process.env.FACTORY_ROOT ?? join(here, '..', '..');
-  const profiles = profilesDir;
+  const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+  const sessions = readSessions(state);
+  const seat = seatCosts(sessions);
+  const recorded = new Set(sessions.map((r) => r.session).filter(Boolean));
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
   const clones = clonesUnder(root);
   if (!opts.repos.length) opts.repos = [...clones.keys()];
@@ -664,15 +688,14 @@ function main(argv) {
   const to = Date.parse(`${opts.until}T23:59:59Z`);
   for (const repo of opts.repos) {
     const [owner, name] = repo.split('/');
-    const profile = join(profiles, owner, name, 'claude');
-    const costs = repoCosts({ own: profile, extra: opts.profileDirs, root, name });
+    const costs = repoCosts({ extra: opts.profileDirs, root, name, seat: seat.get(repo), recorded });
     const graphql = (query, n) => JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `n=${n}`])).data.repository;
     const list = (path) => JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/${path}`])).flat().filter((x) => inWindow(x.created_at, x.closed_at, from, to));
     const pulls = new Map();
     const pull = (n) => {
       if (!pulls.has(n)) {
         const node = graphql(QUERY, n).pullRequest;
-        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: costs !== null, patchOf: patchIn(clones.get(repo)) }) });
+        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: true, patchOf: patchIn(clones.get(repo)) }) });
       }
       return pulls.get(n);
     };
@@ -703,9 +726,8 @@ function main(argv) {
       secrets.set(repo, null);
     }
   }
-  const report = inspect(profileFolders(profilesDir, opts.profileDirs), { latest: opts.latest });
-  const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions: readSessions(state), quota: quotaNow(), accounts: accountsOf(process.env.FACTORY_SEAT_ACCOUNTS) });
+  const report = inspect(folders, { latest: opts.latest });
+  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(process.env.FACTORY_SEAT_ACCOUNTS) });
   if (!opts.post) {
     process.stdout.write(text);
     return;
@@ -714,13 +736,12 @@ function main(argv) {
   writeFileSync(file, text);
   gh(['label', 'create', 'digest', '--repo', opts.post, '--force']);
   const title = digestTitle(opts.since, opts.until);
-  const titles = [title, oldDigestTitle(opts.since, opts.until)];
   // Neither --search nor --label: both go through GitHub's search index, which lags behind a new issue. A plain list
   // reads the repository, and the titles are compared here.
   const all = JSON.parse(gh(['issue', 'list', '--repo', opts.post, '--state', 'all', '--limit', '1000', '--json', 'number,title']));
   if (all.length >= 1000) throw new Error(`${opts.post} has 1000 issues or more, so the list may be cut short and a digest could be posted twice; nothing posted`);
-  const found = all.filter((i) => titles.includes(i.title));
-  if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}" or the older title of that period: ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
+  const found = all.filter((i) => i.title === title);
+  if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}": ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
 }
