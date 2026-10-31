@@ -48,6 +48,60 @@ function fixture(names, { commit = [], ahead = [] } = {}) {
   return { dir, runs, clone, state, sweep, listed, report: join(state, 'queue-worktrees.failed') };
 }
 
+/** The branch of <name> is pushed, then another clone merges it into origin's main, which this clone never fetches. With `update`,
+ * main moves first and is merged into the branch on the origin, as GitHub's "update branch" does: the origin's branch then holds
+ * a commit this clone never had. */
+function mergeElsewhere(f, name, { update = false } = {}) {
+  git(join(f.runs, name, 'w'), 'push', '-q', 'origin', name);
+  const other = join(f.dir, `other-${name}`);
+  git(f.dir, 'clone', '-q', 'origin.git', other);
+  git(other, 'config', 'user.email', 'a@b.c');
+  git(other, 'config', 'user.name', 'a');
+  if (update) {
+    writeFileSync(join(other, 'g'), '2\n');
+    git(other, 'add', 'g');
+    git(other, 'commit', '-q', '-m', 'main moved');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(other, 'checkout', '-q', name);
+    git(other, 'merge', '-q', '-m', 'update branch', 'main');
+    git(other, 'push', '-q', 'origin', name);
+    git(other, 'checkout', '-q', 'main');
+  }
+  git(other, 'merge', '-q', '--no-ff', '-m', `merge ${name}`, `origin/${name}`);
+  git(other, 'push', '-q', 'origin', 'main');
+}
+
+test('a pushed branch merged on the origin is removed though this clone never fetched', () => {
+  withFixture(['far'], { ahead: ['far'] }, (f) => {
+    mergeElsewhere(f, 'far');
+    assert.equal(f.sweep(['far']).removed, 1);
+    assert.ok(!existsSync(join(f.runs, 'far/w')));
+    assert.ok(!existsSync(f.report));
+  });
+});
+
+test('a branch the origin moved past by an update-branch merge commit is removed', () => {
+  withFixture(['upd'], { ahead: ['upd'] }, (f) => {
+    mergeElsewhere(f, 'upd', { update: true });
+    assert.equal(f.sweep(['upd']).removed, 1);
+    assert.ok(!existsSync(join(f.runs, 'upd/w')));
+    assert.ok(!existsSync(f.report));
+  });
+});
+
+test('the first line of the report names a path, and the count in the singular or plural', () => {
+  withFixture(['one', 'two'], { commit: ['one', 'two'] }, (f) => {
+    writeFileSync(join(f.runs, 'one/w/f'), 'changed\n');
+    f.sweep(['one', 'two']);
+    assert.match(readFileSync(f.report, 'utf8').split('\n')[0], new RegExp(` 1 worktree of merged work kept: ${join(f.runs, 'one/w')}$`));
+    writeFileSync(join(f.runs, 'two/w/f'), 'changed\n');
+    f.sweep(['one', 'two']);
+    const [line, ...paths] = readFileSync(f.report, 'utf8').trim().split('\n');
+    assert.match(line, / 2 worktrees of merged work kept: \S+ and 1 more$/);
+    assert.equal(paths.length, 2);
+  });
+});
+
 const withFixture = (names, opts, body) => {
   const f = fixture(names, opts);
   try {
