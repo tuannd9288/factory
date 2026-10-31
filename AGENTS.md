@@ -202,7 +202,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   Checked by: `probes/pack-contract.md:87-100` (§ Start, next step, one session per issue), `probes/pack-probe.mjs`, `packs/pstack/test/pstack.test.mjs`.
   Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
 - **H6**: Tools are commands; permissions live outside the instructions.
-  Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:54` (check 10, the `.env` deny rule on `bin/seat`'s path), `probes/pack-contract.md:102-117` (the `factory` account, #24).
+  Checked by: `kit/.claude/settings.json:3-12`, `probes/pack-contract.md:54` (check 10, the `.env` deny rule on `bin/seat`'s path), `probes/pack-contract.md:102-117` (the `factory` account, #24).
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
