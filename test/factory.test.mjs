@@ -2,7 +2,7 @@
 // live runs, and every name below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EMAIL, ORG, claudeJson, rowOf, sandbox } from './factory-world.mjs';
@@ -26,6 +26,56 @@ test('with no arguments, on the MacBook: one row for each profile, with the acco
     assert.equal(j.code, 0, j.out);
     for (const out of [r.out, j.out]) for (const secret of [EMAIL, 'secret-corp', ORG, 'Secret Corp', 'orgId']) assert.ok(!out.includes(secret), `${secret} leaked`);
     assert.equal(JSON.parse(j.out).find((x) => x.profile === 'macbook/claude').account, 'ann.example');
+  } finally {
+    s.done();
+  }
+});
+
+test('on the MacBook, a plain run lists the Mac mini\'s rows too, as --all does; --all stays accepted', () => {
+  const s = sandbox();
+  try {
+    const rows = [{ place: 'factory', profile: 'factory/seat-2', role: 'worker', kind: 'Claude', loggedIn: true, account: 'ann.example', accountFrom: 'read', plan: 'max', five_hour: null, seven_day: null, asOf: null, live: 0, shared: [], login: 'x', note: '' }];
+    s.w('ssh-factory.json', JSON.stringify(rows));
+    s.w('claude-default.json', claudeJson(EMAIL));
+    const plain = s.fac();
+    assert.equal(plain.code, 0, plain.out);
+    assert.ok(rowOf(plain.out, 'factory/seat-2'), `the Mac mini's rows in\n${plain.out}`);
+    assert.ok(rowOf(plain.out, 'macbook/claude '), plain.out);
+    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory --json'/);
+    assert.equal(JSON.parse(s.fac('--json').out).some((x) => x.profile === 'factory/seat-2'), true);
+    assert.equal(s.fac('--all').code, 0);
+  } finally {
+    s.done();
+  }
+});
+
+test('on the factory host, --all is still refused', () => {
+  const s = sandbox();
+  try {
+    s.onHost();
+    const r = s.fac('--all');
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /--all runs on the MacBook/);
+  } finally {
+    s.done();
+  }
+});
+
+test('the MacBook\'s spare Claude rows are the .claude-acc<N> folders that exist: no row, no claude call and no new folder for one that does not', () => {
+  const s = sandbox();
+  try {
+    for (const d of ['.claude-acc2', '.claude-acc10', '.claude-acc7']) mkdirSync(join(s.home, d));
+    writeFileSync(join(s.home, '.claude-acc5'), 'a file, not a folder');
+    mkdirSync(join(s.home, '.claude-accx'));
+    s.w('claude-.claude-acc2.json', claudeJson('bob.example@other.example', 'pro'));
+    const rows = JSON.parse(s.fac('--json').out).map((x) => x.profile).filter((p) => p.startsWith('macbook/claude-acc'));
+    assert.deepEqual(rows, ['macbook/claude-acc2', 'macbook/claude-acc7', 'macbook/claude-acc10'], 'sorted by number, only folders');
+    const r = s.fac();
+    assert.match(rowOf(r.out, 'macbook/claude-acc2'), /bob\.example/);
+    assert.equal(rowOf(r.out, 'macbook/claude-acc3'), undefined);
+    assert.doesNotMatch(s.calls(), /\.claude-acc(3|4|5)\b/);
+    assert.doesNotMatch(s.calls(), /\.claude-accx/);
+    assert.equal(existsSync(join(s.home, '.claude-acc3')), false);
   } finally {
     s.done();
   }
