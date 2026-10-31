@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Makes the small Node repository the pack probe's scratch repository starts from: a function, its test, one commit on
-# main. The Human puts it on GitHub (probes/pack-contract.md, the steps in the hand-back of issue 6).
+# main. The Human puts it on GitHub (the steps in the hand-back of issue 6; probes/pack-contract.md is now the canary's oracle, not this probe's).
 #   probes/pack-seed.sh <new folder>
 set -euo pipefail
 dir=${1:?usage: probes/pack-seed.sh <new folder>}
