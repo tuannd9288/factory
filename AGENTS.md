@@ -486,13 +486,27 @@ A pack is what the factory holds only for one way of working, and a team copies 
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
 own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
 chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
-The Human starts a repository's pstack Lead, an interactive session, as `factory` with
-`~/WORKSPACES/packs/pstack/bin/lead <repo>`, and resumes it with `--continue` (#163); `--dry-run` prints the folder,
-the plugin plan, the plugin root, the transcript hook and the command, and installs and starts nothing; it runs
+The Human starts a repository's pstack Lead, an interactive session, as `factory` with `lead <repo>` (#163, #166), in a pane of
+the Herdr on the Mac mini. Every day he attaches from the MacBook with `herdr --remote factory@tuans-mac-mini` (through Rex or any
+terminal); the fallback is `ssh -t factory@tuans-mac-mini lead <repo>`. `lead <repo>` resumes the Lead's newest earlier session
+and starts a new one when there is none; `--new` starts a new one anyway. The only record it reads is the newest plain-session-id
+copy in `~/factory-runs/<repo>-lead/transcripts/` (never a profile); a session killed before any Stop hook ran leaves no copy, so
+the next `lead` starts a new one. `--dry-run` prints the folder,
+the plugin plan, the plugin root, the transcript hook, the command and which of the two sessions it would start, and why; it
+installs and starts nothing; it runs
 `direnv exec . printenv CLAUDE_CONFIG_DIR` to name the root, and exits 1 when that gives no path (#185). It runs the repository's `.gate/bin/setup` first, installs the
 plugins the repository's own settings enable with `--scope local`, so the committed pin stays byte for byte, and never
-adds a pin; its role text is the pack's `lead.md`. It never logs in: on the first run the Human logs in to the
-repository's profile and trusts the folder.
+adds a pin; its role text is the pack's `lead.md`. It never logs in: the first time, the Human does `/login` and trusts the
+folder inside that session.
+`lead` is on PATH by `packs/pstack/bin/install-lead`, which `factory` runs once and again after a move of the clone: it links
+`~/.local/bin/lead` to the clone's launcher and keeps one marked block in `~/.zshenv` (the only file an `ssh host cmd` shell
+reads) that puts `~/.local/bin` and Homebrew's `bin` and `sbin` in front of PATH when absent. A second run changes nothing; it
+replaces no other file or link at `~/.local/bin/lead`, and refuses any user but `FACTORY_HOST_USER` (default `factory`).
+Herdr: answer No when `herdr --remote` asks "restart the remote server now?", since Yes stops every pane. After a reboot nothing
+restarts the server; the first attach starts it (no launchd job, Herdr issue 4205) and `lead <repo>` resumes the Lead. Herdr's
+Claude integration is never installed on `factory`, so a restore does not bring the Lead back as a bare `claude --resume`
+without the launcher's deny rules (Herdr issue 5130). Under Rex, the MacBook's Herdr shows notifications only with
+`[ui.toast] delivery = "herdr"` or `"system"`, the Human's own setting.
 
 A module is what the factory holds only for the repositories that turn it on (#71): `modules/<name>/kit/` holds the
 files it adds, at repository paths (a skill among them, at `.claude/skills/<name>/`), and `modules/<name>/test/` its
