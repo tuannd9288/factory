@@ -6,6 +6,9 @@
 // and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds; a run that fails
 // before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
 // queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
+// With no --repo it sweeps the repositories taken in (#211), found as the ledger finds them (clonesUnder): a folder
+// of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its
+// origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -13,6 +16,7 @@ import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync,
 import { hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { clonesUnder } from './ledger.mjs';
 
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
 const CALL_MS = 60_000;
@@ -351,7 +355,7 @@ function main(argv) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(rest[i + 1] ?? '')) throw new Error(`--repo needs owner/name, not ${JSON.stringify(rest[i + 1] ?? '')}`);
     repos.push(rest[++i]);
   }
-  if (!['sweep', 'plist', 'check'].includes(command) || !repos.length) throw new Error('usage: factory-queue sweep|plist|check --repo owner/name...');
+  if (!['sweep', 'plist', 'check'].includes(command)) throw new Error('usage: factory-queue sweep|plist|check [--repo owner/name...]');
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
   if (command === 'plist') return void process.stdout.write(plist(job(repos, process.env, daemon)));
   if (command === 'check') return check(repos, human);
@@ -365,8 +369,12 @@ function main(argv) {
   try {
     const refused = preflight(state, human);
     if (refused) return refused;
+    // No --repo: the repositories taken in, found as the ledger finds them (#211).
+    const skip = (folder, why) => console.log(`queue: skipped ${folder}: ${why}`);
+    const swept = repos.length ? repos : [...clonesUnder(process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'), skip).keys()];
+    if (!swept.length) console.log('queue: no repository taken in under the factory root; nothing swept');
     let failed = 0;
-    for (const repo of repos) {
+    for (const repo of swept) {
       const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
         sweep(repo);
