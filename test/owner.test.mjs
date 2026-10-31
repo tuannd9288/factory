@@ -1,5 +1,5 @@
-// The Human's half of taking a repository in, bin/onboard-owner, against a fake GitHub that keeps the repository's
-// settings in a file; and the agent's half, bin/onboard, refusing to open the kit pull request out of turn. No network.
+// The admin step of taking a repository in, bin/onboard-owner, against a fake GitHub that keeps the repository's
+// settings in a file; and the team's step, bin/onboard, refusing to open the kit pull request out of turn. No network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -354,7 +354,7 @@ test('the factory\'s rulesets: no rewrite on any branch, and one approval of the
   assert.deepEqual(pr.allowed_merge_methods, ['merge']);
 });
 
-test('the agent\'s half opens the kit pull request only as the agents\' account, after the owner script ran', () => {
+test('onboard opens the kit pull request only as the agents\' account, after the owner script ran', () => {
   const dir = mkdtempSync(join(tmpdir(), 'onboard-turn-'));
   try {
     writeFileSync(
@@ -372,7 +372,7 @@ test('the agent\'s half opens the kit pull request only as the agents\' account,
     assert.match(out.stdout + out.stderr, /opens the kit pull request as the agents' account \(tuan9288-agent\), not as tuannd9288/);
     out = onboard({ LOGIN: 'tuan9288-agent', RULES: '[]' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
-    assert.match(out.stdout + out.stderr, /main has no pull request rule: the Human runs bin\/onboard-owner first/);
+    assert.match(out.stdout + out.stderr, /main has no pull request rule: bin\/onboard-owner runs first/);
     assert.ok(!existsSync(join(dir, 'root/app')), 'cloned before refusing');
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -48,6 +48,31 @@ test('two starts at the same moment on a seat with one place left never both run
   }
 });
 
+// A listing that is passed to liveCount: each call gives the next list, the last one for every call after.
+const listings = (...lists) => {
+  let i = 0;
+  return () => lists[Math.min(i++, lists.length - 1)];
+};
+
+test('a count that lists the folder just before a start hands off its claim to its run counts that run', async () => {
+  const { liveCount } = await import('../bin/lib/seat.mjs');
+  await world(async (w) => {
+    const run = join(w.root, 'handoff');
+    mkdirSync(run);
+    writeFileSync(join(run, 'run-a.pid'), `${process.pid}\n`);
+    writeFileSync(join(run, 'run-a.seat'), '2\n');
+    // The first listing has a's claim, whose files are gone by the time they are read; the second has a's run.
+    const claim = join(run, 'run-a.claim.pid');
+    assert.equal(liveCount(w.runs, 2, listings([claim], [join(run, 'run-a.pid')])), 1);
+  });
+});
+
+test('a count whose listing changes every time it is taken calls the seat full', async () => {
+  const { SEATS, liveCount } = await import('../bin/lib/seat.mjs');
+  let n = 0;
+  assert.ok(liveCount('/nowhere', 2, () => [`/nowhere/run-${n++}.pid`]) > SEATS[2].cap);
+});
+
 // An ended run: a dead pid, its seat, and a log whose last rate_limit_event has status (its windows reset in an hour, the
 // week at 0.35), with an mtime minutes ago.
 function ended(dir, tag, seat, status, minutesAgo) {
