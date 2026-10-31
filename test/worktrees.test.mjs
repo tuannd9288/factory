@@ -14,7 +14,7 @@ const git = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { encodi
  * `commit` has one commit of its own, pushed into origin/main (landed); a name in `ahead` has one that is not. */
 function fixture(names, { commit = [], ahead = [] } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'worktrees-'))); // git names a worktree by its real path
-  git(dir, 'init', '-q', '--bare', 'origin.git');
+  git(dir, 'init', '-q', '--bare', '--initial-branch=main', 'origin.git');
   git(dir, 'clone', '-q', 'origin.git', 'clone');
   const clone = join(dir, 'clone');
   git(clone, 'config', 'user.email', 'a@b.c');
