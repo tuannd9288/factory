@@ -173,6 +173,9 @@ const pad2 = (n) => String(n).padStart(2, '0');
 const startOfDay = (ms) => new Date(ms).setHours(0, 0, 0, 0);
 const hm = (ms) => `${pad2(new Date(ms).getHours())}:${pad2(new Date(ms).getMinutes())}`;
 
+/** Whether a session is listed in a frame: it is not gone, and it is live or last wrote on the local day that starts at `day`. */
+const isListed = (s, day) => s.state !== 'gone' && (s.live || s.lastAt >= day);
+
 /** A time as local HH:MM, or MM-DD HH:MM when it is not on the day of now; ? for none. */
 export function local(ms, now) {
   if (typeof ms !== 'number' || Number.isNaN(ms)) return '?';
@@ -595,19 +598,18 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
     if (!groups.length && !own.length && !older) continue;
     const st = r.ghStatus;
     lines.push(clip(st ? `${r.repo}  gh failed ${local(st.failedAt, now)}, ${st.goodAt ? `showing ${local(st.goodAt, now)}` : 'nothing read yet'}` : r.repo, width));
-    // A session that is live or last wrote today is listed; the others fold into one line.
-    const listedNow = (all) => all.filter((x) => x.state !== 'gone' && (x.live || x.lastAt >= day));
-    const fold = (all, indent) => {
-      const n = all.length - listedNow(all).length;
-      if (n) lines.push(`${' '.repeat(indent)}${n} ended before today`);
+    // A session that is live or last wrote today is listed; the others of the whole block fold into one line at its end.
+    let folded = 0;
+    const listedNow = (all) => {
+      folded += all.filter((x) => !isListed(x, day)).length;
+      return all.filter((x) => isListed(x, day));
     };
     for (const s of listedNow(own)) lines.push(sessionRow(s, now, 2, width, full));
-    fold(own, 2);
     for (const g of groups) {
       lines.push(groupRow(g, width));
       for (const s of listedNow(g.sessions)) lines.push(sessionRow(s, now, 4, width, full));
-      fold(g.sessions, 4);
     }
+    if (folded) lines.push(`  ${folded} ended before today`);
     if (older) lines.push(`  ${older} older`);
   }
   const tree = lines.splice(top);
