@@ -462,9 +462,11 @@ repository's `direnv exec`. It picks the seat, sets the role's model, grants and
 seat's account into the child's environment only (the account is the seat's row in `$FACTORY_STATE/accounts`, the token
 `~/.agent-profiles/tokens/<account>`; seat 1 and seat 2 alike, #178; `seats/1/oauth-token` is read no more), and records the
 session. A seat with no row starts nothing and names `factory use`; a seat whose account has no token file starts nothing
-and names `factory login <account>`. It passes a seat over only at its cap of four live sessions, or while Claude Code has
+and names `factory login <account>`. It passes a seat over only while Claude Code has
 rejected it: the last `rate_limit_event` of the seat's newest log has status
-`rejected`, until that event's `resetsAt`. No share of a window stops a seat (#194). One team, one account by default: until
+`rejected`, until that event's `resetsAt`. No share of a window and no number of live sessions stops a seat (#194, #280): how
+many sessions run at once is the Lead's call. When the machine's load is above its cores (`sysctl -n vm.loadavg hw.ncpu`),
+start fewer workers and wait for other full verifies to finish. One team, one account by default: until
 #196 names teams, every session is one team's, whose account is that of the first seat its role tries (the first of the
 role's seats, or the `--seat` of a resume); a seat of another account is passed over, with a reason, and never started on, and
 when no seat of that account is free the refusal names the reset and points to `factory` and `factory use`, which the Human
