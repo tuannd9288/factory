@@ -194,7 +194,7 @@ test('moves an ignored file in the way into the archive and deletes nothing', ()
   assert.equal(readFileSync(join(w.state, 'archive', folder, 'gen.txt'), 'utf8'), 'mine, ignored\n');
 }));
 
-test('liveRuns counts a marker of seat 0 and not against a seat\'s cap; markRun writes and removes it', async () => {
+test('liveRuns counts a marker of seat 0 and not in a seat\'s count; markRun writes and removes it', async () => {
   const { liveRuns, liveCount } = await seatLib();
   const { markRun } = await lib();
   const runs = mkdtempSync(join(tmpdir(), 'checkout-runs-'));
