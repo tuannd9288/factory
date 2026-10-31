@@ -236,6 +236,37 @@ test('a run\'s repository is its record\'s, else a live run\'s origin, else ?; e
   assert.match(issues[0], /--json number,state,title/);
 });
 
+test('an ended run with no record takes its repository from its work folder\'s origin, read once per folder per refresh; one issue sits under one repository', async () => {
+  const w = world();
+  const runs = join(w.root, 'runs-ended');
+  const [a, b, c] = ['w', 'clone', 'other'].map((n) => {
+    const d = join(w.root, 'folders', n);
+    mkdirSync(d, { recursive: true });
+    return d;
+  });
+  const done = (cwd) => init(cwd) + assistant('m1', { input_tokens: 1, output_tokens: 1 }) + result({});
+  session(runs, 'issue-500', 'build-1', { log: done(a), ageSecs: 600 });
+  session(runs, 'issue-500', 'review-3', { log: done(b), ageSecs: 600 });
+  session(runs, 'issue-501', 'build-1', { log: done(a), ageSecs: 600 });
+  session(runs, 'issue-502', 'build-1', { log: done(c), ageSecs: 600 });
+  const asked = [];
+  const originOf = (cwd) => {
+    asked.push(cwd);
+    return cwd === a ? 'p/q' : null;
+  };
+  const { snapshot } = await top();
+  const keep = {};
+  const opts = { ...w.opts, runs, live: () => false, originOf, cache: keep };
+  const snap = await withPath(w.bin, () => snapshot(opts));
+  await withPath(w.bin, () => snapshot({ ...opts, now: NOW + 10_000 }));
+  const by = Object.fromEntries(snap.sessions.map((s) => [s.name, s]));
+  assert.equal(by['500-build-1'].repo, 'p/q');
+  assert.equal(by['500-review-3'].repo, 'p/q', 'a sibling in the same run folder joins the repository the folder\'s other run has');
+  assert.equal(by['501-build-1'].repo, 'p/q');
+  assert.equal(by['502-build-1'].repo, null, 'no origin and no sibling: ?');
+  assert.equal(asked.filter((x) => x === a).length, 1);
+});
+
 test('the claim reader writes nothing into the clone: it fetches into a bare cache of its own under the state folder', async () => {
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
