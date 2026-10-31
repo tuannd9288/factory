@@ -35,11 +35,14 @@ export const ALERTS_SETTINGS = JSON.stringify({
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
 export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
+// No agent runs `factory login` or `factory store` (#177): the Human alone puts a token in the store. The leading `*` takes
+// `factory` by name, by a relative or an absolute path and after other words; the two library rules close the `node` grant.
+export const tokenStoreDeny = ['Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)'];
 // The copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185): only the Lead reads its own, so every seat role is
 // denied them. The Lead's own deny list takes secretsRead alone.
 export const leadTranscripts = 'Read(~/factory-runs/*-lead/transcripts/**)';
 const denyOf = (home, web) => [
-  'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
+  ...tokenStoreDeny, 'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead, leadTranscripts,
 ];
 
