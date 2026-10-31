@@ -226,12 +226,86 @@ test('use with an argument missing, on a terminal, prints the list and asks for 
   }
 });
 
-test('use runs on the Mac mini only', () => {
+// From the MacBook the commands run on the Mac mini over ssh, as login does; the fake ssh runs the far side for real in $FAKE/far.
+function far(s, tokens = { ann: ANN, bob: BOB }) {
+  writeFileSync(join(s.state, 'accounts'), 'factory/seat-1=ann\nfactory/seat-2=ann\n', { mode: 0o600 });
+  const dir = s.tokens(join(s.fake, 'far/.agent-profiles'));
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const [name, token] of Object.entries(tokens)) writeFileSync(join(dir, name), `${token}\n`, { mode: 0o600 });
+  return dir;
+}
+
+test('from the MacBook, use runs on the Mac mini over ssh with its arguments', () => {
   const s = sandbox();
   try {
+    far(s);
+    const r = s.fac('use', '2', 'b');
+    assert.equal(r.code, 0, r.out);
+    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory use 2 b'/);
+    assert.doesNotMatch(s.calls(), /ssh .* -t /);
+    assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), /factory\/seat-2=bob/);
+    assert.match(r.out, /seat 2 now uses bob/);
+  } finally {
+    s.done();
+  }
+});
+
+test('from the MacBook, use checks its arguments first: a bad row, letter or count never reaches ssh', () => {
+  const s = sandbox();
+  try {
+    far(s);
+    for (const args of [['x', 'b'], ['0', 'b'], ['1', '1'], ['1', 'B'], ['1', 'a', 'extra'], ['1; ls', 'a']]) {
+      const r = s.fac('use', ...args);
+      assert.equal(r.code, 2, args.join(' ') + r.out);
+    }
+    assert.doesNotMatch(s.calls(), /ssh/);
+  } finally {
+    s.done();
+  }
+});
+
+test('from the MacBook, use with an argument missing runs ssh -t, so the host asks', () => {
+  const s = sandbox();
+  try {
+    far(s);
+    s.fac('use');
+    s.fac('use', '2');
+    const lines = s.calls().split('\n').filter((l) => l.startsWith('ssh '));
+    assert.equal(lines.length, 2);
+    for (const l of lines) assert.match(l, / -t /);
+    assert.match(lines[0], /factory use'/);
+    assert.match(lines[1], /factory use 2'/);
+  } finally {
+    s.done();
+  }
+});
+
+test('from the MacBook, logout runs on the Mac mini over ssh, and a bad account never reaches it', () => {
+  const s = sandbox();
+  try {
+    const dir = far(s);
+    assert.equal(s.fac('logout', '../x').code, 2);
+    assert.equal(s.fac('logout', 'ann', 'bob').code, 2);
+    assert.equal(s.fac('logout').code, 2);
+    assert.doesNotMatch(s.calls(), /ssh/);
+    const r = s.fac('logout', 'ann');
+    assert.equal(r.code, 0, r.out);
+    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory logout ann'/);
+    assert.equal(existsSync(join(dir, 'ann')), false);
+    assert.equal(readdirSync(join(s.fake, 'far/.agent-profiles/archive/tokens')).length, 1);
+    assert.equal(s.fac('logout', 'nobody').code, 1, 'the host\'s refusal comes back as the exit code');
+  } finally {
+    s.done();
+  }
+});
+
+test('from the MacBook, an unreachable Mac mini is exit 1 and the ssh error', () => {
+  const s = sandbox();
+  try {
+    s.w('ssh-factory.error', 'ssh: Could not resolve hostname tuans-mac-mini\n');
     const r = s.fac('use', '1', 'a');
-    assert.equal(r.code, 2, r.out);
-    assert.match(r.out, /use runs on the Mac mini/);
+    assert.equal(r.code, 255, r.out);
+    assert.match(r.out, /Could not resolve hostname/);
   } finally {
     s.done();
   }
@@ -276,17 +350,6 @@ test('logout refuses an account with no token file, a bad name and a missing nam
     assert.equal(again.code, 0, again.out);
     assert.match(lineOf(s.fac().out, 'factory/seat-1'), /\byes\b/);
     assert.equal(readdirSync(join(s.env.AGENT_PROFILES, 'archive/tokens')).length, 1, 'the archive keeps the old one');
-  } finally {
-    s.done();
-  }
-});
-
-test('logout runs on the Mac mini only', () => {
-  const s = sandbox();
-  try {
-    const r = s.fac('logout', 'ann');
-    assert.equal(r.code, 2, r.out);
-    assert.match(r.out, /logout runs on the Mac mini/);
   } finally {
     s.done();
   }

@@ -311,8 +311,8 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin)
-       bin/factory use [<row> [<letter>]]   (on the Mac mini; the row's account becomes the letter's)
-       bin/factory logout <account>   (on the Mac mini; moves the account's token into the archive)`;
+       bin/factory use [<row> [<letter>]]   (the row's account becomes the letter's; on the Mac mini, by ssh from the MacBook)
+       bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)`;
 
 /** The line told once seat 1's account has a token: the old file moved aside, never deleted. */
 function movedOld(agentProfiles, state) {
@@ -416,6 +416,26 @@ async function store(args, env) {
   return 0;
 }
 
+/** `use` and `logout` from the MacBook run on the Mac mini, as `login` does: the arguments are checked here first (a row is a number,
+ * a letter is a to z, an account matches the account pattern), then the host runs the command in a login shell over ssh, on the
+ * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
+function remote(cmd, args, env) {
+  const bad = cmd === 'use'
+    ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) ? 'the row is a number' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
+    : (args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account');
+  if (bad) {
+    console.error(`bin/factory: ${bad}\n${USAGE}`);
+    return 2;
+  }
+  const tty = cmd === 'use' && args.length < 2;
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: tty ? undefined : 60000, killSignal: 'SIGKILL' });
+  if (r.error) {
+    console.error(`bin/factory: ${cmd} did not reach the Mac mini: ${r.error.code === 'ETIMEDOUT' ? 'timed out' : (r.error.code ?? 'failed')}`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
 /** The Mac mini's list as text: the numbered rows and the lettered accounts, and the line about seat 1's old file while it is there. */
 function listing(ctx, env) {
   const rows = readPlace('factory', ctx);
@@ -436,10 +456,7 @@ const defaultAsk = async (question) => {
 /** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only and a
  * Lead's waits for #179, which restarts the Lead; a seat takes its new account at its next session and nothing running is touched. */
 async function use(args, env, io) {
-  if (placeOf(env) !== 'factory') {
-    console.error('bin/factory: use runs on the Mac mini, the factory host, as the factory user');
-    return 2;
-  }
+  if (placeOf(env) !== 'factory') return remote('use', args, env);
   if (args.length > 2) {
     console.error(USAGE);
     return 2;
@@ -491,10 +508,7 @@ async function use(args, env, io) {
 /** `factory logout <account>`: the account's token file moves into archive/tokens, never deleted. The rows that name it stay in the
  * accounts file and start nothing until `factory login <account>` or `factory use` gives them another. */
 function logout(args, env) {
-  if (placeOf(env) !== 'factory') {
-    console.error('bin/factory: logout runs on the Mac mini, the factory host, as the factory user');
-    return 2;
-  }
+  if (placeOf(env) !== 'factory') return remote('logout', args, env);
   const refused = args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account';
   if (refused) {
     console.error(`bin/factory: ${refused}\n${USAGE}`);

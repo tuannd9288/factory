@@ -669,7 +669,7 @@ function digestJob(argv) {
     args: ['--post', DIGEST_REPO, '--last-week'],
     log: 'digest.log',
     calendar: { Weekday: 1, Hour: 9, Minute: 0 },
-    keep: ['FACTORY_ROOT', 'AGENT_PROFILES', 'FACTORY_RUNS', 'FACTORY_PROFILE_DIRS', 'FACTORY_STATUSLINE', 'FACTORY_SEAT_ACCOUNTS'],
+    keep: ['FACTORY_ROOT', 'AGENT_PROFILES', 'FACTORY_RUNS', 'FACTORY_PROFILE_DIRS', 'FACTORY_STATUSLINE'],
   };
   process.stdout.write(plist(job(repos, process.env, daemon, as)));
 }

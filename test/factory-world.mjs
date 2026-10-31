@@ -51,7 +51,7 @@ for a; do case "$a" in *@*) user=\${a%%@*};; esac; done
 if [ -f "$FAKE/ssh-$user.error" ]; then cat "$FAKE/ssh-$user.error" >&2; exit 255; fi
 cmd=$(printf '%s' "$last" | sed -n "s/^zsh -lc '\\(.*\\)'$/\\1/p")
 case "$cmd" in
-  *"factory store "*)
+  *"factory store "*|*"factory use"*|*"factory logout "*)
     rest=\${cmd#\\~/WORKSPACES/bin/factory}
     FACTORY_HOST_USER="$FAR_USER" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" exec "$FACTORY_BIN" $rest;;
 esac
