@@ -184,7 +184,7 @@ describe('lead name (#286)', () => {
     writeFileSync(join(w.bin, 'herdr-mode'), 'fail');
     const r = w.lead([], { HERDR_PANE_ID: 'p-7' });
     assert.equal(r.code, 0, r.err);
-    assert.equal(r.err.trim().split('\n').filter((l) => /herdr/.test(l)).length, 1);
+    assert.equal(r.err.trim().split('\n').filter((l) => /^bin\/lead: note:/.test(l)).length, 1);
     assert.match(r.err, /bin\/lead: note: could not rename the Herdr pane/);
     assert.equal(w.log().at(-1).argv[0], '--model');
   }));

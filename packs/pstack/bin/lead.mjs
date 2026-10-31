@@ -7,7 +7,8 @@ import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
-import { secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
+import { firstFree } from '../../../bin/lib/names.mjs';
+import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 
 const USAGE = 'usage: factory lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
@@ -169,7 +170,29 @@ function profileConfig(cwd) {
   return config;
 }
 
-const claudeDirt = (cwd) => spawnSync('git', ['status', '--porcelain', '--', '.claude/'], { cwd, encoding: 'utf8' }).stdout ?? '';
+/** The Lead's name (#286): the file <runDir>/name when it is there, else the first animal no live run and no Lead holds, written
+ * to it. Every Lead's name is held for as long as its file exists, so the name stays across restarts. */
+export function leadName(runDir) {
+  const file = join(runDir, 'name');
+  try {
+    return readFileSync(file, 'utf8').trim();
+  } catch {
+    const name = firstFree(heldNames(dirname(runDir)));
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(file, `${name}\n`);
+    return name;
+  }
+}
+
+/** Inside a Herdr pane: keeps the pane id in <runDir>/pane for `top` and renames the pane to the Lead's name. A failure is one note
+ * line and the start goes on. */
+function renamePane(runDir, name, paneId) {
+  writeFileSync(join(runDir, 'pane'), `${paneId}\n`);
+  const r = spawnSync('herdr', ['pane', 'rename', paneId, name], { stdio: 'ignore', timeout: 5000 });
+  if (r.error || r.status !== 0) process.stderr.write(`bin/lead: note: could not rename the Herdr pane ${paneId} to ${name}\n`);
+}
+
+const claudeDirt =(cwd) => spawnSync('git', ['status', '--porcelain', '--', '.claude/'], { cwd, encoding: 'utf8' }).stdout ?? '';
 const lastLine = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '';
 
 function main(argv, env) {
@@ -238,6 +261,9 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: could not copy the transcript hook to ${hookScript}: ${e.code ?? e.message}\n`);
     return 1;
   }
+
+  const name = leadName(runDir);
+  if (env.HERDR_PANE_ID) renamePane(runDir, name, env.HERDR_PANE_ID);
 
   const setup = spawnSync('.gate/bin/setup', [], { cwd, stdio: 'inherit' });
   if (setup.error) {
