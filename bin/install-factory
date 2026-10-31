@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Puts `factory` on the PATH (#177): makes ~/.local/bin/factory a symlink to this clone's bin/factory. The Human runs it, once per
+# machine, on the MacBook and as the factory user on the Mac mini; it can be run again. It replaces nothing that is not already
+# that symlink: a file, a folder or a link to another place is named and left as it is.
+set -euo pipefail
+[ "$#" -eq 0 ] || { echo "usage: bin/install-factory" >&2; exit 2; }
+target=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/factory
+link=$HOME/.local/bin/factory
+if [ -L "$link" ]; then
+  [ "$(readlink "$link")" = "$target" ] || { echo "install-factory: $link is a link to $(readlink "$link"), not to $target; left as it is" >&2; exit 1; }
+elif [ -e "$link" ]; then
+  echo "install-factory: $link exists and is not a link; left as it is" >&2
+  exit 1
+else
+  mkdir -p "$(dirname "$link")"
+  ln -s "$target" "$link"
+fi
+echo "factory: $link -> $target"
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "note: $HOME/.local/bin is not on your PATH" ;; esac
