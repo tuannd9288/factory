@@ -174,7 +174,7 @@ function filePidAlive(file) {
 
 /** Whether a run is live: its pid file's process (the supervisor, or the claude of an old launcher) or the session the
  * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
-const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
+export const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
 
 /** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
  * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off removes
