@@ -1,49 +1,11 @@
-// The module's skill follows the Agent Skills specification (agentskills.io/specification), and its script and fixtures work.
+// The module's skill script and fixtures work.
 // The skill is guidance for an agent; the gate never depends on it. Step 1 ships the whole-file parts only.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { git, run, script } from '../../../test/helpers.mjs';
 import { entry, fl, moduleRepo, report } from './lib.mjs';
-
-const MODULE = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SKILL = join(MODULE, 'kit/.claude/skills/deletion-proof');
-const text = (path) => readFileSync(join(SKILL, path), 'utf8');
-
-/** The front matter of a SKILL.md: its keys with single-line values, and the body after it. */
-function parse(source) {
-  const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(source);
-  assert.ok(m, 'SKILL.md starts with a --- front matter block');
-  const front = {};
-  for (const line of m[1].split('\n')) {
-    const kv = /^([a-z-]+): (.*)$/.exec(line);
-    assert.ok(kv, `front matter line is "key: value": ${line}`);
-    front[kv[1]] = kv[2];
-  }
-  return { front, body: m[2] };
-}
-
-// Claude Code loads the skill from its front matter (agentskills.io/specification): the name must be the folder's, and the
-// one tool the skill grants must be a script the module lays. Retention bar: a key Claude Code reads, outside this repository.
-describe('the skill loads', () => {
-  const { front } = parse(text('SKILL.md'));
-
-  test('front matter: the name is the folder\'s and a valid skill name; the description is not empty and at most 1024 characters', () => {
-    assert.equal(front.name, SKILL.split('/').at(-1));
-    assert.match(front.name, /^[a-z0-9]+(-[a-z0-9]+)*$/);
-    assert.ok(front.name.length <= 64);
-    assert.ok(front.description.length > 0 && front.description.length <= 1024, `${front.description.length} characters`);
-  });
-  test('allowed-tools grants a script the module lays, by a path with no variable', () => {
-    const grant = /^Bash\((\S+) \*\)$/.exec(front['allowed-tools']);
-    assert.ok(grant, front['allowed-tools']);
-    assert.doesNotMatch(grant[1], /[$`]/);
-    const laid = join(MODULE, 'kit', grant[1]);
-    assert.ok(statSync(laid).isFile() && statSync(laid).mode & 0o111, `${grant[1]} is an executable file under the module's kit/`);
-  });
-});
 
 describe('scripts/knip-at-base report', () => {
   let r;

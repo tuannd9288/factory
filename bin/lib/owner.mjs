@@ -1,8 +1,9 @@
 // The admin step of taking a repository in, run by Colly from the factory clone, on the Human's gh login, after his
 // one approval of what it prints: it checks the repository is the one he names, by name and id, shows every change,
-// and with --apply invites the agents' account (write), sets the factory's rulesets and creates the reviewer
-// environment, then reads back what it set; the gate's ruleset follows the repository variable GATE_REVIEWER (#155:
-// entire has its own). It calls only gh against GitHub's API, with the factory's own files: never git, never the
+// and with --apply invites the agents' account (write), sets the four repository variables the kit reads (#210), then
+// the factory's rulesets, and creates the reviewer environment, then reads back what it set; the gate's ruleset follows
+// the repository variable GATE_REVIEWER (#155: entire has its own), as it is being set. It prints the four values it
+// sets and no other variable's. It calls only gh against GitHub's API, with the factory's own files: never git, never the
 // target's .envrc, scripts or hooks, so nothing the target holds runs with his authority. A second run changes
 // nothing. See bin/onboard-owner for the arguments.
 import { execFileSync } from 'node:child_process';
@@ -19,6 +20,14 @@ const FILES = {
   gate: join(here, '../../kit/.gate/ruleset.json'),
 };
 const ENV = 'reviewer';
+/** The four repository variables the kit reads, each with the option that gives its value (#210). */
+const OPTIONS = [['--runner', 'GATE_RUNNER'], ['--pr-runner', 'GATE_PR_RUNNER'], ['--trusted-runner', 'GATE_TRUSTED_RUNNER'], ['--reviewer', 'GATE_REVIEWER']];
+const REVIEWERS = ['claude', 'entire'];
+const LABEL = /^[\w.-]+$/;
+/** GitHub-hosted: one label, an OS name and then `latest` or a version (ubuntu-24.04-arm, macos-15-xlarge); macos-mini is not. */
+const HOSTED = /^(ubuntu|macos|windows)-(latest|\d[\w.]*)(-[\w.]+)?$/i;
+/** Labels every self-hosted runner of one kind carries: sharing them is no sharing of a runner. */
+const GENERIC = new Set(['self-hosted', 'linux', 'macos', 'windows', 'x86', 'x64', 'arm', 'arm64']);
 const CALL_MS = 60_000;
 const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
 /** #155: Entire's GitHub App, which posts the check "Entire Gates": read by the Human on 2026-10-29 from that check on
@@ -62,21 +71,91 @@ const sorted = (r) => ({ ...r, rules: [...(r.rules ?? [])].sort((a, b) => a.type
  * rewrite, one on every tag that refuses creation, update and deletion but for a repository admin, one on the claim refs
  * (claim/<n>) that refuses deletion and rewrite for everyone, and a bootstrap one on main that asks the Human to approve
  * the last push; after, the kit's gate in place of the bootstrap one, in its Entire variant when the reviewer is entire. */
-export function wanted({ kitLanded, branch, reviewer }) {
+export function wanted({ kitLanded, branch, reviewer, variables = {} }) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
   const gate = () => (reviewer === 'entire' ? entireGate(read(FILES.gate)) : read(FILES.gate));
   return {
     rulesets: [read(FILES.branches), read(FILES.tags), read(FILES.claims), kitLanded ? gate() : read(FILES.bootstrap)],
     drop: kitLanded ? [read(FILES.bootstrap).name] : [],
     branch,
+    variables,
   };
 }
 
-/** The calls that bring the repository from have to want: every addition before any removal, so main never stands
- * bare between the two. */
+/** A runner value as the workflows read it, `fromJSON(vars.X)`: a label, or a list of labels, in JSON. Returns
+ * { labels, text } with the value in one form, or null when it is not one. */
+export function parseRunner(text) {
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const labels = typeof value === 'string' ? [value] : value;
+  if (!Array.isArray(labels) || !labels.length || !labels.every((l) => typeof l === 'string' && LABEL.test(l))) return null;
+  return { labels, text: JSON.stringify(value) };
+}
+
+const selfHosted = (runner) => !(runner.labels.length === 1 && HOSTED.test(runner.labels[0]));
+
+/** Whether a job on runner `a` can land on a machine that serves runner `b`, or the reverse: GitHub gives a job to any
+ * runner that carries every label of its runs-on, so one label set inside the other reaches the same machine; so does a
+ * label both hold beyond self-hosted, the operating system and the architecture. */
+function reaches(a, b) {
+  const [x, y] = [a, b].map((r) => new Set(r.labels.map((l) => l.toLowerCase())));
+  const inside = (s, t) => [...s].every((l) => t.has(l));
+  return inside(x, y) || inside(y, x) || [...x].some((l) => y.has(l) && !GENERIC.has(l));
+}
+
+/** The runner rule of kit/.gate/enforced-rules.md as far as this command can know it, without the #155 exception: of the
+ * trusted runner, the candidate's and main's, no two self-hosted ones reach the same machine. GitHub-hosted runners are
+ * fresh for each job, so the same one for all three is fine. A deploy's runner is not known here. `held` maps the
+ * variables' names to their values; an unset or non-runs-on value is for another check. Reasons name variables, never values. */
+export function sharedRunners(held) {
+  const runner = (name) => (held[name] === undefined ? null : parseRunner(held[name]));
+  const problems = [];
+  for (const [a, b] of [['GATE_TRUSTED_RUNNER', 'GATE_RUNNER'], ['GATE_TRUSTED_RUNNER', 'GATE_PR_RUNNER'], ['GATE_PR_RUNNER', 'GATE_RUNNER']]) {
+    const [x, y] = [runner(a), runner(b)];
+    if (x && y && selfHosted(x) && selfHosted(y) && reaches(x, y)) problems.push(`${a} is self-hosted and shares a runner with ${b}`);
+  }
+  return problems;
+}
+
+/** The runner rule with the Human's exception (#155): with GATE_REVIEWER=entire and no reviewer secret in the environment
+ * `reviewer`, the jobs hold no reviewer credential and may share self-hosted runners. This command reads no secret, so the
+ * condition is the Human's to keep, and the commands say so. */
+export const runnerProblems = (held) => (held.GATE_REVIEWER === 'entire' ? [] : sharedRunners(held));
+
+/** What the doctor says of the four variables: each set (a runner only on a private repository, since hosted Ubuntu, the
+ * kit's default, costs a public one nothing), the runners in a form `runs-on` reads, and the runner rule. */
+export function variableProblems(held, { isPrivate = true } = {}) {
+  const problems = [];
+  for (const [, name] of OPTIONS) {
+    if (held[name] === undefined) {
+      if (isPrivate || name === 'GATE_REVIEWER') problems.push(`${name} is not set`);
+    } else if (name.endsWith('RUNNER') && !parseRunner(held[name])) problems.push(`${name} is not a JSON runs-on value`);
+  }
+  return [...problems, ...runnerProblems(held)];
+}
+
+/** The four variables as the repository holds them; an unset or empty one is absent. */
+export function variablesOf(slug, read = gh) {
+  const list = read(['variable', 'list', '--repo', slug, '--json', 'name,value']) ?? [];
+  return Object.fromEntries(OPTIONS.map(([, name]) => [name, list.find((v) => v.name === name)?.value]).filter(([, value]) => value));
+}
+
+const canon = (value) => parseRunner(value)?.text ?? value;
+
+/** The calls that bring the repository from have to want: the variables first, since the gate's ruleset follows
+ * GATE_REVIEWER, then every addition before any removal, so main never stands bare between the two. */
 export function plan(slug, agent, have, want) {
   const repo = `repos/${slug}`;
   const calls = [];
+  for (const [name, value] of Object.entries(want.variables ?? {})) {
+    const now = have.variables?.[name];
+    if (now === undefined) calls.push({ what: `variable ${name}`, method: 'POST', path: `${repo}/actions/variables`, body: { name, value } });
+    else if (canon(now) !== canon(value)) calls.push({ what: `variable ${name}`, method: 'PATCH', path: `${repo}/actions/variables/${name}`, body: { name, value } });
+  }
   if (have.collaborator !== 'write' && !have.invited)
     calls.push({ what: `collaborator ${agent} (write)`, method: 'PUT', path: `${repo}/collaborators/${agent}`, body: { permission: 'push' } });
   for (const r of want.rulesets) {
@@ -120,6 +199,7 @@ export function current(slug, agent, names, read = gh) {
   return {
     // GitHub may answer 404 for an account that is not a collaborator yet, the case the invitation is for.
     collaborator: maybe(`${repo}/collaborators/${agent}/permission`, read)?.permission ?? 'none',
+    variables: variablesOf(slug, read),
     invited: invitations.some((i) => i.invitee?.login?.toLowerCase() === agent.toLowerCase() && i.permissions === 'write'),
     rulesets: list.filter((r) => names.has(r.name)).map((r) => read(['api', `${repo}/rulesets/${r.id}`])),
     environment,
@@ -150,25 +230,54 @@ export function identify(who, { slug, id, agent, read = gh }) {
   return { login, repo };
 }
 
-/** Whether the kit is on the branch (its inventory is) and the repository variable GATE_REVIEWER, which the gate's
- * ruleset follows; the jobs read it too, so a later run cannot put back a ruleset that requires review and verdict
- * while they judge nothing. The caller keeps the value to itself. */
+/** Whether the kit is on the branch (its inventory is) and the four repository variables, GATE_REVIEWER among them,
+ * which the gate's ruleset follows; the jobs read it too, so a later run cannot put back a ruleset that requires review
+ * and verdict while they judge nothing. The caller keeps the values to itself, but for those it is setting. */
 export function gateState(slug, branch, read = gh) {
+  const variables = variablesOf(slug, read);
   return {
     kitLanded: maybe(`repos/${slug}/contents/.gate/kit-files?ref=${encodeURIComponent(branch)}`, read) !== null,
-    reviewer: (read(['variable', 'list', '--repo', slug, '--json', 'name,value']) ?? []).find((v) => v.name === 'GATE_REVIEWER')?.value ?? '',
+    reviewer: variables.GATE_REVIEWER ?? '',
+    variables,
   };
+}
+
+/** The arguments of bin/onboard-owner: { slug, id, apply, given } with `given` mapping a variable's name to the value
+ * the Human's option gave, in one form, or { problem } for a usage error, which never repeats a value. */
+export function parseArguments(argv) {
+  const [slug, ...rest] = argv;
+  const parsed = { slug, id: undefined, apply: false, given: {} };
+  for (let k = 0; k < rest.length; k++) {
+    const flag = rest[k];
+    if (flag === '--apply') {
+      parsed.apply = true;
+      continue;
+    }
+    const name = OPTIONS.find(([option]) => option === flag)?.[1];
+    if (flag !== '--id' && !name) return { problem: `unknown argument ${flag}` };
+    const value = rest[++k];
+    if (value === undefined) return { problem: `${flag} needs a value` };
+    if (flag === '--id') parsed.id = value;
+    else if (name === 'GATE_REVIEWER') {
+      if (!REVIEWERS.includes(value)) return { problem: `--reviewer is ${REVIEWERS.join(' or ')}` };
+      parsed.given[name] = value;
+    } else {
+      const runner = parseRunner(value);
+      if (!runner) return { problem: `${flag} is a JSON runs-on value: a label as "ubuntu-latest", or a list as ["self-hosted","macOS"]` };
+      parsed.given[name] = runner.text;
+    }
+  }
+  return parsed;
 }
 
 const show = (c) => `${c.method} ${c.path}${c.body ? ` ${JSON.stringify(c.body)}` : ''}`;
 
 function main(argv) {
-  const [slug] = argv;
-  const i = argv.indexOf('--id');
-  const id = i >= 0 ? argv[i + 1] : undefined;
-  const apply = argv.includes('--apply');
-  if (!/^[\w.-]+\/[\w.-]+$/.test(slug ?? '') || !/^\d+$/.test(id ?? '')) {
-    console.error('usage: bin/onboard-owner <owner/name> --id <repository id> [--apply]');
+  const { slug, id, apply, given, problem } = parseArguments(argv);
+  if (problem || !/^[\w.-]+\/[\w.-]+$/.test(slug ?? '') || !/^\d+$/.test(id ?? '')) {
+    if (problem) console.error(`onboard-owner: ${problem}`);
+    console.error('usage: bin/onboard-owner <owner/name> --id <repository id> [--runner <json>] [--pr-runner <json>] ' +
+      '[--trusted-runner <json>] [--reviewer claude|entire] [--apply]');
     return 2;
   }
   const agent = process.env.FACTORY_AGENT ?? 'tuan9288-agent';
@@ -179,7 +288,20 @@ function main(argv) {
   }
   const { repo } = who;
   const branch = repo.default_branch;
-  const { kitLanded, reviewer } = gateState(slug, branch);
+  const { kitLanded, variables: held } = gateState(slug, branch);
+  // The variables as they will stand: the gate's ruleset follows GATE_REVIEWER as it will be, and so does the runner rule.
+  const after = { ...held, ...given };
+  const reviewer = after.GATE_REVIEWER ?? '';
+  // A runner already held that breaks the rule is the doctor's to name; a run is refused for it only when it sets a runner
+  // or ends the #155 exception by moving GATE_REVIEWER off entire.
+  const setsRunner = OPTIONS.some(([flag, name]) => flag.endsWith('runner') && given[name] !== undefined);
+  const leavesEntire = held.GATE_REVIEWER === 'entire' && reviewer !== 'entire';
+  const broken = setsRunner || leavesEntire ? runnerProblems(after) : [];
+  if (broken.length) {
+    console.error(`onboard-owner: ${broken.join('; ')}: two of the three jobs (the trusted runner's, main's, the candidate's) ` +
+      'never reach the same self-hosted machine (kit/.gate/enforced-rules.md), so nothing changes');
+    return 2;
+  }
   if (reviewer === 'entire' && kitLanded) {
     const app = maybe(`apps/${ENTIRE_APP.slug}`);
     if (app?.id !== ENTIRE_APP.id) {
@@ -187,11 +309,16 @@ function main(argv) {
       return 2;
     }
   }
-  const want = wanted({ kitLanded, branch, reviewer });
+  const want = wanted({ kitLanded, branch, reviewer, variables: given });
   const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
   console.log(`onboard-owner: ${slug} (id ${repo.id}, default branch ${branch}); the kit is ${kitLanded ? '' : 'not '}on ${branch}`);
+  for (const [flag, name] of OPTIONS)
+    if (given[name] === undefined) console.log(`onboard-owner: ${flag} not given: ${name} stays ${held[name] === undefined ? 'unset' : 'as it is'}`);
   if (reviewer === 'entire')
     console.log(`onboard-owner: GATE_REVIEWER is entire: the gate requires verify, tier and ${ENTIRE_APP.check} from App ${ENTIRE_APP.slug} (id ${ENTIRE_APP.id}), not review or verdict`);
+  if (reviewer === 'entire' && sharedRunners(after).length)
+    console.log('onboard-owner: the runners are shared under the Human\'s exception (#155, kit/.gate/enforced-rules.md), which holds ' +
+      'only while there is no reviewer secret in the environment reviewer; this command does not read secrets, so that is his to keep');
   const calls = plan(slug, agent, current(slug, agent, names), want);
   for (const c of calls) console.log(`  change  ${c.what}: ${show(c)}`);
   if (!calls.length) console.log('  nothing to change');
