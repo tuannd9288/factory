@@ -155,12 +155,12 @@ test('the frame: a header in plain words, what waits on you, one block per team,
   assert.match(lines[0], /^Mac mini {2}load 2\.3 of 8 cores {2}·  1 working · 1 idle · 0 agents waiting {2}·  12:00 {2}·/);
   assert.match(lines[0], /queue ok 11:59/);
   assert.match(lines[0], /alerts 1/);
-  assert.ok(!/\d{4}-\d\d-\d\d|\d\dZ\b/.test(lines.filter((l) => !l.includes('digest.failed')).join('\n')), 'no UTC time or full date is left but an alert\'s own text');
+  assert.ok(!/\d{4}-\d\d-\d\d|\d\dZ\b/.test(lines.join('\n')), 'no UTC time or full date is left, an alert\'s included');
   assert.match(lines[1], /\[1 All\] .*\[2 factory 4\].*\[3 Done 2\]/);
   assert.deepEqual(lines.slice(2, 5), [
     'Waiting on you',
     '  approve  tuannd9288/factory#260 top view  https://github.com/tuannd9288/factory/pull/260',
-    '  alert    digest.failed  2026-10-31T09:00:00Z digest failed',
+    '  alert    digest.failed  09:00 digest failed',
   ]);
   assert.equal(lines[5], 'tuannd9288/factory');
   const lead = lines.findIndex((l) => /^ {2}aardvark +Lead +idle +\?/.test(l));
@@ -217,6 +217,15 @@ test('Waiting on you says "Nothing waits on you" when no pull request, Lead or a
   const { text } = await frame(w);
   assert.equal(text.split('\n')[2], 'Nothing waits on you');
   assert.ok(!text.includes('Waiting on you'));
+});
+
+test('an alert\'s leading ISO time shows as local time, with the date on another day; a line that does not start with one is as it is', async () => {
+  const w = world();
+  writeFileSync(join(w.opts.state, 'claude-canary.failed'), '2026-10-30T13:27:10.966Z claude 2.1.309 failed the canary run\n');
+  writeFileSync(join(w.opts.state, 'queue-run.failed'), 'queue could not start\n');
+  const alerts = (await frame(w)).text.split('\n').filter((l) => l.startsWith('  alert'));
+  assert.ok(alerts.includes('  alert    claude-canary.failed  10-30 13:27 claude 2.1.309 failed the canary run'), alerts.join('\n'));
+  assert.ok(alerts.includes('  alert    queue-run.failed  queue could not start'), alerts.join('\n'));
 });
 
 test('All shows an issue only while it has a session listed today, a claim or an open PR; the rest, one that ended yesterday included, fold into "N older"', async () => {
