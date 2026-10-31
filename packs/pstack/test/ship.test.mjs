@@ -69,7 +69,7 @@ function world({ driver = true, liveVerify = true } = {}) {
   cpSync(join(factory, 'packs/pstack/scripts'), join(repo, 'scripts'), { recursive: true });
   cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
   // Until #264, packs/pstack/INSTALL.md leaves live-verify out of a repository: ship must run without it.
-  if (!liveVerify) for (const f of ['scripts/live-verify', 'scripts/lib/live-verify.mjs']) rmSync(join(repo, f));
+  if (!liveVerify) for (const f of ['scripts/live-verify', 'scripts/lib/live-verify.mjs', 'scripts/lib/verdict.mjs']) rmSync(join(repo, f));
   // main's driver, which ship reads at the base: filled by default, the pack's empty one when `driver` is false.
   if (driver) writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ name: 'cli', start: '', drive: 'node cli.js', network: false }));
   mkdirSync(sh);

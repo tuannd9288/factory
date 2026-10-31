@@ -522,7 +522,7 @@ denied `Read(~/factory-runs/*-lead/transcripts/**)`.
 
 A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
-own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
+own `AGENTS.md` (`section.md`) and its sources (`yields.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
 chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
 The Human starts a repository's pstack Lead, an interactive session, with `factory lead <repo>` (#163, #166), which runs
 `packs/pstack/bin/lead` of this clone on the Mac mini. Every day he attaches from the MacBook with
@@ -597,7 +597,7 @@ factory does not use these parts:
   model family runs on Claude until #182 sends it to Codex.
 - Autopilot's owners and swarm of verifiers: the adapter runs a Cursor cloud agent as a worktree subagent of the
   session, outside `bin/seat` (#182). Shipping's one verifier per pull request is taken, on the Codex CLI instead
-  (`packs/pstack/scripts/live-verify`, `packs/pstack/section.md`); its verdict is no gate
+  (`packs/pstack/scripts/live-verify`, `packs/pstack/yields.md`); its verdict is no gate
   input, so the gate's reviewer (`review`, `verdict`) stays the only judge the merge waits for.
 - The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): the adapter points them
   at `~/.claude/projects/<slug>/`, which the kit's deny rules refuse. A factory profile keeps its transcripts under its
