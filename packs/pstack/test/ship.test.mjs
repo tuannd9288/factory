@@ -99,7 +99,6 @@ function world({ driver = true } = {}) {
       writeFileSync(join(gitdir(), name), '');
     },
     passed: (base = git(repo, 'rev-parse', 'origin/main')) => {
-      w.stamp(`verify-${w.head()}`);
       w.stamp(`red-check-${w.head()}-${base}`);
     },
     ship: (args = ['--body-file', join(dir, 'body.md')]) => {
@@ -115,18 +114,8 @@ function world({ driver = true } = {}) {
 }
 
 describe('opening the pull request', () => {
-  test('is refused without a verify stamp for the head, and says so', () => {
-    const w = world();
-    w.stamp(`red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`);
-    const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} has no verify stamp; run \.gate\/bin\/verify on it$/m);
-    assert.ok(!w.calls().some((c) => c.startsWith('pr create')), w.calls().join('\n'));
-  });
-
   test('is refused without a red-check stamp, and for one against another base', () => {
     const w = world();
-    w.stamp(`verify-${w.head()}`);
     let out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} has no red-check stamp against origin\/main [0-9a-f]{7}; run \.gate\/bin\/red-check --base origin\/main$/m);
@@ -150,7 +139,7 @@ describe('opening the pull request', () => {
     assert.match(out.out, /no red-check stamp against origin\/main/);
   });
 
-  test('opens it through gh pr create --body-file once both stamps name the head', () => {
+  test('opens it through gh pr create --body-file once the red-check stamp names the head, with no verify stamp', () => {
     const w = world();
     w.passed();
     const out = w.ship();
@@ -462,7 +451,6 @@ describe('a red-check that passed by the body\'s No-red line', () => {
   const LINE = 'No-red: a rename with no behaviour to show first';
   const passedByLine = () => {
     const w = world();
-    w.stamp(`verify-${w.head()}`);
     w.stamp(`red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`);
     writeFileSync(join(git(w.repo, 'rev-parse', '--absolute-git-dir'), 'factory', `red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`), `${LINE}\n`);
     return w;
@@ -559,14 +547,9 @@ describe('a remote branch at a commit HEAD does not contain', () => {
 describe('a missing stamp', () => {
   const HINT = /^ship: if the work tree is not clean, commit or remove what `git status` shows$/m;
 
-  test('adds, to the refusal for a verify stamp and for a red-check stamp, what to do when the tree is not clean', () => {
+  test('adds, to the refusal for a red-check stamp, what to do when the tree is not clean', () => {
     const w = world();
-    let out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /has no verify stamp/);
-    assert.match(out.out, HINT);
-    w.stamp(`verify-${w.head()}`);
-    out = w.ship();
+    const out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /has no red-check stamp/);
     assert.match(out.out, HINT);
