@@ -59,7 +59,7 @@ test('leadArgs points both hooks at the copy, and the copy copies a transcript w
     assert.ok(hook.includes(hookScript));
     assert.ok(!hook.includes('packs/pstack/bin/transcript-copy.mjs'));
     const { hooks } = JSON.parse(argv[argv.indexOf('--settings') + 1]);
-    for (const event of ['Stop', 'SessionEnd']) assert.equal(hooks[event][0].hooks[0].command, hook);
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop', 'SessionEnd']) assert.equal(hooks[event][0].hooks[0].command, hook);
     const config = join(dir, 'profile');
     mkdirSync(join(config, 'projects/p'), { recursive: true });
     const source = join(config, 'projects/p/s.jsonl');

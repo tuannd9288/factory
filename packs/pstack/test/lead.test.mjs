@@ -138,11 +138,11 @@ describe('leadArgs', () => {
     for (const command of HARMLESS) assert.ok(!deny.some((r) => matches(r, command)), command);
   });
 
-  test('--settings holds the transcript hook on Stop and SessionEnd, run through node with each part quoted', () => {
+  test('--settings holds the same hook on SessionStart, UserPromptSubmit, Notification, Stop and SessionEnd, run through node with each part quoted', () => {
     const { hooks } = JSON.parse(after('--settings'));
     const command = `'${node}' '${root}/packs/pstack/bin/transcript-copy.mjs' '${home}/factory-runs/zalo-gateway-lead/transcripts'`;
-    assert.deepEqual(Object.keys(hooks).sort(), ['SessionEnd', 'Stop']);
-    for (const event of ['Stop', 'SessionEnd']) assert.deepEqual(hooks[event], [{ hooks: [{ type: 'command', command }] }]);
+    assert.deepEqual(Object.keys(hooks).sort(), ['Notification', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit']);
+    for (const event of Object.keys(hooks)) assert.deepEqual(hooks[event], [{ hooks: [{ type: 'command', command }] }]);
     assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).hook, command);
   });
 
