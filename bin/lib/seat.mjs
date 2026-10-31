@@ -341,16 +341,22 @@ export function launch(argv, env = process.env) {
   // The tag is claimed with a lock folder (mkdir is atomic) for as long as the start takes, so two starts of one tag cannot both pass the check.
   const release = claimTag(join(run, `run-${tag}.lock`), tag);
   try {
-    // The start registers (claim, then pid file) while it holds checkout.lock, so the update of the checkout counts it or has
-    // finished: a start that loaded older code than the checkout now holds starts again (#257).
+    // The start registers (its claim, which chooseSeat writes) while it holds checkout.lock, and only then: the update of the
+    // checkout counts the claim or has finished, and a start that loaded older code than the checkout now holds starts again
+    // (#257). The plugin install and the spawn run after the release, the claim being live from then on.
     let started;
     try {
-      started = withStartLock(state, ROOT, () => startSession({ o, env, home, runs, profiles, state, run, work, brief, tag }));
+      started = withStartLock(state, ROOT, () => register({ o, runs, run, tag }), { label: 'a start of bin/seat' });
     } catch (e) {
       throw e.busy ? new Refused(e.message) : e;
     }
     if (started.moved) throw new Moved(started.head);
-    return started.value;
+    const { seat, pidFile, unclaim } = started.value;
+    try {
+      return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat });
+    } finally {
+      unclaim(); // after the run's own .seat and .pid are written, so the count never drops; on any failure, nothing is left
+    }
   } finally {
     release();
   }
@@ -373,7 +379,10 @@ function claimTag(lock, tag) {
   }
 }
 
-function startSession({ o, env, home, runs, profiles, state, run, work, brief, tag }) {
+/** The registration of a start: refuses a tag that is running, writes the claim and chooses the seat (chooseSeat counts the claim).
+ * Returns the seat, the pid file and the function that removes the claim, which the caller calls when the run's own files are
+ * written. On any failure here nothing is left. */
+function register({ o, runs, run, tag }) {
   const pidFile = join(run, `run-${tag}.pid`);
   if (runLive(pidFile)) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
   // The claim: this start's own pid with its seat, in run-<tag>.claim.pid and .claim.seat, written before the count and
@@ -394,9 +403,10 @@ function startSession({ o, env, home, runs, profiles, state, run, work, brief, t
   try {
     const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim });
     if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
-    return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat });
-  } finally {
-    unclaim(); // after the run's own .seat and .pid are written, so the count never drops; on any failure, nothing is left
+    return { seat, pidFile, unclaim };
+  } catch (e) {
+    unclaim();
+    throw e;
   }
 }
 

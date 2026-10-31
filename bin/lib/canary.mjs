@@ -18,6 +18,7 @@ import { job, plist } from './queue.mjs';
 import { SCHEMA } from './seat.mjs';
 
 const clone = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const NOT_STARTED = ': not started: ';
 const WAIT_MS = 45 * 60_000;
 const UNGRADED_MS = 24 * 3600_000;
 const MAX_TURNS = '12';
@@ -213,12 +214,13 @@ export function run(args) {
   try {
     // The canary reads probes/canary-brief.md and starts bin/seat from this clone while it runs: it counts as a live run for the
     // update of the checkout (#257), and starts again if the checkout moved before it registered.
-    const started = withStartLock(state, clone, () => markRun(args.env.FACTORY_RUNS ?? join(args.env.HOME ?? homedir(), 'factory-runs'), 'canary'));
+    const started = withStartLock(state, clone, () => markRun(args.env.FACTORY_RUNS ?? join(args.env.HOME ?? homedir(), 'factory-runs'), 'canary'), { label: 'the canary' });
     if (started.moved) return reexec(process.argv.slice(1), started.head);
     unmark = started.value;
     return runOnce(args);
   } catch (error) {
-    const text = `: the run raised ${error.name}: ${String(error.message).trim()}`;
+    // A busy checkout lock is no fault of any version: the line says the run did not start, and a later run with nothing to do removes it.
+    const text = error.busy ? `${NOT_STARTED}${String(error.message).trim()}` : `: the run raised ${error.name}: ${String(error.message).trim()}`;
     mkdirSync(state, { recursive: true });
     writeFileSync(join(state, 'claude-canary.failed'), `${new Date().toISOString()} claude${text}\n`);
     console.error(`claude-canary: claude${text}`);
@@ -254,6 +256,7 @@ function runOnce({ repo, seat, env }) {
   const probed = readOr(join(state, 'claude-probed'));
   const candidate = all.filter((v) => v !== rejected).at(-1);
   if (!candidate || compare(candidate, current) < 0 || (candidate === current && probed === current)) {
+    if (readOr(failedFile)?.includes(`claude${NOT_STARTED}`)) rmSync(failedFile, { force: true });
     console.log(`claude-canary: nothing to do; the launcher runs ${current}, probed ${probed || 'never'}, newest version ${candidate ?? 'none'}${rejected ? `, rejected ${rejected}` : ''}`);
     return 0;
   }

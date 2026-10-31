@@ -405,17 +405,18 @@ is not swept: its ruleset dismisses an approval on any push, so an update would 
 
 The checkout the daemons and `bin/seat` run from, `~/WORKSPACES`, follows `main` (#257). The first step of each queue sweep
 (`bin/lib/checkout.mjs`, in `~/WORKSPACES` only, or where `FACTORY_CHECKOUT` names a clone, which is how the tests run it) does
-`git fetch` and `git pull --ff-only origin main`, and nothing else moves the checkout. It refuses, moving nothing and leaving
+`git fetch` and then `git merge --ff-only --no-overwrite-ignore` of the tip it fetched, and nothing else moves the checkout. It refuses, moving nothing and leaving
 `queue-checkout.failed` (the alerts hook and the digest show it): local changes, a branch that is not `main`, a failed fetch, a
 `main` that is not a fast-forward, a failed pull. It moves a file in the way (an ignored one that a commit brings in) to
 `$FACTORY_STATE/archive/<sha7>-<time>/` and deletes nothing. It never changes the files under a run already going: it waits until
 `liveRuns` (every `run-*.pid` in `~/factory-runs/*/`, claims and the canary's marker, of any seat) is 0, under
-`$FACTORY_STATE/checkout.lock`, which every start of a run (`bin/seat`, the canary) holds from before it registers until it
-has; a start that loaded older code than the checkout now holds starts again once (`FACTORY_REEXEC`). A deferral says
+`$FACTORY_STATE/checkout.lock`, which every start of a run (`bin/seat`, the canary) holds from before it registers until its
+claim or marker is written, and no longer (the plugin install and the spawn come after); a refused start names the lock's holder,
+and the canary's refusal is `claude-canary.failed` that a later run with nothing to do removes; a start that loaded older code than the checkout now holds starts again once (`FACTORY_REEXEC`). A deferral says
 nothing until two hours, then `queue-checkout.failed` says how far behind and why. The Lead's Stop and SessionEnd hooks run a copy
 of `transcript-copy.mjs` in its run folder (`hooks/transcript-copy-<sha7>.mjs`, reused, never removed), since its pane stays open
 for days. The sweep also renders the three LaunchDaemon plists with the new code and compares them with the installed ones
-(`/Library/LaunchDaemons`, read only): while they differ, `queue-plist.failed` says so and `$FACTORY_STATE/plist-wanted/` holds what
+(`/Library/LaunchDaemons`, read only): while they differ, or a plist cannot be rendered (`could not render <label>`), `queue-plist.failed` says so and `$FACTORY_STATE/plist-wanted/` holds what
 the Human installs with sudo; it goes away on the first sweep after he does. Until then the old plist still starts the same
 files, so a change to the plist's arguments or environment must keep the old ones working.
 

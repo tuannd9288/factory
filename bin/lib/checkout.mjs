@@ -50,11 +50,16 @@ export const LOADED = process.env.FACTORY_LOADED_HEAD || headOf(ROOT);
 
 /** A lock folder (mkdir is atomic), as bin/seat claims a tag. Returns its release, or null after `wait` ms. One older than STALE_MS
  * is a crashed holder's: the update holds it for seconds, a start for milliseconds. */
-function takeDir(lock, wait) {
+function takeDir(lock, wait, label) {
   const end = Date.now() + wait;
   for (;;) {
     try {
       mkdirSync(lock);
+      try {
+        writeFileSync(join(lock, 'holder'), `${process.pid} ${label}\n`);
+      } catch {
+        // the lock is held all the same, only unnamed
+      }
       return () => rmSync(lock, { recursive: true, force: true });
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
@@ -69,14 +74,20 @@ function takeDir(lock, wait) {
   }
 }
 
-/** Runs fn while holding checkout.lock: the registration of a run (its claim or pid file, its marker, a hook copy). The update
- * cannot count or pull meanwhile. Returns {value}, or {moved: true, head} without running fn when the checkout is at another commit
+/** Runs fn while holding checkout.lock: the registration of a run (its claim, its marker), and no more: a plugin install or a spawn
+ * is for after the release, the claim being live from then on. The update cannot count or pull meanwhile. The lock records its
+ * holder (`label`), which a refused start names. Returns {value}, or {moved: true, head} without running fn when the checkout is at another commit
  * than the one this start loaded its code at: the caller starts again (reexec) so one commit's code starts the run. Throws, naming
  * the update, when the lock stays taken for `wait` ms. */
-export function withStartLock(state, root, fn, { wait = 10_000, loaded = LOADED } = {}) {
+export function withStartLock(state, root, fn, { wait = Number(process.env.FACTORY_CHECKOUT_LOCK_WAIT_MS) || 10_000, loaded = LOADED, label = 'a start' } = {}) {
   mkdirSync(state, { recursive: true });
-  const release = takeDir(join(state, 'checkout.lock'), wait);
-  if (!release) throw Object.assign(new Error('an update of the checkout is in progress; start again in a moment'), { busy: true });
+  const lock = join(state, 'checkout.lock');
+  const release = takeDir(lock, wait, label);
+  if (!release) {
+    const holder = /^(\d+) (.+)$/.exec((readOr(join(lock, 'holder')) ?? '').trim());
+    const by = holder ? `the checkout lock is held by ${holder[2]} (pid ${holder[1]})` : 'an update of the checkout is in progress';
+    throw Object.assign(new Error(`${by}; start again in a moment`), { busy: true });
+  }
   try {
     const head = headOf(root);
     if (!process.env.FACTORY_REEXEC && loaded && head && head !== loaded) return { moved: true, head };
@@ -129,7 +140,8 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
   mkdirSync(state, { recursive: true });
   const report = join(state, 'queue-checkout.failed');
   const since = join(state, 'queue-checkout.since');
-  const git = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 60_000, env: { ...env, GIT_TERMINAL_PROMPT: '0' } });
+  // GIT_LITERAL_PATHSPECS: a path from the scan is a path, whatever characters it holds.
+  const git = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 60_000, env: { ...env, GIT_TERMINAL_PROMPT: '0', GIT_LITERAL_PATHSPECS: '1' } });
   const out = (r) => `${r.stdout ?? ''}`.trim();
   const why = (r) => first(r.stderr) || first(r.stdout) || (r.error ? r.error.message : `exit ${r.status}`);
   const refuse = (text) => {
@@ -168,7 +180,7 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
     return refuse(`main diverged: HEAD ${head.slice(0, 7)} is not behind origin/main ${tip.slice(0, 7)}`);
   }
 
-  const release = takeDir(join(state, 'checkout.lock'), 0);
+  const release = takeDir(join(state, 'checkout.lock'), 0, 'the update of the checkout');
   if (!release) return { status: 'busy' };
   try {
     const n = live();
@@ -182,8 +194,9 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
     }
     reason = unfit();
     if (reason) return refuse(reason);
-    // git overwrites an ignored file that a commit brings in without a word, so those go to the archive first.
-    const brought = out(git('diff', '--name-only', '--diff-filter=AMR', 'HEAD', 'origin/main')).split('\n').filter(Boolean);
+    // git overwrites an ignored file that a commit brings in without a word, so those go to the archive first. The scan and the
+    // merge both use the tip fetched above: a main that moved since is the next sweep's, with its own scan.
+    const brought = out(git('diff', '-z', '--name-only', '--diff-filter=AMR', 'HEAD', tip)).split('\0').filter(Boolean);
     const folder = `${tip.slice(0, 7)}-${stamp(now)}`;
     try {
       for (const path of brought) {
@@ -192,7 +205,8 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
     } catch (e) {
       return refuse(`could not move a file in the way to the archive: ${e.code ?? e.message}`);
     }
-    const pull = git('pull', '-q', '--ff-only', 'origin', 'main');
+    // What the scan cannot see (an ignored file where a directory comes in) is refused by --no-overwrite-ignore, never deleted.
+    const pull = git('merge', '-q', '--ff-only', '--no-overwrite-ignore', tip);
     if (pull.status !== 0) return refuse(`pull failed: ${why(pull)}`);
     clear();
     return { status: 'updated', from: head, to: out(git('rev-parse', 'HEAD')), behind };
@@ -220,9 +234,11 @@ export function renderPlist(root, label, installed, env = process.env) {
 
 /** Compares what the code renders for each plist with the installed file, which it only reads (the three of PLISTS, in plistDir).
  * A plist that is not installed is skipped. A difference leaves the wanted plist in $state/plist-wanted (an earlier, different
- * one moves to the archive) and queue-plist.failed until the Human's reinstall makes them equal. Returns {differ: [labels]}. */
+ * one moves to the archive) and queue-plist.failed until the Human's reinstall makes them equal. A render that throws leaves the
+ * same file too, saying `could not render <label>: <first line>`. Returns {differ: [labels], unrendered: [lines]}. */
 export function checkPlists({ root, state, plistDir, render = (label, installed) => renderPlist(root, label, installed), now = Date.now() }) {
   const differ = [];
+  const unrendered = [];
   const wantedDir = join(state, 'plist-wanted');
   const report = join(state, 'queue-plist.failed');
   for (const label of PLISTS) {
@@ -231,8 +247,9 @@ export function checkPlists({ root, state, plistDir, render = (label, installed)
     let wanted;
     try {
       wanted = render(label, installed);
-    } catch {
-      continue; // the code could not render it (no gh on PATH, say): nothing to compare
+    } catch (error) {
+      unrendered.push(`could not render ${label}: ${first(error.message)}`); // nothing to compare, and never a silence
+      continue;
     }
     const file = join(wantedDir, `${label}.plist`);
     if (wanted === installed) {
@@ -251,8 +268,11 @@ export function checkPlists({ root, state, plistDir, render = (label, installed)
     writeFileSync(tmp, wanted);
     renameSync(tmp, file);
   }
-  if (differ.length) {
-    writeFileSync(report, `${new Date(now).toISOString()} ${differ.join(' ')}: the installed plist differs from what the code renders; the wanted one is in ${wantedDir}; the Human reinstalls it with sudo\n`);
-  } else rmSync(report, { force: true });
-  return { differ };
+  const parts = [
+    ...(differ.length ? [`${differ.join(' ')}: the installed plist differs from what the code renders; the wanted one is in ${wantedDir}; the Human reinstalls it with sudo`] : []),
+    ...unrendered,
+  ];
+  if (parts.length) writeFileSync(report, `${new Date(now).toISOString()} ${parts.join('; ')}\n`);
+  else rmSync(report, { force: true });
+  return { differ, unrendered };
 }
