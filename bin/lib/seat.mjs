@@ -186,8 +186,9 @@ function filePidAlive(file) {
 export const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
 
 /** The names in use (#286): those of the runs that are live, a start's claim included, and every Lead's, which it holds for as long as
- * its file ~/factory-runs/<repo>-lead/name exists. */
-export function heldNames(runs) {
+ * its file ~/factory-runs/<repo>-lead/name exists. With the state folder, also the names of the sessions.jsonl records that ended on
+ * today's local day, so that consecutive sessions of the day do not share a name. */
+export function heldNames(runs, state = null) {
   const read = (file) => {
     try {
       return [readFileSync(file, 'utf8').trim()];
@@ -197,7 +198,9 @@ export function heldNames(runs) {
   };
   const runNames = runFiles(runs, '.name').filter((f) => runLive(f.replace(/\.name$/, '.pid')) || runLive(f.replace(/\.name$/, '.claim.pid'))).flatMap(read);
   const leads = (existsSync(runs) ? readdirSync(runs) : []).filter((d) => d.endsWith('-lead')).flatMap((d) => read(join(runs, d, 'name')));
-  return [...runNames, ...leads];
+  const day = new Date().setHours(0, 0, 0, 0);
+  const today = state ? readSessions(state).filter((r) => r.name && Date.parse(r.end) >= day).map((r) => r.name) : [];
+  return [...runNames, ...leads, ...today];
 }
 
 /** The name a resumed session had in its earlier record, or null. */
@@ -453,9 +456,8 @@ function register({ o, runs, state, run, tag }) {
     if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free on the team's account; \`factory\` shows every account's room and \`factory use\` moves the team`);
     // The name is chosen and written while the start holds checkout.lock, so two starts never take the same one (#286).
     // A resume keeps its session's name unless a live run or a Lead holds it now: no two live sessions share a name.
-    const held = heldNames(runs);
     const earlier = o.resume ? nameOfSession(state, o.resume) : null;
-    const name = earlier && !held.includes(earlier) ? earlier : firstFree(held);
+    const name = earlier && !heldNames(runs).includes(earlier) ? earlier : firstFree(heldNames(runs, state));
     writeFileSync(join(run, `run-${tag}.name`), `${name}\n`);
     return { seat, account: accounts[seat], pidFile, unclaim, name };
   } catch (e) {
