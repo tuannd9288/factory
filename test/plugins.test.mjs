@@ -46,7 +46,7 @@ test('add then install, each in the work folder with two folders in its env, at 
   assert.deepEqual(JSON.parse(readFileSync(join(install, 'marketplaces/pstack-4dd1d05/.claude-plugin/marketplace.json'), 'utf8')), { name: 'pstack-4dd1d05', owner: { name: 'factory' }, plugins: PIN.plugins });
   assert.deepEqual(readdirSync(join(install, 'marketplaces/pstack-4dd1d05/.claude-plugin')), ['marketplace.json']);
   assert.ok(!existsSync(join(w.profiles, 'seats/2')), 'no file was made under the profile');
-  assert.deepEqual(readdirSync(w.profiles), ['seats']);
+  assert.deepEqual(readdirSync(w.profiles), ['seats', 'tokens'], 'only the fixture\'s own folders');
   // A second run does both again, and changes nothing.
   installPlugins(s);
   assert.equal(w.pluginCalls().length, 4);
@@ -146,7 +146,7 @@ for (const bad of ['..', '../../../.agent-profiles/seats/1', 'a/b', '-x', '--acc
     assert.throws(() => installPlugins(setup(w)), (e) => e instanceof PluginError && /name/.test(e.message));
     assert.equal(w.pluginCalls().length, 0);
     assert.ok(!existsSync(join(w.home, '.local')), 'no folder was made');
-    assert.deepEqual(readdirSync(w.profiles), ['seats']);
+    assert.deepEqual(readdirSync(w.profiles), ['seats', 'tokens'], 'only the fixture\'s own folders');
   }));
 
   test(`a plugin name ${JSON.stringify(bad)} is refused before any folder or call`, () => world(async (w) => {

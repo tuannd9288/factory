@@ -257,7 +257,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; it charges a task from the records `bin/seat` appends to `sessions.jsonl` (each names its repository and branch; an older record, or one with neither, is counted in the digest as charged to no task) and from `cwd` under `<root>/<repo>` in `--profile-dir` folders, and reads no repository profile; `--check` is its canary on Claude Code's session format |
-| `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH). With no argument: every agent profile's login, account and quota in a table (the seats, the verifier and the agents' `gh`; no repository profile), and the quota of the seats in a second one (`--all` over ssh from the MacBook, `--json`); it runs only the vendors' status commands, reads no token (a row for each file of `~/.agent-profiles/tokens/` shows its mode and date) and commits no account name (the expected ones are in `$FACTORY_STATE/accounts`). `factory login <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into (`--no-setup` skips setup-token) and stores it at `~/.agent-profiles/tokens/<account>` (mode 600, folder 700): on the Mac mini directly, from the MacBook over ssh's stdin to `factory store <account>`, never in an argument. Only the Human runs `login` and `store`: every `bin/seat` role and the pstack Lead deny them (#177) |
+| `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH). With no argument: every agent profile's login, account and quota in a table, and the quota of the seats in a second one (on the MacBook a plain run is `--all`: it adds the Mac mini's and piggery's rows over ssh, and its spare Claude rows are the `~/.claude-acc<N>` folders that exist; `--json`); it runs only the vendors' status commands, reads no token and commits no account name. On the Mac mini the table is the numbered rows (seat 1, seat 2, each Lead `$FACTORY_STATE/accounts` names, sorted, the verifier) and the lettered accounts (every account the file names and every file of `~/.agent-profiles/tokens/`, read by name and by mode and date only), each with its 5h, 7d, reset, the rows that share it, and `?` where no seat reported; a row whose account has no token file is red with the line to run. `$FACTORY_STATE/accounts` (`<profile>=<account>` a line, mode 600, written through a temporary file and a rename) is the one source of a row's account (#178). `factory use <row> <letter>` rewrites it (from the MacBook, `use` and `logout` run on the Mac mini over ssh, their arguments checked first, `ssh -t` when `use` lacks one; with an argument missing: on a terminal the list and a question, else the list and exit 2); the verifier's row is refused, a Lead's waits for #179, a seat takes the new account at its next session. `factory logout <account>` moves `tokens/<account>` to `~/.agent-profiles/archive/tokens/<UTC stamp>-<account>` (folder 700, by rename, never deleting it); its rows then start nothing. Seat 1's old `seats/1/oauth-token` moves to `archive/seat-1/` at the next `login` or `use` once seat 1's account has a token. `factory login <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into (`--no-setup` skips setup-token) and stores it at `~/.agent-profiles/tokens/<account>` (mode 600, folder 700): on the Mac mini directly, from the MacBook over ssh's stdin to `factory store <account>`, never in an argument. Only the Human runs `login`, `store`, `use` and `logout`: every `bin/seat` role and the pstack Lead deny them (#177, #178) |
 | `bin/factory top` | The read-only view of every session and repository (#174): live on a terminal, or one frame with `--once`; on the MacBook it runs on the Mac mini by ssh |
 | `bin/factory lead` | `factory lead <repo> [--new] [--dry-run]` (#166): starts the pstack Lead of a repository, resuming its newest earlier session; on the Mac mini it runs `packs/pstack/bin/lead`, on the MacBook it runs that by ssh |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH: `~/.local/bin/factory` becomes a symlink to this clone's `bin/factory`; he runs it on the MacBook and as `factory` on the Mac mini; it can be run again and replaces nothing that is not already that symlink |
@@ -458,10 +458,17 @@ deny rule still wins over a grant; a command holding a variable or `$(…)` is d
 (2.1.308, grants-check): use `--body-file`, a plain `-m '…'`.
 Every unattended session of a role (worker, the Lead's reviewer, researcher; not the gate's reviewer) starts through
 `bin/seat <role> <brief> --run <folder> --work <folder>` (#91), run from the factory checkout, not through a
-repository's `direnv exec`. It picks the seat, sets the role's model, grants and report shape, loads seat 1's
-token into the child's environment only, and records the session. It passes a seat over only at its cap of four live
-sessions, or while Claude Code has rejected it: the last `rate_limit_event` of the seat's newest log has status
-`rejected`, until that event's `resetsAt`. No share of a window stops a seat (#194). A session the limit cut off is
+repository's `direnv exec`. It picks the seat, sets the role's model, grants and report shape, loads the token of the
+seat's account into the child's environment only (the account is the seat's row in `$FACTORY_STATE/accounts`, the token
+`~/.agent-profiles/tokens/<account>`; seat 1 and seat 2 alike, #178; `seats/1/oauth-token` is read no more), and records the
+session. A seat with no row starts nothing and names `factory use`; a seat whose account has no token file starts nothing
+and names `factory login <account>`. It passes a seat over only at its cap of four live sessions, or while Claude Code has
+rejected it: the last `rate_limit_event` of the seat's newest log has status
+`rejected`, until that event's `resetsAt`. No share of a window stops a seat (#194). One team, one account by default: until
+#196 names teams, every session is one team's, whose account is that of the first seat its role tries (the first of the
+role's seats, or the `--seat` of a resume); a seat of another account is passed over, with a reason, and never started on, and
+when no seat of that account is free the refusal names the reset and points to `factory` and `factory use`, which the Human
+runs to move the team. A session the limit cut off is
 resumed by the Lead after that reset, which the refusal names and `factory` shows, with `bin/seat <role>
 <brief> --run <folder> --work <folder> --resume <session id> --seat <n>`; nothing resumes it in the background. Every
 session runs with
@@ -478,11 +485,16 @@ finds the `factory` user's own login; `gh` itself stays denied. The researcher i
 those clones, by name, with `log`, `show`, `diff-tree`, `ls-files`, `rev-parse`, `rev-list` and `blame`; it refuses each
 option that runs a program or reads or writes a file the caller names, and runs git with no configuration but the
 clone's own. So a brief that needs a repository's history gives its https URL and a pushed commit, never a path, the
-factory's own repository included. Known limit: the token file sits on disk. Claude Code refuses `cat`, `grep` or
+factory's own repository included. Known limit: the token files sit on disk. Claude Code refuses `cat`, `grep` or
 `git -C` on a path outside the session's folders (probe, 2.1.308), but the worker and the reviewer may run `node` and
-`git -c`, which read and write any file the `factory` user can, and the worker's `sed` can write any such file too; seat
-1's deny rule covers the `Read` tool only (#183 puts their commands in a sandbox). So the researcher, which reads
-untrusted pages and can send them out, never runs on seat 1.
+`git -c`, which read and write any file the `factory` user can, and the worker's `sed` can write any such file too; the
+deny rules for the tokens folder, the archive folder and seat 1's old file (every seat, every role) cover the `Read` tool
+only (#183 puts their commands in a sandbox). The researcher reads untrusted pages and can send them out, and since #178
+its seat 2 holds a token too; its grants were reviewed for that (2026-10-31): it has `Read`, `Glob`, `Grep`, `WebFetch`,
+`WebSearch`, `bin/research-git` and `ls`, `wc`, `mkdir`, `date`, `cd`, so the only tool that returns a file's content is
+`Read`, which the deny rules refuse on the tokens, the archive and the whole `~/.agent-profiles/`, and `research-git` reads
+only its own clones; the token is in `claude`'s environment alone, which the scrub keeps from every command. It has no
+`node`, `cp`, `sed` or `git`.
 
 What a session may read under a profile is nothing: the deny list holds `Read(~/.agent-profiles/**)` whole (#185). Claude
 Code caches a plugin under the profile's `CLAUDE_CONFIG_DIR`, so the cache is moved out: each profile has its own plugin

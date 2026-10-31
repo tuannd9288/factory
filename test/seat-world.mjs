@@ -104,12 +104,17 @@ export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   const w = { root, profiles: join(root, 'profiles'), runs: join(root, 'runs'), state: join(root, 'state'), home: join(root, 'home'), bin: join(root, 'bin'), fake: join(root, 'fake') };
   w.run = join(w.runs, 'issue-1');
   w.work = join(root, 'work');
-  for (const d of [w.profiles, w.run, w.state, w.home, w.bin, w.fake, w.work, join(w.profiles, 'seats/1')]) mkdirSync(d, { recursive: true });
+  for (const d of [w.profiles, w.run, w.state, w.home, w.bin, w.fake, w.work, join(w.profiles, 'seats/1'), join(w.profiles, 'tokens')]) mkdirSync(d, { recursive: true });
   writeFileSync(join(w.bin, 'claude'), FAKE);
   chmodSync(join(w.bin, 'claude'), 0o755);
   writeFileSync(join(w.run, 'BRIEF.md'), 'the brief\n');
-  w.tokenFile = join(w.profiles, 'seats/1/oauth-token');
-  writeFileSync(w.tokenFile, tokenFile);
+  // Both seats name one account by default (#178), whose token file is the fixture's; the seat's old oauth-token is never read.
+  w.account = 'acct-one';
+  writeFileSync(join(w.state, 'accounts'), 'factory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
+  w.tokenOf = (account) => join(w.profiles, 'tokens', account);
+  w.tokenFile = w.tokenOf('acct-one');
+  writeFileSync(w.tokenFile, tokenFile, { mode: 0o600 });
+  w.accounts = (text) => writeFileSync(join(w.state, 'accounts'), text);
   w.out = (n = 'a') => join(w.fake, `${n}.json`);
   w.env = (extra = {}) => ({
     PATH: `${w.bin}:${dirname(process.execPath)}`, HOME: w.home, AGENT_PROFILES: w.profiles, FACTORY_RUNS: w.runs, FACTORY_STATE: w.state,

@@ -51,7 +51,7 @@ for a; do case "$a" in *@*) user=\${a%%@*};; esac; done
 if [ -f "$FAKE/ssh-$user.error" ]; then cat "$FAKE/ssh-$user.error" >&2; exit 255; fi
 cmd=$(printf '%s' "$last" | sed -n "s/^zsh -lc '\\(.*\\)'$/\\1/p")
 case "$cmd" in
-  *"factory store "*)
+  *"factory store "*|*"factory use"*|*"factory logout "*)
     rest=\${cmd#\\~/WORKSPACES/bin/factory}
     FACTORY_HOST_USER="$FAR_USER" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" exec "$FACTORY_BIN" $rest;;
 esac
@@ -81,7 +81,6 @@ export function sandbox() {
     AGENT_PROFILES: join(home, '.agent-profiles'),
     FACTORY_ROOT: join(home, 'WORKSPACES'),
     FACTORY_RUNS: join(home, 'factory-runs'),
-    FACTORY_SEAT_ACCOUNTS: '',
     // The factory host is where the caller's user is FACTORY_HOST_USER: the MacBook here, the Mac mini after onHost() and in the
     // fake ssh's far side (FAR_USER).
     FACTORY_HOST_USER: 'nobody-here',

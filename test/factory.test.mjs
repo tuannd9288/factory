@@ -2,14 +2,18 @@
 // live runs, and every name below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EMAIL, ORG, claudeJson, rowOf, sandbox } from './factory-world.mjs';
 
+/** The spare Claude folders ~/.claude-acc<N> that a MacBook row needs: a row exists only for a folder that is there. */
+const spares = (s, ...ns) => { for (const n of ns) mkdirSync(join(s.home, `.claude-acc${n}`)); };
+
 test('with no arguments, on the MacBook: one row for each profile, with the account local part and the plan, never the address or the org', () => {
   const s = sandbox();
   try {
+    spares(s, 2, 3, 4, 5);
     s.w('claude-default.json', claudeJson(EMAIL));
     s.w('claude-.claude-acc2.json', claudeJson('bob.example@other.example', 'pro'));
     s.w('codex-default', '');
@@ -31,6 +35,56 @@ test('with no arguments, on the MacBook: one row for each profile, with the acco
   }
 });
 
+test('on the MacBook, a plain run lists the Mac mini\'s rows too, as --all does; --all stays accepted', () => {
+  const s = sandbox();
+  try {
+    const rows = [{ place: 'factory', profile: 'factory/seat-2', role: 'worker', kind: 'Claude', loggedIn: true, account: 'ann.example', accountFrom: 'read', plan: 'max', five_hour: null, seven_day: null, asOf: null, live: 0, shared: [], login: 'x', note: '' }];
+    s.w('ssh-factory.json', JSON.stringify(rows));
+    s.w('claude-default.json', claudeJson(EMAIL));
+    const plain = s.fac();
+    assert.equal(plain.code, 0, plain.out);
+    assert.ok(rowOf(plain.out, 'factory/seat-2'), `the Mac mini's rows in\n${plain.out}`);
+    assert.ok(rowOf(plain.out, 'macbook/claude '), plain.out);
+    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory --json'/);
+    assert.equal(JSON.parse(s.fac('--json').out).some((x) => x.profile === 'factory/seat-2'), true);
+    assert.equal(s.fac('--all').code, 0);
+  } finally {
+    s.done();
+  }
+});
+
+test('on the factory host, --all is still refused', () => {
+  const s = sandbox();
+  try {
+    s.onHost();
+    const r = s.fac('--all');
+    assert.equal(r.code, 2, r.out);
+    assert.match(r.out, /--all runs on the MacBook/);
+  } finally {
+    s.done();
+  }
+});
+
+test('the MacBook\'s spare Claude rows are the .claude-acc<N> folders that exist: no row, no claude call and no new folder for one that does not', () => {
+  const s = sandbox();
+  try {
+    for (const d of ['.claude-acc2', '.claude-acc10', '.claude-acc7']) mkdirSync(join(s.home, d));
+    writeFileSync(join(s.home, '.claude-acc5'), 'a file, not a folder');
+    mkdirSync(join(s.home, '.claude-accx'));
+    s.w('claude-.claude-acc2.json', claudeJson('bob.example@other.example', 'pro'));
+    const rows = JSON.parse(s.fac('--json').out).map((x) => x.profile).filter((p) => p.startsWith('macbook/claude-acc'));
+    assert.deepEqual(rows, ['macbook/claude-acc2', 'macbook/claude-acc7', 'macbook/claude-acc10'], 'sorted by number, only folders');
+    const r = s.fac();
+    assert.match(rowOf(r.out, 'macbook/claude-acc2'), /bob\.example/);
+    assert.equal(rowOf(r.out, 'macbook/claude-acc3'), undefined);
+    assert.doesNotMatch(s.calls(), /\.claude-acc(3|4|5)\b/);
+    assert.doesNotMatch(s.calls(), /\.claude-accx/);
+    assert.equal(existsSync(join(s.home, '.claude-acc3')), false);
+  } finally {
+    s.done();
+  }
+});
+
 test('a word that is neither a flag nor a subcommand is refused with the usage', () => {
   const s = sandbox();
   try {
@@ -47,6 +101,7 @@ test('a word that is neither a flag nor a subcommand is refused with the usage',
 test('a profile that is not logged in shows its login command', () => {
   const s = sandbox();
   try {
+    spares(s, 3);
     const r = s.fac();
     assert.match(r.out, /claude-use login 3/);
     assert.match(r.out, /codex-use login/);
@@ -55,13 +110,13 @@ test('a profile that is not logged in shows its login command', () => {
   }
 });
 
-test('seat 1 not logged in names factory login', () => {
+test('seat 1 with no row in the accounts file names factory use', () => {
   const s = sandbox();
   try {
     s.onHost();
     const r = s.fac();
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /factory login <account>/);
+    assert.match(r.out, /factory use 1 /);
   } finally {
     s.done();
   }
@@ -70,6 +125,7 @@ test('seat 1 not logged in names factory login', () => {
 test('the account comes from the local accounts file or FACTORY_SEAT_ACCOUNTS when nothing is read, else unknown; rows on one account name each other', () => {
   const s = sandbox();
   try {
+    spares(s, 3, 4);
     s.w('claude-default.json', claudeJson(EMAIL));
     writeFileSync(join(s.state, 'accounts'), 'macbook/claude-acc3=ann.example\nmacbook/codex=zed.example\n');
     const j = JSON.parse(s.fac('--json').out);
@@ -86,15 +142,17 @@ test('the account comes from the local accounts file or FACTORY_SEAT_ACCOUNTS wh
   }
 });
 
-test('the table stays under 100 columns when "shared with" names four long profiles; --json keeps the whole list', () => {
+// A plain run on the MacBook is --all, so the piggery rows' role ("piggery teams", one column wider than "spare Claude") is in the table.
+test('the table stays under 105 columns when "shared with" names four long profiles; --json keeps the whole list', () => {
   const s = sandbox();
   try {
+    spares(s, 2, 3, 4, 5);
     s.w('claude-default.json', claudeJson(EMAIL));
     writeFileSync(join(s.state, 'accounts'), [2, 3, 4, 5].map((n) => `macbook/claude-acc${n}=ann.example`).join('\n'));
     const r = s.fac();
     const table = r.out.split('\n\n')[0].split('\n');
     assert.ok(table.length > 5, r.out);
-    for (const line of table) assert.ok(line.length <= 100, `${line.length} columns: ${line}`);
+    for (const line of table) assert.ok(line.length <= 105, `${line.length} columns: ${line}`);
     assert.match(rowOf(r.out, 'macbook/claude '), /macbook\/claude-acc2 \+3/);
     const shared = JSON.parse(s.fac('--json').out).find((x) => x.profile === 'macbook/claude').shared;
     assert.deepEqual(shared, [2, 3, 4, 5].map((n) => `macbook/claude-acc${n}`));
@@ -103,19 +161,19 @@ test('the table stays under 100 columns when "shared with" names four long profi
   }
 });
 
-test('on the factory account: seat 1 is its token file\'s mode and date only, seat 2 has quota and live sessions, no row for a repository folder (#205)', () => {
+test('on the factory account: a seat is its account\'s token file\'s mode and date only, seat 2 has quota and live sessions, no row for a repository folder (#205)', () => {
   const s = sandbox();
   try {
-    const seat1 = join(s.home, '.agent-profiles/seats/1');
-    mkdirSync(seat1, { recursive: true });
-    writeFileSync(join(seat1, 'oauth-token'), 'sk-ant-oat01-NEVERSHOWNNEVERSHOWN');
-    chmodSync(join(seat1, 'oauth-token'), 0o600);
-    utimesSync(join(seat1, 'oauth-token'), new Date('2026-10-26T00:00:00Z'), new Date('2026-10-26T00:00:00Z'));
-    s.w('claude-claude.json', claudeJson('seat.two@secret-corp.example', 'max'));
-    s.w('claude-lead-alpha.json', claudeJson('lead.alpha@secret-corp.example', 'pro'));
+    const tokens = s.tokens();
+    mkdirSync(tokens, { recursive: true });
+    for (const a of ['seat.one', 'seat.two']) {
+      writeFileSync(join(tokens, a), 'sk-ant-oat01-NEVERSHOWNNEVERSHOWN');
+      chmodSync(join(tokens, a), 0o600);
+      utimesSync(join(tokens, a), new Date('2026-10-26T00:00:00Z'), new Date('2026-10-26T00:00:00Z'));
+    }
+    writeFileSync(join(s.state, 'accounts'), 'factory/seat-1=seat.one\nfactory/seat-2=seat.two\n');
     s.w('gh-factory', 'agentgh');
     s.onHost();
-    s.env.FACTORY_SEAT_ACCOUNTS = '1=seat.one';
     for (const [repo, files] of [['alpha', ['.gate', '.envrc']], ['beta', ['.gate']], ['gamma', ['.envrc']]]) {
       mkdirSync(join(s.env.FACTORY_ROOT, repo), { recursive: true });
       for (const f of files) writeFileSync(join(s.env.FACTORY_ROOT, repo, f), '');
@@ -137,7 +195,7 @@ test('on the factory account: seat 1 is its token file\'s mode and date only, se
     assert.equal(by('factory/seat-2').live, 0);
     assert.equal(by('factory/verifier').loggedIn, false);
     assert.ok(!r.out.includes('NEVERSHOWN'));
-    assert.ok(!s.calls().includes('seats/1'), 'claude never ran for seat 1');
+    assert.ok(!s.calls().includes('seats/'), 'claude never ran for a seat');
     assert.doesNotMatch(s.calls(), /direnv/);
     assert.match(s.calls(), /codex login status CODEX_HOME=.*verifier\/codex/);
   } finally {
@@ -145,7 +203,7 @@ test('on the factory account: seat 1 is its token file\'s mode and date only, se
   }
 });
 
-test('the list shows a row for each token file: the account, the mode and the date, never the content', () => {
+test('the list shows a lettered account for each token file: the mode and the date, never the content', () => {
   const s = sandbox();
   try {
     s.onHost();
@@ -158,16 +216,12 @@ test('the list shows a row for each token file: the account, the mode and the da
     utimesSync(join(dir, 'ann'), new Date('2026-10-26T00:00:00Z'), new Date('2026-10-26T00:00:00Z'));
     writeFileSync(join(dir, '.ann.123.tmp'), 'half-written');
     const r = s.fac();
-    const rows = JSON.parse(s.fac('--json').out).filter((x) => x.profile.startsWith('factory/token-'));
-    assert.deepEqual(rows.map((x) => x.profile), ['factory/token-ann', 'factory/token-bob']);
-    assert.equal(rows[0].loggedIn, true);
-    assert.equal(rows[0].account, 'ann');
-    assert.match(rows[0].note, /mode 600, modified 2026-10-26/);
-    assert.doesNotMatch(rows[0].note, /should be/);
-    assert.match(rows[1].note, /mode 644 \(should be 600\)/);
-    assert.ok(rowOf(r.out, 'factory/token-ann'), r.out);
-    assert.ok(rowOf(r.out, 'factory/token-bob'), r.out);
-    assert.ok(!r.out.includes('half-written') && !r.out.includes('token-sub'));
+    const ann = r.out.split('\n').find((l) => /^\s*a\s+ann\b/.test(l));
+    const bob = r.out.split('\n').find((l) => /^\s*b\s+bob\b/.test(l));
+    assert.match(ann, /mode 600, modified 2026-10-26/);
+    assert.doesNotMatch(ann, /should be/);
+    assert.match(bob, /mode 644 \(should be 600\)/);
+    assert.ok(!r.out.includes('half-written') && !r.out.includes('sub'));
     const all = `${r.out}\n${s.fac('--json').out}`;
     for (const token of Object.values(tokens)) for (let i = 0; i + 8 <= token.length; i += 1) assert.ok(!all.includes(token.slice(i, i + 8)), `a slice of a token at ${i}`);
   } finally {
@@ -310,14 +364,14 @@ exec "$0.real" "$@"
   }
 });
 
-test('no part of seat 1\'s token reaches the table or the JSON', () => {
+test('no part of a seat\'s token reaches the table or the JSON', () => {
   const s = sandbox();
   try {
     const token = 'sk-ant-oat01-Q7xP2mK9vL4nR8tW3yZ6hJ5c';
-    const seat1 = join(s.home, '.agent-profiles/seats/1');
-    mkdirSync(seat1, { recursive: true });
-    writeFileSync(join(seat1, 'oauth-token'), token);
-    chmodSync(join(seat1, 'oauth-token'), 0o600);
+    mkdirSync(s.tokens(), { recursive: true });
+    writeFileSync(join(s.tokens(), 'ann'), token);
+    chmodSync(join(s.tokens(), 'ann'), 0o600);
+    writeFileSync(join(s.state, 'accounts'), 'factory/seat-1=ann\n');
     s.onHost();
     const out = `${s.fac().out}\n${s.fac('--json').out}`;
     assert.match(out, /mode 600/);

@@ -4,6 +4,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { SEATS, resetPassed, seatEvent } from './seat.mjs';
+import { seatAccounts } from './token.mjs';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -143,7 +144,8 @@ export function roleMapLines(kept, accounts = {}) {
   ];
 }
 
-/** FACTORY_SEAT_ACCOUNTS, "1=name,2=name", as { 1: 'name', 2: 'name' }: the account of a seat, which the Lead or the Human gives. */
-export function accountsOf(text) {
-  return Object.fromEntries((text ?? '').split(',').map((p) => p.split('=').map((s) => s.trim())).filter(([k, v]) => k && v));
+/** The account of each seat as { 1: 'name', 2: 'name' }, from the accounts file in the state folder (#178), the one source of a
+ * row's account. */
+export function accountsOf(state) {
+  return seatAccounts(state);
 }
