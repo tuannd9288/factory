@@ -62,6 +62,14 @@ test('seat 2 holds four live sessions: the fifth goes to seat 1, and says why se
   });
 });
 
+test('a seat with ten live sessions is still chosen: no number of sessions passes a seat over (#280)', async () => {
+  const { chooseSeat } = await lib();
+  world((runs, add) => {
+    for (let i = 0; i < 10; i += 1) add(2);
+    assert.deepEqual(chooseSeat({ runs }), { seat: 2, reasons: [] });
+  });
+});
+
 test('a session whose process is gone does not count, and a pid file with no seat file counts for seat 2', async () => {
   const { chooseSeat } = await lib();
   world((runs, add) => {
