@@ -152,7 +152,7 @@ test('the frame: a header in plain words, what waits on you, one block per team,
   const { text } = await frame(w);
   const lines = text.split('\n');
   assert.ok(lines.every((l) => l.length <= 200));
-  assert.match(lines[0], /^Mac mini {2}load 2\.3 of 8 cores {2}·  1 working · 1 idle · 0 waiting for you {2}·  12:00 {2}·/);
+  assert.match(lines[0], /^Mac mini {2}load 2\.3 of 8 cores {2}·  1 working · 1 idle · 0 agents waiting {2}·  12:00 {2}·/);
   assert.match(lines[0], /queue ok 11:59/);
   assert.match(lines[0], /alerts 1/);
   assert.ok(!/\d{4}-\d\d-\d\d|\d\dZ\b/.test(lines.filter((l) => !l.includes('digest.failed')).join('\n')), 'no UTC time or full date is left but an alert\'s own text');
@@ -399,7 +399,7 @@ test('a frame given the terminal\'s rows keeps the header, what waits on you, th
   assert.equal(cut.length, full.length - 3);
   assert.deepEqual(cut.slice(0, 5), full.slice(0, 5));
   assert.deepEqual(cut.slice(-4), full.slice(-4));
-  assert.match(cut.find((l) => l.startsWith('…')), /^… 4 more rows \(a repository's tab shows fewer\)/);
+  assert.match(cut.find((l) => l.startsWith('…')), /^… 4 more rows \(a repository's tab shows fewer\); 1-9 or Tab tabs, c full columns, q quits$/);
   assert.equal(render(snap, { width: 200, rows: 500 }), full.join('\n'));
 });
 
@@ -553,7 +553,7 @@ test('a Lead with the new hooks, alive over a minute, with no event since its st
     assert.equal(lead.waitNote, 'login or folder trust?');
     const text = (await top()).render(snap, { width: 200 });
     assert.match(text, /^ {2}answer {3}aardvark \(factory Lead\) {2}pane p-7 {2}login or folder trust\?$/m);
-    assert.match(text.split('\n')[0], /1 waiting for you/);
+    assert.match(text.split('\n')[0], /1 agent waiting/);
   }
   assert.equal((await leadOf(w, { pid: 1, command: HOOKED, ageMs: 30_000 }, null)).lead.state, 'idle', 'not yet a minute');
   assert.equal((await leadOf(w, { pid: 1, command: 'claude --name factory-lead --settings {"hooks":{"Stop":[]}}', ageMs: 900_000 }, null)).lead.state, 'idle', 'started before the new hooks');

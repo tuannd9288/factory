@@ -195,7 +195,7 @@ function renamePane(runDir, name, paneId) {
   if (r.error || r.status !== 0) process.stderr.write(`bin/lead: note: could not rename the Herdr pane ${paneId} to ${name}\n`);
 }
 
-const claudeDirt =(cwd) => spawnSync('git', ['status', '--porcelain', '--', '.claude/'], { cwd, encoding: 'utf8' }).stdout ?? '';
+const claudeDirt = (cwd) => spawnSync('git', ['status', '--porcelain', '--', '.claude/'], { cwd, encoding: 'utf8' }).stdout ?? '';
 const lastLine = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '';
 
 function main(argv, env) {

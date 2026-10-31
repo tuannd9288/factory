@@ -571,7 +571,7 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
   const ghText = github.ok ? `gh ok ${age(now - github.at)} ago` : `gh failed (${github.error})`;
   const tabs = tabsOf(snap);
   const lines = [
-    clip(`Mac mini  load ${snap.load[0].toFixed(1)} of ${snap.cores} cores  ·  ${count('working')} working · ${count('idle')} idle · ${count('waiting')} waiting for you  ·  ${hm(now)}  ·  ${q}  ·  alerts ${queue.failed.length}  ·  ${ghText}`, width),
+    clip(`Mac mini  load ${snap.load[0].toFixed(1)} of ${snap.cores} cores  ·  ${count('working')} working · ${count('idle')} idle · ${count('waiting')} agent${count('waiting') === 1 ? '' : 's'} waiting  ·  ${hm(now)}  ·  ${q}  ·  alerts ${queue.failed.length}  ·  ${ghText}`, width),
     clip(tabs.map((t, i) => `${i === tab ? '▸' : ''}[${i + 1} ${t.label}]`).join(' '), width),
   ];
   // What waits on the Human, one line each: what he does, and where.
@@ -623,7 +623,7 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
   // out; without them (--once) the whole frame is printed.
   const room = rows ? rows - lines.length - bottom.length - 1 : tree.length;
   if (rows && tree.length > room) {
-    return [...lines, ...tree.slice(0, Math.max(0, room)), clip(`… ${tree.length - Math.max(0, room)} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, q quits`, width), ...bottom].map(clean).join('\n');
+    return [...lines, ...tree.slice(0, Math.max(0, room)), clip(`… ${tree.length - Math.max(0, room)} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, c full columns, q quits`, width), ...bottom].map(clean).join('\n');
   }
   return [...lines, ...tree, ...bottom].map(clean).join('\n');
 }
