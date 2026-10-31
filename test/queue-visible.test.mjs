@@ -64,7 +64,7 @@ test('the digest lists every .failed file with its time and cause, and each repo
 function ledgerRun(dir, list) {
   writeFileSync(
     join(dir, 'gh'),
-    '#!/bin/sh\necho "$*" >>"$Q/calls"\ncase "$*" in\n  "api --paginate"*) echo "[[]]" ;;\n  "api repos/o/app/actions/secrets") echo \'{"secrets":[]}\' ;;\n  "issue list"*) cat "$Q/list.json" ;;\n  "issue create"*) echo https://github.com/o/factory/issues/99 ;;\n  "issue edit"*) echo https://github.com/o/factory/issues/7 ;;\n  "label create"*) ;;\n  *) exit 1 ;;\nesac\n',
+    '#!/bin/sh\necho "$*" >>"$Q/calls"\ncase "$*" in\n  "repo view"*) echo \'{"visibility":"PRIVATE"}\' ;;\n  "api --paginate"*) echo "[[]]" ;;\n  "api repos/o/app/actions/secrets") echo \'{"secrets":[]}\' ;;\n  "issue list"*) cat "$Q/list.json" ;;\n  "issue create"*) echo https://github.com/o/factory/issues/99 ;;\n  "issue edit"*) echo https://github.com/o/factory/issues/7 ;;\n  "label create"*) ;;\n  *) exit 1 ;;\nesac\n',
   );
   chmodSync(join(dir, 'gh'), 0o755);
   writeFileSync(join(dir, 'list.json'), JSON.stringify(list));

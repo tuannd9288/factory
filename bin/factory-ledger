@@ -2,6 +2,7 @@
 # The factory's ledger and weekly digest, read from GitHub and the repositories' Claude Code profiles; no model runs.
 #   bin/factory-ledger [--repo owner/name]... [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--rows | --digest]
 #                      [--post owner/name] [--profile-dir <dir>]...
+#   bin/factory-ledger plist [--daemon] --repo owner/name...        print the weekly digest's launchd job (#209)
 #   bin/factory-ledger --check [--latest N] [--profile-dir <dir>]...
 #   bin/factory-ledger --quota [--statusline <file>]...
 # --quota prints each seat's five-hour and seven-day windows (#63), as Claude Code itself reports them: the newest
@@ -9,7 +10,9 @@
 # status-line file given by --statusline or FACTORY_STATUSLINE (colon-separated). It reads no credential or profile, and
 # the digest carries the same table. FACTORY_SEAT_ACCOUNTS ("1=name,2=name") names the accounts in the digest's role map.
 # --rows prints one tab-separated row per task (one pull request opened in the window); --digest (the default) prints
-# the digest; --post files it as an issue labelled "digest" in the named repository (the factory's own).
+# the digest; --post files it as an issue labelled "digest" in the named repository, which must be private (#209).
+# --last-week is the 7 days that end yesterday, in place of --since and --until. The job posts it to
+# tuannd9288/better-factory every Monday at 09:00.
 # --check is the canary: over the latest N assistant entries of every profile under AGENT_PROFILES plus the --profile-dir
 # folders it lists the key paths with their types (opening only message and message.usage) and names the fields the
 # ledger reads that are missing, or stale (absent from the newest session file or the newest 10 entries); it prints no
