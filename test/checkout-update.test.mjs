@@ -2,8 +2,8 @@
 // in a temporary folder; no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory, git } from './helpers.mjs';
@@ -24,7 +24,7 @@ async function world(body) {
     git(dir, 'init', '-q', '--bare', '-b', 'main', origin);
     git(dir, 'clone', '-q', origin, seed);
     writeFileSync(join(seed, 'a.txt'), 'one\n');
-    writeFileSync(join(seed, '.gitignore'), 'gen.txt\n');
+    writeFileSync(join(seed, '.gitignore'), 'gen.txt\n*.gen\nnotes\n');
     git(seed, 'add', '.');
     git(seed, 'commit', '-q', '-m', 'one');
     git(seed, 'push', '-q', 'origin', 'HEAD:main');
@@ -34,6 +34,7 @@ async function world(body) {
       dir, origin, seed, checkout, state, runs,
       advance(name = 'b.txt', text = 'two\n', force = false) {
         n += 1;
+        mkdirSync(join(seed, name, '..'), { recursive: true });
         writeFileSync(join(seed, name), text);
         git(seed, 'add', ...(force ? ['-f'] : []), name);
         git(seed, 'commit', '-q', '-m', `c${n}`);
@@ -317,3 +318,152 @@ test('a sweep updates nothing where the checkout is not named: not ~/WORKSPACES 
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(w.head(), before);
 }));
+
+// Round 2 (#257): the start registers under the lock and only then; git never overwrites an ignored file; a failed render alerts.
+const archived = (w) => (existsSync(join(w.state, 'archive')) ? readdirSync(join(w.state, 'archive'), { recursive: true }) : []);
+
+test('an ignored file that a merge lands after the fetch brings in is kept, then archived by the next sweep', () => world(async (w) => {
+  writeFileSync(join(w.checkout, 'gen.txt'), 'MINE\n');
+  const tip = w.advance('b.txt', 'two\n');
+  const r = await w.follow({ live: () => { w.advance('gen.txt', 'theirs\n', true); return 0; } });
+  assert.equal(r.status, 'updated', JSON.stringify(r));
+  assert.equal(w.head(), tip, 'it moved to the tip its archive scan used');
+  assert.equal(readFileSync(join(w.checkout, 'gen.txt'), 'utf8'), 'MINE\n');
+  const next = await w.follow();
+  assert.equal(next.status, 'updated', JSON.stringify(next));
+  assert.equal(readFileSync(join(w.checkout, 'gen.txt'), 'utf8'), 'theirs\n');
+  assert.ok(archived(w).some((n) => n.endsWith('gen.txt')));
+  const [folder] = readdirSync(join(w.state, 'archive')).filter((f) => existsSync(join(w.state, 'archive', f, 'gen.txt')));
+  assert.equal(readFileSync(join(w.state, 'archive', folder, 'gen.txt'), 'utf8'), 'MINE\n');
+}));
+
+test('an ignored file on the parent path of an incoming file is kept: the merge refuses and says so', () => world(async (w) => {
+  writeFileSync(join(w.checkout, 'notes'), 'MINE\n');
+  const before = w.head();
+  w.advance('notes/x.txt', 'theirs\n', true);
+  const r = await w.follow();
+  assert.equal(r.status, 'refused', JSON.stringify(r));
+  assert.match(w.failed(), /pull failed/);
+  assert.equal(w.head(), before);
+  assert.equal(readFileSync(join(w.checkout, 'notes'), 'utf8'), 'MINE\n');
+}));
+
+test('an ignored file with a non-ASCII name is archived, not overwritten', () => world(async (w) => {
+  writeFileSync(join(w.checkout, 'é.gen'), 'MINE\n');
+  w.advance('é.gen', 'theirs\n', true);
+  const r = await w.follow();
+  assert.equal(r.status, 'updated', JSON.stringify(r));
+  assert.equal(readFileSync(join(w.checkout, 'é.gen'), 'utf8'), 'theirs\n');
+  const [folder] = readdirSync(join(w.state, 'archive'));
+  assert.equal(readFileSync(join(w.state, 'archive', folder, 'é.gen'), 'utf8'), 'MINE\n');
+}));
+
+test('a path with glob characters is matched literally when the scan asks git whether it is tracked', () => world(async (w) => {
+  w.advance('ab.gen', 'tracked\n', true); // a tracked file that the glob a*.gen would match
+  assert.equal((await w.follow()).status, 'updated');
+  writeFileSync(join(w.checkout, 'a*.gen'), 'MINE\n');
+  w.advance('a*.gen', 'theirs\n', true);
+  const r = await w.follow();
+  assert.equal(r.status, 'updated', JSON.stringify(r));
+  const [folder] = readdirSync(join(w.state, 'archive'));
+  assert.equal(readFileSync(join(w.state, 'archive', folder, 'a*.gen'), 'utf8'), 'MINE\n');
+}));
+
+test('a failed render keeps queue-plist.failed and names the plist and the first line; a first failed render writes it', async () => {
+  const { checkPlists } = await lib();
+  const dir = mkdtempSync(join(tmpdir(), 'checkout-plist-'));
+  try {
+    const plists = join(dir, 'p');
+    const state = join(dir, 's');
+    mkdirSync(plists);
+    mkdirSync(state);
+    const label = 'io.github.tuannd9288.factory.queue';
+    writeFileSync(join(plists, `${label}.plist`), 'old\n');
+    const broken = () => { throw new Error('plist: unknown argument --daemon\nsecond line'); };
+    const first = checkPlists({ root: dir, state, plistDir: plists, render: broken });
+    assert.match(readFileSync(join(state, 'queue-plist.failed'), 'utf8'), new RegExp(`could not render ${label}: plist: unknown argument --daemon\n$`));
+    assert.deepEqual(first.differ, []);
+    checkPlists({ root: dir, state, plistDir: plists, render: () => 'new\n' });
+    assert.match(readFileSync(join(state, 'queue-plist.failed'), 'utf8'), new RegExp(`^\\S+ ${label}: the installed plist differs`));
+    checkPlists({ root: dir, state, plistDir: plists, render: broken });
+    assert.match(readFileSync(join(state, 'queue-plist.failed'), 'utf8'), /could not render/, 'the earlier alert is not cleared by a failure');
+    writeFileSync(join(plists, `${label}.plist`), 'new\n');
+    checkPlists({ root: dir, state, plistDir: plists, render: () => 'new\n' });
+    assert.ok(!existsSync(join(state, 'queue-plist.failed')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The start side. A named pipe where bin/seat reads a seat's log holds it inside chooseSeat, right after the claim is written.
+test('a start writes its claim while it holds checkout.lock, and releases the lock once the seat is chosen', async () => {
+  const { world: seatWorld, until, SEAT_JS } = await import('./seat-world.mjs');
+  await seatWorld(async (w) => {
+    const other = join(w.runs, 'issue-2');
+    mkdirSync(other);
+    const fifo = join(other, 'run-p.jsonl');
+    assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
+    writeFileSync(join(other, 'run-p.seat'), '2\n');
+    const child = spawn(process.execPath, [SEAT_JS, ...w.args('worker')], { env: w.env(), cwd: w.root, stdio: 'ignore' });
+    const ended = new Promise((resolve) => child.on('close', resolve));
+    try {
+      await until(() => existsSync(join(w.run, 'run-worker.claim.pid')), 'the claim');
+      assert.ok(existsSync(join(w.state, 'checkout.lock')), 'the claim was written without checkout.lock');
+      closeSync(openSync(fifo, 'w'));
+      assert.equal(await ended, 0);
+      assert.ok(!existsSync(join(w.state, 'checkout.lock')), 'the lock was not released');
+    } finally {
+      child.kill('SIGKILL');
+    }
+  });
+});
+
+test('the plugin install runs with no checkout.lock held and with the start\'s claim written', async () => {
+  const { world: seatWorld, PSTACK_SETTINGS } = await import('./seat-world.mjs');
+  await seatWorld(async (w) => {
+    w.settings(PSTACK_SETTINGS);
+    const r = w.start('worker');
+    assert.equal(r.code, 0, r.out + r.err);
+    const calls = w.pluginCalls();
+    assert.ok(calls.length > 0, 'no plugin call was made');
+    for (const c of calls) {
+      assert.equal(c.lock, false, `checkout.lock was held during ${c.argv.join(' ')}`);
+      assert.equal(c.claimed, true, `no claim during ${c.argv.join(' ')}`);
+    }
+  });
+});
+
+test('a start that finds checkout.lock held refuses as busy and leaves no pid, claim or seat file', async () => {
+  const { world: seatWorld } = await import('./seat-world.mjs');
+  await seatWorld(async (w) => {
+    mkdirSync(join(w.state, 'checkout.lock'));
+    const r = w.start('worker', [], { FACTORY_CHECKOUT_LOCK_WAIT_MS: '100' });
+    assert.equal(r.code, 2, r.out + r.err);
+    assert.match(r.err, /checkout/);
+    assert.deepEqual(readdirSync(w.run).filter((n) => /^run-worker\./.test(n)), []);
+    assert.deepEqual(w.records(), []);
+  });
+});
+
+test('the refusal after the wait names the holder when the lock records one', async () => {
+  const { world: seatWorld } = await import('./seat-world.mjs');
+  await seatWorld(async (w) => {
+    mkdirSync(join(w.state, 'checkout.lock'));
+    writeFileSync(join(w.state, 'checkout.lock', 'holder'), '4242 the update of the checkout\n');
+    const r = w.start('worker', [], { FACTORY_CHECKOUT_LOCK_WAIT_MS: '100' });
+    assert.equal(r.code, 2, r.out + r.err);
+    assert.match(r.err, /held by the update of the checkout \(pid 4242\)/);
+  });
+});
+
+test('a lock taken by the update or by a start records its holder', async () => {
+  const { withStartLock } = await lib();
+  const dir = mkdtempSync(join(tmpdir(), 'checkout-holder-'));
+  try {
+    let seen;
+    withStartLock(dir, dir, () => { seen = readFileSync(join(dir, 'checkout.lock', 'holder'), 'utf8'); }, { wait: 50, label: 'a start of bin/seat' });
+    assert.equal(seen, `${process.pid} a start of bin/seat\n`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
