@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { factory } from './helpers.mjs';
@@ -34,7 +34,8 @@ process.stdin.on('end', () => {
 `;
 
 function world(body) {
-  const root = mkdtempSync(join(tmpdir(), 'seat-launch-'));
+  // The real path, as bin/seat needs for a folder (#192).
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'seat-launch-')));
   const w = { root, profiles: join(root, 'profiles'), runs: join(root, 'runs'), state: join(root, 'state'), home: join(root, 'home'), bin: join(root, 'bin'), fake: join(root, 'fake') };
   w.run = join(w.runs, 'issue-1');
   w.work = join(root, 'work');
@@ -101,6 +102,17 @@ test('the session gets its preset, the brief on stdin, the work folder as cwd, a
   assert.equal(saw.env.config, join(w.profiles, 'seats/2/claude'));
   assert.equal(saw.env.token, null, 'seat 2 has no token, even when the caller\'s environment has one');
   assert.equal(saw.env.spec, null, 'the supervisor\'s own settings do not reach the session');
+}));
+
+test('an --add-dir reaches claude as a directory and as an Edit rule (#192)', () => world(async (w) => {
+  const extra = join(w.root, 'extra');
+  mkdirSync(extra);
+  const r = w.start('worker', ['--add-dir', extra]);
+  assert.equal(r.code, 0, r.out + r.err);
+  await until(() => existsSync(w.out()) && w.records().length === 1, 'the session');
+  const { argv } = w.saw();
+  assert.deepEqual(argv.slice(argv.indexOf('--add-dir'), argv.indexOf('--allowedTools')), ['--add-dir', w.run, '--add-dir', extra]);
+  assert.ok(argv.includes(`Edit(/${extra}/**)`));
 }));
 
 function readlinkReal(p) {

@@ -4,7 +4,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
-import { basename, extname, join, resolve } from 'node:path';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
@@ -242,6 +242,14 @@ const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <wo
 const VALUE = { '--run': 'run', '--work': 'work', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
 const LIST = { '--skill': 'skills', '--allow': 'allow', '--deny': 'deny', '--add-dir': 'addDirs' };
 
+const realOf = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+};
+
 /** The arguments of bin/seat as an object; a Refused error, in a sentence, for anything else. */
 export function parseArgs(argv) {
   const o = { skills: [], allow: [], deny: [], addDirs: [] };
@@ -260,6 +268,12 @@ export function parseArgs(argv) {
   if (!o.run || !o.work) throw new Refused(`--run and --work are both needed\n${USAGE}`);
   for (const [flag, value] of [['--resume', o.resume], ...o.allow.map((v) => ['--allow', v]), ...o.deny.map((v) => ['--deny', v]), ...o.addDirs.map((v) => ['--add-dir', v])]) {
     if (typeof value === 'string' && value.startsWith('-')) throw new Refused(`${flag} ${value}: a value that starts with a dash is refused, since claude would read it as a flag`);
+  }
+  // A folder's Edit rule is a gitignore pattern, so a glob character widens it, and a path that is not already real (relative,
+  // a link, a trailing slash, a `..` step) is not the path the rule would name once claude resolves it (#192).
+  for (const [flag, value] of [['--run', o.run], ['--work', o.work], ...o.addDirs.map((v) => ['--add-dir', v])]) {
+    if (/[*?[]/.test(value)) throw new Refused(`${flag} ${value}: a folder with a glob character (*, ? or [) is refused, since its permission rule would reach other folders`);
+    if (!isAbsolute(value) || realOf(value) !== value) throw new Refused(`${flag} ${value}: a folder must be an existing absolute path that is its own real path (no link, no relative part, no trailing slash)`);
   }
   if (o.seat !== undefined && !/^[12]$/.test(o.seat)) throw new Refused(`seat ${o.seat} does not exist; the seats are 1 and 2`);
   if (o.seat !== undefined) o.seat = Number(o.seat);

@@ -2,6 +2,8 @@
 // eval's arm B has no Agent tool) without a change to any preset's grants.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { until, world } from './seat-world.mjs';
 
 const lib = () => import('../bin/lib/seat.mjs');
@@ -21,11 +23,13 @@ test('deny rules come after the preset\'s own, and before seat 1\'s; the grants 
 
 test('--deny is repeatable, and a value that starts with a dash is refused like --allow\'s', async () => {
   const { parseArgs } = await lib();
-  const o = parseArgs(['researcher', 'b.md', '--run', 'r', '--work', 'w', '--deny', 'Agent', '--deny', 'Task']);
+  // A folder must be its own real path (#192), so a real one stands for run and work.
+  const dir = realpathSync(tmpdir());
+  const o = parseArgs(['researcher', 'b.md', '--run', dir, '--work', dir, '--deny', 'Agent', '--deny', 'Task']);
   assert.deepEqual(o.deny, ['Agent', 'Task']);
-  assert.deepEqual(parseArgs(['researcher', 'b.md', '--run', 'r', '--work', 'w']).deny, []);
-  assert.throws(() => parseArgs(['researcher', 'b.md', '--run', 'r', '--work', 'w', '--deny', '--model']), /--deny --model: a value that starts with a dash is refused/);
-  assert.throws(() => parseArgs(['researcher', 'b.md', '--run', 'r', '--work', 'w', '--deny']), /--deny needs a value/);
+  assert.deepEqual(parseArgs(['researcher', 'b.md', '--run', dir, '--work', dir]).deny, []);
+  assert.throws(() => parseArgs(['researcher', 'b.md', '--run', dir, '--work', dir, '--deny', '--model']), /--deny --model: a value that starts with a dash is refused/);
+  assert.throws(() => parseArgs(['researcher', 'b.md', '--run', dir, '--work', dir, '--deny']), /--deny needs a value/);
 });
 
 test('bin/seat passes --deny on to claude', () => world(async (w) => {
