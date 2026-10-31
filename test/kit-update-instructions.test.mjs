@@ -125,7 +125,7 @@ describe('bin/kit-update replaces only the Gate block', () => {
     }
   });
 
-  test('refuses malformed markers, an AGENTS.md with no markers that is not the old kit\'s, and a CLAUDE.md that does not reach it', () => {
+  test('refuses malformed markers, an AGENTS.md with no Gate block, and a CLAUDE.md that does not reach it', () => {
     const w = made({ seedFiles: { 'AGENTS.md': rulebook(FIVE.E) } });
     try {
       const good = exact(w, 'HEAD', 'AGENTS.md');

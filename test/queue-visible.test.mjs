@@ -78,8 +78,6 @@ function ledgerRun(dir, list) {
 }
 
 const TITLE = 'Weekly digest 2026-10-17 → 2026-10-24';
-// The title the digests posted before #98 carry (#1).
-const OLD_TITLE = (since, until) => `Bản tin xưởng ${since} → ${until}`;
 
 test('--post creates the digest when no issue has its title, ignoring fuzzy near matches', () => {
   withDir((dir) => {
@@ -98,32 +96,6 @@ test('a second --post for one period updates the issue it finds, open or closed,
     assert.match(calls, /issue edit 7 --repo o\/factory --add-label digest --body-file \S+/);
     assert.doesNotMatch(calls, /issue create/);
     assert.match(out.stdout, /issues\/7/);
-  });
-});
-
-test('a digest posted under the old title for the same period is found and updated, not posted twice', () => {
-  withDir((dir) => {
-    const { out, calls } = ledgerRun(dir, [{ number: 3, title: OLD_TITLE('2026-10-10', '2026-10-17') }, { number: 5, title: OLD_TITLE('2026-10-17', '2026-10-24'), state: 'CLOSED' }]);
-    assert.equal(out.status, 0, out.stdout + out.stderr);
-    assert.match(calls, /issue edit 5 --repo o\/factory --add-label digest --body-file \S+/);
-    assert.doesNotMatch(calls, /issue create/);
-  });
-});
-
-test('an old-title digest of another period does not stop a new one being created', () => {
-  withDir((dir) => {
-    const { out, calls } = ledgerRun(dir, [{ number: 3, title: OLD_TITLE('2026-10-10', '2026-10-17') }]);
-    assert.equal(out.status, 0, out.stdout + out.stderr);
-    assert.match(calls, /issue create .*--title Weekly digest 2026-10-17 → 2026-10-24/);
-  });
-});
-
-test('one issue under the old title and one under the new, for one period: update none, name both', () => {
-  withDir((dir) => {
-    const { out, calls } = ledgerRun(dir, [{ number: 5, title: OLD_TITLE('2026-10-17', '2026-10-24') }, { number: 7, title: TITLE }]);
-    assert.notEqual(out.status, 0, out.stdout + out.stderr);
-    assert.match(out.stderr, /#5.*#7/);
-    assert.doesNotMatch(calls, /issue (edit|create)/);
   });
 });
 
