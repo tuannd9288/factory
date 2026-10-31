@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exitCodeOf, leadArgs, missingPlugins, refusal } from '../bin/lead.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
+import { matches } from '../../../test/bash-rule.mjs';
+import { FORMS, HARMLESS } from '../../../test/login-forms.mjs';
 
 const home = '/home/factory';
 const tmp = () => mkdtempSync(join(tmpdir(), 'lead-'));
@@ -107,6 +109,12 @@ describe('leadArgs', () => {
     const deny = list('--disallowedTools');
     assert.ok(secretsRead.length > 0);
     for (const d of ['Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
+  });
+
+  test('the deny list refuses factory login and factory store in every form, and not the list', () => {
+    const deny = list('--disallowedTools');
+    for (const command of FORMS) assert.ok(deny.some((r) => matches(r, command)), command);
+    for (const command of HARMLESS) assert.ok(!deny.some((r) => matches(r, command)), command);
   });
 
   test('the deny list keeps Edit and Write out of the live clone, by an absolute path', () => {
