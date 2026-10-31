@@ -33,6 +33,6 @@ describe('the pstack pin', () => {
   test('holds the pin as the installer writes it, two-space JSON in the installer\'s key order, and no permissions', () => {
     const text = readFileSync(join(factory, 'packs/pstack/settings.json'), 'utf8');
     assert.equal(text, `${JSON.stringify(settings, null, 2)}\n`);
-    assert.deepEqual(Object.keys(settings), ['enabledPlugins', 'extraKnownMarketplaces']);
+    assert.deepEqual(Object.keys(settings), ['enabledPlugins', 'extraKnownMarketplaces', 'skillOverrides']);
   });
 });
