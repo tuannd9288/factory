@@ -6,7 +6,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir, loadavg } from 'node:os';
-import { dirname, join, sep } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
@@ -260,26 +260,28 @@ const firstLine = (e) => String(e.stderr || e.message || e).trim().split('\n')[0
 // The git options of the trusted jobs (kit/.gate/bin/lib/claim.mjs JOB_NET): gh's helper carries the agents' login.
 const NET = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 
-/** The claims on a repository's origin as `claim --list` reads them: the tip of each refs/heads/claim/<n>, by its subject.
- * Nothing is written into the clone: it is only asked for its origin's URL. The claim commits are fetched into a bare
- * repository of the view's own, `<state>/top/<owner>-<name>.git`, made on first use. */
-export async function readClaims(repo, clone, state) {
-  const git = async (cwd, ...a) => (await run('git', cwd ? ['-C', cwd, ...a] : a, { encoding: 'utf8', timeout: CALL_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })).stdout.trim();
-  const url = clone ? await git(clone, 'remote', 'get-url', 'origin') : `https://github.com/${repo}.git`;
-  const cache = join(state, 'top', `${repo.replace('/', '-')}.git`);
+/** The claims on a repository as `claim --list` reads them: the tip of each refs/heads/claim/<n>, by its subject. The URL is
+ * built from the repository's name alone (`url` is for tests), never asked of a clone, whose config a worker can write. Every
+ * git call runs in a bare repository of the view's own, `<state>/top/<owner>-<name>.git`, made on first use, so that only its
+ * config applies and nothing is written into a clone or the folder the view runs from; `--` ends the options before the URL. */
+export async function readClaims(repo, state, { url = `https://github.com/${repo}.git` } = {}) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error(`not owner/name: ${JSON.stringify(repo)}`);
+  const git = async (cwd, ...a) => (await run('git', ['-C', cwd, ...a], { encoding: 'utf8', timeout: CALL_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })).stdout.trim();
+  const top = join(state, 'top');
+  const cache = join(top, `${repo.replace('/', '-')}.git`);
   if (!existsSync(cache)) {
-    mkdirSync(dirname(cache), { recursive: true });
-    await git(null, 'init', '--bare', '--quiet', cache);
+    mkdirSync(top, { recursive: true });
+    await git(top, 'init', '--bare', '--quiet', basename(cache));
   }
   const claims = new Map();
-  for (const l of (await git(null, ...NET, 'ls-remote', url, 'refs/heads/claim/*')).split('\n').filter(Boolean)) {
+  for (const l of (await git(cache, ...NET, 'ls-remote', '--', url, 'refs/heads/claim/*')).split('\n').filter(Boolean)) {
     const m = /^([0-9a-f]+)\trefs\/heads\/claim\/([1-9]\d*)$/.exec(l);
     if (!m) continue;
     const n = Number(m[2]);
     try {
       await git(cache, 'cat-file', '-e', `${m[1]}^{commit}`);
     } catch {
-      await git(cache, ...NET, 'fetch', '--quiet', url, `refs/heads/claim/${n}:refs/claims/${n}`);
+      await git(cache, ...NET, 'fetch', '--quiet', '--', url, `refs/heads/claim/${n}:refs/claims/${n}`);
     }
     claims.set(n, claimStateOf(n, await git(cache, 'log', '-1', '--format=%s', m[1])));
   }
@@ -300,7 +302,7 @@ export async function gatherGithub({ repos, clones, state, claims = readClaims, 
       let held = new Map();
       let claimsOk = true;
       try {
-        held = await claims(repo, clones.get(repo) ?? null, state);
+        held = await claims(repo, state);
       } catch {
         claimsOk = false;
       }
