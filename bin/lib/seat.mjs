@@ -114,13 +114,13 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
   ];
 }
 
-// The seats, as factory:~/factory-runs/seat.zsh has them (the Human, 2026-10-26): at most four live sessions a seat. A new
-// session tries seat 2 first. A seat has no stop at a share of its quota (the Human, 2026-10-30, #194).
-export const SEATS = { 1: { cap: 4 }, 2: { cap: 4 } };
+// The seats: 1 and 2. A new session tries seat 2 first. A seat has no stop at a share of its quota (the Human, 2026-10-30,
+// #194), nor at a number of live sessions (the Human, 2026-10-31, #280): how many run is the Lead's call.
+export const SEATS = { 1: {}, 2: {} };
 const ORDER = [2, 1];
 
 /** The run*<ext> files of the run folders under runs (one level down). */
-function runFiles(runs, ext) {
+export function runFiles(runs, ext) {
   const out = [];
   for (const folder of existsSync(runs) ? readdirSync(runs) : []) {
     const dir = join(runs, folder);
@@ -186,8 +186,8 @@ export const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFil
 /** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
  * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off removes
  * run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the listing, so none can finish between two
- * equal listings; one seen half done counts that start twice at worst, which only makes a start back off. list is the listing,
- * passed in so a test can force the interleaving. */
+ * equal listings; one seen half done counts that start twice at worst. list is the listing, passed in so a test can force the
+ * interleaving. */
 export function liveCount(runs, seat, list = runFiles) {
   return countLive(runs, (p) => seatOf(p, '2') === String(seat), list);
 }
@@ -241,13 +241,12 @@ export function seatOut(runs, seat, now = Date.now()) {
   return `rejected by Claude Code (${WINDOW[info.rateLimitType] ?? info.rateLimitType} window) until ${until} UTC`;
 }
 
-/** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is under its cap and not out
- * (seatOut). reasons say why each seat that was tried was passed over; with seat null, none was free. With claim, a function that
- * writes this start's own pid file for a seat and returns the function that removes it, the count runs after the claim and
- * includes it: two starts at the same moment cannot both pass a seat at its cap minus one, since each counts the other's
- * claim (both may back off). The claim of the seat chosen stays. With accounts ({ seat: account }, #178), the team's account is that
- * of the first seat tried, and a seat whose account differs, or that has none, is passed over with a reason: nothing moves a
- * session to another account by itself. */
+/** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is not out (seatOut), whatever its
+ * number of live sessions. reasons say why each seat that was tried was passed over; with seat null, none was free. With claim, a
+ * function that writes this start's own pid file for a seat and returns the function that removes it, the claim is written
+ * before the seat is judged, so the update of the checkout counts it (#257). The claim of the seat chosen stays. With accounts
+ * ({ seat: account }, #178), the team's account is that of the first seat tried, and a seat whose account differs, or that has
+ * none, is passed over with a reason: nothing moves a session to another account by itself. */
 export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = null, now = Date.now(), accounts = null }) {
   if (resumeSeat !== null && !Object.hasOwn(SEATS, resumeSeat)) throw new Error(`seat ${resumeSeat} does not exist; the seats are 1 and 2`);
   const reasons = [];
@@ -262,11 +261,9 @@ export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = nul
       continue;
     }
     const unclaim = claim ? claim(seat) : () => {};
-    const n = liveCount(runs, seat);
     const out = seatOut(runs, seat, now);
-    if (n > SEATS[seat].cap - (claim ? 0 : 1)) reasons.push(n === Infinity ? `seat ${seat}: its run folders kept changing while its sessions were counted` : `seat ${seat}: ${n - (claim ? 1 : 0)} live sessions, at most ${SEATS[seat].cap}`);
-    else if (out) reasons.push(`seat ${seat}: ${out}`);
-    else return { seat, reasons };
+    if (!out) return { seat, reasons };
+    reasons.push(`seat ${seat}: ${out}`);
     unclaim();
   }
   return { seat: null, reasons };
@@ -403,14 +400,14 @@ function claimTag(lock, tag) {
   }
 }
 
-/** The registration of a start: refuses a tag that is running, writes the claim and chooses the seat (chooseSeat counts the claim).
+/** The registration of a start: refuses a tag that is running, writes the claim and chooses the seat (chooseSeat writes the claim).
  * Returns the seat, the pid file and the function that removes the claim, which the caller calls when the run's own files are
  * written. On any failure here nothing is left. */
 function register({ o, runs, state, run, tag }) {
   const pidFile = join(run, `run-${tag}.pid`);
   if (runLive(pidFile)) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
-  // The claim: this start's own pid with its seat, in run-<tag>.claim.pid and .claim.seat, written before the count and
-  // removed if it backs off. They are files of their own, since run-<tag>.seat also gives the earlier run's log to a seat
+  // The claim: this start's own pid with its seat, in run-<tag>.claim.pid and .claim.seat, written before the seat is judged
+  // and removed if it backs off. They are files of their own, since run-<tag>.seat also gives the earlier run's log to a seat
   // (seatEvent) and a claim must not move it. Until the supervisor exists the claim holds bin/seat's pid, which counts as
   // live (this user's, started before the file).
   const claimPid = join(run, `run-${tag}.claim.pid`);

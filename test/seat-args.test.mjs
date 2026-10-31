@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fill, until, world } from './seat-world.mjs';
+import { rejected, until, world } from './seat-world.mjs';
 
 const started = (w) => readdirSync(w.run).filter((n) => n !== 'BRIEF.md' && n !== '.gh-empty');
 
@@ -80,15 +80,15 @@ test('a seat that is not 1 or 2 is refused with exit 2, an Object.prototype name
   assert.deepEqual(started(w), []);
 }));
 
-test('the researcher never runs on seat 1 (the Lead\'s proposal, not yet the Human\'s word): --seat 1 is refused, and a full seat 2 is no reason to fall to seat 1', () => world((w) => {
+test('the researcher never runs on seat 1 (the Lead\'s proposal, not yet the Human\'s word): --seat 1 is refused, and a rejected seat 2 is no reason to fall to seat 1', () => world((w) => {
   const pinned = w.start('researcher', ['--seat', '1']);
   assert.equal(pinned.code, 2, pinned.out + pinned.err);
   assert.match(pinned.err, /researcher/);
-  fill(w, 2, 4);
-  const full = w.start('researcher');
-  assert.equal(full.code, 2, full.out + full.err);
-  assert.match(full.err, /seat 2: 4 live sessions/);
-  assert.doesNotMatch(full.err, /seat 1/);
-  assert.deepEqual(started(w).filter((n) => !n.startsWith('run-fill')), []);
+  rejected(w, 2, 'old2');
+  const out = w.start('researcher');
+  assert.equal(out.code, 2, out.out + out.err);
+  assert.match(out.err, /seat 2: rejected by Claude Code/);
+  assert.doesNotMatch(out.err, /seat 1/);
+  assert.deepEqual(started(w).filter((n) => !n.startsWith('run-old2')), []);
   assert.equal(w.start('worker').code, 0, 'a worker still falls to seat 1');
 }));
