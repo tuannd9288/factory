@@ -104,7 +104,7 @@ export function reexec(argv, head) {
   return r.status ?? 1;
 }
 
-/** A run of a process with no run folder of its own (the canary): run-<name>.pid and .seat (seat 0, which no cap counts) under
+/** A run of a process with no run folder of its own (the canary): run-<name>.pid and .seat (seat 0, which no seat's count includes) under
  * <runs>/daemon-<name>, so liveRuns sees it. Returns the function that removes the two. */
 export function markRun(runs, name) {
   const dir = join(runs, `daemon-${name}`);

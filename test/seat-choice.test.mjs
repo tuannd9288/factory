@@ -1,7 +1,7 @@
 // bin/seat (#91): which seat a session runs on, ported from factory:~/factory-runs/seat.zsh. A new session tries seat 2, then
-// seat 1; at most four live sessions a seat, counted from run*.pid and run*.seat under FACTORY_RUNS; a seat is passed over
-// for its use only while Claude Code has rejected it, until the reset it gave, as the newest rate_limit_event of that seat's
-// logs says (#194); a resume stays on its seat.
+// seat 1; no number of live sessions passes a seat over (#280); a seat is passed over for its use only while Claude Code has
+// rejected it, until the reset it gave, as the newest rate_limit_event of that seat's logs says (#194); a resume stays on its
+// seat.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -52,39 +52,24 @@ test('with nothing running a new session takes seat 2', async () => {
   world((runs) => assert.deepEqual(chooseSeat({ runs }), { seat: 2, reasons: [] }));
 });
 
-test('seat 2 holds four live sessions: the fifth goes to seat 1, and says why seat 2 was passed', async () => {
+test('a seat with ten live sessions is still chosen: no number of sessions passes a seat over (#280)', async () => {
   const { chooseSeat } = await lib();
   world((runs, add) => {
-    for (let i = 0; i < 3; i += 1) add(2);
-    assert.equal(chooseSeat({ runs }).seat, 2);
-    add(2);
-    assert.deepEqual(chooseSeat({ runs }), { seat: 1, reasons: ['seat 2: 4 live sessions, at most 4'] });
+    for (let i = 0; i < 10; i += 1) add(2);
+    assert.deepEqual(chooseSeat({ runs }), { seat: 2, reasons: [] });
   });
 });
 
-test('a session whose process is gone does not count, and a pid file with no seat file counts for seat 2', async () => {
-  const { chooseSeat } = await lib();
+test('liveCount: a session whose process is gone does not count, a pid file with no seat file counts for seat 2, and the run folders are all counted', async () => {
+  const { liveCount } = await lib();
   world((runs, add) => {
     for (let i = 0; i < 4; i += 1) add(2, { live: false });
-    assert.equal(chooseSeat({ runs }).seat, 2);
+    assert.equal(liveCount(runs, 2), 0);
     for (let i = 0; i < 4; i += 1) add(null);
-    assert.equal(chooseSeat({ runs }).seat, 1);
-  });
-});
-
-test('live sessions are counted across the run folders', async () => {
-  const { chooseSeat } = await lib();
-  world((runs, add) => {
     for (let i = 0; i < 4; i += 1) add(2, { folder: `issue-${i}` });
-    assert.equal(chooseSeat({ runs }).seat, 1);
-  });
-});
-
-test('no seat free: null, with a reason for each seat', async () => {
-  const { chooseSeat } = await lib();
-  world((runs, add) => {
-    for (let i = 0; i < 4; i += 1) { add(2); add(1); }
-    assert.deepEqual(chooseSeat({ runs }), { seat: null, reasons: ['seat 2: 4 live sessions, at most 4', 'seat 1: 4 live sessions, at most 4'] });
+    add(1);
+    assert.equal(liveCount(runs, 2), 8);
+    assert.equal(liveCount(runs, 1), 1);
   });
 });
 
@@ -92,10 +77,9 @@ test('a seat is never passed over for its use: seven-day 0.95 on seat 2 and 0.99
   const { chooseSeat } = await lib();
   world((runs, add) => {
     add(2, { live: false, log: rate(0.95) });
-    assert.deepEqual(chooseSeat({ runs }), { seat: 2, reasons: [] });
-    for (let i = 0; i < 4; i += 1) add(2);
     add(1, { live: false, log: rate(0.99) });
-    assert.deepEqual(chooseSeat({ runs }), { seat: 1, reasons: ['seat 2: 4 live sessions, at most 4'] });
+    assert.deepEqual(chooseSeat({ runs }), { seat: 2, reasons: [] });
+    assert.deepEqual(chooseSeat({ runs, resumeSeat: 1 }), { seat: 1, reasons: [] });
   });
 });
 
@@ -144,12 +128,12 @@ test('the logs of the other seat, and logs with no seat file, are not read', asy
   });
 });
 
-test('a resume stays on its seat: the other seat is not tried, and a full seat, or one rejected until its reset, is refused', async () => {
+test('a resume stays on its seat: the other seat is not tried, and one rejected until its reset is refused', async () => {
   const { chooseSeat } = await lib();
   world((runs, add) => {
     assert.deepEqual(chooseSeat({ runs, resumeSeat: 1 }), { seat: 1, reasons: [] });
-    for (let i = 0; i < 4; i += 1) add(1);
-    assert.deepEqual(chooseSeat({ runs, resumeSeat: 1 }), { seat: null, reasons: ['seat 1: 4 live sessions, at most 4'] });
+    for (let i = 0; i < 10; i += 1) add(1);
+    assert.deepEqual(chooseSeat({ runs, resumeSeat: 1 }), { seat: 1, reasons: [] });
     assert.equal(chooseSeat({ runs, resumeSeat: 2 }).seat, 2);
   });
   world((runs, add) => {
