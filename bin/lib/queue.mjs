@@ -307,7 +307,7 @@ function which(name, path) {
 /** The launchd job that sweeps `repos` once a minute (#48): this clone's bin/factory-queue, with the gh and the node
  * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
  * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
- * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (#24's claude-canary):
+ * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (the digest's):
  * its label, tool, verb, log name and interval, more variables to keep and more tools to find on the PATH; the
  * defaults are the queue's own. The digest's job (#209) gives no verb, `args` before the repositories, and a
  * `calendar` (launchd's StartCalendarInterval) in place of the interval. */

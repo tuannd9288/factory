@@ -6,7 +6,7 @@
 // and queue-checkout.failed says why. checkPlists tells the Human when the code now renders a LaunchDaemon plist that differs
 // from the installed one, which only his sudo can replace.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -104,26 +104,6 @@ export function reexec(argv, head) {
   return r.status ?? 1;
 }
 
-/** A run of a process with no run folder of its own (the canary): run-<name>.pid and .seat (seat 0, which no seat's count includes) under
- * <runs>/daemon-<name>, so liveRuns sees it. Returns the function that removes the two. */
-export function markRun(runs, name) {
-  const dir = join(runs, `daemon-${name}`);
-  mkdirSync(dir, { recursive: true });
-  const seat = join(dir, `run-${name}.seat`);
-  const pid = join(dir, `run-${name}.pid`);
-  writeFileSync(seat, '0\n');
-  writeFileSync(pid, `${process.pid}\n`);
-  return () => {
-    rmSync(pid, { force: true });
-    rmSync(seat, { force: true });
-    try {
-      rmdirSync(dir); // only while it is empty
-    } catch {
-      // another process's marker, or already gone
-    }
-  };
-}
-
 const stamp = (ms) => new Date(ms).toISOString().replace(/:/g, '-');
 
 /** Moves path (under root) into $state/archive/<folder>, keeping its place in the tree. */
@@ -215,15 +195,15 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
   }
 }
 
-export const PLISTS = ['io.github.tuannd9288.factory.queue', 'io.github.tuannd9288.factory.digest', 'io.github.tuannd9288.factory.claude-canary'];
-const TOOLS = { queue: 'bin/factory-queue', digest: 'bin/factory-ledger', 'claude-canary': 'bin/claude-canary' };
+export const PLISTS = ['io.github.tuannd9288.factory.queue', 'io.github.tuannd9288.factory.digest'];
+const TOOLS = { queue: 'bin/factory-queue', digest: 'bin/factory-ledger' };
 
 /** The repositories an installed plist names (its --repo arguments), in order. */
 export function reposOf(text) {
   return [...text.matchAll(/<string>--repo<\/string>\s*<string>([^<]+)<\/string>/g)].map((m) => m[1]);
 }
 
-/** What this checkout's code renders for the plist of `label`, with the repositories the installed one names: the three tools'
+/** What this checkout's code renders for the plist of `label`, with the repositories the installed one names: the tools'
  * own `plist --daemon`, run in this process's environment, which for a daemon is the plist's. */
 export function renderPlist(root, label, installed, env = process.env) {
   const tool = TOOLS[label.split('.').slice(4).join('.')];
@@ -232,7 +212,7 @@ export function renderPlist(root, label, installed, env = process.env) {
   return r.stdout;
 }
 
-/** Compares what the code renders for each plist with the installed file, which it only reads (the three of PLISTS, in plistDir).
+/** Compares what the code renders for each plist with the installed file, which it only reads (each of PLISTS, in plistDir).
  * A plist that is not installed is skipped. A difference leaves the wanted plist in $state/plist-wanted (an earlier, different
  * one moves to the archive) and queue-plist.failed until the Human's reinstall makes them equal. A render that throws leaves the
  * same file too, saying `could not render <label>: <first line>`. Returns {differ: [labels], unrendered: [lines]}. */

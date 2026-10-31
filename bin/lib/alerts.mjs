@@ -1,5 +1,5 @@
 // The SessionStart hook behind bin/factory-alerts (#24): a *.failed file in the state folder is a job (the queue, the
-// Claude canary) telling the Human it failed. A session in the agents' account says so before anything else, rather
+// digest) telling the Human it failed. A session in the agents' account says so before anything else, rather
 // than the weekly digest. It also names a quota window Claude Code rejected or warns of (#63, #194). Claude Code reads the JSON on stdout (code.claude.com/docs/en/hooks): `systemMessage` is
 // shown to the Human, `additionalContext` goes to Claude. It always exits 0, so a hook never blocks a session.
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
