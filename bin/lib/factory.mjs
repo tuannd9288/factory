@@ -265,7 +265,37 @@ export function tableText(rows, { now = Date.now() } = {}) {
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin)
-       bin/factory top [--once] [--width N]`;
+       bin/factory top [--once] [--width N]
+       bin/factory lead <repo> [--new] [--dry-run]`;
+
+/** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
+ * -t asks for a terminal of its own. The exit code is the remote command's. */
+function onHostBySsh(sub, args, tty, env) {
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[sub, ...args].join(' ')}'`], { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: ${sub}: ssh did not run (${r.error.code ?? 'error'})`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
+/** `factory lead <repo> [--new] [--dry-run]` (#166): starts the pstack Lead of a repository. On the factory host it runs this
+ * clone's packs/pstack/bin/lead; on the MacBook it runs the same command there by ssh. The name and the flags are checked before
+ * anything runs. */
+function lead(args, env) {
+  const [repo, ...flags] = args;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '') || flags.some((f) => f !== '--new' && f !== '--dry-run') || new Set(flags).size !== flags.length) {
+    console.error(USAGE);
+    return 2;
+  }
+  if (placeOf(env) !== 'factory') return onHostBySsh('lead', args, true, env);
+  const r = spawnSync(resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/bin/lead'), args, { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: lead: ${r.error.code ?? 'error'}`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
 
 /** `factory top` (#174): the read-only view of every session and repository (bin/lib/top.mjs). On the factory host it runs
  * here; on the MacBook it runs the same command there by ssh, with a terminal (-t) for the live view only. Only `--once` and
@@ -287,12 +317,7 @@ async function top(args, env) {
       return 1;
     }
   }
-  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', ...(live ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory top${args.length ? ` ${args.join(' ')}` : ''}'`], { stdio: 'inherit', env });
-  if (r.error) {
-    console.error(`bin/factory: top: ssh did not run (${r.error.code ?? 'error'})`);
-    return 1;
-  }
-  return r.status ?? 1;
+  return onHostBySsh('top', args, live, env);
 }
 
 /** `factory login <account>`: checks the name, runs `claude setup-token` on the terminal's own streams (so what it prints goes to
@@ -389,6 +414,7 @@ export async function main(argv, env = process.env) {
   if (cmd === 'login') return login(rest, env);
   if (cmd === 'store') return store(rest, env);
   if (cmd === 'top') return top(rest, env);
+  if (cmd === 'lead') return lead(rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);
     return 2;
