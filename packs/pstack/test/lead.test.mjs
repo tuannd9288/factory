@@ -146,6 +146,10 @@ describe('leadArgs', () => {
     assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).hook, command);
   });
 
+  test('--settings turns auto memory off (#285)', () => {
+    assert.equal(JSON.parse(after('--settings')).autoMemoryEnabled, false);
+  });
+
   test('the hook command runs the script with no exec bit, even where the paths hold a space and a quote', () => {
     const dir = tmp();
     try {

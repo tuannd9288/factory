@@ -114,7 +114,7 @@ export function leadArgs({ repo, home, root, roleText, node, resume = null, hook
       '--permission-mode', 'auto',
       '--add-dir', join(home, 'factory-runs'),
       '--name', `${repo}-lead`,
-      '--settings', JSON.stringify({ hooks: { Stop: hooks, SessionEnd: hooks } }),
+      '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: { Stop: hooks, SessionEnd: hooks } }),
       ...(resume ? ['--resume', resume] : []),
       '--allowedTools', ...allowOf(root),
       '--disallowedTools', ...denyOf(cwd),

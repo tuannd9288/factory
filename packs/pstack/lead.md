@@ -18,9 +18,10 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    end. Check with Grep, once at a time, not in a shell loop. The record's `structured` is its final message, and
    `session` and `seat` are what a fix round resumes. Then read its whole diff, from the worktree: `cd <worktree>`, then
    `git diff origin/main...HEAD`. How many workers run at once is your call: when the load is above the cores
-   (`sysctl -n vm.loadavg hw.ncpu`), start fewer and wait for other full verifies to finish.
-5. Check it in the worktree yourself: `.gate/bin/verify` and `.gate/bin/red-check --base origin/main`, each with the
-   Bash tool's `run_in_background`, because they outlast the tool's two-minute limit. On a red, brief a fix round to the
+   (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers.
+5. Check it in the worktree yourself as the Gate block says: `.gate/bin/verify --fast`, the tests of the part changed
+   and `.gate/bin/red-check --base origin/main`, with the Bash tool's `run_in_background` where one outlasts the tool's
+   two-minute limit. The full suite runs on CI, as the required `verify`. On a red, brief a fix round to the
    same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; wait for the
    record with `"tag":"fix<k>"` the same way.
 6. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`). Open the pull request with

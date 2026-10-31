@@ -1,10 +1,10 @@
-// The pass record (#85): a full .gate/bin/verify and .gate/bin/red-check leave a stamp under the git dir, named for the
-// commits they judged, that scripts/ship reads. Never in the work tree; per worktree.
+// The pass record (#85, #281): .gate/bin/red-check leaves a stamp under the git dir, named for the commits it judged, that
+// scripts/ship reads. verify leaves none: the full suite runs on CI. Never in the work tree; per worktree.
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { commit, git, repoWithKit, script, write } from './helpers.mjs';
+import { commit, git, repoWithKit, script } from './helpers.mjs';
 
 const MUL = 'export function add(a, b) {\n  return a + b;\n}\n\nexport function mul(a, b) {\n  return a * b;\n}\n';
 const RED_AT_BASE =
@@ -22,35 +22,14 @@ describe('the pass record', () => {
   });
   after(() => r.cleanup());
 
-  test('a full verify that passes on a clean head writes verify-<head>, and nowhere in the work tree', () => {
-    const head = git(r.repo, 'rev-parse', 'HEAD');
-    assert.deepEqual(stamps(), []);
-    const out = script(r.repo, 'verify', [], { GATE_BASE: 'origin/main' });
-    assert.equal(out.code, 0, out.out);
-    assert.deepEqual(stamps(), [`verify-${head}`]);
-    assert.equal(git(r.repo, 'status', '--porcelain'), '');
-  });
-
-  test('--fast, --only and --tests write none', () => {
+  test('verify writes no stamp, whole or in part, and leaves the work tree clean', () => {
     commit(r.repo, { 'README.md': '# app, again\n' }, 'Touch the readme');
-    for (const args of [['--fast'], ['--only', 'policy'], ['--tests', 'test/math.test.js']]) {
+    for (const args of [[], ['--fast'], ['--only', 'policy'], ['--tests', 'test/math.test.js']]) {
       const out = script(r.repo, 'verify', args, { GATE_BASE: 'origin/main' });
       assert.equal(out.code, 0, `${args}: ${out.out}`);
     }
-    assert.deepEqual(stamps(), [`verify-${git(r.repo, 'rev-parse', 'HEAD~1')}`]);
-  });
-
-  test('a verify that fails, or runs over an uncommitted change, writes none', () => {
-    write(r.repo, { 'README.md': '# not committed\n' });
-    let out = script(r.repo, 'verify', [], { GATE_BASE: 'origin/main' });
-    assert.equal(out.code, 0, out.out);
-    assert.equal(stamps().length, 1);
-    git(r.repo, 'checkout', '-q', '--', 'README.md');
-    commit(r.repo, { 'AGENTS.md': 'x\n'.repeat(160) }, 'Break the instructions');
-    out = script(r.repo, 'verify', [], { GATE_BASE: 'origin/main' });
-    assert.equal(out.code, 1, out.out);
-    assert.equal(stamps().length, 1);
-    git(r.repo, 'reset', '-q', '--hard', 'HEAD~1');
+    assert.deepEqual(stamps(), []);
+    assert.equal(git(r.repo, 'status', '--porcelain'), '');
   });
 
   test('red-check that passes writes red-check-<head>-<base>, with no source change and with a red test', () => {
