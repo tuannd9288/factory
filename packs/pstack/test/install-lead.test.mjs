@@ -137,7 +137,7 @@ describe('the ~/.zshenv block, sourced by a shell', () => {
   for (const shell of ['sh', 'zsh']) {
     test(`${shell}: prints nothing, adds the missing folders in front in ~/.zprofile's order, and adds none twice`, (t) => fixture((f) => {
       const ask = (PATH) => spawnSync(shell, ['-c', `. "${f.zshenv}"; printf %s "$PATH"`], { encoding: 'utf8', env: { PATH, HOME: f.home } });
-      if (ask('/usr/bin').error) return t.skip(`no ${shell}`);
+      if (ask('/usr/bin:/bin').error) return t.skip(`no ${shell}`);
       writeFileSync(f.zshenv, BLOCK);
       let r = ask('/usr/bin:/bin');
       assert.equal(r.stderr, '');
@@ -145,8 +145,8 @@ describe('the ~/.zshenv block, sourced by a shell', () => {
       const full = `/usr/bin:/opt/homebrew/bin:${f.home}/.local/bin:/opt/homebrew/sbin:/bin`;
       r = ask(full);
       assert.equal(r.stdout, full, 'a PATH that holds them all is left as it is');
-      r = ask(`/shim:/opt/homebrew/bin:/usr/bin`);
-      assert.equal(r.stdout, `${f.home}/.local/bin:/opt/homebrew/sbin:/shim:/opt/homebrew/bin:/usr/bin`);
+      r = ask('/shim:/opt/homebrew/bin:/usr/bin:/bin');
+      assert.equal(r.stdout, `${f.home}/.local/bin:/opt/homebrew/sbin:/shim:/opt/homebrew/bin:/usr/bin:/bin`);
     }));
   }
 });
