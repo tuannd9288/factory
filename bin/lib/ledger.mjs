@@ -784,7 +784,7 @@ function main(argv) {
     }
   }
   const report = inspect(folders, { latest: opts.latest });
-  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(process.env.FACTORY_SEAT_ACCOUNTS) });
+  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(state) });
   if (!opts.post) {
     process.stdout.write(text);
     return;

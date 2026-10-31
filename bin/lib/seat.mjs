@@ -7,6 +7,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins } from './plugins.mjs';
+import { seatAccounts, tokenDir } from './token.mjs';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. */
@@ -36,7 +37,11 @@ export const ALERTS_SETTINGS = JSON.stringify({
 export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
 // No agent runs `factory login` or `factory store` (#177): the Human alone puts a token in the store. The leading `*` takes
 // `factory` by name, by a relative or an absolute path and after other words; the two library rules close the `node` grant.
-export const tokenStoreDeny = ['Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)'];
+// `factory use` and `factory logout` (#178) are the Human's too: the first moves a row to another account, the second removes one.
+export const tokenStoreDeny = [
+  'Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)',
+  'Bash(*factory use*)', 'Bash(*factory logout*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs logout*)',
+];
 // The copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185): only the Lead reads its own, so every seat role is
 // denied them. The Lead's own deny list takes secretsRead alone.
 export const leadTranscripts = 'Read(~/factory-runs/*-lead/transcripts/**)';
@@ -72,7 +77,8 @@ export const PRESETS = {
   },
   researcher: {
     // The Lead's proposal (review of #91, #6), agreed by Colly on 2026-10-26: the researcher reads untrusted pages and can send
-    // them out with WebFetch, so it never runs on seat 1, which holds a token.
+    // them out with WebFetch, so it never runs on seat 1. Since #178 seat 2 holds a token too; its grants were reviewed for that
+    // (AGENTS.md): no tool of its own returns a file's content but Read, which the deny rules refuse on the tokens.
     model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, web: true, seats: [2],
     allow: () => [
       'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${RESEARCH_GIT}:*)`,
@@ -85,15 +91,16 @@ export const PRESETS = {
 export const ROLES = Object.keys(PRESETS);
 
 /** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories and run its
- * `sv`); skills become Skill(<name>) grants and allow is a run's own extra grants; seat and tokenPath add seat 1's
- * deny rule; deny is a run's own extra deny rules (#92), which come after the role's and before seat 1's. The mode is
+ * `sv`); skills become Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, adds three deny
+ * rules for every seat (#178): the tokens folder, the archive folder and seat 1's old token file; deny is a run's own extra deny
+ * rules (#92), which come after the role's and before those three. The mode is
  * default: with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set, Claude Code 2.1.308 forces it whatever is asked (#188). Write, Edit
  * and redirects reach the session's own folders only (run, work and each --add-dir), as acceptEdits limited them. */
-export function buildArgs({ role, run, work = null, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, seat = null, tokenPath = null }) {
+export function buildArgs({ role, run, work = null, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, profiles = null }) {
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
   const edits = [...new Set([run, work, ...addDirs].filter(Boolean))].map((d) => `Edit(/${d}/**)`);
-  const deny = [...denyOf(home, p.web), ...(p.deny ?? []), ...extraDeny, ...(seat === 1 ? [`Read(/${tokenPath})`] : [])];
+  const deny = [...denyOf(home, p.web), ...(p.deny ?? []), ...extraDeny, ...(profiles ? [`Read(/${profiles}/tokens/**)`, `Read(/${profiles}/archive/**)`, `Read(/${profiles}/seats/1/oauth-token)`] : [])];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
@@ -227,11 +234,22 @@ export function seatOut(runs, seat, now = Date.now()) {
  * (seatOut). reasons say why each seat that was tried was passed over; with seat null, none was free. With claim, a function that
  * writes this start's own pid file for a seat and returns the function that removes it, the count runs after the claim and
  * includes it: two starts at the same moment cannot both pass a seat at its cap minus one, since each counts the other's
- * claim (both may back off). The claim of the seat chosen stays. */
-export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = null, now = Date.now() }) {
+ * claim (both may back off). The claim of the seat chosen stays. With accounts ({ seat: account }, #178), the team's account is that
+ * of the first seat tried, and a seat whose account differs, or that has none, is passed over with a reason: nothing moves a
+ * session to another account by itself. */
+export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = null, now = Date.now(), accounts = null }) {
   if (resumeSeat !== null && !Object.hasOwn(SEATS, resumeSeat)) throw new Error(`seat ${resumeSeat} does not exist; the seats are 1 and 2`);
   const reasons = [];
-  for (const seat of resumeSeat === null ? seats : [resumeSeat]) {
+  const tried = resumeSeat === null ? seats : [resumeSeat];
+  for (const seat of tried) {
+    if (accounts && accounts[seat] === undefined) {
+      reasons.push(`seat ${seat}: no row in the accounts file`);
+      continue;
+    }
+    if (accounts && accounts[seat] !== accounts[tried[0]]) {
+      reasons.push(`seat ${seat}: its account is not the team's (the team's is seat ${tried[0]}'s)`);
+      continue;
+    }
     const unclaim = claim ? claim(seat) : () => {};
     const n = liveCount(runs, seat);
     const out = seatOut(runs, seat, now);
@@ -290,16 +308,19 @@ export function parseArgs(argv) {
   return o;
 }
 
-/** Seat 1's token from its file, trailing newlines stripped. Refuses, naming the path only, when the file is missing, empty
- * or holds any byte outside printable ASCII (0x21-0x7E): such a value would make Node throw an error that quotes it. */
-function readToken(path) {
+/** The token of a seat's account from its file under tokens/, trailing newlines stripped. Refuses, naming the path only, when the
+ * file is missing (and then names `factory login`), empty or holds any byte outside printable ASCII (0x21-0x7E): such a value
+ * would make Node throw an error that quotes it. */
+function readToken(path, seat, account) {
   let text = '';
+  let missing = false;
   try {
     text = readFileSync(path, 'latin1').replace(/[\r\n]+$/, '');
-  } catch {
-    // Missing or unreadable: the same refusal below.
+  } catch (e) {
+    missing = e.code === 'ENOENT';
   }
-  if (!/^[\x21-\x7e]+$/.test(text)) throw new Refused(`seat 1: the token file ${path} is missing, empty or not printable ASCII`);
+  if (missing) throw new Refused(`seat ${seat}: the account ${account} has no token file ${path}; the Human runs \`factory login ${account}\``);
+  if (!/^[\x21-\x7e]+$/.test(text)) throw new Refused(`seat ${seat}: the token file ${path} is empty or not printable ASCII`);
   return text;
 }
 
@@ -369,17 +390,21 @@ function startSession({ o, env, home, runs, profiles, state, run, work, brief, t
     return unclaim;
   };
   try {
-    const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim });
-    if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free`);
-    return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat });
+    // Until teams are named (#196) every session is one team's: its account is that of the first seat its role tries.
+    const accounts = seatAccounts(state);
+    const first = o.seat ?? (PRESETS[o.role].seats ?? ORDER)[0];
+    if (!accounts[first]) throw new Refused(`seat ${first} has no row in the accounts file ${join(state, 'accounts')}; the Human sets one with \`factory use\``);
+    const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim, accounts });
+    if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free on the team's account; \`factory\` shows every account's room and \`factory use\` moves the team`);
+    return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account: accounts[seat] });
   } finally {
     unclaim(); // after the run's own .seat and .pid are written, so the count never drops; on any failure, nothing is left
   }
 }
 
-function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat }) {
-  const tokenPath = join(profiles, 'seats/1/oauth-token');
-  if (seat === 1) readToken(tokenPath); // refuses now; the supervisor reads it again, just before it starts claude
+function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account }) {
+  const tokenPath = join(tokenDir(profiles), account);
+  readToken(tokenPath, seat, account); // refuses now; the supervisor reads it again, just before it starts claude
 
   // Neither bin/seat's environment nor the supervisor's holds the token, nor the caller's GitHub or API credentials. The
   // scrub has claude take credentials out of the environment of each command, hook and MCP server it starts (#181).
@@ -395,10 +420,10 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
     if (e instanceof PluginError) throw new Refused(`plugins: ${e.message}`);
     throw e;
   }
-  const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
+  const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
-    childFile: join(run, `run-${tag}.child`), tokenPath: seat === 1 ? tokenPath : null, role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
+    childFile: join(run, `run-${tag}.child`), tokenPath, account, role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
   };
   for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
@@ -470,7 +495,7 @@ function supervise() {
   const env = { ...process.env };
   let child;
   try {
-    if (spec.tokenPath) env.CLAUDE_CODE_OAUTH_TOKEN = readToken(spec.tokenPath);
+    env.CLAUDE_CODE_OAUTH_TOKEN = readToken(spec.tokenPath, spec.seat, spec.account);
     child = spawn(cmd, args, { cwd: spec.cwd, env, stdio: [stdin, 'pipe', stderr], detached: true });
   } catch (e) {
     // A fixed message: a Node error can quote the environment.

@@ -24,7 +24,9 @@ const allowOf = (root) => [
 ];
 // The Lead writes only in ~/factory-runs: a leading // makes each rule an absolute path.
 const denyOf = (cwd) => [
-  ...tokenStoreDeny, 'Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', `Edit(/${cwd}/**)`, `Write(/${cwd}/**)`, ...secretsRead,
+  ...tokenStoreDeny, 'Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', `Edit(/${cwd}/**)`, `Write(/${cwd}/**)`, ...secretsRead,
+  // The tokens, the archive and seat 1's old file, by name, beside the whole profiles folder (#178).
+  'Read(~/.agent-profiles/tokens/**)', 'Read(~/.agent-profiles/archive/**)', 'Read(~/.agent-profiles/seats/1/oauth-token)',
 ];
 
 /** The reason to refuse a start, or null: repo is a plain folder name and root/repo is a real folder with .git, .gate/ and .envrc. */

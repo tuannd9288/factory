@@ -1,7 +1,7 @@
 // The token store of `factory login` (#177): one file for each account, ~/.agent-profiles/tokens/<account>, mode 600, in a
 // folder of mode 700. This file holds the checks of a name and of a token, the write, the list of the files and the read of a
 // token from stdin. It never prints a token, and no error it raises holds one.
-import { chmodSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ACCOUNT = /^[a-z0-9][a-z0-9._-]*$/;
@@ -58,6 +58,87 @@ export function tokenAccounts(agentProfiles) {
     // no store yet
   }
   return entries.filter((e) => e.isFile() && accountRefusal(e.name) === null).map((e) => e.name).sort();
+}
+
+/** The accounts file (#178), $FACTORY_STATE/accounts: "<profile>=<account>" a line, the one source of every row's account. It is
+ * read as { profile: account }; a comment, a blank line or a line with no name is skipped. No file is no rows. */
+export function readAccounts(state) {
+  let text = '';
+  try {
+    text = readFileSync(join(state, 'accounts'), 'utf8');
+  } catch {
+    // no file: no row has an account
+  }
+  const out = {};
+  for (const line of text.split('\n')) {
+    const i = line.indexOf('=');
+    if (i > 0 && !line.trimStart().startsWith('#') && line.slice(i + 1).trim()) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+
+/** The seats' accounts as { 1, 2 } from the file. */
+export function seatAccounts(state) {
+  const rows = readAccounts(state);
+  return Object.fromEntries([1, 2].filter((n) => rows[`factory/seat-${n}`]).map((n) => [n, rows[`factory/seat-${n}`]]));
+}
+
+/** Sets one row's account: the file is written to a temporary name in its folder, mode 600, and renamed over the old one. The other
+ * lines, comments included, stay as they were. */
+export function setAccount(state, profile, account) {
+  mkdirSync(state, { recursive: true });
+  const file = join(state, 'accounts');
+  let lines = [];
+  try {
+    lines = readFileSync(file, 'utf8').split('\n');
+    if (lines.at(-1) === '') lines.pop();
+  } catch {
+    // a new file
+  }
+  const at = lines.findIndex((l) => !l.trimStart().startsWith('#') && l.indexOf('=') > 0 && l.slice(0, l.indexOf('=')).trim() === profile);
+  if (at >= 0) lines[at] = `${profile}=${account}`;
+  else lines.push(`${profile}=${account}`);
+  const tmp = join(state, `.accounts.${process.pid}.tmp`);
+  rmSync(tmp, { force: true });
+  try {
+    writeFileSync(tmp, `${lines.join('\n')}\n`, { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+const stampOf = (at) => at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+
+/** Moves a file into a folder of mode 700 under the archive, by rename, as <UTC stamp>-<name>; a name taken that second gets a
+ * counter, so nothing archived is overwritten. Returns the new path. */
+function archive(agentProfiles, kind, from, name, at) {
+  const dir = join(agentProfiles, 'archive', kind);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const d of [join(agentProfiles, 'archive'), dir]) chmodSync(d, 0o700);
+  let to = join(dir, `${stampOf(at)}-${name}`);
+  for (let n = 1; existsSync(to); n += 1) to = join(dir, `${stampOf(at)}-${name}.${n}`);
+  renameSync(from, to);
+  return to;
+}
+
+/** `factory logout`: tokens/<account> goes to archive/tokens/<UTC stamp>-<account>, never deleted. */
+export function archiveToken(agentProfiles, account, at = new Date()) {
+  const from = join(tokenDir(agentProfiles), account);
+  if (!existsSync(from)) throw new Error(`there is no token file for ${account}`);
+  return archive(agentProfiles, 'tokens', from, account, at);
+}
+
+export const seat1File = (agentProfiles) => join(agentProfiles, 'seats/1/oauth-token');
+
+/** Seat 1's old token file moves to archive/seat-1/<UTC stamp>-oauth-token once seat 1's account has a token in tokens/. Returns the
+ * new path, or null when nothing moved (no such file, no row, or no token for the account yet). */
+export function retireSeat1File(agentProfiles, state, at = new Date()) {
+  const account = readAccounts(state)['factory/seat-1'];
+  const old = seat1File(agentProfiles);
+  if (!account || !existsSync(old) || !existsSync(join(tokenDir(agentProfiles), account))) return null;
+  return archive(agentProfiles, 'seat-1', old, 'oauth-token', at);
 }
 
 /** All of stdin, as text. On a terminal, with echo off, up to the first Enter; the text after it in the same paste is kept, so a

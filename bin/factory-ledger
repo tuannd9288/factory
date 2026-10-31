@@ -8,7 +8,7 @@
 # --quota prints each seat's five-hour and seven-day windows (#63), as Claude Code itself reports them: the newest
 # rate_limit_event in the run logs under FACTORY_RUNS (default ~/factory-runs), and the last rate_limits record of each
 # status-line file given by --statusline or FACTORY_STATUSLINE (colon-separated). It reads no credential or profile, and
-# the digest carries the same table. FACTORY_SEAT_ACCOUNTS ("1=name,2=name") names the accounts in the digest's role map.
+# the digest carries the same table. The accounts file ($FACTORY_STATE/accounts) names the seats' accounts in the digest's role map.
 # --rows prints one tab-separated row per task (one pull request opened in the window); --digest (the default) prints
 # the digest; --post files it as an issue labelled "digest" in the named repository, which must be private (#209).
 # --last-week is the 7 days that end yesterday, in place of --since and --until. The job posts it to

@@ -12,9 +12,12 @@ import { sandbox } from './factory-world.mjs';
 const ANN = 'sk-ant-oat01-ANNANNANNANN1234567890abcd';
 const BOB = 'sk-ant-oat01-BOBBOBBOBBOB1234567890efgh';
 const utc = (sec) => new Date(sec * 1000).toISOString().slice(5, 16).replace('T', ' ');
-const EVENT = readFileSync(fileURLToPath(new URL('./fixtures/quota/real-event.jsonl', import.meta.url)), 'utf8');
+// The recorded event with its resets moved to the future, since a window that reset since is not shown with its time.
+const FIVE = Math.floor(Date.now() / 1000) + 3 * 3600;
+const EVENT = `${JSON.stringify(JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/quota/real-event.jsonl', import.meta.url)), 'utf8')), (k, v) => (k === 'resetsAt' ? FIVE : v))}\n`;
 const mode = (p) => (statSync(p).mode & 0o777).toString(8);
-const lineOf = (out, text) => out.split('\n').find((l) => l.includes(text));
+// A profile name is found as the row that starts with it: another row's "shared with" column may name it too.
+const lineOf = (out, text) => out.split('\n').find((l) => (text.startsWith('factory/') ? new RegExp(`^\\s*\\d+\\s+${text}\\b`).test(l) : l.includes(text)));
 
 /** The Mac mini's world: accounts file, token files, and a seat 2 log with a quota event. */
 function mini(s, { accounts = 'factory/seat-1=ann\nfactory/seat-2=ann\nfactory/lead-alpha=bob\n', tokens = { ann: ANN, bob: BOB } } = {}) {
@@ -52,7 +55,7 @@ test('the frame: numbered rows, lettered accounts with 5h, 7d, reset and the row
     assert.ok(ann && bob, r.out);
     assert.match(ann, /13%/, '5h of ann, from the seat 2 event');
     assert.match(ann, /3%/, '7d of ann');
-    assert.ok(ann.includes(utc(1792998600)), 'the reset');
+    assert.ok(ann.includes(utc(FIVE)), 'the reset');
     assert.match(ann, /rows? 1, 2\b/);
     assert.match(bob, /\?/, 'no seat of bob has an event');
     assert.match(bob, /rows? 3\b/);
@@ -313,11 +316,11 @@ test('while seat 1\'s old token file is there, factory prints one line about it,
 test('use on seat 1, with a token for the new account, moves the old file to archive/seat-1 by rename; with no token it stays', () => {
   const s = sandbox();
   try {
-    mini(s, { accounts: 'factory/seat-1=ann\nfactory/seat-2=ann\n', tokens: { ann: ANN, bob: BOB } });
+    mini(s, { accounts: 'factory/seat-1=ann\nfactory/seat-2=ann\n', tokens: { bob: BOB } });
     withOld(s);
     const r = s.fac('use', '2', 'b');
     assert.equal(r.code, 0, r.out);
-    assert.ok(existsSync(oldFile(s)), 'a use on seat 2 does not move it');
+    assert.ok(existsSync(oldFile(s)), 'seat 1\'s account ann has no token yet: nothing moves');
     const one = s.fac('use', '1', 'b');
     assert.equal(one.code, 0, one.out);
     assert.equal(existsSync(oldFile(s)), false);
