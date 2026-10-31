@@ -120,7 +120,7 @@ export const SEATS = { 1: { cap: 4 }, 2: { cap: 4 } };
 const ORDER = [2, 1];
 
 /** The run*<ext> files of the run folders under runs (one level down). */
-function runFiles(runs, ext) {
+export function runFiles(runs, ext) {
   const out = [];
   for (const folder of existsSync(runs) ? readdirSync(runs) : []) {
     const dir = join(runs, folder);

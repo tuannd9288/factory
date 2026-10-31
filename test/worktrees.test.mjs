@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sweepWorktrees } from '../bin/lib/worktrees.mjs';
@@ -13,7 +13,7 @@ const git = (dir, ...args) => execFileSync('git', ['-C', dir, ...args], { encodi
 /** A clone whose origin/main holds one commit, with a worktree <runs>/<name>/w on branch <name> for each name. A name in
  * `commit` has one commit of its own, pushed into origin/main (landed); a name in `ahead` has one that is not. */
 function fixture(names, { commit = [], ahead = [] } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'worktrees-'));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'worktrees-'))); // git names a worktree by its real path
   git(dir, 'init', '-q', '--bare', 'origin.git');
   git(dir, 'clone', '-q', 'origin.git', 'clone');
   const clone = join(dir, 'clone');

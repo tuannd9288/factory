@@ -18,7 +18,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, checkPlists, followMain } from './checkout.mjs';
 import { clonesUnder } from './ledger.mjs';
-import { liveRuns } from './seat.mjs';
+import { liveRuns, runFiles } from './seat.mjs';
+import { sweepWorktrees } from './worktrees.mjs';
 
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
 const CALL_MS = 60_000;
@@ -234,18 +235,24 @@ function preflight(state, human) {
   return 2;
 }
 
-/** The first step of a sweep (#257): the checkout the daemons and bin/seat run from follows main, and the installed plists are
- * compared with what the code renders. The checkout is $FACTORY_CHECKOUT, else this clone when it is ~/WORKSPACES, so a clone
- * anywhere else (a developer's, a test's) is never moved. A refusal or a failure is told in queue-checkout.failed and never stops
- * the sweep. */
-function followCheckout(state) {
+/** The checkout the daemons and bin/seat run from: $FACTORY_CHECKOUT, else this clone when it is ~/WORKSPACES, so a clone anywhere
+ * else (a developer's, a test's) is never touched; null otherwise. */
+function checkoutRoot() {
   const home = process.env.HOME;
-  let root = process.env.FACTORY_CHECKOUT || null;
+  if (process.env.FACTORY_CHECKOUT) return process.env.FACTORY_CHECKOUT;
   try {
-    if (!root && home && realpathSync(join(home, 'WORKSPACES')) === realpathSync(ROOT)) root = ROOT;
+    if (home && realpathSync(join(home, 'WORKSPACES')) === realpathSync(ROOT)) return ROOT;
   } catch {
     // no ~/WORKSPACES
   }
+  return null;
+}
+
+/** The first step of a sweep (#257): the checkout the daemons and bin/seat run from follows main, and the installed plists are
+ * compared with what the code renders. A refusal or a failure is told in queue-checkout.failed and never stops the sweep. */
+function followCheckout(state) {
+  const home = process.env.HOME;
+  const root = checkoutRoot();
   if (!root) return;
   try {
     const r = followMain({ root, state, live: () => liveRuns(process.env.FACTORY_RUNS ?? join(home, 'factory-runs')) });
@@ -258,6 +265,29 @@ function followCheckout(state) {
     mkdirSync(state, { recursive: true });
     writeFileSync(join(state, 'queue-checkout.failed'), `${new Date().toISOString()} the update raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
     console.error(`queue: checkout: ${error.message}`);
+  }
+}
+
+/** The step after it (#279): the worktrees of landed work go, in the checkout and in each clone under it. Where followCheckout does
+ * not run, this does not. A failure is told in queue-worktrees.failed and never stops the sweep. */
+function sweepLanded(state) {
+  const root = checkoutRoot();
+  if (!root) return;
+  const runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs');
+  // A worktree is held when a live run's folder is its parent: the run files of that folder alone are listed.
+  const live = (path) => liveRuns(runs, (dir, ext) => runFiles(dir, ext).filter((f) => path.startsWith(`${dirname(f)}/`)));
+  const merged = (repo) =>
+    new Set(JSON.parse(gh(['pr', 'list', '-R', repo, '--state', 'merged', '--limit', '1000', '--json', 'headRefName'])).map((p) => p.headRefName));
+  try {
+    const origin = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const own = /github\.com[:/](.+?)(?:\.git)?\/?$/.exec(origin)?.[1];
+    const clones = [...(own ? [{ repo: own, dir: root }] : []), ...[...clonesUnder(root)].map(([repo, dir]) => ({ repo, dir }))];
+    const r = sweepWorktrees({ clones, state, live, merged });
+    if (r.removed || r.kept.length) console.log(`queue: worktrees removed ${r.removed}, kept ${r.kept.length}${r.kept.length ? ' (queue-worktrees.failed names them)' : ''}`);
+  } catch (error) {
+    mkdirSync(state, { recursive: true });
+    writeFileSync(join(state, 'queue-worktrees.failed'), `${new Date().toISOString()} the sweep raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    console.error(`queue: worktrees: ${error.message}`);
   }
 }
 
@@ -398,6 +428,7 @@ function main(argv) {
   }
   try {
     followCheckout(state);
+    sweepLanded(state);
     const refused = preflight(state, human);
     if (refused) return refused;
     // No --repo: the repositories taken in, found as the ledger finds them (#211).
