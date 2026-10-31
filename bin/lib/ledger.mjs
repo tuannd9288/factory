@@ -4,13 +4,14 @@
 // request that closes no task is a task of its own, from its opening. Cost is API-equivalent usage, never cash.
 // See bin/factory-ledger for the arguments.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
 import { coverage } from '../../packs/pstack/scripts/lib/verdict.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { job, plist } from './queue.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PRICES = JSON.parse(readFileSync(join(here, 'prices.json'), 'utf8')).models;
@@ -641,13 +642,49 @@ function check(dirs, latest, extra) {
   return r.missing.length || r.stale.length ? 1 : 0;
 }
 
+/** The digest's window for a run at `now` (#209): the seven days that end the day before, as local dates, since the
+ * job runs on the Mac mini's own Monday morning and launchd cannot compute a date. */
+export function lastWeek(now = new Date()) {
+  const day = (offset) => {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  return { since: day(7), until: day(1) };
+}
+
+/** The digest's own launchd job (#209), `plist [--daemon] --repo owner/name...`: Monday 09:00 in the machine's local
+ * time, posting last week's digest to the private repository where the Human reads it. */
+function digestJob(argv) {
+  const repos = [];
+  let daemon = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--daemon') daemon = true;
+    else if (argv[i] === '--repo' && /^[\w.-]+\/[\w.-]+$/.test(argv[i + 1] ?? '')) repos.push(argv[++i]);
+    else throw new Error(`plist takes --daemon and --repo owner/name, not ${JSON.stringify(argv[i] === '--repo' ? argv[i + 1] ?? '' : argv[i])}`);
+  }
+  const as = {
+    label: 'io.github.tuannd9288.factory.digest',
+    tool: 'bin/factory-ledger',
+    verb: null,
+    args: ['--post', DIGEST_REPO, '--last-week'],
+    log: 'digest.log',
+    calendar: { Weekday: 1, Hour: 9, Minute: 0 },
+    keep: ['FACTORY_ROOT', 'AGENT_PROFILES', 'FACTORY_RUNS', 'FACTORY_PROFILE_DIRS', 'FACTORY_STATUSLINE', 'FACTORY_SEAT_ACCOUNTS'],
+  };
+  process.stdout.write(plist(job(repos, process.env, daemon, as)));
+}
+
+const DIGEST_REPO = 'tuannd9288/better-factory';
+
 function main(argv) {
+  if (argv[0] === 'plist') return digestJob(argv.slice(1));
   const opts = { repos: [], since: null, until: null, mode: 'digest', post: null, check: false, latest: 50, profileDirs: (process.env.FACTORY_PROFILE_DIRS ?? '').split(':').filter(Boolean), quota: false, statusFiles: (process.env.FACTORY_STATUSLINE ?? '').split(':').filter(Boolean) };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--repo') opts.repos.push(argv[++i]);
     else if (a === '--since') opts.since = argv[++i];
     else if (a === '--until') opts.until = argv[++i];
+    else if (a === '--last-week') opts.lastWeek = true;
     else if (a === '--rows') opts.mode = 'rows';
     else if (a === '--digest') opts.mode = 'digest';
     else if (a === '--post') opts.post = argv[++i];
@@ -680,6 +717,15 @@ function main(argv) {
     const q = quotaNow();
     console.log(q.error ?? quotaSection(q.rows, { now: q.now }).join('\n'));
     return;
+  }
+  // Nothing of the digest reaches a public repository (#209): the target is read before anything is built or posted.
+  if (opts.post) {
+    const visibility = JSON.parse(gh(['repo', 'view', opts.post, '--json', 'visibility'])).visibility;
+    if (visibility !== 'PRIVATE') throw new Error(`${opts.post} is ${visibility ?? 'of unknown visibility'}, not PRIVATE; the digest lists private tasks, so nothing posted`);
+  }
+  if (opts.lastWeek) {
+    if (opts.since || opts.until) throw new Error('--last-week takes no --since or --until');
+    Object.assign(opts, lastWeek());
   }
   const day = (d) => d.toISOString().slice(0, 10);
   opts.until ??= day(new Date());
@@ -755,6 +801,7 @@ function main(argv) {
   if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}": ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
+  rmSync(join(state, 'digest.failed'), { force: true });
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
@@ -762,7 +809,18 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     main(process.argv.slice(2));
   } catch (error) {
-    console.error(`factory-ledger: ${String(error.stderr || error.message).trim()}`);
+    const why = String(error.stderr || error.message).trim();
+    console.error(`factory-ledger: ${why}`);
+    // A failed weekly post leaves digest.failed for bin/factory-alerts, as the queue leaves queue-run.failed (#209);
+    // a run that prints to stdout, and plist, keep no state.
+    const args = process.argv.slice(2);
+    if (args[0] !== 'plist' && args.includes('--post')) {
+      try {
+        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+        mkdirSync(state, { recursive: true });
+        writeFileSync(join(state, 'digest.failed'), `${new Date().toISOString()} ${why.split('\n')[0]}\n`);
+      } catch {}
+    }
     process.exit(1);
   }
 }

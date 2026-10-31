@@ -250,13 +250,14 @@ function which(name, path) {
  * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
  * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (#24's claude-canary):
  * its label, tool, verb, log name and interval, more variables to keep and more tools to find on the PATH; the
- * defaults are the queue's own. */
+ * defaults are the queue's own. The digest's job (#209) gives no verb, `args` before the repositories, and a
+ * `calendar` (launchd's StartCalendarInterval) in place of the interval. */
 export function job(repos, env = process.env, daemon = false, as = {}) {
   const gh = which('gh', env.PATH);
   if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
   const node = which('node', env.PATH) ?? process.execPath;
   const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, keep = [], tools = [] } = as;
+  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, calendar = null, args = [], keep = [], tools = [] } = as;
   const extra = tools.map((name) => which(name, env.PATH)).filter(Boolean).map((p) => dirname(p));
   const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), ...extra, '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
   const found = which('node', path);
@@ -265,8 +266,9 @@ export function job(repos, env = process.env, daemon = false, as = {}) {
   const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN', ...keep].filter((k) => env[k]).map((k) => [k, env[k]]));
   return {
     label,
-    interval,
-    program: [join(factory, tool), verb, ...repos.flatMap((repo) => ['--repo', repo])],
+    interval: calendar ? null : interval,
+    calendar,
+    program: [join(factory, tool), ...(verb ? [verb] : []), ...args, ...repos.flatMap((repo) => ['--repo', repo])],
     cwd: factory,
     env: { PATH: path, ...kept, ...(daemon ? { HOME: env.HOME } : {}) },
     log: join(env.HOME, 'Library/Logs/factory', log),
@@ -296,10 +298,9 @@ ${j.program.map((a) => `    ${str(a)}`).join('\n')}
   <dict>
 ${Object.entries(j.env).map(([k, v]) => `    <key>${esc(k)}</key>\n    ${str(v)}`).join('\n')}
   </dict>
-  <key>StartInterval</key>
-  <integer>${j.interval ?? 60}</integer>
-  <key>RunAtLoad</key>
-  <true/>
+${j.calendar
+    ? `  <key>StartCalendarInterval</key>\n  <dict>\n${Object.entries(j.calendar).map(([k, v]) => `    <key>${esc(k)}</key>\n    <integer>${v}</integer>`).join('\n')}\n  </dict>\n  <key>RunAtLoad</key>\n  <false/>`
+    : `  <key>StartInterval</key>\n  <integer>${j.interval ?? 60}</integer>\n  <key>RunAtLoad</key>\n  <true/>`}
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>

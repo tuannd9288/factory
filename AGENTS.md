@@ -230,9 +230,12 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 - A change to `kit/` changes every repository's gate at its next kit pull request: it is tier 3 here.
 - Before any brief, the Lead posts the Human's words verbatim, with their source, on the issue, in a comment marked
   "relayed by Colly"; the brief carries them, and `bin/brief-check <brief> <relay>` is the check (#90).
-- The weekly digest is `bin/factory-ledger --post tuannd9288/factory`: it posts even when the canary (`--check`) finds a
-  field missing or stale, saying so in one line. No job runs it yet; its schedule (launchd, as the agents' account) is
-  the Human's to set up.
+- The weekly digest is `bin/factory-ledger --post tuannd9288/better-factory --last-week`: it posts even when the canary
+  (`--check`) finds a field missing or stale, saying so in one line. `--post` refuses a repository that is not
+  `PRIVATE`, since the digest lists private repositories' tasks (#209). `bin/factory-ledger plist --daemon --repo
+  owner/name...` prints its job, `io.github.tuannd9288.factory.digest`: Monday 09:00 on the Mac mini's clock, as the
+  agents' account, for the 7 days that end the day before. The Human installs it with the queue's and the canary's, with
+  one `sudo install` for the three.
 - Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or AGENTS.md, and review
   reads it. A test that reads text stays only when a program in this repository reads those bytes: a parser, a hash a
   script compares, or a file `onboard` or `kit-update` writes (#112).
@@ -414,8 +417,9 @@ error in a run writes it too, with its message). The `--repo` needs the kit, the
 `exec`s that version; Claude Code leaves a launcher of ours in place and keeps every installed version, per
 code.claude.com/docs/en/setup), then removes versions older than the previous one. A failed version is rejected
 (`claude-rejected`) until a newer one arrives and the launcher stays. `bin/claude-canary plist --daemon --repo
-<owner/repo>` prints its LaunchDaemon, `io.github.tuannd9288.factory.claude-canary`, every six hours, loaded like the queue's. Every
-`*.failed` file in the state folder (`claude-canary.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
+<owner/repo>` prints its LaunchDaemon, `io.github.tuannd9288.factory.claude-canary`, every six hours, loaded like the queue's;
+`bin/factory-ledger plist --daemon --repo <owner/repo>...` prints the digest's, `io.github.tuannd9288.factory.digest`, every Monday at 09:00, loaded the same way. Every
+`*.failed` file in the state folder (`claude-canary.failed`, `digest.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
 the Human at once, at the start of each Claude session in this account, by `bin/factory-alerts`, the SessionStart hook
 in each profile's `settings.json` and in the settings `bin/seat` passes to every session it starts (`--settings`);
 `FACTORY_NO_ALERTS=1` silences it, and the probe and the canary set it. The hook in
