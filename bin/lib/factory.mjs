@@ -1,4 +1,4 @@
-// bin/factory (#173, #177): the list of every agent profile's login, account and quota in one table, and `login` and `store`,
+// bin/factory (#173, #177): the list of every agent profile's login, account and plan in a table with the seats' quota in a second one, and `login` and `store`,
 // which put a token in the factory's token store. The list runs only the vendors' own status commands (claude auth status,
 // codex login status, gh auth status), reads quota through quotaRows() and liveCount(), and keeps from each answer only the
 // logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and date) and
@@ -135,7 +135,8 @@ export function contextOf(env = process.env) {
   };
 }
 
-export const placeOf = (env = process.env) => ((env.FACTORY_USER ?? userInfo().username) === 'factory' ? 'factory' : 'macbook');
+/** The factory host is where the command runs as the host's user: FACTORY_HOST_USER, `factory` unless the setting names another. */
+export const placeOf = (env = process.env) => (userInfo().username === (env.FACTORY_HOST_USER || 'factory') ? 'factory' : 'macbook');
 
 const win = (w) => (w ? { use: w.use, resetsAt: w.resetsAt } : null);
 
@@ -240,7 +241,7 @@ const windowCell = (w, now) => (w ? `${pct(w.use)} ${w.resetsAt != null && w.res
 /** "Shared with" in the table: the names while they fit in 24 columns, else the first and a count; --json has the whole list. */
 const sharedCell = (names) => (names.join(', ').length <= 24 ? names.join(', ') || '–' : `${names[0]} +${names.length - 1}`);
 
-/** The text of the table:the profiles, then the quota of the rows that have one, then what to do and what to know. */
+/** The text of the table: the profiles, then the quota of the rows that have one, then what to do and what to know. */
 export function tableText(rows, { now = Date.now() } = {}) {
   const normal = rows.filter((r) => !r.unreachable);
   const heads = ['PROFILE', 'ROLE', 'KIND', 'IN', 'ACCOUNT', 'PLAN', 'LIVE', 'SHARED WITH / WHY NOT READ'];
@@ -305,8 +306,14 @@ async function login(args, env) {
     return 1;
   }
   if (placeOf(env) === 'factory') {
-    writeToken(contextOf(env).agentProfiles, account, t.token);
-    console.log(`stored the token of ${account} in ${join(tokenDir(contextOf(env).agentProfiles), account)}`);
+    const { agentProfiles } = contextOf(env);
+    try {
+      writeToken(agentProfiles, account, t.token);
+    } catch (e) {
+      console.error(`bin/factory: ${e.message}`);
+      return 1;
+    }
+    console.log(`stored the token of ${account} in ${join(tokenDir(agentProfiles), account)}`);
     return 0;
   }
   const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory store ${account}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
@@ -343,7 +350,12 @@ async function store(args, env) {
     console.error(`bin/factory: ${t.error}; nothing was stored`);
     return 1;
   }
-  writeToken(contextOf(env).agentProfiles, args[0], t.token);
+  try {
+    writeToken(contextOf(env).agentProfiles, args[0], t.token);
+  } catch (e) {
+    console.error(`bin/factory: ${e.message}`);
+    return 1;
+  }
   console.log(`stored the token of ${args[0]}`);
   return 0;
 }

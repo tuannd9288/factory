@@ -1,7 +1,7 @@
 // The token store of `factory login` (#177): one file for each account, ~/.agent-profiles/tokens/<account>, mode 600, in a
 // folder of mode 700. This file holds the checks of a name and of a token, the write, the list of the files and the read of a
 // token from stdin. It never prints a token, and no error it raises holds one.
-import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ACCOUNT = /^[a-z0-9][a-z0-9._-]*$/;
@@ -11,11 +11,16 @@ export const accountRefusal = (name) => (typeof name === 'string' && ACCOUNT.tes
   ? null
   : 'the account name is refused: lowercase letters, digits, ".", "_" and "-", starting with a letter or digit, and no ".."');
 
-/** { token } from what stdin held, once a single trailing newline is removed; or { error } for an empty token or more than one line. */
+/** { token } from what stdin held: a carriage return is a line end (a terminal in raw mode sends Return as one), a single trailing
+ * newline is removed and spaces and tabs around the token are trimmed; or { error } for an empty token, more than one line, or
+ * whitespace inside the token. */
 export function tokenOf(text) {
-  const token = text.replace(/\r?\n$/, '');
+  let token = text.replace(/\r\n?/g, '\n');
+  if (token.endsWith('\n')) token = token.slice(0, -1);
   if (!token.trim()) return { error: 'the token is empty' };
-  if (/[\r\n]/.test(token)) return { error: 'the token is more than one line' };
+  if (token.includes('\n')) return { error: 'the token is more than one line' };
+  token = token.replace(/^[ \t]+|[ \t]+$/g, '');
+  if (/\s/.test(token)) return { error: 'the token has whitespace inside it' };
   return { token };
 }
 
@@ -24,13 +29,19 @@ export const tokenDir = (agentProfiles) => join(agentProfiles, 'tokens');
 /** Writes the token to a temporary file in the store and renames it over <account>. The caller has checked both. */
 export function writeToken(agentProfiles, account, token) {
   const dir = tokenDir(agentProfiles);
+  let st = null;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    // no store yet: made below
+  }
+  if (st?.isSymbolicLink()) throw new Error(`${dir} is a symlink; nothing was stored`);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const tmp = join(dir, `.${account}.${process.pid}.tmp`);
   rmSync(tmp, { force: true });
   try {
     writeFileSync(tmp, `${token}\n`, { mode: 0o600, flag: 'wx' });
-    chmodSync(tmp, 0o600);
     renameSync(tmp, join(dir, account));
   } catch (e) {
     rmSync(tmp, { force: true });
