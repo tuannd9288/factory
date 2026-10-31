@@ -388,16 +388,16 @@ ruleset off, after taking auto-merge off every open pull request, since with the
 The queue leaves a tier-3 pull request behind `main` until the Human approved it, then updates it once; his approval
 holds on the updated head, whose patch is unchanged (`git patch-id`), so he is asked once.
 
-`bin/factory-queue plist` prints that job, `com.tuanhub.factory.queue`, which lists no repository: every 60 s from this
+`bin/factory-queue plist` prints that job, `io.github.tuannd9288.factory.queue`, which lists no repository: every 60 s from this
 clone, with the `gh` and `node` the shell finds, logging to `~/Library/Logs/factory/queue.log`. With `--daemon` it is
 a LaunchDaemon run by the account that printed it, `factory`, with that account's `HOME`, and never `KeepAlive`: a
 sweep exits after each run, so it would restart at once, in a loop. Before loading it, run `bin/factory-queue check`
 from the same shell: it runs one sweep in the job's environment, makes the log's folder,
 which launchd does not, and says whether the job is ready. `factory`'s gh login keeps its token in a file
 (`gh auth login --insecure-storage`), since the keychain is locked over SSH and under launchd. The Human installs the
-plist with `sudo install -o root -g wheel -m 644 <plist> /Library/LaunchDaemons/com.tuanhub.factory.queue.plist`,
+plist with `sudo install -o root -g wheel -m 644 <plist> /Library/LaunchDaemons/io.github.tuannd9288.factory.queue.plist`,
 loads it with `sudo launchctl bootstrap system <that path>` and stops it with
-`sudo launchctl bootout system/com.tuanhub.factory.queue`. `tuannd9288/factory` itself
+`sudo launchctl bootout system/io.github.tuannd9288.factory.queue`. `tuannd9288/factory` itself
 is not swept: its ruleset dismisses an approval on any push, so an update would ask the Human twice.
 
 Claude Code updates itself on the stable channel, and a new version runs only after the pack probe passes on it
@@ -406,7 +406,7 @@ Claude Code updates itself on the stable channel, and a new version runs only af
 `exec`s that version; Claude Code leaves a launcher of ours in place and keeps every installed version, per
 code.claude.com/docs/en/setup), then removes versions older than the previous one. A failed version is rejected
 (`claude-rejected`) until a newer one arrives and the launcher stays. `bin/claude-canary plist --daemon --repo
-<owner/repo>` prints its LaunchDaemon, `com.tuanhub.factory.claude-canary`, every six hours, loaded like the queue's. Every
+<owner/repo>` prints its LaunchDaemon, `io.github.tuannd9288.factory.claude-canary`, every six hours, loaded like the queue's. Every
 `*.failed` file in the state folder (`claude-canary.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
 the Human at once, at the start of each Claude session in this account, by `bin/factory-alerts`, the SessionStart hook
 in each profile's `settings.json` and in the settings `bin/seat` passes to every session it starts (`--settings`);

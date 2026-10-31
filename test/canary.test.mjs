@@ -223,7 +223,7 @@ test('plist --daemon prints the canary as a LaunchDaemon: every six hours, at lo
   const r = plistOf(['plist', '--daemon', '--repo', 'o/app'], { CLAUDE_LAUNCHER: '/h/.local/bin/claude', FACTORY_STATE: '/h/state' });
   assert.equal(r.code, 0, r.err);
   const j = r.job;
-  assert.equal(j.Label, 'com.tuanhub.factory.claude-canary');
+  assert.equal(j.Label, 'io.github.tuannd9288.factory.claude-canary');
   assert.deepEqual(j.ProgramArguments, [join(factory, 'bin/claude-canary'), 'run', '--repo', 'o/app']);
   assert.equal(j.StartInterval, 21600);
   assert.equal(j.RunAtLoad, true);
@@ -249,7 +249,7 @@ test('plist needs exactly one --repo, and the queue\'s own job keeps its label, 
     writeFileSync(join(dir, 'bin/gh'), '#!/bin/sh\nexit 0\n');
     chmodSync(join(dir, 'bin/gh'), 0o755);
     const r = spawnSync(join(factory, 'bin/factory-queue'), ['plist', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: dir } });
-    assert.match(r.stdout, /<string>com\.tuanhub\.factory\.queue<\/string>/);
+    assert.match(r.stdout, /<string>io\.github\.tuannd9288\.factory\.queue<\/string>/);
     assert.match(r.stdout, /<key>StartInterval<\/key>\n  <integer>60<\/integer>/);
     assert.ok(r.stdout.includes(`<string>${join(dir, 'Library/Logs/factory/queue.log')}</string>`));
     assert.doesNotMatch(r.stdout, /canary/);
