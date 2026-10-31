@@ -127,7 +127,7 @@ describe('install-lead', () => {
   }));
 
   test('the shell wrapper installs the same way', () => fixture((f) => {
-    const r = spawnSync(join(real, 'packs/pstack/bin/install-lead'), [], { encoding: 'utf8', env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, HOME: f.home, FACTORY_HOST_USER: me } });
+    const r = spawnSync('bash', [join(real, 'packs/pstack/bin/install-lead')], { encoding: 'utf8', env: { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, HOME: f.home, FACTORY_HOST_USER: me } });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(readFileSync(f.zshenv, 'utf8'), BLOCK);
   }));

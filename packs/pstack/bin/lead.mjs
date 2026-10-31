@@ -1,14 +1,40 @@
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one repository. This file holds the pure parts (the arguments of
 // claude, the enabled plugins, the refusals) and the start. Nothing here reads a credential or logs in.
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
 
-const USAGE = 'usage: packs/pstack/bin/lead <repo> [--continue] [--dry-run]';
+const USAGE = 'usage: lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
+const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
+
+/** The Lead's earlier session, from the copies transcript-copy.mjs keeps in dir (~/factory-runs/<repo>-lead/transcripts), never from
+ * a profile: { id, count } for the newest regular file by mtime whose name is a plain session id plus .jsonl, or null. */
+export function newestSession(dir) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const found = [];
+  for (const name of names) {
+    const m = SESSION_COPY.exec(name);
+    if (!m) continue;
+    try {
+      const st = lstatSync(join(dir, name));
+      if (st.isFile()) found.push({ id: m[1], mtime: st.mtimeMs });
+    } catch {
+      // gone since the listing
+    }
+  }
+  if (!found.length) return null;
+  found.sort((a, b) => b.mtime - a.mtime);
+  return { id: found[0].id, count: found.length };
+}
 
 // The Lead's grants (lead.md): it reads, claims, makes worktrees, pushes its own HEAD, opens and arms pull requests, and starts
 // workers through bin/seat. lead.md tells it to write no change itself and never to run gh api; the grants alone do not stop it.
@@ -69,7 +95,7 @@ export function findNode(PATH) {
  * hook is the command of the Stop and SessionEnd hooks, which copy the session's own transcript to ~/factory-runs/<repo>-lead/
  * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
  * exec bit. */
-export function leadArgs({ repo, home, root, roleText, node, resume = false }) {
+export function leadArgs({ repo, home, root, roleText, node, resume = null }) {
   const cwd = join(root, repo);
   const hook = [node, join(root, 'packs/pstack/bin/transcript-copy.mjs'), join(home, 'factory-runs', `${repo}-lead`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
@@ -84,7 +110,7 @@ export function leadArgs({ repo, home, root, roleText, node, resume = false }) {
       '--add-dir', join(home, 'factory-runs'),
       '--name', `${repo}-lead`,
       '--settings', JSON.stringify({ hooks: { Stop: hooks, SessionEnd: hooks } }),
-      ...(resume ? ['--continue'] : []),
+      ...(resume ? ['--resume', resume] : []),
       '--allowedTools', ...allowOf(root),
       '--disallowedTools', ...denyOf(cwd),
     ],
@@ -123,7 +149,7 @@ const lastLine = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(
 function main(argv, env) {
   const flags = argv.filter((a) => a.startsWith('--'));
   const rest = argv.filter((a) => !a.startsWith('--'));
-  const unknown = flags.filter((f) => f !== '--continue' && f !== '--dry-run');
+  const unknown = flags.filter((f) => f !== '--new' && f !== '--dry-run');
   if (rest.length !== 1 || unknown.length) {
     process.stderr.write(`bin/lead: ${unknown.length ? `unknown option ${unknown[0]}\n` : ''}${USAGE}\n`);
     return 2;
@@ -141,7 +167,12 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;
   }
-  const resume = flags.includes('--continue');
+  const transcripts = join(env.HOME, 'factory-runs', `${repo}-lead`, 'transcripts');
+  const earlier = flags.includes('--new') ? null : newestSession(transcripts);
+  const resume = earlier?.id ?? null;
+  const sessionLine = resume
+    ? `session: resume ${resume} (newest of ${earlier.count} ${earlier.count === 1 ? 'copy' : 'copies'} in ${transcripts})`
+    : `session: new (${flags.includes('--new') ? '--new' : `no copy in ${transcripts}`})`;
   const node = findNode(env.PATH);
   if (!node) {
     process.stderr.write('bin/lead: no node on PATH, which the transcript hook needs\n');
@@ -169,6 +200,7 @@ function main(argv, env) {
     process.stdout.write(`plugin root: ${pluginRoot}\n`);
     process.stdout.write(`transcript hook: ${hook}\n`);
     process.stdout.write(`${shown.join(' ')}\n`);
+    process.stdout.write(`${sessionLine}\n`);
     return 0;
   }
 

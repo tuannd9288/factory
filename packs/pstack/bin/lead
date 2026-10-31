@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# packs/pstack/bin/lead <repo> [--continue] [--dry-run] (#163): starts the pstack Lead of one onboarded repository, an interactive
-# claude session in ~/WORKSPACES/<repo> on the repository's own profile. It runs the repository's .gate/bin/setup, installs the
-# plugins the repository's own .claude/settings.json enables (never adds a pin) and execs `direnv exec . claude`. It never logs in.
-# --dry-run prints the folder, the plugin plan and the command, and runs nothing. Exits 2 on a refusal. See lead.mjs.
-exec node "$(dirname "$0")/lead.mjs" "$@"
+# lead <repo> [--new] [--dry-run] (#163, #166): starts the pstack Lead of one onboarded repository, an interactive claude session in
+# ~/WORKSPACES/<repo> on the repository's own profile. It resumes the newest earlier session (from the transcript copies, never from
+# the profile) unless --new. It runs the repository's .gate/bin/setup, installs the plugins the repository's own
+# .claude/settings.json enables (never adds a pin) and execs `direnv exec . claude`. It never logs in.
+# --dry-run prints the folder, the plugin plan, the command and the session choice, and runs nothing. Exits 2 on a refusal.
+# ~/.local/bin/lead is a symlink to this file (install-lead): follow every link first, so lead.mjs is found next to the real file.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+done
+exec node "$(cd -P "$(dirname "$src")" && pwd)/lead.mjs" "$@"

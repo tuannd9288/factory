@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# packs/pstack/bin/install-lead (#166): puts `lead` on the factory account's PATH: ~/.local/bin/lead and one block in ~/.zshenv.
+# Run once as `factory`, and again after a move of the clone; a second run changes nothing. See install-lead.mjs.
+exec node "$(dirname "$0")/install-lead.mjs" "$@"
