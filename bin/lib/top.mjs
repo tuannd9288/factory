@@ -293,11 +293,12 @@ export async function readClaims(repo, state, { url = `https://github.com/${repo
 export async function gatherGithub({ repos, clones, state, claims = readClaims, now, cache = {} }) {
   if (cache.data && now - cache.at < GH_MS) return cache.data;
   const data = { ok: true, error: null, at: now, repos: {} };
+  const good = (cache.good ??= {});
   await Promise.all(repos.map(async (repo) => {
     try {
       const [issues, prs] = await Promise.all([
         ghJson(['issue', 'list', '--repo', repo, '--state', 'all', '--limit', '300', '--json', 'number,state,title']),
-        ghJson(['pr', 'list', '--repo', repo, '--state', 'all', '--limit', '100', '--json', 'number,title,state,headRefName,body,labels,mergedAt,statusCheckRollup']),
+        ghJson(['pr', 'list', '--repo', repo, '--state', 'all', '--limit', '100', '--json', 'number,title,state,headRefName,body,labels,mergedAt,reviewDecision,statusCheckRollup']),
       ]);
       let held = new Map();
       let claimsOk = true;
@@ -306,10 +307,18 @@ export async function gatherGithub({ repos, clones, state, claims = readClaims, 
       } catch {
         claimsOk = false;
       }
-      data.repos[repo] = { issues, prs, claims: held, claimsOk };
+      // The checks `main` requires: the kit's for a repository whose clone holds the kit, `verify` alone for any other.
+      const required = clones.get(repo) && existsSync(join(clones.get(repo), '.gate/bin')) ? REQUIRED : ['verify'];
+      const entry = { issues, prs, claims: held, claimsOk, required };
+      good[repo] = { entry, at: now };
+      data.repos[repo] = entry;
     } catch (error) {
       data.ok = false;
       data.error = `${repo}: ${firstLine(error)}`;
+      // A failed read replaces nothing: the last good one stays, marked with the two times; with none, every field is ?.
+      data.repos[repo] = good[repo]
+        ? { ...good[repo].entry, failedAt: now, goodAt: good[repo].at }
+        : { unknown: true, issues: [], prs: [], claims: new Map(), claimsOk: false, required: ['verify'], failedAt: now, goodAt: null };
     }
   }));
   cache.data = data;
@@ -326,12 +335,19 @@ const MARK = (c) => {
 
 /** A group per issue: its claim, step, pull request with the required checks, and who it waits on. */
 function groupOf(repo, number, gh, sessions) {
-  const issue = gh?.issues.find((i) => i.number === number) ?? null;
+  // No GitHub data at all for this repository: nothing is filled in.
+  if (!gh || gh.unknown) {
+    return {
+      number, title: '?', done: false, active: sessions.some((s) => s.state !== 'gone'), team: null, step: '?', pr: null, unknown: true,
+      waiting: sessions.some((s) => s.live) ? 'the team' : '?', sessions,
+    };
+  }
+  const issue = gh.issues.find((i) => i.number === number) ?? null;
   const prs = (gh?.prs ?? []).filter((p) => new RegExp(`^Issue: #${number}\\b`, 'm').test(p.body ?? '') && p.state !== 'CLOSED');
   const pr = prs.find((p) => p.state === 'OPEN') ?? prs.filter((p) => p.mergedAt).sort((a, b) => b.number - a.number)[0] ?? null;
   const claim = gh?.claims.get(number);
   const held = claim && (claim.state === 'claimed' || claim.state === 'handed-off') ? claim.team : null;
-  const checks = Object.fromEntries(REQUIRED.map((name) => [name, (pr?.statusCheckRollup ?? []).filter((c) => c.name === name).at(-1) ?? null]));
+  const checks = Object.fromEntries(gh.required.map((name) => [name, (pr?.statusCheckRollup ?? []).filter((c) => c.name === name).at(-1) ?? null]));
   const labels = (pr?.labels ?? []).map((l) => l.name);
   const merged = Boolean(pr?.mergedAt);
   const closed = issue?.state === 'CLOSED';
@@ -339,6 +355,7 @@ function groupOf(repo, number, gh, sessions) {
   let waiting = '–';
   if (pr && !merged) {
     if (labels.some((l) => l === 'tier-3' || l === 'needs-human') && checks.tier && checks.tier.status === 'COMPLETED' && checks.tier.conclusion !== 'SUCCESS') waiting = 'the Human';
+    else if (pr.reviewDecision === 'REVIEW_REQUIRED' && gh.required.every((n) => MARK(checks[n]) === '✓')) waiting = 'the Human';
     else if (checks.review && checks.review.status !== 'COMPLETED') waiting = 'the reviewer';
   }
   if (waiting === '–' && sessions.some((s) => s.live)) waiting = 'the team';
@@ -373,7 +390,7 @@ export async function snapshot(opts = {}) {
     const gh = github.repos[repo];
     const numbers = new Set([...(gh?.issues ?? []).map((i) => i.number), ...mine.map((s) => s.issue).filter((n) => n !== null)]);
     const groups = [...numbers].sort((a, b) => a - b).map((n) => groupOf(repo, n, gh, mine.filter((s) => s.issue === n)));
-    return { repo, groups, other: mine.filter((s) => s.issue === null) };
+    return { repo, groups, other: mine.filter((s) => s.issue === null), ghStatus: gh?.failedAt ? { failedAt: gh.failedAt, goodAt: gh.goodAt } : null };
   });
   return { now, load: opts.load ?? loadavg(), sessions, repos: byRepo, github, queue: queueOf(state), seats: opts.live ? seatCounts(sessions) : seatsLive(runs) };
 }
@@ -410,8 +427,8 @@ function sessionRow(s, now, indent, width) {
 }
 
 function groupRow(g, width) {
-  const pr = g.pr ? `PR #${g.pr.number} ${Object.entries(g.pr.checks).map(([k, v]) => `${k}${v}`).join(' ')}` : 'no PR';
-  return clip(`  #${g.number} ${clip(g.title, 40)}  team ${g.team ?? '–'}  step ${g.step}  ${pr}  waiting on ${g.waiting}`, width);
+  const pr = g.pr ? `PR #${g.pr.number} ${Object.entries(g.pr.checks).map(([k, v]) => `${k}${v}`).join(' ')}` : g.unknown ? 'PR ?' : 'no PR';
+  return clip(`  #${g.number} ${clip(g.title, 40)}  team ${g.unknown ? '?' : (g.team ?? '–')}  step ${g.step}  ${pr}  waiting on ${g.waiting}`, width);
 }
 
 /** The tabs: All, one for each repository (name and the sessions it shows), Done (the issues). */
@@ -448,7 +465,8 @@ export function render(snap, { width = 120, tab = 0, rows = null } = {}) {
     const older = done ? listed.length - groups.length : r.groups.filter((g) => !g.done && !g.active).length;
     const own = done ? [] : r.other;
     if (!groups.length && !own.length && !older) continue;
-    lines.push(clip(r.repo, width));
+    const st = r.ghStatus;
+    lines.push(clip(st ? `${r.repo}  gh failed ${hhmm(st.failedAt)}, ${st.goodAt ? `showing ${hhmm(st.goodAt)}` : 'nothing read yet'}` : r.repo, width));
     const fold = (all, indent) => {
       const gone = all.filter((s) => s.state === 'gone').length;
       if (gone) lines.push(`${' '.repeat(indent)}${gone} gone`);
