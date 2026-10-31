@@ -1,5 +1,5 @@
 // The quota windows (#63, K2 option B): what Claude Code itself reports, and nothing else. Source 1 is the rate_limit_event of
-// a stream-json log, source 3 the status line's rate_limits (probes/results.md, #62). Nothing here reads a credential, a
+// a stream-json log, source 3 the status line's rate_limits (#62). Nothing here reads a credential, a
 // profile or the network; a window that was not reported is null, never a guess.
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
