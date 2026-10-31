@@ -582,7 +582,7 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
   const waits = [
     ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => item('approve', `${r.repo}#${g.pr.number} ${g.pr.title}  https://github.com/${r.repo}/pull/${g.pr.number}`))),
     ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => item('answer', `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead)  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`)),
-    ...queue.failed.map((f) => item('alert', `${f.file}  ${f.text}`)),
+    ...queue.failed.map((f) => item('alert', `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`)),
   ];
   lines.push(...(waits.length ? ['Waiting on you', ...waits] : ['Nothing waits on you']));
   const top = lines.length;
