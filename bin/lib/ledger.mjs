@@ -4,7 +4,7 @@
 // request that closes no task is a task of its own, from its opening. Cost is API-equivalent usage, never cash.
 // See bin/factory-ledger for the arguments.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -780,6 +780,7 @@ function main(argv) {
   if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}" or the older title of that period: ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
+  rmSync(join(state, 'digest.failed'), { force: true });
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
@@ -787,7 +788,18 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   try {
     main(process.argv.slice(2));
   } catch (error) {
-    console.error(`factory-ledger: ${String(error.stderr || error.message).trim()}`);
+    const why = String(error.stderr || error.message).trim();
+    console.error(`factory-ledger: ${why}`);
+    // A failed weekly post leaves digest.failed for bin/factory-alerts, as the queue leaves queue-run.failed (#209);
+    // a run that prints to stdout, and plist, keep no state.
+    const args = process.argv.slice(2);
+    if (args[0] !== 'plist' && args.includes('--post')) {
+      try {
+        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+        mkdirSync(state, { recursive: true });
+        writeFileSync(join(state, 'digest.failed'), `${new Date().toISOString()} ${why.split('\n')[0]}\n`);
+      } catch {}
+    }
     process.exit(1);
   }
 }

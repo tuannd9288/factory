@@ -419,7 +419,7 @@ code.claude.com/docs/en/setup), then removes versions older than the previous on
 (`claude-rejected`) until a newer one arrives and the launcher stays. `bin/claude-canary plist --daemon --repo
 <owner/repo>` prints its LaunchDaemon, `io.github.tuannd9288.factory.claude-canary`, every six hours, loaded like the queue's;
 `bin/factory-ledger plist --daemon --repo <owner/repo>...` prints the digest's, `io.github.tuannd9288.factory.digest`, every Monday at 09:00, loaded the same way. Every
-`*.failed` file in the state folder (`claude-canary.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
+`*.failed` file in the state folder (`claude-canary.failed`, `digest.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
 the Human at once, at the start of each Claude session in this account, by `bin/factory-alerts`, the SessionStart hook
 in each profile's `settings.json`; `FACTORY_NO_ALERTS=1` silences it, and the probe and the canary set it. The hook in
 the Supervisor's own settings on the MacBook is installed by Colly, not here.
