@@ -43,7 +43,7 @@ test('a Lead holds its name for as long as its name file exists', () => world(as
 }));
 
 test('a resume never takes a name a live run holds: uniqueness wins over keeping its own', () => world(async (w) => {
-  const old = `${JSON.stringify({ session: 's-named', role: 'worker', seat: 1, tag: 't', run: w.run, start: '2026-10-31T00:00:00Z', end: '2026-10-31T00:01:00Z', name: 'aardvark' })}\n`;
+  const old = `${JSON.stringify({ session: 's-named', role: 'worker', seat: 1, tag: 't', run: w.run, start: '2020-01-01T00:00:00Z', end: '2020-01-01T00:01:00Z', name: 'aardvark' })}\n`;
   writeFileSync(join(w.state, 'sessions.jsonl'), old);
   assert.equal(w.start('worker', ['--tag', 'live'], { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.root, 'release') }).code, 0);
   assert.equal(nameOf(w, 'live'), 'aardvark', 'the live run took the freed name');
@@ -52,7 +52,7 @@ test('a resume never takes a name a live run holds: uniqueness wins over keeping
 }));
 
 test('a resume keeps the name of its session\'s earlier record; a record without a name gets a new one', () => world(async (w) => {
-  const old = (session, extra) => `${JSON.stringify({ session, role: 'worker', seat: 1, tag: 't', run: w.run, start: '2026-10-31T00:00:00Z', end: '2026-10-31T00:01:00Z', ...extra })}\n`;
+  const old = (session, extra) => `${JSON.stringify({ session, role: 'worker', seat: 1, tag: 't', run: w.run, start: '2020-01-01T00:00:00Z', end: '2020-01-01T00:01:00Z', ...extra })}\n`;
   writeFileSync(join(w.state, 'sessions.jsonl'), old('s-named', { name: 'dingo' }) + old('s-bare', {}));
   assert.equal(w.start('worker', ['--tag', 'x', '--resume', 's-named', '--seat', '1']).code, 0);
   assert.equal(nameOf(w, 'x'), 'dingo');
