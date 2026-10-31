@@ -39,6 +39,7 @@ function world() {
   session(runs, 'issue-174', 'reviewer', { log: init(cwd) + assistant('m1', u) + result({ total_cost_usd: 1.5, num_turns: 4 }), ageSecs: 4000 });
   session(runs, 'issue-170', 'worker', { log: init(cwd) + assistant('m1', u) + limit('rejected', NOW / 1000 + 3600) + result({ is_error: true, subtype: 'error', api_error_status: 429 }), seat: '1', ageSecs: 600 });
   session(runs, 'issue-169', 'worker', { log: init(cwd) + assistant('m1', u), ageSecs: 90000 });
+  session(runs, 'issue-174', 'old', { log: init(cwd) + assistant('m1', u), ageSecs: 90000 });
   session(runs, 'issue-150', 'worker', { log: init(cwd) + assistant('m1', u) + result({ is_error: true, subtype: 'error_during_execution' }), ageSecs: 7200 });
   const lead = join(runs, 'factory-lead/transcripts');
   mkdirSync(lead, { recursive: true });
@@ -56,6 +57,8 @@ function world() {
     { number: 174, title: 'factory top, the repo view', state: 'OPEN', labels: [{ name: 'task' }] },
     { number: 170, title: 'A session real end', state: 'OPEN', labels: [{ name: 'task' }] },
     { number: 150, title: 'An old task', state: 'CLOSED', labels: [{ name: 'task' }] },
+    { number: 151, title: 'Closed with no PR', state: 'CLOSED', labels: [] },
+    { number: 17, title: 'A quiet open issue', state: 'OPEN', labels: [] },
   ]));
   writeFileSync(join(fx, 'prs.json'), JSON.stringify([
     { number: 260, title: 'top view', state: 'OPEN', headRefName: 'issue-174-top', body: 'Issue: #174\nClaim: abc\nTeam: alpha', labels: [{ name: 'tier-3' }], mergedAt: null, statusCheckRollup: [check('verify', 'SUCCESS'), check('review', null, 'IN_PROGRESS'), check('tier', 'FAILURE')] },
@@ -69,7 +72,7 @@ function world() {
     runs, state, now: NOW, repos: ['tuannd9288/factory'], clones: new Map([['tuannd9288/factory', join(root, 'WORKSPACES/factory')]]),
     live: (pidFile) => pidFile.endsWith('issue-174/run-worker.pid'),
     processes: () => [{ pid: 4242, command: 'claude --model opus --name factory-lead --continue' }],
-    branchOf: () => 'issue-174-top', load: [2.31, 1.98, 1.5], claims,
+    branchOf: () => 'issue-174-top', originOf: () => null, load: [2.31, 1.98, 1.5], claims,
   };
   return { root, bin, fx, log, opts };
 }
@@ -137,7 +140,7 @@ test('the frame: header, tabs, the tree and the session columns at a fixed width
   assert.match(lines[0], /seats 1:0\/4 2:1\/4/);
   assert.match(lines[0], /queue ok 2026-10-31 11:59/);
   assert.match(lines[0], /alerts 1/);
-  assert.match(lines[1], /\[1 All\] .*\[2 factory 4\].*\[3 Done 1\]/);
+  assert.match(lines[1], /\[1 All\] .*\[2 factory 4\].*\[3 Done 2\]/);
   assert.ok(lines.some((l) => /accounts/i.test(l) && /#178/.test(l)));
   const head = lines.find((l) => l.startsWith('NAME'));
   for (const col of ['ROLE', 'STATE', 'HARNESS', 'MODEL', 'SEAT', 'CTX', 'TURNS', 'TOKENS', 'COST', 'AGE', 'SINCE', 'CWD']) assert.ok(head.includes(col), col);
@@ -157,15 +160,106 @@ test('the frame: header, tabs, the tree and the session columns at a fixed width
   assert.match(lines[reviewer], /\$1\.50/);
 });
 
-test('gone sessions fold into one row; the Done tab holds the merged issue', async () => {
+test('under an issue, sessions that ended over a day ago fold into one "N gone" row', async () => {
+  const w = world();
+  const lines = (await frame(w, 0)).text.split('\n');
+  const group = lines.findIndex((l) => /#174 factory top/.test(l));
+  const gone = lines.findIndex((l, i) => i > group && /^\s+1 gone$/.test(l));
+  assert.ok(gone > group, 'the gone row sits under #174');
+  assert.ok(!lines.some((l) => /^\s*174-old /.test(l)));
+});
+
+test('All shows an issue only while it has a live session, a claim, an open PR or a recent session; the rest fold into "N older"', async () => {
   const w = world();
   const all = (await frame(w, 0)).text;
-  assert.match(all, /1 gone/);
-  assert.ok(!/^\s*169-worker /m.test(all));
-  assert.ok(!/#150 An old task/.test(all));
+  for (const n of [174, 170]) assert.match(all, new RegExp(`#${n} `));
+  assert.ok(!/#17 A quiet/.test(all));
+  assert.ok(!/#169 /.test(all));
+  assert.match(all, /^\s*2 older$/m);
+  assert.ok(!/#15[01] /.test(all));
+});
+
+test('the Done tab holds the closed issues, merged or not', async () => {
+  const w = world();
   const done = (await frame(w, 2)).text;
-  assert.match(done, /#150 An old task/);
-  assert.match(done, /step merged/);
+  assert.match(done, /#150 An old task.*step merged/);
+  assert.match(done, /#151 Closed with no PR.*step closed/);
+  assert.ok(!/#174 /.test(done));
+});
+
+test('the role comes from the record, else from the tag; a tag it does not know shows ?', async () => {
+  const { roleOf } = await top();
+  assert.equal(roleOf('anything', { role: 'reviewer' }), 'reviewer');
+  assert.equal(roleOf('build-2', null), 'worker');
+  assert.equal(roleOf('fix-1', null), 'worker');
+  assert.equal(roleOf('review-3', null), 'reviewer');
+  assert.equal(roleOf('BRIEF-review-x', null), 'reviewer');
+  assert.equal(roleOf('rereview', null), 'reviewer');
+  assert.equal(roleOf('research-1', null), 'researcher');
+  assert.equal(roleOf('worker', null), 'worker');
+  assert.equal(roleOf('mystery', null), '?');
+});
+
+test('a pid file whose pid is alive but belongs to a later process start is not a live session', async () => {
+  const w = world();
+  const runs = join(w.root, 'runs-reuse');
+  session(runs, 'issue-300', 'worker', { log: init('/x') + assistant('m1', { input_tokens: 1, output_tokens: 1 }) });
+  const pidFile = join(runs, 'issue-300/run-worker.pid');
+  writeFileSync(pidFile, `${process.pid}\n`);
+  const old = new Date('2000-01-01T00:00:00Z');
+  utimesSync(pidFile, old, old);
+  const { gatherSessions, snapshot } = await top();
+  const [s] = gatherSessions({ runs, state: w.opts.state, now: NOW, processes: () => [] });
+  assert.equal(s.live, false);
+  assert.equal(s.state, 'gone');
+  const { live, ...rest } = w.opts;
+  const snap = await withPath(w.bin, () => snapshot({ ...rest, runs }));
+  assert.equal(snap.seats['2'].live, 0);
+});
+
+test('a run\'s repository is its record\'s, else a live run\'s origin, else ?; every such repository has its issues read', async () => {
+  const w = world();
+  const runs = join(w.root, 'runs-origin');
+  session(runs, 'issue-400', 'build-1', { log: init('/elsewhere/w') + assistant('m1', { input_tokens: 1, output_tokens: 1 }) });
+  session(runs, 'issue-401', 'build-1', { log: init('/elsewhere/v') + assistant('m1', { input_tokens: 1, output_tokens: 1 }), ageSecs: 100000 });
+  const { snapshot } = await top();
+  const opts = { ...w.opts, runs, live: (f) => f.includes('issue-400'), originOf: (cwd) => (cwd === '/elsewhere/w' ? 'x/y' : null) };
+  const snap = await withPath(w.bin, () => snapshot(opts));
+  const by = Object.fromEntries(snap.sessions.map((s) => [s.name, s]));
+  assert.equal(by['400-build-1'].repo, 'x/y');
+  assert.equal(by['401-build-1'].repo, null);
+  const calls = readFileSync(w.log, 'utf8').trim().split('\n');
+  const issues = calls.filter((c) => c.startsWith('issue list') && c.includes('--repo x/y'));
+  assert.equal(issues.length, 1);
+  assert.match(issues[0], /--state all/);
+  assert.match(issues[0], /--limit 300/);
+  assert.match(issues[0], /--json number,state,title/);
+});
+
+test('the claim reader writes nothing into the clone: it fetches into a bare cache of its own under the state folder', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { readClaims } = await top();
+  const root = mkdtempSync(join(tmpdir(), 'top-claims-'));
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  const git = (cwd, ...a) => execFileSync('git', a, { cwd, env, encoding: 'utf8' }).trim();
+  const origin = join(root, 'origin.git');
+  const clone = join(root, 'clone');
+  git(root, 'init', '--bare', '-q', origin);
+  git(root, 'clone', '-q', origin, clone);
+  git(clone, 'commit', '--allow-empty', '-q', '-m', 'first');
+  git(clone, 'push', '-q', 'origin', 'HEAD:refs/heads/main');
+  const main = git(origin, 'rev-parse', 'main');
+  const tip = git(origin, 'commit-tree', `${main}^{tree}`, '-p', main, '-m', 'claim 5 alpha');
+  git(origin, 'update-ref', 'refs/heads/claim/5', tip);
+  const before = git(clone, 'for-each-ref');
+  const state = join(root, 'state');
+  const claims = await readClaims('o/n', clone, state);
+  assert.deepEqual(claims.get(5), { state: 'claimed', team: 'alpha' });
+  assert.ok(existsSync(join(state, 'top/o-n.git')));
+  assert.ok(!existsSync(join(clone, '.git/FETCH_HEAD')));
+  assert.equal(git(clone, 'for-each-ref'), before);
+  assert.throws(() => git(clone, 'cat-file', '-e', `${tip}^{commit}`));
 });
 
 test('a field the data does not give shows as ?', async () => {
