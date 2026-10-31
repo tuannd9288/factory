@@ -390,11 +390,11 @@ const MARK = (c) => {
 };
 
 /** A group per issue: its claim, step, pull request with the required checks, and who it waits on. */
-function groupOf(repo, number, gh, sessions) {
+function groupOf(repo, number, gh, sessions, day) {
   // No GitHub data at all for this repository: nothing is filled in.
   if (!gh || gh.unknown) {
     return {
-      number, title: '?', done: false, active: sessions.some((s) => s.state !== 'gone'), team: null, step: '?', pr: null, unknown: true,
+      number, title: '?', done: false, active: sessions.some((s) => isListed(s, day)), team: null, step: '?', pr: null, unknown: true,
       waiting: sessions.some((s) => s.live) ? 'the team' : '?', sessions,
     };
   }
@@ -418,8 +418,8 @@ function groupOf(repo, number, gh, sessions) {
   return {
     number, title: issue?.title ?? '?',
     done: closed,
-    // Shown on All while it has a live session, a claim, an open pull request or a session that ended in the last day.
-    active: sessions.some((s) => s.state !== 'gone') || Boolean(held) || Boolean(pr && !merged),
+    // Shown on All while it has a session listed today (live, or last written today), a claim or an open pull request.
+    active: sessions.some((s) => isListed(s, day)) || Boolean(held) || Boolean(pr && !merged),
     team: held ?? /^Team: (\S+)/m.exec(pr?.body ?? '')?.[1] ?? null,
     step, pr: pr ? { number: pr.number, title: pr.title, checks: Object.fromEntries(Object.entries(checks).map(([k, c]) => [k, MARK(c)])) } : null,
     waiting, sessions,
@@ -445,7 +445,7 @@ export async function snapshot(opts = {}) {
     const mine = sessions.filter((s) => (s.repo ?? '?') === repo);
     const gh = github.repos[repo];
     const numbers = new Set([...(gh?.issues ?? []).map((i) => i.number), ...mine.map((s) => s.issue).filter((n) => n !== null)]);
-    const groups = [...numbers].sort((a, b) => a - b).map((n) => groupOf(repo, n, gh, mine.filter((s) => s.issue === n)));
+    const groups = [...numbers].sort((a, b) => a - b).map((n) => groupOf(repo, n, gh, mine.filter((s) => s.issue === n), startOfDay(now)));
     return { repo, groups, other: mine.filter((s) => s.issue === null), ghStatus: gh?.failedAt ? { failedAt: gh.failedAt, goodAt: gh.goodAt } : null };
   });
   const agentProfiles = opts.agentProfiles ?? process.env.AGENT_PROFILES ?? join(home, '.agent-profiles');
