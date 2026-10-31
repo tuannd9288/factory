@@ -19,8 +19,20 @@ if (a[0] === 'pr' && a[1] === 'list') { const pr = read(); out(JSON.stringify(pr
 if (a[0] === 'pr' && a[1] === 'create') {
   fs.copyFileSync(a[a.indexOf('--body-file') + 1], sh + '/created-body');
   const head = fs.readFileSync(sh + '/head', 'utf8').trim();
-  fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, url: 'https://github.com/o/app/pull/7', baseRefName: 'main', headRefOid: head, labels: [], autoMergeRequest: null, statusCheckRollup: [] }));
+  const base = fs.readFileSync(sh + '/base', 'utf8').trim();
+  fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, url: 'https://github.com/o/app/pull/7', baseRefName: 'main', baseRefOid: base, headRefOid: head, labels: [], autoMergeRequest: null, statusCheckRollup: [] }));
   out('https://github.com/o/app/pull/7\n');
+}
+// The comments are $SH/comments.json; a comment gh posts is by the pull request's author ($SH/author, else agent).
+const comments = () => (fs.existsSync(sh + '/comments.json') ? JSON.parse(fs.readFileSync(sh + '/comments.json', 'utf8')) : []);
+const author = () => (fs.existsSync(sh + '/author') ? fs.readFileSync(sh + '/author', 'utf8').trim() : 'agent');
+// $SH/login is the login gh runs as, when it is not the pull request's author.
+const login = () => (fs.existsSync(sh + '/login') ? fs.readFileSync(sh + '/login', 'utf8').trim() : author());
+if (a[0] === 'pr' && a[1] === 'view') out(JSON.stringify({ author: { login: author() }, headRefOid: read().headRefOid, comments: comments() }));
+if (a[0] === 'pr' && a[1] === 'comment') {
+  const body = fs.readFileSync(a[a.indexOf('--body-file') + 1], 'utf8');
+  fs.writeFileSync(sh + '/comments.json', JSON.stringify([...comments(), { author: { login: login() }, body, includesCreatedEdit: false }]));
+  out('https://github.com/o/app/pull/7#issuecomment-1\n');
 }
 if (a[0] === 'pr' && a[1] === 'merge') {
   const pr = read();
@@ -48,7 +60,7 @@ process.exit(verdict === 'FAIL' ? 1 : 2);
 const BODY = 'Closes #3\n\n## Summary for the Human\n- Purpose: names the operation\n';
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
-function world() {
+function world({ driver = true } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
   const repo = join(dir, 'app');
   const sh = join(dir, 'sh');
@@ -56,6 +68,8 @@ function world() {
   // What a pstack team copies into its repository (packs/pstack/section.md): the pack's scripts and its .gate files.
   cpSync(join(factory, 'packs/pstack/scripts'), join(repo, 'scripts'), { recursive: true });
   cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
+  // main's driver, which ship reads at the base: filled by default, the pack's empty one when `driver` is false.
+  if (driver) writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ name: 'cli', start: '', drive: 'node cli.js', network: false }));
   mkdirSync(sh);
   git(repo, 'init', '-q', '-b', 'main');
   commit(repo, { 'cli.js': 'console.log(1);\n' }, 'start');
@@ -90,6 +104,7 @@ function world() {
     },
     ship: (args = ['--body-file', join(dir, 'body.md')]) => {
       writeFileSync(join(sh, 'head'), w.head());
+      writeFileSync(join(sh, 'base'), git(repo, 'rev-parse', 'origin/main'));
       return run(repo, join(repo, 'scripts/ship'), args, { ...quiet, SH: sh, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-a-token' });
     },
     pr: (over) => writeFileSync(join(sh, 'pr.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(sh, 'pr.json'), 'utf8')), ...over })),
@@ -596,5 +611,121 @@ describe('the remote branch', () => {
     assert.match(out.out, /^ship: refused: origin\/work is at [0-9a-f]{7}, not HEAD [0-9a-f]{7}; push HEAD first$/m);
     assert.equal(w.read('lv-calls'), '');
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
+  });
+});
+
+describe('a repository with no driver on main', () => {
+  const opened = () => {
+    const w = world({ driver: false });
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    return w;
+  };
+  const noteFor = (head) => `not run as a user: no driver (head ${head})`;
+  const notes = (w) => (w.read('comments.json') ? JSON.parse(w.read('comments.json')) : []);
+  const plant = (w, comment) => writeFileSync(join(w.sh, 'comments.json'), JSON.stringify([...notes(w), { author: { login: 'agent' }, includesCreatedEdit: false, ...comment }]));
+  const posts = (w) => w.calls().filter((c) => c.startsWith('pr comment'));
+
+  test('posts one note for the head, never runs live-verify, arms, and the next run does neither again', () => {
+    const w = opened();
+    let out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(w.read('lv-calls'), '', 'live-verify was not run');
+    assert.equal(posts(w).length, 1, w.calls().join('\n'));
+    assert.match(posts(w)[0], /^pr comment 7 --body-file /);
+    assert.equal(notes(w)[0].body.split('\n')[0], noteFor(w.head()));
+    assert.ok(w.calls().includes('pr merge 7 --auto --merge'), w.calls().join('\n'));
+    out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(posts(w).length, 1, 'no second note');
+    assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 1, 'not disarmed, not armed twice');
+    assert.equal(w.read('lv-calls'), '');
+  });
+
+  test('arms on a note the agents\' login already posted for the head, and posts none', () => {
+    const w = opened();
+    plant(w, { body: `${noteFor(w.head())}\nmore\n` });
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(posts(w).length, 0);
+    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
+  });
+
+  test('ignores a note by another login: it posts its own', () => {
+    const w = opened();
+    plant(w, { author: { login: 'stranger' }, body: noteFor(w.head()) });
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(posts(w).length, 1);
+  });
+
+  test('ignores an edited note: it posts its own', () => {
+    const w = opened();
+    plant(w, { includesCreatedEdit: true, body: noteFor(w.head()) });
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(posts(w).length, 1);
+  });
+
+  test('ignores a note for another head: it posts its own', () => {
+    const w = opened();
+    plant(w, { body: noteFor('0'.repeat(40)) });
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(posts(w).length, 1);
+    assert.equal(notes(w).at(-1).body.split('\n')[0], noteFor(w.head()));
+  });
+
+  test('stops without arming when the note it posted does not count: the pull request\'s author is not its login', () => {
+    const w = opened();
+    writeFileSync(join(w.sh, 'author'), 'human');
+    writeFileSync(join(w.sh, 'login'), 'agent');
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: stopped on #7: .*author \(human\) is not ship's login/m);
+    assert.equal(posts(w).length, 1);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
+  });
+
+  test('judges the note on the pull request\'s head: an armed one whose head moved past the note is disarmed', () => {
+    const w = opened();
+    assert.equal(w.ship().code, 0);
+    w.pr({ headRefOid: 'e'.repeat(40) });
+    const out = w.ship();
+    assert.match(out.out, /^ship: disarmed #7: no no-driver note covers HEAD/m);
+    assert.equal(w.calls().at(-1), 'pr merge 7 --disable-auto');
+  });
+
+  test('refuses, posting and arming nothing, when the local HEAD is not the pull request\'s head', () => {
+    const w = opened();
+    w.pr({ headRefOid: 'e'.repeat(40) });
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} is not the pull request's head eeeeeee; pull or push so they agree$/m);
+    assert.equal(posts(w).length, 0);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
+  });
+
+  test('disarms an armed pull request when the only note is a forged one', () => {
+    const w = opened();
+    assert.equal(w.ship().code, 0);
+    writeFileSync(join(w.sh, 'comments.json'), JSON.stringify([{ author: { login: 'agent' }, includesCreatedEdit: true, body: noteFor(w.head()) }]));
+    const out = w.ship();
+    assert.match(out.out, /^ship: disarmed #7: no /m);
+    assert.equal(w.calls().at(-1), 'pr merge 7 --disable-auto');
+  });
+});
+
+describe('a repository with a driver on main', () => {
+  test('runs live-verify as before, posts no note, and FAIL still stops it', () => {
+    const w = world();
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    writeFileSync(join(w.sh, 'verdict'), 'FAIL\n');
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /live-verify answered FAIL/);
+    assert.equal(w.read('lv-calls'), '--covered 7\n7\n');
+    assert.ok(!w.calls().some((c) => c.startsWith('pr comment') || c.startsWith('pr merge')), w.calls().join('\n'));
   });
 });
