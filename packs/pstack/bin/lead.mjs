@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 
-const USAGE = 'usage: lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
+const USAGE = 'usage: factory lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
 
 /** The Lead's earlier session, from the copies transcript-copy.mjs keeps in dir (~/factory-runs/<repo>-lead/transcripts), never from
