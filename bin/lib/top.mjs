@@ -425,7 +425,7 @@ export function tabsOf(snap) {
 }
 
 /** One frame as text, no colour, each line at most width characters. tab indexes tabsOf(snap). */
-export function render(snap, { width = 120, tab = 0 } = {}) {
+export function render(snap, { width = 120, tab = 0, rows = null } = {}) {
   const { sessions, queue, github, now } = snap;
   const count = (st) => sessions.filter((s) => s.state === st).length;
   const seats = Object.entries(snap.seats).map(([n, s]) => `${n}:${Number.isFinite(s.live) ? s.live : '?'}/${s.cap}`).join(' ');
@@ -437,7 +437,7 @@ export function render(snap, { width = 120, tab = 0 } = {}) {
   const tabs = tabsOf(snap);
   lines.push(clip(tabs.map((t, i) => `${i === tab ? '▸' : ''}[${i + 1} ${t.label}]`).join(' '), width));
   lines.push(clip('accounts: not shown yet; it waits for #178\'s accounts file', width));
-  lines.push(COLS.map(([h, w]) => h.padEnd(w)).join(' ') + ' CWD BRANCH');
+  lines.push(clip(COLS.map(([h, w]) => h.padEnd(w)).join(' ') + ' CWD BRANCH', width));
   const t = tabs[tab] ?? tabs[0];
   for (const r of snap.repos) {
     if (t.kind === 'repo' && r.repo !== t.repo) continue;
@@ -462,6 +462,14 @@ export function render(snap, { width = 120, tab = 0 } = {}) {
     }
     if (older) lines.push(`  ${older} older`);
   }
+  // With the terminal's rows, the header, tabs, accounts line and column header stay and the tree is cut to fit, the last row
+  // saying how much was left out; without them (--once) the whole frame is printed.
+  const fixed = 4;
+  if (rows && lines.length + 1 > rows) {
+    const room = Math.max(0, rows - fixed - 1);
+    const left = lines.length - fixed - room;
+    return [...lines.slice(0, fixed + room), clip(`… ${left} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, q quits`, width)].join('\n');
+  }
   lines.push(clip('keys: 1-9 or Tab switch tabs, q quits', width));
   return lines.join('\n');
 }
@@ -474,7 +482,7 @@ async function loop(opts) {
   let busy = false;
   const draw = () => {
     if (!snap) return;
-    const text = render(snap, { width: out.columns ?? 120, tab }).split('\n').map((l) => `${l}\x1b[K`).join('\n');
+    const text = render(snap, { width: out.columns ?? 120, tab, rows: out.rows ?? null }).split('\n').map((l) => `${l}\x1b[K`).join('\n');
     out.write(`\x1b[H${text}\x1b[J`);
   };
   const tick = async () => {
