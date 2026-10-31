@@ -219,13 +219,19 @@ test('Waiting on you says "Nothing waits on you" when no pull request, Lead or a
   assert.ok(!text.includes('Waiting on you'));
 });
 
-test('All shows an issue only while it has a live session, a claim, an open PR or a recent session; the rest fold into "N older"', async () => {
+test('All shows an issue only while it has a session listed today, a claim or an open PR; the rest, one that ended yesterday included, fold into "N older"', async () => {
   const w = world();
+  const cwd = join(w.root, 'WORKSPACES/factory/.claude/worktrees/w');
+  // #171 is open; its only session finished 15 hours ago, before today: not live, not gone, not listed.
+  session(w.opts.runs, 'issue-171', 'worker', { log: init(cwd) + assistant('m1', { input_tokens: 1, output_tokens: 1 }) + result({}), ageSecs: 54000 });
+  const issues = JSON.parse(readFileSync(join(w.fx, 'issues.json'), 'utf8'));
+  writeFileSync(join(w.fx, 'issues.json'), JSON.stringify([...issues, { number: 171, title: 'Ended yesterday', state: 'OPEN', labels: [] }]));
   const all = (await frame(w, 0)).text;
   for (const n of [174, 170]) assert.match(all, new RegExp(`#${n} `));
   assert.ok(!/#17 A quiet/.test(all));
   assert.ok(!/#169 /.test(all));
-  assert.match(all, /^\s*2 older$/m);
+  assert.ok(!/#171 /.test(all));
+  assert.match(all, /^\s*3 older$/m);
   assert.ok(!/#15[01] /.test(all));
 });
 
