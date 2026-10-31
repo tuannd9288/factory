@@ -351,21 +351,20 @@ and does nothing when the clone is dirty or `factory/kit-<sha7>` exists. It adds
 the repository holds as an older kit had it, replaces the Gate block of `AGENTS.md` and nothing else of it (the head and
 the tail stay byte for byte, and so does `CLAUDE.md`), renders `CODEOWNERS` anew, writes `.gate/kit-commit`, inserts the
 kit's new deny lines into a `settings.json` the repository has, removes a file the kit dropped when it is unchanged, and
-keeps and names what the repository changed. An `AGENTS.md` with malformed Gate markers, one with no block that is not
-the old kit's composition (a head, a pack section, then `## Layout` and `## Facts the code cannot tell`: it gets the block
-in place of that head, keeps every byte from `## Layout` on, and loses `.gate/pack`), a `CLAUDE.md` that does not reach
-it, or a result over 150 lines or 32 KiB stops it, to merge by hand. A `CODEOWNERS` the repository changed is kept (named
-in the pull request), so the kit's newer lines do not reach it. It refuses a repository whose `.gate/kit-files` lists
-`scripts/verify`: that is the old layout, where the kit shipped its commands in `scripts/` and replaced the repository's
-hooks, and the Human is told to onboard it afresh. Its evidence names each updated file with the blob it had, and fails a
-pull request that changes the repository's head or tail of `AGENTS.md`. The gate judges the block of such a pull request
-too: `.gate/bin/verify-trusted` reads the candidate's git objects before it lays `main`'s protected files over them, and a
-block, `.gate/gate-section.md` or `.gate/kit-commit` that differs from the base's passes only when the commit
-`.gate/kit-commit` names is on the first-parent line of the main of `tuannd9288/factory` (public: it is fetched, and a
-fetch that fails is red; onboard and kit-update ask the same of `origin/main`), holds that block, is not older than the
-base's, and leaves the tail and `CLAUDE.md` as they were. A deliberate roll back of the kit is refused by that rule; it
-waits until the factory's main has moved on. A block that main reverted later still passes while it is not older than the
-base's. The variable `GATE_FACTORY_URL` is for tests and takes only an absolute local folder.
+keeps and names what the repository changed. An `AGENTS.md` with malformed Gate markers or with no block, a `CLAUDE.md`
+that does not reach it, or a result over 150 lines or 32 KiB stops it, to merge by hand. A `CODEOWNERS` the repository
+changed is kept (named in the pull request), so the kit's newer lines do not reach it. It refuses a repository whose
+`.gate/kit-files` lists `scripts/verify`: that is the old layout, where the kit shipped its commands in `scripts/` and
+replaced the repository's hooks, and the Human is told to onboard it afresh. Its evidence names each updated file with
+the blob it had, and fails a pull request that changes the repository's head or tail of `AGENTS.md`. The gate judges the
+block of such a pull request too: `.gate/bin/verify-trusted` reads the candidate's git objects before it lays `main`'s
+protected files over them, and a block, `.gate/gate-section.md` or `.gate/kit-commit` that differs from the base's
+passes only when the commit `.gate/kit-commit` names is on the first-parent line of the main of `tuannd9288/factory`
+(public: it is fetched, and a fetch that fails is red; onboard and kit-update ask the same of `origin/main`), holds that
+block, is not older than the base's, and leaves the tail and `CLAUDE.md` as they were. A deliberate roll back of the
+kit is refused by that rule; it waits until the factory's main has moved on. A block that main reverted later still
+passes while it is not older than the base's. The variable `GATE_FACTORY_URL` is for tests and takes only an absolute
+local folder.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (the bootstrap rule asks
