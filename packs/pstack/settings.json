@@ -20,5 +20,8 @@
         ]
       }
     }
+  },
+  "skillOverrides": {
+    "repo-refresh": "user-invocable-only"
   }
 }

@@ -571,7 +571,7 @@ describe('the pinned install and the workflow', () => {
         writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
         chmodSync(join(dir, name), 0o755);
       };
-      const go = (npm, claude) => {
+      const go = (npm, claude, onPath = '') => {
         fake('bin/npm', npm);
         rmSync(join(dir, '.gate/bin/reviewer'), { recursive: true, force: true });
         if (claude !== null) {
@@ -580,7 +580,7 @@ describe('the pinned install and the workflow', () => {
           chmodSync(join(pkg, 'claude'), 0o755);
         }
         writeFileSync(join(dir, 'path'), '');
-        return run(dir, 'bash', ['-ec', script], { PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GITHUB_PATH: join(dir, 'path') });
+        return run(dir, 'bash', ['-ec', script], { PATH: `${join(dir, 'bin')}:${onPath}${process.env.PATH}`, GITHUB_PATH: join(dir, 'path') });
       };
       const notice = /^::notice title=review-result::unavailable: not-installed$/m;
       let out = go('exit 1', 'echo "2.1.308 (Claude Code)"');
@@ -589,6 +589,14 @@ describe('the pinned install and the workflow', () => {
       out = go('exit 0', null);
       assert.notEqual(out.code, 0);
       assert.match(out.out, notice, 'no binary');
+      // A claude of the pinned version already on the PATH is not the install.
+      mkdirSync(join(dir, 'host'));
+      const pinned = JSON.parse(readFileSync(join(dir, '.gate/bin/lib/reviewer.json'), 'utf8')).version;
+      writeFileSync(join(dir, 'host/claude'), `#!/bin/sh\necho "${pinned} (Claude Code)"\n`);
+      chmodSync(join(dir, 'host/claude'), 0o755);
+      out = go('exit 0', null, `${join(dir, 'host')}:`);
+      assert.notEqual(out.code, 0);
+      assert.match(out.out, notice, 'no binary, a pinned claude elsewhere on the PATH');
       out = go('exit 0', 'echo "2.1.309 (Claude Code)"');
       assert.notEqual(out.code, 0);
       assert.match(out.out, notice, 'another version');
