@@ -12,7 +12,7 @@ const lib = () => import('../bin/lib/checkout.mjs');
 const seatLib = () => import('../bin/lib/seat.mjs');
 
 /** An origin, a clone of it that is the checkout, and a second clone that makes commits on origin. */
-function world(body) {
+async function world(body) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-')));
   try {
     const origin = join(dir, 'origin.git');
@@ -44,7 +44,7 @@ function world(body) {
       failed: () => (existsSync(join(state, 'queue-checkout.failed')) ? readFileSync(join(state, 'queue-checkout.failed'), 'utf8') : null),
       follow: async (extra = {}) => (await lib()).followMain({ root: checkout, state, live: () => 0, ...extra }),
     };
-    return body(w);
+    return await body(w);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -135,8 +135,9 @@ test('a start that registered first is counted, so the update defers; a start ho
   assert.equal(liveRuns(w.runs), 1, 'a claim counts');
   assert.equal((await w.follow({ live: () => liveRuns(w.runs) })).status, 'deferred');
   rmSync(join(w.runs, 'issue-1', 'run-a.claim.pid'));
-  const out = withStartLock(w.state, w.checkout, () => w.follow(), { wait: 50 });
-  assert.equal((await out.value).status, 'busy');
+  const { followMain } = await lib();
+  const out = withStartLock(w.state, w.checkout, () => followMain({ root: w.checkout, state: w.state, live: () => 0 }), { wait: 50, loaded: before });
+  assert.equal(out.value.status, 'busy');
   assert.equal(w.head(), before, 'nothing moved under a start');
   assert.equal((await w.follow()).status, 'updated');
 }));

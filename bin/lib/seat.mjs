@@ -6,6 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ROOT, reexec, withStartLock } from './checkout.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
@@ -178,9 +179,19 @@ const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.repla
  * equal listings; one seen half done counts that start twice at worst, which only makes a start back off. list is the listing,
  * passed in so a test can force the interleaving. */
 export function liveCount(runs, seat, list = runFiles) {
+  return countLive(runs, (p) => seatOf(p, '2') === String(seat), list);
+}
+
+/** How many runs are live whatever their seat, claims and the markers of seat 0 included (#257): the update of the checkout waits
+ * for none. Infinity when the folders never held still. */
+export function liveRuns(runs, list = runFiles) {
+  return countLive(runs, () => true, list);
+}
+
+function countLive(runs, keep, list) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const before = list(runs, '.pid').sort();
-    const n = before.filter((p) => seatOf(p, '2') === String(seat) && runLive(p)).length;
+    const n = before.filter((p) => keep(p) && runLive(p)).length;
     if (before.join('\n') === list(runs, '.pid').sort().join('\n')) return n;
   }
   return Infinity;
@@ -241,6 +252,12 @@ export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = nul
 }
 
 class Refused extends Error {}
+class Moved extends Error {
+  constructor(head) {
+    super('the checkout moved');
+    this.head = head;
+  }
+}
 
 const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--deny <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
 const VALUE = { '--run': 'run', '--work': 'work', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
@@ -324,7 +341,16 @@ export function launch(argv, env = process.env) {
   // The tag is claimed with a lock folder (mkdir is atomic) for as long as the start takes, so two starts of one tag cannot both pass the check.
   const release = claimTag(join(run, `run-${tag}.lock`), tag);
   try {
-    return startSession({ o, env, home, runs, profiles, state, run, work, brief, tag });
+    // The start registers (claim, then pid file) while it holds checkout.lock, so the update of the checkout counts it or has
+    // finished: a start that loaded older code than the checkout now holds starts again (#257).
+    let started;
+    try {
+      started = withStartLock(state, ROOT, () => startSession({ o, env, home, runs, profiles, state, run, work, brief, tag }));
+    } catch (e) {
+      throw e.busy ? new Refused(e.message) : e;
+    }
+    if (started.moved) throw new Moved(started.head);
+    return started.value;
   } finally {
     release();
   }
@@ -518,9 +544,12 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     try {
       process.stdout.write(launch(process.argv.slice(2)));
     } catch (e) {
-      // A Node error can quote the environment, so anything but our own refusal prints its code and nothing else.
-      process.stderr.write(`bin/seat: ${e instanceof Refused ? e.message : `failed (${e.code ?? e.name})`}\n`);
-      process.exitCode = e instanceof Refused ? 2 : 1;
+      if (e instanceof Moved) process.exitCode = reexec(process.argv.slice(1), e.head);
+      else {
+        // A Node error can quote the environment, so anything but our own refusal prints its code and nothing else.
+        process.stderr.write(`bin/seat: ${e instanceof Refused ? e.message : `failed (${e.code ?? e.name})`}\n`);
+        process.exitCode = e instanceof Refused ? 2 : 1;
+      }
     }
   }
 }

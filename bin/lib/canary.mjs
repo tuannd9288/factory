@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { byRule, parseSession, pickMarker } from '../../probes/pack-probe.mjs';
+import { markRun, reexec, withStartLock } from './checkout.mjs';
 import { job, plist } from './queue.mjs';
 import { SCHEMA } from './seat.mjs';
 
@@ -207,15 +208,23 @@ export function stop(pid) {
  * not judge. seat is the command that starts a session (bin/seat in this clone unless a test gives another). An error the
  * run did not foresee is told to the Human like any other failure: claude-canary.failed holds its message, and the code is 2. */
 export function run(args) {
+  const state = args.env.FACTORY_STATE ?? join(args.env.HOME ?? homedir(), '.local/state/factory');
+  let unmark = () => {};
   try {
+    // The canary reads probes/canary-brief.md and starts bin/seat from this clone while it runs: it counts as a live run for the
+    // update of the checkout (#257), and starts again if the checkout moved before it registered.
+    const started = withStartLock(state, clone, () => markRun(args.env.FACTORY_RUNS ?? join(args.env.HOME ?? homedir(), 'factory-runs'), 'canary'));
+    if (started.moved) return reexec(process.argv.slice(1), started.head);
+    unmark = started.value;
     return runOnce(args);
   } catch (error) {
-    const state = args.env.FACTORY_STATE ?? join(args.env.HOME ?? homedir(), '.local/state/factory');
     const text = `: the run raised ${error.name}: ${String(error.message).trim()}`;
     mkdirSync(state, { recursive: true });
     writeFileSync(join(state, 'claude-canary.failed'), `${new Date().toISOString()} claude${text}\n`);
     console.error(`claude-canary: claude${text}`);
     return 2;
+  } finally {
+    unmark();
   }
 }
 

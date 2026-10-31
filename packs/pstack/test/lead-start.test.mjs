@@ -34,6 +34,7 @@ function world(body, { settings = PSTACK } = {}) {
   for (const d of [w.home, w.bin, join(w.tree, 'bin'), join(w.tree, 'packs/pstack/bin')]) mkdirSync(d, { recursive: true });
   cpSync(join(real, 'bin/lib'), join(w.tree, 'bin/lib'), { recursive: true });
   cpSync(join(real, 'packs/pstack/bin/lead.mjs'), join(w.tree, 'packs/pstack/bin/lead.mjs'));
+  cpSync(join(real, 'packs/pstack/bin/transcript-copy.mjs'), join(w.tree, 'packs/pstack/bin/transcript-copy.mjs')); // copied into the run folder (#257)
   cpSync(join(real, 'packs/pstack/settings.json'), join(w.tree, 'packs/pstack/settings.json')); // the factory's pin
   writeFileSync(join(w.tree, 'packs/pstack/lead.md'), '# role\n');
   const repo = join(w.tree, 'zalo');
@@ -69,7 +70,9 @@ describe('lead --dry-run', () => {
     assert.equal(lines[0], join(w.tree, 'zalo'));
     assert.equal(lines[1], 'plugins to ensure: pstack@pstack-4dd1d05');
     assert.equal(lines[2], `plugin root: ${w.pluginRoot}`);
-    assert.equal(lines[3], `transcript hook: '${w.bin}/node' '${w.tree}/packs/pstack/bin/transcript-copy.mjs' '${w.home}/factory-runs/zalo-lead/transcripts'`);
+    // The hook runs a copy in the Lead's run folder (#257); a dry run names it and makes none.
+    assert.match(lines[3], new RegExp(`^transcript hook: '${w.bin}/node' '${w.home}/factory-runs/zalo-lead/hooks/transcript-copy-[0-9a-f]{7}\\.mjs' '${w.home}/factory-runs/zalo-lead/transcripts'$`));
+    assert.ok(!existsSync(join(w.home, 'factory-runs')), 'a dry run copied nothing');
     assert.match(lines[4], /^direnv exec \. claude --model opus .* --settings \{"hooks":\{"Stop":/);
     assert.deepEqual(w.log(), []);
     assert.ok(!existsSync(w.pluginRoot));
