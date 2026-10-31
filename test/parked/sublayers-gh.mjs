@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 
 // `label list` and `issue list` print $SL/labels.json and $SL/issues.json as they are.
 const FAKE_GH = String.raw`#!/usr/bin/env node
@@ -21,7 +21,7 @@ process.exit(1);
 
 /** `labels` and `issues` are the JSON texts gh prints, or a function from the 17 right labels to the labels to print. */
 export async function fake({ labels, issues }) {
-  const { SUBLAYERS } = await import('../bin/lib/sublayers.mjs');
+  const { SUBLAYERS } = await import('../../bin/lib/sublayers.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'sublayers-'));
   writeFileSync(join(dir, 'gh'), FAKE_GH);
   chmodSync(join(dir, 'gh'), 0o755);

@@ -147,7 +147,7 @@ test('a folder is matched by path containment: .. in cwd, //, symlinks on either
   }
 });
 
-test('check mode reads the union: the per-repository profiles and the extra folders', () => {
+test('check mode reads the extra folders only, not the per-repository profiles (#205)', () => {
   const profiles = mkdtempSync(join(tmpdir(), 'ledger-union-'));
   mkdirSync(join(profiles, 'o/app/claude'), { recursive: true });
   const own = profile([{ name: 'a.jsonl', day: 1, entries: [entry()] }]);
@@ -156,7 +156,7 @@ test('check mode reads the union: the per-repository profiles and the extra fold
     spawnSync('cp', ['-R', join(own.dir, 'projects'), join(profiles, 'o/app/claude/projects')]);
     const r = check(['--profile-dir', extra.dir], { AGENT_PROFILES: profiles });
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /2 assistant entries .* from 2 profile folder/);
+    assert.match(r.out, /1 assistant entries .* from 1 profile folder/);
   } finally {
     own.cleanup();
     extra.cleanup();
