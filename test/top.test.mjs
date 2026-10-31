@@ -180,7 +180,7 @@ test('the frame: a header in plain words, what waits on you, one block per team,
     '  a  acct-one  5h 100% resets 13:00 · 7d 20% resets 11-01 13:00 · seat 1, factory Lead',
     '  b  acct-two  5h ? · 7d ? · seat 2',
   ]);
-  assert.equal(lines.at(-2), 'Today  1 pull request merged · workers and reviewers cost b $1.60 · waited on you 1h30');
+  assert.equal(lines.at(-2), 'Today  1 pull request merged · workers and reviewers cost $1.60 on account b · waited on you 1h30');
   assert.equal(lines.at(-1), 'keys: 1-9 or Tab switch tabs, c full columns, q quits');
 });
 
@@ -217,6 +217,15 @@ test('Waiting on you says "Nothing waits on you" when no pull request, Lead or a
   const { text } = await frame(w);
   assert.equal(text.split('\n')[2], 'Nothing waits on you');
   assert.ok(!text.includes('Waiting on you'));
+});
+
+test('Today names each account after its cost: "$1.00 on account a, $2.00 on account b"; with none, "nothing yet"', async () => {
+  const w = world();
+  const { snap } = await frame(w);
+  const { render } = await top();
+  const today = (cost) => render({ ...snap, today: { ...snap.today, cost } }, { width: 200 }).split('\n').at(-2);
+  assert.match(today([['a', 1], ['b', 2]]), /workers and reviewers cost \$1\.00 on account a, \$2\.00 on account b · waited/);
+  assert.match(today([]), /workers and reviewers cost nothing yet · waited/);
 });
 
 test('an alert\'s leading ISO time shows as local time, with the date on another day; a line that does not start with one is as it is', async () => {
