@@ -429,7 +429,7 @@ export function keptSessions(records, since, until) {
 }
 
 /** One record for each session, its last, in the order the sessions started. */
-function lastRecords(records) {
+export function lastRecords(records) {
   const last = new Map();
   for (const r of [...records].sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(r.session ?? `${r.run}#${r.tag}`, r);
   return [...last.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));

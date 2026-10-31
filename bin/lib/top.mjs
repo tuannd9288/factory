@@ -12,7 +12,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
-import { REQUIRED, clonesUnder, costOf, readSessions } from './ledger.mjs';
+import { REQUIRED, clonesUnder, costOf, lastRecords as lastOfSession, readSessions } from './ledger.mjs';
 import { quotaRows, windowsOf } from './quota.mjs';
 import { PRESETS, SEATS, liveCount, resetPassed, runLive } from './seat.mjs';
 import { accountList, readAccounts } from './token.mjs';
@@ -502,10 +502,8 @@ export function todayOf({ now, repos, github, records, accounts }) {
       waitedMs += Math.max(0, Math.min(now, open ? now : Date.parse(pr.mergedAt)) - Math.max(day, ...finished));
     }
   }
-  const last = new Map();
-  for (const x of [...records].sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(x.session ?? `${x.run}#${x.tag}`, x);
   const cost = new Map();
-  for (const x of last.values()) {
+  for (const x of lastOfSession(records)) {
     if (!(Date.parse(x.end) >= day) || typeof x.total_cost_usd !== 'number') continue;
     const letter = accounts.find((a) => a.users.includes(`seat ${x.seat}`))?.letter ?? '?';
     cost.set(letter, (cost.get(letter) ?? 0) + x.total_cost_usd);
