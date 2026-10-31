@@ -235,6 +235,19 @@ test('All shows an issue only while it has a session listed today, a claim or an
   assert.ok(!/#15[01] /.test(all));
 });
 
+test('a repository\'s tab lists an issue whose session ended in the last 24 hours, as #174 did; All counts it in "N older"', async () => {
+  const w = world();
+  const cwd = join(w.root, 'WORKSPACES/factory/.claude/worktrees/w');
+  session(w.opts.runs, 'issue-171', 'worker', { log: init(cwd) + assistant('m1', { input_tokens: 1, output_tokens: 1 }) + result({}), ageSecs: 54000 });
+  const issues = JSON.parse(readFileSync(join(w.fx, 'issues.json'), 'utf8'));
+  writeFileSync(join(w.fx, 'issues.json'), JSON.stringify([...issues, { number: 171, title: 'Ended yesterday', state: 'OPEN', labels: [] }]));
+  const tab = (await frame(w, 1)).text;
+  for (const n of [174, 170, 171]) assert.match(tab, new RegExp(`^ {2}#${n} `, 'm'));
+  assert.ok(!/#169 /.test(tab), 'a session over 24 hours old is gone');
+  assert.match(tab, /^\s*2 older$/m);
+  assert.ok(!/^ {2}#171 /m.test((await frame(w, 0)).text), 'All folds it');
+});
+
 test('the Done tab holds the closed issues, merged or not', async () => {
   const w = world();
   const done = (await frame(w, 2)).text;
