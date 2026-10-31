@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enabledPlugins, exitCodeOf, findNode, leadArgs, refusal } from '../bin/lead.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
-import { matches } from '../../../test/bash-rule.mjs';
+import { matches, rulesAfter } from '../../../test/bash-rule.mjs';
 import { FORMS, HARMLESS } from '../../../test/login-forms.mjs';
 
 const home = '/home/factory';
@@ -101,11 +101,20 @@ describe('leadArgs', () => {
       'Bash(git rev-parse:*)', 'Bash(git branch:*)', 'Bash(git push -u origin HEAD)',
       'Bash(cd:*)', 'Bash(ls:*)', 'Bash(mkdir:*)',
       'Bash(.gate/bin/claim:*)', 'Bash(.gate/bin/tier:*)', 'Bash(.gate/bin/verify:*)', 'Bash(.gate/bin/red-check:*)',
-      'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh pr create:*)', 'Bash(gh pr view:*)', 'Bash(gh pr checks:*)',
+      'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
+      'Bash(gh pr create:*)', 'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)',
       'Bash(gh pr merge --auto --merge:*)',
       'Bash(' + root + '/bin/seat:*)',
     ]);
     for (const bad of ['Bash(gh:*)', 'Bash(git:*)']) assert.ok(!list('--allowedTools').includes(bad));
+  });
+
+  test('the command the Lead ran at 22:05 (gh issue create) is allowed, and gh api is still denied (#277)', () => {
+    const create = 'gh issue create --label task --title "scripts/ship: the exit-code line says a stop exits 1, but a BLOCKED stop exits 2" --body-file /private/tmp/x/issue.md';
+    assert.ok(rulesAfter(argv, '--allowedTools').some((r) => matches(r, create)));
+    assert.ok(rulesAfter(argv, '--allowedTools').some((r) => matches(r, 'gh issue comment 12 --body-file /private/tmp/x/c.md')));
+    assert.ok(rulesAfter(argv, '--disallowedTools').some((r) => matches(r, 'gh api repos/x/y')));
+    assert.ok(!rulesAfter(argv, '--allowedTools').some((r) => matches(r, 'gh api repos/x/y')));
   });
 
   test('the deny list holds gh api, claude, codex, herdr and the secrets', () => {
