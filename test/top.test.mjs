@@ -155,12 +155,12 @@ test('the frame: a header in plain words, what waits on you, one block per team,
   assert.match(lines[0], /^Mac mini {2}load 2\.3 of 8 cores {2}·  1 working · 1 idle · 0 agents waiting {2}·  12:00 {2}·/);
   assert.match(lines[0], /queue ok 11:59/);
   assert.match(lines[0], /alerts 1/);
-  assert.ok(!/\d{4}-\d\d-\d\d|\d\dZ\b/.test(lines.filter((l) => !l.includes('digest.failed')).join('\n')), 'no UTC time or full date is left but an alert\'s own text');
+  assert.ok(!/\d{4}-\d\d-\d\d|\d\dZ\b/.test(lines.join('\n')), 'no UTC time or full date is left, an alert\'s included');
   assert.match(lines[1], /\[1 All\] .*\[2 factory 4\].*\[3 Done 2\]/);
   assert.deepEqual(lines.slice(2, 5), [
     'Waiting on you',
     '  approve  tuannd9288/factory#260 top view  https://github.com/tuannd9288/factory/pull/260',
-    '  alert    digest.failed  2026-10-31T09:00:00Z digest failed',
+    '  alert    digest.failed  09:00 digest failed',
   ]);
   assert.equal(lines[5], 'tuannd9288/factory');
   const lead = lines.findIndex((l) => /^ {2}aardvark +Lead +idle +\?/.test(l));
@@ -180,7 +180,7 @@ test('the frame: a header in plain words, what waits on you, one block per team,
     '  a  acct-one  5h 100% resets 13:00 · 7d 20% resets 11-01 13:00 · seat 1, factory Lead',
     '  b  acct-two  5h ? · 7d ? · seat 2',
   ]);
-  assert.equal(lines.at(-2), 'Today  1 pull request merged · workers and reviewers cost b $1.60 · waited on you 1h30');
+  assert.equal(lines.at(-2), 'Today  1 pull request merged · workers and reviewers cost $1.60 on account b · waited on you 1h30');
   assert.equal(lines.at(-1), 'keys: 1-9 or Tab switch tabs, c full columns, q quits');
 });
 
@@ -217,6 +217,24 @@ test('Waiting on you says "Nothing waits on you" when no pull request, Lead or a
   const { text } = await frame(w);
   assert.equal(text.split('\n')[2], 'Nothing waits on you');
   assert.ok(!text.includes('Waiting on you'));
+});
+
+test('Today names each account after its cost: "$1.00 on account a, $2.00 on account b"; with none, "nothing yet"', async () => {
+  const w = world();
+  const { snap } = await frame(w);
+  const { render } = await top();
+  const today = (cost) => render({ ...snap, today: { ...snap.today, cost } }, { width: 200 }).split('\n').at(-2);
+  assert.match(today([['a', 1], ['b', 2]]), /workers and reviewers cost \$1\.00 on account a, \$2\.00 on account b · waited/);
+  assert.match(today([]), /workers and reviewers cost nothing yet · waited/);
+});
+
+test('an alert\'s leading ISO time shows as local time, with the date on another day; a line that does not start with one is as it is', async () => {
+  const w = world();
+  writeFileSync(join(w.opts.state, 'claude-canary.failed'), '2026-10-30T13:27:10.966Z claude 2.1.309 failed the canary run\n');
+  writeFileSync(join(w.opts.state, 'queue-run.failed'), 'queue could not start\n');
+  const alerts = (await frame(w)).text.split('\n').filter((l) => l.startsWith('  alert'));
+  assert.ok(alerts.includes('  alert    claude-canary.failed  10-30 13:27 claude 2.1.309 failed the canary run'), alerts.join('\n'));
+  assert.ok(alerts.includes('  alert    queue-run.failed  queue could not start'), alerts.join('\n'));
 });
 
 test('All shows an issue only while it has a session listed today, a claim or an open PR; the rest, one that ended yesterday included, fold into "N older"', async () => {
@@ -334,6 +352,38 @@ test('an ended run with no record takes its repository from its work folder\'s o
   assert.equal(by['501-build-1'].repo, 'p/q');
   assert.equal(by['502-build-1'].repo, null, 'no origin and no sibling: ?');
   assert.equal(asked.filter((x) => x === a).length, 1);
+});
+
+test('a run with no repository takes it from its folder\'s name: issue-<n> is the factory\'s own, <short>-<n> a known repository\'s; the rest fold into one line, not a block or a tab', async () => {
+  const w = world();
+  const runs = join(w.root, 'runs-folders');
+  const done = init(join(w.root, 'gone')) + assistant('m1', { input_tokens: 1, output_tokens: 1 }) + result({});
+  session(runs, 'issue-293', 'review-1', { log: done, ageSecs: 600 });
+  session(runs, 'zalo-gateway-7', 'build-1', { log: done, ageSecs: 600 });
+  session(runs, 'mystery-9', 'build-1', { log: done, ageSecs: 600 });
+  session(runs, 'notes', 'build-1', { log: done, ageSecs: 600 });
+  const asked = [];
+  const originOf = (cwd) => {
+    asked.push(cwd);
+    return cwd === '/the/factory' ? 'tuannd9288/factory' : null;
+  };
+  const clones = new Map([...w.opts.clones, ['tuannd9288/zalo-gateway', join(w.root, 'WORKSPACES/zalo-gateway')]]);
+  const { snapshot, render } = await top();
+  const opts = { ...w.opts, runs, live: () => false, processes: () => [], originOf, clones, root: '/the/factory' };
+  const snap = await withPath(w.bin, () => snapshot(opts));
+  const by = Object.fromEntries(snap.sessions.map((s) => [s.name, s]));
+  assert.equal(by['293-review-1'].repo, 'tuannd9288/factory');
+  assert.equal(by['zalo-gateway-7-build-1'].repo, 'tuannd9288/zalo-gateway');
+  assert.equal(by['mystery-9-build-1'].repo, null);
+  assert.equal(by['notes-build-1'].repo, null);
+  assert.equal(asked.filter((x) => x === '/the/factory').length, 1, 'the factory\'s origin is read once');
+  const text = render(snap, { width: 200 });
+  const lines = text.split('\n');
+  assert.ok(!lines.some((l) => /^\?$|team \?/.test(l)), 'no block of ?');
+  assert.ok(!lines[1].includes('[? '), 'no tab of ?');
+  const unplaced = lines.findIndex((l) => l === '  2 sessions with no repository');
+  assert.ok(unplaced > lines.findLastIndex((l) => /^tuannd9288\//.test(l)) && unplaced === lines.indexOf('Accounts') - 1, 'the line ends the repositories, before Accounts');
+  assert.ok(!render(snap, { width: 200, tab: 1 }).includes('no repository'), 'only All shows it');
 });
 
 test('the claim reader writes nothing into the clone: it fetches into a bare cache of its own under the state folder', async () => {
