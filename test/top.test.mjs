@@ -138,7 +138,7 @@ test('the frame: header, tabs, the tree and the session columns at a fixed width
   assert.match(lines[0], /1 working/);
   assert.match(lines[0], /1 idle/);
   assert.match(lines[0], /1 stopped/);
-  assert.match(lines[0], /seats 1:0\/4 2:1\/4/);
+  assert.match(lines[0], /seats 1:0 2:1(?!\/)/);
   assert.match(lines[0], /queue ok 2026-10-31 11:59/);
   assert.match(lines[0], /alerts 1/);
   assert.match(lines[1], /\[1 All\] .*\[2 factory 4\].*\[3 Done 2\]/);

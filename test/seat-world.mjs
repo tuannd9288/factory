@@ -98,6 +98,13 @@ export function fill(w, seat, n, folder = w.run) {
   }
 }
 
+/** A log of a seat's, in the run folder, whose last rate_limit_event Claude Code rejected for inSeconds. */
+export function rejected(w, seat, tag, inSeconds = 3600) {
+  const resetsAt = Math.floor(Date.now() / 1000) + inSeconds;
+  writeFileSync(join(w.run, `run-${tag}.jsonl`), `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt, rateLimitType: 'five_hour', unifiedWindows: { five_hour: { utilization: 1, resetsAt }, seven_day: { utilization: 0.3, resetsAt: resetsAt + 9999 } } } })}\n`);
+  writeFileSync(join(w.run, `run-${tag}.seat`), `${seat}\n`);
+}
+
 export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   // The real path: tmpdir() is under /var, a link to /private/var on macOS, and bin/seat refuses a folder that is not its own real path (#192).
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'seat-world-')));

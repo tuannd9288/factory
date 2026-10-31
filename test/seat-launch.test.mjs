@@ -76,7 +76,12 @@ function filesUnder(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesUnder(join(dir, e.name)) : [[join(dir, e.name), readFileSync(join(dir, e.name), 'utf8')]]));
 }
 
-const full = (w, n) => { for (let i = 0; i < n; i += 1) { writeFileSync(join(w.run, `run-x${i}.pid`), `${process.pid}\n`); writeFileSync(join(w.run, `run-x${i}.seat`), '2\n'); } };
+// A seat Claude Code has rejected for an hour: its last log ends in a rejected rate_limit_event.
+const rejected = (w, seat) => {
+  const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+  writeFileSync(join(w.run, `run-r${seat}.jsonl`), `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt, rateLimitType: 'five_hour', unifiedWindows: { seven_day: { utilization: 0.3, resetsAt } } } })}\n`);
+  writeFileSync(join(w.run, `run-r${seat}.seat`), `${seat}\n`);
+};
 
 test('it starts the session in the background and prints the pid, the seat and the tag', () => world(async (w) => {
   const r = w.start('worker', [], { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release') });
@@ -122,7 +127,7 @@ function readlinkReal(p) {
 }
 
 test('seat 1: the token is in the session\'s environment and in no argv, log, record, pid file or output', () => world(async (w) => {
-  full(w, 4);
+  rejected(w, 2);
   const r = w.start('worker', ['--tag', 'one']);
   assert.equal(r.code, 0, r.out + r.err);
   assert.match(r.out, /on seat 1/);
@@ -152,11 +157,11 @@ test('seat 1 with a missing or empty token file is refused with exit 2, naming t
 }));
 
 test('no seat free: exit 2, and a reason for each seat', () => world((w) => {
-  full(w, 4);
-  for (let i = 0; i < 4; i += 1) { writeFileSync(join(w.run, `run-y${i}.pid`), `${process.pid}\n`); writeFileSync(join(w.run, `run-y${i}.seat`), '1\n'); }
+  rejected(w, 2);
+  rejected(w, 1);
   const r = w.start('worker');
   assert.equal(r.code, 2);
-  assert.match(r.out + r.err, /seat 2: 4 live sessions, at most 4\n.*seat 1: 4 live sessions, at most 4/s);
+  assert.match(r.out + r.err, /seat 2: rejected by Claude Code.*\n.*seat 1: rejected by Claude Code/s);
   assert.match(r.out + r.err, /no seat free/);
 }));
 
