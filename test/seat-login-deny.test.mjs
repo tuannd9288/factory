@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { matches, rulesAfter } from './bash-rule.mjs';
 import { FORMS, HARMLESS } from './login-forms.mjs';
 
-test('every role denies factory login and factory store, in every form', async () => {
+test('every role denies factory login, store, use and logout, in every form', async () => {
   const { buildArgs, ROLES } = await import('../bin/lib/seat.mjs');
   for (const role of ROLES) {
     for (const seat of [1, 2]) {

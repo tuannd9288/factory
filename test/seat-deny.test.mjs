@@ -9,15 +9,15 @@ import { until, world } from './seat-world.mjs';
 const lib = () => import('../bin/lib/seat.mjs');
 const denied = (args) => args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--output-format'));
 
-test('deny rules come after the preset\'s own, and before seat 1\'s; the grants stay as they were', async () => {
+test('deny rules come after the preset\'s own, and before the three profiles rules; the grants stay as they were', async () => {
   const { buildArgs } = await lib();
-  const plain = buildArgs({ role: 'researcher', run: '/r', home: '/h', seat: 1, tokenPath: '/p/seats/1/oauth-token' });
-  const withDeny = buildArgs({ role: 'researcher', run: '/r', home: '/h', seat: 1, tokenPath: '/p/seats/1/oauth-token', deny: ['Agent', 'Task'] });
+  const plain = buildArgs({ role: 'researcher', run: '/r', home: '/h', seat: 1, profiles: '/p' });
+  const withDeny = buildArgs({ role: 'researcher', run: '/r', home: '/h', seat: 1, profiles: '/p', deny: ['Agent', 'Task'] });
   const base = denied(plain);
   const rules = denied(withDeny);
-  assert.deepEqual(rules.slice(0, base.length - 1), base.slice(0, -1));
-  assert.deepEqual(rules.slice(base.length - 1, base.length + 1), ['Agent', 'Task']);
-  assert.deepEqual(rules.slice(base.length + 1), base.slice(-1));
+  assert.deepEqual(rules.slice(0, base.length - 3), base.slice(0, -3));
+  assert.deepEqual(rules.slice(base.length - 3, base.length - 1), ['Agent', 'Task']);
+  assert.deepEqual(rules.slice(base.length - 1), base.slice(-3));
   assert.deepEqual(withDeny.slice(0, withDeny.indexOf('--disallowedTools')), plain.slice(0, plain.indexOf('--disallowedTools')));
 });
 
@@ -37,5 +37,5 @@ test('bin/seat passes --deny on to claude', () => world(async (w) => {
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
   const rules = denied(w.saw().argv);
-  assert.deepEqual(rules.slice(-2), ['Agent', 'Task']);
+  assert.deepEqual(rules.slice(-5, -3), ['Agent', 'Task'], 'before the three rules for the tokens, the archive and the old seat 1 file');
 }));
