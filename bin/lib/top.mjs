@@ -89,7 +89,7 @@ export function roleOf(tag, record) {
 
 /** owner/name of a work folder's origin, read with git alone; null where git cannot tell. */
 function originIn(cwd) {
-  if (!cwd) return null;
+  if (!cwd || !existsSync(cwd)) return null;
   try {
     const url = execFileSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)?.[1] ?? null;
@@ -175,7 +175,12 @@ function shape(p, { record, role, name, issue, folder, seat, live, mtime, start,
 }
 
 /** Every session: the run folders' logs, and each Lead's process with its transcript copies. */
-export function gatherSessions({ runs, state, now, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn }) {
+export function gatherSessions({ runs, state, now, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn, origins = new Map() }) {
+  // A work folder's origin, asked of git once for as long as `origins` lives (the caller clears it at each GitHub refresh).
+  const originCached = (cwd) => {
+    if (!origins.has(cwd)) origins.set(cwd, originOf(cwd));
+    return origins.get(cwd);
+  };
   const records = lastRecords(readSessions(state));
   const out = [];
   for (const folder of existsSync(runs) ? readdirSync(runs).sort() : []) {
@@ -207,7 +212,7 @@ export function gatherSessions({ runs, state, now, clones = new Map(), live = ru
       out.push(shape(p, {
         record, role, name: `${issue ?? folder}-${tag}`, issue: issue ? Number(issue) : null, folder, seat, live: isLive,
         mtime: st.mtimeMs, start: record?.start ? Date.parse(record.start) : st.birthtimeMs, cwd,
-        repo: record?.repo ?? (isLive ? originOf(cwd) : null) ?? repoOfCwd(cwd, clones), branch: record?.branch ?? (isLive ? branchOf(cwd) : null), harness: 'claude -p', now,
+        repo: record?.repo ?? (cwd ? originCached(cwd) : null) ?? repoOfCwd(cwd, clones), branch: record?.branch ?? (isLive ? branchOf(cwd) : null), harness: 'claude -p', now,
       }));
     }
   }
@@ -226,6 +231,12 @@ export function gatherSessions({ runs, state, now, clones = new Map(), live = ru
       record: null, role: 'lead', name: `${m[1]}-lead`, issue: null, folder: null, seat: null, live: true,
       mtime: newest?.mtimeMs ?? now, start: null, cwd, repo, branch: branchOf(cwd), harness: 'claude', now,
     }));
+  }
+  // One run folder is one issue, and one issue sits under one repository: a run with none takes the one its folder's other runs have.
+  for (const s of out) {
+    if (s.repo || !s.folder) continue;
+    const known = new Set(out.filter((o) => o.folder === s.folder && o.repo).map((o) => o.repo));
+    if (known.size === 1) s.repo = [...known][0];
   }
   const rank = (s) => ROLE_ORDER.indexOf(s.role) === -1 ? ROLE_ORDER.length : ROLE_ORDER.indexOf(s.role);
   return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { numeric: true }));
@@ -348,10 +359,12 @@ export async function snapshot(opts = {}) {
   const state = opts.state ?? process.env.FACTORY_STATE ?? join(home, '.local/state/factory');
   const root = opts.root ?? process.env.FACTORY_ROOT ?? join(here, '..', '..');
   const clones = opts.clones ?? clonesUnder(root);
-  const sessions = gatherSessions({ runs, state, now, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf });
+  const cache = opts.cache ?? {};
+  if (!cache.origins || now - cache.origins.at >= GH_MS) cache.origins = { at: now, map: new Map() };
+  const sessions = gatherSessions({ runs, state, now, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map });
   // Every repository a session names has its issues read too, not only the clones.
   const repos = [...new Set([...(opts.repos ?? clones.keys()), ...sessions.map((s) => s.repo).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r ?? ''))])];
-  const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache: opts.cache });
+  const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache });
   const names = [...new Set([...repos, ...sessions.map((s) => s.repo ?? '?')])];
   const byRepo = names.map((repo) => {
     const mine = sessions.filter((s) => (s.repo ?? '?') === repo);
