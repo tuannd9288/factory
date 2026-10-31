@@ -50,17 +50,19 @@ export function parseLog(text) {
   const usages = [...messages.values()];
   const side = (u) => (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
   const last = results.at(-1) ?? null;
-  const priced = usages.map((m) => costOf(m.model, m.usage));
+  // A <synthetic> message (Claude Code's own, with no usage) says nothing of the model, the context or the price.
+  const real = usages.filter((m) => m.model !== '<synthetic>');
+  const priced = real.map((m) => costOf(m.model, m.usage));
   const turnSum = results.some((r) => num(r.num_turns) !== null) ? results.reduce((s, r) => s + (num(r.num_turns) ?? 0), 0) : null;
   return {
-    model: init?.model ?? usages.at(-1)?.model ?? null,
+    model: init?.model ?? real.at(-1)?.model ?? null,
     cwd: init?.cwd ?? null,
     turns: turnSum ?? (usages.length ? usages.length : null),
-    ctx: usages.length ? side(usages.at(-1).usage) : null,
+    ctx: real.length ? side(real.at(-1).usage) : null,
     tokensIn: usages.length ? usages.reduce((s, m) => s + side(m.usage), 0) : null,
     tokensOut: usages.length ? usages.reduce((s, m) => s + (m.usage.output_tokens ?? 0), 0) : null,
     cost: num(last?.total_cost_usd),
-    estCost: usages.length && priced.every((c) => c !== null) ? priced.reduce((s, c) => s + c, 0) : null,
+    estCost: real.length && priced.every((c) => c !== null) ? priced.reduce((s, c) => s + c, 0) : null,
     isError: typeof last?.is_error === 'boolean' ? last.is_error : null,
     apiStatus: last?.api_error_status ?? null,
     rate: rate ? { ...windowsOf(rate), resetsAt: num(rate.resetsAt) } : null,
@@ -400,9 +402,10 @@ const seatsLive = (runs) => Object.fromEntries(Object.entries(SEATS).map(([n, { 
 
 const seatCounts = (sessions) => Object.fromEntries(Object.entries(SEATS).map(([n, { cap }]) => [n, { live: sessions.filter((s) => s.live && s.seat === n).length, cap }]));
 
-const age = (ms) => {
-  if (!(ms >= 0)) return '?';
-  const s = Math.floor(ms / 1000);
+/** A span as 45s, 12m, 3h05 or 5d; a negative one (a log written after the snapshot's clock) is 0s; not a number is ?. */
+export const age = (ms) => {
+  if (typeof ms !== 'number' || Number.isNaN(ms)) return '?';
+  const s = Math.floor(Math.max(0, ms) / 1000);
   if (s < 90) return `${s}s`;
   const m = Math.floor(s / 60);
   if (m < 90) return `${m}m`;
@@ -413,6 +416,8 @@ const kilo = (n) => (n === null || n === undefined ? '?' : n >= 1e6 ? `${(n / 1e
 const clip = (s, n) => (s.length > n ? `${s.slice(0, Math.max(0, n - 1))}…` : s);
 const pad = (s, n) => clip(String(s), n).padEnd(n);
 
+// COST is the session's total across resumes (the last result's total_cost_usd), while TOKENS and TURNS count this log's
+// rounds only, so a resumed session's row mixes two spans; a live `~$` estimate counts this log alone.
 const COLS = [['NAME', 16], ['ROLE', 10], ['STATE', 26], ['HARNESS', 9], ['MODEL', 18], ['SEAT', 5], ['CTX', 8], ['TURNS', 6], ['TOKENS ↓/↑', 14], ['COST', 8], ['AGE', 7], ['SINCE', 7]];
 const tail = (cwd) => (cwd ? cwd.split(sep).filter(Boolean).slice(-2).join('/') : '?');
 
@@ -486,11 +491,14 @@ export function render(snap, { width = 120, tab = 0, rows = null } = {}) {
   if (rows && lines.length + 1 > rows) {
     const room = Math.max(0, rows - fixed - 1);
     const left = lines.length - fixed - room;
-    return [...lines.slice(0, fixed + room), clip(`… ${left} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, q quits`, width)].join('\n');
+    return [...lines.slice(0, fixed + room), clip(`… ${left} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, q quits`, width)].map(clean).join('\n');
   }
   lines.push(clip('keys: 1-9 or Tab switch tabs, q quits', width));
-  return lines.join('\n');
+  return lines.map(clean).join('\n');
 }
+
+/** A string from a log, a folder or GitHub, less its control characters, so none can reach the terminal as an escape sequence. */
+const clean = (s) => s.replace(/[\x00-\x1f\x7f]/g, '');
 
 async function loop(opts) {
   const out = process.stdout;
