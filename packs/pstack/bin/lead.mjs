@@ -1,12 +1,13 @@
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one repository. This file holds the pure parts (the arguments of
 // claude, the enabled plugins, the refusals) and the start. Nothing here reads a credential or logs in.
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
-import { secretsRead } from '../../../bin/lib/seat.mjs';
+import { secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 
 const USAGE = 'usage: lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
@@ -50,7 +51,7 @@ const allowOf = (root) => [
 ];
 // The Lead writes only in ~/factory-runs: a leading // makes each rule an absolute path.
 const denyOf = (cwd) => [
-  'Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', `Edit(/${cwd}/**)`, `Write(/${cwd}/**)`, ...secretsRead,
+  ...tokenStoreDeny, 'Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', `Edit(/${cwd}/**)`, `Write(/${cwd}/**)`, ...secretsRead,
 ];
 
 /** The reason to refuse a start, or null: repo is a plain folder name and root/repo is a real folder with .git, .gate/ and .envrc. */
@@ -95,9 +96,9 @@ export function findNode(PATH) {
  * hook is the command of the Stop and SessionEnd hooks, which copy the session's own transcript to ~/factory-runs/<repo>-lead/
  * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
  * exec bit. */
-export function leadArgs({ repo, home, root, roleText, node, resume = null }) {
+export function leadArgs({ repo, home, root, roleText, node, resume = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
   const cwd = join(root, repo);
-  const hook = [node, join(root, 'packs/pstack/bin/transcript-copy.mjs'), join(home, 'factory-runs', `${repo}-lead`, 'transcripts')].map(quote).join(' ');
+  const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-lead`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
   return {
     cwd,
@@ -115,6 +116,27 @@ export function leadArgs({ repo, home, root, roleText, node, resume = null }) {
       '--disallowedTools', ...denyOf(cwd),
     ],
   };
+}
+
+/** Where the hooks' script is copied to (#257): <run folder>/hooks/transcript-copy-<sha7 of its bytes>.mjs. A Lead pane stays open
+ * for days, and its Stop hook would otherwise run whatever the checkout holds by then; the script imports only node: modules, so the
+ * copy runs alone. */
+export function hookPath({ root, runDir }) {
+  const sha = createHash('sha256').update(readFileSync(join(root, 'packs/pstack/bin/transcript-copy.mjs'))).digest('hex').slice(0, 7);
+  return join(runDir, 'hooks', `transcript-copy-${sha}.mjs`);
+}
+
+/** Copies the script to hookPath unless a copy is there already (reused, never written again), and returns the path. A changed
+ * script has another name, so an earlier copy stays for the panes that run it. */
+export function copyHook({ root, runDir }) {
+  const to = hookPath({ root, runDir });
+  if (!existsSync(to)) {
+    mkdirSync(dirname(to), { recursive: true });
+    const tmp = `${to}.${process.pid}.tmp`;
+    writeFileSync(tmp, readFileSync(join(root, 'packs/pstack/bin/transcript-copy.mjs')));
+    renameSync(tmp, to);
+  }
+  return to;
 }
 
 /** The plugins the settings enable (value true), by id. */
@@ -178,7 +200,9 @@ function main(argv, env) {
     process.stderr.write('bin/lead: no node on PATH, which the transcript hook needs\n');
     return 2;
   }
-  const { cwd, argv: command, hook } = leadArgs({ repo, home: env.HOME, root, roleText, node, resume });
+  const runDir = join(env.HOME, 'factory-runs', `${repo}-lead`);
+  const hookScript = hookPath({ root, runDir });
+  const { cwd, argv: command, hook } = leadArgs({ repo, home: env.HOME, root, roleText, node, resume, hookScript });
   const wanted = enabledPlugins(readSettings(cwd));
   // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
   const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
@@ -194,7 +218,7 @@ function main(argv, env) {
   }
 
   if (flags.includes('--dry-run')) {
-    const shown = leadArgs({ repo, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume }).argv;
+    const shown = leadArgs({ repo, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, hookScript }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
     process.stdout.write(`plugin root: ${pluginRoot}\n`);
@@ -202,6 +226,13 @@ function main(argv, env) {
     process.stdout.write(`${shown.join(' ')}\n`);
     process.stdout.write(`${sessionLine}\n`);
     return 0;
+  }
+
+  try {
+    copyHook({ root, runDir });
+  } catch (e) {
+    process.stderr.write(`bin/lead: could not copy the transcript hook to ${hookScript}: ${e.code ?? e.message}\n`);
+    return 1;
   }
 
   const setup = spawnSync('.gate/bin/setup', [], { cwd, stdio: 'inherit' });

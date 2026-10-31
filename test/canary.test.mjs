@@ -66,6 +66,37 @@ function withMachine({ versions: names, current, script = false, probed, rejecte
 
 const worktrees = (clone) => git(clone, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
 
+// #257: the canary reads the clone and starts bin/seat from it while it runs, so it is a live run for the update of the checkout.
+test('the canary\'s marker is there while its seat run goes on and gone afterwards', () => {
+  withMachine({ versions: ['2.1.309'], current: '2.1.309' }, ({ runs, run, seatCalls }) => {
+    assert.equal(run().code, 0);
+    assert.equal(seatCalls()[0].marked, true, 'daemon-canary/run-canary.pid was not there during the seat run');
+    assert.ok(!existsSync(join(runs, 'daemon-canary')), 'the marker is left behind');
+  });
+});
+
+test('a busy checkout lock makes the run fail with a line that says it did not start, and a later run with nothing to do removes it', () => {
+  withMachine({ versions: ['2.1.309'], current: '2.1.309' }, ({ state, run, seatCalls }) => {
+    mkdirSync(join(state, 'checkout.lock'));
+    const busy = run(['--seat', 'unused'], { FACTORY_CHECKOUT_LOCK_WAIT_MS: '50' });
+    assert.equal(busy.code, 2, busy.out);
+    assert.match(read(join(state, 'claude-canary.failed')), /claude: not started: .*checkout/);
+    assert.equal(seatCalls().length, 0);
+    rmSync(join(state, 'checkout.lock'), { recursive: true });
+    writeFileSync(join(state, 'claude-probed'), '2.1.309\n');
+    assert.equal(run().code, 0);
+    assert.ok(!existsSync(join(state, 'claude-canary.failed')), 'a failure that only a busy lock wrote is still there');
+  });
+});
+
+test('a failed file that a busy lock did not write stays when there is nothing to do', () => {
+  withMachine({ versions: ['2.1.309'], current: '2.1.309', probed: '2.1.309' }, ({ state, run }) => {
+    writeFileSync(join(state, 'claude-canary.failed'), '2026-10-31T10:00:00.000Z claude 2.1.309 failed the canary run; the launcher stays on 2.1.308\n');
+    assert.equal(run().code, 0);
+    assert.ok(existsSync(join(state, 'claude-canary.failed')));
+  });
+});
+
 test('first run from the installer\'s symlink, the session passes: the launcher becomes our script, the version is recorded, older ones go', () => {
   withMachine({ versions: ['2.1.300', '2.1.309'], current: '2.1.309' }, ({ versions, state, launcher, run, seatCalls }) => {
     const r = run();
