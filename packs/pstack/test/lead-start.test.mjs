@@ -89,7 +89,7 @@ describe('lead --dry-run', () => {
     // The hook runs a copy in the Lead's run folder (#257); a dry run names it and makes none.
     assert.match(lines[3], new RegExp(`^transcript hook: '${w.bin}/node' '${w.home}/factory-runs/zalo-lead/hooks/transcript-copy-[0-9a-f]{7}\\.mjs' '${w.home}/factory-runs/zalo-lead/transcripts'$`));
     assert.ok(!existsSync(join(w.home, 'factory-runs')), 'a dry run copied nothing');
-    assert.match(lines[4], /^direnv exec \. claude --model opus .* --settings \{"hooks":\{"SessionStart":/);
+    assert.match(lines[4], /^direnv exec \. claude --model opus .* --settings \{"autoMemoryEnabled":false,"hooks":\{"SessionStart":/);
     assert.deepEqual(w.log(), []);
     assert.ok(!existsSync(w.pluginRoot));
   }));

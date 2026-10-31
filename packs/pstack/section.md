@@ -6,9 +6,8 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
 `skills/poteto-mode/playbooks/` unless a path says otherwise):
 
 - **Force-push** (`shipping.md:8`, `babysit.md:10`, `autopilot-full.md:12`: `--force-with-lease`). The factory never
-  rewrites a pushed branch: `factory-branches` refuses a non-fast-forward push on every branch; the repository's own deny
-  rule `Bash(git *push *--force*)` (`kit/.claude/settings.json:4`) binds every session in it; and `bin/seat` denies every
-  `git push` (`bin/lib/seat.mjs:35`). Fix forward with a new commit.
+  rewrites a pushed branch: `factory-branches` refuses a non-fast-forward push on every branch, and `bin/seat` denies every
+  `git push` (`Bash(git push:*)` in `bin/lib/seat.mjs`). Fix forward with a new commit.
 - **Stacked pull requests** (`opening-a-pr.md:28`, `autopilot-stack.md:6`, `multi-phase-plan.md:57`: a base that is the
   parent's branch; `shipping.md:8`: retarget to trunk with `gh pr edit --base`). `scripts/ship` opens with `--base main`
   (`ship.mjs:64`) and refuses to arm any other base (`ship.mjs:172`): no stack.
@@ -58,7 +57,7 @@ Push, then run `scripts/ship` (`--body-file`: the template in English, `Closes #
 says `armed` or stops. Each run takes the next step: opens the pull request, runs `scripts/live-verify <pr>`,
 arms auto-merge. With no driver on `main` it runs no `live-verify`: it posts one comment, `not run as a user: no driver
 (head <full sha>)`, and goes on. A note counts for a head only if the pull request's author, the agents' login, wrote it
-and nobody has edited it; any other comment stands for nothing. The note is no verdict: the ledger counts that head as a miss. It refuses to open unless origin holds HEAD and a full `verify` and `red-check` passed on it, to arm on FAIL or
+and nobody has edited it; any other comment stands for nothing. The note is no verdict: the ledger counts that head as a miss. It refuses to open unless origin holds HEAD and `red-check` passed on it, to arm on FAIL or
 a base other than `main`, and stops on `needs-human`, or on a tier 3 it armed that waits for the Human. FAIL: fix forward with a red
 test, push, run it again. BLOCKED: put the reason and your recommended answer in the pull request. It disarms an
 armed pull request whose HEAD is past its verdict; push, then run it again. Then release the branch; do not wait for CI.
