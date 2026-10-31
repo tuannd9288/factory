@@ -7,7 +7,9 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
+import { firstFree } from './names.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
+import { readSessions } from './records.mjs';
 import { seatAccounts, tokenDir } from './token.mjs';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
@@ -182,6 +184,24 @@ function filePidAlive(file) {
 /** Whether a run is live: its pid file's process (the supervisor, or the claude of an old launcher) or the session the
  * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
 export const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
+
+/** The names in use (#286): those of the runs that are live, a start's claim included, and every Lead's, which it holds for as long as
+ * its file ~/factory-runs/<repo>-lead/name exists. */
+export function heldNames(runs) {
+  const read = (file) => {
+    try {
+      return [readFileSync(file, 'utf8').trim()];
+    } catch {
+      return [];
+    }
+  };
+  const runNames = runFiles(runs, '.name').filter((f) => runLive(f.replace(/\.name$/, '.pid')) || runLive(f.replace(/\.name$/, '.claim.pid'))).flatMap(read);
+  const leads = (existsSync(runs) ? readdirSync(runs) : []).filter((d) => d.endsWith('-lead')).flatMap((d) => read(join(runs, d, 'name')));
+  return [...runNames, ...leads];
+}
+
+/** The name a resumed session had in its earlier record, or null. */
+export const nameOfSession = (state, session) => readSessions(state).findLast((r) => r.session === session)?.name ?? null;
 
 /** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
  * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off removes
@@ -372,9 +392,12 @@ export function launch(argv, env = process.env) {
       throw e.busy ? new Refused(e.message) : e;
     }
     if (started.moved) throw new Moved(started.head);
-    const { seat, account, pidFile, unclaim } = started.value;
+    const { seat, account, pidFile, unclaim, name } = started.value;
     try {
-      return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account });
+      return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, name });
+    } catch (e) {
+      rmSync(join(run, `run-${tag}.name`), { force: true }); // a refused start leaves nothing
+      throw e;
     } finally {
       unclaim(); // after the run's own .seat and .pid are written, so the count never drops; on any failure, nothing is left
     }
@@ -428,14 +451,17 @@ function register({ o, runs, state, run, tag }) {
     if (!accounts[first]) throw new Refused(`seat ${first} has no row in the accounts file ${join(state, 'accounts')}; the Human sets one with \`factory use\``);
     const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim, accounts });
     if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free on the team's account; \`factory\` shows every account's room and \`factory use\` moves the team`);
-    return { seat, account: accounts[seat], pidFile, unclaim };
+    // The name is chosen and written while the start holds checkout.lock, so two starts never take the same one (#286).
+    const name = (o.resume && nameOfSession(state, o.resume)) || firstFree(heldNames(runs));
+    writeFileSync(join(run, `run-${tag}.name`), `${name}\n`);
+    return { seat, account: accounts[seat], pidFile, unclaim, name };
   } catch (e) {
     unclaim();
     throw e;
   }
 }
 
-function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account }) {
+function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, name }) {
   const tokenPath = join(tokenDir(profiles), account);
   readToken(tokenPath, seat, account); // refuses now; the supervisor reads it again, just before it starts claude
 
@@ -456,7 +482,7 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
-    childFile: join(run, `run-${tag}.child`), tokenPath, account, role: o.role, seat, tag, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
+    childFile: join(run, `run-${tag}.child`), tokenPath, account, role: o.role, seat, tag, name, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
   };
   for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
@@ -495,7 +521,7 @@ export function recordOf(spec, events, { code, signal, error = null, end = new D
   const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
   return {
     session: result?.session_id ?? init?.session_id ?? spec.resume ?? null,
-    role: spec.role, seat: spec.seat, tag: spec.tag, run: spec.run, ...placeOf(spec.cwd),
+    role: spec.role, seat: spec.seat, tag: spec.tag, ...(spec.name ? { name: spec.name } : {}), run: spec.run, ...placeOf(spec.cwd),
     model: models.length ? models.join(',') : (init?.model ?? spec.model),
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
     turns: sum('num_turns'), duration_ms: sum('duration_ms'), total_cost_usd: result?.total_cost_usd ?? null,
