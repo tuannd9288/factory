@@ -81,7 +81,7 @@ export function leadArgs({ repo, home, root, roleText, node, resume = false, hoo
       'direnv', 'exec', '.', 'claude',
       '--model', 'opus', '--effort', 'high',
       '--append-system-prompt', roleText,
-      '--permission-mode', 'acceptEdits',
+      '--permission-mode', 'auto',
       '--add-dir', join(home, 'factory-runs'),
       '--name', `${repo}-lead`,
       '--settings', JSON.stringify({ hooks: { Stop: hooks, SessionEnd: hooks } }),
