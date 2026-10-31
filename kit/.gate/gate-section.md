@@ -8,8 +8,8 @@ file. What a program enforces: `.gate/enforced-rules.md`.
 - Work enters as one issue labelled `task`; claim it first: `.gate/bin/claim <n> <team>` (a second claim is refused). It
   leaves as one pull request whose body says `Issue: #<n>`, `Claim: <sha>` and `Team: <name>`. Never push to `main`;
   land by a merge commit through auto-merge.
-- Run `.gate/bin/setup` once per clone. Before the pull request run `.gate/bin/verify --fast`, the tests you changed
-  (`--tests <files>`) and `.gate/bin/red-check --base origin/main`; the full suite runs on CI, as `verify`.
+- Run `.gate/bin/setup` once per clone. Before the pull request run `.gate/bin/verify --fast`, the tests of the part you
+  changed (`--tests <files>`) and `.gate/bin/red-check --base origin/main`; the full suite runs on CI, as `verify`.
 - For a feature new to this repository, search GitHub (`gh search repos`, `gh search code`) and existing products for projects that already do it, and compare their approaches before writing it from scratch. Judge a project by its mechanism, never its stars or age. Adding a library, service or dependency is the Human's choice: propose it with the comparison.
 - A source change carries a test that fails at the base. Where none can, the pull request body says
   `No-red: <why, 20 characters or more>`; the reviewer judges it (where Entire reviews, the Human: tier 3).
