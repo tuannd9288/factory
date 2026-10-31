@@ -7,7 +7,8 @@ import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
-import { secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
+import { firstFree } from '../../../bin/lib/names.mjs';
+import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 
 const USAGE = 'usage: factory lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
@@ -96,8 +97,11 @@ export function findNode(PATH) {
   return null;
 }
 
+// The hooks that run transcript-copy.mjs: it copies the transcript on Stop and SessionEnd, and on all five tells `top` the Lead's state (#286).
+const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop', 'SessionEnd'];
+
 /** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
- * hook is the command of the Stop and SessionEnd hooks, which copy the session's own transcript to ~/factory-runs/<repo>-lead/
+ * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-lead/
  * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
  * exec bit. */
 export function leadArgs({ repo, home, root, roleText, node, resume = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
@@ -114,7 +118,7 @@ export function leadArgs({ repo, home, root, roleText, node, resume = null, hook
       '--permission-mode', 'auto',
       '--add-dir', join(home, 'factory-runs'),
       '--name', `${repo}-lead`,
-      '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: { Stop: hooks, SessionEnd: hooks } }),
+      '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])) }),
       ...(resume ? ['--resume', resume] : []),
       '--allowedTools', ...allowOf(root),
       '--disallowedTools', ...denyOf(cwd),
@@ -167,6 +171,28 @@ function profileConfig(cwd) {
   const config = lastLine(r.stdout);
   if (r.status !== 0 || !config) throw new PluginError(`direnv gave no CLAUDE_CONFIG_DIR in ${cwd}${r.error ? ` (${r.error.message})` : ''}`);
   return config;
+}
+
+/** The Lead's name (#286): the file <runDir>/name when it is there, else the first animal no live run and no Lead holds, written
+ * to it. Every Lead's name is held for as long as its file exists, so the name stays across restarts. */
+export function leadName(runDir, state) {
+  const file = join(runDir, 'name');
+  try {
+    return readFileSync(file, 'utf8').trim();
+  } catch {
+    const name = firstFree(heldNames(dirname(runDir), state));
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(file, `${name}\n`);
+    return name;
+  }
+}
+
+/** Inside a Herdr pane: keeps the pane id in <runDir>/pane for `top` and renames the pane to the Lead's name. A failure is one note
+ * line and the start goes on. */
+function renamePane(runDir, name, paneId) {
+  writeFileSync(join(runDir, 'pane'), `${paneId}\n`);
+  const r = spawnSync('herdr', ['pane', 'rename', paneId, name], { stdio: 'ignore', timeout: 5000 });
+  if (r.error || r.status !== 0) process.stderr.write(`bin/lead: note: could not rename the Herdr pane ${paneId} to ${name}\n`);
 }
 
 const claudeDirt = (cwd) => spawnSync('git', ['status', '--porcelain', '--', '.claude/'], { cwd, encoding: 'utf8' }).stdout ?? '';
@@ -238,6 +264,9 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: could not copy the transcript hook to ${hookScript}: ${e.code ?? e.message}\n`);
     return 1;
   }
+
+  const name = leadName(runDir, resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')));
+  if (env.HERDR_PANE_ID) renamePane(runDir, name, env.HERDR_PANE_ID);
 
   const setup = spawnSync('.gate/bin/setup', [], { cwd, stdio: 'inherit' });
   if (setup.error) {

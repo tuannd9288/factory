@@ -14,7 +14,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quotaRows } from './quota.mjs';
 import { liveCount } from './seat.mjs';
-import { accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
+import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -186,14 +186,8 @@ export function readPlace(place, ctx) {
   });
 }
 
-const letterOf = (i) => (i >= 26 ? letterOf(Math.floor(i / 26) - 1) : '') + String.fromCharCode(97 + (i % 26));
-
-/** The lettered accounts, sorted: every account the accounts file names, and every token file's name. Names come from the file and
- * from readdir; no token file is read. */
-export function accountList({ state, agentProfiles }) {
-  const names = [...new Set([...Object.values(readAccounts(state)), ...tokenAccounts(agentProfiles)])].sort();
-  return names.map((name, i) => ({ name, letter: letterOf(i) }));
-}
+// accountList moved to token.mjs, so that top.mjs can use it without importing this file, which `bin/factory` runs as its main module.
+export { accountList };
 
 /** Rows of piggery's two profiles through pig on the Mac mini, by ssh. */
 export function readPiggery(ctx) {
@@ -325,7 +319,7 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin)
        bin/factory use [<row> [<letter>]]   (the row's account becomes the letter's; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
-       bin/factory top [--once] [--width N]
+       bin/factory top [--once] [--width N] [--full]
        bin/factory lead <repo> [--new] [--dry-run]`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
@@ -365,12 +359,12 @@ function movedOld(agentProfiles, state) {
 
 /** `factory top` (#174): the read-only view of every session and repository (bin/lib/top.mjs). On the factory host it runs
  * here; on the MacBook it runs the same command there by ssh, with a terminal (-t) for the live view only. Only `--once` and
- * `--width N` (digits) are taken, checked before any ssh. */
+ * `--full` (each at most once) and `--width N` (digits) are taken, checked before any ssh. */
 async function top(args, env) {
   const live = !args.includes('--once');
-  const rest = args.filter((a) => a !== '--once');
+  const rest = args.filter((a) => a !== '--once' && a !== '--full');
   const width = rest.length === 2 && rest[0] === '--width' && /^\d+$/.test(rest[1]);
-  if (args.filter((a) => a === '--once').length > 1 || (rest.length && !width)) {
+  if (['--once', '--full'].some((f) => args.filter((a) => a === f).length > 1) || (rest.length && !width)) {
     console.error(USAGE);
     return 2;
   }

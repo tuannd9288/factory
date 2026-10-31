@@ -28,6 +28,14 @@ fs.appendFileSync(dir + '/log.jsonl', JSON.stringify({ argv: process.argv.slice(
 if (process.argv[2] === 'plugin' && fs.existsSync(dir + '/plugin-mode')) { console.error('boom'); process.exit(1); }
 `;
 
+// herdr logs its arguments next to itself; a herdr-mode file makes it fail.
+const HERDR = `${node}
+const fs = require('fs');
+const dir = require('path').dirname(process.argv[1]);
+fs.appendFileSync(dir + '/herdr.log', process.argv.slice(2).join(' ') + '\\n');
+if (fs.existsSync(dir + '/herdr-mode')) { console.error('no such pane'); process.exit(1); }
+`;
+
 function world(body, { settings = PSTACK } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'lead-start-'))); // the launcher finds its tree by realpath
   const w = { root, home: join(root, 'home'), tree: join(root, 'WORKSPACES'), bin: join(root, 'bin') };
@@ -44,7 +52,7 @@ function world(body, { settings = PSTACK } = {}) {
   writeFileSync(join(repo, '.envrc'), 'x\n');
   writeFileSync(join(repo, '.gate/bin/setup'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(repo, '.claude/settings.json'), JSON.stringify(settings));
-  for (const [n, text] of [['direnv', DIRENV], ['claude', CLAUDE]]) writeFileSync(join(w.bin, n), text, { mode: 0o755 });
+  for (const [n, text] of [['direnv', DIRENV], ['claude', CLAUDE], ['herdr', HERDR]]) writeFileSync(join(w.bin, n), text, { mode: 0o755 });
   symlinkSync(process.execPath, join(w.bin, 'node')); // like /opt/homebrew/bin/node, a link to a Cellar path
   w.config = join(w.home, '.agent-profiles/o/zalo/claude');
   w.pluginRoot = join(w.home, '.local/share/factory/plugins/o/zalo/claude');
@@ -60,6 +68,8 @@ function world(body, { settings = PSTACK } = {}) {
     writeFileSync(join(dir, name), 'x\n');
     utimesSync(join(dir, name), mtime, mtime);
   };
+  w.herdr = () => (existsSync(join(w.bin, 'herdr.log')) ? readFileSync(join(w.bin, 'herdr.log'), 'utf8').split('\n').filter(Boolean) : []);
+  w.leadFile = (name, repo = 'zalo') => join(w.home, 'factory-runs', `${repo}-lead`, name);
   w.log = () => (existsSync(join(w.bin, 'log.jsonl')) ? readFileSync(join(w.bin, 'log.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
   try {
     return body(w);
@@ -79,7 +89,7 @@ describe('lead --dry-run', () => {
     // The hook runs a copy in the Lead's run folder (#257); a dry run names it and makes none.
     assert.match(lines[3], new RegExp(`^transcript hook: '${w.bin}/node' '${w.home}/factory-runs/zalo-lead/hooks/transcript-copy-[0-9a-f]{7}\\.mjs' '${w.home}/factory-runs/zalo-lead/transcripts'$`));
     assert.ok(!existsSync(join(w.home, 'factory-runs')), 'a dry run copied nothing');
-    assert.match(lines[4], /^direnv exec \. claude --model opus .* --settings \{"autoMemoryEnabled":false,"hooks":\{"Stop":/);
+    assert.match(lines[4], /^direnv exec \. claude --model opus .* --settings \{"autoMemoryEnabled":false,"hooks":\{"SessionStart":/);
     assert.deepEqual(w.log(), []);
     assert.ok(!existsSync(w.pluginRoot));
   }));
@@ -142,6 +152,41 @@ describe('lead resumes by default', () => {
     w.copy(`--${B}.jsonl`, 7000);
     mkdirSync(join(w.home, 'factory-runs/zalo-lead/transcripts', `${B}.jsonl`));
     assert.match(w.lead(['--dry-run']).out, new RegExp(`^session: resume ${A} `, 'm'));
+  }));
+});
+
+describe('lead name (#286)', () => {
+  test('a start picks a free animal once and keeps it; another Lead\'s name is held, a dry run writes none', () => world((w) => {
+    assert.equal(w.lead(['--dry-run']).code, 0);
+    assert.ok(!existsSync(w.leadFile('name')));
+    mkdirSync(join(w.home, 'factory-runs/other-lead'), { recursive: true });
+    writeFileSync(w.leadFile('name', 'other'), 'aardvark\n');
+    assert.equal(w.lead().code, 0);
+    assert.equal(readFileSync(w.leadFile('name'), 'utf8'), 'badger\n');
+    rmSync(w.leadFile('name', 'other'));
+    assert.equal(w.lead().code, 0);
+    assert.equal(readFileSync(w.leadFile('name'), 'utf8'), 'badger\n', 'kept across restarts');
+  }));
+
+  test('inside a Herdr pane the pane id is kept and the pane is renamed to the name', () => world((w) => {
+    assert.equal(w.lead([], { HERDR_PANE_ID: 'p-7' }).code, 0);
+    assert.equal(readFileSync(w.leadFile('pane'), 'utf8').trim(), 'p-7');
+    assert.deepEqual(w.herdr(), ['pane rename p-7 aardvark']);
+  }));
+
+  test('outside Herdr nothing is renamed and no pane file is written', () => world((w) => {
+    assert.equal(w.lead().code, 0);
+    assert.deepEqual(w.herdr(), []);
+    assert.ok(!existsSync(w.leadFile('pane')));
+  }));
+
+  test('a rename that fails prints one note line and the start goes on', () => world((w) => {
+    writeFileSync(join(w.bin, 'herdr-mode'), 'fail');
+    const r = w.lead([], { HERDR_PANE_ID: 'p-7' });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.err.trim().split('\n').filter((l) => /^bin\/lead: note:/.test(l)).length, 1);
+    assert.match(r.err, /bin\/lead: note: could not rename the Herdr pane/);
+    assert.equal(w.log().at(-1).argv[0], '--model');
   }));
 });
 
