@@ -4,7 +4,7 @@
 // and gh porcelain (never `gh api`). A field the data does not give is shown as `?`. The accounts panel waits for #178.
 // `node bin/lib/top.mjs --once [--width N]` prints one frame; `factory top` wires it in once #177 lands.
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir, loadavg } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
 import { REQUIRED, clonesUnder, costOf, readSessions } from './ledger.mjs';
 import { windowsOf } from './quota.mjs';
-import { PRESETS, SEATS, resetPassed } from './seat.mjs';
+import { PRESETS, SEATS, liveCount, resetPassed, runLive } from './seat.mjs';
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -21,6 +21,7 @@ const GH_MS = 60_000;
 const CALL_MS = 15_000;
 const WORKING_MS = 120_000;
 const GONE_MS = 24 * 3600_000;
+const DONE_MAX = 40;
 const ROLE_ORDER = ['lead', 'worker', 'reviewer', 'researcher'];
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -74,19 +75,27 @@ const readText = (file) => {
   }
 };
 
-/** A pid file's process is alive: a signal-0 probe of the pid in the file or in its .child twin. The default of `live`. */
-function pidLive(pidFile) {
-  for (const f of [pidFile, pidFile.replace(/\.pid$/, '.child')]) {
-    const pid = Number(readText(f).trim());
-    if (!Number.isInteger(pid) || pid < 1) continue;
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (error) {
-      if (error.code === 'EPERM') return true;
-    }
+/** The role of a run: its record's, else the tag's (build/fix a worker, review a reviewer, research a researcher, or a
+ * preset's own name), else `?`. */
+export function roleOf(tag, record) {
+  if (record?.role) return record.role;
+  if (Object.hasOwn(PRESETS, tag)) return tag;
+  const t = tag.replace(/^BRIEF-/i, '');
+  if (/^(build|fix)/i.test(t)) return 'worker';
+  if (/review/i.test(t)) return 'reviewer';
+  if (/^research/i.test(t)) return 'researcher';
+  return '?';
+}
+
+/** owner/name of a work folder's origin, read with git alone; null where git cannot tell. */
+function originIn(cwd) {
+  if (!cwd) return null;
+  try {
+    const url = execFileSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)?.[1] ?? null;
+  } catch {
+    return null;
   }
-  return false;
 }
 
 /** The processes as { pid, command }, from ps; [] when ps cannot run. */
@@ -166,7 +175,7 @@ function shape(p, { record, role, name, issue, folder, seat, live, mtime, start,
 }
 
 /** Every session: the run folders' logs, and each Lead's process with its transcript copies. */
-export function gatherSessions({ runs, state, now, clones = new Map(), live = pidLive, processes = psList, branchOf = branchIn }) {
+export function gatherSessions({ runs, state, now, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn }) {
   const records = lastRecords(readSessions(state));
   const out = [];
   for (const folder of existsSync(runs) ? readdirSync(runs).sort() : []) {
@@ -190,7 +199,7 @@ export function gatherSessions({ runs, state, now, clones = new Map(), live = pi
       }
       const record = records.get(`${dir}#${tag}`) ?? null;
       const p = parseLog(readText(file));
-      const role = record?.role ?? (Object.hasOwn(PRESETS, tag) ? tag : '?');
+      const role = roleOf(tag, record);
       const issue = /^issue-(\d+)/.exec(folder)?.[1] ?? null;
       const seat = readText(join(dir, `run-${tag}.seat`)).trim() || (record?.seat != null ? String(record.seat) : null);
       const isLive = live(join(dir, `run-${tag}.pid`));
@@ -198,7 +207,7 @@ export function gatherSessions({ runs, state, now, clones = new Map(), live = pi
       out.push(shape(p, {
         record, role, name: `${issue ?? folder}-${tag}`, issue: issue ? Number(issue) : null, folder, seat, live: isLive,
         mtime: st.mtimeMs, start: record?.start ? Date.parse(record.start) : st.birthtimeMs, cwd,
-        repo: record?.repo ?? repoOfCwd(cwd, clones), branch: record?.branch ?? (isLive ? branchOf(cwd) : null), harness: 'claude -p', now,
+        repo: record?.repo ?? (isLive ? originOf(cwd) : null) ?? repoOfCwd(cwd, clones), branch: record?.branch ?? (isLive ? branchOf(cwd) : null), harness: 'claude -p', now,
       }));
     }
   }
@@ -237,40 +246,50 @@ export function queueOf(dir) {
 const ghJson = async (args) => JSON.parse((await run('gh', args, { encoding: 'utf8', timeout: CALL_MS, maxBuffer: 64 << 20 })).stdout);
 const firstLine = (e) => String(e.stderr || e.message || e).trim().split('\n')[0].slice(0, 80);
 
-/** The claims on a clone's origin as `claim --list` reads them: the tip of each refs/heads/claim/<n>, by its subject. */
-async function readClaims(repo, clone) {
-  const git = async (...a) => (await run('git', ['-C', clone, ...a], { encoding: 'utf8', timeout: CALL_MS })).stdout.trim();
+// The git options of the trusted jobs (kit/.gate/bin/lib/claim.mjs JOB_NET): gh's helper carries the agents' login.
+const NET = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
+
+/** The claims on a repository's origin as `claim --list` reads them: the tip of each refs/heads/claim/<n>, by its subject.
+ * Nothing is written into the clone: it is only asked for its origin's URL. The claim commits are fetched into a bare
+ * repository of the view's own, `<state>/top/<owner>-<name>.git`, made on first use. */
+export async function readClaims(repo, clone, state) {
+  const git = async (cwd, ...a) => (await run('git', cwd ? ['-C', cwd, ...a] : a, { encoding: 'utf8', timeout: CALL_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })).stdout.trim();
+  const url = clone ? await git(clone, 'remote', 'get-url', 'origin') : `https://github.com/${repo}.git`;
+  const cache = join(state, 'top', `${repo.replace('/', '-')}.git`);
+  if (!existsSync(cache)) {
+    mkdirSync(dirname(cache), { recursive: true });
+    await git(null, 'init', '--bare', '--quiet', cache);
+  }
   const claims = new Map();
-  for (const l of (await git('ls-remote', 'origin', 'refs/heads/claim/*')).split('\n').filter(Boolean)) {
+  for (const l of (await git(null, ...NET, 'ls-remote', url, 'refs/heads/claim/*')).split('\n').filter(Boolean)) {
     const m = /^([0-9a-f]+)\trefs\/heads\/claim\/([1-9]\d*)$/.exec(l);
     if (!m) continue;
     const n = Number(m[2]);
     try {
-      await git('cat-file', '-e', `${m[1]}^{commit}`);
+      await git(cache, 'cat-file', '-e', `${m[1]}^{commit}`);
     } catch {
-      await git('fetch', '--quiet', 'origin', `refs/heads/claim/${n}`);
+      await git(cache, ...NET, 'fetch', '--quiet', url, `refs/heads/claim/${n}:refs/claims/${n}`);
     }
-    claims.set(n, claimStateOf(n, await git('log', '-1', '--format=%s', m[1])));
+    claims.set(n, claimStateOf(n, await git(cache, 'log', '-1', '--format=%s', m[1])));
   }
   return claims;
 }
 
 /** Issues, pull requests and claims of the repositories, at most once a minute (cache holds the last read). A call that
  * fails gives its first line and the rest still shows. */
-export async function gatherGithub({ repos, clones, claims = readClaims, now, cache = {} }) {
+export async function gatherGithub({ repos, clones, state, claims = readClaims, now, cache = {} }) {
   if (cache.data && now - cache.at < GH_MS) return cache.data;
   const data = { ok: true, error: null, at: now, repos: {} };
   await Promise.all(repos.map(async (repo) => {
     try {
       const [issues, prs] = await Promise.all([
-        ghJson(['issue', 'list', '--repo', repo, '--label', 'task', '--state', 'all', '--limit', '100', '--json', 'number,title,state,labels']),
+        ghJson(['issue', 'list', '--repo', repo, '--state', 'all', '--limit', '300', '--json', 'number,state,title']),
         ghJson(['pr', 'list', '--repo', repo, '--state', 'all', '--limit', '100', '--json', 'number,title,state,headRefName,body,labels,mergedAt,statusCheckRollup']),
       ]);
       let held = new Map();
       let claimsOk = true;
       try {
-        if (clones.get(repo)) held = await claims(repo, clones.get(repo));
-        else claimsOk = false;
+        held = await claims(repo, clones.get(repo) ?? null, state);
       } catch {
         claimsOk = false;
       }
@@ -302,7 +321,8 @@ function groupOf(repo, number, gh, sessions) {
   const checks = Object.fromEntries(REQUIRED.map((name) => [name, (pr?.statusCheckRollup ?? []).filter((c) => c.name === name).at(-1) ?? null]));
   const labels = (pr?.labels ?? []).map((l) => l.name);
   const merged = Boolean(pr?.mergedAt);
-  const step = merged ? 'merged' : pr ? 'PR open' : held ? 'claimed' : gh?.claimsOk === false ? '?' : 'unclaimed';
+  const closed = issue?.state === 'CLOSED';
+  const step = merged ? 'merged' : closed ? 'closed' : pr ? 'PR open' : held ? 'claimed' : gh?.claimsOk === false ? '?' : 'unclaimed';
   let waiting = '–';
   if (pr && !merged) {
     if (labels.some((l) => l === 'tier-3' || l === 'needs-human') && checks.tier && checks.tier.status === 'COMPLETED' && checks.tier.conclusion !== 'SUCCESS') waiting = 'the Human';
@@ -311,7 +331,9 @@ function groupOf(repo, number, gh, sessions) {
   if (waiting === '–' && sessions.some((s) => s.live)) waiting = 'the team';
   return {
     number, title: issue?.title ?? '?',
-    done: issue?.state === 'CLOSED' && merged,
+    done: closed,
+    // Shown on All while it has a live session, a claim, an open pull request or a session that ended in the last day.
+    active: sessions.some((s) => s.state !== 'gone') || Boolean(held) || Boolean(pr && !merged),
     team: held ?? /^Team: (\S+)/m.exec(pr?.body ?? '')?.[1] ?? null,
     step, pr: pr ? { number: pr.number, checks: Object.fromEntries(Object.entries(checks).map(([k, c]) => [k, MARK(c)])) } : null,
     waiting, sessions,
@@ -326,9 +348,10 @@ export async function snapshot(opts = {}) {
   const state = opts.state ?? process.env.FACTORY_STATE ?? join(home, '.local/state/factory');
   const root = opts.root ?? process.env.FACTORY_ROOT ?? join(here, '..', '..');
   const clones = opts.clones ?? clonesUnder(root);
-  const sessions = gatherSessions({ runs, state, now, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf });
-  const repos = opts.repos ?? [...clones.keys()];
-  const github = await gatherGithub({ repos, clones, claims: opts.claims, now, cache: opts.cache });
+  const sessions = gatherSessions({ runs, state, now, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf });
+  // Every repository a session names has its issues read too, not only the clones.
+  const repos = [...new Set([...(opts.repos ?? clones.keys()), ...sessions.map((s) => s.repo).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r ?? ''))])];
+  const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache: opts.cache });
   const names = [...new Set([...repos, ...sessions.map((s) => s.repo ?? '?')])];
   const byRepo = names.map((repo) => {
     const mine = sessions.filter((s) => (s.repo ?? '?') === repo);
@@ -337,8 +360,11 @@ export async function snapshot(opts = {}) {
     const groups = [...numbers].sort((a, b) => a - b).map((n) => groupOf(repo, n, gh, mine.filter((s) => s.issue === n)));
     return { repo, groups, other: mine.filter((s) => s.issue === null) };
   });
-  return { now, load: opts.load ?? loadavg(), sessions, repos: byRepo, github, queue: queueOf(state), seats: seatCounts(sessions) };
+  return { now, load: opts.load ?? loadavg(), sessions, repos: byRepo, github, queue: queueOf(state), seats: opts.live ? seatCounts(sessions) : seatsLive(runs) };
 }
+
+/** The seats' live sessions as bin/seat counts them for its cap (liveCount). */
+const seatsLive = (runs) => Object.fromEntries(Object.entries(SEATS).map(([n, { cap }]) => [n, { live: liveCount(runs, Number(n)), cap }]));
 
 const seatCounts = (sessions) => Object.fromEntries(Object.entries(SEATS).map(([n, { cap }]) => [n, { live: sessions.filter((s) => s.live && s.seat === n).length, cap }]));
 
@@ -387,7 +413,7 @@ export function tabsOf(snap) {
 export function render(snap, { width = 120, tab = 0 } = {}) {
   const { sessions, queue, github, now } = snap;
   const count = (st) => sessions.filter((s) => s.state === st).length;
-  const seats = Object.entries(snap.seats).map(([n, s]) => `${n}:${s.live}/${s.cap}`).join(' ');
+  const seats = Object.entries(snap.seats).map(([n, s]) => `${n}:${Number.isFinite(s.live) ? s.live : '?'}/${s.cap}`).join(' ');
   const q = queue.lastSweep ? `${queue.queueFailed ? 'failed, last ok' : 'ok'} ${stamp(Date.parse(queue.lastSweep))}` : '?';
   const ghText = github.ok ? `gh ok ${age(now - github.at)} ago` : `gh failed (${github.error})`;
   const lines = [
@@ -400,17 +426,26 @@ export function render(snap, { width = 120, tab = 0 } = {}) {
   const t = tabs[tab] ?? tabs[0];
   for (const r of snap.repos) {
     if (t.kind === 'repo' && r.repo !== t.repo) continue;
-    const groups = r.groups.filter((g) => (t.kind === 'done' ? g.done : !g.done));
-    const own = t.kind === 'done' ? [] : r.other;
-    const gone = [...own, ...groups.flatMap((g) => g.sessions)].filter((s) => s.state === 'gone');
-    if (!groups.length && !own.length) continue;
+    const done = t.kind === 'done';
+    // The newest DONE_MAX closed issues; the rest, and on the other tabs the issues with nothing going on, fold into "N older".
+    const listed = done ? r.groups.filter((g) => g.done).sort((a, b) => b.number - a.number) : r.groups.filter((g) => !g.done && g.active);
+    const groups = listed.slice(0, done ? DONE_MAX : listed.length);
+    const older = done ? listed.length - groups.length : r.groups.filter((g) => !g.done && !g.active).length;
+    const own = done ? [] : r.other;
+    if (!groups.length && !own.length && !older) continue;
     lines.push(clip(r.repo, width));
+    const fold = (all, indent) => {
+      const gone = all.filter((s) => s.state === 'gone').length;
+      if (gone) lines.push(`${' '.repeat(indent)}${gone} gone`);
+    };
     for (const s of own.filter((x) => x.state !== 'gone')) lines.push(sessionRow(s, now, 2, width));
+    fold(own, 2);
     for (const g of groups) {
       lines.push(groupRow(g, width));
       for (const s of g.sessions.filter((x) => x.state !== 'gone')) lines.push(sessionRow(s, now, 4, width));
+      fold(g.sessions, 4);
     }
-    if (gone.length) lines.push(clip(`  ${gone.length} gone: ${gone.map((s) => s.name).join(', ')}`, width));
+    if (older) lines.push(`  ${older} older`);
   }
   lines.push(clip('keys: 1-9 or Tab switch tabs, q quits', width));
   return lines.join('\n');
