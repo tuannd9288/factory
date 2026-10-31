@@ -2,7 +2,7 @@
 // repo -> issue -> session, modelled on `piggery top`. It changes nothing and keeps no store: it reads the run folders'
 // stream-json logs and pid files, bin/seat's sessions.jsonl, the state folder's queue and *.failed files, the claim refs,
 // and gh porcelain (never `gh api`). A field the data does not give is shown as `?`. The accounts panel waits for #178.
-// `node bin/lib/top.mjs --once [--width N]` prints one frame; `factory top` wires it in once #177 lands.
+// It runs as `factory top [--once] [--width N]` (bin/lib/factory.mjs); `node bin/lib/top.mjs --once` prints one frame as well.
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir, loadavg } from 'node:os';

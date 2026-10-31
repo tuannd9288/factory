@@ -264,7 +264,36 @@ export function tableText(rows, { now = Date.now() } = {}) {
 
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
-       bin/factory store <account>   (on the Mac mini; reads the token from stdin)`;
+       bin/factory store <account>   (on the Mac mini; reads the token from stdin)
+       bin/factory top [--once] [--width N]`;
+
+/** `factory top` (#174): the read-only view of every session and repository (bin/lib/top.mjs). On the factory host it runs
+ * here; on the MacBook it runs the same command there by ssh, with a terminal (-t) for the live view only. Only `--once` and
+ * `--width N` (digits) are taken, checked before any ssh. */
+async function top(args, env) {
+  const live = !args.includes('--once');
+  const rest = args.filter((a) => a !== '--once');
+  const width = rest.length === 2 && rest[0] === '--width' && /^\d+$/.test(rest[1]);
+  if (args.filter((a) => a === '--once').length > 1 || (rest.length && !width)) {
+    console.error(USAGE);
+    return 2;
+  }
+  if (placeOf(env) === 'factory') {
+    try {
+      await (await import('./top.mjs')).main(args);
+      return 0;
+    } catch (e) {
+      console.error(`bin/factory: top: ${String(e.message).split('\n')[0]}`);
+      return 1;
+    }
+  }
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', ...(live ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory top${args.length ? ` ${args.join(' ')}` : ''}'`], { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: top: ssh did not run (${r.error.code ?? 'error'})`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
 
 /** `factory login <account>`: checks the name, runs `claude setup-token` on the terminal's own streams (so what it prints goes to
  * the Human's screen and is never captured), reads the token from a hidden prompt, then stores it: here on the Mac mini, else by
@@ -359,6 +388,7 @@ export async function main(argv, env = process.env) {
   const [cmd, ...rest] = argv;
   if (cmd === 'login') return login(rest, env);
   if (cmd === 'store') return store(rest, env);
+  if (cmd === 'top') return top(rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);
     return 2;
