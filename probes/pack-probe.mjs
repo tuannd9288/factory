@@ -1,6 +1,8 @@
 // The pack conformance probe: drives a pack's launcher (default: plain Claude Code behind direnv) and gh in a scratch
-// repository the factory has taken in, and prints PASS or FAIL for each item of probes/pack-contract.md,
-// and for one property of Claude Code the contract does not list (the quota windows in the stream).
+// repository the factory has taken in, and prints PASS or FAIL for each of its own items,
+// and for one property of Claude Code (the quota windows in the stream). The canary (bin/lib/canary.mjs) grades a new
+// Claude Code with this file's exported functions (parseSession, pickMarker, byRule), against probes/pack-contract.md;
+// the script itself runs by hand.
 //   node probes/pack-probe.mjs --repo owner/name [--root <factory root>] [--profiles <dir>] [--log-dir <dir>]
 //     [--claude "direnv exec . claude"] [--ledger bin/factory-ledger] [--max-turns 8] [--max-turns-pr 25] [--no-pr]
 //     [--poll-seconds 20] [--timeout-minutes 20] [--agent tuan9288-agent] [--env-prefix "direnv exec ."]
@@ -37,7 +39,7 @@ const DISALLOWED = ['Bash(gh pr merge:*)', 'Bash(scripts/live-verify:*)', 'Bash(
  * tool call with its result, the denials the result reports, the permission_denied events and the quota windows of each
  * rate_limit_event (null for an event without them). */
 export function parseSession(text) {
-  const session = { cwd: null, plugins: [], permissionMode: null, model: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, failed: null, text: '', loaded: null, rateLimits: [] };
+  const session = { cwd: null, plugins: [], permissionMode: null, model: null, claudeCodeVersion: null, sessionId: null, tools: [], denials: new Set(), deniedEvents: new Map(), subtype: null, failed: null, text: '', loaded: null, rateLimits: [] };
   const byId = new Map();
   for (const line of text.split('\n')) {
     let e;
@@ -47,7 +49,7 @@ export function parseSession(text) {
       continue;
     }
     if (e.type === 'system' && e.subtype === 'init') {
-      Object.assign(session, { cwd: e.cwd ?? null, permissionMode: e.permissionMode ?? null, model: e.model ?? null, sessionId: e.session_id ?? null, plugins: (e.plugins ?? []).map((p) => p.name) });
+      Object.assign(session, { cwd: e.cwd ?? null, permissionMode: e.permissionMode ?? null, model: e.model ?? null, claudeCodeVersion: e.claude_code_version ?? null, sessionId: e.session_id ?? null, plugins: (e.plugins ?? []).map((p) => p.name) });
       session.loaded = { servers: e.mcp_servers ?? [], tools: e.tools ?? [], plugins: e.plugins ?? [], skills: e.skills ?? [] };
     } else if (e.type === 'system' && e.subtype === 'permission_denied') {
       session.deniedEvents.set(e.tool_use_id, { type: e.decision_reason_type ?? null, message: e.message ?? e.decision_reason ?? '' });
@@ -106,13 +108,15 @@ const commandOf = (t) => (t.name === 'Bash' ? String(t.input.command ?? '') : ''
 /** Whether a tool call was denied by a deny rule, and the words that show it. Only the result's permission_denials
  * and the permission_denied events count: a call that "requires approval" is the mode refusing it, not a rule, and
  * a model's own words are no denial. */
-function byRule(session, tool, names) {
+export function byRule(session, tool, names) {
   const event = session.deniedEvents.get(tool.id);
   const said = `${tool.output ?? ''} ${event?.message ?? ''}`;
   if (!session.denials.has(tool.id)) return { ok: false, why: `not among the result's permission_denials: ${(tool.output ?? 'no result').trim().slice(0, 80)}` };
   if (/requires? approval/i.test(said)) return { ok: false, why: 'denied only because the call "requires approval", which a mode does, not a deny rule' };
   // Only the wording Claude Code emits for a rule counts; an event type alone, or any other text, is no rule.
-  if (!/Permission to use .* has been denied|denied by your permission settings/i.test(said)) return { ok: false, why: `a denial that names no rule: ${said.trim().slice(0, 80)}` };
+  // "Permission to use Bash with command … has been denied." and "Permission to read … has been denied." are the words of
+  // real 2.1.308 runs (issue-181/run-probe-after.jsonl:14, issue-111/run-reviewer.jsonl:65).
+  if (!/Permission to (use|read) .* has been denied|denied by your permission settings/i.test(said)) return { ok: false, why: `a denial that names no rule: ${said.trim().slice(0, 80)}` };
   // It must also name the call judged: a compound's other part (--no-verify) can be the one a rule denied.
   if (!names.test(said)) return { ok: false, why: `a denial that does not name this call (${names}): ${said.trim().slice(0, 80)}` };
   return { ok: true, why: `${event ? `${event.type}: ` : ''}${(event?.message || tool.output).trim().slice(0, 100)}` };
