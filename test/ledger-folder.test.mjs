@@ -75,16 +75,16 @@ test('an entry with no working directory is charged to no repository by folder, 
   }
 });
 
-test('with one profile per repository the costs are branchCosts of that profile, unchanged; extra folders add to it once', async () => {
-  const { repoCosts, branchCosts, costOf } = await ledger();
+test('repoCosts reads no folder but the extra ones: a profile passed as `own` adds nothing (#205)', async () => {
+  const { repoCosts, costOf } = await ledger();
   const one = costOf(FIXTURE.message.model, FIXTURE.message.usage);
   const own = profile([{ cwd: '/anywhere', gitBranch: 'a' }, { cwd: '/anywhere', gitBranch: 'b' }]);
-  const extra = profile([{ id: 'e1', cwd: '/work/app', gitBranch: 'a' }, { id: 'm0', cwd: '/work/app', gitBranch: 'a' }]);
+  const extra = profile([{ id: 'e1', cwd: '/work/app', gitBranch: 'a' }]);
   try {
-    assert.deepEqual([...repoCosts({ own: own.dir, extra: [], root: '/work', name: 'app' })], [...branchCosts(own.dir)]);
+    assert.equal(repoCosts({ own: own.dir, extra: [], root: '/work', name: 'app' }), null);
     const both = repoCosts({ own: own.dir, extra: [extra.dir], root: '/work', name: 'app' });
-    assert.ok(Math.abs(both.get('a').dollars - 2 * one) < 1e-9, 'own m0 + extra e1; extra m0 is the same message as own m0');
-    assert.ok(Math.abs(both.get('b').dollars - one) < 1e-9);
+    assert.ok(Math.abs(both.get('a').dollars - one) < 1e-9);
+    assert.equal(both.has('b'), false);
     assert.equal(repoCosts({ own: null, extra: [], root: '/work', name: 'app' }), null);
   } finally {
     own.cleanup();

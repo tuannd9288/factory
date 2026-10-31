@@ -49,6 +49,10 @@ process.exit(1);
 const FAKE_TOKEN = 'ghp_FAKEtoken0123456789';
 const REVIEWER_VALUE = 'zz-reviewer-value-not-entire';
 const OTHER_VALUE = 'zz-other-variable-value';
+const RUNNERS = { GATE_RUNNER: '["self-hosted","zz-main-label"]', GATE_PR_RUNNER: '["self-hosted","zz-pr-label"]', GATE_TRUSTED_RUNNER: '["self-hosted","zz-trusted-label"]' };
+/** The four variables the kit reads, as the factory wants them, with `over` laid over them (null: unset). */
+const gateVariables = (over = {}) =>
+  Object.entries({ ...RUNNERS, GATE_REVIEWER: REVIEWER_VALUE, ...over }).filter(([, value]) => value !== null).map(([name, value]) => ({ name, value }));
 const LABELS = ['settings', 'gate-block', 'verify', 'claude-md', 'size', 'kit-evidence'];
 const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
 
@@ -130,7 +134,7 @@ function state(head, over = {}) {
     invitations: [],
     rulesets: want.rulesets.map((r, i) => ({ ...r, id: 100 + i })),
     environment: { name: 'reviewer', deployment_branch_policy: BRANCH_POLICY, policies: [{ name: 'main', type: 'branch' }] },
-    variables: [{ name: 'GATE_REVIEWER', value: REVIEWER_VALUE }, { name: 'OTHER', value: OTHER_VALUE }],
+    variables: [...gateVariables(), { name: 'OTHER', value: OTHER_VALUE }],
     prs: [
       { number: 5, headRefName: 'factory/kit', mergeCommit: { oid: kitMerge }, mergedAt: '2026-10-01T00:00:00Z' },
       { number: 7, headRefName: 'topic', mergeCommit: { oid: head }, mergedAt: '2026-10-02T00:00:00Z' },
@@ -185,6 +189,52 @@ test('settings: red names each call left, and when the kit is not on the default
   assert.equal(r.code, 1, r.out);
   assert.equal(mark(r.lines.settings), 'RED');
   assert.match(r.lines.settings, /dev/);
+});
+
+test('settings: red names each gate variable that is unset, not a runs-on value, or breaks the runner rule; no value is printed (#210)', () => {
+  const cases = [
+    [{ GATE_RUNNER: null }, /GATE_RUNNER is not set/],
+    [{ GATE_PR_RUNNER: null }, /GATE_PR_RUNNER is not set/],
+    [{ GATE_TRUSTED_RUNNER: null }, /GATE_TRUSTED_RUNNER is not set/],
+    [{ GATE_REVIEWER: null }, /GATE_REVIEWER is not set/],
+    [{ GATE_RUNNER: 'zz-bare-label' }, /GATE_RUNNER is not a JSON runs-on value/],
+    [{ GATE_TRUSTED_RUNNER: RUNNERS.GATE_RUNNER }, /GATE_TRUSTED_RUNNER is self-hosted and shares a runner with GATE_RUNNER/],
+    [{ GATE_TRUSTED_RUNNER: '["self-hosted","zz-pr-label","x"]' }, /GATE_TRUSTED_RUNNER is self-hosted and shares a runner with GATE_PR_RUNNER/],
+  ];
+  for (const [over, reason] of cases) {
+    const r = doctor({ held: state(kitMerge, { variables: [...gateVariables(over), { name: 'OTHER', value: OTHER_VALUE }] }) });
+    assert.equal(r.code, 1, r.out);
+    assert.deepEqual(marks(r), { ...green, settings: 'RED' }, r.out);
+    assert.match(r.out.replace(/\n\s+/g, ' '), reason);
+    for (const secret of [REVIEWER_VALUE, OTHER_VALUE, 'zz-bare-label', 'zz-main-label', 'zz-pr-label', 'zz-trusted-label']) assert.ok(!r.out.includes(secret), `${secret} printed:\n${r.out}`);
+  }
+});
+
+test('settings: shared runners under entire are green, the #155 exception; the same runners under claude are red (#210)', () => {
+  const shared = '["self-hosted","zz-shared-label"]';
+  const runners = { GATE_RUNNER: shared, GATE_PR_RUNNER: shared, GATE_TRUSTED_RUNNER: shared };
+  const entire = wanted({ kitLanded: true, branch: 'main', reviewer: 'entire' }).rulesets.map((r, i) => ({ ...r, id: 100 + i }));
+  let r = doctor({ held: state(kitMerge, { rulesets: entire, variables: gateVariables({ ...runners, GATE_REVIEWER: 'entire' }) }) });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(mark(r.lines.settings), 'ok', r.out);
+  r = doctor({ held: state(kitMerge, { variables: gateVariables({ ...runners, GATE_REVIEWER: 'claude' }) }) });
+  assert.equal(mark(r.lines.settings), 'RED', r.out);
+  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_TRUSTED_RUNNER is self-hosted and shares a runner with GATE_RUNNER/);
+  assert.ok(!r.out.includes('zz-shared-label'), r.out);
+});
+
+test('settings: unset runners are red on a private repository only; an unset GATE_REVIEWER is red on both (#210)', () => {
+  const repo = (isPrivate) => ({ id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, private: isPrivate });
+  const unset = { GATE_RUNNER: null, GATE_PR_RUNNER: null, GATE_TRUSTED_RUNNER: null };
+  let r = doctor({ held: state(kitMerge, { repo: repo(false), variables: gateVariables(unset) }) });
+  assert.equal(r.code, 0, r.out);
+  r = doctor({ held: state(kitMerge, { repo: repo(true), variables: gateVariables(unset) }) });
+  assert.equal(mark(r.lines.settings), 'RED', r.out);
+  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_RUNNER is not set/);
+  r = doctor({ held: state(kitMerge, { repo: repo(false), variables: gateVariables({ ...unset, GATE_REVIEWER: null }) }) });
+  assert.equal(mark(r.lines.settings), 'RED', r.out);
+  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_REVIEWER is not set/);
+  assert.doesNotMatch(r.out.replace(/\n\s+/g, ' '), /GATE_RUNNER is not set/);
 });
 
 test('gate-block: red when the block is not .gate/gate-section.md byte for byte, or is gone', () => {
@@ -256,7 +306,7 @@ test('no variable value and no token reaches the output, green or red', () => {
   for (const [held, code] of [[state(kitMerge), 0], [state(kitMerge, { environment: null, kitLanded: false, prs: [] }), 1]]) {
     const r = doctor({ held });
     assert.equal(r.code, code, r.out);
-    for (const secret of [FAKE_TOKEN, REVIEWER_VALUE, OTHER_VALUE]) assert.ok(!r.out.includes(secret), `${secret} printed:\n${r.out}`);
+    for (const secret of [FAKE_TOKEN, REVIEWER_VALUE, OTHER_VALUE, 'zz-main-label', 'zz-pr-label', 'zz-trusted-label']) assert.ok(!r.out.includes(secret), `${secret} printed:\n${r.out}`);
   }
 });
 
