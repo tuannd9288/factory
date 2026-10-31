@@ -144,7 +144,7 @@ function main(argv) {
   }
   if (!['run', 'plist'].includes(command) || !repo) throw new Error('usage: claude-canary run|plist --repo owner/name [--probe <command>] [--daemon]');
   if (command === 'plist') {
-    const as = { label: 'com.tuanhub.factory.claude-canary', tool: 'bin/claude-canary', verb: 'run', log: 'claude-canary.log', interval: 21600, keep: ['CLAUDE_VERSIONS', 'CLAUDE_LAUNCHER', 'AGENT_PROFILES', 'FACTORY_ROOT'], tools: ['direnv'] };
+    const as = { label: 'io.github.tuannd9288.factory.claude-canary', tool: 'bin/claude-canary', verb: 'run', log: 'claude-canary.log', interval: 21600, keep: ['CLAUDE_VERSIONS', 'CLAUDE_LAUNCHER', 'AGENT_PROFILES', 'FACTORY_ROOT'], tools: ['direnv'] };
     return void process.stdout.write(plist(job([repo], process.env, daemon, as)));
   }
   return run({ repo, probe, env: process.env });

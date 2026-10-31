@@ -111,7 +111,7 @@ jobs:
           npm ci --ignore-scripts --prefix .gate/bin/reviewer --no-audit --no-fund || down "npm ci failed"
           bin="$PWD/.gate/bin/reviewer/node_modules/@anthropic-ai/claude-code-linux-x64"
           want=$(node -p "require('./.gate/bin/lib/reviewer.json').version")
-          got=$(PATH="$bin:$PATH" claude --version) || down "the installed claude does not run"
+          got=$("$bin/claude" --version) || down "the installed claude does not run"
           case "$got" in "$want "*) ;; *) down "the installed claude is '$got', not $want" ;; esac
           echo "$bin" >>"$GITHUB_PATH"
         working-directory: trusted

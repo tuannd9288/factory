@@ -40,7 +40,7 @@ test('plist prints a launchd job that sweeps the named repositories every minute
     const r = queue('plist', '--repo', 'o/app', '--repo', 'o/lib');
     assert.equal(r.status, 0, r.stdout + r.stderr);
     const job = parse(r.stdout, dir);
-    assert.equal(job.Label, 'com.tuanhub.factory.queue');
+    assert.equal(job.Label, 'io.github.tuannd9288.factory.queue');
     assert.deepEqual(job.ProgramArguments, [join(factory, 'bin/factory-queue'), 'sweep', '--repo', 'o/app', '--repo', 'o/lib']);
     assert.ok(existsSync(job.ProgramArguments[0]));
     assert.equal(job.WorkingDirectory, factory);

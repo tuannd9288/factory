@@ -4,7 +4,7 @@
 // changes a profile. The committed profile list below holds no account name: the factory repository is public, and an
 // account is an email local part. The account a profile is expected to have is in $FACTORY_STATE/accounts, local to a machine.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { accountsOf, quotaRows } from './quota.mjs';
@@ -15,8 +15,8 @@ const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
 
 const claude = (profile, role, env, login) => ({ profile, role, kind: 'claude', check: { cmd: 'claude', args: ['auth', 'status'], env }, login });
 
-/** The profiles of a place, from the committed list. leads: the repository folders that hold .gate/ and .envrc. */
-export function profilesOf(place, { home, agentProfiles, root }) {
+/** The profiles of a place, from the committed list. */
+export function profilesOf(place, { home, agentProfiles }) {
   if (place === 'macbook') {
     return [
       claude('macbook/claude', 'Colly', {}, 'claude auth login'),
@@ -27,13 +27,9 @@ export function profilesOf(place, { home, agentProfiles, root }) {
   }
   if (place === 'factory') {
     const seat2 = join(agentProfiles, 'seats/2/claude');
-    const leads = (existsSync(root) ? readdirSync(root).sort() : [])
-      .filter((n) => !n.startsWith('.') && existsSync(join(root, n, '.gate')) && existsSync(join(root, n, '.envrc')))
-      .map((n) => ({ profile: `factory/lead-${n}`, role: 'Lead', kind: 'claude', check: { cmd: 'direnv', args: ['exec', '.', 'claude', 'auth', 'status'], env: {}, cwd: join(root, n) }, login: leadLogin(n) }));
     return [
-      { profile: 'factory/seat-1', role: 'seat 1 (bin/seat)', kind: 'claude', tokenFile: join(agentProfiles, 'seats/1/oauth-token'), login: 'claude setup-token (on the MacBook), then omk-provider-key set CLAUDE_CODE_OAUTH_TOKEN, then copy it to ~/.agent-profiles/seats/1/oauth-token with mode 600 (#91)' },
+      { profile: 'factory/seat-1', role: 'seat 1 (bin/seat)', kind: 'claude', tokenFile: join(agentProfiles, 'seats/1/oauth-token'), login: `On a machine with a browser, run: claude setup-token (#91). Then ssh -t factory@${HOST} and paste this line:\nread -rs t; umask 077; f=~/.agent-profiles/seats/1/oauth-token; printf '%s' "$t" > "$f.new" && mv "$f.new" "$f"; unset t` },
       claude('factory/seat-2', 'seat 2 (bin/seat)', { CLAUDE_CONFIG_DIR: seat2 }, `ssh -t factory@${HOST}\nCLAUDE_CONFIG_DIR=~/.agent-profiles/seats/2/claude claude auth login`),
-      ...leads,
       { profile: 'factory/verifier', role: 'live verifier', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: { CODEX_HOME: join(agentProfiles, 'verifier/codex') } }, login: 'CODEX_HOME=~/.agent-profiles/verifier/codex codex login --device-auth' },
       { profile: 'factory/gh', role: 'agents gh', kind: 'gh', check: { cmd: 'gh', args: ['auth', 'status'], env: {} }, login: 'gh auth login --insecure-storage' },
     ];
@@ -43,8 +39,6 @@ export function profilesOf(place, { home, agentProfiles, root }) {
     { profile: 'piggery/codex', role: 'piggery teams', kind: 'codex', check: { cmd: 'pig', args: ['codex', 'login', 'status'], env: {} }, login: `ssh -t tuannguyen@${HOST}\npig codex login --device-auth` },
   ];
 }
-
-const leadLogin = (repo) => `cd ~/WORKSPACES/${repo} && direnv exec . claude auth login`;
 
 
 const timeoutMs = (env) => Number(env.FACTORY_AUTH_TIMEOUT_MS) || 15000;
@@ -90,7 +84,7 @@ function check(p, ctx) {
     const mode = (s.mode & 0o777).toString(8);
     return { loggedIn: true, account: null, plan: null, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, modified ${s.mtime.toISOString().slice(0, 10)}` };
   }
-  const r = call(p.check.cmd, p.check.args, { extra: p.check.env, cwd: p.check.cwd, env: ctx.env, timeout: ctx.timeout });
+  const r = call(p.check.cmd, p.check.args, { extra: p.check.env, env: ctx.env, timeout: ctx.timeout });
   if (r.error) return { loggedIn: null, account: null, plan: null, note: r.error };
   if (p.kind === 'codex') return { loggedIn: r.code === 0, account: null, plan: null, note: '' };
   const read = p.kind === 'gh' ? readGh(r.out) : readClaude(r.stdout);
@@ -121,7 +115,6 @@ export function contextOf(env = process.env) {
     home,
     state: env.FACTORY_STATE ?? join(home, '.local/state/factory'),
     agentProfiles: env.AGENT_PROFILES ?? join(home, '.agent-profiles'),
-    root: resolve(env.FACTORY_ROOT ?? join(home, 'WORKSPACES')),
     runs: resolve(env.FACTORY_RUNS ?? join(home, 'factory-runs')),
     timeout: timeoutMs(env),
   };
