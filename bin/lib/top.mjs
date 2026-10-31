@@ -176,6 +176,10 @@ const hm = (ms) => `${pad2(new Date(ms).getHours())}:${pad2(new Date(ms).getMinu
 /** Whether a session is listed in a frame: it is not gone, and it is live or last wrote on the local day that starts at `day`. */
 const isListed = (s, day) => s.state !== 'gone' && (s.live || s.lastAt >= day);
 
+/** When an issue is listed while open, with `busy` for a claim or an open pull request: `active` on All, where a session counts only
+ * if it is listed today; `recent` on a repository's tab, where #174's rule holds and a session of the last 24 hours counts. */
+const shownOf = (sessions, day, busy) => ({ active: busy || sessions.some((s) => isListed(s, day)), recent: busy || sessions.some((s) => s.state !== 'gone') });
+
 /** A time as local HH:MM, or MM-DD HH:MM when it is not on the day of now; ? for none. */
 export function local(ms, now) {
   if (typeof ms !== 'number' || Number.isNaN(ms)) return '?';
@@ -394,7 +398,7 @@ function groupOf(repo, number, gh, sessions, day) {
   // No GitHub data at all for this repository: nothing is filled in.
   if (!gh || gh.unknown) {
     return {
-      number, title: '?', done: false, active: sessions.some((s) => isListed(s, day)), team: null, step: '?', pr: null, unknown: true,
+      number, title: '?', done: false, ...shownOf(sessions, day, false), team: null, step: '?', pr: null, unknown: true,
       waiting: sessions.some((s) => s.live) ? 'the team' : '?', sessions,
     };
   }
@@ -418,8 +422,7 @@ function groupOf(repo, number, gh, sessions, day) {
   return {
     number, title: issue?.title ?? '?',
     done: closed,
-    // Shown on All while it has a session listed today (live, or last written today), a claim or an open pull request.
-    active: sessions.some((s) => isListed(s, day)) || Boolean(held) || Boolean(pr && !merged),
+    ...shownOf(sessions, day, Boolean(held) || Boolean(pr && !merged)),
     team: held ?? /^Team: (\S+)/m.exec(pr?.body ?? '')?.[1] ?? null,
     step, pr: pr ? { number: pr.number, title: pr.title, checks: Object.fromEntries(Object.entries(checks).map(([k, c]) => [k, MARK(c)])) } : null,
     waiting, sessions,
@@ -589,9 +592,10 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
     if (t.kind === 'repo' && r.repo !== t.repo) continue;
     const done = t.kind === 'done';
     // The newest DONE_MAX closed issues; the rest, and on the other tabs the issues with nothing going on, fold into "N older".
-    const listed = done ? r.groups.filter((g) => g.done).sort((a, b) => b.number - a.number) : r.groups.filter((g) => !g.done && g.active);
+    const shown = t.kind === 'repo' ? 'recent' : 'active';
+    const listed = done ? r.groups.filter((g) => g.done).sort((a, b) => b.number - a.number) : r.groups.filter((g) => !g.done && g[shown]);
     const groups = listed.slice(0, done ? DONE_MAX : listed.length);
-    const older = done ? listed.length - groups.length : r.groups.filter((g) => !g.done && !g.active).length;
+    const older = done ? listed.length - groups.length : r.groups.filter((g) => !g.done && !g[shown]).length;
     const own = done ? [] : r.other;
     if (!groups.length && !own.length && !older) continue;
     const st = r.ghStatus;
