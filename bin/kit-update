@@ -79,7 +79,8 @@ if [ "$open_pr" -eq 1 ]; then
   [ "$(lc "$login")" = "$(lc "$agent")" ] || refuse "opens the kit pull request as the agents' account ($agent), not as $login"
   slug=$(cd "$dest" && gh repo view --json nameWithOwner --jq .nameWithOwner) || refuse "could not read the repository's name from gh"
   rules=$(gh ruleset check main --repo "$slug") || refuse "could not read the rules on main of $slug"
-  grep -Eq '^- pull_request(:|$)' <<<"$rules" || refuse "main has no pull request rule: the Human runs bin/onboard-owner first"
+  grep -Eq '^- pull_request(:|$)' <<<"$rules" ||
+    refuse "main has no pull request rule: bin/onboard-owner runs first (Colly, on the Human's login)"
   # The node id (R_kg...), which gh repo view gives; the numeric id would take gh api.
   id=$(cd "$dest" && gh repo view --json id --jq .id) || refuse "could not read the repository's id from gh"
 else
