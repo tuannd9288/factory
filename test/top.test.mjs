@@ -493,6 +493,16 @@ test('the queue and the alerts come from the state folder files', async () => {
   assert.equal(queueOf(join(w.root, 'missing')).lastSweep, null);
 });
 
+test('the ledger\'s lastRecords is the one reader of "a session\'s last record", and Today counts a resumed session once', async () => {
+  const { lastRecords } = await import('../bin/lib/ledger.mjs');
+  const rec = (end, cost) => ({ session: 's1', role: 'worker', seat: 2, tag: 't', run: '/r', start: '2026-10-31T08:00:00Z', end, total_cost_usd: cost });
+  assert.deepEqual(lastRecords([rec('2026-10-31T10:00:00Z', 1), rec('2026-10-31T09:00:00Z', 0.5)]).map((r) => r.total_cost_usd), [1]);
+  const { todayOf } = await top();
+  const accounts = [{ letter: 'a', users: ['seat 2'] }];
+  const t = todayOf({ now: NOW, repos: [], github: { repos: {} }, records: [rec('2026-10-31T09:00:00Z', 0.5), rec('2026-10-31T10:00:00Z', 1)], accounts });
+  assert.deepEqual(t.cost, [['a', 1]]);
+});
+
 test('local times: HH:MM on the day of now, MM-DD HH:MM on another, ? for no time', async () => {
   const { local } = await top();
   assert.equal(local(Date.parse('2026-10-31T09:05:00Z'), NOW), '09:05');
