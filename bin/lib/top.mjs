@@ -1,18 +1,21 @@
 // `factory top` (#174): one terminal view of every session the factory runs and the state of every repository it works on,
 // repo -> issue -> session, modelled on `piggery top`. It changes nothing and keeps no store: it reads the run folders'
 // stream-json logs and pid files, bin/seat's sessions.jsonl, the state folder's queue and *.failed files, the claim refs,
-// and gh porcelain (never `gh api`). A field the data does not give is shown as `?`. The accounts panel waits for #178.
-// It runs as `factory top [--once] [--width N]` (bin/lib/factory.mjs); `node bin/lib/top.mjs --once` prints one frame as well.
+// and gh porcelain (never `gh api`). A field the data does not give is shown as `?`.
+// #286: what waits on the Human first, one block per team, the accounts (factory.mjs's list, the seats' quota) and Today.
+// It runs as `factory top [--once] [--width N] [--full]` (bin/lib/factory.mjs); `node bin/lib/top.mjs --once` prints one frame as well.
+// `c` (or --full) adds #174's engineering columns.
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { homedir, loadavg } from 'node:os';
+import { cpus, homedir, loadavg } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
 import { REQUIRED, clonesUnder, costOf, readSessions } from './ledger.mjs';
-import { windowsOf } from './quota.mjs';
+import { quotaRows, windowsOf } from './quota.mjs';
 import { PRESETS, SEATS, liveCount, resetPassed, runLive } from './seat.mjs';
+import { accountList, readAccounts } from './token.mjs';
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -21,6 +24,7 @@ const GH_MS = 60_000;
 const CALL_MS = 15_000;
 const WORKING_MS = 120_000;
 const GONE_MS = 24 * 3600_000;
+const LOGIN_MS = 60_000;
 const DONE_MAX = 40;
 const ROLE_ORDER = ['lead', 'worker', 'reviewer', 'researcher'];
 
@@ -100,16 +104,22 @@ function originIn(cwd) {
   }
 }
 
-/** The processes as { pid, command }, from ps; [] when ps cannot run. */
+/** ps's elapsed time ([[dd-]hh:]mm:ss) in milliseconds; null for anything else. */
+export function etimeMs(text) {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(text ?? '');
+  return m ? ((Number(m[1] ?? 0) * 24 + Number(m[2] ?? 0)) * 3600 + Number(m[3]) * 60 + Number(m[4])) * 1000 : null;
+}
+
+/** The processes as { pid, ageMs, command }, from ps; [] when ps cannot run. */
 function psList() {
   for (const ps of ['/bin/ps', '/usr/bin/ps']) {
     if (!existsSync(ps)) continue;
     try {
-      return execFileSync(ps, ['-axo', 'pid=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
+      return execFileSync(ps, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
         .split('\n')
         .flatMap((l) => {
-          const m = /^\s*(\d+)\s+(.*)$/.exec(l);
-          return m ? [{ pid: Number(m[1]), command: m[2] }] : [];
+          const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
+          return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
         });
     } catch {
       return [];
@@ -154,20 +164,53 @@ function stateOf(p, { live, ageMs, record, now }) {
   const w = p.rate;
   const resets = w ? (w[w.type]?.resetsAt ?? w.resetsAt) : null;
   if (p.isError === true && ((w?.rejected && resets != null && !resetPassed(resets, now)) || p.apiStatus === 429)) {
-    const window = w?.type === 'seven_day' ? '7d' : '5h';
-    return { state: 'stopped', stopped: `${window} limit, resets ${resets != null ? `${hhmm(resets * 1000)}Z` : '?'}` };
+    return { state: 'stopped', until: resets != null ? resets * 1000 : null };
   }
   return ageMs > GONE_MS ? { state: 'gone' } : { state };
 }
 
-const hhmm = (ms) => new Date(ms).toISOString().slice(11, 16);
-const stamp = (ms) => `${new Date(ms).toISOString().slice(0, 16).replace('T', ' ')}Z`;
+const pad2 = (n) => String(n).padStart(2, '0');
+const startOfDay = (ms) => new Date(ms).setHours(0, 0, 0, 0);
+const hm = (ms) => `${pad2(new Date(ms).getHours())}:${pad2(new Date(ms).getMinutes())}`;
 
-function shape(p, { record, role, name, issue, folder, seat, live, mtime, start, cwd, repo, branch, harness, now }) {
+/** A time as local HH:MM, or MM-DD HH:MM when it is not on the day of now; ? for none. */
+export function local(ms, now) {
+  if (typeof ms !== 'number' || Number.isNaN(ms)) return '?';
+  const d = new Date(ms);
+  return startOfDay(ms) === startOfDay(now) ? hm(ms) : `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${hm(ms)}`;
+}
+
+// The Lead's state from its newest hook event (packs/pstack/bin/transcript-copy.mjs writes state.json): Claude Code's Notification
+// types and the hooks the launcher sets. It is data, to be adjusted from what real Leads send; an event it does not name leaves the
+// state the Lead's log gives.
+const LEAD_STATES = {
+  'Notification:permission_prompt': 'waiting',
+  'Notification:elicitation_dialog': 'waiting',
+  'Notification:idle_prompt': 'idle',
+  Stop: 'idle',
+  SessionStart: 'idle',
+  UserPromptSubmit: 'working',
+};
+
+/** The Lead's state from state.json's event and its process: { state, stateAt, waitNote? }, or null to leave it to the log. An event
+ * older than the process belongs to an earlier session. A process that carries the new SessionStart hook, is over a minute old and
+ * has run none of its hooks waits at the login or the folder trust. That is an inference: whether SessionStart fires only after the
+ * trust dialog has not been seen yet; it is seen at zalo-gateway's first Lead start. A Lead started before the hook existed never
+ * gets this line. */
+function leadStateOf({ event, command, ageMs, now }) {
+  const at = event ? Date.parse(event.at) : NaN;
+  if (Number.isFinite(at) && (ageMs == null || at >= now - ageMs)) {
+    const state = LEAD_STATES[event.type ? `${event.event}:${event.type}` : event.event];
+    return state ? { state, stateAt: at } : null;
+  }
+  return /"SessionStart"/.test(command) && ageMs > LOGIN_MS ? { state: 'waiting', waitNote: 'login or folder trust?' } : null;
+}
+
+function shape(p, { record, role, name, issue, folder, seat, live, mtime, start, cwd, repo, branch, harness, now, override = null, pane = null }) {
   const ageMs = now - mtime;
   return {
-    name, role, issue, folder, repo, seat, harness, live,
-    ...stateOf(p, { live, ageMs, record, now }),
+    name, role, issue, folder, repo, seat, harness, live, pane,
+    ...(override ?? stateOf(p, { live, ageMs, record, now })),
     model: p.model ?? record?.model?.split(',')[0] ?? null,
     effort: PRESETS[role]?.effort ?? (role === 'lead' ? 'high' : null),
     ctx: p.ctx, turns: p.turns ?? num(record?.turns), tokensIn: p.tokensIn, tokensOut: p.tokensOut,
@@ -212,7 +255,7 @@ export function gatherSessions({ runs, state, now, clones = new Map(), live = ru
       const isLive = live(join(dir, `run-${tag}.pid`));
       const cwd = p.cwd;
       out.push(shape(p, {
-        record, role, name: `${issue ?? folder}-${tag}`, issue: issue ? Number(issue) : null, folder, seat, live: isLive,
+        record, role, name: readText(join(dir, `run-${tag}.name`)).trim() || `${issue ?? folder}-${tag}`, issue: issue ? Number(issue) : null, folder, seat, live: isLive,
         mtime: st.mtimeMs, start: record?.start ? Date.parse(record.start) : st.birthtimeMs, cwd,
         repo: record?.repo ?? (cwd ? originCached(cwd) : null) ?? repoOfCwd(cwd, clones), branch: record?.branch ?? (isLive ? branchOf(cwd) : null), harness: 'claude -p', now,
       }));
@@ -221,7 +264,8 @@ export function gatherSessions({ runs, state, now, clones = new Map(), live = ru
   for (const proc of processes()) {
     const m = /(?:^|\s)--name\s+(\S+)-lead(?:\s|$)/.exec(proc.command);
     if (!m || !/\bclaude\b/.test(proc.command)) continue;
-    const dir = join(runs, `${m[1]}-lead`, 'transcripts');
+    const leadDir = join(runs, `${m[1]}-lead`);
+    const dir = join(leadDir, 'transcripts');
     let newest = null;
     for (const n of existsSync(dir) ? readdirSync(dir).filter((x) => x.endsWith('.jsonl')) : []) {
       const s = statSync(join(dir, n));
@@ -229,9 +273,16 @@ export function gatherSessions({ runs, state, now, clones = new Map(), live = ru
     }
     const repo = [...clones.keys()].find((r) => r.split('/')[1] === m[1]) ?? null;
     const cwd = repo ? clones.get(repo) : null;
+    let event = null;
+    try {
+      event = JSON.parse(readText(join(leadDir, 'state.json')));
+    } catch {
+      // no state yet: the log gives the state
+    }
     out.push(shape(newest ? parseLog(readText(newest.file)) : parseLog(''), {
-      record: null, role: 'lead', name: `${m[1]}-lead`, issue: null, folder: null, seat: null, live: true,
+      record: null, role: 'lead', name: readText(join(leadDir, 'name')).trim() || `${m[1]}-lead`, issue: null, folder: null, seat: null, live: true,
       mtime: newest?.mtimeMs ?? now, start: null, cwd, repo, branch: branchOf(cwd), harness: 'claude', now,
+      override: leadStateOf({ event, command: proc.command, ageMs: proc.ageMs, now }), pane: readText(join(leadDir, 'pane')).trim() || null,
     }));
   }
   // One run folder is one issue, and one issue sits under one repository: a run with none takes the one its folder's other runs have.
@@ -367,7 +418,7 @@ function groupOf(repo, number, gh, sessions) {
     // Shown on All while it has a live session, a claim, an open pull request or a session that ended in the last day.
     active: sessions.some((s) => s.state !== 'gone') || Boolean(held) || Boolean(pr && !merged),
     team: held ?? /^Team: (\S+)/m.exec(pr?.body ?? '')?.[1] ?? null,
-    step, pr: pr ? { number: pr.number, checks: Object.fromEntries(Object.entries(checks).map(([k, c]) => [k, MARK(c)])) } : null,
+    step, pr: pr ? { number: pr.number, title: pr.title, checks: Object.fromEntries(Object.entries(checks).map(([k, c]) => [k, MARK(c)])) } : null,
     waiting, sessions,
   };
 }
@@ -394,13 +445,70 @@ export async function snapshot(opts = {}) {
     const groups = [...numbers].sort((a, b) => a - b).map((n) => groupOf(repo, n, gh, mine.filter((s) => s.issue === n)));
     return { repo, groups, other: mine.filter((s) => s.issue === null), ghStatus: gh?.failedAt ? { failedAt: gh.failedAt, goodAt: gh.goodAt } : null };
   });
-  return { now, load: opts.load ?? loadavg(), sessions, repos: byRepo, github, queue: queueOf(state), seats: opts.live ? seatCounts(sessions) : seatsLive(runs) };
+  const agentProfiles = opts.agentProfiles ?? process.env.AGENT_PROFILES ?? join(home, '.agent-profiles');
+  const accounts = accountRows({ state, runs, agentProfiles });
+  return {
+    now, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), accounts,
+    seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: readSessions(state), accounts }),
+  };
 }
 
 /** The seats' live sessions as bin/seat counts them (liveCount). */
 const seatsLive = (runs) => Object.fromEntries(Object.keys(SEATS).map((n) => [n, { live: liveCount(runs, Number(n)) }]));
 
 const seatCounts = (sessions) => Object.fromEntries(Object.keys(SEATS).map((n) => [n, { live: sessions.filter((s) => s.live && s.seat === n).length }]));
+
+/** The lettered accounts (token.mjs's accountList, which `bin/factory` lists too) with the quota of the seats that use them, from Claude Code's own report
+ * (quotaRows), and who uses each: `seat N` for a seat row of the accounts file, `<repo> Lead` for a `lead-<repo>` row. */
+function accountRows({ state, runs, agentProfiles }) {
+  const rows = readAccounts(state);
+  let quota = [];
+  try {
+    quota = quotaRows({ runs });
+  } catch {
+    // no quota to show: every window is ?
+  }
+  return accountList({ state, agentProfiles }).map(({ name, letter }) => {
+    const profiles = Object.keys(rows).filter((p) => rows[p] === name).sort();
+    const q = quota.filter((x) => x.seat && x.asOf && rows[`factory/seat-${x.seat}`] === name).sort((a, b) => b.asOf - a.asOf)[0];
+    const users = [
+      ...profiles.flatMap((p) => (/^factory\/seat-\d$/.test(p) ? [p.replace('factory/seat-', 'seat ')] : [])),
+      ...profiles.flatMap((p) => (/^factory\/lead-.+/.test(p) ? [`${p.slice('factory/lead-'.length)} Lead`] : [])),
+    ];
+    return { letter, name, five_hour: q?.windows?.five_hour ?? null, seven_day: q?.windows?.seven_day ?? null, users };
+  });
+}
+
+const HUMAN_LABELS = new Set(['tier-3', 'needs-human']);
+
+/** Today (the local day of now): the pull requests merged, the cost of the sessions.jsonl records that ended today for each account
+ * letter (a Lead's cost is in no record), and the time pull requests waited on the Human, clipped to today. A pull request waited
+ * from the newest finish of its required checks other than `tier` until it merged, or until now while it waits. */
+export function todayOf({ now, repos, github, records, accounts }) {
+  const day = startOfDay(now);
+  let merged = 0;
+  let waitedMs = 0;
+  for (const r of repos) {
+    const gh = github.repos[r.repo];
+    for (const pr of gh && !gh.unknown ? gh.prs : []) {
+      if (pr.mergedAt && Date.parse(pr.mergedAt) >= day) merged += 1;
+      const open = pr.state === 'OPEN';
+      const human = open ? r.groups.some((g) => g.pr?.number === pr.number && g.waiting === 'the Human') : Boolean(pr.mergedAt) && (pr.labels ?? []).some((l) => HUMAN_LABELS.has(l.name));
+      const finished = gh.required.filter((n) => n !== 'tier').flatMap((n) => (pr.statusCheckRollup ?? []).filter((c) => c.name === n).map((c) => Date.parse(c.completedAt))).filter(Number.isFinite);
+      if (!human || !finished.length) continue;
+      waitedMs += Math.max(0, Math.min(now, open ? now : Date.parse(pr.mergedAt)) - Math.max(day, ...finished));
+    }
+  }
+  const last = new Map();
+  for (const x of [...records].sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(x.session ?? `${x.run}#${x.tag}`, x);
+  const cost = new Map();
+  for (const x of last.values()) {
+    if (!(Date.parse(x.end) >= day) || typeof x.total_cost_usd !== 'number') continue;
+    const letter = accounts.find((a) => a.users.includes(`seat ${x.seat}`))?.letter ?? '?';
+    cost.set(letter, (cost.get(letter) ?? 0) + x.total_cost_usd);
+  }
+  return { merged, cost: [...cost].sort(([a], [b]) => a.localeCompare(b)).map(([letter, usd]) => [letter, Math.round(usd * 100) / 100]), waitedMs };
+}
 
 /** A span as 45s, 12m, 3h05 or 5d; a negative one (a log written after the snapshot's clock) is 0s; not a number is ?. */
 export const age = (ms) => {
@@ -418,17 +526,24 @@ const pad = (s, n) => clip(String(s), n).padEnd(n);
 
 // COST is the session's total across resumes (the last result's total_cost_usd), while TOKENS and TURNS count this log's
 // rounds only, so a resumed session's row mixes two spans; a live `~$` estimate counts this log alone.
-const COLS = [['NAME', 16], ['ROLE', 10], ['STATE', 26], ['HARNESS', 9], ['MODEL', 18], ['SEAT', 5], ['CTX', 8], ['TURNS', 6], ['TOKENS ↓/↑', 14], ['COST', 8], ['AGE', 7], ['SINCE', 7]];
+// The columns of a session row. The first five are always shown; the others, #174's engineering columns, with `c` or --full.
+const COLS = [['NAME', 16], ['ROLE', 10], ['STATE', 40], ['FOR', 12], ['COST', 8]];
+const FULL_COLS = [['HARNESS', 9], ['MODEL', 18], ['SEAT', 5], ['CTX', 8], ['TURNS', 6], ['TOKENS ↓/↑', 14]];
 const tail = (cwd) => (cwd ? cwd.split(sep).filter(Boolean).slice(-2).join('/') : '?');
+const header = (full) => [...COLS, ...(full ? FULL_COLS : [])].map(([h, w]) => h.padEnd(w)).join(' ') + (full ? ' CWD BRANCH' : '');
 
-function sessionRow(s, now, indent, width) {
+/** A session's state in plain words. */
+const stateText = (s, now) => (s.state === 'waiting' ? `waiting for you${s.waitNote ? `: ${s.waitNote}` : ''}` : s.state === 'stopped' ? `out of quota until ${local(s.until, now)}` : s.state);
+
+function sessionRow(s, now, indent, width, full) {
   const model = s.model ? `${s.model.replace(/^claude-/, '')} ${s.effort ?? '?'}` : '?';
   const cost = s.cost !== null ? `$${s.cost.toFixed(2)}` : s.estCost !== null && s.estCost !== undefined ? `~$${s.estCost.toFixed(2)}` : '?';
-  const cells = [
-    `${' '.repeat(indent)}${s.name}`, s.role, s.stopped ? `stopped ${s.stopped}` : s.state, s.harness, model, s.seat ?? '?', kilo(s.ctx), s.turns ?? '?',
-    s.tokensIn === null ? '?' : `${kilo(s.tokensIn)}/${kilo(s.tokensOut)}`, cost, s.startedAt ? age(now - s.startedAt) : '?', age(now - s.lastAt),
-  ];
-  return clip(`${cells.map((c, i) => pad(c, COLS[i][1])).join(' ')} ${tail(s.cwd)} ${s.branch ?? '?'}`, width);
+  // A Lead is shown since its newest hook event; any other session by how long it has run (or ran).
+  const span = s.role === 'lead' ? (s.stateAt ? `since ${local(s.stateAt, now)}` : '?') : s.startedAt ? age((s.live ? now : s.lastAt) - s.startedAt) : '?';
+  const cells = [`${' '.repeat(indent)}${s.name}`, s.role === 'lead' ? 'Lead' : s.role, stateText(s, now), span, cost];
+  const more = full ? [s.harness, model, s.seat ?? '?', kilo(s.ctx), s.turns ?? '?', s.tokensIn === null ? '?' : `${kilo(s.tokensIn)}/${kilo(s.tokensOut)}`] : [];
+  const cols = [...COLS, ...(full ? FULL_COLS : [])];
+  return clip([...cells, ...more].map((c, i) => pad(c, cols[i][1])).join(' ').trimEnd() + (full ? ` ${tail(s.cwd)} ${s.branch ?? '?'}` : ''), width);
 }
 
 function groupRow(g, width) {
@@ -447,19 +562,27 @@ export function tabsOf(snap) {
 }
 
 /** One frame as text, no colour, each line at most width characters. tab indexes tabsOf(snap). */
-export function render(snap, { width = 120, tab = 0, rows = null } = {}) {
+export function render(snap, { width = 120, tab = 0, rows = null, full = false } = {}) {
   const { sessions, queue, github, now } = snap;
+  const day = startOfDay(now);
   const count = (st) => sessions.filter((s) => s.state === st).length;
-  const seats = Object.entries(snap.seats).map(([n, s]) => `${n}:${Number.isFinite(s.live) ? s.live : '?'}`).join(' ');
-  const q = queue.lastSweep ? `${queue.queueFailed ? 'failed, last ok' : 'ok'} ${stamp(Date.parse(queue.lastSweep))}` : '?';
+  const q = queue.lastSweep ? `queue ${queue.queueFailed ? 'failed, last ok' : 'ok'} ${local(Date.parse(queue.lastSweep), now)}` : 'queue ?';
   const ghText = github.ok ? `gh ok ${age(now - github.at)} ago` : `gh failed (${github.error})`;
-  const lines = [
-    clip(`factory top  load ${snap.load.map((x) => x.toFixed(2)).join(' ')}  ${count('working')} working ${count('idle')} idle ${count('stopped')} stopped  seats ${seats}  queue ${q}  alerts ${queue.failed.length}  ${ghText}`, width),
-  ];
   const tabs = tabsOf(snap);
-  lines.push(clip(tabs.map((t, i) => `${i === tab ? '▸' : ''}[${i + 1} ${t.label}]`).join(' '), width));
-  lines.push(clip('accounts: not shown yet; it waits for #178\'s accounts file', width));
-  lines.push(clip(COLS.map(([h, w]) => h.padEnd(w)).join(' ') + ' CWD BRANCH', width));
+  const lines = [
+    clip(`Mac mini  load ${snap.load[0].toFixed(1)} of ${snap.cores} cores  ·  ${count('working')} working · ${count('idle')} idle · ${count('waiting')} waiting for you  ·  ${hm(now)}  ·  ${q}  ·  alerts ${queue.failed.length}  ·  ${ghText}`, width),
+    clip(tabs.map((t, i) => `${i === tab ? '▸' : ''}[${i + 1} ${t.label}]`).join(' '), width),
+  ];
+  // What waits on the Human, one line each: what he does, and where.
+  const item = (verb, text) => clip(`  ${verb.padEnd(7)}  ${text}`, width);
+  const waits = [
+    ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => item('approve', `${r.repo}#${g.pr.number} ${g.pr.title}  https://github.com/${r.repo}/pull/${g.pr.number}`))),
+    ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => item('answer', `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead)  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`)),
+    ...queue.failed.map((f) => item('alert', `${f.file}  ${f.text}`)),
+  ];
+  lines.push(...(waits.length ? ['Waiting on you', ...waits] : ['Nothing waits on you']));
+  const top = lines.length;
+  if (full) lines.push(clip(header(true), width));
   const t = tabs[tab] ?? tabs[0];
   for (const r of snap.repos) {
     if (t.kind === 'repo' && r.repo !== t.repo) continue;
@@ -471,30 +594,38 @@ export function render(snap, { width = 120, tab = 0, rows = null } = {}) {
     const own = done ? [] : r.other;
     if (!groups.length && !own.length && !older) continue;
     const st = r.ghStatus;
-    lines.push(clip(st ? `${r.repo}  gh failed ${hhmm(st.failedAt)}, ${st.goodAt ? `showing ${hhmm(st.goodAt)}` : 'nothing read yet'}` : r.repo, width));
+    lines.push(clip(st ? `${r.repo}  gh failed ${local(st.failedAt, now)}, ${st.goodAt ? `showing ${local(st.goodAt, now)}` : 'nothing read yet'}` : r.repo, width));
+    // A session that is live or last wrote today is listed; the others fold into one line.
+    const listedNow = (all) => all.filter((x) => x.state !== 'gone' && (x.live || x.lastAt >= day));
     const fold = (all, indent) => {
-      const gone = all.filter((s) => s.state === 'gone').length;
-      if (gone) lines.push(`${' '.repeat(indent)}${gone} gone`);
+      const n = all.length - listedNow(all).length;
+      if (n) lines.push(`${' '.repeat(indent)}${n} ended before today`);
     };
-    for (const s of own.filter((x) => x.state !== 'gone')) lines.push(sessionRow(s, now, 2, width));
+    for (const s of listedNow(own)) lines.push(sessionRow(s, now, 2, width, full));
     fold(own, 2);
     for (const g of groups) {
       lines.push(groupRow(g, width));
-      for (const s of g.sessions.filter((x) => x.state !== 'gone')) lines.push(sessionRow(s, now, 4, width));
+      for (const s of listedNow(g.sessions)) lines.push(sessionRow(s, now, 4, width, full));
       fold(g.sessions, 4);
     }
     if (older) lines.push(`  ${older} older`);
   }
-  // With the terminal's rows, the header, tabs, accounts line and column header stay and the tree is cut to fit, the last row
-  // saying how much was left out; without them (--once) the whole frame is printed.
-  const fixed = 4;
-  if (rows && lines.length + 1 > rows) {
-    const room = Math.max(0, rows - fixed - 1);
-    const left = lines.length - fixed - room;
-    return [...lines.slice(0, fixed + room), clip(`… ${left} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, q quits`, width)].map(clean).join('\n');
+  const tree = lines.splice(top);
+  const win = (label, w) => (w ? `${label} ${Math.round(w.use * 1000) / 10}%${w.resetsAt == null ? '' : resetPassed(w.resetsAt, now) ? ' (reset since)' : ` resets ${local(w.resetsAt * 1000, now)}`}` : `${label} ?`);
+  const nameW = Math.max(0, ...snap.accounts.map((a) => a.name.length));
+  const { merged, cost, waitedMs } = snap.today;
+  const bottom = [
+    ...(snap.accounts.length ? ['Accounts', ...snap.accounts.map((a) => clip(`  ${a.letter}  ${a.name.padEnd(nameW)}  ${win('5h', a.five_hour)} · ${win('7d', a.seven_day)} · ${a.users.join(', ') || 'no row'}`, width))] : []),
+    clip(`Today  ${merged} pull request${merged === 1 ? '' : 's'} merged · workers and reviewers cost ${cost.length ? cost.map(([letter, usd]) => `${letter} $${usd.toFixed(2)}`).join(', ') : 'nothing yet'} · waited on you ${age(waitedMs)}`, width),
+    'keys: 1-9 or Tab switch tabs, c full columns, q quits',
+  ];
+  // With the terminal's rows, everything but the team blocks stays and the blocks are cut to fit, a row saying how much was left
+  // out; without them (--once) the whole frame is printed.
+  const room = rows ? rows - lines.length - bottom.length - 1 : tree.length;
+  if (rows && tree.length > room) {
+    return [...lines, ...tree.slice(0, Math.max(0, room)), clip(`… ${tree.length - Math.max(0, room)} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, q quits`, width), ...bottom].map(clean).join('\n');
   }
-  lines.push(clip('keys: 1-9 or Tab switch tabs, q quits', width));
-  return lines.map(clean).join('\n');
+  return [...lines, ...tree, ...bottom].map(clean).join('\n');
 }
 
 /** A string from a log, a folder or GitHub, less its control characters, so none can reach the terminal as an escape sequence. */
@@ -505,10 +636,11 @@ async function loop(opts) {
   const cache = {};
   let snap = null;
   let tab = 0;
+  let full = Boolean(opts.full);
   let busy = false;
   const draw = () => {
     if (!snap) return;
-    const text = render(snap, { width: out.columns ?? 120, tab, rows: out.rows ?? null }).split('\n').map((l) => `${l}\x1b[K`).join('\n');
+    const text = render(snap, { width: out.columns ?? 120, tab, rows: out.rows ?? null, full }).split('\n').map((l) => `${l}\x1b[K`).join('\n');
     out.write(`\x1b[H${text}\x1b[J`);
   };
   const tick = async () => {
@@ -541,7 +673,8 @@ async function loop(opts) {
   process.stdin.on('data', (key) => {
     if (key === 'q' || key === '\x03') return process.exit(0);
     const count = snap ? tabsOf(snap).length : 1;
-    if (key === '\t') tab = (tab + 1) % count;
+    if (key === 'c') full = !full;
+    else if (key === '\t') tab = (tab + 1) % count;
     else if (/^[1-9]$/.test(key) && Number(key) <= count) tab = Number(key) - 1;
     draw();
   });
@@ -552,11 +685,11 @@ export async function main(argv) {
   const width = argv.includes('--width') ? Number(argv[argv.indexOf('--width') + 1]) : null;
   if (argv.includes('--once')) {
     const snap = await snapshot({});
-    process.stdout.write(`${render(snap, { width: width ?? process.stdout.columns ?? 200 })}\n`);
+    process.stdout.write(`${render(snap, { width: width ?? process.stdout.columns ?? 200, full: argv.includes('--full') })}\n`);
     return;
   }
   if (!process.stdin.isTTY) throw new Error('needs a terminal; use --once for one frame');
-  await loop({});
+  await loop({ full: argv.includes('--full') });
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
