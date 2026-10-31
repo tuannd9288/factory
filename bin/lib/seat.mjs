@@ -6,6 +6,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PluginError, installPlugins } from './plugins.mjs';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. */
@@ -33,9 +34,12 @@ export const ALERTS_SETTINGS = JSON.stringify({
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
 export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
+// The copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185): only the Lead reads its own, so every seat role is
+// denied them. The Lead's own deny list takes secretsRead alone.
+export const leadTranscripts = 'Read(~/factory-runs/*-lead/transcripts/**)';
 const denyOf = (home, web) => [
   'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
-  'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead,
+  'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead, leadTranscripts,
 ];
 
 // --json-schema adds the StructuredOutput tool to the session, so each allow list admits it (claude-reviewer.mjs).
@@ -381,6 +385,13 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   // The researcher's git clones under its run folder, and only there (bin/research-git).
   if (o.role === 'researcher') child.FACTORY_RESEARCH_CLONES = join(run, 'clones');
   mkdirSync(child.GH_CONFIG_DIR, { recursive: true });
+  // The plugin cache is outside every profile, since the deny list hides the profiles (#185); whatever the caller had is replaced.
+  try {
+    child.CLAUDE_CODE_PLUGIN_CACHE_DIR = installPlugins({ work, config: child.CLAUDE_CONFIG_DIR, home, profiles, env });
+  } catch (e) {
+    if (e instanceof PluginError) throw new Refused(`plugins: ${e.message}`);
+    throw e;
+  }
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, seat, tokenPath });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),

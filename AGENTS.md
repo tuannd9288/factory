@@ -456,13 +456,32 @@ factory's own repository included. Known limit: the token file sits on disk. Cla
 1's deny rule covers the `Read` tool only (#183 puts their commands in a sandbox). So the researcher, which reads
 untrusted pages and can send them out, never runs on seat 1.
 
+What a session may read under a profile is nothing: the deny list holds `Read(~/.agent-profiles/**)` whole (#185). Claude
+Code caches a plugin under the profile's `CLAUDE_CONFIG_DIR`, so the cache is moved out: each profile has its own plugin
+root, `~/.local/share/factory/plugins/<path of the profile's config dir under ~/.agent-profiles>`, mode 700, which
+`bin/seat` and `packs/pstack/bin/lead` set as `CLAUDE_CODE_PLUGIN_CACHE_DIR`. Both install the work folder's enabled
+plugins into it before the session (`bin/lib/plugins.mjs`), through a throwaway config folder of their own under
+`~/.local/share/factory/plugin-install/`, so no profile's folder is touched. The marketplace comes only from the
+factory's own pin, `packs/pstack/settings.json` of the checkout that runs, never from the work folder, which may be a
+candidate branch and would otherwise re-point the root every later session on the profile shares. The work folder decides
+only whether to install: its `.claude/settings.json` must enable the pin's `pstack@<name>` and no other plugin, and declare
+no marketplace but the pin, with the pin's own source; anything else (an older pin included: take the kit update), a
+name that is not plain letters, digits, dot, dash and underscore, stops the start before any folder is made or any `claude`
+call is run, and so does a failed install. A session reads its own earlier transcripts from copies outside every profile: a
+seat's `run-<tag>.jsonl` in its run folder, and a Lead's `~/factory-runs/<repo>-lead/transcripts/`, which a Stop and
+SessionEnd hook of the launcher (`packs/pstack/bin/transcript-copy.mjs`) fills with the one transcript its input names.
+The hook runs it with the `node` that `PATH` names when `lead` starts (`/opt/homebrew/bin/node`, a link `brew upgrade`
+keeps, not its Cellar path), and `lead` refuses to start with none. Only the Lead reads those copies: every seat role is
+denied `Read(~/factory-runs/*-lead/transcripts/**)`.
+
 A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
 own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
 chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
 The Human starts a repository's pstack Lead, an interactive session, as `factory` with
 `~/WORKSPACES/packs/pstack/bin/lead <repo>`, and resumes it with `--continue` (#163); `--dry-run` prints the folder,
-the plugin plan and the command and runs nothing. It runs the repository's `.gate/bin/setup` first, installs the
+the plugin plan, the plugin root, the transcript hook and the command, and installs and starts nothing; it runs
+`direnv exec . printenv CLAUDE_CONFIG_DIR` to name the root, and exits 1 when that gives no path (#185). It runs the repository's `.gate/bin/setup` first, installs the
 plugins the repository's own settings enable with `--scope local`, so the committed pin stays byte for byte, and never
 adds a pin; its role text is the pack's `lead.md`. It never logs in: on the first run the Human logs in to the
 repository's profile and trusts the folder.
@@ -505,9 +524,10 @@ request per repository; attack 23 checks that two pins share one profile without
 
 pstack's skills use Cursor's names. 23 of its 58 skills point to its adapter, `docs/harness/claude-code.md`, which maps
 Cursor's tools, subagent fields, models and paths to Claude Code's, and skips, with one line, a step that needs Cursor
-Automations, Bugbot or a Cursor cloud agent itself. No factory session can read the adapter yet: the plugin is cached
-under the session's profile, in `~/.agent-profiles/`, which `bin/seat` and `packs/pstack/bin/lead` deny (`secretsRead`,
-#185). Until then the model maps Cursor's names itself, and not always as the adapter says (#193's seat run). The
+Automations, Bugbot or a Cursor cloud agent itself. A session reads the adapter and the other files of the plugin
+from its profile's plugin root, outside `~/.agent-profiles/` (#185; a seat's run shows it reading `docs/harness/claude-code.md`
+and `references/explainer-prompt.md` with no denial), so it can map Cursor's names as the adapter says; before that, the
+plugin was cached under the profile, which `secretsRead` denies, and the model mapped them itself (#193's seat run). The
 factory does not use these parts:
 
 - `/setup-pstack`: it writes `~/.claude/rules/pstack-models.md`, which the factory's deny rules hide; whether Claude
@@ -521,5 +541,6 @@ factory does not use these parts:
   input, so the gate's reviewer (`review`, `verdict`) stays the only judge the merge waits for.
 - The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): the adapter points them
   at `~/.claude/projects/<slug>/`, which the kit's deny rules refuse. A factory profile keeps its transcripts under its
-  own `CLAUDE_CONFIG_DIR`, in `~/.agent-profiles/`, which `bin/seat` and `packs/pstack/bin/lead` deny (#185).
+  own `CLAUDE_CONFIG_DIR`, in `~/.agent-profiles/`, which `bin/seat` and `packs/pstack/bin/lead` deny (#185); they read
+  the copies instead: a seat's `run-<tag>.jsonl` and a Lead's `~/factory-runs/<repo>-lead/transcripts/`.
 - `cursor-team-kit`'s `deslop`, `control-ui` and `control-cli`: they ship in another Cursor plugin, not in pstack.

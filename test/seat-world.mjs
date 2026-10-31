@@ -9,6 +9,8 @@ import { factory } from './helpers.mjs';
 
 export const TOKEN = 'fake-token-0123456789-do-not-leak';
 export const SEAT_JS = join(factory, 'bin/lib/seat.mjs');
+/** The pstack pack's settings, which pin the plugin and enable it. */
+export const PSTACK_SETTINGS = JSON.parse(readFileSync(join(factory, 'packs/pstack/settings.json'), 'utf8'));
 
 // FAKE_MODE: ok (one result), two (two results, the report only in the first), hang (waits for FAKE_RELEASE, then its result),
 // holdafter (one result, then waits for FAKE_RELEASE), split (a result line cut inside a multi-byte character), noresult (exit 3).
@@ -17,6 +19,15 @@ const FAKE = `#!${process.execPath}
 const fs = require('fs');
 const { spawnSync } = require('child_process');
 process.stdout.on('error', () => {});
+if (process.argv[2] === 'plugin') {
+  // \`claude plugin ...\` (#185): logs the call next to this file; plugin-mode there makes it fail (fail) or ask for a login (login).
+  const dir = require('path').dirname(process.argv[1]);
+  fs.appendFileSync(dir + '/plugin-log.jsonl', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: process.env }) + '\\n');
+  const mode = fs.existsSync(dir + '/plugin-mode') ? fs.readFileSync(dir + '/plugin-mode', 'utf8').trim() : 'ok';
+  if (mode === 'fail') { console.error('boom'); process.exit(1); }
+  if (mode === 'login') console.log('Not logged in. Please run /login');
+  process.exit(0);
+}
 const chunks = [];
 process.stdin.on('data', (c) => chunks.push(c));
 process.stdin.on('end', () => {
@@ -29,7 +40,7 @@ process.stdin.on('end', () => {
     parentHasToken: parent.includes('CLAUDE_CODE_OAUTH_TOKEN'), parentSeen: parent.includes('PATH='),
     env: { gh: e.GH_CONFIG_DIR, config: e.CLAUDE_CONFIG_DIR, token: e.CLAUDE_CODE_OAUTH_TOKEN ?? null, spec: e.FACTORY_SEAT_SUPERVISE ?? null,
       GH_TOKEN: 'GH_TOKEN' in e, GITHUB_TOKEN: 'GITHUB_TOKEN' in e, ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' in e, ANTHROPIC_AUTH_TOKEN: 'ANTHROPIC_AUTH_TOKEN' in e,
-      scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null, clones: e.FACTORY_RESEARCH_CLONES ?? null } }));
+      pluginCache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null, clones: e.FACTORY_RESEARCH_CLONES ?? null } }));
   const line = (o) => console.log(JSON.stringify(o));
   const sid = e.FAKE_SID ?? 'sess-1';
   line({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-sonnet-5-5' });
@@ -108,7 +119,13 @@ export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   w.start = (role = 'worker', extra = [], env = {}) => w.seat(w.args(role, extra), env);
   w.records = () => (existsSync(join(w.state, 'sessions.jsonl')) ? readFileSync(join(w.state, 'sessions.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
   w.saw = (n = 'a') => JSON.parse(readFileSync(w.out(n), 'utf8'));
-  w.pidOf = (tag) => Number(readFileSync(join(w.run, `run-${tag}.pid`), 'utf8'));
+  w.pluginCalls = () => (existsSync(join(w.bin, 'plugin-log.jsonl')) ? readFileSync(join(w.bin, 'plugin-log.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  w.pluginMode = (mode) => writeFileSync(join(w.bin, 'plugin-mode'), mode);
+  w.settings = (settings) => {
+    mkdirSync(join(w.work, '.claude'), { recursive: true });
+    writeFileSync(join(w.work, '.claude/settings.json'), JSON.stringify(settings));
+  };
+  w.pidOf =(tag) => Number(readFileSync(join(w.run, `run-${tag}.pid`), 'utf8'));
   try {
     return await body(w);
   } finally {
