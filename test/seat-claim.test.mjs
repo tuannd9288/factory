@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { SEAT_JS, fill, until, world } from './seat-world.mjs';
+import { SEAT_JS, until, world } from './seat-world.mjs';
 
 const alive = (pid) => {
   try {
@@ -33,21 +33,6 @@ test('three concurrent starts with one tag give one session; the others exit 2; 
   await until(() => w.records().length === 2, 'the second record');
 }));
 
-// Without the fix, one try lets both through about 56 times in 100, so five tries are red about 98% of the time.
-test('two starts at the same moment on a seat with one place left never both run on it', async () => {
-  const { liveCount } = await import('../bin/lib/seat.mjs');
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
-    await world(async (w) => {
-      fill(w, 2, 3);
-      fill(w, 1, 4);
-      const hold = { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release') };
-      const codes = await exits(w, ['a', 'b'].map((tag) => w.args('worker', ['--tag', tag])), hold);
-      assert.ok(codes.filter((c) => c === 0).length <= 1, `try ${attempt}: exit codes ${codes}`);
-      assert.ok(liveCount(w.runs, 2) <= 4, `try ${attempt}: seat 2 is not over its cap`);
-    });
-  }
-});
-
 // A listing that is passed to liveCount: each call gives the next list, the last one for every call after.
 const listings = (...lists) => {
   let i = 0;
@@ -67,10 +52,10 @@ test('a count that lists the folder just before a start hands off its claim to i
   });
 });
 
-test('a count whose listing changes every time it is taken calls the seat full', async () => {
-  const { SEATS, liveCount } = await import('../bin/lib/seat.mjs');
+test('a count whose listing changes every time it is taken is Infinity, not a number', async () => {
+  const { liveCount } = await import('../bin/lib/seat.mjs');
   let n = 0;
-  assert.ok(liveCount('/nowhere', 2, () => [`/nowhere/run-${n++}.pid`]) > SEATS[2].cap);
+  assert.equal(liveCount('/nowhere', 2, () => [`/nowhere/run-${n++}.pid`]), Infinity);
 });
 
 // An ended run: a dead pid, its seat, and a log whose last rate_limit_event has status (its windows reset in an hour, the
@@ -88,7 +73,7 @@ function ended(dir, tag, seat, status, minutesAgo) {
 }
 
 test('a refused start leaves the earlier run\'s .seat, so its log stays on its seat and seat 1 stays rejected', () => world(async (w) => {
-  fill(w, 2, 4);
+  ended(w.run, 'old2', 2, 'rejected', 1); // seat 2 is out too, so the start reaches seat 1's log
   ended(w.run, 'worker', 1, 'rejected', 1); // the worker's last run ended on seat 1, cut off by Claude Code
   ended(join(w.runs, 'issue-3'), 'old', 1, 'allowed', 60);
   const first = w.start('worker');

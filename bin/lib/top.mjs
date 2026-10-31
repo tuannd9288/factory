@@ -397,10 +397,10 @@ export async function snapshot(opts = {}) {
   return { now, load: opts.load ?? loadavg(), sessions, repos: byRepo, github, queue: queueOf(state), seats: opts.live ? seatCounts(sessions) : seatsLive(runs) };
 }
 
-/** The seats' live sessions as bin/seat counts them for its cap (liveCount). */
-const seatsLive = (runs) => Object.fromEntries(Object.entries(SEATS).map(([n, { cap }]) => [n, { live: liveCount(runs, Number(n)), cap }]));
+/** The seats' live sessions as bin/seat counts them (liveCount). */
+const seatsLive = (runs) => Object.fromEntries(Object.keys(SEATS).map((n) => [n, { live: liveCount(runs, Number(n)) }]));
 
-const seatCounts = (sessions) => Object.fromEntries(Object.entries(SEATS).map(([n, { cap }]) => [n, { live: sessions.filter((s) => s.live && s.seat === n).length, cap }]));
+const seatCounts = (sessions) => Object.fromEntries(Object.keys(SEATS).map((n) => [n, { live: sessions.filter((s) => s.live && s.seat === n).length }]));
 
 /** A span as 45s, 12m, 3h05 or 5d; a negative one (a log written after the snapshot's clock) is 0s; not a number is ?. */
 export const age = (ms) => {
@@ -450,7 +450,7 @@ export function tabsOf(snap) {
 export function render(snap, { width = 120, tab = 0, rows = null } = {}) {
   const { sessions, queue, github, now } = snap;
   const count = (st) => sessions.filter((s) => s.state === st).length;
-  const seats = Object.entries(snap.seats).map(([n, s]) => `${n}:${Number.isFinite(s.live) ? s.live : '?'}/${s.cap}`).join(' ');
+  const seats = Object.entries(snap.seats).map(([n, s]) => `${n}:${Number.isFinite(s.live) ? s.live : '?'}`).join(' ');
   const q = queue.lastSweep ? `${queue.queueFailed ? 'failed, last ok' : 'ok'} ${stamp(Date.parse(queue.lastSweep))}` : '?';
   const ghText = github.ok ? `gh ok ${age(now - github.at)} ago` : `gh failed (${github.error})`;
   const lines = [
