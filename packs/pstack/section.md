@@ -6,9 +6,8 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
 `skills/poteto-mode/playbooks/` unless a path says otherwise):
 
 - **Force-push** (`shipping.md:8`, `babysit.md:10`, `autopilot-full.md:12`: `--force-with-lease`). The factory never
-  rewrites a pushed branch: `factory-branches` refuses a non-fast-forward push on every branch; the repository's own deny
-  rule `Bash(git *push *--force*)` (`kit/.claude/settings.json:4`) binds every session in it; and `bin/seat` denies every
-  `git push` (`bin/lib/seat.mjs:35`). Fix forward with a new commit.
+  rewrites a pushed branch: `factory-branches` refuses a non-fast-forward push on every branch, and `bin/seat` denies every
+  `git push` (`Bash(git push:*)` in `bin/lib/seat.mjs`). Fix forward with a new commit.
 - **Stacked pull requests** (`opening-a-pr.md:28`, `autopilot-stack.md:6`, `multi-phase-plan.md:57`: a base that is the
   parent's branch; `shipping.md:8`: retarget to trunk with `gh pr edit --base`). `scripts/ship` opens with `--base main`
   (`ship.mjs:64`) and refuses to arm any other base (`ship.mjs:172`): no stack.
