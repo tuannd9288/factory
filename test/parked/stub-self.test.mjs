@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { commit, factory, git, quiet, run } from './helpers.mjs';
+import { commit, factory, git, quiet, run } from '../helpers.mjs';
 
 const MARKERS = [['GATE', 'STUB', 'FINDING'], ['GATE', 'STUB', 'RAISE'], ['GATE', 'STUB', 'VERDICT']].map((p) => p.join('-'));
 const STUB = 'kit/.gate/bin/lib/stub-reviewer.mjs';

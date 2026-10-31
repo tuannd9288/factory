@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 
 // gh: `label list` and `issue list` answer from $SL/labels.json and $SL/issues.json; $SL_FAIL names the command that
 // fails. Every call is appended to $SL/calls.
@@ -25,7 +25,7 @@ process.exit(1);
 `;
 
 async function setup({ labels, issues, fail }) {
-  const { SUBLAYERS } = await import('../bin/lib/sublayers.mjs');
+  const { SUBLAYERS } = await import('../../bin/lib/sublayers.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'sublayers-'));
   const bin = join(dir, 'bin');
   const ghPath = join(dir, 'gh');

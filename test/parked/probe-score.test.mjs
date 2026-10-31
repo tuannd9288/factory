@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
+const factory = join(dirname(fileURLToPath(import.meta.url)), '../..');
 // gh: pr view N, run list --commit SHA, run view ID --json jobs | --log, all answered from $D/<what>.json or .log.
 const FAKE_GH = String.raw`#!/usr/bin/env node
 const fs = require('fs');

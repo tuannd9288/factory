@@ -1,7 +1,7 @@
 // The fixture of the bin/seat tests (#91): a temporary world with a fake `claude` on PATH (never a live one), a fake token in a
 // temporary AGENT_PROFILES, and FACTORY_RUNS and FACTORY_STATE of their own.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
@@ -84,7 +84,8 @@ export function fill(w, seat, n, folder = w.run) {
 }
 
 export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'seat-world-'));
+  // The real path: tmpdir() is under /var, a link to /private/var on macOS, and bin/seat refuses a folder that is not its own real path (#192).
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'seat-world-')));
   const w = { root, profiles: join(root, 'profiles'), runs: join(root, 'runs'), state: join(root, 'state'), home: join(root, 'home'), bin: join(root, 'bin'), fake: join(root, 'fake') };
   w.run = join(w.runs, 'issue-1');
   w.work = join(root, 'work');
