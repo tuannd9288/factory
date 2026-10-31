@@ -2,9 +2,12 @@
 // gh on PATH. Nothing here runs claude, a live gh or the network. Frames are rendered at a fixed width.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// Local times are shown in the machine's zone; the fixtures are in UTC, so a local time reads as the fixture's.
+process.env.TZ = 'UTC';
 
 const top = () => import('../bin/lib/top.mjs');
 
@@ -42,10 +45,15 @@ function world() {
   session(runs, 'issue-169', 'worker', { log: init(cwd) + assistant('m1', u), ageSecs: 90000 });
   session(runs, 'issue-174', 'old', { log: init(cwd) + assistant('m1', u), ageSecs: 90000 });
   session(runs, 'issue-150', 'worker', { log: init(cwd) + assistant('m1', u) + result({ is_error: true, subtype: 'error_during_execution' }), ageSecs: 7200 });
+  // The names bin/seat and the Lead's launcher keep (#286); the 170 and 150 runs have none and keep the old <issue>-<tag>.
+  writeFileSync(join(runs, 'issue-174/run-worker.name'), 'badger\n');
+  writeFileSync(join(runs, 'issue-174/run-reviewer.name'), 'beaver\n');
   const lead = join(runs, 'factory-lead/transcripts');
   mkdirSync(lead, { recursive: true });
+  writeFileSync(join(runs, 'factory-lead/name'), 'aardvark\n');
   writeFileSync(join(lead, 'abc.jsonl'), assistant('l1', u));
   utimesSync(join(lead, 'abc.jsonl'), NOW / 1000 - 10000, NOW / 1000 - 10000);
+  writeFileSync(join(state, 'accounts'), 'factory/seat-1=acct-one\nfactory/seat-2=acct-two\nfactory/lead-factory=acct-one\n');
   writeFileSync(
     join(state, 'sessions.jsonl'),
     line({ session: 's1', role: 'reviewer', seat: 2, tag: 'reviewer', run: join(runs, 'issue-174'), repo: 'tuannd9288/factory', branch: 'issue-174-top', start: '2026-10-31T10:00:00Z', end: '2026-10-31T10:30:00Z', total_cost_usd: 1.5, model: 'claude-opus-5-5', ended: 'success' }) +
@@ -53,7 +61,7 @@ function world() {
   );
   writeFileSync(join(state, 'queue-tuannd9288-factory.ok'), '2026-10-31T11:59:00Z\n');
   writeFileSync(join(state, 'digest.failed'), '2026-10-31T09:00:00Z digest failed\n');
-  const check = (name, conclusion, status = 'COMPLETED') => ({ name, status, conclusion });
+  const check = (name, conclusion, status = 'COMPLETED', completedAt = undefined) => ({ name, status, conclusion, completedAt });
   writeFileSync(join(fx, 'issues.json'), JSON.stringify([
     { number: 174, title: 'factory top, the repo view', state: 'OPEN', labels: [{ name: 'task' }] },
     { number: 170, title: 'A session real end', state: 'OPEN', labels: [{ name: 'task' }] },
@@ -62,7 +70,9 @@ function world() {
     { number: 17, title: 'A quiet open issue', state: 'OPEN', labels: [] },
   ]));
   writeFileSync(join(fx, 'prs.json'), JSON.stringify([
-    { number: 260, title: 'top view', state: 'OPEN', headRefName: 'issue-174-top', body: 'Issue: #174\nClaim: abc\nTeam: alpha', labels: [{ name: 'tier-3' }], mergedAt: null, statusCheckRollup: [check('verify', 'SUCCESS'), check('review', null, 'IN_PROGRESS'), check('tier', 'FAILURE')] },
+    { number: 260, title: 'top view', state: 'OPEN', headRefName: 'issue-174-top', body: 'Issue: #174\nClaim: abc\nTeam: alpha', labels: [{ name: 'tier-3' }], mergedAt: null, statusCheckRollup: [check('verify', 'SUCCESS', 'COMPLETED', '2026-10-31T11:00:00Z'), check('review', null, 'IN_PROGRESS'), check('tier', 'FAILURE', 'COMPLETED', '2026-10-31T11:05:00Z')] },
+    // merged today after waiting for the Human from 08:30 (the newest finish of verify, review and verdict) to 09:00
+    { number: 250, title: 'earlier today', state: 'MERGED', headRefName: 'x', body: 'Issue: #999', labels: [{ name: 'tier-3' }], mergedAt: '2026-10-31T09:00:00Z', statusCheckRollup: [check('verify', 'SUCCESS', 'COMPLETED', '2026-10-31T07:00:00Z'), check('review', 'SUCCESS', 'COMPLETED', '2026-10-31T08:00:00Z'), check('verdict', 'SUCCESS', 'COMPLETED', '2026-10-31T08:30:00Z'), check('tier', 'SUCCESS', 'COMPLETED', '2026-10-31T08:45:00Z')] },
     { number: 240, title: 'old', state: 'MERGED', headRefName: 'issue-150-x', body: 'Issue: #150', labels: [], mergedAt: '2026-10-30T00:00:00Z', statusCheckRollup: [check('verify', 'SUCCESS'), check('review', 'SUCCESS'), check('verdict', 'SUCCESS'), check('tier', 'SUCCESS')] },
   ]));
   const log = join(root, 'gh.log');
@@ -73,7 +83,7 @@ function world() {
     runs, state, now: NOW, repos: ['tuannd9288/factory'], clones: new Map([['tuannd9288/factory', join(root, 'WORKSPACES/factory')]]),
     live: (pidFile) => pidFile.endsWith('issue-174/run-worker.pid'),
     processes: () => [{ pid: 4242, command: 'claude --model opus --name factory-lead --continue' }],
-    branchOf: () => 'issue-174-top', originOf: () => null, load: [2.31, 1.98, 1.5], claims,
+    branchOf: () => 'issue-174-top', originOf: () => null, load: [2.31, 1.98, 1.5], cores: 8, agentProfiles: join(root, 'profiles'), claims,
   };
   return { root, bin, fx, log, opts };
 }
@@ -119,55 +129,90 @@ test('the sessions: states follow the log, the pid and the limit; a stopped sess
   const w = world();
   const { snap } = await frame(w);
   const by = Object.fromEntries(snap.sessions.map((s) => [s.name, s]));
-  assert.equal(by['174-worker'].state, 'working');
-  assert.equal(by['174-reviewer'].state, 'done');
+  assert.equal(by.badger.state, 'working');
+  assert.equal(by.beaver.state, 'done');
   assert.equal(by['170-worker'].state, 'stopped');
-  assert.match(by['170-worker'].stopped, /5h .*13:00/);
+  assert.equal(by['170-worker'].until, (NOW / 1000 + 3600) * 1000);
   assert.equal(by['150-worker'].state, 'failed');
   assert.equal(by['169-worker'].state, 'gone');
-  assert.equal(by['factory-lead'].role, 'lead');
-  assert.equal(by['factory-lead'].state, 'idle');
+  assert.equal(by.aardvark.role, 'lead');
+  assert.equal(by.aardvark.state, 'idle');
 });
 
-test('the frame: header, tabs, the tree and the session columns at a fixed width', async () => {
+test('a run shows the name in its run-<tag>.name, a Lead the name in its folder\'s name file; a run with none keeps <issue>-<tag>', async () => {
+  const w = world();
+  const { snap } = await frame(w);
+  const names = snap.sessions.map((s) => s.name);
+  for (const n of ['badger', 'beaver', 'aardvark', '170-worker', '150-worker']) assert.ok(names.includes(n), n);
+  assert.ok(!names.includes('174-worker') && !names.includes('factory-lead'));
+});
+
+test('the frame: a header in plain words, what waits on you, one block per team, the accounts, today and the keys', async () => {
   const w = world();
   const { text } = await frame(w);
   const lines = text.split('\n');
   assert.ok(lines.every((l) => l.length <= 200));
-  assert.match(lines[0], /load 2\.31 1\.98 1\.50/);
-  assert.match(lines[0], /1 working/);
-  assert.match(lines[0], /1 idle/);
-  assert.match(lines[0], /1 stopped/);
-  assert.match(lines[0], /seats 1:0 2:1(?!\/)/);
-  assert.match(lines[0], /queue ok 2026-10-31 11:59/);
+  assert.match(lines[0], /^Mac mini {2}load 2\.3 of 8 cores {2}·  1 working · 1 idle · 0 waiting for you {2}·  12:00 {2}·/);
+  assert.match(lines[0], /queue ok 11:59/);
   assert.match(lines[0], /alerts 1/);
+  assert.ok(!/\d{4}-\d\d-\d\d|\d\dZ\b/.test(lines.filter((l) => !l.includes('digest.failed')).join('\n')), 'no UTC time or full date is left but an alert\'s own text');
   assert.match(lines[1], /\[1 All\] .*\[2 factory 4\].*\[3 Done 2\]/);
-  assert.ok(lines.some((l) => /accounts/i.test(l) && /#178/.test(l)));
-  const head = lines.find((l) => l.startsWith('NAME'));
-  for (const col of ['ROLE', 'STATE', 'HARNESS', 'MODEL', 'SEAT', 'CTX', 'TURNS', 'TOKENS', 'COST', 'AGE', 'SINCE', 'CWD']) assert.ok(head.includes(col), col);
+  assert.deepEqual(lines.slice(2, 5), [
+    'Waiting on you',
+    '  approve  tuannd9288/factory#260 top view  https://github.com/tuannd9288/factory/pull/260',
+    '  alert    digest.failed  2026-10-31T09:00:00Z digest failed',
+  ]);
+  assert.equal(lines[5], 'tuannd9288/factory');
+  const lead = lines.findIndex((l) => /^ {2}aardvark +Lead +idle +\?/.test(l));
   const group = lines.findIndex((l) => /#174 factory top, the repo view/.test(l));
-  assert.ok(group > 0);
+  assert.ok(lead > 5 && lead < group, 'the Lead\'s line opens its block');
   assert.match(lines[group], /alpha/);
   assert.match(lines[group], /PR #260/);
   assert.match(lines[group], /verify✓ review… verdict– tier✗/);
   assert.match(lines[group], /waiting on the Human/);
-  const lead = lines.findIndex((l) => /^\s*factory-lead /.test(l));
-  const worker = lines.findIndex((l) => /^\s*174-worker /.test(l));
-  const reviewer = lines.findIndex((l) => /^\s*174-reviewer /.test(l));
-  assert.ok(lead > 0 && lead < group || lead > 0, 'the lead is listed');
+  const worker = lines.findIndex((l) => /^ {4}badger +worker +working /.test(l));
+  const reviewer = lines.findIndex((l) => /^ {4}beaver +reviewer +done +53m +\$1\.50/.test(l));
   assert.ok(group < worker && worker < reviewer, 'workers before reviewers, under the issue');
-  assert.match(lines[worker], /worker +working +claude -p +sonnet-5-5 medium +2 /);
-  assert.match(lines[worker], /issue-174-top/);
-  assert.match(lines[reviewer], /\$1\.50/);
+  assert.ok(lines.some((l) => /^ {4}170-worker +worker +out of quota until 13:00/.test(l)));
+  assert.ok(!lines.some((l) => /HARNESS|claude -p|CTX|TOKENS/.test(l)), 'the engineering columns are behind a key');
+  const accounts = lines.findIndex((l) => l === 'Accounts');
+  assert.deepEqual(lines.slice(accounts + 1, accounts + 3), [
+    '  a  acct-one  5h 100% resets 13:00 · 7d 20% resets 11-01 13:00 · seat 1, factory Lead',
+    '  b  acct-two  5h ? · 7d ? · seat 2',
+  ]);
+  assert.equal(lines.at(-2), 'Today  1 pull request merged · workers and reviewers cost b $1.60 · waited on you 1h30');
+  assert.equal(lines.at(-1), 'keys: 1-9 or Tab switch tabs, c full columns, q quits');
 });
 
-test('under an issue, sessions that ended over a day ago fold into one "N gone" row', async () => {
+test('--full adds the engineering columns to every session row, and a header for them', async () => {
+  const w = world();
+  const { snapshot, render } = await top();
+  const snap = await withPath(w.bin, () => snapshot(w.opts));
+  const lines = render(snap, { width: 200, full: true }).split('\n');
+  const head = lines.find((l) => l.startsWith('NAME'));
+  for (const col of ['ROLE', 'STATE', 'COST', 'HARNESS', 'MODEL', 'SEAT', 'CTX', 'TURNS', 'TOKENS', 'CWD', 'BRANCH']) assert.ok(head.includes(col), col);
+  const worker = lines.find((l) => /^ {4}badger /.test(l));
+  assert.match(worker, /worker +working .* claude -p +sonnet-5-5 medium +2 /);
+  assert.match(worker, /issue-174-top/);
+  assert.ok(!render(snap, { width: 200 }).split('\n').some((l) => l.startsWith('NAME')));
+});
+
+test('under a block, sessions that ended before today fold into one "N ended before today" row', async () => {
   const w = world();
   const lines = (await frame(w, 0)).text.split('\n');
   const group = lines.findIndex((l) => /#174 factory top/.test(l));
-  const gone = lines.findIndex((l, i) => i > group && /^\s+1 gone$/.test(l));
-  assert.ok(gone > group, 'the gone row sits under #174');
+  const folded = lines.findIndex((l, i) => i > group && /^\s+1 ended before today$/.test(l));
+  assert.ok(folded > group, 'the folded row sits under #174');
   assert.ok(!lines.some((l) => /^\s*174-old /.test(l)));
+});
+
+test('Waiting on you says "Nothing waits on you" when no pull request, Lead or alert waits', async () => {
+  const w = world();
+  writeFileSync(join(w.fx, 'prs.json'), '[]');
+  rmSync(join(w.opts.state, 'digest.failed'));
+  const { text } = await frame(w);
+  assert.equal(text.split('\n')[2], 'Nothing waits on you');
+  assert.ok(!text.includes('Waiting on you'));
 });
 
 test('All shows an issue only while it has a live session, a claim, an open PR or a recent session; the rest fold into "N older"', async () => {
@@ -335,16 +380,16 @@ test('every line of the frame, the column header included, is cut to the width',
   for (const l of text.split('\n')) assert.ok(l.length <= 80, `${l.length}: ${l}`);
 });
 
-test('a frame given the terminal\'s rows keeps the header, tabs and column header, cuts the tree, and says how much is left out', async () => {
+test('a frame given the terminal\'s rows keeps the header, what waits on you, the accounts, today and the keys, cuts the tree, and says how much is left out', async () => {
   const w = world();
   const { snapshot, render } = await top();
   const snap = await withPath(w.bin, () => snapshot(w.opts));
   const full = render(snap, { width: 200 }).split('\n');
-  const cut = render(snap, { width: 200, rows: 12 }).split('\n');
-  assert.equal(cut.length, 12);
-  assert.deepEqual(cut.slice(0, 4), full.slice(0, 4));
-  assert.match(cut.at(-1), /^… \d+ more rows/);
-  assert.match(cut.at(-1), /a repository's tab shows fewer/);
+  const cut = render(snap, { width: 200, rows: full.length - 3 }).split('\n');
+  assert.equal(cut.length, full.length - 3);
+  assert.deepEqual(cut.slice(0, 5), full.slice(0, 5));
+  assert.deepEqual(cut.slice(-4), full.slice(-4));
+  assert.match(cut.find((l) => l.startsWith('…')), /^… 4 more rows \(a repository's tab shows fewer\)/);
   assert.equal(render(snap, { width: 200, rows: 500 }), full.join('\n'));
 });
 
@@ -401,7 +446,7 @@ test('small things: <synthetic> messages give no model or context; a negative ag
 test('a field the data does not give shows as ?', async () => {
   const w = world();
   const { text } = await frame(w);
-  const lead = text.split('\n').find((l) => /^\s*factory-lead /.test(l));
+  const lead = text.split('\n').find((l) => /^\s*aardvark /.test(l));
   assert.match(lead, /\?/);
 });
 
@@ -426,7 +471,7 @@ test('a failing gh shows in the header and the local part still renders', async 
   const { text } = await frame(w);
   const head = text.split('\n')[0];
   assert.match(head, /gh failed/);
-  assert.match(text, /174-worker/);
+  assert.match(text, /badger/);
 });
 
 test('the queue and the alerts come from the state folder files', async () => {
@@ -436,4 +481,83 @@ test('the queue and the alerts come from the state folder files', async () => {
   assert.equal(q.lastSweep, '2026-10-31T11:59:00Z');
   assert.equal(q.failed.length, 1);
   assert.equal(queueOf(join(w.root, 'missing')).lastSweep, null);
+});
+
+test('local times: HH:MM on the day of now, MM-DD HH:MM on another, ? for no time', async () => {
+  const { local } = await top();
+  assert.equal(local(Date.parse('2026-10-31T09:05:00Z'), NOW), '09:05');
+  assert.equal(local(Date.parse('2026-10-30T23:59:00Z'), NOW), '10-30 23:59');
+  assert.equal(local(NaN, NOW), '?');
+});
+
+test('ps\'s elapsed time reads as milliseconds: mm:ss, hh:mm:ss and dd-hh:mm:ss', async () => {
+  const { etimeMs } = await top();
+  assert.equal(etimeMs('05:30'), 330_000);
+  assert.equal(etimeMs('1:02:03'), 3_723_000);
+  assert.equal(etimeMs('2-03:04:05'), ((2 * 24 + 3) * 3600 + 4 * 60 + 5) * 1000);
+  assert.equal(etimeMs('nonsense'), null);
+});
+
+const HOOKED = 'claude --model opus --name factory-lead --settings {"hooks":{"SessionStart":[{"hooks":[]}]}}';
+const leadOf = async (w, proc, state) => {
+  const dir = join(w.opts.runs, 'factory-lead');
+  if (state === null) rmSync(join(dir, 'state.json'), { force: true });
+  else if (state) writeFileSync(join(dir, 'state.json'), JSON.stringify(state));
+  const { snapshot } = await top();
+  const snap = await withPath(w.bin, () => snapshot({ ...w.opts, processes: () => [proc] }));
+  return { snap, lead: snap.sessions.find((s) => s.role === 'lead') };
+};
+
+test('a Lead\'s state is its newest hook event, through one table: a prompt that needs a person is waiting for you, a prompt for input or a stop is idle, a submitted prompt is working', async () => {
+  const w = world();
+  const at = new Date(NOW - 30_000).toISOString();
+  for (const [event, type, state] of [
+    ['Notification', 'permission_prompt', 'waiting'], ['Notification', 'elicitation_dialog', 'waiting'], ['Notification', 'idle_prompt', 'idle'],
+    ['Stop', null, 'idle'], ['SessionStart', null, 'idle'], ['UserPromptSubmit', null, 'working'],
+  ]) {
+    const { lead } = await leadOf(w, { pid: 1, command: HOOKED, ageMs: 600_000 }, { event, type, at });
+    assert.equal(lead.state, state, `${event} ${type}`);
+    assert.equal(lead.stateAt, NOW - 30_000);
+  }
+  const { lead } = await leadOf(w, { pid: 1, command: HOOKED, ageMs: 600_000 }, { event: 'Notification', type: 'auth_success', at });
+  assert.equal(lead.state, 'idle', 'an event the table does not name leaves the state the log gives');
+});
+
+test('a Lead with the new hooks, alive over a minute, with no event since its start, waits for you at the login or the folder trust; an older Lead never does', async () => {
+  const w = world();
+  const stale = { event: 'Stop', type: null, at: new Date(NOW - 1_000_000).toISOString() };
+  writeFileSync(join(w.opts.runs, 'factory-lead/pane'), 'p-7\n');
+  for (const state of [null, stale]) {
+    const { lead, snap } = await leadOf(w, { pid: 1, command: HOOKED, ageMs: 120_000 }, state);
+    assert.equal(lead.state, 'waiting');
+    assert.equal(lead.waitNote, 'login or folder trust?');
+    const text = (await top()).render(snap, { width: 200 });
+    assert.match(text, /^ {2}answer {3}aardvark \(factory Lead\) {2}pane p-7 {2}login or folder trust\?$/m);
+    assert.match(text.split('\n')[0], /1 waiting for you/);
+  }
+  assert.equal((await leadOf(w, { pid: 1, command: HOOKED, ageMs: 30_000 }, null)).lead.state, 'idle', 'not yet a minute');
+  assert.equal((await leadOf(w, { pid: 1, command: 'claude --name factory-lead --settings {"hooks":{"Stop":[]}}', ageMs: 900_000 }, null)).lead.state, 'idle', 'started before the new hooks');
+});
+
+test('a Lead waiting on a prompt is listed as an item that names its pane; with no pane file the pane is its name', async () => {
+  const w = world();
+  const state = { event: 'Notification', type: 'permission_prompt', at: new Date(NOW - 5000).toISOString() };
+  const { snap } = await leadOf(w, { pid: 1, command: HOOKED, ageMs: 600_000 }, state);
+  const { render } = await top();
+  assert.match(render(snap, { width: 200 }), /^ {2}answer {3}aardvark \(factory Lead\) {2}pane aardvark$/m);
+});
+
+test('the accounts come from the accounts file and the seats\' quota; none named, no section', async () => {
+  const w = world();
+  const { snap } = await frame(w);
+  assert.deepEqual(snap.accounts.map((a) => [a.letter, a.name, a.users]), [['a', 'acct-one', ['seat 1', 'factory Lead']], ['b', 'acct-two', ['seat 2']]]);
+  rmSync(join(w.opts.state, 'accounts'));
+  const none = (await frame(w)).text;
+  assert.ok(!none.includes('Accounts'));
+});
+
+test('Today counts the pull requests merged today, the cost of the records that ended today by account letter, and the time pull requests waited on the Human, clipped to today', async () => {
+  const w = world();
+  const { snap } = await frame(w);
+  assert.deepEqual(snap.today, { merged: 1, cost: [['b', 1.6]], waitedMs: 90 * 60_000 });
 });
