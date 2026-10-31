@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { driverAt } from './live-verify.mjs';
+import { driverAt } from './driver.mjs';
 
 const PLACEHOLDER = '<issue labelled task>';
 const FIELDS = 'number,url,baseRefName,baseRefOid,headRefOid,labels,autoMergeRequest,statusCheckRollup';
