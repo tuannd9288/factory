@@ -13,4 +13,4 @@ export const FORMS = [
   'node bin/lib/factory.mjs login ann', `node ${join(factory, 'bin/lib/factory.mjs')} store ann`,
 ];
 
-export const HARMLESS = ['factory', 'factory --json', 'bin/factory --all', `${bin} --json`, 'node bin/lib/factory.mjs --json', 'git log --oneline'];
+export const HARMLESS = ['factory', 'factory --json', 'bin/factory --all', `${bin} --json`, 'node bin/lib/factory.mjs --json', 'ls -la bin'];

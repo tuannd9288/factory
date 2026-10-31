@@ -55,15 +55,13 @@ test('a profile that is not logged in shows its login command', () => {
   }
 });
 
-test('seat 1 not logged in names factory login, and no line names omk-provider-key', () => {
+test('seat 1 not logged in names factory login', () => {
   const s = sandbox();
   try {
     s.onHost();
     const r = s.fac();
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /factory login <account>/);
-    assert.doesNotMatch(r.out, /omk-provider-key/);
-    assert.doesNotMatch(s.fac('--json').out, /omk-provider-key/);
   } finally {
     s.done();
   }

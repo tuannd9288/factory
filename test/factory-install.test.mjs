@@ -28,6 +28,13 @@ test('makes ~/.local/bin/factory a symlink to the clone\'s bin/factory, and can 
   assert.ok(existsSync(link), 'the link reaches bin/factory');
 }));
 
+test('the command runs through the link', () => home((dir, install, link) => {
+  assert.equal(install().code, 0);
+  const r = run(dir, link, ['--bogus'], { HOME: dir });
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /usage: bin\/factory/);
+}));
+
 test('keeps the folder\'s other files, and an existing ~/.local/bin', () => home((dir, install, link) => {
   mkdirSync(join(dir, '.local/bin'), { recursive: true });
   writeFileSync(join(dir, '.local/bin/other'), 'x');

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# The one command for the Human's agent accounts (#177; its list is #173's).
+#   factory [--all] [--json]       every agent profile's login, account and quota in one table, and a row for each token file
+#   factory login <account> [--no-setup]   runs `claude setup-token`, takes the token from a hidden prompt, stores it
+#   factory store <account>        on the Mac mini: reads one token from stdin and stores it (what login runs over ssh)
+# The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
+# it runs in (factory when the user is factory, else macbook), and takes quota and live sessions from the seats' run logs. --all,
+# on the MacBook, adds the factory rows and the piggery rows over ssh to the Mac mini. --json prints the rows as one JSON line.
+# A row that is not logged in shows its login command; the Human runs it. The profiles are committed in lib/factory.mjs, with no
+# account name; the account a profile is expected to have is in $FACTORY_STATE/accounts (default ~/.local/state/factory/accounts),
+# one "<profile>=<name>" a line, local to the machine, and FACTORY_SEAT_ACCOUNTS ("1=name,2=name") still names the seats' accounts.
+# A call that takes longer than FACTORY_TIMEOUT_MS (default 15000) is shown as timed out.
+# Tokens are stored at ~/.agent-profiles/tokens/<account> (mode 600, in a folder of mode 700); only the Human runs login (bin/install-factory
+# puts this command on his PATH, as a symlink, which is followed here).
+src=${BASH_SOURCE[0]}
+while [ -L "$src" ]; do
+  dir=$(cd -P "$(dirname "$src")" && pwd)
+  src=$(readlink "$src")
+  case $src in /*) ;; *) src=$dir/$src ;; esac
+done
+exec node "$(cd -P "$(dirname "$src")" && pwd)/lib/factory.mjs" "$@"

@@ -5,7 +5,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { secretsRead } from '../../../bin/lib/seat.mjs';
+import { secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 
 const USAGE = 'usage: packs/pstack/bin/lead <repo> [--continue] [--dry-run]';
 
@@ -23,7 +23,7 @@ const allowOf = (root) => [
 ];
 // The Lead writes only in ~/factory-runs: a leading // makes each rule an absolute path.
 const denyOf = (cwd) => [
-  'Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', `Edit(/${cwd}/**)`, `Write(/${cwd}/**)`, ...secretsRead,
+  ...tokenStoreDeny, 'Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', `Edit(/${cwd}/**)`, `Write(/${cwd}/**)`, ...secretsRead,
 ];
 
 /** The reason to refuse a start, or null: repo is a plain folder name and root/repo is a real folder with .git, .gate/ and .envrc. */

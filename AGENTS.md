@@ -252,7 +252,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; it charges an entry to a repository by its own profile, or by `cwd` under `<root>/<repo>` in `--profile-dir` folders; `--check` is its canary on Claude Code's session format |
-| `bin/factory-auth` | Every agent profile's login, account and quota in one table (`status`, `status --all` over ssh from the MacBook, `--json`); it runs only the vendors' status commands, reads no token, logs in nothing and commits no account name (the expected ones are in `$FACTORY_STATE/accounts`) |
+| `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH). With no argument: every agent profile's login, account and quota in a table, and the quota of the seats in a second one (`--all` over ssh from the MacBook, `--json`); it runs only the vendors' status commands, reads no token (a row for each file of `~/.agent-profiles/tokens/` shows its mode and date) and commits no account name (the expected ones are in `$FACTORY_STATE/accounts`). `factory login <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into (`--no-setup` skips setup-token) and stores it at `~/.agent-profiles/tokens/<account>` (mode 600, folder 700): on the Mac mini directly, from the MacBook over ssh's stdin to `factory store <account>`, never in an argument. Only the Human runs `login` and `store`: every `bin/seat` role and the pstack Lead deny them (#177) |
+| `bin/install-factory` | The Human's step that puts `factory` on the PATH: `~/.local/bin/factory` becomes a symlink to this clone's `bin/factory`; he runs it on the MacBook and as `factory` on the Mac mini; it can be run again and replaces nothing that is not already that symlink |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
 | `bin/factory-sublayers` | The sublayer check (#82): the 17 `sublayer-<code>` labels exist with their descriptions, and every open issue carries exactly one; the list is `bin/lib/sublayers.mjs`, the template `.github/ISSUE_TEMPLATE/task.md` |
@@ -403,7 +404,7 @@ repository's `direnv exec`. It picks the seat, sets the role's model, grants and
 token into the child's environment only, and records the session. It passes a seat over only at its cap of four live
 sessions, or while Claude Code has rejected it: the last `rate_limit_event` of the seat's newest log has status
 `rejected`, until that event's `resetsAt`. No share of a window stops a seat (#194). A session the limit cut off is
-resumed by the Lead after that reset, which the refusal names and `bin/factory-auth status` shows, with `bin/seat <role>
+resumed by the Lead after that reset, which the refusal names and `factory` shows, with `bin/seat <role>
 <brief> --run <folder> --work <folder> --resume <session id> --seat <n>`; nothing resumes it in the background. Every
 session runs with
 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, so its commands, hooks and MCP servers get no credential from the environment, and
