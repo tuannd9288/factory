@@ -43,7 +43,7 @@ function world() {
   const lead = join(runs, 'factory-lead/transcripts');
   mkdirSync(lead, { recursive: true });
   writeFileSync(join(lead, 'abc.jsonl'), assistant('l1', u));
-  utimesSync(join(lead, 'abc.jsonl'), (NOW - 10000) / 1000, (NOW - 10000) / 1000);
+  utimesSync(join(lead, 'abc.jsonl'), NOW / 1000 - 10000, NOW / 1000 - 10000);
   writeFileSync(
     join(state, 'sessions.jsonl'),
     line({ session: 's1', role: 'reviewer', seat: 2, tag: 'reviewer', run: join(runs, 'issue-174'), repo: 'tuannd9288/factory', branch: 'issue-174-top', start: '2026-10-31T10:00:00Z', end: '2026-10-31T10:30:00Z', total_cost_usd: 1.5, model: 'claude-opus-5-5', ended: 'success' }) +
