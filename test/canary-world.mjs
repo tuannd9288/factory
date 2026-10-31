@@ -101,7 +101,7 @@ const config = JSON.parse(readFileSync(process.env.FAKE_SEAT_CONFIG, 'utf8'));
 const args = process.argv.slice(2);
 const at = (flag) => args[args.indexOf(flag) + 1];
 const [run, work, tag] = [at('--run'), at('--work'), at('--tag')];
-appendFileSync(config.calls, JSON.stringify({ args, path: process.env.PATH, alerts: process.env.FACTORY_NO_ALERTS, kept: existsSync(work + '/keep.txt'), brief: readFileSync(args[1], 'utf8'), shim: (spawnSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).stdout ?? '').trim() }) + '\\n');
+appendFileSync(config.calls, JSON.stringify({ args, path: process.env.PATH, alerts: process.env.FACTORY_NO_ALERTS, marked: existsSync(run + '/../daemon-canary/run-canary.pid'), kept: existsSync(work + '/keep.txt'), brief: readFileSync(args[1], 'utf8'), shim: (spawnSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).stdout ?? '').trim() }) + '\\n');
 if (config.refuse) {
   console.error('seat 2: 4 live sessions, at most 4\\nseat 1: rejected by Claude Code (seven-day window) until 2026-11-01 06:00 UTC\\nno seat free');
   process.exit(2);

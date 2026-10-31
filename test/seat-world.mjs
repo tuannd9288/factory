@@ -22,7 +22,11 @@ process.stdout.on('error', () => {});
 if (process.argv[2] === 'plugin') {
   // \`claude plugin ...\` (#185): logs the call next to this file; plugin-mode there makes it fail (fail) or ask for a login (login).
   const dir = require('path').dirname(process.argv[1]);
-  fs.appendFileSync(dir + '/plugin-log.jsonl', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: process.env }) + '\\n');
+  // The install runs in the work folder, a sibling of state/ and runs/ in world() (the plugin call's environment holds neither).
+  // lock: whether checkout.lock is held now; claimed: whether a start's claim file is in the run folder (#257).
+  const root = require('path').dirname(process.cwd());
+  fs.appendFileSync(dir + '/plugin-log.jsonl', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: process.env,
+    lock: fs.existsSync(root + '/state/checkout.lock'), claimed: fs.readdirSync(root + '/runs/issue-1').some((n) => n.endsWith('.claim.pid')) }) + '\\n');
   const mode = fs.existsSync(dir + '/plugin-mode') ? fs.readFileSync(dir + '/plugin-mode', 'utf8').trim() : 'ok';
   if (mode === 'fail') { console.error('boom'); process.exit(1); }
   if (mode === 'login') console.log('Not logged in. Please run /login');
