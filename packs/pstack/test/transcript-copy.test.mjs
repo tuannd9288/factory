@@ -96,6 +96,38 @@ describe('transcript-copy', () => {
     assert.match(noDest.stderr, /usage/);
   }));
 
+  test('every hook writes state.json beside the transcripts folder by rename: the event, the notification type or null, an ISO time (#286)', () => fixture(({ dest, source, hook }) => {
+    const state = join(dest, '../state.json');
+    for (const [input, event, type] of [
+      [{ hook_event_name: 'SessionStart', transcript_path: source }, 'SessionStart', null],
+      [{ hook_event_name: 'Notification', notification_type: 'permission_prompt', transcript_path: source }, 'Notification', 'permission_prompt'],
+      [{ hook_event_name: 'UserPromptSubmit' }, 'UserPromptSubmit', null],
+      [{ hook_event_name: 'Stop', transcript_path: source }, 'Stop', null],
+    ]) {
+      const before = Date.now();
+      const r = hook(input);
+      assert.equal(r.code, 0, r.err);
+      assert.equal(r.err, '');
+      const s = JSON.parse(readFileSync(state, 'utf8'));
+      assert.deepEqual(Object.keys(s), ['event', 'type', 'at']);
+      assert.deepEqual([s.event, s.type], [event, type]);
+      assert.ok(Date.parse(s.at) >= before - 1000 && new Date(s.at).toISOString() === s.at, s.at);
+    }
+    assert.deepEqual(readdirSync(join(dest, '..')).sort(), ['state.json', 'transcripts'], 'no temporary name is left');
+  }));
+
+  test('only Stop and SessionEnd copy the transcript; the other events only write the state (#286)', () => fixture(({ dest, source, hook }) => {
+    for (const hook_event_name of ['SessionStart', 'UserPromptSubmit', 'Notification']) {
+      assert.equal(hook({ hook_event_name, transcript_path: source }).err, '');
+      assert.ok(!existsSync(dest), hook_event_name);
+    }
+    for (const hook_event_name of ['Stop', 'SessionEnd']) {
+      rmSync(dest, { recursive: true, force: true });
+      hook({ hook_event_name, transcript_path: source });
+      assert.deepEqual(readdirSync(dest), ['abc.jsonl'], hook_event_name);
+    }
+  }));
+
   test('a destination it cannot make is a message and exit 0', () => fixture(({ root, source, config }) => {
     writeFileSync(join(root, 'file'), 'x');
     const r = spawnSync(process.execPath, [SCRIPT, join(root, 'file/sub')], { input: JSON.stringify({ transcript_path: source }), encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: config } });
