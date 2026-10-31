@@ -24,6 +24,12 @@ export const SCHEMA = {
 // The researcher's only git (#181).
 export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta.url));
 
+// The settings every session gets with --settings (#205): bin/factory-alerts at its start, from this checkout, so no profile
+// has to hold the hook.
+export const ALERTS_SETTINGS = JSON.stringify({
+  hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: fileURLToPath(new URL('../factory-alerts', import.meta.url)), timeout: 10 }] }] },
+});
+
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
 export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
@@ -85,6 +91,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
     '--permission-mode', 'default',
+    '--settings', ALERTS_SETTINGS,
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
     '--allowedTools', ...p.allow(run), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
