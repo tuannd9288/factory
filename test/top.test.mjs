@@ -354,6 +354,38 @@ test('an ended run with no record takes its repository from its work folder\'s o
   assert.equal(asked.filter((x) => x === a).length, 1);
 });
 
+test('a run with no repository takes it from its folder\'s name: issue-<n> is the factory\'s own, <short>-<n> a known repository\'s; the rest fold into one line, not a block or a tab', async () => {
+  const w = world();
+  const runs = join(w.root, 'runs-folders');
+  const done = init(join(w.root, 'gone')) + assistant('m1', { input_tokens: 1, output_tokens: 1 }) + result({});
+  session(runs, 'issue-293', 'review-1', { log: done, ageSecs: 600 });
+  session(runs, 'zalo-gateway-7', 'build-1', { log: done, ageSecs: 600 });
+  session(runs, 'mystery-9', 'build-1', { log: done, ageSecs: 600 });
+  session(runs, 'notes', 'build-1', { log: done, ageSecs: 600 });
+  const asked = [];
+  const originOf = (cwd) => {
+    asked.push(cwd);
+    return cwd === '/the/factory' ? 'tuannd9288/factory' : null;
+  };
+  const clones = new Map([...w.opts.clones, ['tuannd9288/zalo-gateway', join(w.root, 'WORKSPACES/zalo-gateway')]]);
+  const { snapshot, render } = await top();
+  const opts = { ...w.opts, runs, live: () => false, processes: () => [], originOf, clones, root: '/the/factory' };
+  const snap = await withPath(w.bin, () => snapshot(opts));
+  const by = Object.fromEntries(snap.sessions.map((s) => [s.name, s]));
+  assert.equal(by['293-review-1'].repo, 'tuannd9288/factory');
+  assert.equal(by['zalo-gateway-7-build-1'].repo, 'tuannd9288/zalo-gateway');
+  assert.equal(by['mystery-9-build-1'].repo, null);
+  assert.equal(by['notes-build-1'].repo, null);
+  assert.equal(asked.filter((x) => x === '/the/factory').length, 1, 'the factory\'s origin is read once');
+  const text = render(snap, { width: 200 });
+  const lines = text.split('\n');
+  assert.ok(!lines.some((l) => /^\?$|team \?/.test(l)), 'no block of ?');
+  assert.ok(!lines[1].includes('[? '), 'no tab of ?');
+  const unplaced = lines.findIndex((l) => l === '  2 sessions with no repository');
+  assert.ok(unplaced > lines.findLastIndex((l) => /^tuannd9288\//.test(l)) && unplaced === lines.indexOf('Accounts') - 1, 'the line ends the repositories, before Accounts');
+  assert.ok(!render(snap, { width: 200, tab: 1 }).includes('no repository'), 'only All shows it');
+});
+
 test('the claim reader writes nothing into the clone: it fetches into a bare cache of its own under the state folder', async () => {
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
