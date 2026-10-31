@@ -34,6 +34,7 @@ function world() {
   const fx = join(root, 'fx');
   for (const d of [runs, state, bin, fx]) mkdirSync(d);
   const cwd = join(root, 'WORKSPACES/factory/.claude/worktrees/w');
+  mkdirSync(join(root, 'WORKSPACES/factory/.gate/bin'), { recursive: true });
   const u = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100 };
   session(runs, 'issue-174', 'worker', { log: init(cwd) + assistant('m1', u) + assistant('m2', { ...u, output_tokens: 7 }) });
   session(runs, 'issue-174', 'reviewer', { log: init(cwd) + assistant('m1', u) + result({ total_cost_usd: 1.5, num_turns: 4 }), ageSecs: 4000 });
@@ -285,12 +286,116 @@ test('the claim reader writes nothing into the clone: it fetches into a bare cac
   git(origin, 'update-ref', 'refs/heads/claim/5', tip);
   const before = git(clone, 'for-each-ref');
   const state = join(root, 'state');
-  const claims = await readClaims('o/n', clone, state);
+  git(clone, 'config', 'remote.origin.url', `--upload-pack=touch ${join(root, 'PWNED')} #`);
+  const claims = await readClaims('o/n', state, { url: origin });
   assert.deepEqual(claims.get(5), { state: 'claimed', team: 'alpha' });
   assert.ok(existsSync(join(state, 'top/o-n.git')));
   assert.ok(!existsSync(join(clone, '.git/FETCH_HEAD')));
   assert.equal(git(clone, 'for-each-ref'), before);
   assert.throws(() => git(clone, 'cat-file', '-e', `${tip}^{commit}`));
+  assert.ok(!existsSync(join(root, 'PWNED')), 'the clone\'s url is never read, so its hostile value runs nothing');
+});
+
+test('the claim reader runs git in its own cache: no option in a url, no config of the folder the view runs from', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { readClaims } = await top();
+  const root = mkdtempSync(join(tmpdir(), 'top-hostile-'));
+  const state = join(root, 'state');
+  const g = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' });
+  // A url that starts with a dash would be an option without `--`.
+  const flag = join(root, 'PWNED-OPTION');
+  const gitFailure = (e) => !(e instanceof TypeError);
+  await assert.rejects(readClaims('o/n', state, { url: `--upload-pack=touch ${flag} #` }), gitFailure);
+  assert.ok(!existsSync(flag));
+  assert.ok(existsSync(join(state, 'top/o-n.git')), 'git ran, in the cache');
+  // The folder the view runs from rewrites https://github.com/ to ssh and sets an ssh command.
+  const here = join(root, 'cwd');
+  mkdirSync(here);
+  g(here, 'init', '-q');
+  const mark = join(root, 'PWNED-CWD');
+  g(here, 'config', 'url.ssh://evil.invalid/.insteadOf', 'https://github.com/');
+  g(here, 'config', 'core.sshCommand', `touch ${mark} #`);
+  const before = [process.cwd(), process.env.GIT_ALLOW_PROTOCOL];
+  process.chdir(here);
+  process.env.GIT_ALLOW_PROTOCOL = 'ssh';
+  try {
+    await assert.rejects(readClaims('o/n', state), gitFailure);
+  } finally {
+    process.chdir(before[0]);
+    if (before[1] === undefined) delete process.env.GIT_ALLOW_PROTOCOL;
+    else process.env.GIT_ALLOW_PROTOCOL = before[1];
+  }
+  assert.ok(!existsSync(mark));
+});
+
+test('every line of the frame, the column header included, is cut to the width', async () => {
+  const w = world();
+  const { text } = await frame(w, 0, 80);
+  for (const l of text.split('\n')) assert.ok(l.length <= 80, `${l.length}: ${l}`);
+});
+
+test('a frame given the terminal\'s rows keeps the header, tabs and column header, cuts the tree, and says how much is left out', async () => {
+  const w = world();
+  const { snapshot, render } = await top();
+  const snap = await withPath(w.bin, () => snapshot(w.opts));
+  const full = render(snap, { width: 200 }).split('\n');
+  const cut = render(snap, { width: 200, rows: 12 }).split('\n');
+  assert.equal(cut.length, 12);
+  assert.deepEqual(cut.slice(0, 4), full.slice(0, 4));
+  assert.match(cut.at(-1), /^… \d+ more rows/);
+  assert.match(cut.at(-1), /a repository's tab shows fewer/);
+  assert.equal(render(snap, { width: 200, rows: 500 }), full.join('\n'));
+});
+
+test('a failed gh read keeps the last good one and says when; with none, the fields are ?, never unclaimed or no PR', async () => {
+  const w = world();
+  const { snapshot, render } = await top();
+  const keep = {};
+  const good = await withPath(w.bin, () => snapshot({ ...w.opts, cache: keep }));
+  assert.ok(good.github.ok);
+  writeFileSync(join(w.bin, 'gh'), '#!/bin/sh\necho "HTTP 502" >&2\nexit 1\n');
+  const later = await withPath(w.bin, () => snapshot({ ...w.opts, cache: keep, now: NOW + 61_000 }));
+  assert.equal(later.github.ok, false);
+  const text = render(later, { width: 200 });
+  assert.match(text, /tuannd9288\/factory +gh failed 12:01, showing 12:00/);
+  assert.match(text, /#174 factory top, the repo view .*PR #260/);
+  assert.ok(!/step unclaimed|no PR/.test(text.split('\n').filter((l) => /#174 /.test(l)).join('\n')));
+  const none = await withPath(w.bin, () => snapshot({ ...w.opts, cache: {} }));
+  const row = render(none, { width: 200 }).split('\n').find((l) => /^\s*#170 /.test(l));
+  assert.match(row, /step \?/);
+  assert.match(row, /PR \?/);
+  assert.match(row, /waiting on \?/);
+  assert.ok(!/unclaimed|no PR|waiting on –/.test(row));
+});
+
+test('a repository without the kit lists verify alone; a PR with it green and reviewDecision REVIEW_REQUIRED waits on the Human', async () => {
+  const w = world();
+  const { rmSync } = await import('node:fs');
+  rmSync(join(w.root, 'WORKSPACES/factory/.gate'), { recursive: true });
+  writeFileSync(join(w.fx, 'prs.json'), JSON.stringify([
+    { number: 260, title: 'top view', state: 'OPEN', headRefName: 'issue-174-top', body: 'Issue: #174\nTeam: alpha', labels: [], mergedAt: null, reviewDecision: 'REVIEW_REQUIRED', statusCheckRollup: [{ name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS' }] },
+  ]));
+  const { text } = await frame(w);
+  const row = text.split('\n').find((l) => /^\s*#174 /.test(l));
+  assert.match(row, /PR #260 verify✓\s+waiting on the Human/);
+  assert.ok(!/review|verdict|tier/.test(row));
+  assert.match(readFileSync(w.log, 'utf8'), /pr list .*reviewDecision/);
+});
+
+test('small things: <synthetic> messages give no model or context; a negative age is 0s; control characters are stripped', async () => {
+  const { parseLog, age } = await top();
+  const u = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100 };
+  const p = parseLog(assistant('m1', u) + line({ type: 'assistant', message: { id: 'm2', model: '<synthetic>', usage: { input_tokens: 0, output_tokens: 0 } } }));
+  assert.equal(p.model, 'claude-sonnet-5-5');
+  assert.equal(p.ctx, 1110);
+  assert.equal(age(-5000), '0s');
+  assert.equal(age(NaN), '?');
+  const w = world();
+  writeFileSync(join(w.fx, 'issues.json'), JSON.stringify([{ number: 174, title: 'evil\x1b[31m\x07 title', state: 'OPEN', labels: [] }]));
+  const { text } = await frame(w);
+  assert.ok(!/[\x00-\x09\x0b-\x1f\x7f]/.test(text));
+  assert.match(text, /evil\[31m title/);
 });
 
 test('a field the data does not give shows as ?', async () => {
