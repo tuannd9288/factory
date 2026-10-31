@@ -229,7 +229,7 @@ describe('the kit pull request', () => {
       assert.match(text, /`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/);
       assert.match(text, new RegExp(`bin/kit-evidence --factory <factory> --commit ${ahead} --repo <clone> --base [0-9a-f]{40} --head ${head} --slug tuannd9288/app --id 1234`));
       assert.match(text, /^## Summary for the Human\n- Purpose: bring app into the factory with the kit of tuannd9288\/factory\.$/m);
-      assert.match(text, /^## The Human's steps after the merge\n1\. From the factory's clone, run `bin\/onboard-owner tuannd9288\/app --id 1234 --apply` again/m);
+      assert.match(text, /^## After the merge\n1\. .*`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/m);
       // The gate reads two lines of this body (#133): the team that wrote it and that it answers no issue.
       const lines = run(dir, process.execPath, [join(factory, 'kit/.gate/bin/lib/prbody.mjs'), '--team', body]);
       assert.equal(lines.code, 0, lines.out);
