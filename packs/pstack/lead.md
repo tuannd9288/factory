@@ -28,7 +28,7 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    `gh pr merge --auto --merge <pr>`, the flags first, as your grant names them.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier. On tier 3, tell the Human the pull request, its head
    commit and what he approves. When a check is red, read `.claude/skills/gate-red/SKILL.md` first.
-8. When it has landed, check that the issue closed, and remove the worktree.
+8. When it has landed, check that the issue closed. The queue's sweep removes the worktree.
 
 ## What you ask the Human
 Only a tier-3 approval, a product answer, a login or a cost. Number each question and give your recommended answer.

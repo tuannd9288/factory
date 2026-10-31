@@ -421,7 +421,7 @@ of `transcript-copy.mjs` in its run folder (`hooks/transcript-copy-<sha7>.mjs`, 
 for days. The sweep also renders the three LaunchDaemon plists with the new code and compares them with the installed ones
 (`/Library/LaunchDaemons`, read only): while they differ, or a plist cannot be rendered (`could not render <label>`), `queue-plist.failed` says so and `$FACTORY_STATE/plist-wanted/` holds what
 the Human installs with sudo; it goes away on the first sweep after he does. Until then the old plist still starts the same
-files, so a change to the plist's arguments or environment must keep the old ones working.
+files, so a change to the plist's arguments or environment must keep the old ones working. Then, where it follows `main`, the sweep removes the worktrees of landed work (#279, `bin/lib/worktrees.mjs`): in the checkout and each clone under it, a linked worktree on a branch with a merged pull request (`gh pr list`), whose tip is in `origin/main`, that is clean and that no live run holds; `git worktree remove`, never `--force`, and the branch and the run folder stay. Merged work left dirty or unpushed is kept and named in `queue-worktrees.failed`.
 
 Claude Code updates itself on the stable channel, and a new version runs only after the canary passes it (#24).
 `bin/claude-canary run --repo <owner/repo>` finds the newest version in `~/.local/share/claude/versions`, runs it through
