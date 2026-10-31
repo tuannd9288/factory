@@ -192,7 +192,7 @@ export function liveCount(runs, seat, list = runFiles) {
   return countLive(runs, (p) => seatOf(p, '2') === String(seat), list);
 }
 
-/** How many runs are live whatever their seat, claims and the markers of seat 0 included (#257): the update of the checkout waits
+/** How many runs are live whatever their seat, claims included (#257): the update of the checkout waits
  * for none. Infinity when the folders never held still. */
 export function liveRuns(runs, list = runFiles) {
   return countLive(runs, () => true, list);
