@@ -7,7 +7,7 @@
 // The committed profile list below holds no account name: the factory repository is public, and an account is an email local
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { join, resolve } from 'node:path';
@@ -21,13 +21,25 @@ const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
 
 const claude = (profile, role, env, login) => ({ profile, role, kind: 'claude', check: { cmd: 'claude', args: ['auth', 'status'], env }, login });
 
+/** The numbers N of the `.claude-acc<N>` folders in home, ascending: a spare Claude row exists only for a folder that is there, so
+ * the check never points CLAUDE_CONFIG_DIR at a missing one and never makes it. */
+function spareFolders(home) {
+  let entries = [];
+  try {
+    entries = readdirSync(home, { withFileTypes: true });
+  } catch {
+    // no home to list: no spare rows
+  }
+  return entries.filter((e) => e.isDirectory() && /^\.claude-acc[0-9]+$/.test(e.name)).map((e) => Number(e.name.slice('.claude-acc'.length))).sort((a, b) => a - b);
+}
+
 /** The profiles of a place, from the committed list. On the Mac mini the Lead rows are the ones the accounts file names. A row with
  * `byFile` has its account from that file, and its login state is the token file of that account. */
 export function profilesOf(place, { home, agentProfiles, state }) {
   if (place === 'macbook') {
     return [
       claude('macbook/claude', 'Colly', {}, 'claude auth login'),
-      ...[2, 3, 4, 5].map((n) => claude(`macbook/claude-acc${n}`, 'spare Claude', { CLAUDE_CONFIG_DIR: join(home, `.claude-acc${n}`) }, `claude-use login ${n}`)),
+      ...spareFolders(home).map((n) => claude(`macbook/claude-acc${n}`, 'spare Claude', { CLAUDE_CONFIG_DIR: join(home, `.claude-acc${n}`) }, `claude-use login ${n}`)),
       { profile: 'macbook/codex', role: 'Colly Codex', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: {} }, login: 'codex-use login <N>' },
       { profile: 'macbook/gh', role: 'Colly gh', kind: 'gh', check: { cmd: 'gh', args: ['auth', 'status'], env: {} }, login: 'gh auth login' },
     ];
@@ -537,11 +549,12 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   }
   const ctx = contextOf(env);
   const place = placeOf(env);
-  const all = argv.includes('--all');
-  if (all && place !== 'macbook') {
+  if (argv.includes('--all') && place !== 'macbook') {
     console.error('bin/factory: --all runs on the MacBook');
     return 2;
   }
+  // On the MacBook a plain run is --all (the Human, 2026-10-31); --all stays accepted.
+  const all = place === 'macbook';
   if (place === 'factory' && !all) {
     const { rows, text } = listing(ctx, env);
     console.log(argv.includes('--json') ? JSON.stringify(rows) : text);

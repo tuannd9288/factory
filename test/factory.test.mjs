@@ -7,9 +7,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EMAIL, ORG, claudeJson, rowOf, sandbox } from './factory-world.mjs';
 
+/** The spare Claude folders ~/.claude-acc<N> that a MacBook row needs: a row exists only for a folder that is there. */
+const spares = (s, ...ns) => { for (const n of ns) mkdirSync(join(s.home, `.claude-acc${n}`)); };
+
 test('with no arguments, on the MacBook: one row for each profile, with the account local part and the plan, never the address or the org', () => {
   const s = sandbox();
   try {
+    spares(s, 2, 3, 4, 5);
     s.w('claude-default.json', claudeJson(EMAIL));
     s.w('claude-.claude-acc2.json', claudeJson('bob.example@other.example', 'pro'));
     s.w('codex-default', '');
@@ -97,6 +101,7 @@ test('a word that is neither a flag nor a subcommand is refused with the usage',
 test('a profile that is not logged in shows its login command', () => {
   const s = sandbox();
   try {
+    spares(s, 3);
     const r = s.fac();
     assert.match(r.out, /claude-use login 3/);
     assert.match(r.out, /codex-use login/);
@@ -120,6 +125,7 @@ test('seat 1 with no row in the accounts file names factory use', () => {
 test('the account comes from the local accounts file or FACTORY_SEAT_ACCOUNTS when nothing is read, else unknown; rows on one account name each other', () => {
   const s = sandbox();
   try {
+    spares(s, 3, 4);
     s.w('claude-default.json', claudeJson(EMAIL));
     writeFileSync(join(s.state, 'accounts'), 'macbook/claude-acc3=ann.example\nmacbook/codex=zed.example\n');
     const j = JSON.parse(s.fac('--json').out);
@@ -136,15 +142,17 @@ test('the account comes from the local accounts file or FACTORY_SEAT_ACCOUNTS wh
   }
 });
 
-test('the table stays under 100 columns when "shared with" names four long profiles; --json keeps the whole list', () => {
+// A plain run on the MacBook is --all, so the piggery rows' role ("piggery teams", one column wider than "spare Claude") is in the table.
+test('the table stays under 105 columns when "shared with" names four long profiles; --json keeps the whole list', () => {
   const s = sandbox();
   try {
+    spares(s, 2, 3, 4, 5);
     s.w('claude-default.json', claudeJson(EMAIL));
     writeFileSync(join(s.state, 'accounts'), [2, 3, 4, 5].map((n) => `macbook/claude-acc${n}=ann.example`).join('\n'));
     const r = s.fac();
     const table = r.out.split('\n\n')[0].split('\n');
     assert.ok(table.length > 5, r.out);
-    for (const line of table) assert.ok(line.length <= 100, `${line.length} columns: ${line}`);
+    for (const line of table) assert.ok(line.length <= 105, `${line.length} columns: ${line}`);
     assert.match(rowOf(r.out, 'macbook/claude '), /macbook\/claude-acc2 \+3/);
     const shared = JSON.parse(s.fac('--json').out).find((x) => x.profile === 'macbook/claude').shared;
     assert.deepEqual(shared, [2, 3, 4, 5].map((n) => `macbook/claude-acc${n}`));

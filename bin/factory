@@ -7,8 +7,9 @@
 #   factory use [<row> [<letter>]] on the Mac mini: the row's account in the accounts file becomes the letter's (a seat, at its next session)
 #   factory logout <account>       on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
-# it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes quota and live sessions from the seats' run logs. --all,
-# on the MacBook, adds the factory rows and the piggery rows over ssh to the Mac mini. --json prints the rows as one JSON line.
+# it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes quota and live sessions from the seats' run logs. On the
+# MacBook a plain run is --all (still accepted; refused on the host), and its spare Claude rows are the ~/.claude-acc<N> folders that exist. --all
+# adds the factory rows and the piggery rows over ssh to the Mac mini. --json prints the rows as one JSON line.
 # A row that is not logged in shows its login command; the Human runs it. The profiles are committed in lib/factory.mjs, with no
 # account name; the account of a profile is in $FACTORY_STATE/accounts (default ~/.local/state/factory/accounts), one
 # "<profile>=<name>" a line, local to the machine, mode 600: on the Mac mini the one source of a row's account (only `use` changes it).
