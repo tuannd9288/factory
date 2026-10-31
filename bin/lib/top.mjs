@@ -620,7 +620,7 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
   const { merged, cost, waitedMs } = snap.today;
   const bottom = [
     ...(snap.accounts.length ? ['Accounts', ...snap.accounts.map((a) => clip(`  ${a.letter}  ${a.name.padEnd(nameW)}  ${win('5h', a.five_hour)} · ${win('7d', a.seven_day)} · ${a.users.join(', ') || 'no row'}`, width))] : []),
-    clip(`Today  ${merged} pull request${merged === 1 ? '' : 's'} merged · workers and reviewers cost ${cost.length ? cost.map(([letter, usd]) => `${letter} $${usd.toFixed(2)}`).join(', ') : 'nothing yet'} · waited on you ${age(waitedMs)}`, width),
+    clip(`Today  ${merged} pull request${merged === 1 ? '' : 's'} merged · workers and reviewers cost ${cost.length ? cost.map(([letter, usd]) => `$${usd.toFixed(2)} on account ${letter}`).join(', ') : 'nothing yet'} · waited on you ${age(waitedMs)}`, width),
     'keys: 1-9 or Tab switch tabs, c full columns, q quits',
   ];
   // With the terminal's rows, everything but the team blocks stays and the blocks are cut to fit, a row saying how much was left
