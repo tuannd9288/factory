@@ -176,7 +176,7 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
-- **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify`, `red-check`.
+- **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify --fast`, the tests of the part changed, `red-check`; the full suite runs on CI (#281).
 - **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit.
 - **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
 - **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
@@ -470,7 +470,7 @@ and names `factory login <account>`. It passes a seat over only while Claude Cod
 rejected it: the last `rate_limit_event` of the seat's newest log has status
 `rejected`, until that event's `resetsAt`. No share of a window and no number of live sessions stops a seat (#194, #280): how
 many sessions run at once is the Lead's call. When the machine's load is above its cores (`sysctl -n vm.loadavg hw.ncpu`),
-start fewer workers and wait for other full verifies to finish. One team, one account by default: until
+start fewer workers. One team, one account by default: until
 #196 names teams, every session is one team's, whose account is that of the first seat its role tries (the first of the
 role's seats, or the `--seat` of a resume); a seat of another account is passed over, with a reason, and never started on, and
 when no seat of that account is free the refusal names the reset and points to `factory` and `factory use`, which the Human

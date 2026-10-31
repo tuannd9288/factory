@@ -35,10 +35,6 @@ function open(branch, head, args) {
   const short = head.slice(0, 7);
   const stamps = join(git(['rev-parse', '--absolute-git-dir']), 'factory');
   const dirty = 'if the work tree is not clean, commit or remove what `git status` shows';
-  if (!existsSync(join(stamps, `verify-${head}`))) {
-    say(1, `refused: HEAD ${short} has no verify stamp; run .gate/bin/verify on it`);
-    return say(1, dirty);
-  }
   let main;
   try {
     main = git(['rev-parse', '--verify', 'origin/main^{commit}']);
