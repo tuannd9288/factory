@@ -4,8 +4,8 @@ This repository (`tuannd9288/factory`) is the root of the Human's software facto
 in the agents' own macOS account, `factory` (#24), as `~/WORKSPACES`; each repository in the factory is a subfolder
 there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`tuan9288-agent`
 alone), their profiles and their Herdr; the Human reaches it with `ssh factory@<the Mac mini>`. His own account keeps
-his SSH keys and gh login behind its home, `drwx------` on the Mac mini (Colly's measure, 2026-10-24); the probe's
-`#24 file` lines must show both files refused. The clone is outside `~/Desktop`, which macOS privacy controls (TCC)
+his SSH keys and gh login behind its home, `drwx------` on the Mac mini (Colly's measure, 2026-10-24); the canary's
+`#24 file` lines (at the tag `before-271`) checked that both files are refused. The clone is outside `~/Desktop`, which macOS privacy controls (TCC)
 close to launchd jobs that were not granted access; not tested here. This file covers the factory's rules and taking a repository in. Inside a repository, that
 repository's own `AGENTS.md` governs.
 
@@ -166,7 +166,7 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **0a Environment** [S2, OA1]: the `factory` account, `~/WORKSPACES`, the worktrees under `.claude/worktrees/`.
 - **0b Tools & permissions** [A5, A2]: the deny rules, the permission mode, the agents' `gh` login.
 - **0c Model configuration** [MODELCFG]: which model a role runs on; one profile for each repository; the factory's own runs use one profile per seat, `~/.agent-profiles/seats/<n>/claude`, which the launcher picks.
-- **0d Harness & session** [A2]: the loop that runs Claude Code: `direnv exec`, `bin/claude-canary`.
+- **0d Harness & session** [A2]: the loop that runs Claude Code: `direnv exec`.
 - **1a Issues** [GH2]: where work comes in: one issue labelled `task`.
 - **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger.
 - **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
@@ -187,10 +187,10 @@ A sublayer may change anything inside it while its contracts hold; a change to a
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
 decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization that does the same.
 
-- **H1**: Work enters through one issue. Checked by: `kit/.gate/gate-section.md` (the Gate block), `probes/pack-probe.mjs` (`judge`: the items `task label and Closes #n on the pull request` and `the issue the session created carries the label task`).
+- **H1**: Work enters through one issue. Checked by: `kit/.gate/gate-section.md` (the Gate block).
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
-  Checked by: `kit/.github/pull_request_template.md:1-9`, `probes/pack-probe.mjs` (`judge`: the item `pull request opened and accepted by the gate`).
+  Checked by: `kit/.github/pull_request_template.md:1-9`.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
   Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:27` (one reviewer call per head).
@@ -199,10 +199,10 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
   Prior art [OA1]: "Repository-local, versioned artifacts (e.g., code, markdown, schemas, executable plans) are all it can see."
 - **H5**: A way of working is a pack of data.
-  Checked by: `probes/pack-contract.md:87-100` (§ Start, next step, one session per issue), `probes/pack-probe.mjs`, `packs/pstack/test/pstack.test.mjs`.
+  Checked by: `packs/pstack/test/pstack.test.mjs`.
   Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
 - **H6**: Tools are commands; permissions live outside the instructions.
-  Checked by: `kit/.claude/settings.json:3-28`, `probes/pack-contract.md:54` (check 10, the `.env` deny rule on `bin/seat`'s path), `probes/pack-contract.md:102-117` (the `factory` account, #24).
+  Checked by: `kit/.claude/settings.json:3-28`.
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
@@ -216,7 +216,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   prompt, so agents do not type into another pane: `herdr agent send-keys`, `herdr pane send-keys`, `rex send` and
   `rex send-key` are denied, which is #76 and not yet in the kit's deny rules; (5) with every surface stopped, the
   factory still runs. Checked by: none yet. The check will be a test that stops every surface process and shows that a
-  `bin/factory-queue` sweep (the merge queue) and a `bin/claude-canary` run on a fake `bin/seat` (the canary) still pass.
+  `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
 
 ## This root
@@ -234,8 +234,8 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   (`--check`) finds a field missing or stale, saying so in one line. `--post` refuses a repository that is not
   `PRIVATE`, since the digest lists private repositories' tasks (#209). `bin/factory-ledger plist --daemon --repo
   owner/name...` prints its job, `io.github.tuannd9288.factory.digest`: Monday 09:00 on the Mac mini's clock, as the
-  agents' account, for the 7 days that end the day before. The Human installs it with the queue's and the canary's, with
-  one `sudo install` for the three.
+  agents' account, for the 7 days that end the day before. The Human installs it with the queue's, with
+  one `sudo install` for the two.
 - Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or AGENTS.md, and review
   reads it. A test that reads text stays only when a program in this repository reads those bytes: a parser, a hash a
   script compares, or a file `onboard` or `kit-update` writes (#112).
@@ -263,7 +263,6 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH: `~/.local/bin/factory` becomes a symlink to this clone's `bin/factory`; he runs it on the MacBook and as `factory` on the Mac mini; it can be run again and replaces nothing that is not already that symlink |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
-| `probes/` | The canary's files: `probes/pack-contract.md` is the canary's oracle (what a new Claude Code keeps on `bin/seat`'s path), `probes/canary-brief.md` its brief, and `probes/pack-probe.mjs` supplies the canary's parser |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
 | `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
@@ -411,37 +410,24 @@ The checkout the daemons and `bin/seat` run from, `~/WORKSPACES`, follows `main`
 `queue-checkout.failed` (the alerts hook and the digest show it): local changes, a branch that is not `main`, a failed fetch, a
 `main` that is not a fast-forward, a failed pull. It moves a file in the way (an ignored one that a commit brings in) to
 `$FACTORY_STATE/archive/<sha7>-<time>/` and deletes nothing. It never changes the files under a run already going: it waits until
-`liveRuns` (every `run-*.pid` in `~/factory-runs/*/`, claims and the canary's marker, of any seat) is 0, under
-`$FACTORY_STATE/checkout.lock`, which every start of a run (`bin/seat`, the canary) holds from before it registers until its
-claim or marker is written, and no longer (the plugin install and the spawn come after); a refused start names the lock's holder,
-and the canary's refusal is `claude-canary.failed` that a later run with nothing to do removes; a start that loaded older code than the checkout now holds starts again once (`FACTORY_REEXEC`). A deferral says
+`liveRuns` (every `run-*.pid` in `~/factory-runs/*/`, and claims, of any seat) is 0, under
+`$FACTORY_STATE/checkout.lock`, which every start of a run (`bin/seat`) holds from before it registers until its
+claim is written, and no longer (the plugin install and the spawn come after); a refused start names the lock's holder;
+a start that loaded older code than the checkout now holds starts again once (`FACTORY_REEXEC`). A deferral says
 nothing until two hours, then `queue-checkout.failed` says how far behind and why. The Lead's Stop and SessionEnd hooks run a copy
 of `transcript-copy.mjs` in its run folder (`hooks/transcript-copy-<sha7>.mjs`, reused, never removed), since its pane stays open
-for days. The sweep also renders the three LaunchDaemon plists with the new code and compares them with the installed ones
+for days. The sweep also renders the two LaunchDaemon plists with the new code and compares them with the installed ones
 (`/Library/LaunchDaemons`, read only): while they differ, or a plist cannot be rendered (`could not render <label>`), `queue-plist.failed` says so and `$FACTORY_STATE/plist-wanted/` holds what
 the Human installs with sudo; it goes away on the first sweep after he does. Until then the old plist still starts the same
 files, so a change to the plist's arguments or environment must keep the old ones working.
 
-Claude Code updates itself on the stable channel, and a new version runs only after the canary passes it (#24).
-`bin/claude-canary run --repo <owner/repo>` finds the newest version in `~/.local/share/claude/versions`, runs it through
-`bin/seat` (a worker, in a worktree of the repository's clone at `origin/main`, in the run folder `~/factory-runs/canary-<version>`,
-which nothing removes) behind a shim `claude` first on `PATH`, so
-the session has `bin/seat`'s grants, `default` mode and scrub, checks the log against `probes/pack-contract.md` (twelve
-checks, among them a granted `git` and `node` command that must run, a `git tag` and a `gh` command that a rule must refuse,
-and the scrub, tested on both seats through the token and `CLAUDE_CONFIG_DIR`, which `bin/seat` sets and the scrub removes; exit 0 passes, 1 fails, 2 could not judge and rejects nothing; "no seat free" and a rate limit are only
-logged, until a version has gone 24 h ungraded since it was first seen, then `claude-canary.failed` names it; any other
-error in a run writes it too, with its message). The `--repo` needs the kit, the pstack pin installed through #185 and a
-`CLAUDE.md` that brings in `AGENTS.md`. The canary covers `bin/seat`'s path only: a new version's first run in
-`packs/pstack/bin/lead` is that path's own check. Only on a pass does it write the launcher `~/.local/bin/claude` (a script that
-`exec`s that version; Claude Code leaves a launcher of ours in place and keeps every installed version, per
-code.claude.com/docs/en/setup), then removes versions older than the previous one. A failed version is rejected
-(`claude-rejected`) until a newer one arrives and the launcher stays. `bin/claude-canary plist --daemon --repo
-<owner/repo>` prints its LaunchDaemon, `io.github.tuannd9288.factory.claude-canary`, every six hours, loaded like the queue's;
-`bin/factory-ledger plist --daemon --repo <owner/repo>...` prints the digest's, `io.github.tuannd9288.factory.digest`, every Monday at 09:00, loaded the same way. Every
-`*.failed` file in the state folder (`claude-canary.failed`, `digest.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
+Claude Code updates itself on the stable channel; nothing in the factory pins its version (the canary, #24, is at the tag
+`before-271`).
+`bin/factory-ledger plist --daemon --repo <owner/repo>...` prints the digest's LaunchDaemon, `io.github.tuannd9288.factory.digest`, every Monday at 09:00, loaded like the queue's. Every
+`*.failed` file in the state folder (`digest.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
 the Human at once, at the start of each Claude session in this account, by `bin/factory-alerts`, the SessionStart hook
 in each profile's `settings.json` and in the settings `bin/seat` passes to every session it starts (`--settings`);
-`FACTORY_NO_ALERTS=1` silences it, and the probe and the canary set it. The hook in
+`FACTORY_NO_ALERTS=1` silences it. The hook in
 the Supervisor's own settings on the MacBook is installed by Colly, not here.
 
 The live verifier runs on one Codex profile for every repository, `~/.agent-profiles/verifier/codex`, which only
