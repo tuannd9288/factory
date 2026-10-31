@@ -142,8 +142,9 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 ## What the Human keeps
 
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy.
-- Admin steps: running `bin/onboard-owner` (the agents' account, rulesets, the `reviewer` environment), the
-  reviewer's secrets, registering the runner.
+- His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
+  `reviewer` environment), which Colly then applies on his login; and the reviewer's secret, where a repository uses
+  the kit's Claude reviewer.
 - Logging into a repository's profile and the verifier's Codex profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.
@@ -246,8 +247,9 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
 | `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
 | `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
-| `bin/onboard-owner` | The Human's half of taking a repository in: account, rulesets, `reviewer` environment |
-| `bin/onboard` | The agents' half: clone, profile, kit, verify, the kit pull request |
+| `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment), which Colly runs on the Human's login after his one approval |
+| `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
+| `bin/onboard-doctor` | Reads one repository taken in and prints one line per check, green or red, and changes nothing; Colly runs it on the Human's login, from a commit on `main`; the "Take <repo> in" issue closes on its output |
 | `bin/kit-update` | The onboarded repository's counterpart of onboard: brings its clone up to a factory commit, with evidence, in a pull request from `factory/kit-<sha7>` |
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
@@ -263,9 +265,33 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 
 ## Taking a repository in
 
-Two halves, the Human's first. From this clone, logged into `gh` as the repository's owner, he runs
-`bin/onboard-owner <owner/repo> --id <id>`, reads the changes it prints, and runs it again with `--apply`. The id is
-the repository's own (`gh api repos/<owner/repo> --jq .id`), so a typo or a renamed repository is refused. It invites
+Six steps, run by Colly and a team:
+
+1. The Human says "take <repo> in". Colly opens the issue "Take <repo> in"; its acceptance is the lines
+   `bin/onboard-doctor` prints.
+2. Colly runs `bin/onboard-owner` without `--apply`, from the factory's clone on the MacBook, on the Human's `gh`
+   login, and sends him the changes it prints. He approves once; Colly runs it with `--apply`. For a private
+   repository, Colly also takes the runner's registration token (the Human's standing exception, 2026-10-29), never
+   printed. The agents' account accepts the invitation itself. The changes he approves name the four repository
+   variables the kit reads (`GATE_RUNNER`, `GATE_PR_RUNNER`, `GATE_TRUSTED_RUNNER`, `GATE_REVIEWER`) with their
+   values; Colly sets them in this step, before the second `--apply`, which reads `GATE_REVIEWER`.
+3. A team claims the issue and runs `bin/onboard <repo-url>`. The kit pull request carries its evidence
+   (`bin/kit-evidence`). Until `main` holds the kit, its `verify` is red (code 127), and the bootstrap rule requires
+   no check (`bin/onboard`'s own note in the kit pull request body). He approves it as tier 3 from its "Summary for
+   the Human" (`kit/.github/pull_request_template.md`).
+4. When it merges, Colly runs `--apply` the second time (`factory-gate` in, `factory-bootstrap` out). The Human's
+   approval of the kit pull request covers it. The merge queue then sweeps the repository with nothing more from
+   him, and no `sudo` install for each new repository (#211). The queue job's one install is his, together with the
+   other daemons after #203 (#209).
+5. The team sweeps the repository (#20) with the Human's `repo-refresh` skill (#19) in audit mode, then opens one
+   pull request per area through the gate.
+6. When `bin/onboard-doctor` prints every line green, Colly closes the issue.
+
+His part is the two approvals, and pasting the reviewer's secret where the repository uses the kit's Claude reviewer;
+Entire needs none (#155).
+
+Step 2 in detail: `bin/onboard-owner <owner/repo> --id <id>` takes the id of the repository itself
+(`gh api repos/<owner/repo> --jq .id`), so a typo or a renamed repository is refused. With `--apply` it invites
 the agents' account (write), sets `factory-branches` (every branch: no rewrite), `factory-tags` (every tag: no create,
 update or delete, but for a repository admin), `factory-claims` (`refs/heads/claim/**`: no deletion, no rewrite, no
 bypass) and `factory-bootstrap` (`main`: a pull request, one approval of the
@@ -273,7 +299,8 @@ last push, merge commits only), creates the `reviewer` environment for `main`, a
 reads it all back; it calls only `gh api`, never `git` and nothing the repository holds. A claim on an issue is the ref
 `claim/<n>`, taken with `.gate/bin/claim`; `verify-trusted` checks the pull request body's `Team:` line, and `tier` its
 `Issue:` and `Claim:` lines against that ref (`Session:` and `Cost:` inform only). Once the agents' account
-has accepted the invitation, an agent runs `bin/onboard <repo-url>` from this root, logged into `gh` as that account.
+has accepted the invitation, the team that claimed the issue runs `bin/onboard <repo-url>` from this root, logged into
+`gh` as that account.
 It refuses any other login, and a `main` without the bootstrap pull request rule:
 
 1. clones the repository into `<root>/<repo>`;
@@ -342,9 +369,10 @@ base's. The variable `GATE_FACTORY_URL` is for tests and takes only an absolute 
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
 proposes `.gate/load-bearing`, and runs the probes. The Human approves the kit pull request (the bootstrap rule asks
-for his approval), runs `bin/onboard-owner … --apply` again once it merged, which puts the kit's `factory-gate` in and
-only then takes `factory-bootstrap` out, sets the reviewer's secrets in `reviewer`, and logs into the profile in a new
-pane opened in the repository (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
+for his approval). Once it merged, Colly runs `bin/onboard-owner … --apply` again on his login, which puts the kit's
+`factory-gate` in and only then takes `factory-bootstrap` out; his approval of the kit pull request covers it. He pastes
+the reviewer's secret into `reviewer` where the repository uses the kit's Claude reviewer (Entire needs none, #155),
+and logs into the profile in a new pane opened in the repository (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
 
 Run `bin/factory-queue sweep --repo <owner/repo>...` from launchd every minute, logged into `gh` as the agents'
 account (it refuses the Human's): the ruleset requires a branch to be up to date, GitHub updates none by itself, and
