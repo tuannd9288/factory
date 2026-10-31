@@ -92,7 +92,7 @@ test('a branch the origin moved past by an update-branch merge commit is removed
 test('the first line of the report names a path, and the count in the singular or plural', () => {
   withFixture(['one', 'two'], { commit: ['one', 'two'] }, (f) => {
     writeFileSync(join(f.runs, 'one/w/f'), 'changed\n');
-    f.sweep(['one', 'two']);
+    f.sweep(['one']);
     assert.match(readFileSync(f.report, 'utf8').split('\n')[0], new RegExp(` 1 worktree of merged work kept: ${join(f.runs, 'one/w')}$`));
     writeFileSync(join(f.runs, 'two/w/f'), 'changed\n');
     f.sweep(['one', 'two']);

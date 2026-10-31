@@ -273,12 +273,12 @@ function followCheckout(state) {
 function sweepLanded(state) {
   const root = checkoutRoot();
   if (!root) return;
-  const runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs');
-  // A worktree is held when a live run's folder is its parent: the run files of that folder alone are listed.
-  const live = (path) => liveRuns(runs, (dir, ext) => runFiles(dir, ext).filter((f) => path.startsWith(`${dirname(f)}/`)));
   const merged = (repo) =>
     new Set(JSON.parse(gh(['pr', 'list', '-R', repo, '--state', 'merged', '--limit', '1000', '--json', 'headRefName'])).map((p) => p.headRefName));
   try {
+    const runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs');
+    // A worktree is held when a live run's folder is its parent: the run files of that folder alone are listed.
+    const live = (path) => liveRuns(runs, (dir, ext) => runFiles(dir, ext).filter((f) => path.startsWith(`${dirname(f)}/`)));
     const origin = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     const own = /github\.com[:/](.+?)(?:\.git)?\/?$/.exec(origin)?.[1];
     const clones = [...(own ? [{ repo: own, dir: root }] : []), ...[...clonesUnder(root)].map(([repo, dir]) => ({ repo, dir }))];

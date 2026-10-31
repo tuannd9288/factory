@@ -1,15 +1,16 @@
 // A task's worktree goes when its work has landed (#279). The queue's sweep calls sweepWorktrees after the checkout follows main: for
 // each clone it reads `git worktree list --porcelain` (never a guessed path) and removes, with `git worktree remove` and never
-// --force, each linked worktree that is on a branch with a merged pull request, whose HEAD is in origin/main, that is clean and that
-// no live run holds. The branch and the run folder, its logs and transcripts stay. A worktree of merged work that is not clean or
-// not in origin/main is kept and named in queue-worktrees.failed, so the Human sees it in the alerts.
+// --force, each linked worktree that is on the head branch of a merged pull request, that is clean, whose HEAD holds no commit on
+// none of the clone's remote refs, and that no live run holds. The branch and the run folder, its logs and transcripts stay. A
+// worktree of merged work that is not clean or holds an unpushed commit is kept and named in queue-worktrees.failed, so the Human
+// sees it in the alerts.
 import { spawnSync } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const first = (r) => String(r.stderr || r.stdout || r.error?.message || `exit ${r.status}`).trim().split('\n')[0].slice(0, 200);
 
-/** The linked worktrees of a clone (its own first one left out): {path, branch, head, locked, prunable}. */
+/** The linked worktrees of a clone (its own first one left out): {path, branch, locked, prunable}. */
 function linked(git) {
   const list = git('worktree', 'list', '--porcelain');
   if (list.status !== 0) throw new Error(first(list));
@@ -34,10 +35,12 @@ export function sweepWorktrees({ clones, state, live, merged, now = Date.now() }
       const open = linked(git).filter((w) => w.branch && !w.locked && !w.prunable && live(w.path) === 0);
       const landed = open.length ? merged(repo) : new Set();
       for (const w of open.filter((x) => landed.has(x.branch))) {
-        const clean = spawnSync('git', ['-C', w.path, 'status', '--porcelain'], { encoding: 'utf8', timeout: 60_000 });
-        // The branch is checked out there, so its tip is the worktree's HEAD.
-        const inMain = git('merge-base', '--is-ancestor', `refs/heads/${w.branch}`, 'origin/main');
-        if (clean.status !== 0 || clean.stdout.trim() || inMain.status !== 0) kept.push(w.path);
+        const at = (...args) => spawnSync('git', ['-C', w.path, ...args], { encoding: 'utf8', timeout: 60_000 });
+        const clean = at('status', '--porcelain');
+        // Nothing unpushed: HEAD holds no commit that is on none of the clone's remote refs. A fetch is no need: the Lead pushed
+        // from this worktree, and a stale origin/main would only keep it.
+        const unpushed = at('rev-list', '--count', 'HEAD', '--not', '--remotes');
+        if (clean.status !== 0 || clean.stdout.trim() || unpushed.stdout.trim() !== '0') kept.push(w.path);
         else {
           const gone = git('worktree', 'remove', w.path);
           if (gone.status === 0) removed += 1;
@@ -49,7 +52,11 @@ export function sweepWorktrees({ clones, state, live, merged, now = Date.now() }
     }
     git('worktree', 'prune');
   }
-  if (kept.length) writeFileSync(report, `${new Date(now).toISOString()} ${kept.length} worktrees of merged work kept or unchecked:\n${kept.join('\n')}\n`);
+  // alerts.mjs shows the first line alone, so it names the first path.
+  if (kept.length) {
+    const more = kept.length > 1 ? ` and ${kept.length - 1} more` : '';
+    writeFileSync(report, `${new Date(now).toISOString()} ${kept.length} worktree${kept.length > 1 ? 's' : ''} of merged work kept: ${kept[0]}${more}\n${kept.join('\n')}\n`);
+  }
   else rmSync(report, { force: true });
   return { removed, kept };
 }
