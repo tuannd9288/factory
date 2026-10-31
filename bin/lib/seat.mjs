@@ -452,7 +452,10 @@ function register({ o, runs, state, run, tag }) {
     const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim, accounts });
     if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free on the team's account; \`factory\` shows every account's room and \`factory use\` moves the team`);
     // The name is chosen and written while the start holds checkout.lock, so two starts never take the same one (#286).
-    const name = (o.resume && nameOfSession(state, o.resume)) || firstFree(heldNames(runs));
+    // A resume keeps its session's name unless a live run or a Lead holds it now: no two live sessions share a name.
+    const held = heldNames(runs);
+    const earlier = o.resume ? nameOfSession(state, o.resume) : null;
+    const name = earlier && !held.includes(earlier) ? earlier : firstFree(held);
     writeFileSync(join(run, `run-${tag}.name`), `${name}\n`);
     return { seat, account: accounts[seat], pidFile, unclaim, name };
   } catch (e) {
