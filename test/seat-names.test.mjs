@@ -15,14 +15,22 @@ test('a new start writes run-<tag>.name, and the record carries the name', () =>
   assert.equal(w.records()[0].name, 'aardvark');
 }));
 
-test('a live run holds its name, so the next start takes the next one; a run that ended gives its name back', () => world(async (w) => {
+test('a live run holds its name, so the next start takes the next one', () => world(async (w) => {
   const release = join(w.root, 'release');
   assert.equal(w.start('worker', ['--tag', 'a'], { FAKE_MODE: 'hang', FAKE_RELEASE: release }).code, 0);
   assert.equal(w.start('reviewer', ['--tag', 'b'], { FAKE_MODE: 'hang', FAKE_RELEASE: release }).code, 0);
   assert.deepEqual([nameOf(w, 'a'), nameOf(w, 'b')], ['aardvark', 'badger']);
-  writeFileSync(release, '');
-  await until(() => w.records().length === 2, 'both records');
-  await until(() => !existsSync(join(w.run, 'run-a.child')) && !existsSync(join(w.run, 'run-b.child')), 'both gone');
+}));
+
+test('a name stays apart through the day: a run that ended today still holds its name against a new start', () => world(async (w) => {
+  assert.equal(w.start('worker', ['--tag', 'a']).code, 0);
+  await until(() => w.records().length === 1, 'the record');
+  await until(() => !existsSync(join(w.run, 'run-a.child')), 'the run gone');
+  assert.equal(w.start('reviewer', ['--tag', 'b']).code, 0);
+  assert.deepEqual([nameOf(w, 'a'), nameOf(w, 'b')], ['aardvark', 'badger']);
+  // a record of an earlier day holds nothing
+  await until(() => w.records().length === 2 && !existsSync(join(w.run, 'run-b.child')), 'b gone');
+  writeFileSync(join(w.state, 'sessions.jsonl'), `${JSON.stringify({ session: 'old', role: 'worker', seat: 1, tag: 't', run: w.run, start: '2020-01-01T00:00:00Z', end: '2020-01-01T00:01:00Z', name: 'aardvark' })}\n`);
   assert.equal(w.start('worker', ['--tag', 'c']).code, 0);
   assert.equal(nameOf(w, 'c'), 'aardvark');
 }));
