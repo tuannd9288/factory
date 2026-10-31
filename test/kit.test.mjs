@@ -1573,7 +1573,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     claude({ output: { blocking: [], noRed: 'unjudged' } });
     let out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: '', ...pr });
     assert.match(out.out, /^::notice title=review-result::unavailable: no-reviewer\n/);
-    assert.match(out.out, /^review: reviewer unavailable \(no-reviewer\)/m, 'probes/score.mjs stops on this line');
+    assert.match(out.out, /^review: reviewer unavailable \(no-reviewer\)/m, 'a caller stops on this line');
     out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: 'gpt', ...pr });
     assert.match(out.out, /^::notice title=review-result::unavailable: no-reviewer\n/);
     assert.match(out.out, /^review: reviewer unavailable \(no-reviewer\)/m);
