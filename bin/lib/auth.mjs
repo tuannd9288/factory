@@ -28,7 +28,7 @@ export function profilesOf(place, { home, agentProfiles }) {
   if (place === 'factory') {
     const seat2 = join(agentProfiles, 'seats/2/claude');
     return [
-      { profile: 'factory/seat-1', role: 'seat 1 (bin/seat)', kind: 'claude', tokenFile: join(agentProfiles, 'seats/1/oauth-token'), login: 'claude setup-token (on the MacBook), then omk-provider-key set CLAUDE_CODE_OAUTH_TOKEN, then copy it to ~/.agent-profiles/seats/1/oauth-token with mode 600 (#91)' },
+      { profile: 'factory/seat-1', role: 'seat 1 (bin/seat)', kind: 'claude', tokenFile: join(agentProfiles, 'seats/1/oauth-token'), login: `On a machine with a browser, run: claude setup-token (#91). Then ssh -t factory@${HOST} and paste this line:\nread -rs t; umask 077; f=~/.agent-profiles/seats/1/oauth-token; printf '%s' "$t" > "$f.new" && mv "$f.new" "$f"; unset t` },
       claude('factory/seat-2', 'seat 2 (bin/seat)', { CLAUDE_CONFIG_DIR: seat2 }, `ssh -t factory@${HOST}\nCLAUDE_CONFIG_DIR=~/.agent-profiles/seats/2/claude claude auth login`),
       { profile: 'factory/verifier', role: 'live verifier', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: { CODEX_HOME: join(agentProfiles, 'verifier/codex') } }, login: 'CODEX_HOME=~/.agent-profiles/verifier/codex codex login --device-auth' },
       { profile: 'factory/gh', role: 'agents gh', kind: 'gh', check: { cmd: 'gh', args: ['auth', 'status'], env: {} }, login: 'gh auth login --insecure-storage' },
