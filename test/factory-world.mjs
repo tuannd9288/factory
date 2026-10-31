@@ -81,7 +81,6 @@ export function sandbox() {
     AGENT_PROFILES: join(home, '.agent-profiles'),
     FACTORY_ROOT: join(home, 'WORKSPACES'),
     FACTORY_RUNS: join(home, 'factory-runs'),
-    FACTORY_SEAT_ACCOUNTS: '',
     // The factory host is where the caller's user is FACTORY_HOST_USER: the MacBook here, the Mac mini after onHost() and in the
     // fake ssh's far side (FAR_USER).
     FACTORY_HOST_USER: 'nobody-here',

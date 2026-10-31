@@ -43,8 +43,10 @@ function world(body) {
   writeFileSync(join(w.bin, 'claude'), FAKE);
   chmodSync(join(w.bin, 'claude'), 0o755);
   writeFileSync(join(w.run, 'BRIEF.md'), 'the brief\n');
-  mkdirSync(join(w.profiles, 'seats/1'), { recursive: true });
-  writeFileSync(join(w.profiles, 'seats/1/oauth-token'), `${TOKEN}\n`);
+  // Both seats name one account, whose token file is the fixture's (#178).
+  mkdirSync(join(w.profiles, 'tokens'), { recursive: true });
+  writeFileSync(join(w.profiles, 'tokens/acct-one'), `${TOKEN}\n`);
+  writeFileSync(join(w.state, 'accounts'), 'factory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
   w.out = (n = 'a') => join(w.fake, `${n}.json`);
   w.env = (extra = {}) => ({
     PATH: `${w.bin}:${dirname(process.execPath)}`, HOME: w.home, AGENT_PROFILES: w.profiles, FACTORY_RUNS: w.runs, FACTORY_STATE: w.state,
@@ -88,19 +90,19 @@ test('it starts the session in the background and prints the pid, the seat and t
   await until(() => w.records().length === 1, 'the record');
 }));
 
-test('the session gets its preset, the brief on stdin, the work folder as cwd, an empty gh config and seat 2\'s profile, and no token', () => world(async (w) => {
+test('the session gets its preset, the brief on stdin, the work folder as cwd, an empty gh config, seat 2\'s profile and its account\'s token', () => world(async (w) => {
   const { buildArgs } = await import('../bin/lib/seat.mjs');
   const r = w.start('worker', ['--skill', 'deletion-proof', '--allow', `Bash(${w.run}/other)`]);
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => existsSync(w.out()) && w.records().length === 1, 'the session');
   const saw = w.saw();
-  assert.deepEqual(saw.argv, buildArgs({ role: 'worker', run: w.run, home: w.home, work: w.work, skills: ['deletion-proof'], allow: [`Bash(${w.run}/other)`], seat: 2 }));
+  assert.deepEqual(saw.argv, buildArgs({ role: 'worker', run: w.run, home: w.home, work: w.work, skills: ['deletion-proof'], allow: [`Bash(${w.run}/other)`], seat: 2, profiles: w.profiles }));
   assert.equal(saw.stdin, 'the brief\n');
   assert.equal(saw.cwd, readlinkReal(w.work));
   assert.equal(saw.env.gh, join(w.run, '.gh-empty'));
   assert.ok(existsSync(join(w.run, '.gh-empty')));
   assert.equal(saw.env.config, join(w.profiles, 'seats/2/claude'));
-  assert.equal(saw.env.token, null, 'seat 2 has no token, even when the caller\'s environment has one');
+  assert.equal(saw.env.token, TOKEN, 'the account\'s token, not the one in the caller\'s environment');
   assert.equal(saw.env.spec, null, 'the supervisor\'s own settings do not reach the session');
 }));
 
@@ -129,16 +131,15 @@ test('seat 1: the token is in the session\'s environment and in no argv, log, re
   assert.equal(saw.env.token, TOKEN);
   assert.equal(saw.env.config, join(w.profiles, 'seats/1/claude'));
   assert.ok(!saw.argv.some((a) => a.includes(TOKEN)));
-  const tokenFile = join(w.profiles, 'seats/1/oauth-token');
   const i = saw.argv.indexOf('--disallowedTools');
   const denied = saw.argv.slice(i + 1, saw.argv.indexOf('--output-format'));
-  assert.deepEqual(denied.slice(-1), [`Read(/${tokenFile})`]);
+  assert.deepEqual(denied.slice(-3), [`Read(/${w.profiles}/tokens/**)`, `Read(/${w.profiles}/archive/**)`, `Read(/${w.profiles}/seats/1/oauth-token)`]);
   for (const [file, text] of [...filesUnder(w.run), ...filesUnder(w.state)]) assert.ok(!text.includes(TOKEN), `${file} holds the token`);
   assert.ok(!(r.out + r.err).includes(TOKEN));
 }));
 
 test('seat 1 with a missing or empty token file is refused with exit 2, naming the path and not the content', () => world(async (w) => {
-  const tokenFile = join(w.profiles, 'seats/1/oauth-token');
+  const tokenFile = join(w.profiles, 'tokens/acct-one');
   for (const content of [null, '', '\n\n']) {
     if (content === null) rmSync(tokenFile);
     else writeFileSync(tokenFile, content);

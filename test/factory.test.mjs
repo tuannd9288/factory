@@ -55,13 +55,13 @@ test('a profile that is not logged in shows its login command', () => {
   }
 });
 
-test('seat 1 not logged in names factory login', () => {
+test('seat 1 with no row in the accounts file names factory use', () => {
   const s = sandbox();
   try {
     s.onHost();
     const r = s.fac();
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /factory login <account>/);
+    assert.match(r.out, /factory use 1 /);
   } finally {
     s.done();
   }
@@ -103,19 +103,19 @@ test('the table stays under 100 columns when "shared with" names four long profi
   }
 });
 
-test('on the factory account: seat 1 is its token file\'s mode and date only, seat 2 has quota and live sessions, no row for a repository folder (#205)', () => {
+test('on the factory account: a seat is its account\'s token file\'s mode and date only, seat 2 has quota and live sessions, no row for a repository folder (#205)', () => {
   const s = sandbox();
   try {
-    const seat1 = join(s.home, '.agent-profiles/seats/1');
-    mkdirSync(seat1, { recursive: true });
-    writeFileSync(join(seat1, 'oauth-token'), 'sk-ant-oat01-NEVERSHOWNNEVERSHOWN');
-    chmodSync(join(seat1, 'oauth-token'), 0o600);
-    utimesSync(join(seat1, 'oauth-token'), new Date('2026-10-26T00:00:00Z'), new Date('2026-10-26T00:00:00Z'));
-    s.w('claude-claude.json', claudeJson('seat.two@secret-corp.example', 'max'));
-    s.w('claude-lead-alpha.json', claudeJson('lead.alpha@secret-corp.example', 'pro'));
+    const tokens = s.tokens();
+    mkdirSync(tokens, { recursive: true });
+    for (const a of ['seat.one', 'seat.two']) {
+      writeFileSync(join(tokens, a), 'sk-ant-oat01-NEVERSHOWNNEVERSHOWN');
+      chmodSync(join(tokens, a), 0o600);
+      utimesSync(join(tokens, a), new Date('2026-10-26T00:00:00Z'), new Date('2026-10-26T00:00:00Z'));
+    }
+    writeFileSync(join(s.state, 'accounts'), 'factory/seat-1=seat.one\nfactory/seat-2=seat.two\n');
     s.w('gh-factory', 'agentgh');
     s.onHost();
-    s.env.FACTORY_SEAT_ACCOUNTS = '1=seat.one';
     for (const [repo, files] of [['alpha', ['.gate', '.envrc']], ['beta', ['.gate']], ['gamma', ['.envrc']]]) {
       mkdirSync(join(s.env.FACTORY_ROOT, repo), { recursive: true });
       for (const f of files) writeFileSync(join(s.env.FACTORY_ROOT, repo, f), '');
@@ -137,7 +137,7 @@ test('on the factory account: seat 1 is its token file\'s mode and date only, se
     assert.equal(by('factory/seat-2').live, 0);
     assert.equal(by('factory/verifier').loggedIn, false);
     assert.ok(!r.out.includes('NEVERSHOWN'));
-    assert.ok(!s.calls().includes('seats/1'), 'claude never ran for seat 1');
+    assert.ok(!s.calls().includes('seats/'), 'claude never ran for a seat');
     assert.doesNotMatch(s.calls(), /direnv/);
     assert.match(s.calls(), /codex login status CODEX_HOME=.*verifier\/codex/);
   } finally {
@@ -145,7 +145,7 @@ test('on the factory account: seat 1 is its token file\'s mode and date only, se
   }
 });
 
-test('the list shows a row for each token file: the account, the mode and the date, never the content', () => {
+test('the list shows a lettered account for each token file: the mode and the date, never the content', () => {
   const s = sandbox();
   try {
     s.onHost();
@@ -158,16 +158,12 @@ test('the list shows a row for each token file: the account, the mode and the da
     utimesSync(join(dir, 'ann'), new Date('2026-10-26T00:00:00Z'), new Date('2026-10-26T00:00:00Z'));
     writeFileSync(join(dir, '.ann.123.tmp'), 'half-written');
     const r = s.fac();
-    const rows = JSON.parse(s.fac('--json').out).filter((x) => x.profile.startsWith('factory/token-'));
-    assert.deepEqual(rows.map((x) => x.profile), ['factory/token-ann', 'factory/token-bob']);
-    assert.equal(rows[0].loggedIn, true);
-    assert.equal(rows[0].account, 'ann');
-    assert.match(rows[0].note, /mode 600, modified 2026-10-26/);
-    assert.doesNotMatch(rows[0].note, /should be/);
-    assert.match(rows[1].note, /mode 644 \(should be 600\)/);
-    assert.ok(rowOf(r.out, 'factory/token-ann'), r.out);
-    assert.ok(rowOf(r.out, 'factory/token-bob'), r.out);
-    assert.ok(!r.out.includes('half-written') && !r.out.includes('token-sub'));
+    const ann = r.out.split('\n').find((l) => /^\s*a\s+ann\b/.test(l));
+    const bob = r.out.split('\n').find((l) => /^\s*b\s+bob\b/.test(l));
+    assert.match(ann, /mode 600, modified 2026-10-26/);
+    assert.doesNotMatch(ann, /should be/);
+    assert.match(bob, /mode 644 \(should be 600\)/);
+    assert.ok(!r.out.includes('half-written') && !r.out.includes('sub'));
     const all = `${r.out}\n${s.fac('--json').out}`;
     for (const token of Object.values(tokens)) for (let i = 0; i + 8 <= token.length; i += 1) assert.ok(!all.includes(token.slice(i, i + 8)), `a slice of a token at ${i}`);
   } finally {
@@ -310,14 +306,14 @@ exec "$0.real" "$@"
   }
 });
 
-test('no part of seat 1\'s token reaches the table or the JSON', () => {
+test('no part of a seat\'s token reaches the table or the JSON', () => {
   const s = sandbox();
   try {
     const token = 'sk-ant-oat01-Q7xP2mK9vL4nR8tW3yZ6hJ5c';
-    const seat1 = join(s.home, '.agent-profiles/seats/1');
-    mkdirSync(seat1, { recursive: true });
-    writeFileSync(join(seat1, 'oauth-token'), token);
-    chmodSync(join(seat1, 'oauth-token'), 0o600);
+    mkdirSync(s.tokens(), { recursive: true });
+    writeFileSync(join(s.tokens(), 'ann'), token);
+    chmodSync(join(s.tokens(), 'ann'), 0o600);
+    writeFileSync(join(s.state, 'accounts'), 'factory/seat-1=ann\n');
     s.onHost();
     const out = `${s.fac().out}\n${s.fac('--json').out}`;
     assert.match(out, /mode 600/);

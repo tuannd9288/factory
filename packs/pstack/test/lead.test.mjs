@@ -114,7 +114,13 @@ describe('leadArgs', () => {
     for (const d of ['Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
   });
 
-  test('the deny list refuses factory login and factory store in every form, and not the list', () => {
+  test('the deny list refuses reading the environment, the tokens folder and the archive folder (#178)', () => {
+    const deny = list('--disallowedTools');
+    for (const command of ['env', 'env -0', 'printenv', 'printenv CLAUDE_CODE_OAUTH_TOKEN']) assert.ok(deny.some((r) => matches(r, command)), command);
+    for (const rule of ['Read(~/.agent-profiles/tokens/**)', 'Read(~/.agent-profiles/archive/**)', 'Read(~/.agent-profiles/seats/1/oauth-token)']) assert.ok(deny.includes(rule), rule);
+  });
+
+  test('the deny list refuses factory login, store, use and logout in every form, and not the list', () => {
     const deny = list('--disallowedTools');
     for (const command of FORMS) assert.ok(deny.some((r) => matches(r, command)), command);
     for (const command of HARMLESS) assert.ok(!deny.some((r) => matches(r, command)), command);
