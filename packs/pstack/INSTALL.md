@@ -3,11 +3,12 @@
 The pack is a folder a team copies; the kit does not lay it. Run from the repository's root, with the factory
 checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.gate/` and `.claude/` are tier 3.
 
-1. `cp -p $FACTORY/packs/pstack/scripts/ship scripts/` and `mkdir -p scripts/lib && cp -p
+1. `mkdir -p scripts/lib && cp -p $FACTORY/packs/pstack/scripts/ship scripts/ && cp -p
    $FACTORY/packs/pstack/scripts/lib/ship.mjs $FACTORY/packs/pstack/scripts/lib/driver.mjs scripts/lib/`. A `scripts/`
    the repository already has keeps its other files. `live-verify`, `lib/live-verify.mjs` and `lib/verdict.mjs` stay out
    until #264 is fixed (`yields.md`, "The live verifier").
-2. `cp $FACTORY/packs/pstack/.gate/driver.json .gate/driver.json`; the repository's session fills it.
+2. `cp $FACTORY/packs/pstack/.gate/driver.json .gate/driver.json`. It stays the template until #264 is fixed: with
+   no `scripts/live-verify`, a filled driver stops `scripts/ship` on every pull request.
 3. Append the two rows of `enforced-rules.rows.md` to `.gate/enforced-rules.md`.
 4. Add what `section.md` says to the repository's own `AGENTS.md`, after the Gate block, within 150 lines and 32 KiB.
    A repository already near the limit shortens its own rules first, through the Human's rule audit; the pack is not

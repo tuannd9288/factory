@@ -1,5 +1,5 @@
 {
-  "$comment": "How a user runs this repository, for scripts/live-verify. The repository's session fills it; changing it is tier 3, and live-verify reads main's copy, never the pull request's. name: the driver (a CLI, a browser script, an API client). start: the command that starts the change, or empty. drive: what to run or do as a user, and what to look at. network: true when the run needs outbound network; Codex's sandbox has none otherwise. An empty name or drive makes every live verdict BLOCKED.",
+  "$comment": "How a user runs this repository, for scripts/live-verify. The repository's session fills it once scripts/live-verify is in, not before #264 is fixed; until then scripts/ship posts a no-driver note. Changing it is tier 3, and live-verify reads main's copy, never the pull request's. name: the driver (a CLI, a browser script, an API client). start: the command that starts the change, or empty. drive: what to run or do as a user, and what to look at. network: true when the run needs outbound network; Codex's sandbox has none otherwise. An empty name or drive makes every live verdict BLOCKED.",
   "name": "",
   "start": "",
   "drive": "",

@@ -248,7 +248,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | Path | What it is |
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
-| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
+| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
 | `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment), which Colly runs on the Human's login after his one approval |
 | `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
@@ -522,8 +522,9 @@ denied `Read(~/factory-runs/*-lead/transcripts/**)`.
 
 A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
-own `AGENTS.md` (`section.md`) and its sources (`yields.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
-chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
+own `AGENTS.md` (`section.md`) and its sources (`yields.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`,
+the steps; a repository that chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no
+`--pack`.
 The Human starts a repository's pstack Lead, an interactive session, with `factory lead <repo>` (#163, #166), which runs
 `packs/pstack/bin/lead` of this clone on the Mac mini. Every day he attaches from the MacBook with
 `herdr --remote factory@tuans-mac-mini` (through Rex or any terminal) and runs `factory lead <repo>` in a pane there; from any

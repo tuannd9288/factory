@@ -6,14 +6,15 @@ differs from the factory, the gate's rule wins (sources: the factory's `packs/ps
 - No force-push; fix forward with a new commit. `factory-branches` refuses a non-fast-forward push.
 - No stacked pull requests: `scripts/ship` opens against `main` and arms no other base.
 - No merge by hand: `factory-gate` allows merge commits only, and `scripts/ship` arms `--auto --merge`.
-- The title is the head commit's subject; the body is the repository's template, with `Closes #<issue>` filled in.
-- No `gh api` (the Human's decision on #182): the Lead and seats are denied it.
+- Title: the head commit's subject; body: the repository's template with `Closes #<issue>` (`scripts/ship` sends them).
+- No `gh api` unless the Human approves it: the Lead and seats are denied it.
 - `claude -p` has no `AskUserQuestion`: ask in the report.
-- `/repo-refresh` runs only when the Human types it, and changes the repository only through pull requests.
+- `/repo-refresh` runs only when the Human types it (`skillOverrides`), and changes a repository only by pull request.
 
-Every session is denied its profile (`$CLAUDE_CONFIG_DIR`). Where pstack's docs say `~/.claude/`, the plugin is under
-`~/.local/share/factory/plugins/`; `recall` and `reflect` read a seat's `run-<tag>.jsonl` in its run folder, or a Lead's
-`~/factory-runs/<repo>-lead/transcripts/`; no profile gets a rules file, so a role uses its skill's default model.
+A session that `bin/seat` or `factory lead` starts is denied its profile. Where pstack's docs say `~/.claude/`, its
+plugin is under `~/.local/share/factory/plugins/`; `recall` and `reflect` read a seat's `run-<tag>.jsonl` in its run
+folder, or a Lead's `~/factory-runs/<repo>-lead/transcripts/`; no profile gets a rules file, so a role uses its
+skill's default model.
 
 ## Shipping with pstack
 
