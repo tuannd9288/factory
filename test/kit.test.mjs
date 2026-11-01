@@ -797,6 +797,30 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /handoff 7 team-y/);
   });
+  // #324: Team: must be the team that holds the claim, not only a body whose Claim: is the tip.
+  test('tier fails when Team: is not the team holding the claim, naming the holder', () => {
+    const sha = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${sha}\nTeam: team-y\n`);
+    const out = tierRun();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /team-x/);
+  });
+  test('after a handoff, only the new holder\'s Team: passes', () => {
+    const tip = claimTip('handoff 7 team-y', claimTip('claim 7 team-x'));
+    prBody(`Issue: #7\nClaim: ${tip}\nTeam: team-x\n`);
+    const out = tierRun();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /team-y/);
+    prBody(`Issue: #7\nClaim: ${tip}\nTeam: team-y\n`);
+    assert.equal(tierRun().code, 0);
+  });
+  test('tier fails when a claimed issue\'s body has no Team: line, naming the holder', () => {
+    const sha = claimTip('claim 7 team-x');
+    prBody(`Issue: #7\nClaim: ${sha}\n`);
+    const out = tierRun();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /Team: team-x/);
+  });
   test('tier reads the claim again after it waited for the review: a claim moved during the wait fails it', () => {
     const first = claimTip('claim 7 team-x');
     prBody(`Issue: #7\nClaim: ${first}\n`);
