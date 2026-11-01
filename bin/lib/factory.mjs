@@ -1,7 +1,7 @@
 // bin/factory (#173, #177, #178): the list of every agent profile in a table with the seats' quota in a second one, and `login`,
 // `store`, `use` and `logout`. On the Mac mini the rows are numbered (seat 1, seat 2, each Lead the accounts file names, the
-// verifier) and the accounts lettered; `use` rewrites the accounts file (on a Lead's row it also restarts that Lead once Herdr
-// reports it idle, #179) and `logout` moves a token into the archive; `login` and
+// verifier) and the accounts lettered; `use` rewrites the accounts file (`use lead-<repo>` makes a Lead's row; a running Lead is
+// restarted once Herdr reports it idle, #179) and `logout` moves a token into the archive; `login` and
 // `store` put a token in the factory's token store. The list runs only the vendors' own status commands (codex login status,
 // gh auth status; on the MacBook claude auth status too), reads quota through quotaRows() and liveCount(), and keeps from each answer
 // only the logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and date).
@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quotaRows } from './quota.mjs';
 import { liveCount } from './seat.mjs';
+import { refusal } from '../../packs/pstack/bin/lead.mjs';
 import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
@@ -318,7 +319,7 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin)
-       bin/factory use [<row> [<letter>]]   (the row's account becomes the letter's; a Lead's row also restarts that Lead when idle; on the Mac mini, by ssh from the MacBook)
+       bin/factory use [<row|lead-repo> [<letter>]]   (the row's account becomes the letter's; lead-<repo> makes a Lead's row, and a running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
        bin/factory lead <repo> [--new] [--dry-run]`;
@@ -482,7 +483,7 @@ async function store(args, env) {
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
 function remote(cmd, args, env) {
   const bad = cmd === 'use'
-    ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) ? 'the row is a number' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
+    ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^([1-9][0-9]*|lead-[A-Za-z0-9._-]+)$/.test(args[0]) ? 'the row is a number or lead-<repo>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
     : (args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account');
   if (bad) {
     console.error(`bin/factory: ${bad}\n${USAGE}`);
@@ -536,6 +537,17 @@ async function restartLead(repo, account, ctx) {
     console.log(`${account} has no token file yet: factory login ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
     return 1;
   }
+  // A Lead is running unless it has no state or its newest hook event is SessionEnd (#286); its pane may hold something else by now.
+  let event = null;
+  try {
+    event = JSON.parse(readFileSync(join(ctx.runs, `${repo}-lead`, 'state.json'), 'utf8')).event;
+  } catch {
+    // no state: the Lead never ran, or its file is unreadable
+  }
+  if (!event || event === 'SessionEnd') {
+    console.log(`the Lead of ${repo} is not running; it takes ${account} at its next start (factory lead ${repo})`);
+    return 0;
+  }
   let pane = '';
   try {
     pane = readFileSync(join(ctx.runs, `${repo}-lead`, 'pane'), 'utf8').trim();
@@ -580,7 +592,8 @@ async function restartLead(repo, account, ctx) {
 }
 
 /** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only; a
- * seat takes its new account at its next session and nothing running is touched; a Lead's row also restarts that Lead (#179). */
+ * seat takes its new account at its next session and nothing running is touched; a Lead's row also restarts that Lead if it runs
+ * (#179). The row is a number, or `lead-<repo>` for an onboarded repository, which makes the row when the file has none. */
 async function use(args, env, io) {
   if (placeOf(env) !== 'factory') return remote('use', args, env);
   if (args.length > 2) {
@@ -599,7 +612,17 @@ async function use(args, env, io) {
     if (row === undefined) row = (await io.ask('Row number: ')).trim();
     if (letter === undefined) letter = (await io.ask('Account letter: ')).trim();
   }
-  const target = /^[1-9][0-9]*$/.test(row) ? rows.find((r) => r.n === Number(row)) : null;
+  let target = /^[1-9][0-9]*$/.test(row) ? rows.find((r) => r.n === Number(row)) : null;
+  if (row.startsWith('lead-')) {
+    // `lead-<repo>` names the Lead of an onboarded repository, and makes its row when the file has none (#179).
+    const repo = row.slice('lead-'.length);
+    const why = refusal(repo, env.FACTORY_ROOT ?? resolve(fileURLToPath(import.meta.url), '../../..'));
+    if (why) {
+      console.error(`bin/factory: ${why.replace(/^bin\/lead: /, '')}; nothing was changed`);
+      return 2;
+    }
+    target = rows.find((r) => r.profile === `factory/lead-${repo}`) ?? { profile: `factory/lead-${repo}` };
+  }
   if (!target) {
     console.error(`bin/factory: there is no row ${row}; the rows are numbered 1 to ${rows.filter((r) => r.n).length}`);
     return 2;
