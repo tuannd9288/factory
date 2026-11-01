@@ -13,24 +13,25 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    change, the commands it runs to check, and that it commits but never pushes.
 4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
    `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
-   the background, and has ended only when `~/.local/state/factory/sessions.jsonl` holds its record, a line with
-   `"tag":"worker","run":"/Users/factory/factory-runs/<repo>-<n>"`; a `"type":"result"` line in its log is not the
-   end. Check with Grep, once at a time, not in a shell loop. The record's `structured` is its final message, and
-   `session` and `seat` are what a fix round resumes. Then read its whole diff, from the worktree: `cd <worktree>`, then
-   `git diff origin/main...HEAD`. How many workers run at once is your call: when the load is above the cores
-   (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Your `bin/seat` calls inherit `FACTORY_TEAM`, which names your
-   team's account; never set or change it in a command.
+   the background, and has ended only when `~/.local/state/factory/sessions.jsonl` holds its record, a line that
+   matches `"tag":"worker".*"run":"/Users/factory/factory-runs/<repo>-<n>"` (other fields sit between the two); a
+   `"type":"result"` line in its log is not the end. Check with Grep, once at a time, not in a shell loop. The record's
+   `structured` is its final message, and `session` and `seat` are what a fix round resumes. Then read its whole diff,
+   from the worktree: `cd <worktree>`, then `git diff origin/main...HEAD`. How many workers run at once is your call:
+   when the load is above the cores (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Your `bin/seat` calls inherit
+   `FACTORY_TEAM`, which names your team's account; never set or change it in a command.
 5. Check it in the worktree yourself as the Gate block says: `.gate/bin/verify --fast`, the tests of the part changed
    and `.gate/bin/red-check --base origin/main`, with the Bash tool's `run_in_background` where one outlasts the tool's
    two-minute limit. The full suite runs on CI, as the required `verify`. On a red, brief a fix round to the
    same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; wait for the
    record with `"tag":"fix<k>"` the same way.
 6. Have a peer reviewer read the change before you push; it writes no code. Write its brief beside the worker's: the
-   issue's acceptance, the worktree, that it reads `git diff origin/main...HEAD` there, and that its final message
-   starts with `PASS` or `FAIL` and lists what it found. Start it with step 4's command, with `reviewer` in place of
-   `worker`, its own brief and `--tag review<k>`, and wait for the record with `"tag":"review<k>"` the same way. On
-   `FAIL`, brief a fix round as in step 5, then review again with the next `<k>`. Push only after a `PASS`; after three
-   `FAIL` rounds, ask the Human.
+   issue's acceptance, the worktree, that it reads `git diff origin/main...HEAD` there, that it writes nothing in the
+   worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists what it found. Start
+   it with step 4's command, with `reviewer` in place of `worker`, its own brief and `--tag review<k>`, and wait for its
+   record with `"tag":"review<k>"` the same way. On `FAIL`, brief a fix round as in step 5, run step 5's checks again,
+   then review again. A `fix<k>` or `review<k>` tag is used once in a run: `<k>` counts on and never restarts. Push only
+   after a `PASS`; after three `FAIL` rounds, ask the Human.
 7. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run
    `scripts/ship --body-file <file>` until it says `armed` or stops. The body's first line is `Closes #<n>`, so GitHub
    closes the issue on merge. It also carries `Issue: #<n>`, `Claim: <sha>`, `Team: {{TEAM}}` and the template's summary
@@ -41,8 +42,7 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
 
 ## What you ask the Human
 Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login or
-a cost. Number each question and give
-your recommended answer.
+a cost. Number each question and give your recommended answer.
 Decide and report everything else.
 
 ## Never
