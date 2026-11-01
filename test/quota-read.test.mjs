@@ -70,8 +70,10 @@ function withRuns(logs, body) {
   }
 }
 
-test('seatEvent is the newest log of the seat that reports a seven-day use, with the log\'s time', async () => {
-  const { seatEvent } = await seat();
+test('accountEvent is the newest log of the account that reports a seven-day use, with the log\'s time; a run with no .account file is its seat\'s row\'s (#311)', async () => {
+  const { accountEvent } = await seat();
+  const rows = { 1: 'acct-a', 2: 'acct-b' };
+  const seatEvent = (runs, n) => accountEvent(runs, rows[n], rows);
   withRuns([
     ['issue-1', 'old', 2, 'real-event.jsonl', '2026-10-20T00:00:00Z'],
     ['issue-2', 'new', 2, 'synthetic-high-week-event.jsonl', '2026-10-25T00:00:00Z'],
@@ -85,6 +87,11 @@ test('seatEvent is the newest log of the seat that reports a seven-day use, with
   });
   withRuns([], (runs) => {
     assert.equal(seatEvent(runs, 2), null);
+  });
+  withRuns([['issue-1', 'a', 2, 'synthetic-high-week-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
+    writeFileSync(join(runs, 'issue-1', 'run-a.account'), 'acct-c\n');
+    assert.equal(accountEvent(runs, 'acct-c', rows).info.unifiedWindows.seven_day.utilization, 0.74, 'the .account file');
+    assert.equal(accountEvent(runs, 'acct-b', rows), null, 'not the seat\'s row: the file wins');
   });
 });
 

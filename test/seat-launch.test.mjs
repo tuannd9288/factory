@@ -43,14 +43,14 @@ function world(body) {
   writeFileSync(join(w.bin, 'claude'), FAKE);
   chmodSync(join(w.bin, 'claude'), 0o755);
   writeFileSync(join(w.run, 'BRIEF.md'), 'the brief\n');
-  // Both seats name one account, whose token file is the fixture's (#178).
+  // The team factory-lead's row names the account whose token file is the fixture's (#311); the seat rows are old lines of the file.
   mkdirSync(join(w.profiles, 'tokens'), { recursive: true });
   writeFileSync(join(w.profiles, 'tokens/acct-one'), `${TOKEN}\n`);
-  writeFileSync(join(w.state, 'accounts'), 'factory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
+  writeFileSync(join(w.state, 'accounts'), 'factory/factory-lead=acct-one\nfactory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
   w.out = (n = 'a') => join(w.fake, `${n}.json`);
   w.env = (extra = {}) => ({
     PATH: `${w.bin}:${dirname(process.execPath)}`, HOME: w.home, AGENT_PROFILES: w.profiles, FACTORY_RUNS: w.runs, FACTORY_STATE: w.state,
-    FAKE_OUT: w.out(), CLAUDE_CODE_OAUTH_TOKEN: 'inherited-token-must-go', ...extra,
+    FACTORY_TEAM: 'factory-lead', FAKE_OUT: w.out(), CLAUDE_CODE_OAUTH_TOKEN: 'inherited-token-must-go', ...extra,
   });
   w.seat = (args, extra = {}) => {
     const r = spawnSync(process.execPath, [SEAT_JS, ...args], { encoding: 'utf8', env: w.env(extra), cwd: w.root, timeout: 20000 });
@@ -126,9 +126,8 @@ function readlinkReal(p) {
   return spawnSync(process.execPath, ['-e', 'console.log(require("fs").realpathSync(process.argv[1]))', p], { encoding: 'utf8' }).stdout.trim();
 }
 
-test('seat 1: the token is in the session\'s environment and in no argv, log, record, pid file or output', () => world(async (w) => {
-  rejected(w, 2);
-  const r = w.start('worker', ['--tag', 'one']);
+test('seat 1, on a resume: the token is in the session\'s environment and in no argv, log, record, pid file or output (#311)', () => world(async (w) => {
+  const r = w.start('worker', ['--tag', 'one', '--resume', 'sid-1', '--seat', '1']);
   assert.equal(r.code, 0, r.out + r.err);
   assert.match(r.out, /on seat 1/);
   await until(() => w.records().length === 1, 'the record');
@@ -156,13 +155,15 @@ test('seat 1 with a missing or empty token file is refused with exit 2, naming t
   assert.equal(w.records().length, 0);
 }));
 
-test('no seat free: exit 2, and a reason for each seat', () => world((w) => {
+test('the team\'s account rejected: exit 2, one reason naming the account, and nothing started (#311)', () => world((w) => {
   rejected(w, 2);
   rejected(w, 1);
   const r = w.start('worker');
   assert.equal(r.code, 2);
-  assert.match(r.out + r.err, /seat 2: rejected by Claude Code.*\n.*seat 1: rejected by Claude Code/s);
+  assert.match(r.out + r.err, /acct-one: rejected by Claude Code \(five-hour window\)/);
+  assert.doesNotMatch(r.out + r.err, /seat 2: rejected|seat 1: rejected/);
   assert.match(r.out + r.err, /no seat free/);
+  assert.equal(existsSync(join(w.run, 'run-worker.pid')), false);
 }));
 
 test('a resume needs --seat, passes the session id and stays on that seat; its tag is the brief\'s name', () => world(async (w) => {

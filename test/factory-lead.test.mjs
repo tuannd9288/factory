@@ -1,8 +1,7 @@
 // `factory lead <repo>` (#166): the pstack Lead's start as a subcommand of bin/factory. On the factory host it runs this clone's
 // packs/pstack/bin/lead; on the MacBook it runs the same command there over ssh, as `top` does. Fake ssh on PATH; nothing live runs.
 import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { sandbox } from './factory-world.mjs';
+import assert from 'node:assert/strict';import { sandbox } from './factory-world.mjs';
 
 const SSH = (s) => s.calls().split('\n').filter((l) => l.startsWith('ssh '));
 

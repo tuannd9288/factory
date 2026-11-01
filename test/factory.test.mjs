@@ -161,7 +161,7 @@ test('the table stays under 105 columns when "shared with" names four long profi
   }
 });
 
-test('on the factory account: a seat is its account\'s token file\'s mode and date only, seat 2 has quota and live sessions, no row for a repository folder (#205)', () => {
+test('on the factory account: a team row is its account\'s token file\'s mode and date only, with the account\'s quota; no seat row, and no row for a repository folder or an unknown team (#311)', () => {
   const s = sandbox();
   try {
     const tokens = s.tokens();
@@ -171,28 +171,36 @@ test('on the factory account: a seat is its account\'s token file\'s mode and da
       chmodSync(join(tokens, a), 0o600);
       utimesSync(join(tokens, a), new Date('2026-10-26T00:00:00Z'), new Date('2026-10-26T00:00:00Z'));
     }
-    writeFileSync(join(s.state, 'accounts'), 'factory/seat-1=seat.one\nfactory/seat-2=seat.two\n');
+    // alpha is an onboarded clone with a team row; beta and gamma are folders with no clone; delta is onboarded and has no row; lead-x is
+    // an old Lead row of #179, which names no team of the repository "lead".
+    writeFileSync(join(s.state, 'accounts'), 'factory/alpha-lead=seat.one\nfactory/factory-lead=seat.two\nfactory/beta-lead=seat.one\nfactory/lead-x=seat.one\nfactory/seat-1=seat.one\nfactory/seat-2=seat.two\n');
     s.w('gh-factory', 'agentgh');
     s.onHost();
-    for (const [repo, files] of [['alpha', ['.gate', '.envrc']], ['beta', ['.gate']], ['gamma', ['.envrc']]]) {
+    for (const [repo, files] of [['alpha', ['.gate', '.envrc', '.git/x']], ['beta', ['.gate']], ['gamma', ['.envrc']], ['delta', ['.gate', '.envrc', '.git/x']]]) {
       mkdirSync(join(s.env.FACTORY_ROOT, repo), { recursive: true });
-      for (const f of files) writeFileSync(join(s.env.FACTORY_ROOT, repo, f), '');
+      for (const f of files) {
+        mkdirSync(join(s.env.FACTORY_ROOT, repo, f, '..'), { recursive: true });
+        writeFileSync(join(s.env.FACTORY_ROOT, repo, f), '');
+      }
     }
     const runs = join(s.env.FACTORY_RUNS, 'issue-1');
     mkdirSync(runs, { recursive: true });
     writeFileSync(join(runs, 'run-worker.jsonl'), `{"type":"system","subtype":"init"}\n${readFileSync(fileURLToPath(new URL('./fixtures/quota/real-event.jsonl', import.meta.url)), 'utf8')}`);
     writeFileSync(join(runs, 'run-worker.seat'), '2\n');
+    writeFileSync(join(runs, 'run-worker.account'), 'seat.two\n');
     const r = s.fac();
     assert.equal(r.code, 0, r.out);
     const rows = JSON.parse(s.fac('--json').out);
     const by = (p) => rows.find((x) => x.profile === p);
-    assert.deepEqual(rows.map((x) => x.profile).filter((p) => p.startsWith('factory/lead')), [], 'alpha holds .gate/ and .envrc, and still has no row');
-    assert.equal(by('factory/seat-1').loggedIn, true);
-    assert.equal(by('factory/seat-1').account, 'seat.one');
-    assert.match(by('factory/seat-1').note, /600/);
-    assert.equal(by('factory/seat-2').account, 'seat.two');
-    assert.ok(by('factory/seat-2').five_hour.use >= 0);
-    assert.equal(by('factory/seat-2').live, 0);
+    assert.deepEqual(rows.map((x) => x.profile).filter((p) => p !== 'factory/verifier' && p !== 'factory/gh'), ['factory/alpha-lead', 'factory/factory-lead'], 'the rows of onboarded repositories and of the factory, and no seat row, no beta, no lead-x');
+    assert.equal(by('factory/alpha-lead').loggedIn, true);
+    assert.equal(by('factory/alpha-lead').account, 'seat.one');
+    assert.match(by('factory/alpha-lead').note, /600/);
+    assert.equal(by('factory/alpha-lead').role, 'Lead and seats of alpha, team lead');
+    assert.equal(by('factory/factory-lead').account, 'seat.two');
+    assert.ok(by('factory/factory-lead').five_hour.use >= 0, 'the quota of its account, from the account\'s runs');
+    assert.equal(by('factory/alpha-lead').five_hour, null, 'no run of seat.one has reported');
+    assert.doesNotMatch(r.out, /factory\/seat-/);
     assert.equal(by('factory/verifier').loggedIn, false);
     assert.ok(!r.out.includes('NEVERSHOWN'));
     assert.ok(!s.calls().includes('seats/'), 'claude never ran for a seat');
@@ -387,16 +395,17 @@ test('from the MacBook, use waits as long as the Mac mini does while every other
   assert.equal(remoteTimeout('logout'), 60000);
 });
 
-test('from the MacBook, use passes lead-<repo> on to the Mac mini and refuses a row that is neither a number nor that (#179)', () => {
+test('from the MacBook, use passes <repo>-<team> on to the Mac mini and refuses a row that is neither a number nor that (#311)', () => {
   const s = sandbox();
   try {
-    const ok = s.fac('use', 'lead-alpha', 'b');
-    assert.match(s.calls(), /ssh .*factory use lead-alpha b/, ok.out);
-    for (const row of ['lead-', 'lead-a/b', 'lead-a b', 'alpha', '0']) {
+    const ok = s.fac('use', 'alpha-lead', 'b');
+    assert.match(s.calls(), /ssh .*factory use alpha-lead b/, ok.out);
+    assert.match(s.fac('use', 'factory-lead', 'b').out + s.calls(), /factory use factory-lead b/);
+    for (const row of ['alpha-', '-lead', 'a/b-lead', 'alpha-a b', 'alpha', '0', 'alpha-Lead', 'alpha-1a']) {
       const before = s.calls();
       const r = s.fac('use', row, 'b');
       assert.equal(r.code, 2, `${row}: ${r.out}`);
-      assert.match(r.out, /the row is a number or lead-<repo>/);
+      assert.match(r.out, /the row is a number or <repo>-<team>/);
       assert.equal(s.calls(), before, `${row}: no ssh call`);
     }
   } finally {
