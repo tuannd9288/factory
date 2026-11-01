@@ -42,8 +42,8 @@ changes nothing; its apply mode changes a repository only through pull requests 
   ~/.agent-profiles>`, mode 700, one for each profile (#185), not `~/.claude/plugins/`.
 - **Transcripts.** A profile keeps its own under `$CLAUDE_CONFIG_DIR/projects/`, which every session is denied.
   `recall` and `reflect` read the copies instead: a seat's `run-<tag>.jsonl` in its run folder, and a Lead's
-  `~/factory-runs/<repo>-lead/transcripts/`, which seats are denied. That a profile keeps them under `projects/`, where
-  the Lead's hook copies from, was checked by the Lead's live run on 2.1.308 (#185, issuecomment-6545015874,
+  `~/factory-runs/<repo>-<team>/transcripts/`, which seats are denied. That a profile keeps them under `projects/`,
+  where the Lead's hook copies from, was checked by the Lead's live run on 2.1.308 (#185, issuecomment-6545015874,
   item d). `recall` and `reflect` themselves have not yet run on the copies (#185, acceptance 5).
 - **Rules.** The factory writes no rules into any profile; `setup-pstack`, their only writer, is not used. So nothing
   the factory runs writes the adapter's `~/.claude/rules/pstack-models.md`; without it, a role uses its skill's default
