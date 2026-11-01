@@ -55,6 +55,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   pstack's live verifier both stay for now; dropping one is decided only on the probe's numbers. Source:
   https://github.com/tuannd9288/factory/issues/25#issuecomment-6372755422 (reviewer and payment) and
   https://github.com/tuannd9288/factory/issues/25#issuecomment-6373226939 (one call; both layers stay).
+  Note, 2026-11-01 (#203): in the code that is one call per head commit, as H3 says; a push makes a new head, and each
+  head gets its own call (`kit/.gate/bin/review`).
 - **Colly's scope, 2026-10-24.** Colly handles only the factory. The piggery teams of Kizuna and kizuna-labs report to
   the Human directly. Source: chat, as the map page records it in Vietnamese; this line is an English rendering, not
   his words.
@@ -119,6 +121,19 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   tail, with its own headings. Sources: https://github.com/tuannd9288/factory/issues/131#issuecomment-6445068794 and
   https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962 (the questions and K1 to K3), and
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6446708922 (the evening words), all relayed by Colly.
+- **Control surfaces, 2026-10-29.** This takes the place of K1 in "Control surfaces (#68), 2026-10-25": the factory
+  runs on Ghostty and Herdr until it is finished, and Rex and Paseo are rolled out after that. His words to Colly in
+  chat, relayed by Colly: "trước mắt cứ chạy với ghostty + herdr cho hoàn thành cái factory rồi triển khai rex và paseo"
+  (2026-10-29), and "nếu đang bị mở rộng ra thì dừng lại, dùng Herdr TUI hoặc APP đã" (2026-10-31; the Lead's
+  translation: "if it is widening, stop, and use Herdr's TUI or app for now"). Source:
+  https://github.com/tuannd9288/factory/issues/203#issuecomment-6560905773.
+- **The live verifier, 2026-10-30.** This takes the place of "The live verifier, decided 2026-10-25": he approved
+  #182's D1 and D2 as proposed, "D1 và D2 theo đề xuất", relayed by Colly. D2, in Colly's words: "pstack's other-family
+  steps run on Codex through a factory script on `codex exec`, like `scripts/live-verify`, on the verifier's Codex
+  profile." #95, which was to make the verifier's model a setting for each repository with Claude by default, was closed
+  as superseded by D2: "the verifier's steps run on its Codex profile". Sources:
+  https://github.com/tuannd9288/factory/issues/182#issuecomment-6513127448 and
+  https://github.com/tuannd9288/factory/issues/95#issuecomment-6525022374.
 - **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
 
 ## Tiers
@@ -128,11 +143,14 @@ The change sets the tier, by the paths it touches (`.gate/bin/tier`), never the 
 | Tier | Trigger | Must be true to merge | The Human |
 |---|---|---|---|
 | 1 | no tier-2 or tier-3 path | `verify`, `review`, `verdict`, `tier` green on the head commit; `verdict` passes at once | none |
-| 2 | a `.gate/load-bearing` path, or a dependency manifest | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
-| 3 | a path in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), or the label `needs-human` | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks | approves from the summary |
+| 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
+| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks | approves from the summary |
 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
 removed.
+
+Where a repository picks Entire as its reviewer (`GATE_REVIEWER=entire`, #155), the required checks are `verify`,
+`tier` and `Entire Gates`, set by `bin/onboard-owner`; `review` and `verdict` are not among them.
 
 Agents open pull requests under their own GitHub account, never the Human's. GitHub refuses an author's approval of
 his own pull request, and its code-owner rule asks nothing of an author who owns the code: on the scratch repository
@@ -163,7 +181,8 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **Layer 3 Merge gates** [OA1]: what decides whether a change lands.
 - **Layer 4 Observability & evals** [SH, U1, A8]: what shows cost and whether the factory improves.
 
-- **0a Environment** [S2, OA1]: the `factory` account, `~/WORKSPACES`, the worktrees under `.claude/worktrees/`.
+- **0a Environment** [S2, OA1]: the `factory` account, `~/WORKSPACES`, the worktrees: under a repository's
+  `.claude/worktrees/`, and a pack Lead's under `~/factory-runs/<repo>-<n>/w` (`packs/pstack/lead.md`).
 - **0b Tools & permissions** [A5, A2]: the deny rules, the permission mode, the agents' `gh` login.
 - **0c Model configuration** [MODELCFG]: which model a role runs on; one profile for each repository; the factory's own runs use one profile per seat, `~/.agent-profiles/seats/<n>/claude`, which the launcher picks.
 - **0d Harness & session** [A2]: the loop that runs Claude Code: `direnv exec`.
@@ -177,7 +196,8 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
 - **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify --fast`, the tests of the part changed, `red-check`; the full suite runs on CI (#281).
-- **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit.
+- **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit; where Entire
+  reviews, `verify`, `tier` and `Entire Gates` (#155).
 - **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
 - **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
 - **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
@@ -213,8 +233,10 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   factory's unattended sessions; 0d does; (2) the record of a task stays on GitHub (1b) and in 0d's panes, and a surface
   keeps no sole copy; (3) the factory's own code in this sublayer reads no credential (#58 K2; this binds the factory's
   code, not the Human's own tools, and K3 keeps Paseo's usage plugin as it is); (4) only a person answers a permission
-  prompt, so agents do not type into another pane: `herdr agent send-keys`, `herdr pane send-keys`, `rex send` and
-  `rex send-key` are denied, which is #76 and not yet in the kit's deny rules; (5) with every surface stopped, the
+  prompt, so agents do not type into another pane: the seats and the Lead are denied all of `herdr`, its
+  `agent send-keys` and `pane send-keys` with it (`bin/lib/seat.mjs`, `packs/pstack/bin/lead.mjs`); the kit's deny
+  rules bind Claude Code only and hold no such rule (#76, closed 2026-10-30); `rex` is denied nowhere yet (#267); (5)
+  with every surface stopped, the
   factory still runs. Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
@@ -301,7 +323,8 @@ the agents' account (write), sets `factory-branches` (every branch: no rewrite),
 update or delete, but for a repository admin), `factory-claims` (`refs/heads/claim/**`: no deletion, no rewrite, no
 bypass) and `factory-bootstrap` (`main`: a pull request, one approval of the
 last push, merge commits only), creates the `reviewer` environment for `main`, turns on "Allow auto-merge", and
-reads it all back; it calls only `gh api`, never `git` and nothing the repository holds. A claim on an issue is the ref
+reads it all back; it calls only `gh api` and `gh variable list`, never `git` and nothing the repository holds. A
+claim on an issue is the ref
 `claim/<n>`, taken with `.gate/bin/claim`; `verify-trusted` checks the pull request body's `Team:` line, and `tier` its
 `Issue:` and `Claim:` lines against that ref (`Session:` and `Cost:` inform only). Once the agents' account
 has accepted the invitation, the team that claimed the issue runs `bin/onboard <repo-url>` from this root, logged into
@@ -386,7 +409,8 @@ without the queue every auto-merge pull request strands when another lands. Each
 repository whose sweep failed keeps `~/.local/state/factory/queue-<owner>-<repo>.failed` until one succeeds; a run that
 fails before its repository loop keeps `queue-run.failed` until a run gets past it; a clean sweep writes
 `queue-<owner>-<repo>.ok`, and the weekly digest lists every such file. A sweep that holds the lock records its pid in
-`queue.lock`: if the queue stops and that pid is not running, remove `~/.local/state/factory/queue.lock` by hand. A
+`queue.lock`: the next sweep takes over a lock whose pid is not running, and one it cannot read once it is ten minutes
+old (`takeLock` in `bin/lib/queue.mjs`), so nobody removes it by hand. A
 rollback is a revert pull request through the gate. Only when the gate itself is broken does the Human turn the
 ruleset off, after taking auto-merge off every open pull request, since with the ruleset off each would land unjudged.
 The queue leaves a tier-3 pull request behind `main` until the Human approved it, then updates it once; his approval
@@ -426,8 +450,9 @@ no commit that is on none of the clone's remote refs (`git rev-list --count HEAD
 clean and that no live run holds. It runs `git worktree remove`, never `--force`; the branch and the run folder stay. Merged work
 left dirty or unpushed is kept and named in `queue-worktrees.failed`, whose first line names the first path.
 
-Claude Code updates itself on the stable channel; nothing in the factory pins its version (the canary, #24, is at the tag
-`before-271`).
+Claude Code updates itself on the stable channel; nothing in the factory pins the version its sessions run (the canary,
+#24, is at the tag `before-271`). The gate's reviewer on CI pins its own, 2.1.308
+(`kit/.gate/bin/reviewer/package.json`, `kit/.gate/bin/lib/reviewer.json`).
 `bin/factory-ledger plist --daemon --repo <owner/repo>...` prints the digest's LaunchDaemon, `io.github.tuannd9288.factory.digest`, every Monday at 09:00, loaded like the queue's. Every
 `*.failed` file in the state folder (`digest.failed`, `queue-run.failed`, `queue-<owner>-<repo>.failed`) is told to
 the Human at once, at the start of each Claude session in this account, by `bin/factory-alerts`, the SessionStart hook
@@ -578,7 +603,8 @@ request per repository; attack 23 checks that two pins share one profile without
 - 53 of 54 pstack skills carry `disable-model-invocation` (57 of 58 at `4dd1d05`), so the model's own Skill call is
   refused; `setup-pstack` does not. The agents `pstack:poteto-agent` and `pstack:comment-sicko` have no guard: a model
   may spawn them, and with
-  poteto-agent poteto-mode's playbook, in a run nobody typed (#8 decides whether to forbid that).
+  poteto-agent poteto-mode's playbook, in a run nobody typed (#182 decides whether to forbid that; #8 was merged into
+  it).
 - `claude -p "/pstack:poteto-mode …"` starts the skill; a prompt that only names it does not. So an unattended prompt
   starts a skill explicitly with `/pstack:<skill>` at its start; without that the run follows the repository's `AGENTS.md`
   and whatever the model spawns.

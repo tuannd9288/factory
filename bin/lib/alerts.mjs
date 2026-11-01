@@ -36,7 +36,7 @@ export function lines(state) {
   };
 }
 
-/** The quota alerts (#63): the seats' newest rate_limit_event under FACTORY_RUNS (default ~/factory-runs). A status line
+/** The quota alerts (#63): each account's newest rate_limit_event (quotaRows, #311) under FACTORY_RUNS (default ~/factory-runs). A status line
  * reports no rejection or warning, only a use, so the hook reads none (#194). A runs folder that cannot be read gives none:
  * the hook never fails a session. */
 export function quotaLines(env) {

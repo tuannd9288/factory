@@ -99,7 +99,7 @@ export function quotaSection(rows, { now = Date.now() } = {}) {
   }
   lines.push(
     '',
-    'A seat shows its windows only after a session ran on it through bin/seat; the figures are those of its newest log, as of the log\'s time. A window marked "reset since" ended after that report, so its use is not current.',
+    'An account shows its windows only after a session ran on it through bin/seat; the figures are those of its newest log, as of the log\'s time. A window marked "reset since" ended after that report, so its use is not current.',
     ...(rows.some((r) => r.source === 'status line') ? [] : ['No status-line file was given (FACTORY_STATUSLINE or --statusline), so source 3 is not shown.']),
   );
   return lines;
