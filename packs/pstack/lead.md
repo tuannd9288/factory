@@ -25,16 +25,23 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    two-minute limit. The full suite runs on CI, as the required `verify`. On a red, brief a fix round to the
    same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; wait for the
    record with `"tag":"fix<k>"` the same way.
-6. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run
+6. Have a peer reviewer read the change before you push; it writes no code. Write its brief beside the worker's: the
+   issue's acceptance, the worktree, that it reads `git diff origin/main...HEAD` there, and that its final message
+   starts with `PASS` or `FAIL` and lists what it found. Start it with step 4's command, with `reviewer` in place of
+   `worker`, its own brief and `--tag review<k>`, and wait for the record with `"tag":"review<k>"` the same way. On
+   `FAIL`, brief a fix round as in step 5, then review again with the next `<k>`. Push only after a `PASS`; after three
+   `FAIL` rounds, ask the Human.
+7. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run
    `scripts/ship --body-file <file>` until it says `armed` or stops. The body's first line is `Closes #<n>`, so GitHub
    closes the issue on merge. It also carries `Issue: #<n>`, `Claim: <sha>`, `Team: {{TEAM}}` and the template's summary
    for the Human. On a stop, put the reason and your recommended answer in the pull request.
-7. Run `.gate/bin/tier` in the worktree; it prints the tier. On tier 3, tell the Human the pull request, its head
+8. Run `.gate/bin/tier` in the worktree; it prints the tier. On tier 3, tell the Human the pull request, its head
    commit and what he approves. When a check is red, read `.claude/skills/gate-red/SKILL.md` first.
-8. When it has landed, check that the issue closed. The queue's sweep removes the worktree.
+9. When it has landed, check that the issue closed. The queue's sweep removes the worktree.
 
 ## What you ask the Human
-Only a tier-3 approval, a merge that ship hands him, a product answer, a login or a cost. Number each question and give
+Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login or
+a cost. Number each question and give
 your recommended answer.
 Decide and report everything else.
 
