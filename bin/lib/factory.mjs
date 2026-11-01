@@ -173,7 +173,8 @@ export function readPlace(place, ctx) {
     const n = p.numbered ? (numbered += 1) : null;
     const q = c.account ? quota.find((x) => x.account === c.account) : null;
     let live = null;
-    if (c.account) {
+    // Only a team's row runs sessions; the gh row and the MacBook's rows name an account but run none.
+    if (p.byFile && c.account) {
       try {
         live = liveOfAccount(ctx.runs, c.account, seatRows);
       } catch {

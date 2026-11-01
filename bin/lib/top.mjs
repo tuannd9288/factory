@@ -2,7 +2,7 @@
 // repo -> issue -> session, modelled on `piggery top`. It changes nothing and keeps no store: it reads the run folders'
 // stream-json logs and pid files, bin/seat's sessions.jsonl, the state folder's queue and *.failed files, the claim refs,
 // and gh porcelain (never `gh api`). A field the data does not give is shown as `?`.
-// #286: what waits on the Human first, one block per team, the accounts (factory.mjs's list, the seats' quota) and Today.
+// #286: what waits on the Human first, one block per team, the accounts (factory.mjs's list, each account's quota) and Today.
 // It runs as `factory top [--once] [--width N] [--full]` (bin/lib/factory.mjs); `node bin/lib/top.mjs --once` prints one frame as well.
 // `c` (or --full) adds #174's engineering columns.
 import { execFile, execFileSync } from 'node:child_process';

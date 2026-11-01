@@ -527,7 +527,7 @@ The Human starts a repository's pstack Lead, an interactive session, with `facto
 MacBook terminal without Herdr, `factory lead <repo>` does the same over ssh. `factory` is on the PATH of each machine by
 `bin/install-factory`, which he runs once on the MacBook and `factory` runs once on the Mac mini (#177). `factory lead [--team <name>]` starts the Lead of one team (#196), named
 `<repo>-<team>` with its folder `~/factory-runs/<repo>-<team>/`; the team is the claim's team (`lead.md` takes it from the launcher), `lead` when
-none is given, and a repository's teams share its account row. `factory lead` resumes
+none is given, and each team has its own account row, `factory/<repo>-<team>` (#311). `factory lead` resumes
 the team's newest earlier session and starts a new one when there is none; `--new` starts a new one anyway. The only record it reads is the newest plain-session-id
 copy in `~/factory-runs/<repo>-<team>/transcripts/` (never a profile); a session killed before any Stop hook ran leaves no copy, so
 the next `factory lead` starts a new one. `--dry-run` prints the folder,
