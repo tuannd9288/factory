@@ -1,7 +1,7 @@
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one team of a repository (#196: --team, default lead; the session is named
 // <repo>-<team> and its folder is ~/factory-runs/<repo>-<team>/; the account row is the repository's). This file holds the pure parts (the arguments of
-// claude, the enabled plugins, the refusals) and the start. Nobody logs in (#179): the Lead needs the row factory/lead-<repo> in the
-// accounts file and refuses to start without it; it reads that account's token file once, before setup, and gives it to claude's
+// claude, the enabled plugins, the refusals) and the start. Nobody logs in (#179): the Lead needs the row factory/<repo>-<team> in the
+// accounts file (#311) and refuses to start without it; it sets FACTORY_TEAM=<repo>-<team> in claude's environment for bin/seat; it reads that account's token file once, before setup, and gives it to claude's
 // environment alone (CLAUDE_CODE_OAUTH_TOKEN), with no scrub, in auto mode (the Human, 2026-11-01); it prints none of it. It also
 // sets hasCompletedOnboarding in the profile's .claude.json, since a token on a fresh profile would replay onboarding.
 import { spawnSync } from 'node:child_process';
@@ -280,10 +280,10 @@ function main(argv, env) {
   }
   // No row, no start: the Lead runs on a row's token, never on a login (the Human, 2026-11-01).
   const state = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
-  const row = `factory/lead-${repo}`;
+  const row = `factory/${repo}-${team}`;
   const account = readAccounts(state)[row] ?? null;
   if (!account) {
-    process.stderr.write(`bin/lead: no row ${row} in the accounts file; the Human runs \`factory use lead-${repo} <letter>\` (\`factory\` lists the letters)\n`);
+    process.stderr.write(`bin/lead: no row ${row} in the accounts file; the Human runs \`factory use ${repo}-${team} <letter>\` (\`factory\` lists the letters)\n`);
     return 2;
   }
   if (accountRefusal(account)) {
@@ -379,7 +379,8 @@ function main(argv, env) {
   if (claudeDirt(cwd) !== before) process.stderr.write(`bin/lead: the install changed .claude/ in ${cwd}; check git status there\n`);
 
   // The token goes to claude's environment alone, never to the plugin installs above or to a message.
-  const childEnv = { ...env, CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginRoot, CLAUDE_CODE_OAUTH_TOKEN: token };
+  // FACTORY_TEAM is the team's row for every bin/seat the Lead runs (#311); an inherited value is replaced.
+  const childEnv = { ...env, CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginRoot, CLAUDE_CODE_OAUTH_TOKEN: token, FACTORY_TEAM: `${repo}-${team}` };
   // Ctrl-C reaches this process as well as claude, which uses it itself; like system(), ignore SIGINT and SIGQUIT while the child runs.
   for (const s of ['SIGINT', 'SIGQUIT']) process.on(s, () => {});
   const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit', env: childEnv });

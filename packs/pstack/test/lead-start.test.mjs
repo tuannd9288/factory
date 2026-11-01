@@ -74,7 +74,7 @@ function world(body, { settings = PSTACK } = {}) {
   w.row = (account, token) => {
     const state = join(w.home, '.local/state/factory');
     mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, 'accounts'), `factory/seat-1=ann\nfactory/lead-zalo=${account}\nfactory/zalo-lead=${account}\nfactory/zalo-b=${account}\n`);
+    writeFileSync(join(state, 'accounts'), `factory/seat-1=ann\nfactory/lead-zalo=${account}\nfactory/zalo-lead=${account}\nfactory/zalo-b=${account}\nfactory/zalo-c=${account}\nfactory/zalo-${'a'.repeat(32)}=${account}\n`);
     if (token !== undefined) {
       mkdirSync(join(w.home, '.agent-profiles/tokens'), { recursive: true });
       writeFileSync(join(w.home, '.agent-profiles/tokens', account), `${token}\n`);
@@ -207,12 +207,12 @@ describe('lead --team (#196)', () => {
     assert.equal(w.lead().code, 0);
     assert.equal(w.log().at(-1).team, 'zalo-lead');
     assert.equal(w.log().filter((c) => c.argv[0] !== '--model').every((c) => c.team === null), true, 'the plugin installs do not get it');
-    const none = w.lead(['--team', 'c']);
+    const none = w.lead(['--team', 'd']);
     assert.equal(none.code, 2);
-    assert.match(none.err, /factory use zalo-c <letter>/);
-    assert.match(none.err, /row factory\/zalo-c/);
+    assert.match(none.err, /factory use zalo-d <letter>/);
+    assert.match(none.err, /row factory\/zalo-d/);
     const before = w.log().length;
-    assert.equal(w.lead(['--team', 'c', '--dry-run']).code, 2);
+    assert.equal(w.lead(['--team', 'd', '--dry-run']).code, 2);
     assert.equal(w.log().length, before);
     // an inherited FACTORY_TEAM is replaced, never kept
     assert.equal(w.lead(['--team', 'b'], { FACTORY_TEAM: 'other-lead' }).code, 0);

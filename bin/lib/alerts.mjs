@@ -42,7 +42,8 @@ export function lines(state) {
 export function quotaLines(env) {
   try {
     const runs = env.FACTORY_RUNS ?? join(env.HOME ?? homedir(), 'factory-runs');
-    return alertLines(quotaRows({ runs }));
+    const state = env.FACTORY_STATE ?? join(env.HOME ?? homedir(), '.local/state/factory');
+    return alertLines(quotaRows({ runs, state, root: env.FACTORY_ROOT }));
   } catch {
     return [];
   }

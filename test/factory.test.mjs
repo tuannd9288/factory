@@ -110,13 +110,14 @@ test('a profile that is not logged in shows its login command', () => {
   }
 });
 
-test('seat 1 with no row in the accounts file names factory use', () => {
+test('with no team row in the accounts file the list shows no team and no seat, only the verifier and gh (#311)', () => {
   const s = sandbox();
   try {
     s.onHost();
     const r = s.fac();
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /factory use 1 /);
+    assert.doesNotMatch(r.out, /seat|factory\/factory-/);
+    assert.deepEqual(JSON.parse(s.fac('--json').out).map((x) => x.profile), ['factory/verifier', 'factory/gh']);
   } finally {
     s.done();
   }

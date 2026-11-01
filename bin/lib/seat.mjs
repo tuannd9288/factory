@@ -7,10 +7,10 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
-import { firstFree } from './names.mjs';
+import { firstFree, parseTeam } from './names.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
-import { readTokenFile, seatAccounts, tokenDir } from './token.mjs';
+import { readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. */
@@ -222,10 +222,22 @@ function countLive(runs, keep, list) {
   return Infinity;
 }
 
-/** The rate_limit_info that the newest log of the seat reporting a seven-day use gives (its last rate_limit_event), with the
- * log's time, or null. The one reader of a seat's quota: seatOut and the ledger's table (bin/lib/quota.mjs) both use it. */
-export function seatEvent(runs, seat) {
-  const logs = runFiles(runs, '.jsonl').filter((f) => seatOf(f) === String(seat)).map((f) => ({ f, t: statSync(f).mtimeMs })).sort((a, b) => b.t - a.t);
+/** The account a run's file belongs to (#311): its .account file; a run from before that, with none, the account its seat's old row
+ * names (seatRows, { seat: account } from the accounts file), if that row is still there; else null, counted under no account. */
+const accountOf = (file, seatRows) => {
+  try {
+    return readFileSync(file.replace(/\.[^./]*$/, '.account'), 'utf8').trim() || null;
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const seat = seatOf(file);
+  return seat === null ? null : (seatRows[seat] ?? null);
+};
+
+/** The rate_limit_info that the newest log of the account reporting a seven-day use gives (its last rate_limit_event), with the
+ * log's time, or null. The one reader of an account's quota: accountOut, the ledger's table, `factory` and `factory top` all use it. */
+export function accountEvent(runs, account, seatRows = {}) {
+  const logs = runFiles(runs, '.jsonl').filter((f) => accountOf(f, seatRows) === account).map((f) => ({ f, t: statSync(f).mtimeMs })).sort((a, b) => b.t - a.t);
   for (const { f, t } of logs) {
     const line = readFileSync(f, 'utf8').split('\n').filter((l) => l.includes('"type":"rate_limit_event"')).pop();
     if (!line) continue;
@@ -246,42 +258,29 @@ export const resetPassed = (resetsAt, now) => resetsAt != null && resetsAt * 100
 
 const WINDOW = { five_hour: 'five-hour', seven_day: 'seven-day' };
 
-/** Why the seat is out, or null: Claude Code rejected its newest event (see seatEvent), and the reset that event gives has not
+/** Why the account is out, or null: Claude Code rejected its newest event (see accountEvent), and the reset that event gives has not
  * passed. This is the only signal of a limit hit (#194): the two recorded cut-offs, factory-runs/issue-149 and issue-167, each
  * carry this event before their result ("You've hit your session limit · resets …", api_error_status 429). */
-export function seatOut(runs, seat, now = Date.now()) {
-  const info = seatEvent(runs, seat)?.info;
+export function accountOut(runs, account, seatRows = {}, now = Date.now()) {
+  const info = accountEvent(runs, account, seatRows)?.info;
   if (info?.status !== 'rejected' || info.resetsAt == null || resetPassed(info.resetsAt, now)) return null;
   const until = new Date(info.resetsAt * 1000).toISOString().slice(0, 16).replace('T', ' ');
   return `rejected by Claude Code (${WINDOW[info.rateLimitType] ?? info.rateLimitType} window) until ${until} UTC`;
 }
 
-/** The seat a session runs on: resumeSeat when it is a resume, else the first of 2, 1 that is not out (seatOut), whatever its
- * number of live sessions. reasons say why each seat that was tried was passed over; with seat null, none was free. With claim, a
- * function that writes this start's own pid file for a seat and returns the function that removes it, the claim is written
- * before the seat is judged, so the update of the checkout counts it (#257). The claim of the seat chosen stays. With accounts
- * ({ seat: account }, #178), the team's account is that of the first seat tried, and a seat whose account differs, or that has
- * none, is passed over with a reason: nothing moves a session to another account by itself. */
-export function chooseSeat({ runs, resumeSeat = null, seats = ORDER, claim = null, now = Date.now(), accounts = null }) {
+/** The seat a session runs on (#311): a seat is a slot. It is resumeSeat for a resume, else the first of the role's seats, whatever its
+ * number of live sessions. What stops a session is its team's account: while Claude Code has rejected it (accountOut) the session
+ * is refused, with the reason in reasons and seat null, and never moves to another seat or account. With claim, a function that
+ * writes this start's own pid file for a seat and returns the function that removes it, the claim is written before the account
+ * is judged, so the update of the checkout counts it (#257). The claim of the seat chosen stays. */
+export function chooseSeat({ runs, account, seatRows = {}, resumeSeat = null, seats = ORDER, claim = null, now = Date.now() }) {
   if (resumeSeat !== null && !Object.hasOwn(SEATS, resumeSeat)) throw new Error(`seat ${resumeSeat} does not exist; the seats are 1 and 2`);
-  const reasons = [];
-  const tried = resumeSeat === null ? seats : [resumeSeat];
-  for (const seat of tried) {
-    if (accounts && accounts[seat] === undefined) {
-      reasons.push(`seat ${seat}: no row in the accounts file`);
-      continue;
-    }
-    if (accounts && accounts[seat] !== accounts[tried[0]]) {
-      reasons.push(`seat ${seat}: its account is not the team's (the team's is seat ${tried[0]}'s)`);
-      continue;
-    }
-    const unclaim = claim ? claim(seat) : () => {};
-    const out = seatOut(runs, seat, now);
-    if (!out) return { seat, reasons };
-    reasons.push(`seat ${seat}: ${out}`);
-    unclaim();
-  }
-  return { seat: null, reasons };
+  const seat = resumeSeat ?? seats[0];
+  const unclaim = claim ? claim(seat) : () => {};
+  const out = accountOut(runs, account, seatRows, now);
+  if (!out) return { seat, reasons: [] };
+  unclaim();
+  return { seat: null, reasons: [`${account}: ${out}`] };
 }
 
 class Refused extends Error {}
@@ -365,6 +364,13 @@ export function launch(argv, env = process.env) {
   const [run, work, brief] = [resolve(o.run), resolve(o.work), resolve(o.brief)];
   for (const [what, path] of [['run folder', run], ['work folder', work]]) if (!existsSync(path) || !statSync(path).isDirectory()) throw new Refused(`the ${what} ${path} is not a folder`);
   if (!existsSync(brief) || !statSync(brief).isFile()) throw new Refused(`the brief ${brief} is not a file`);
+  // The session runs on its team's account (#311): the team comes from the Lead that started it, in FACTORY_TEAM, and a start without
+  // one, with a malformed one or with a team that has no row is refused here, before anything is claimed.
+  const team = env.FACTORY_TEAM;
+  if (!team) throw new Refused('FACTORY_TEAM is not set: a session runs on its team\'s account, and bin/seat takes the team from the Lead that started it, as <repo>-<team>');
+  if (!parseTeam(team)) throw new Refused(`FACTORY_TEAM ${JSON.stringify(String(team).slice(0, 80))} is not <repo>-<team> (the team is a letter, then at most 31 lowercase letters and digits)`);
+  const account = readAccounts(state)[`factory/${team}`];
+  if (!account) throw new Refused(`the team ${team} has no row factory/${team} in the accounts file ${join(state, 'accounts')}; the Human sets one with \`factory use ${team} <letter>\``);
   const tag = o.tag ?? (o.resume ? basename(brief, extname(brief)) : o.role);
   // run-<tag>.claim.pid is the claim of a start of <tag>, so a tag of that shape, in any case on a disk that ignores case, would
   // take another's claim files as its run files.
@@ -377,14 +383,14 @@ export function launch(argv, env = process.env) {
     // (#257). The plugin install and the spawn run after the release, the claim being live from then on.
     let started;
     try {
-      started = withStartLock(state, ROOT, () => register({ o, runs, state, run, tag }), { label: 'a start of bin/seat' });
+      started = withStartLock(state, ROOT, () => register({ o, runs, state, run, tag, account }), { label: 'a start of bin/seat' });
     } catch (e) {
       throw e.busy ? new Refused(e.message) : e;
     }
     if (started.moved) throw new Moved(started.head);
-    const { seat, account, pidFile, unclaim, name } = started.value;
+    const { seat, pidFile, unclaim, name } = started.value;
     try {
-      return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, name });
+      return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, team, name });
     } catch (e) {
       rmSync(join(run, `run-${tag}.name`), { force: true }); // a refused start leaves nothing
       throw e;
@@ -416,12 +422,12 @@ function claimTag(lock, tag) {
 /** The registration of a start: refuses a tag that is running, writes the claim and chooses the seat (chooseSeat writes the claim).
  * Returns the seat, the pid file and the function that removes the claim, which the caller calls when the run's own files are
  * written. On any failure here nothing is left. */
-function register({ o, runs, state, run, tag }) {
+function register({ o, runs, state, run, tag, account }) {
   const pidFile = join(run, `run-${tag}.pid`);
   if (runLive(pidFile)) throw new Refused(`run-${tag} is already running (${readFileSync(pidFile, 'utf8').trim()}) in ${run}`);
   // The claim: this start's own pid with its seat, in run-<tag>.claim.pid and .claim.seat, written before the seat is judged
   // and removed if it backs off. They are files of their own, since run-<tag>.seat also gives the earlier run's log to a seat
-  // (seatEvent) and a claim must not move it. Until the supervisor exists the claim holds bin/seat's pid, which counts as
+  // (accountEvent) and a claim must not move it. Until the supervisor exists the claim holds bin/seat's pid, which counts as
   // live (this user's, started before the file).
   const claimPid = join(run, `run-${tag}.claim.pid`);
   const claimSeat = join(run, `run-${tag}.claim.seat`);
@@ -435,25 +441,22 @@ function register({ o, runs, state, run, tag }) {
     return unclaim;
   };
   try {
-    // Until teams are named (#196) every session is one team's: its account is that of the first seat its role tries.
-    const accounts = seatAccounts(state);
-    const first = o.seat ?? (PRESETS[o.role].seats ?? ORDER)[0];
-    if (!accounts[first]) throw new Refused(`seat ${first} has no row in the accounts file ${join(state, 'accounts')}; the Human sets one with \`factory use\``);
-    const { seat, reasons } = chooseSeat({ runs, resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim, accounts });
-    if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free on the team's account; \`factory\` shows every account's room and \`factory use\` moves the team`);
+    // The seat is a slot; the account is the team's. A run from before #311 is read through its seat's old row.
+    const { seat, reasons } = chooseSeat({ runs, account, seatRows: seatAccounts(state), resumeSeat: o.seat ?? null, seats: PRESETS[o.role].seats, claim });
+    if (seat === null) throw new Refused(`${reasons.join('\n')}\nno seat free: the team's account is out, and the session does not run on another; \`factory\` shows every account's room and \`factory use\` moves the team`);
     // The name is chosen and written while the start holds checkout.lock, so two starts never take the same one (#286).
     // A resume keeps its session's name unless a live run or a Lead holds it now: no two live sessions share a name.
     const earlier = o.resume ? nameOfSession(state, o.resume) : null;
     const name = earlier && !heldNames(runs).includes(earlier) ? earlier : firstFree(heldNames(runs, state));
     writeFileSync(join(run, `run-${tag}.name`), `${name}\n`);
-    return { seat, account: accounts[seat], pidFile, unclaim, name };
+    return { seat, pidFile, unclaim, name };
   } catch (e) {
     unclaim();
     throw e;
   }
 }
 
-function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, name }) {
+function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, team, name }) {
   const tokenPath = join(tokenDir(profiles), account);
   readToken(tokenPath, seat, account); // refuses now; the supervisor reads it again, just before it starts claude
 
@@ -477,14 +480,16 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
-    childFile: join(run, `run-${tag}.child`), tokenPath, account, role: o.role, seat, tag, name, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
+    childFile: join(run, `run-${tag}.child`), tokenPath, account, team, role: o.role, seat, tag, name, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
   };
   for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
   if (!sup.pid) throw new Refused(`could not start the supervisor of run-${tag}`);
   sup.unref();
-  // The seat first: a pid file with no .seat file would count on seat 2.
+  // The seat and the account first: a pid file with no .seat file would count on seat 2, and a log with no .account file under
+  // its seat's old row.
   writeFileSync(join(run, `run-${tag}.seat`), `${seat}\n`);
+  writeFileSync(join(run, `run-${tag}.account`), `${account}\n`);
   writeFileSync(pidFile, `${sup.pid}\n`);
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
@@ -516,7 +521,7 @@ export function recordOf(spec, events, { code, signal, error = null, end = new D
   const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
   return {
     session: result?.session_id ?? init?.session_id ?? spec.resume ?? null,
-    role: spec.role, seat: spec.seat, tag: spec.tag, ...(spec.name ? { name: spec.name } : {}), run: spec.run, ...placeOf(spec.cwd),
+    role: spec.role, seat: spec.seat, ...(spec.team ? { team: spec.team, account: spec.account } : {}), tag: spec.tag, ...(spec.name ? { name: spec.name } : {}), run: spec.run, ...placeOf(spec.cwd),
     model: models.length ? models.join(',') : (init?.model ?? spec.model),
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
     turns: sum('num_turns'), duration_ms: sum('duration_ms'), total_cost_usd: result?.total_cost_usd ?? null,

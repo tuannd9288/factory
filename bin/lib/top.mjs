@@ -16,7 +16,8 @@ import { REQUIRED, clonesUnder, costOf, lastRecords as lastOfSession, readSessio
 import { quotaRows, windowsOf } from './quota.mjs';
 import { PRESETS, SEATS, liveCount, resetPassed, runLive } from './seat.mjs';
 import { TEAM } from './names.mjs';
-import { accountList, readAccounts } from './token.mjs';
+import { accountList, seatAccounts } from './token.mjs';
+import { teamRows } from './teams.mjs';
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -474,10 +475,10 @@ export async function snapshot(opts = {}) {
     return { repo, groups, other: mine.filter((s) => s.issue === null), ghStatus: gh?.failedAt ? { failedAt: gh.failedAt, goodAt: gh.goodAt } : null };
   });
   const agentProfiles = opts.agentProfiles ?? process.env.AGENT_PROFILES ?? join(home, '.agent-profiles');
-  const accounts = accountRows({ state, runs, agentProfiles });
+  const accounts = accountRows({ state, runs, agentProfiles, root });
   return {
     now, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), accounts,
-    seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: readSessions(state), accounts }),
+    seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: readSessions(state), accounts, seatRows: seatAccounts(state) }),
   };
 }
 
@@ -486,23 +487,19 @@ const seatsLive = (runs) => Object.fromEntries(Object.keys(SEATS).map((n) => [n,
 
 const seatCounts = (sessions) => Object.fromEntries(Object.keys(SEATS).map((n) => [n, { live: sessions.filter((s) => s.live && s.seat === n).length }]));
 
-/** The lettered accounts (token.mjs's accountList, which `bin/factory` lists too) with the quota of the seats that use them, from Claude Code's own report
- * (quotaRows), and who uses each: `seat N` for a seat row of the accounts file, `<repo> Lead` for a `lead-<repo>` row. */
-function accountRows({ state, runs, agentProfiles }) {
-  const rows = readAccounts(state);
+/** The lettered accounts (token.mjs's accountList, which `bin/factory` lists too) with the quota of each from its own newest event
+ * (quotaRows, one row for each account, #311), and who uses each: its teams, `<repo>-<team>`. */
+function accountRows({ state, runs, agentProfiles, root }) {
+  const teams = teamRows(state, root);
   let quota = [];
   try {
-    quota = quotaRows({ runs });
+    quota = quotaRows({ runs, state, root });
   } catch {
     // no quota to show: every window is ?
   }
   return accountList({ state, agentProfiles }).map(({ name, letter }) => {
-    const profiles = Object.keys(rows).filter((p) => rows[p] === name).sort();
-    const q = quota.filter((x) => x.seat && x.asOf && rows[`factory/seat-${x.seat}`] === name).sort((a, b) => b.asOf - a.asOf)[0];
-    const users = [
-      ...profiles.flatMap((p) => (/^factory\/seat-\d$/.test(p) ? [p.replace('factory/seat-', 'seat ')] : [])),
-      ...profiles.flatMap((p) => (/^factory\/lead-.+/.test(p) ? [`${p.slice('factory/lead-'.length)} Lead`] : [])),
-    ];
+    const q = quota.find((x) => x.account === name && x.asOf);
+    const users = teams.filter((t) => t.account === name).map((t) => t.name);
     return { letter, name, five_hour: q?.windows?.five_hour ?? null, seven_day: q?.windows?.seven_day ?? null, users };
   });
 }
@@ -512,7 +509,7 @@ const HUMAN_LABELS = new Set(['tier-3', 'needs-human']);
 /** Today (the local day of now): the pull requests merged, the cost of the sessions.jsonl records that ended today for each account
  * letter (a Lead's cost is in no record), and the time pull requests waited on the Human, clipped to today. A pull request waited
  * from the newest finish of its required checks other than `tier` until it merged, or until now while it waits. */
-export function todayOf({ now, repos, github, records, accounts }) {
+export function todayOf({ now, repos, github, records, accounts, seatRows = {} }) {
   const day = startOfDay(now);
   let merged = 0;
   let waitedMs = 0;
@@ -530,7 +527,8 @@ export function todayOf({ now, repos, github, records, accounts }) {
   const cost = new Map();
   for (const x of lastOfSession(records)) {
     if (!(Date.parse(x.end) >= day) || typeof x.total_cost_usd !== 'number') continue;
-    const letter = accounts.find((a) => a.users.includes(`seat ${x.seat}`))?.letter ?? '?';
+    const account = x.account ?? seatRows[x.seat]; // a record from before #311 has no account: its seat's old row
+    const letter = accounts.find((a) => a.name === account)?.letter ?? '?';
     cost.set(letter, (cost.get(letter) ?? 0) + x.total_cost_usd);
   }
   return { merged, cost: [...cost].sort(([a], [b]) => a.localeCompare(b)).map(([letter, usd]) => [letter, Math.round(usd * 100) / 100]), waitedMs };

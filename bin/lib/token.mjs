@@ -99,7 +99,8 @@ export function readAccounts(state) {
   return out;
 }
 
-/** The seats' accounts as { 1, 2 } from the file. */
+/** The old seat rows (#311), as { 1, 2 } from the file. No start reads them: they only name the account of a run, or of a record, from
+ * before a session wrote its own account. */
 export function seatAccounts(state) {
   const rows = readAccounts(state);
   return Object.fromEntries([1, 2].filter((n) => rows[`factory/seat-${n}`]).map((n) => [n, rows[`factory/seat-${n}`]]));

@@ -698,7 +698,8 @@ function main(argv) {
   const quotaNow = () => {
     const runs = resolve(process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'));
     try {
-      return { rows: quotaRows({ runs, statusFiles: opts.statusFiles }), now: Date.now() };
+      const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+      return { rows: quotaRows({ runs, state, root: process.env.FACTORY_ROOT, statusFiles: opts.statusFiles }), now: Date.now() };
     } catch (error) {
       return { error: `The runs folder or a log in it could not be read (${error.code ?? 'error'}), so there is no quota table.` };
     }
