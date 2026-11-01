@@ -132,8 +132,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   steps run on Codex through a factory script on `codex exec`, like `scripts/live-verify`, on the verifier's Codex
   profile." #95, which was to make the verifier's model a setting for each repository with Claude by default, was closed
   as superseded by D2: "the verifier's steps run on its Codex profile". That step from D2 to the verifier is Colly's, in
-  closing #95; the Human approved #203 "theo đề xuất" on 2026-10-30, and its area 4 lists `:103` as "#95, now
-  #182". Sources: https://github.com/tuannd9288/factory/issues/182#issuecomment-6513127448,
+  closing #95, on the Human's approval of the cleanup that #203 records ("theo đề xuất", 2026-10-30); #203's area 4
+  lists `:103` as "#95, now #182". Sources: https://github.com/tuannd9288/factory/issues/182#issuecomment-6513127448,
   https://github.com/tuannd9288/factory/issues/95#issuecomment-6525022374 and
   https://github.com/tuannd9288/factory/issues/203 (area 4).
 - **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
@@ -193,7 +193,8 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
 - **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, the ledger's canary.
 - **1e Surfaces** [GH2, #68]: the Human's own screens: Ghostty with the Herdr TUI or app until the factory is finished, then
-  Rex and Paseo's app (Control surfaces, 2026-10-29), and Remote Control (T3, pending). Herdr's server and Paseo's daemon stay in 0d.
+  Rex on the MacBook (K1 = C, pending his check) and Paseo's app (Control surfaces, 2026-10-29), and Remote Control (T3,
+  pending). Herdr's server and Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
