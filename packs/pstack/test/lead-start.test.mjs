@@ -254,17 +254,51 @@ describe('lead role.sha (#316)', () => {
     assert.equal(messageOf(w.log().at(-1)), `${HEAD}# role, new\n`);
   }));
 
-  test('a new session, with no copy and with --new, gives no message and removes role.sha (#316)', () => world((w) => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const sessionIdOf = (call) => call.argv[call.argv.indexOf('--session-id') + 1];
+
+  test('a new session, with no copy and with --new, passes --session-id and records the hash with that id (#316)', () => world((w) => {
     recorded(w, `${hashOf('# role\n')} ${A}\n`);
     assert.equal(w.lead().code, 0);
-    assert.equal(messageOf(w.log().at(-1)), null);
-    assert.equal(w.log().at(-1).argv[w.log().at(-1).argv.indexOf('--append-system-prompt') + 1], '# role\n');
-    assert.ok(!existsSync(sha(w)));
+    const first = w.log().at(-1);
+    assert.ok(!first.argv.includes('--resume'));
+    assert.equal(messageOf(first), null);
+    assert.equal(first.argv[first.argv.indexOf('--append-system-prompt') + 1], '# role\n');
+    assert.match(sessionIdOf(first), UUID);
+    assert.equal(first.argv[first.argv.indexOf('--session-id') + 2], '--allowedTools');
+    assert.equal(readFileSync(sha(w), 'utf8'), `${hashOf('# role\n')} ${sessionIdOf(first)}\n`);
     w.copy(`${A}.jsonl`, 4000);
-    recorded(w, `${hashOf('# role\n')} ${A}\n`);
     assert.equal(w.lead(['--new']).code, 0);
-    assert.ok(!w.log().at(-1).argv.includes('--resume'));
-    assert.ok(!existsSync(sha(w)));
+    const second = w.log().at(-1);
+    assert.ok(!second.argv.includes('--resume'));
+    assert.match(sessionIdOf(second), UUID);
+    assert.notEqual(sessionIdOf(second), sessionIdOf(first));
+    assert.equal(readFileSync(sha(w), 'utf8'), `${hashOf('# role\n')} ${sessionIdOf(second)}\n`);
+  }));
+
+  test('the first resume of a new session whose text has not changed gets no message, after no copy and after --new (#316)', () => world((w) => {
+    for (const args of [[], ['--new']]) {
+      if (args.length) w.copy(`${A}.jsonl`, 4000);
+      assert.equal(w.lead(args).code, 0);
+      const id = sessionIdOf(w.log().at(-1));
+      w.copy(`${id}.jsonl`, 5000 + args.length);
+      const before = readFileSync(sha(w), 'utf8');
+      assert.equal(w.lead().code, 0);
+      const call = w.log().at(-1);
+      assert.equal(resumed(call), id);
+      assert.ok(!call.argv.includes('--session-id'), 'a resume passes no --session-id');
+      assert.equal(messageOf(call), null);
+      assert.equal(readFileSync(sha(w), 'utf8'), before);
+    }
+  }));
+
+  test('the first resume of a new session whose text changed since it started gets the message (#316)', () => world((w) => {
+    assert.equal(w.lead().code, 0);
+    const id = sessionIdOf(w.log().at(-1));
+    w.copy(`${id}.jsonl`, 5000);
+    setRole(w, '# role, new\n');
+    assert.equal(w.lead().code, 0);
+    assert.equal(messageOf(w.log().at(-1)), `${HEAD}# role, new\n`);
   }));
 
   test('a spawn that fails puts the earlier record back, or removes the file when there was none (#316)', () => world((w) => {
@@ -298,7 +332,7 @@ describe('lead role.sha (#316)', () => {
     assert.deepEqual(readdirSync(dirname(sha(w))).filter((f) => f.endsWith('.tmp')), []);
   }));
 
-  test('--dry-run writes no role.sha and says which of the three cases it is (#316)', () => world((w) => {
+  test('--dry-run writes no role.sha and says which role case the start is in (#316)', () => world((w) => {
     const line = (args) => /^role: .*$/m.exec(w.lead(['--dry-run', ...args]).out)?.[0];
     assert.match(line([]), /^role: new session, .*system prompt/);
     w.copy(`${A}.jsonl`, 4000);
@@ -324,6 +358,10 @@ describe('lead role.sha (#316)', () => {
     const r = w.lead(['--dry-run']);
     assert.ok(r.out.includes(`--resume ${A} <`), 'a placeholder follows the session id');
     assert.ok(!r.out.includes('your role changed'));
+    assert.ok(!r.out.includes('--session-id'), 'a resume shows no new session id');
+    const fresh = w.lead(['--dry-run', '--new']).out;
+    assert.ok(fresh.includes('--session-id <new session id> '), 'a new session shows a placeholder for its id');
+    assert.ok(!existsSync(sha(w)));
   }));
 
   test('a start refused or stopped before claude records nothing (#316)', () => world((w) => {
