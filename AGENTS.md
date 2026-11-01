@@ -465,8 +465,11 @@ resumed by the Lead after that reset, which the refusal names and `factory` show
 <brief> --run <folder> --work <folder> --resume <session id> --seat <n>`; nothing resumes it in the background. Every
 seat runs in auto mode with no role allow list and every deny rule, `env` and `printenv` included, and holds the team's
 key: the Human's decision of 2026-11-01 (#307), with no scrub, since `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` makes Claude Code
-force the `default` mode (2.1.308 to 2.1.316). Only `StructuredOutput`, the run's `--skill` and its own `--allow` rules are
-granted. The one exception is the researcher while `hideKey` on its row in `PRESETS` is `true` (the default): it keeps the
+force the `default` mode (2.1.308 to 2.1.316). Even without the scrub, Claude Code 2.1.316 keeps `CLAUDE_CODE_OAUTH_TOKEN`
+out of a command's environment (probe, #307; hooks, MCP servers and other versions not probed). Only `StructuredOutput`,
+the run's `--skill` and its own `--allow` rules are granted. The one exception is the researcher while `hideKey` on its row
+in `PRESETS` is `true` (the default), so that it, which reads untrusted pages, cannot run a shell read of the token file,
+the path auto mode leaves to the classifier: it keeps the
 scrub, so its commands, hooks and MCP servers get no credential from the environment, the `default` mode, its short allow
 list, seat 2, and (#188) `Write`, `Edit` and output redirects only in the session's own folders (run, work and each
 `--add-dir`), through one `Edit` rule a folder, each a real absolute path with no glob character (#192), and none of

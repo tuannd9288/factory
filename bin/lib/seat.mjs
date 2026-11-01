@@ -67,7 +67,8 @@ export const PRESETS = {
   reviewer: { model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, web: false },
   researcher: {
     // hideKey: true is today's setup: the scrub, the default mode, the short allow list below and seat 2. false makes it run like
-    // the rest of the team (the Human, 2026-11-01: "Làm, mặc định giấu"). Flipping it is a one-line pull request (#307).
+    // the rest of the team (the Human, 2026-11-01: "Làm, mặc định giấu"). Flipping it is a pull request the Human approves,
+    // which also changes the researcher tests that pin today's value (#307).
     hideKey: true,
     // The Lead's proposal (review of #91, #6), agreed by Colly on 2026-10-26: the researcher reads untrusted pages and can send
     // them out with WebFetch, so it never runs on seat 1. Since #178 seat 2 holds a token too; its grants were reviewed for that
@@ -83,8 +84,8 @@ export const PRESETS = {
 
 export const ROLES = Object.keys(PRESETS);
 
-/** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories and run its
- * `sv`); skills become Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, adds three deny
+/** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories); skills become
+ * Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, adds three deny
  * rules for every seat (#178): the tokens folder, the archive folder and seat 1's old token file; deny is a run's own extra deny
  * rules (#92), which come after the role's and before those three. The mode is auto and the only grants are StructuredOutput,
  * the skills and the run's own allow, the deny rules staying whole (#307). With hideKey the mode is default (the scrub forces it,
@@ -322,7 +323,8 @@ export function parseArgs(argv) {
   for (const [flag, value] of [['--resume', o.resume], ...o.allow.map((v) => ['--allow', v]), ...o.deny.map((v) => ['--deny', v]), ...o.addDirs.map((v) => ['--add-dir', v])]) {
     if (typeof value === 'string' && value.startsWith('-')) throw new Refused(`${flag} ${value}: a value that starts with a dash is refused, since claude would read it as a flag`);
   }
-  // A folder's Edit rule is a gitignore pattern, so a glob character widens it, and a path that is not already real (relative,
+  // A folder becomes an --add-dir and, for the researcher with hideKey, an Edit rule, which is a gitignore pattern: a glob
+  // character widens it, and a path that is not already real (relative,
   // a link, a trailing slash, a `..` step) is not the path the rule would name once claude resolves it (#192).
   for (const [flag, value] of [['--run', o.run], ['--work', o.work], ...o.addDirs.map((v) => ['--add-dir', v])]) {
     if (/[*?[]/.test(value)) throw new Refused(`${flag} ${value}: a folder with a glob character (*, ? or [) is refused, since its permission rule would reach other folders`);
