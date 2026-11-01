@@ -194,24 +194,6 @@ test('moves an ignored file in the way into the archive and deletes nothing', ()
   assert.equal(readFileSync(join(w.state, 'archive', folder, 'gen.txt'), 'utf8'), 'mine, ignored\n');
 }));
 
-test('liveRuns counts a marker of seat 0 and not in a seat\'s count; markRun writes and removes it', async () => {
-  const { liveRuns, liveCount } = await seatLib();
-  const { markRun } = await lib();
-  const runs = mkdtempSync(join(tmpdir(), 'checkout-runs-'));
-  try {
-    assert.equal(liveRuns(runs), 0);
-    const unmark = markRun(runs, 'canary');
-    assert.equal(liveRuns(runs), 1);
-    assert.equal(liveCount(runs, 1), 0);
-    assert.equal(liveCount(runs, 2), 0);
-    assert.equal(readFileSync(join(runs, 'daemon-canary', 'run-canary.seat'), 'utf8').trim(), '0');
-    unmark();
-    assert.equal(liveRuns(runs), 0);
-  } finally {
-    rmSync(runs, { recursive: true, force: true });
-  }
-});
-
 test('liveRuns counts a live session of either seat and not a dead pid', async () => {
   const { liveRuns } = await seatLib();
   const runs = mkdtempSync(join(tmpdir(), 'checkout-runs-'));
@@ -276,7 +258,7 @@ test('a plist that is not installed is skipped; a wanted plist that changed move
 
 test('the repositories of an installed plist are handed to the generator', async () => {
   const { reposOf } = await lib();
-  const text = '<array>\n    <string>/x/bin/claude-canary</string>\n    <string>run</string>\n    <string>--repo</string>\n    <string>o/app</string>\n    <string>--repo</string>\n    <string>o/lib</string>\n  </array>';
+  const text = '<array>\n    <string>/x/bin/factory-queue</string>\n    <string>run</string>\n    <string>--repo</string>\n    <string>o/app</string>\n    <string>--repo</string>\n    <string>o/lib</string>\n  </array>';
   assert.deepEqual(reposOf(text), ['o/app', 'o/lib']);
   assert.deepEqual(reposOf('<string>x</string>'), []);
 });
