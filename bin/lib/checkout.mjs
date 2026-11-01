@@ -115,7 +115,8 @@ function archive(state, folder, root, path) {
 
 /** One try to bring the checkout at root to origin/main. live() is the number of runs live now (Infinity when unknown). Returns
  * {status}: current, updated, deferred (runs are live; nothing written until two hours), busy (a start holds the lock) or refused
- * (queue-checkout.failed says why). It moves the checkout by `git pull --ff-only origin main` alone. */
+ * (queue-checkout.failed says why). It moves the checkout by `git fetch`, then `git merge --ff-only --no-overwrite-ignore` of the
+ * tip it fetched, and nothing else. */
 export function followMain({ root, state, live, now = Date.now(), env = process.env }) {
   mkdirSync(state, { recursive: true });
   const report = join(state, 'queue-checkout.failed');

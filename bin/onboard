@@ -282,7 +282,7 @@ gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, 
 - Purpose: bring $name into the factory with the kit of tuannd9288/factory.
 - Change: \`.gate/bin/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review, setup), \`.gate/hooks/\`, \`.gate/\` (with \`protected\`: the tier-3 paths), three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`.gate/kit-commit\` (the factory commit), the \`## Gate\` block in \`AGENTS.md\` and, where there was none, \`CLAUDE.md\`.
 - Evidence: the full \`.gate/bin/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
-- Tier: 3 (touches \`.github/\`, \`scripts/\`, \`.gate/\`).
+- Tier: 3 (touches \`.github/\`, \`.gate/\`, \`.claude/\` and \`AGENTS.md\`).
 - Rollback: revert this PR.
 - Needs the Human: yes — confirm \`.gate/load-bearing\` (tier 2) and \`.gate/protected\` (tier 3); recommendation: approve once the repository's session has filled both lists.
 
