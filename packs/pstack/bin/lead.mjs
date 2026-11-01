@@ -4,9 +4,11 @@
 // accounts file and refuses to start without it; it reads that account's token file once, before setup, and gives it to claude's
 // environment alone (CLAUDE_CODE_OAUTH_TOKEN), with no scrub, in auto mode (the Human, 2026-11-01); it prints none of it. It also
 // sets hasCompletedOnboarding in the profile's .claude.json, since a token on a fresh profile would replay onboarding.
-// A resumed session ignores a new --append-system-prompt (2.1.316), so <run folder>/role.sha keeps the hash of the role text last given
-// and a resume whose hash differs, or has none, gets the current text as its first message under "[factory] your role changed:" (#316;
-// piggery v0.10.3 does the same with card_hash: internal/store/migrate_15.sql, internal/core/harness.go newCard and giveCard).
+// A resumed session ignores a new --append-system-prompt (2.1.316), so <run folder>/role.sha keeps "<hash of the role text> <session id>"
+// of the last resume that was given the text, and a resume of any other session, or with another hash, or with no record, gets the current
+// text as its first message under "[factory] your role changed:"; a new session removes the file (#316). piggery v0.10.3 keeps the same
+// kind of record, card_hash for each participant (internal/store/migrate_15.sql, internal/core/harness.go newCard and giveCard), but hashes
+// team, role and name and gives the card before every turn's text; here the whole text is hashed and given once, on a resume.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -221,27 +223,39 @@ export function markOnboarded(config) {
 /** The role text's hash (#316): SHA-256 hex of the exact string that goes to --append-system-prompt. */
 export const roleHash = (roleText) => createHash('sha256').update(roleText).digest('hex');
 
-/** The hash <runDir>/role.sha records, or null when the file is missing, unreadable or not one 64-character lowercase hex line. */
-export function recordedRole(runDir) {
+const ROLE_RECORD = /^([0-9a-f]{64}) ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n$/;
+
+/** What <runDir>/role.sha holds: { raw, hash, session }. raw is the file's text, or null when it is missing or unreadable; hash and
+ * session are null unless it is one line, 64 lowercase hex characters, a space, a session id and a newline (an older one-field file is none). */
+export function readRole(runDir) {
+  let raw = null;
   try {
-    return /^([0-9a-f]{64})\n?$/.exec(readFileSync(join(runDir, 'role.sha'), 'utf8'))?.[1] ?? null;
+    raw = readFileSync(join(runDir, 'role.sha'), 'utf8');
   } catch {
-    return null;
+    // missing or unreadable: no record
   }
+  const m = raw === null ? null : ROLE_RECORD.exec(raw);
+  return { raw, hash: m?.[1] ?? null, session: m?.[2] ?? null };
 }
 
-/** Records the hash in <runDir>/role.sha through a temporary file in the same folder and a rename. */
-export function recordRole(runDir, hash) {
+/** Writes <runDir>/role.sha through a temporary file in the same folder (exclusive create) and a rename. */
+export function writeRole(runDir, text) {
   const file = join(runDir, 'role.sha');
   const tmp = `${file}.${process.pid}.tmp`;
   mkdirSync(runDir, { recursive: true });
   try {
-    writeFileSync(tmp, `${hash}\n`);
+    writeFileSync(tmp, text, { flag: 'wx' });
     renameSync(tmp, file);
   } catch (e) {
     rmSync(tmp, { force: true });
     throw e;
   }
+}
+
+/** Puts role.sha back as readRole saw it: its raw text, or no file. */
+export function restoreRole(runDir, raw) {
+  if (raw === null) rmSync(join(runDir, 'role.sha'), { force: true });
+  else writeRole(runDir, raw);
 }
 
 /** The Lead's name (#286): the file <runDir>/name when it is there, else the first animal no live run and no Lead holds, written
@@ -328,15 +342,16 @@ function main(argv, env) {
   const sessionLine = resume
     ? `session: resume ${resume} (newest of ${earlier.count} ${earlier.count === 1 ? 'copy' : 'copies'} in ${transcripts})`
     : `session: new (${flags.includes('--new') ? '--new' : `no copy in ${transcripts}`})`;
-  // A resumed session ignores a new --append-system-prompt, so a changed role text goes as its first message (#316; piggery's card_hash).
+  // A resumed session ignores a new --append-system-prompt, so a text it was not given goes as its first message (#316; piggery's card_hash).
   const hash = roleHash(roleText);
-  const recorded = recordedRole(runDir);
+  const earlierRole = readRole(runDir);
+  const given = resume !== null && earlierRole.hash === hash && earlierRole.session === resume;
   const roleLine = !resume
     ? 'role: new session, the role text goes as the system prompt'
-    : recorded === hash
+    : given
       ? `role: unchanged since ${hash.slice(0, 7)}, no message`
-      : `role: ${recorded ? `changed since ${recorded.slice(0, 7)}` : 'no record'}, the first message gives the role text`;
-  const message = resume && recorded !== hash ? `${ROLE_CHANGED}\n${roleText}` : null;
+      : `role: ${earlierRole.hash === hash ? 'given to another session, not to this one' : earlierRole.hash ? `changed since ${earlierRole.hash.slice(0, 7)}` : 'no record'}, the first message gives the role text`;
+  const message = resume && !given ? `${ROLE_CHANGED}\n${roleText}` : null;
   const node = findNode(env.PATH);
   if (!node) {
     process.stderr.write('bin/lead: no node on PATH, which the transcript hook needs\n');
@@ -419,10 +434,12 @@ function main(argv, env) {
   }
   if (claudeDirt(cwd) !== before) process.stderr.write(`bin/lead: the install changed .claude/ in ${cwd}; check git status there\n`);
 
-  // Last step before claude, so a start refused or stopped above records nothing; an unchanged record is not written again.
-  if (recorded !== hash) {
+  // Last step before claude, so a start refused or stopped above records nothing. A resume that was given the text leaves the file
+  // alone; one that gets the message records its hash and session; a new session removes the file, since its id is not known here.
+  if (!given) {
     try {
-      recordRole(runDir, hash);
+      if (resume) writeRole(runDir, `${hash} ${resume}\n`);
+      else restoreRole(runDir, null);
     } catch (e) {
       process.stderr.write(`bin/lead: could not record the role text's hash in ${join(runDir, 'role.sha')}: ${e.code ?? e.message}\n`);
       return 1;
@@ -436,6 +453,14 @@ function main(argv, env) {
   const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit', env: childEnv });
   if (r.error) {
     process.stderr.write(`bin/lead: ${command[0]}: ${r.error.message}\n`);
+    // claude never ran, so the text was not given: the next start gives it.
+    if (!given) {
+      try {
+        restoreRole(runDir, earlierRole.raw);
+      } catch (e) {
+        process.stderr.write(`bin/lead: could not put back ${join(runDir, 'role.sha')}: ${e.code ?? e.message}\n`);
+      }
+    }
     return 1;
   }
   return exitCodeOf(r);

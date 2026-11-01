@@ -522,13 +522,14 @@ MacBook terminal without Herdr, `factory lead <repo>` does the same over ssh. `f
 `bin/install-factory`, which he runs once on the MacBook and `factory` runs once on the Mac mini (#177). `factory lead [--team <name>]` starts the Lead of one team (#196), named
 `<repo>-<team>` with its folder `~/factory-runs/<repo>-<team>/`; the team is the claim's team (`lead.md` takes it from the launcher), `lead` when
 none is given, and a repository's teams share its account row. A resumed session ignores a new `--append-system-prompt` (2.1.316), so
-`<repo>-<team>/role.sha` keeps the SHA-256 of the role text last given (#316): a resume whose current text hashes differently, or whose file is
-missing or malformed, gets that text as its first message under `[factory] your role changed:`, and one whose hash is equal gets none (piggery's
-`card_hash`, v0.10.3). `factory lead` resumes
+`<repo>-<team>/role.sha` keeps the SHA-256 of the role text and the id of the session it was last given to (#316): a resume of any other
+session, or whose current text hashes differently, or whose file is missing or malformed, gets that text as its first message under
+`[factory] your role changed:`, and one of the same session and hash gets none; a new session removes the file. Known limit: `/compact`
+(piggery keeps a like record, `card_hash`, v0.10.3). `factory lead` resumes
 the team's newest earlier session and starts a new one when there is none; `--new` starts a new one anyway. The only record it reads is the newest plain-session-id
 copy in `~/factory-runs/<repo>-<team>/transcripts/` (never a profile); a session killed before any Stop hook ran leaves no copy, so
 the next `factory lead` starts a new one. `--dry-run` prints the folder,
-the team, the plugin plan, the plugin root, the transcript hook, the command and which of the two sessions it would start, and why; it
+the team, the plugin plan, the plugin root, the transcript hook, the command, which of the two sessions it would start, and why, and a `role:` line saying whether the first message gives the role text; it
 installs and starts nothing; it runs
 `direnv exec . printenv CLAUDE_CONFIG_DIR` to name the root, and exits 1 when that gives no path (#185). It runs the repository's `.gate/bin/setup` first, installs the
 plugins the repository's own settings enable with `--scope local`, so the committed pin stays byte for byte, and never
