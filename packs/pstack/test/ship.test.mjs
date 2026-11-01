@@ -235,7 +235,7 @@ describe('the steps after it opened', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
   });
 
-  test('stops on a ready pull request that is not armed, before any note, verdict or merge (#304)', () => {
+  test('stops on a ready pull request that is not armed, before the arm (#304)', () => {
     for (const driver of [true, false]) {
       for (const mergeStateStatus of ['CLEAN', 'HAS_HOOKS', 'UNSTABLE']) {
         const w = world({ driver });
@@ -245,8 +245,7 @@ describe('the steps after it opened', () => {
         const out = w.ship();
         assert.equal(out.code, 1, out.out);
         assert.match(out.out, /^ship: stopped on #7: it is ready to merge and not armed; the Human merges it$/m);
-        assert.equal(w.read('lv-calls'), '');
-        assert.ok(!w.calls().some((c) => c.startsWith('pr merge') || c.startsWith('pr comment')), w.calls().join('\n'));
+        assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
       }
     }
   });

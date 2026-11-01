@@ -39,8 +39,9 @@ export function newestSession(dir) {
 }
 
 // The Lead's grants (lead.md): it reads, claims, makes worktrees, pushes its own HEAD, files, comments on and edits issues,
-// ships pull requests through scripts/ship (which runs gh for it), comments on them, and starts workers through bin/seat. In auto mode a write to GitHub that no rule
-// names is refused by the classifier (#277). lead.md tells it to write no change itself and never to run gh api; the grants alone do not stop it.
+// ships pull requests through scripts/ship (which runs gh for it), comments on them, and starts workers through bin/seat.
+// In auto mode a write to GitHub that no rule names is refused by the classifier (#277). lead.md tells it to write no change
+// itself and never to run gh api; the grants alone do not stop it.
 const allowOf = (root) => [
   'Read', 'Glob', 'Grep', 'Write', 'Edit',
   'Bash(git fetch:*)', 'Bash(git worktree:*)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)',

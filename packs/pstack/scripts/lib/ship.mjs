@@ -9,7 +9,7 @@ import process from 'node:process';
 import { driverAt } from './driver.mjs';
 
 const PLACEHOLDER = '<issue labelled task>';
-const FIELDS = 'number,url,baseRefName,baseRefOid,headRefOid,labels,autoMergeRequest,statusCheckRollup,mergeStateStatus';
+const FIELDS = 'number,url,baseRefName,baseRefOid,headRefOid,labels,autoMergeRequest,statusCheckRollup';
 // gh pr merge --auto merges these outright, whatever the repository's auto-merge setting.
 const READY = ['CLEAN', 'HAS_HOOKS', 'UNSTABLE'];
 
@@ -147,9 +147,6 @@ function step(pr, head, branch) {
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);
 
-  // Before any note or verdict: arming a ready pull request would merge it, so the Human does.
-  if (READY.includes(pr.mergeStateStatus)) return say(1, `stopped on #${n}: it is ready to merge and not armed; the Human merges it`);
-
   // No driver: live-verify would only answer BLOCKED. The note stands for the pull request's head in its place, once, and
   // the run goes on. Never arm a head nobody checked: a local HEAD that is not the pull request's head is refused, and a
   // note that does not count once posted (the author is not this login) stops the run before the arming.
@@ -173,6 +170,9 @@ function step(pr, head, branch) {
     if (r.status !== 0) return say(2, `could not run: live-verify exited ${r.status ?? r.signal}`);
   }
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
+  // Read fresh: live-verify ran for minutes, CI may have ended, and arming a ready pull request would merge it.
+  if (READY.includes(JSON.parse(gh(['pr', 'view', String(n), '--json', 'mergeStateStatus'])).mergeStateStatus))
+    return say(1, `stopped on #${n}: it is ready to merge and not armed; the Human merges it`);
   try {
     gh(['pr', 'merge', String(n), '--auto', '--merge']);
   } catch (error) {
