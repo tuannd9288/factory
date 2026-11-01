@@ -284,7 +284,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; `--check` is its canary on Claude Code's session format; the header says what it charges a task from |
 | `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH): the table of profiles, accounts and quota, and `login`, `store`, `use` and `logout`, which only the Human runs (#177, #178); its header has the rest |
 | `bin/factory top` | The read-only view of every session and repository (#174, #286); the header of `bin/lib/top.mjs` has the rest |
-| `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the header of `packs/pstack/bin/lead` has the rest |
+| `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH: `~/.local/bin/factory` becomes a symlink to this clone's `bin/factory`; he runs it on the MacBook and as `factory` on the Mac mini; it can be run again and replaces nothing that is not already that symlink |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
@@ -326,7 +326,7 @@ onboarded repository to a newer factory commit; its refusals, what it replaces a
 the header of `bin/kit-update`.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
-proposes `.gate/load-bearing`, and runs the probes. The Human logs into the profile in a new pane opened in the repository
+and proposes `.gate/load-bearing`. The Human logs into the profile in a new pane opened in the repository
 (`echo $CLAUDE_CONFIG_DIR`, then `claude`).
 
 The queue's job, its install, its lock and its checkout rules are in `bin/factory-queue`'s header. A rollback is a revert pull

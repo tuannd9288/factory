@@ -40,7 +40,7 @@ The pstack pack's `packs/pstack/settings.json` pins upstream's Claude Code build
 repository and trusted the folder, install it from the repository root with
 `claude plugin install pstack@pstack-4dd1d05 --scope project`. Never at user scope: no install without `--scope project` (or
 `--scope local`, which `packs/pstack/bin/lead` uses), and never the `--marketplace` form, which declares the marketplace in the
-profile's user settings. A new pin is a new marketplace name, in a tier-3 pull request per repository; attack 23 checks that two
+profile's user settings. A new pin is a new marketplace name, in a tier-3 pull request per repository; attack 23 checked that two
 pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-22 (attack 23; `probes/results.md` at the tag
 `before-271`):
 
