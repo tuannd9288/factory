@@ -28,13 +28,18 @@ const comments = () => (fs.existsSync(sh + '/comments.json') ? JSON.parse(fs.rea
 const author = () => (fs.existsSync(sh + '/author') ? fs.readFileSync(sh + '/author', 'utf8').trim() : 'agent');
 // $SH/login is the login gh runs as, when it is not the pull request's author.
 const login = () => (fs.existsSync(sh + '/login') ? fs.readFileSync(sh + '/login', 'utf8').trim() : author());
-if (a[0] === 'pr' && a[1] === 'view') out(JSON.stringify({ author: { login: author() }, headRefOid: read().headRefOid, comments: comments() }));
+if (a[0] === 'pr' && a[1] === 'view') out(JSON.stringify({ author: { login: author() }, headRefOid: read().headRefOid, mergeStateStatus: read().mergeStateStatus, comments: comments() }));
 if (a[0] === 'pr' && a[1] === 'comment') {
   const body = fs.readFileSync(a[a.indexOf('--body-file') + 1], 'utf8');
   fs.writeFileSync(sh + '/comments.json', JSON.stringify([...comments(), { author: { login: login() }, body, includesCreatedEdit: false }]));
   out('https://github.com/o/app/pull/7#issuecomment-1\n');
 }
 if (a[0] === 'pr' && a[1] === 'merge') {
+  // $SH/arm-refused: GitHub refuses to enable auto-merge, as gh 2.102.0 reports it.
+  if (a.includes('--auto') && fs.existsSync(sh + '/arm-refused')) {
+    process.stderr.write('GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)\n');
+    process.exit(1);
+  }
   const pr = read();
   pr.autoMergeRequest = a.includes('--auto') ? { mergeMethod: 'MERGE' } : null;
   fs.writeFileSync(sh + '/pr.json', JSON.stringify(pr));
@@ -53,7 +58,15 @@ fs.appendFileSync(sh + '/lv-calls', a.join(' ') + '\n');
 if (a[0] === '--covered') process.exit(fs.existsSync(sh + '/covered') ? 0 : 1);
 const verdict = fs.readFileSync(sh + '/verdict', 'utf8').trim();
 console.log('live-verify: ' + verdict + ' on #' + a[0]);
-if (verdict === 'PASS' || verdict === 'PASS+NOTES') { fs.writeFileSync(sh + '/covered', ''); process.exit(0); }
+if (verdict === 'PASS' || verdict === 'PASS+NOTES') {
+  fs.writeFileSync(sh + '/covered', '');
+  // $SH/clean-on-verify: CI turned green while the run took its minutes.
+  if (fs.existsSync(sh + '/clean-on-verify')) {
+    const pr = JSON.parse(fs.readFileSync(sh + '/pr.json', 'utf8'));
+    fs.writeFileSync(sh + '/pr.json', JSON.stringify({ ...pr, mergeStateStatus: 'CLEAN' }));
+  }
+  process.exit(0);
+}
 process.exit(verdict === 'FAIL' ? 1 : 2);
 `;
 
@@ -220,6 +233,42 @@ describe('the steps after it opened', () => {
     assert.equal(out.code, 2, out.out);
     assert.match(out.out, /^ship: stopped on #7: live-verify is BLOCKED; put the reason and your recommended answer in the pull request$/m);
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
+  });
+
+  test('stops on a ready pull request that is not armed, before the arm (#304)', () => {
+    for (const driver of [true, false]) {
+      for (const mergeStateStatus of ['CLEAN', 'HAS_HOOKS', 'UNSTABLE']) {
+        const w = world({ driver });
+        w.passed();
+        assert.equal(w.ship().code, 0);
+        w.pr({ mergeStateStatus });
+        const out = w.ship();
+        assert.equal(out.code, 1, out.out);
+        assert.match(out.out, /^ship: stopped on #7: it is ready to merge and not armed; the Human merges it$/m);
+        assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
+      }
+    }
+  });
+
+  test('stops when CI turns green while live-verify runs, with no merge (#304)', () => {
+    const w = opened();
+    w.pr({ mergeStateStatus: 'BLOCKED' });
+    writeFileSync(join(w.sh, 'clean-on-verify'), '');
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: stopped on #7: it is ready to merge and not armed; the Human merges it$/m);
+    assert.equal(w.read('lv-calls'), '--covered 7\n7\n');
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
+  });
+
+  test('stops when GitHub refuses the arm because auto-merge is off (#304)', () => {
+    const w = opened();
+    w.pr({ mergeStateStatus: 'BLOCKED' });
+    writeFileSync(join(w.sh, 'arm-refused'), '');
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: stopped on #7: auto-merge is off on this repository; the Human merges it$/m);
+    assert.doesNotMatch(out.out, /could not run|armed #7/);
   });
 
   test('refuses to arm when the base is not main, and says which', () => {
