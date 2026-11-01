@@ -486,7 +486,8 @@ export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
 /** `use` and `logout` from the MacBook run on the Mac mini, as `login` does: the arguments are checked here first (a row is a number,
  * a letter is a to z, an account matches the account pattern), then the host runs the command in a login shell over ssh, on the
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
-function remote(cmd, args, env) {  const bad = cmd === 'use'
+function remote(cmd, args, env) {
+  const bad = cmd === 'use'
     ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^([1-9][0-9]*|lead-[A-Za-z0-9._-]+)$/.test(args[0]) ? 'the row is a number or lead-<repo>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
     : (args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account');
   if (bad) {
