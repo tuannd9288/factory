@@ -105,6 +105,12 @@ export function rejected(w, seat, tag, inSeconds = 3600) {
   writeFileSync(join(w.run, `run-${tag}.seat`), `${seat}\n`);
 }
 
+/** A log of an account's, in the run folder: its last rate_limit_event Claude Code rejected for inSeconds, and run-<tag>.account. */
+export function rejectedOn(w, account, tag, inSeconds = 3600, seat = 2) {
+  rejected(w, seat, tag, inSeconds);
+  writeFileSync(join(w.run, `run-${tag}.account`), `${account}\n`);
+}
+
 export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   // The real path: tmpdir() is under /var, a link to /private/var on macOS, and bin/seat refuses a folder that is not its own real path (#192).
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'seat-world-')));
@@ -115,18 +121,29 @@ export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   writeFileSync(join(w.bin, 'claude'), FAKE);
   chmodSync(join(w.bin, 'claude'), 0o755);
   writeFileSync(join(w.run, 'BRIEF.md'), 'the brief\n');
-  // Both seats name one account by default (#178), whose token file is the fixture's; the seat's old oauth-token is never read.
+  // The team factory-lead has the row factory/factory-lead (#311), whose token file is the fixture's. The two seat rows are the old
+  // lines of an accounts file: only a run from before #311, with no .account file, is attributed through them; no start reads them.
   w.account = 'acct-one';
-  writeFileSync(join(w.state, 'accounts'), 'factory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
+  w.team = 'factory-lead';
+  // The factory's root (FACTORY_ROOT) holds the onboarded repository probe, as bin/onboard leaves one (#311); `factory` needs no folder.
+  w.froot = join(root, 'froot');
+  w.onboard = (name) => {
+    mkdirSync(join(w.froot, name, '.git'), { recursive: true });
+    mkdirSync(join(w.froot, name, '.gate'));
+    writeFileSync(join(w.froot, name, '.envrc'), 'x\n');
+  };
+  w.onboard('probe');
+  writeFileSync(join(w.state, 'accounts'), 'factory/factory-lead=acct-one\nfactory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
   w.tokenOf = (account) => join(w.profiles, 'tokens', account);
   w.tokenFile = w.tokenOf('acct-one');
   writeFileSync(w.tokenFile, tokenFile, { mode: 0o600 });
   w.accounts = (text) => writeFileSync(join(w.state, 'accounts'), text);
   w.out = (n = 'a') => join(w.fake, `${n}.json`);
-  w.env = (extra = {}) => ({
+  // A null in extra takes the variable out (FACTORY_TEAM: null is a start with no team).
+  w.env = (extra = {}) => Object.fromEntries(Object.entries({
     PATH: `${w.bin}:${dirname(process.execPath)}`, HOME: w.home, AGENT_PROFILES: w.profiles, FACTORY_RUNS: w.runs, FACTORY_STATE: w.state,
-    FAKE_OUT: w.out(), ...extra,
-  });
+    FACTORY_TEAM: w.team, FACTORY_ROOT: w.froot, FAKE_OUT: w.out(), ...extra,
+  }).filter(([, v]) => v !== null));
   w.seat = (args, extra = {}) => {
     const r = spawnSync(process.execPath, [SEAT_JS, ...args], { encoding: 'utf8', env: w.env(extra), cwd: w.root, timeout: 20000 });
     return { code: r.status, out: r.stdout, err: r.stderr };

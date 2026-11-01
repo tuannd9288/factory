@@ -3,7 +3,8 @@
 // profile or the network; a window that was not reported is null, never a guess.
 import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { SEATS, resetPassed, seatEvent } from './seat.mjs';
+import { accountEvent, resetPassed } from './seat.mjs';
+import { teamAccounts } from './teams.mjs';
 import { seatAccounts } from './token.mjs';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -59,17 +60,20 @@ export function lastStatusLine(file) {
   return null;
 }
 
-/** The rows of the table: seat 1 and seat 2 of bin/seat from their logs under runs (source 1), then one for each
- * status-line file (source 3). A row's windows are null when nothing was reported: the profile shows its windows only
- * after a session ran on it. A status-line record names no profile, so its row is named by its file. */
-export function quotaRows({ runs, statusFiles = [] }) {
-  const rows = Object.keys(SEATS).map((n) => {
-    const e = seatEvent(runs, n);
-    return { profile: `seat ${n}`, source: 'rate_limit_event', seat: Number(n), windows: e ? windowsOf(e.info) : null, resetsAt: num(e?.info.resetsAt), asOf: e?.asOf ?? null, missing: 'no session has run on it' };
+/** The rows of the table (#311): one for each account (`account <name>`) from the runs under runs (source 1), then one for each
+ * status-line file (source 3). The accounts are given, else those of the teams the accounts file in state names (root is where the
+ * onboarded repositories are). A run with no .account file is read through its seat's old row. A row's windows are null when nothing
+ * was reported: an account shows its windows only after a session ran on it. A status-line record names no profile, so its row is
+ * named by its file. */
+export function quotaRows({ runs, state = null, root, accounts = null, statusFiles = [] }) {
+  const seatRows = state ? seatAccounts(state) : {};
+  const rows = (accounts ?? (state ? teamAccounts(state, root) : [])).map((account) => {
+    const e = accountEvent(runs, account, seatRows);
+    return { profile: `account ${account}`, source: 'rate_limit_event', account, windows: e ? windowsOf(e.info) : null, resetsAt: num(e?.info.resetsAt), asOf: e?.asOf ?? null, missing: 'no session has run on it' };
   });
   for (const file of statusFiles) {
     const s = lastStatusLine(file);
-    rows.push({ profile: `status line ${basename(file)}`, source: 'status line', seat: null, windows: s?.windows ?? null, asOf: s?.asOf ?? null, missing: 'no record with rate_limits' });
+    rows.push({ profile: `status line ${basename(file)}`, source: 'status line', account: null, windows: s?.windows ?? null, asOf: s?.asOf ?? null, missing: 'no record with rate_limits' });
   }
   return rows;
 }
@@ -125,12 +129,12 @@ export function alertLines(rows, { now = Date.now() } = {}) {
   return out;
 }
 
-/** The table of role, model and seat for the sessions (the kept records of ledger.keptSessions), with an account where one
- * was given by seat: nothing in a log names the account. */
+/** The table of role, model and seat for the sessions (the kept records of ledger.keptSessions). The account is the record's own
+ * (#311); an older record has none, and takes its seat's old row from accounts ({ seat: account }), else "not recorded". */
 export function roleMapLines(kept, accounts = {}) {
   const groups = new Map();
   for (const r of kept) {
-    const key = [r.role, r.model, r.seat].join('\t');
+    const key = [r.role, r.model, r.seat, r.account ?? accounts[r.seat] ?? 'not recorded'].join('\t');
     groups.set(key, (groups.get(key) ?? 0) + 1);
   }
   if (!groups.size) return ['- None.'];
@@ -138,8 +142,8 @@ export function roleMapLines(kept, accounts = {}) {
     '| Role | Model | Seat | Sessions | Account |',
     '|---|---|---|---|---|',
     ...[...groups].sort(([a], [b]) => (a < b ? -1 : 1)).map(([key, n]) => {
-      const [role, model, seat] = key.split('\t');
-      return `| ${role} | ${model} | ${seat} | ${n} | ${accounts[seat] ?? 'not recorded'} |`;
+      const [role, model, seat, account] = key.split('\t');
+      return `| ${role} | ${model} | ${seat} | ${n} | ${account} |`;
     }),
   ];
 }

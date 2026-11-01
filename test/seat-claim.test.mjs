@@ -72,8 +72,8 @@ function ended(dir, tag, seat, status, minutesAgo) {
   utimesSync(log, t, t);
 }
 
-test('a refused start leaves the earlier run\'s .seat, so its log stays on its seat and seat 1 stays rejected', () => world(async (w) => {
-  ended(w.run, 'old2', 2, 'rejected', 1); // seat 2 is out too, so the start reaches seat 1's log
+test('a refused start leaves the earlier run\'s .seat, so its log stays on its seat and its account stays rejected (#311)', () => world(async (w) => {
+  ended(w.run, 'old2', 2, 'rejected', 1); // an old run of seat 2, whose row names the same account
   ended(w.run, 'worker', 1, 'rejected', 1); // the worker's last run ended on seat 1, cut off by Claude Code
   ended(join(w.runs, 'issue-3'), 'old', 1, 'allowed', 60);
   const first = w.start('worker');
@@ -81,7 +81,7 @@ test('a refused start leaves the earlier run\'s .seat, so its log stays on its s
   assert.equal(readFileSync(join(w.run, 'run-worker.seat'), 'utf8'), '1\n');
   const other = w.start('worker', ['--tag', 'other']);
   assert.equal(other.code, 2, other.out + other.err);
-  assert.match(other.err, /seat 1: rejected by Claude Code \(five-hour window\) until /);
+  assert.match(other.err, /acct-one: rejected by Claude Code \(five-hour window\) until /);
 }));
 
 test('a start that fails after it chose a seat leaves no claim behind', () => world(async (w) => {

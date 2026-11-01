@@ -1,9 +1,9 @@
-// bin/factory (#173, #177, #178): the list of every agent profile in a table with the seats' quota in a second one, and `login`,
-// `store`, `use` and `logout`. On the Mac mini the rows are numbered (seat 1, seat 2, each Lead the accounts file names, the
-// verifier) and the accounts lettered; `use` rewrites the accounts file (`use lead-<repo>` makes a Lead's row; every running Lead of
-// it, one for each team, is restarted once Herdr reports it idle, #179, #196; `lead <repo> [--team <name>]` starts one team's) and `logout` moves a token into the archive; `login` and
+// bin/factory (#173, #177, #178, #311): the list of every agent profile in a table with each account's quota in a second one, and `login`,
+// `store`, `use` and `logout`. On the Mac mini the rows are numbered (each team the accounts file names, the verifier) and the accounts
+// lettered; `use` rewrites the accounts file (`use <repo>-<team>` makes a team's row; that team's running Lead alone is restarted once
+// Herdr reports it idle, #179, #196; `lead <repo> [--team <name>]` starts one team's) and `logout` moves a token into the archive; `login` and
 // `store` put a token in the factory's token store. The list runs only the vendors' own status commands (codex login status,
-// gh auth status; on the MacBook claude auth status too), reads quota through quotaRows() and liveCount(), and keeps from each answer
+// gh auth status; on the MacBook claude auth status too), reads quota through quotaRows(), and keeps from each answer
 // only the logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and date).
 // The committed profile list below holds no account name: the factory repository is public, and an account is an email local
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
@@ -14,11 +14,12 @@ import { createInterface } from 'node:readline/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quotaRows } from './quota.mjs';
-import { liveCount } from './seat.mjs';
-import { quote, refusal } from '../../packs/pstack/bin/lead.mjs';
-import { DEFAULT_TEAM, TEAM } from './names.mjs';
+import { liveOfAccount } from './seat.mjs';
+import { quote } from '../../packs/pstack/bin/lead.mjs';
+import { DEFAULT_TEAM, TEAM, parseTeam } from './names.mjs';
+import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { leadTeams } from './top.mjs';
-import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
+import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -39,7 +40,7 @@ function spareFolders(home) {
 
 /** The profiles of a place, from the committed list. On the Mac mini the Lead rows are the ones the accounts file names. A row with
  * `byFile` has its account from that file, and its login state is the token file of that account. */
-export function profilesOf(place, { home, agentProfiles, state }) {
+export function profilesOf(place, { home, agentProfiles, state, root }) {
   if (place === 'macbook') {
     return [
       claude('macbook/claude', 'Colly', {}, 'claude auth login'),
@@ -50,12 +51,10 @@ export function profilesOf(place, { home, agentProfiles, state }) {
   }
   if (place === 'factory') {
     const byFile = (profile, role) => ({ profile, role, kind: 'claude', byFile: true, numbered: true });
-    // No folder scan and no direnv (#205): a Lead is a row because the file names it.
-    const leads = Object.keys(readAccounts(state)).filter((p) => /^factory\/lead-.+/.test(p)).sort();
+    // No folder scan and no direnv (#205): a team is a row because the file names it and its repository is onboarded or the
+    // factory (#311). No seat has a row: a seat is a slot of a team's account.
     return [
-      byFile('factory/seat-1', 'seat 1 (bin/seat)'),
-      byFile('factory/seat-2', 'seat 2 (bin/seat)'),
-      ...leads.map((p) => byFile(p, `Lead of ${p.slice('factory/lead-'.length)}`)),
+      ...teamRows(state, root).map((t) => byFile(t.row, `Lead and seats of ${t.repo}, team ${t.team}`)),
       { profile: 'factory/verifier', numbered: true, role: 'live verifier', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: { CODEX_HOME: join(agentProfiles, 'verifier/codex') } }, login: 'CODEX_HOME=~/.agent-profiles/verifier/codex codex login --device-auth' },
       { profile: 'factory/gh', role: 'agents gh', kind: 'gh', check: { cmd: 'gh', args: ['auth', 'status'], env: {} }, login: 'gh auth login --insecure-storage' },
     ];
@@ -142,6 +141,7 @@ export function contextOf(env = process.env) {
   return {
     env,
     home,
+    root: env.FACTORY_ROOT ?? resolve(fileURLToPath(import.meta.url), '../../..'),
     state: env.FACTORY_STATE ?? join(home, '.local/state/factory'),
     agentProfiles: env.AGENT_PROFILES ?? join(home, '.agent-profiles'),
     runs: resolve(env.FACTORY_RUNS ?? join(home, 'factory-runs')),
@@ -154,28 +154,29 @@ export const placeOf = (env = process.env) => (userInfo().username === (env.FACT
 
 const win = (w) => (w ? { use: w.use, resetsAt: w.resetsAt } : null);
 
-/** The rows of one place: the profile list read through the vendors' commands. Quota and live sessions only for the seats. */
+/** The rows of one place: the profile list read through the vendors' commands. A team's row carries the quota of its account. */
 export function readPlace(place, ctx) {
   let quota = [];
   if (place === 'factory') {
     try {
-      quota = quotaRows({ runs: ctx.runs });
+      quota = quotaRows({ runs: ctx.runs, state: ctx.state, root: ctx.root });
     } catch {
       quota = [];
     }
   }
   const accounts = place === 'factory' ? readAccounts(ctx.state) : {};
+  const seatRows = place === 'factory' ? seatAccounts(ctx.state) : {};
   const letters = place === 'factory' ? new Map(accountList(ctx).map((a) => [a.name, a.letter])) : new Map();
   let numbered = 0;
   return profilesOf(place, ctx).map((p) => {
     const c = check(p, { ...ctx, accounts });
     const n = p.numbered ? (numbered += 1) : null;
-    const seat = /^factory\/seat-(\d)$/.exec(p.profile)?.[1];
-    const q = seat ? quota.find((x) => x.seat === Number(seat)) : null;
+    const q = c.account ? quota.find((x) => x.account === c.account) : null;
     let live = null;
-    if (seat) {
+    // Only a team's row runs sessions; the gh row and the MacBook's rows name an account but run none.
+    if (p.byFile && c.account) {
       try {
-        live = liveCount(ctx.runs, seat);
+        live = liveOfAccount(ctx.runs, c.account, seatRows);
       } catch {
         live = null;
       }
@@ -268,7 +269,7 @@ const sharedCell = (names) => (names.join(', ').length <= 24 ? names.join(', ') 
 const red = (text) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[31m${text}\x1b[0m` : text);
 
 /** The lines of the lettered accounts (Mac mini): for each, its 5h and 7d use with the reset, the token file, and the numbers of the
- * rows that name it. The quota is the newest a seat of that account reported; "?" where none did. */
+ * rows that name it. The quota is the newest a run of that account reported; "?" where none did. */
 export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }) {
   const win = (w) => (w ? windowCell(w, now) : '?');
   const heads = accounts.map(({ name, letter }) => {
@@ -301,13 +302,15 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
   const out = [line(heads), ...cells.map((c, i) => (numbered && normal[i].loggedIn === false && normal[i].n ? red(line(c)) : line(c)))];
   for (const r of rows.filter((x) => x.unreachable)) out.push(`${r.profile}  ${r.note}`);
   if (accounts?.length) out.push('', ...accounts);
-  const quota = normal.filter((r) => r.five_hour || r.seven_day || r.asOf);
+  // One row for each account, not for each team: teams on one account share it.
+  const quota = normal.filter((r) => (r.five_hour || r.seven_day || r.asOf) && r.account && r.account !== 'unknown').filter((r, i, all) => all.findIndex((o) => o.account === r.account) === i);
   if (quota.length) {
-    const qw = Math.max(7, ...quota.map((r) => r.profile.length));
+    const names = quota.map((r) => `account ${r.account}`);
+    const qw = Math.max(7, ...names.map((n) => n.length));
     out.push('', `${pad('QUOTA', qw)}  ${pad('5H USE @RESET (UTC)', 21)}  ${pad('7D USE @RESET (UTC)', 21)}  AS OF (UTC)`);
-    for (const r of quota) out.push(`${pad(r.profile, qw)}  ${pad(windowCell(r.five_hour, now), 21)}  ${pad(windowCell(r.seven_day, now), 21)}  ${r.asOf ? utc(r.asOf) : '–'}`);
+    for (const [i, r] of quota.entries()) out.push(`${pad(names[i], qw)}  ${pad(windowCell(r.five_hour, now), 21)}  ${pad(windowCell(r.seven_day, now), 21)}  ${r.asOf ? utc(r.asOf) : '–'}`);
   }
-  out.push('', 'Quota is reported for the seats only, from their run logs; every other row: not reported.', '* = the expected account (a local file), not one read.');
+  out.push('', 'Quota is reported for each account that has run a session, from the run logs; every other row: not reported.', '* = the expected account (a local file), not one read.');
   const out_ = normal.filter((r) => r.loggedIn !== true);
   if (out_.length) {
     out.push('', 'Not logged in or not readable:');
@@ -321,7 +324,7 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin)
-       bin/factory use [<row|lead-repo> [<letter>]]   (the row's account becomes the letter's; lead-<repo> makes a Lead's row, and each running Lead of the repository restarts when idle; on the Mac mini, by ssh from the MacBook)
+       bin/factory use [<row|repo-team> [<letter>]]   (the row's account becomes the letter's; <repo>-<team> makes a team's row, and that team's running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
        bin/factory lead <repo> [--team <name>] [--new] [--dry-run]`;
@@ -498,7 +501,7 @@ export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
 function remote(cmd, args, env) {
   const bad = cmd === 'use'
-    ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^([1-9][0-9]*|lead-[A-Za-z0-9._-]+)$/.test(args[0]) ? 'the row is a number or lead-<repo>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
+    ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) && !parseTeam(args[0]) ? 'the row is a number or <repo>-<team>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
     : (args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account');
   if (bad) {
     console.error(`bin/factory: ${bad}\n${USAGE}`);
@@ -541,15 +544,18 @@ const stateOf = (r) => {
 };
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-/** The second half of `use` on a Lead's row (#179, #196), after the accounts file changed: each running Lead of the repository, one
- * after another (teams in name order), by `restartTeam`. 0 when every one was restarted or none runs, else 1; a Lead left running
- * does not stop the others. */
-async function restartLead(repo, account, ctx) {
+/** The command that starts a team's Lead, in brackets, or nothing for the factory itself: the launcher refuses `factory`, which is the
+ * checkout's root and not a folder under it. */
+const startNote = (repo, flag) => (repo === FACTORY_REPO ? '' : ` (factory lead ${repo}${flag})`);
+
+/** The second half of `use` on a team's row (#179, #196, #311), after the accounts file changed: that team's Lead alone, by
+ * `restartTeam`, if it runs; the other teams of the repository are not touched. 0 when it was restarted or does not run, else 1. */
+async function restartLead(repo, team, account, ctx) {
   const hasToken = tokenState(ctx.agentProfiles, account).ok;
+  const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
   // `factory top`'s rule: a claude process with --name <repo>-<team>. A recorded pane may hold something else by now.
-  const teams = leadTeams(repo);
-  if (!teams.length) {
-    console.log(`the Lead of ${repo} is not running; it takes ${account} at its next start (factory lead ${repo})`);
+  if (!leadTeams(repo).includes(team)) {
+    console.log(`the Lead of ${repo} (team ${team}) is not running; it takes ${account} at its next start${startNote(repo, flag)}`);
     if (!hasToken) console.log(`${account} has no token file yet: that next start is refused until factory login ${account}`);
     return 0;
   }
@@ -557,11 +563,7 @@ async function restartLead(repo, account, ctx) {
     console.log(`${account} has no token file yet: factory login ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
     return 1;
   }
-  let code = 0;
-  for (const team of teams) {
-    if ((await restartTeam(repo, team, account, ctx)) !== 0) code = 1;
-  }
-  return code;
+  return restartTeam(repo, team, account, ctx);
 }
 
 /** One team's Lead: through `herdr` on PATH, waits for its pane (<runs>/<repo>-<team>/pane, written by bin/lead inside Herdr) to
@@ -571,7 +573,7 @@ async function restartLead(repo, account, ctx) {
 async function restartTeam(repo, team, account, ctx) {
   const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
   const who = `the Lead of ${repo} (team ${team})`;
-  const next = `${who} takes it at its next start (factory lead ${repo}${flag})`;
+  const next = `${who} takes it at its next start${startNote(repo, flag)}`;
   let pane = '';
   try {
     pane = readFileSync(join(ctx.runs, `${repo}-${team}`, 'pane'), 'utf8').trim();
@@ -616,8 +618,8 @@ async function restartTeam(repo, team, account, ctx) {
 }
 
 /** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only; a
- * seat takes its new account at its next session and nothing running is touched; a Lead's row also restarts that Lead if it runs
- * (#179). The row is a number, or `lead-<repo>` for an onboarded repository, which makes the row when the file has none. */
+ * team's next seat session takes its new account and nothing else running is touched; the row also restarts that team's Lead alone,
+ * if it runs (#179, #311). The row is a number, or `<repo>-<team>` for an onboarded repository or the factory, which makes the row when the file has none. */
 async function use(args, env, io) {
   if (placeOf(env) !== 'factory') return remote('use', args, env);
   if (args.length > 2) {
@@ -637,15 +639,14 @@ async function use(args, env, io) {
     if (letter === undefined) letter = (await io.ask('Account letter: ')).trim();
   }
   let target = /^[1-9][0-9]*$/.test(row) ? rows.find((r) => r.n === Number(row)) : null;
-  if (row.startsWith('lead-')) {
-    // `lead-<repo>` names the Lead of an onboarded repository, and makes its row when the file has none (#179).
-    const repo = row.slice('lead-'.length);
-    const why = refusal(repo, env.FACTORY_ROOT ?? resolve(fileURLToPath(import.meta.url), '../../..'));
-    if (why) {
-      console.error(`${why}\nnothing was changed`);
+  const named = /^[1-9][0-9]*$/.test(row) ? null : parseTeam(row);
+  if (named) {
+    // `<repo>-<team>` names a team of an onboarded repository or of the factory, and makes its row when the file has none (#311).
+    if (!repoOk(named.repo, ctx.root)) {
+      console.error(`bin/factory: ${named.repo} is not an onboarded repository or the factory; nothing was changed`);
       return 2;
     }
-    target = rows.find((r) => r.profile === `factory/lead-${repo}`) ?? { profile: `factory/lead-${repo}` };
+    target = rows.find((r) => r.profile === `factory/${row}`) ?? { profile: `factory/${row}` };
   }
   if (!target) {
     console.error(`bin/factory: there is no row ${row}; the rows are numbered 1 to ${rows.filter((r) => r.n).length}`);
@@ -660,7 +661,6 @@ async function use(args, env, io) {
     console.error('bin/factory: the verifier\'s row is read-only: Codex has no token file, so use does not apply to it');
     return 2;
   }
-  const isLead = target.profile.startsWith('factory/lead-');
   let moved;
   try {
     setAccount(ctx.state, target.profile, account.name);
@@ -669,15 +669,10 @@ async function use(args, env, io) {
     console.error(`bin/factory: ${e.message}`);
     return 1;
   }
-  if (isLead) {
-    console.log(`${target.profile} now uses ${account.name} (${account.letter}).`);
-    if (moved) console.log(moved);
-    return restartLead(target.profile.slice('factory/lead-'.length), account.name, ctx);
-  }
-  console.log(`${target.profile.replace('factory/seat-', 'seat ')} now uses ${account.name} (${account.letter}); it takes effect at its next session, and nothing running is touched.`);
-  if (!tokenState(ctx.agentProfiles, account.name).ok) console.log(`${account.name} has no token file yet: factory login ${account.name}`);
+  console.log(`${target.profile} now uses ${account.name} (${account.letter}); its next seat session takes it, and nothing else running is touched.`);
   if (moved) console.log(moved);
-  return 0;
+  const t = parseTeam(target.profile.slice('factory/'.length));
+  return t ? restartLead(t.repo, t.team, account.name, ctx) : 0;
 }
 
 /** `factory logout <account>`: the account's token file moves into archive/tokens, never deleted. The rows that name it stay in the

@@ -14,6 +14,17 @@ export const ANIMALS = [
 export const TEAM = /^[a-z][a-z0-9]{0,31}$/;
 export const DEFAULT_TEAM = 'lead';
 
+/** `<repo>-<team>` (#311) split at its last `-`: { repo, team }, or null. The repo is a plain folder name (GitHub's characters, no `..`,
+ * no `-` at its end); the team is in the TEAM grammar. Whether the repo is onboarded is not asked here. */
+export function parseTeam(name) {
+  if (typeof name !== 'string') return null;
+  const i = name.lastIndexOf('-');
+  if (i < 1) return null;
+  const [repo, team] = [name.slice(0, i), name.slice(i + 1)];
+  if (!TEAM.test(team) || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo) || repo.endsWith('-') || repo.includes('..')) return null;
+  return { repo, team };
+}
+
 /** The first animal, in list order, that is not in taken; with all of them taken, the list again with a number (aardvark2). */
 export function firstFree(taken) {
   const held = new Set(taken);
