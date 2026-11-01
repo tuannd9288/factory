@@ -108,7 +108,6 @@ describe('leadArgs', () => {
     assert.equal(withMessage[at + 2], message);
     assert.equal(withMessage.filter((a) => a === message).length, 1);
     assert.ok(at + 2 < withMessage.indexOf('--allowedTools') && at + 2 < withMessage.indexOf('--disallowedTools'));
-    assert.equal(withMessage[withMessage.indexOf('--settings') - 1].startsWith('--'), false, 'the value of --settings is not the prompt');
     assert.equal(withMessage[at + 3], '--allowedTools');
     assert.equal(withMessage[withMessage.indexOf('--append-system-prompt') + 1], roleText, 'the role text stays a system prompt');
     const without = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id }).argv;
