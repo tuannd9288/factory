@@ -12,6 +12,10 @@ import { sandbox } from './factory-world.mjs';
 
 const ANN = 'sk-ant-oat01-ANNANNANNANN1234567890abcd';
 const BOB = 'sk-ant-oat01-BOBBOBBOBBOB1234567890efgh';
+// The onboarded repository of every sandbox. `factory top` finds a Lead as a `claude --name <repo>-<team>` process in the machine's whole
+// process table, so the name is this run's own: the process id is unique among the processes alive at once, which two runs of this file
+// at once are (#313). One name for the whole file run, since each test stops its fake Leads in done().
+const REPO = `alpha${process.pid}`;
 const utc = (sec) => new Date(sec * 1000).toISOString().slice(5, 16).replace('T', ' ');
 // The recorded event with its resets moved to the future, since a window that reset since is not shown with its time.
 const FIVE = Math.floor(Date.now() / 1000) + 3 * 3600;
@@ -20,11 +24,11 @@ const mode = (p) => (statSync(p).mode & 0o777).toString(8);
 // A profile name is found as the row that starts with it: another row's "shared with" column may name it too.
 const lineOf = (out, text) => out.split('\n').find((l) => (text.startsWith('factory/') ? new RegExp(`^\\s*\\d+\\s+${text}\\b`).test(l) : l.includes(text)));
 
-/** The Mac mini's world: the repository alpha onboarded, the accounts file (the teams alpha-lead on bob and factory-lead on ann; the rows
+/** The Mac mini's world: the repository REPO onboarded, the accounts file (the teams REPO-lead on bob and factory-lead on ann; the rows
  * are numbered in name order), token files, and a run with a quota event. */
-function mini(s, { accounts = 'factory/alpha-lead=bob\nfactory/factory-lead=ann\n', tokens = { ann: ANN, bob: BOB } } = {}) {
+function mini(s, { accounts = `factory/${REPO}-lead=bob\nfactory/factory-lead=ann\n`, tokens = { ann: ANN, bob: BOB } } = {}) {
   s.onHost();
-  onboarded(s, 'alpha');
+  onboarded(s, REPO);
   writeFileSync(join(s.state, 'accounts'), accounts, { mode: 0o600 });
   const dir = s.tokens();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -50,12 +54,12 @@ test('the frame: one numbered row for each team, no seat row; lettered accounts 
     logRun(s, 'ann');
     const r = s.fac();
     assert.equal(r.code, 0, r.out);
-    console.log(`--- frame of \`factory\` (the factory Lead on ann, the alpha Lead on bob) ---\n${r.out}\n--- end of frame ---`);
-    const rows = ['factory/alpha-lead', 'factory/factory-lead', 'factory/verifier'];
+    console.log(`--- frame of \`factory\` (the factory Lead on ann, the ${REPO} Lead on bob) ---\n${r.out}\n--- end of frame ---`);
+    const rows = [`factory/${REPO}-lead`, 'factory/factory-lead', 'factory/verifier'];
     const at = rows.map((p) => r.out.indexOf(lineOf(r.out, p)));
     assert.deepEqual([...at].sort((a, b) => a - b), at, 'the rows come in this order');
     for (const [i, p] of rows.entries()) assert.match(lineOf(r.out, p), new RegExp(`^\\s*${i + 1}\\s+${p}\\b`), p);
-    assert.match(lineOf(r.out, 'factory/alpha-lead'), /Lead and seats of alpha, team lead/);
+    assert.match(lineOf(r.out, `factory/${REPO}-lead`), new RegExp(`Lead and seats of ${REPO}, team lead`));
     assert.doesNotMatch(r.out, /factory\/seat-|seat 1|seat 2/);
     const ann = r.out.split('\n').find((l) => /^\s*a\s+ann\b/.test(l));
     const bob = r.out.split('\n').find((l) => /^\s*b\s+bob\b/.test(l));
@@ -67,7 +71,7 @@ test('the frame: one numbered row for each team, no seat row; lettered accounts 
     assert.match(bob, /\?/, 'no run of bob has an event');
     assert.match(bob, /rows? 1\b/);
     assert.match(lineOf(r.out, 'factory/factory-lead'), /ann \(a\)/);
-    assert.match(lineOf(r.out, 'factory/alpha-lead'), /bob \(b\)/);
+    assert.match(lineOf(r.out, `factory/${REPO}-lead`), /bob \(b\)/);
     for (const token of [ANN, BOB]) for (let i = 0; i + 8 <= token.length; i += 1) assert.ok(!r.out.includes(token.slice(i, i + 8)), 'a slice of a token');
   } finally {
     s.done();
@@ -77,7 +81,7 @@ test('the frame: one numbered row for each team, no seat row; lettered accounts 
 test('an account with a token file and no row is lettered, and an account a row names with no token file is red with the line to run (#311)', () => {
   const s = box();
   try {
-    mini(s, { accounts: 'factory/alpha-lead=ann\nfactory/factory-lead=cat\n', tokens: { ann: ANN, zed: BOB } });
+    mini(s, { accounts: `factory/${REPO}-lead=ann\nfactory/factory-lead=cat\n`, tokens: { ann: ANN, zed: BOB } });
     const r = s.fac();
     assert.equal(r.code, 0, r.out);
     const letters = r.out.split('\n').filter((l) => /^\s*[a-z]\s+\S/.test(l)).map((l) => l.trim().split(/\s+/).slice(0, 2).join(' '));
@@ -85,7 +89,7 @@ test('an account with a token file and no row is lettered, and an account a row 
     assert.match(lineOf(r.out, 'factory/factory-lead'), /\bNO\b/);
     assert.match(r.out, /factory login cat/);
     assert.match(r.out, /factory use 2 /);
-    assert.match(lineOf(r.out, 'factory/alpha-lead'), /\byes\b/);
+    assert.match(lineOf(r.out, `factory/${REPO}-lead`), /\byes\b/);
     const zed = r.out.split('\n').find((l) => /^\s*c\s+zed\b/.test(l));
     assert.match(zed, /no row/);
   } finally {
@@ -110,10 +114,10 @@ test('a token file shows its mode and date in the accounts block, never the cont
 test('a team row whose account is not in the file is not a row; a row of the file whose account has no token is red and names factory use (#311)', () => {
   const s = box();
   try {
-    mini(s, { accounts: 'factory/factory-lead=ann\nfactory/alpha-lead=zed\n', tokens: { ann: ANN } });
+    mini(s, { accounts: `factory/factory-lead=ann\nfactory/${REPO}-lead=zed\n`, tokens: { ann: ANN } });
     s.env.FACTORY_SEAT_ACCOUNTS = '2=zed';
     const rows = JSON.parse(s.fac('--json').out);
-    const lead = rows.find((x) => x.profile === 'factory/alpha-lead');
+    const lead = rows.find((x) => x.profile === `factory/${REPO}-lead`);
     assert.equal(lead.loggedIn, false);
     assert.equal(lead.account, 'zed');
     assert.match(lead.login, /factory login zed/);
@@ -127,11 +131,11 @@ test('a team row whose account is not in the file is not a row; a row of the fil
 test('the team rows are the file\'s, sorted, for the factory and the onboarded repositories only; no folder is scanned and no direnv runs (#311)', () => {
   const s = box();
   try {
-    mini(s, { accounts: 'factory/seat-1=ann\nfactory/seat-2=ann\nfactory/lead-zeta=ann\nfactory/alpha-lead=bob\nfactory/alpha-b=ann\nfactory/factory-lead=ann\nfactory/gamma-lead=ann\nfactory/nope-lead=ann\n' });
+    mini(s, { accounts: `factory/seat-1=ann\nfactory/seat-2=ann\nfactory/lead-zeta=ann\nfactory/${REPO}-lead=bob\nfactory/${REPO}-b=ann\nfactory/factory-lead=ann\nfactory/gamma-lead=ann\nfactory/nope-lead=ann\n` });
     onboarded(s, 'gamma');
     mkdirSync(join(s.env.FACTORY_ROOT, 'bare'), { recursive: true });
     const rows = JSON.parse(s.fac('--json').out);
-    assert.deepEqual(rows.map((x) => x.profile).filter((p) => p !== 'factory/verifier' && p !== 'factory/gh'), ['factory/alpha-b', 'factory/alpha-lead', 'factory/factory-lead', 'factory/gamma-lead']);
+    assert.deepEqual(rows.map((x) => x.profile).filter((p) => p !== 'factory/verifier' && p !== 'factory/gh'), [`factory/${REPO}-b`, `factory/${REPO}-lead`, 'factory/factory-lead', 'factory/gamma-lead']);
     assert.doesNotMatch(s.calls(), /direnv/);
   } finally {
     s.done();
@@ -144,11 +148,11 @@ test('the JSON keeps its list of rows and adds the number and the letter of each
     mini(s);
     const rows = JSON.parse(s.fac('--json').out);
     const by = (p) => rows.find((x) => x.profile === p);
-    assert.equal(by('factory/alpha-lead').n, 1);
+    assert.equal(by(`factory/${REPO}-lead`).n, 1);
     assert.equal(by('factory/factory-lead').n, 2);
     assert.equal(by('factory/verifier').n, 3);
     assert.equal(by('factory/factory-lead').letter, 'a');
-    assert.equal(by('factory/alpha-lead').letter, 'b');
+    assert.equal(by(`factory/${REPO}-lead`).letter, 'b');
     assert.deepEqual(by('factory/factory-lead').shared, []);
   } finally {
     s.done();
@@ -158,10 +162,10 @@ test('the JSON keeps its list of rows and adds the number and the letter of each
 test('use <row> <letter> rewrites the accounts file through a rename, mode 600, and touches no other line (#311)', () => {
   const s = box();
   try {
-    mini(s, { accounts: '# mine\nfactory/alpha-lead=bob\nfactory/factory-lead=ann\n' });
+    mini(s, { accounts: `# mine\nfactory/${REPO}-lead=bob\nfactory/factory-lead=ann\n` });
     const r = s.fac('use', '2', 'b');
     assert.equal(r.code, 0, r.out);
-    assert.equal(readFileSync(join(s.state, 'accounts'), 'utf8'), '# mine\nfactory/alpha-lead=bob\nfactory/factory-lead=bob\n');
+    assert.equal(readFileSync(join(s.state, 'accounts'), 'utf8'), `# mine\nfactory/${REPO}-lead=bob\nfactory/factory-lead=bob\n`);
     assert.equal(mode(join(s.state, 'accounts')), '600');
     assert.deepEqual(readdirSync(s.state), ['accounts']);
     assert.match(r.out, /factory\/factory-lead now uses bob/);
@@ -172,7 +176,7 @@ test('use <row> <letter> rewrites the accounts file through a rename, mode 600, 
 });
 
 /** A Lead's pane as `bin/lead` leaves it, and what herdr was asked, in order. */
-const withPane = (s, pane = 'p-7', { event = 'Stop', repo = 'alpha', running = true, team = 'lead' } = {}) => {
+const withPane = (s, pane = 'p-7', { event = 'Stop', repo = REPO, running = true, team = 'lead' } = {}) => {
   const folder = `${repo}-${team}`;
   mkdirSync(join(s.env.FACTORY_RUNS, folder), { recursive: true });
   if (pane) writeFileSync(join(s.env.FACTORY_RUNS, `${folder}/pane`), `${pane}\n`);
@@ -210,11 +214,11 @@ for (const state of ['idle', 'done']) {
       s.w('herdr-state', state);
       const r = s.fac('use', '1', 'a');
       assert.equal(r.code, 0, r.out);
-      assert.equal(accountsOf(s), 'factory/alpha-lead=ann\nfactory/factory-lead=ann\n');
+      assert.equal(accountsOf(s), `factory/${REPO}-lead=ann\nfactory/factory-lead=ann\n`);
       const calls = herdrCalls(s);
       assert.deepEqual(calls.slice(0, 4), ['agent wait p-7 --timeout 600000', 'agent get p-7', 'agent prompt p-7 /exit', 'agent get p-7']);
       assert.equal(calls.length, 5);
-      assert.match(calls[4], /^pane run p-7 '\S*\/packs\/pstack\/bin\/lead' alpha$/);
+      assert.match(calls[4], new RegExp(`^pane run p-7 '\\S*/packs/pstack/bin/lead' ${REPO}$`));
       assert.ok(!r.out.includes(ANN) && !r.out.includes(BOB), 'no token in the output');
     } finally {
       s.done();
@@ -222,7 +226,7 @@ for (const state of ['idle', 'done']) {
   });
 }
 
-const TWO_TEAMS = 'factory/alpha-b=bob\nfactory/alpha-lead=bob\nfactory/factory-lead=ann\n';
+const TWO_TEAMS = `factory/${REPO}-b=bob\nfactory/${REPO}-lead=bob\nfactory/factory-lead=ann\n`;
 
 test('use <repo>-<team> restarts only that team\'s running Lead, in its own pane, and leaves the other team of the repository alone (#311)', () => {
   const s = box();
@@ -230,14 +234,14 @@ test('use <repo>-<team> restarts only that team\'s running Lead, in its own pane
     mini(s, { accounts: TWO_TEAMS });
     withPane(s, 'p-7');
     withPane(s, 'p-8', { team: 'b' });
-    const r = s.fac('use', 'alpha-b', 'a');
+    const r = s.fac('use', `${REPO}-b`, 'a');
     assert.equal(r.code, 0, r.out);
-    assert.equal(accountsOf(s), 'factory/alpha-b=ann\nfactory/alpha-lead=bob\nfactory/factory-lead=ann\n', 'the other team\'s row is as it was');
+    assert.equal(accountsOf(s), `factory/${REPO}-b=ann\nfactory/${REPO}-lead=bob\nfactory/factory-lead=ann\n`, 'the other team\'s row is as it was');
     const calls = herdrCalls(s);
     assert.deepEqual(calls.slice(0, 4), ['agent wait p-8 --timeout 600000', 'agent get p-8', 'agent prompt p-8 /exit', 'agent get p-8']);
-    assert.match(calls[4], /^pane run p-8 '\S*\/packs\/pstack\/bin\/lead' alpha --team b$/);
+    assert.match(calls[4], new RegExp(`^pane run p-8 '\\S*/packs/pstack/bin/lead' ${REPO} --team b$`));
     assert.equal(calls.length, 5, 'nothing was asked of the pane of the other team');
-    assert.match(r.out, /Lead of alpha \(team b\)/);
+    assert.match(r.out, new RegExp(`Lead of ${REPO} \\(team b\\)`));
     assert.doesNotMatch(r.out, /team lead/);
     assert.match(r.out, /next seat session/);
   } finally {
@@ -252,7 +256,7 @@ test('use <repo>-<team> with a busy Lead exits 1 and does not touch the other te
     withPane(s, 'p-7');
     withPane(s, 'p-8', { team: 'b' });
     s.w('herdr-busy-p-8', '');
-    const r = s.fac('use', 'alpha-b', 'a');
+    const r = s.fac('use', `${REPO}-b`, 'a');
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /team b\).*not idle/);
     assert.deepEqual(herdrCalls(s), ['agent wait p-8 --timeout 600000']);
@@ -264,7 +268,7 @@ test('use <repo>-<team> with a busy Lead exits 1 and does not touch the other te
 test('the LIVE column of a team row counts the live runs of its account; teams on one account show the same number (#311)', () => {
   const s = box();
   try {
-    mini(s, { accounts: 'factory/alpha-b=ann\nfactory/alpha-lead=bob\nfactory/factory-lead=ann\nfactory/gamma-lead=cat\nfactory/seat-2=ann\n' });
+    mini(s, { accounts: `factory/${REPO}-b=ann\nfactory/${REPO}-lead=bob\nfactory/factory-lead=ann\nfactory/gamma-lead=cat\nfactory/seat-2=ann\n` });
     onboarded(s, 'gamma');
     const folder = join(s.env.FACTORY_RUNS, 'issue-1');
     mkdirSync(folder, { recursive: true });
@@ -280,9 +284,9 @@ test('the LIVE column of a team row counts the live runs of its account; teams o
     s.w('gh-factory', 'agent-x'); // a logged-in gh row names an account but runs no session
     const rows = JSON.parse(s.fac('--json').out);
     const liveOf = (p) => rows.find((x) => x.profile === p).live;
-    assert.equal(liveOf('factory/alpha-b'), 2);
+    assert.equal(liveOf(`factory/${REPO}-b`), 2);
     assert.equal(liveOf('factory/factory-lead'), 2);
-    assert.equal(liveOf('factory/alpha-lead'), 1);
+    assert.equal(liveOf(`factory/${REPO}-lead`), 1);
     assert.equal(liveOf('factory/gamma-lead'), 0);
     assert.equal(rows.find((x) => x.profile === 'factory/verifier').live, null);
     assert.equal(rows.find((x) => x.profile === 'factory/gh').live, null);
@@ -316,10 +320,10 @@ test('use <repo>-<team> works by name and by number, and names the factory\'s ow
     mini(s, { accounts: TWO_TEAMS });
     const own = s.fac('use', 'factory-lead', 'b');
     assert.equal(own.code, 0, own.out);
-    assert.equal(accountsOf(s), 'factory/alpha-b=bob\nfactory/alpha-lead=bob\nfactory/factory-lead=bob\n');
+    assert.equal(accountsOf(s), `factory/${REPO}-b=bob\nfactory/${REPO}-lead=bob\nfactory/factory-lead=bob\n`);
     assert.match(own.out, /factory\/factory-lead now uses bob/);
     assert.equal(s.fac('use', '3', 'a').code, 0);
-    assert.equal(accountsOf(s), 'factory/alpha-b=bob\nfactory/alpha-lead=bob\nfactory/factory-lead=ann\n');
+    assert.equal(accountsOf(s), `factory/${REPO}-b=bob\nfactory/${REPO}-lead=bob\nfactory/factory-lead=ann\n`);
   } finally {
     s.done();
   }
@@ -334,7 +338,7 @@ test('use on a team\'s row whose Lead stays busy rewrites the file, restarts not
     const r = s.fac('use', '1', 'a');
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /not idle/);
-    assert.match(accountsOf(s), /factory\/alpha-lead=ann/);
+    assert.match(accountsOf(s), new RegExp(`factory/${REPO}-lead=ann`));
     assert.deepEqual(herdrCalls(s), ['agent wait p-7 --timeout 600000']);
   } finally {
     s.done();
@@ -363,8 +367,8 @@ test('use on a team\'s row with no pane file rewrites the file, calls no herdr a
     withPane(s, null);
     const r = s.fac('use', '1', 'a');
     assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /factory lead alpha/);
-    assert.match(accountsOf(s), /factory\/alpha-lead=ann/);
+    assert.match(r.out, new RegExp(`factory lead ${REPO}`));
+    assert.match(accountsOf(s), new RegExp(`factory/${REPO}-lead=ann`));
     assert.deepEqual(herdrCalls(s), []);
   } finally {
     s.done();
@@ -415,7 +419,7 @@ test('use does not start the Lead again while herdr still reports its agent afte
   }
 });
 
-const SENTENCE = (old, now, team = 'lead') => `the Lead of alpha (team ${team}) has background work running and was not restarted; the Lead keeps running on ${old} until its next start; its new workers start on ${now} now`;
+const SENTENCE = (old, now, team = 'lead') => `the Lead of ${REPO} (team ${team}) has background work running and was not restarted; the Lead keeps running on ${old} until its next start; its new workers start on ${now} now`;
 
 test('use sends Esc to a Lead left at the exit dialog, does not start it again, says so with both accounts and exits 1 (#315)', () => {
   const s = box();
@@ -426,7 +430,7 @@ test('use sends Esc to a Lead left at the exit dialog, does not start it again, 
     const r = s.fac('use', '1', 'a');
     assert.equal(r.code, 1, r.out);
     assert.ok(r.out.includes(SENTENCE('bob', 'ann')), r.out);
-    assert.equal(accountsOf(s), 'factory/alpha-lead=ann\nfactory/factory-lead=ann\n', 'the row is rewritten all the same');
+    assert.equal(accountsOf(s), `factory/${REPO}-lead=ann\nfactory/factory-lead=ann\n`, 'the row is rewritten all the same');
     assert.deepEqual(herdrCalls(s), ['agent wait p-7 --timeout 600000', 'agent get p-7', 'agent prompt p-7 /exit', 'agent get p-7', 'agent send-keys p-7 esc']);
   } finally {
     s.done();
@@ -439,7 +443,7 @@ test('use says "its old account" when the row had none before use made it (#315)
     mini(s);
     withPane(s, 'p-9', { team: 'c' });
     s.w('herdr-dialog', '');
-    const r = s.fac('use', 'alpha-c', 'a');
+    const r = s.fac('use', `${REPO}-c`, 'a');
     assert.equal(r.code, 1, r.out);
     assert.ok(r.out.includes(SENTENCE('its old account', 'ann', 'c')), r.out);
     assert.ok(herdrCalls(s).includes('agent send-keys p-9 esc'));
@@ -473,12 +477,12 @@ test('use leaves the other team of the repository alone when the named team\'s L
     withPane(s, 'p-7');
     withPane(s, 'p-8', { team: 'b' });
     s.w('herdr-dialog', '');
-    const r = s.fac('use', 'alpha-b', 'a');
+    const r = s.fac('use', `${REPO}-b`, 'a');
     assert.equal(r.code, 1, r.out);
     assert.ok(r.out.includes(SENTENCE('bob', 'ann', 'b')), r.out);
     assert.ok(herdrCalls(s).includes('agent send-keys p-8 esc'));
     assert.ok(!herdrCalls(s).some((c) => c.includes('p-7')), 'no call names the other team\'s pane');
-    assert.equal(accountsOf(s), 'factory/alpha-b=ann\nfactory/alpha-lead=bob\nfactory/factory-lead=ann\n');
+    assert.equal(accountsOf(s), `factory/${REPO}-b=ann\nfactory/${REPO}-lead=bob\nfactory/factory-lead=ann\n`);
   } finally {
     s.done();
   }
@@ -492,8 +496,8 @@ test('use on a Lead with no process calls no herdr, whatever state.json says, an
       withPane(s, 'p-7', { event, running: false });
       const r = s.fac('use', '1', 'a');
       assert.equal(r.code, 0, r.out);
-      assert.match(r.out, /factory lead alpha/);
-      assert.match(accountsOf(s), /factory\/alpha-lead=ann/);
+      assert.match(r.out, new RegExp(`factory lead ${REPO}`));
+      assert.match(accountsOf(s), new RegExp(`factory/${REPO}-lead=ann`));
       assert.deepEqual(herdrCalls(s), []);
     } finally {
       s.done();
@@ -508,16 +512,16 @@ test('use <repo>-<team> creates the row of a valid team of an onboarded reposito
     onboarded(s, 'gamma');
     const made = s.fac('use', 'gamma-lead', 'b');
     assert.equal(made.code, 0, made.out);
-    assert.equal(accountsOf(s), 'factory/alpha-lead=bob\nfactory/factory-lead=ann\nfactory/gamma-lead=bob\n');
+    assert.equal(accountsOf(s), `factory/${REPO}-lead=bob\nfactory/factory-lead=ann\nfactory/gamma-lead=bob\n`);
     assert.match(made.out, /factory\/gamma-lead now uses bob/);
     assert.deepEqual(herdrCalls(s), [], 'a Lead that never ran is not restarted');
     assert.equal(s.fac('use', 'gamma-second', 'a').code, 0);
     assert.equal(s.fac('use', 'factory-b2', 'a').code, 0);
-    assert.equal(accountsOf(s), 'factory/alpha-lead=bob\nfactory/factory-lead=ann\nfactory/gamma-lead=bob\nfactory/gamma-second=ann\nfactory/factory-b2=ann\n');
-    const had = s.fac('use', 'alpha-lead', 'a');
+    assert.equal(accountsOf(s), `factory/${REPO}-lead=bob\nfactory/factory-lead=ann\nfactory/gamma-lead=bob\nfactory/gamma-second=ann\nfactory/factory-b2=ann\n`);
+    const had = s.fac('use', `${REPO}-lead`, 'a');
     assert.equal(had.code, 0, had.out);
-    assert.match(accountsOf(s), /factory\/alpha-lead=ann\n/);
-    assert.equal(accountsOf(s).split('alpha-lead').length, 2, 'one row, not two');
+    assert.match(accountsOf(s), new RegExp(`factory/${REPO}-lead=ann\\n`));
+    assert.equal(accountsOf(s).split(`${REPO}-lead`).length, 2, 'one row, not two');
   } finally {
     s.done();
   }
@@ -529,7 +533,7 @@ test('use lead-<repo> is gone: it is refused like any name that is not a team of
     mini(s);
     mkdirSync(join(s.env.FACTORY_ROOT, 'bare'), { recursive: true });
     const before = accountsOf(s);
-    for (const row of ['lead-alpha', 'lead-factory', 'nope-lead', 'bare-lead', 'alpha-', '-lead', 'alpha-Lead', 'alpha-1', 'a/b-lead', 'alpha--lead', '..-lead', `alpha-${'x'.repeat(33)}`]) {
+    for (const row of [`lead-${REPO}`, 'lead-factory', 'nope-lead', 'bare-lead', `${REPO}-`, '-lead', `${REPO}-Lead`, `${REPO}-1`, 'a/b-lead', `${REPO}--lead`, '..-lead', `${REPO}-${'x'.repeat(33)}`]) {
       const r = s.fac('use', row, 'a');
       assert.equal(r.code, 2, `${row}: ${r.out}`);
     }
@@ -565,7 +569,7 @@ test('use with an argument missing prints the list and exits 2 when there is no 
     for (const args of [['use'], ['use', '2']]) {
       const r = s.fac(...args);
       assert.equal(r.code, 2, r.out);
-      assert.match(r.out, /factory\/alpha-lead/);
+      assert.match(r.out, new RegExp(`factory/${REPO}-lead`));
       assert.match(r.out, /^\s*a\s+ann\b/m);
     }
   } finally {
@@ -593,7 +597,7 @@ test('use with an argument missing, on a terminal, prints the list and asks for 
     assert.equal(asked.length, 2);
     assert.match(asked[0], /row/i);
     assert.match(asked[1], /letter/i);
-    assert.match(printed.join('\n'), /factory\/alpha-lead/);
+    assert.match(printed.join('\n'), new RegExp(`factory/${REPO}-lead`));
     assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), /factory\/factory-lead=bob/);
   } finally {
     s.done();
@@ -602,8 +606,8 @@ test('use with an argument missing, on a terminal, prints the list and asks for 
 
 // From the MacBook the commands run on the Mac mini over ssh, as login does; the fake ssh runs the far side for real in $FAKE/far.
 function far(s, tokens = { ann: ANN, bob: BOB }) {
-  writeFileSync(join(s.state, 'accounts'), 'factory/alpha-lead=ann\nfactory/factory-lead=ann\n', { mode: 0o600 });
-  onboarded(s, 'alpha');
+  writeFileSync(join(s.state, 'accounts'), `factory/${REPO}-lead=ann\nfactory/factory-lead=ann\n`, { mode: 0o600 });
+  onboarded(s, REPO);
   const dir = s.tokens(join(s.fake, 'far/.agent-profiles'));
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   for (const [name, token] of Object.entries(tokens)) writeFileSync(join(dir, name), `${token}\n`, { mode: 0o600 });
@@ -620,10 +624,10 @@ test('from the MacBook, use runs on the Mac mini over ssh with its arguments, a 
     assert.doesNotMatch(s.calls(), /ssh .* -t /);
     assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), /factory\/factory-lead=bob/);
     assert.match(r.out, /factory\/factory-lead now uses bob/);
-    const named = s.fac('use', 'alpha-lead', 'b');
+    const named = s.fac('use', `${REPO}-lead`, 'b');
     assert.equal(named.code, 0, named.out);
-    assert.match(s.calls(), /factory use alpha-lead b'/);
-    assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), /factory\/alpha-lead=bob/);
+    assert.match(s.calls(), new RegExp(`factory use ${REPO}-lead b'`));
+    assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), new RegExp(`factory/${REPO}-lead=bob`));
   } finally {
     s.done();
   }
@@ -707,7 +711,7 @@ test('logout moves the token into archive/tokens by rename, never deletes it, an
     assert.ok(!r.out.includes('ANNANN'));
     const list = s.fac();
     assert.match(lineOf(list.out, 'factory/factory-lead'), /\bNO\b/);
-    assert.match(lineOf(list.out, 'factory/alpha-lead'), /\byes\b/);
+    assert.match(lineOf(list.out, `factory/${REPO}-lead`), /\byes\b/);
     assert.match(list.out, /factory login ann/);
     assert.match(list.out, /factory use 2 /);
     assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), /factory-lead=ann/);
@@ -758,12 +762,12 @@ test('while seat 1\'s old token file is there, factory prints one line about it,
 test('use, once the old seat-1 line of the file names an account with a token, moves the old file to archive/seat-1 by rename; with no token it stays (#311)', () => {
   const s = box();
   try {
-    mini(s, { accounts: 'factory/seat-1=ann\nfactory/factory-lead=ann\nfactory/alpha-lead=bob\n', tokens: { bob: BOB } });
+    mini(s, { accounts: `factory/seat-1=ann\nfactory/factory-lead=ann\nfactory/${REPO}-lead=bob\n`, tokens: { bob: BOB } });
     withOld(s);
     const r = s.fac('use', '2', 'b');
     assert.equal(r.code, 0, r.out);
     assert.ok(existsSync(oldFile(s)), 'seat 1\'s old account ann has no token yet: nothing moves');
-    writeFileSync(join(s.state, 'accounts'), 'factory/seat-1=bob\nfactory/factory-lead=ann\nfactory/alpha-lead=bob\n');
+    writeFileSync(join(s.state, 'accounts'), `factory/seat-1=bob\nfactory/factory-lead=ann\nfactory/${REPO}-lead=bob\n`);
     const one = s.fac('use', '2', 'b');
     assert.equal(one.code, 0, one.out);
     assert.equal(existsSync(oldFile(s)), false);
