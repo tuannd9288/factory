@@ -164,9 +164,18 @@ test('use <row> <letter> rewrites the accounts file through a rename, mode 600, 
 });
 
 /** A Lead's pane as `bin/lead` leaves it, and what herdr was asked, in order. */
-const withPane = (s, pane = 'p-7') => {
-  mkdirSync(join(s.env.FACTORY_RUNS, 'alpha-lead'), { recursive: true });
-  writeFileSync(join(s.env.FACTORY_RUNS, 'alpha-lead/pane'), `${pane}\n`);
+const withPane = (s, pane = 'p-7', { event = 'Stop', repo = 'alpha' } = {}) => {
+  mkdirSync(join(s.env.FACTORY_RUNS, `${repo}-lead`), { recursive: true });
+  if (pane) writeFileSync(join(s.env.FACTORY_RUNS, `${repo}-lead/pane`), `${pane}\n`);
+  // what the Lead's hooks leave (#286): its newest event, so the Lead is running unless that is SessionEnd
+  if (event) writeFileSync(join(s.env.FACTORY_RUNS, `${repo}-lead/state.json`), `${JSON.stringify({ event, type: null, at: new Date().toISOString() })}\n`);
+};
+/** A repository folder as `bin/onboard` leaves it, in the factory root. */
+const onboarded = (s, name) => {
+  const dir = join(s.env.FACTORY_ROOT, name);
+  mkdirSync(join(dir, '.git'), { recursive: true });
+  mkdirSync(join(dir, '.gate'));
+  writeFileSync(join(dir, '.envrc'), 'x\n');
 };
 const herdrCalls = (s) => (existsSync(join(s.fake, 'herdr.log')) ? readFileSync(join(s.fake, 'herdr.log'), 'utf8').split('\n').filter(Boolean) : []);
 const accountsOf = (s) => readFileSync(join(s.state, 'accounts'), 'utf8');
@@ -227,6 +236,7 @@ test('use on a Lead\'s row with no pane file rewrites the file, calls no herdr a
   const s = sandbox();
   try {
     mini(s);
+    withPane(s, null);
     const r = s.fac('use', '3', 'a');
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /factory lead alpha/);
@@ -262,6 +272,60 @@ test('use does not start the Lead again while herdr still reports its agent afte
     assert.equal(r.code, 1, r.out);
     assert.ok(herdrCalls(s).includes('agent prompt p-7 /exit'));
     assert.ok(!herdrCalls(s).some((c) => c.startsWith('pane run')));
+  } finally {
+    s.done();
+  }
+});
+
+test('use on a Lead that is not running (no state, or SessionEnd) calls no herdr, says the next start and exits 0 (#179)', () => {
+  for (const event of [null, 'SessionEnd']) {
+    const s = sandbox();
+    try {
+      mini(s);
+      withPane(s, 'p-7', { event });
+      const r = s.fac('use', '3', 'a');
+      assert.equal(r.code, 0, r.out);
+      assert.match(r.out, /factory lead alpha/);
+      assert.match(accountsOf(s), /factory\/lead-alpha=ann/);
+      assert.deepEqual(herdrCalls(s), []);
+    } finally {
+      s.done();
+    }
+  }
+});
+
+test('use lead-<repo> creates the row of an onboarded repository, or takes the row it has (#179)', () => {
+  const s = sandbox();
+  try {
+    mini(s);
+    onboarded(s, 'gamma');
+    onboarded(s, 'alpha');
+    const made = s.fac('use', 'lead-gamma', 'b');
+    assert.equal(made.code, 0, made.out);
+    assert.equal(accountsOf(s), 'factory/seat-1=ann\nfactory/seat-2=ann\nfactory/lead-alpha=bob\nfactory/lead-gamma=bob\n');
+    assert.match(made.out, /factory\/lead-gamma now uses bob/);
+    assert.deepEqual(herdrCalls(s), [], 'a Lead that never ran is not restarted');
+    const had = s.fac('use', 'lead-alpha', 'a');
+    assert.equal(had.code, 0, had.out);
+    assert.match(accountsOf(s), /factory\/lead-alpha=ann\n/);
+    assert.equal(accountsOf(s).split('lead-alpha').length, 2, 'one row, not two');
+  } finally {
+    s.done();
+  }
+});
+
+test('use lead-<repo> of a name that is not onboarded, or not a plain name, is refused and changes nothing (#179)', () => {
+  const s = sandbox();
+  try {
+    mini(s);
+    mkdirSync(join(s.env.FACTORY_ROOT, 'bare'), { recursive: true });
+    const before = accountsOf(s);
+    for (const row of ['lead-nope', 'lead-bare', 'lead-', 'lead-..', 'lead-a/b', 'lead--x']) {
+      const r = s.fac('use', row, 'a');
+      assert.equal(r.code, 2, `${row}: ${r.out}`);
+    }
+    assert.equal(accountsOf(s), before);
+    assert.deepEqual(herdrCalls(s), []);
   } finally {
     s.done();
   }
