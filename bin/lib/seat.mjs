@@ -47,7 +47,7 @@ export const tokenStoreDeny = [
 ];
 // The copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185): only the Lead reads its own, so every seat role is
 // denied them. The Lead's own deny list takes secretsRead alone.
-export const leadTranscripts = 'Read(~/factory-runs/*-lead/transcripts/**)';
+export const leadTranscripts = 'Read(~/factory-runs/*/transcripts/**)';
 const denyOf = (home, web) => [
   ...tokenStoreDeny, 'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead, leadTranscripts,
@@ -186,7 +186,7 @@ function filePidAlive(file) {
 export const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
 
 /** The names in use (#286): those of the runs that are live, a start's claim included, and every Lead's, which it holds for as long as
- * its file ~/factory-runs/<repo>-lead/name exists. With the state folder, also the names of the sessions.jsonl records that ended on
+ * its file ~/factory-runs/<repo>-<team>/name exists (#196). With the state folder, also the names of the sessions.jsonl records that ended on
  * today's local day, so that consecutive sessions of the day do not share a name. */
 export function heldNames(runs, state = null) {
   const read = (file) => {
@@ -197,7 +197,7 @@ export function heldNames(runs, state = null) {
     }
   };
   const runNames = runFiles(runs, '.name').filter((f) => runLive(f.replace(/\.name$/, '.pid')) || runLive(f.replace(/\.name$/, '.claim.pid'))).flatMap(read);
-  const leads = (existsSync(runs) ? readdirSync(runs) : []).filter((d) => d.endsWith('-lead')).flatMap((d) => read(join(runs, d, 'name')));
+  const leads = (existsSync(runs) ? readdirSync(runs) : []).flatMap((d) => read(join(runs, d, 'name')));
   const day = new Date().setHours(0, 0, 0, 0);
   const today = state ? readSessions(state).filter((r) => r.name && Date.parse(r.end) >= day).map((r) => r.name) : [];
   return [...runNames, ...leads, ...today];

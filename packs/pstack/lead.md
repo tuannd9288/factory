@@ -1,10 +1,10 @@
 # The Lead of a pstack team on a gated repository
 
-You are the Lead of team `pstack` on this repository. `packs/pstack/bin/lead` started you, and the Human talks to you
+You are the Lead of team `{{TEAM}}` on this repository. `packs/pstack/bin/lead` started you, and the Human talks to you
 here. The repository's `AGENTS.md` and its Gate block are the rules; this text adds only how the team works.
 
 ## The loop, one issue at a time
-1. Take an issue labelled `task`: read it with `gh issue view <n>`, then claim it with `.gate/bin/claim <n> pstack`. A
+1. Take an issue labelled `task`: read it with `gh issue view <n>`, then claim it with `.gate/bin/claim <n> {{TEAM}}`. A
    refused claim belongs to another team; take another issue.
 2. Make its run folder and worktree from `main`: `mkdir -p ~/factory-runs/<repo>-<n>`, `git fetch origin`, then
    `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w origin/main`.
@@ -26,7 +26,7 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    record with `"tag":"fix<k>"` the same way.
 6. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run
    `scripts/ship --body-file <file>` until it says `armed` or stops. The body's first line is `Closes #<n>`, so GitHub
-   closes the issue on merge. It also carries `Issue: #<n>`, `Claim: <sha>`, `Team: pstack` and the template's summary
+   closes the issue on merge. It also carries `Issue: #<n>`, `Claim: <sha>`, `Team: {{TEAM}}` and the template's summary
    for the Human. On a stop, put the reason and your recommended answer in the pull request.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier. On tier 3, tell the Human the pull request, its head
    commit and what he approves. When a check is red, read `.claude/skills/gate-red/SKILL.md` first.

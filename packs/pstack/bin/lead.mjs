@@ -1,4 +1,5 @@
-// packs/pstack/bin/lead (#163): starts the pstack Lead of one repository. This file holds the pure parts (the arguments of
+// packs/pstack/bin/lead (#163): starts the pstack Lead of one team of a repository (#196: --team, default lead; the session is named
+// <repo>-<team> and its folder is ~/factory-runs/<repo>-<team>/; the account row is the repository's). This file holds the pure parts (the arguments of
 // claude, the enabled plugins, the refusals) and the start. Nobody logs in (#179): the Lead needs the row factory/lead-<repo> in the
 // accounts file and refuses to start without it; it reads that account's token file once, before setup, and gives it to claude's
 // environment alone (CLAUDE_CODE_OAUTH_TOKEN), with no scrub, in auto mode (the Human, 2026-11-01); it prints none of it. It also
@@ -10,14 +11,15 @@ import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
-import { firstFree } from '../../../bin/lib/names.mjs';
+import { DEFAULT_TEAM, TEAM, firstFree } from '../../../bin/lib/names.mjs';
 import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
-const USAGE = 'usage: factory lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
+const USAGE = 'usage: factory lead <repo> [--team <name>] [--new] [--dry-run]   (--team names the team, default lead; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
+const TEAM_TOKEN = '{{TEAM}}'; // in lead.md where the team's name goes; nothing else in that text is written so
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
 
-/** The Lead's earlier session, from the copies transcript-copy.mjs keeps in dir (~/factory-runs/<repo>-lead/transcripts), never from
+/** The Lead's earlier session, from the copies transcript-copy.mjs keeps in dir (~/factory-runs/<repo>-<team>/transcripts), never from
  * a profile: { id, count } for the newest regular file by mtime whose name is a plain session id plus .jsonl, or null. */
 export function newestSession(dir) {
   let names;
@@ -105,12 +107,12 @@ export function findNode(PATH) {
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop', 'SessionEnd'];
 
 /** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
- * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-lead/
+ * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-<team>/
  * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
  * exec bit. */
-export function leadArgs({ repo, home, root, roleText, node, resume = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
+export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node, resume = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
   const cwd = join(root, repo);
-  const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-lead`, 'transcripts')].map(quote).join(' ');
+  const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
   return {
     cwd,
@@ -121,7 +123,7 @@ export function leadArgs({ repo, home, root, roleText, node, resume = null, hook
       '--append-system-prompt', roleText,
       '--permission-mode', 'auto',
       '--add-dir', join(home, 'factory-runs'),
-      '--name', `${repo}-lead`,
+      '--name', `${repo}-${team}`,
       '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])) }),
       ...(resume ? ['--resume', resume] : []),
       '--allowedTools', ...allowOf(root),
@@ -236,15 +238,34 @@ function renamePane(runDir, name, paneId) {
 const claudeDirt = (cwd) => spawnSync('git', ['status', '--porcelain', '--', '.claude/'], { cwd, encoding: 'utf8' }).stdout ?? '';
 const lastLine = (text) => (text ?? '').split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '';
 
+/** The arguments: { repo, team, flags } (flags are --new and --dry-run, once each) or { error }. `--team <name>` is checked against
+ * the grammar here, before anything runs (#196). */
+export function parseArgs(argv) {
+  const flags = [];
+  const rest = [];
+  let team = null;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--team') {
+      if (team !== null) return { error: '--team is given once' };
+      team = argv[++i] ?? '';
+      if (!TEAM.test(team)) return { error: `the team "${team}" is not a letter then at most 31 lowercase letters and digits` };
+    } else if (a.startsWith('--')) {
+      if (a !== '--new' && a !== '--dry-run') return { error: `unknown option ${a}` };
+      flags.push(a);
+    } else rest.push(a);
+  }
+  if (rest.length !== 1) return { error: '' };
+  return { repo: rest[0], team: team ?? DEFAULT_TEAM, flags };
+}
+
 function main(argv, env) {
-  const flags = argv.filter((a) => a.startsWith('--'));
-  const rest = argv.filter((a) => !a.startsWith('--'));
-  const unknown = flags.filter((f) => f !== '--new' && f !== '--dry-run');
-  if (rest.length !== 1 || unknown.length) {
-    process.stderr.write(`bin/lead: ${unknown.length ? `unknown option ${unknown[0]}\n` : ''}${USAGE}\n`);
+  const parsed = parseArgs(argv);
+  if (parsed.error !== undefined) {
+    process.stderr.write(`bin/lead: ${parsed.error ? `${parsed.error}\n` : ''}${USAGE}\n`);
     return 2;
   }
-  const [repo] = rest;
+  const { repo, team, flags } = parsed;
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
   const why = refusal(repo, root);
   if (why) {
@@ -252,7 +273,7 @@ function main(argv, env) {
     return 2;
   }
   const rolePath = join(root, 'packs/pstack/lead.md');
-  const roleText = existsSync(rolePath) ? readFileSync(rolePath, 'utf8') : '';
+  const roleText = existsSync(rolePath) ? readFileSync(rolePath, 'utf8').replaceAll(TEAM_TOKEN, team) : '';
   if (!roleText.trim()) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;
@@ -269,7 +290,8 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: the account of ${row} is not a plain account name\n`);
     return 2;
   }
-  const transcripts = join(env.HOME, 'factory-runs', `${repo}-lead`, 'transcripts');
+  const runDir = join(env.HOME, 'factory-runs', `${repo}-${team}`);
+  const transcripts = join(runDir, 'transcripts');
   const earlier = flags.includes('--new') ? null : newestSession(transcripts);
   const resume = earlier?.id ?? null;
   const sessionLine = resume
@@ -280,9 +302,8 @@ function main(argv, env) {
     process.stderr.write('bin/lead: no node on PATH, which the transcript hook needs\n');
     return 2;
   }
-  const runDir = join(env.HOME, 'factory-runs', `${repo}-lead`);
   const hookScript = hookPath({ root, runDir });
-  const { cwd, argv: command, hook } = leadArgs({ repo, home: env.HOME, root, roleText, node, resume, hookScript });
+  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, root, roleText, node, resume, hookScript });
   const wanted = enabledPlugins(readSettings(cwd));
   // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
   const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
@@ -298,12 +319,13 @@ function main(argv, env) {
   }
 
   if (flags.includes('--dry-run')) {
-    const shown = leadArgs({ repo, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, hookScript }).argv;
+    const shown = leadArgs({ repo, team, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, hookScript }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
     process.stdout.write(`plugin root: ${pluginRoot}\n`);
     process.stdout.write(`transcript hook: ${hook}\n`);
     process.stdout.write(`${shown.join(' ')}\n`);
+    process.stdout.write(`team: ${team}\n`);
     process.stdout.write(`${sessionLine}\n`);
     process.stdout.write(`account: ${account} (row ${row})\n`);
     return 0;

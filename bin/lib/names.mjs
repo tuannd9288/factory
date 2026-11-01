@@ -9,6 +9,11 @@ export const ANIMALS = [
   'xerus', 'yak', 'zapus',
 ];
 
+/** A Lead's team (#196): a letter, then at most 31 lowercase letters and digits. No `-` and no `/`, so `<repo>-<team>` splits at its
+ * last `-`; a letter first, so it never matches a Lead's issue folder `<repo>-<n>`. The default team is `lead`. */
+export const TEAM = /^[a-z][a-z0-9]{0,31}$/;
+export const DEFAULT_TEAM = 'lead';
+
 /** The first animal, in list order, that is not in taken; with all of them taken, the list again with a number (aardvark2). */
 export function firstFree(taken) {
   const held = new Set(taken);

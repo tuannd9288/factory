@@ -1,7 +1,7 @@
 // bin/factory (#173, #177, #178): the list of every agent profile in a table with the seats' quota in a second one, and `login`,
 // `store`, `use` and `logout`. On the Mac mini the rows are numbered (seat 1, seat 2, each Lead the accounts file names, the
-// verifier) and the accounts lettered; `use` rewrites the accounts file (`use lead-<repo>` makes a Lead's row; a running Lead is
-// restarted once Herdr reports it idle, #179) and `logout` moves a token into the archive; `login` and
+// verifier) and the accounts lettered; `use` rewrites the accounts file (`use lead-<repo>` makes a Lead's row; every running Lead of
+// it, one for each team, is restarted once Herdr reports it idle, #179, #196; `lead <repo> [--team <name>]` starts one team's) and `logout` moves a token into the archive; `login` and
 // `store` put a token in the factory's token store. The list runs only the vendors' own status commands (codex login status,
 // gh auth status; on the MacBook claude auth status too), reads quota through quotaRows() and liveCount(), and keeps from each answer
 // only the logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and date).
@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { quotaRows } from './quota.mjs';
 import { liveCount } from './seat.mjs';
 import { quote, refusal } from '../../packs/pstack/bin/lead.mjs';
-import { leadRunning } from './top.mjs';
+import { DEFAULT_TEAM, TEAM } from './names.mjs';
+import { leadTeams } from './top.mjs';
 import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
@@ -323,7 +324,7 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory use [<row|lead-repo> [<letter>]]   (the row's account becomes the letter's; lead-<repo> makes a Lead's row, and a running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
-       bin/factory lead <repo> [--new] [--dry-run]`;
+       bin/factory lead <repo> [--team <name>] [--new] [--dry-run]`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
  * -t asks for a terminal of its own. The exit code is the remote command's. */
@@ -336,12 +337,21 @@ function onHostBySsh(sub, args, tty, env) {
   return r.status ?? 1;
 }
 
-/** `factory lead <repo> [--new] [--dry-run]` (#166): starts the pstack Lead of a repository. On the factory host it runs this
- * clone's packs/pstack/bin/lead; on the MacBook it runs the same command there by ssh. The name and the flags are checked before
- * anything runs. */
+/** `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository. On
+ * the factory host it runs this clone's packs/pstack/bin/lead; on the MacBook it runs the same command there by ssh. The name, the
+ * team (the grammar of bin/lib/names.mjs) and the flags are checked before anything runs. */
 function lead(args, env) {
-  const [repo, ...flags] = args;
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '') || flags.some((f) => f !== '--new' && f !== '--dry-run') || new Set(flags).size !== flags.length) {
+  const [repo, ...more] = args;
+  const flags = [];
+  let teams = 0;
+  let okTeam = true;
+  for (let i = 0; i < more.length; i++) {
+    if (more[i] === '--team') {
+      teams += 1;
+      okTeam = okTeam && TEAM.test(more[++i] ?? '');
+    } else flags.push(more[i]);
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '') || teams > 1 || !okTeam || flags.some((f) => f !== '--new' && f !== '--dry-run') || new Set(flags).size !== flags.length) {
     console.error(USAGE);
     return 2;
   }
@@ -531,15 +541,14 @@ const stateOf = (r) => {
 };
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-/** The second half of `use` on a Lead's row (#179), after the accounts file changed: through `herdr` on PATH, waits for the Lead's
- * pane (<runs>/<repo>-lead/pane, written by bin/lead inside Herdr) to settle, restarts it only if idle or done (`/exit`, then until
- * Herdr reports no agent there, then `packs/pstack/bin/lead <repo>` in the pane, which resumes the conversation), and otherwise
- * leaves it running. 0 once the start was sent, else 1 with the reason. */
+/** The second half of `use` on a Lead's row (#179, #196), after the accounts file changed: each running Lead of the repository, one
+ * after another (teams in name order), by `restartTeam`. 0 when every one was restarted or none runs, else 1; a Lead left running
+ * does not stop the others. */
 async function restartLead(repo, account, ctx) {
-  const next = `the Lead takes it at its next start (factory lead ${repo})`;
   const hasToken = tokenState(ctx.agentProfiles, account).ok;
-  // `factory top`'s rule: a claude process with --name <repo>-lead. A recorded pane may hold something else by now.
-  if (!leadRunning(repo)) {
+  // `factory top`'s rule: a claude process with --name <repo>-<team>. A recorded pane may hold something else by now.
+  const teams = leadTeams(repo);
+  if (!teams.length) {
     console.log(`the Lead of ${repo} is not running; it takes ${account} at its next start (factory lead ${repo})`);
     if (!hasToken) console.log(`${account} has no token file yet: that next start is refused until factory login ${account}`);
     return 0;
@@ -548,30 +557,45 @@ async function restartLead(repo, account, ctx) {
     console.log(`${account} has no token file yet: factory login ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
     return 1;
   }
+  let code = 0;
+  for (const team of teams) {
+    if ((await restartTeam(repo, team, account, ctx)) !== 0) code = 1;
+  }
+  return code;
+}
+
+/** One team's Lead: through `herdr` on PATH, waits for its pane (<runs>/<repo>-<team>/pane, written by bin/lead inside Herdr) to
+ * settle, restarts it only if idle or done (`/exit`, then until Herdr reports no agent there, then
+ * `packs/pstack/bin/lead <repo> [--team <team>]` in the pane, which resumes the conversation), and otherwise leaves it running. 0 once
+ * the start was sent, else 1 with the reason. */
+async function restartTeam(repo, team, account, ctx) {
+  const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
+  const who = `the Lead of ${repo} (team ${team})`;
+  const next = `${who} takes it at its next start (factory lead ${repo}${flag})`;
   let pane = '';
   try {
-    pane = readFileSync(join(ctx.runs, `${repo}-lead`, 'pane'), 'utf8').trim();
+    pane = readFileSync(join(ctx.runs, `${repo}-${team}`, 'pane'), 'utf8').trim();
   } catch {
     // no pane file: the Lead did not start inside Herdr
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(pane)) {
-    console.log(`no Herdr pane is recorded for the Lead of ${repo}; ${next}`);
+    console.log(`no Herdr pane is recorded for ${who}; ${next}`);
     return 1;
   }
-  console.log(`waiting for the Lead of ${repo} in pane ${pane} to settle (up to 10 minutes)`);
+  console.log(`waiting for ${who} in pane ${pane} to settle (up to 10 minutes)`);
   const waited = herdr(['agent', 'wait', pane, '--timeout', '600000'], 610000);
   if (waited.status !== 0) {
-    console.log(`the Lead of ${repo} is not idle after the wait (or herdr failed); it keeps running and was not restarted; ${next}`);
+    console.log(`${who} is not idle after the wait (or herdr failed); it keeps running and was not restarted; ${next}`);
     return 1;
   }
   const seen = stateOf(herdr(['agent', 'get', pane], 10000));
   if (seen !== 'idle' && seen !== 'done') {
-    console.log(`the Lead of ${repo} is ${seen ?? 'in a state herdr did not report'}, not idle; it keeps running and was not restarted; ${next}`);
+    console.log(`${who} is ${seen ?? 'in a state herdr did not report'}, not idle; it keeps running and was not restarted; ${next}`);
     return 1;
   }
-  console.log(`the Lead of ${repo} is ${seen}; sending /exit`);
+  console.log(`${who} is ${seen}; sending /exit`);
   if (herdr(['agent', 'prompt', pane, '/exit'], 10000).status !== 0) {
-    console.log(`herdr did not take /exit; the Lead of ${repo} keeps running; ${next}`);
+    console.log(`herdr did not take /exit; ${who} keeps running; ${next}`);
     return 1;
   }
   const until = Date.now() + (Number(ctx.env.FACTORY_GONE_MS) || 30000);
@@ -583,11 +607,11 @@ async function restartLead(repo, account, ctx) {
     await sleep(200);
   }
   const lead = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/bin/lead');
-  if (herdr(['pane', 'run', pane, `${quote(lead)} ${repo}`], 10000).status !== 0) {
+  if (herdr(['pane', 'run', pane, `${quote(lead)} ${repo}${flag}`], 10000).status !== 0) {
     console.log(`herdr did not run the start in pane ${pane}; ${next}`);
     return 1;
   }
-  console.log(`started the Lead of ${repo} again in pane ${pane}; it resumes its conversation on ${account}`);
+  console.log(`started ${who} again in pane ${pane}; it resumes its conversation on ${account}`);
   return 0;
 }
 
