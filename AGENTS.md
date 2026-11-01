@@ -55,8 +55,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   pstack's live verifier both stay for now; dropping one is decided only on the probe's numbers. Source:
   https://github.com/tuannd9288/factory/issues/25#issuecomment-6372755422 (reviewer and payment) and
   https://github.com/tuannd9288/factory/issues/25#issuecomment-6373226939 (one call; both layers stay).
-  Note, 2026-11-01 (#203): in the code that is one call per head commit, as H3 says; a push makes a new head, and each
-  head gets its own call (`kit/.gate/bin/review`).
+  Note (the Lead, 2026-11-01, #203): in the code that is one call per head commit, as H3 says; a push makes a new
+  head, and each head gets its own call (`kit/.gate/bin/review`).
 - **Colly's scope, 2026-10-24.** Colly handles only the factory. The piggery teams of Kizuna and kizuna-labs report to
   the Human directly. Source: chat, as the map page records it in Vietnamese; this line is an English rendering, not
   his words.
@@ -121,7 +121,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   tail, with its own headings. Sources: https://github.com/tuannd9288/factory/issues/131#issuecomment-6445068794 and
   https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962 (the questions and K1 to K3), and
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6446708922 (the evening words), all relayed by Colly.
-- **Control surfaces, 2026-10-29.** This takes the place of K1 in "Control surfaces (#68), 2026-10-25": the factory
+- **Control surfaces, 2026-10-29.** Rex, which K1 of "Control surfaces (#68), 2026-10-25" brings in, waits: the factory
   runs on Ghostty and Herdr until it is finished, and Rex and Paseo are rolled out after that. His words to Colly in
   chat, relayed by Colly: "trước mắt cứ chạy với ghostty + herdr cho hoàn thành cái factory rồi triển khai rex và paseo"
   (2026-10-29), and "nếu đang bị mở rộng ra thì dừng lại, dùng Herdr TUI hoặc APP đã" (2026-10-31; the Lead's
@@ -131,9 +131,11 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   #182's D1 and D2 as proposed, "D1 và D2 theo đề xuất", relayed by Colly. D2, in Colly's words: "pstack's other-family
   steps run on Codex through a factory script on `codex exec`, like `scripts/live-verify`, on the verifier's Codex
   profile." #95, which was to make the verifier's model a setting for each repository with Claude by default, was closed
-  as superseded by D2: "the verifier's steps run on its Codex profile". Sources:
-  https://github.com/tuannd9288/factory/issues/182#issuecomment-6513127448 and
-  https://github.com/tuannd9288/factory/issues/95#issuecomment-6525022374.
+  as superseded by D2: "the verifier's steps run on its Codex profile". That step from D2 to the verifier is Colly's, in
+  closing #95; the Human approved #203 "theo đề xuất" on 2026-10-30, and its area 4 lists `:103` as "#95, now
+  #182". Sources: https://github.com/tuannd9288/factory/issues/182#issuecomment-6513127448,
+  https://github.com/tuannd9288/factory/issues/95#issuecomment-6525022374 and
+  https://github.com/tuannd9288/factory/issues/203 (area 4).
 - **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
 
 ## Tiers
@@ -190,8 +192,8 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger.
 - **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
 - **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, the ledger's canary.
-- **1e Surfaces** [GH2, #68]: the Human's own screens: the Herdr TUI, Paseo's app, Rex on the MacBook (K1 = C, pending his
-  check) and Remote Control (T3, pending). Herdr's server and Paseo's daemon stay in 0d.
+- **1e Surfaces** [GH2, #68]: the Human's own screens: Ghostty with the Herdr TUI or app until the factory is finished, then
+  Rex and Paseo's app (Control surfaces, 2026-10-29), and Remote Control (T3, pending). Herdr's server and Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
