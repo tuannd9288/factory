@@ -10,6 +10,8 @@ import { driverAt } from './driver.mjs';
 
 const PLACEHOLDER = '<issue labelled task>';
 const FIELDS = 'number,url,baseRefName,baseRefOid,headRefOid,labels,autoMergeRequest,statusCheckRollup';
+// gh pr merge --auto merges these outright, whatever the repository's auto-merge setting.
+const READY = ['CLEAN', 'HAS_HOOKS', 'UNSTABLE'];
 
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -168,7 +170,15 @@ function step(pr, head, branch) {
     if (r.status !== 0) return say(2, `could not run: live-verify exited ${r.status ?? r.signal}`);
   }
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
-  gh(['pr', 'merge', String(n), '--auto', '--merge']);
+  // Read fresh: live-verify may have run for minutes, CI may have ended, and arming a ready pull request would merge it.
+  if (READY.includes(JSON.parse(gh(['pr', 'view', String(n), '--json', 'mergeStateStatus'])).mergeStateStatus))
+    return say(1, `stopped on #${n}: it is ready to merge and not armed; the Human merges it`);
+  try {
+    gh(['pr', 'merge', String(n), '--auto', '--merge']);
+  } catch (error) {
+    if (!String(error.stderr).includes('Auto merge is not allowed for this repository')) throw error;
+    return say(1, `stopped on #${n}: auto-merge is off on this repository; the Human merges it`);
+  }
   say(0, driver ? `armed #${n}: a live PASS covers HEAD ${short}` : `armed #${n}: not run as a user, no driver; the note covers HEAD ${short}`);
   return stop();
 }
