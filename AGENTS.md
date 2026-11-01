@@ -521,7 +521,10 @@ The Human starts a repository's pstack Lead, an interactive session, with `facto
 MacBook terminal without Herdr, `factory lead <repo>` does the same over ssh. `factory` is on the PATH of each machine by
 `bin/install-factory`, which he runs once on the MacBook and `factory` runs once on the Mac mini (#177). `factory lead [--team <name>]` starts the Lead of one team (#196), named
 `<repo>-<team>` with its folder `~/factory-runs/<repo>-<team>/`; the team is the claim's team (`lead.md` takes it from the launcher), `lead` when
-none is given, and a repository's teams share its account row. `factory lead` resumes
+none is given, and a repository's teams share its account row. A resumed session ignores a new `--append-system-prompt` (2.1.316), so
+`<repo>-<team>/role.sha` keeps the SHA-256 of the role text last given (#316): a resume whose current text hashes differently, or whose file is
+missing or malformed, gets that text as its first message under `[factory] your role changed:`, and one whose hash is equal gets none (piggery's
+`card_hash`, v0.10.3). `factory lead` resumes
 the team's newest earlier session and starts a new one when there is none; `--new` starts a new one anyway. The only record it reads is the newest plain-session-id
 copy in `~/factory-runs/<repo>-<team>/transcripts/` (never a profile); a session killed before any Stop hook ran leaves no copy, so
 the next `factory lead` starts a new one. `--dry-run` prints the folder,

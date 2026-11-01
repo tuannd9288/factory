@@ -4,6 +4,9 @@
 // accounts file and refuses to start without it; it reads that account's token file once, before setup, and gives it to claude's
 // environment alone (CLAUDE_CODE_OAUTH_TOKEN), with no scrub, in auto mode (the Human, 2026-11-01); it prints none of it. It also
 // sets hasCompletedOnboarding in the profile's .claude.json, since a token on a fresh profile would replay onboarding.
+// A resumed session ignores a new --append-system-prompt (2.1.316), so <run folder>/role.sha keeps the hash of the role text last given
+// and a resume whose hash differs, or has none, gets the current text as its first message under "[factory] your role changed:" (#316;
+// piggery v0.10.3 does the same with card_hash: internal/store/migrate_15.sql, internal/core/harness.go newCard and giveCard).
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -17,6 +20,7 @@ import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../
 
 const USAGE = 'usage: factory lead <repo> [--team <name>] [--new] [--dry-run]   (--team names the team, default lead; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
 const TEAM_TOKEN = '{{TEAM}}'; // in lead.md where the team's name goes; nothing else in that text is written so
+const ROLE_CHANGED = '[factory] your role changed:'; // the head of a resumed session's first message (#316)
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
 
 /** The Lead's earlier session, from the copies transcript-copy.mjs keeps in dir (~/factory-runs/<repo>-<team>/transcripts), never from
@@ -110,7 +114,7 @@ const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop',
  * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-<team>/
  * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
  * exec bit. */
-export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node, resume = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
+export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node, resume = null, message = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
   const cwd = join(root, repo);
   const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
@@ -125,7 +129,8 @@ export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node
       '--add-dir', join(home, 'factory-runs'),
       '--name', `${repo}-${team}`,
       '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])) }),
-      ...(resume ? ['--resume', resume] : []),
+      // The prompt argument goes right after the id: --allowedTools and --disallowedTools take every word up to the next option.
+      ...(resume ? ['--resume', resume, ...(message ? [message] : [])] : []),
       '--allowedTools', ...allowOf(root),
       '--disallowedTools', ...denyOf(cwd),
     ],
@@ -213,6 +218,32 @@ export function markOnboarded(config) {
   }
 }
 
+/** The role text's hash (#316): SHA-256 hex of the exact string that goes to --append-system-prompt. */
+export const roleHash = (roleText) => createHash('sha256').update(roleText).digest('hex');
+
+/** The hash <runDir>/role.sha records, or null when the file is missing, unreadable or not one 64-character lowercase hex line. */
+export function recordedRole(runDir) {
+  try {
+    return /^([0-9a-f]{64})\n?$/.exec(readFileSync(join(runDir, 'role.sha'), 'utf8'))?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Records the hash in <runDir>/role.sha through a temporary file in the same folder and a rename. */
+export function recordRole(runDir, hash) {
+  const file = join(runDir, 'role.sha');
+  const tmp = `${file}.${process.pid}.tmp`;
+  mkdirSync(runDir, { recursive: true });
+  try {
+    writeFileSync(tmp, `${hash}\n`);
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
 /** The Lead's name (#286): the file <runDir>/name when it is there, else the first animal no live run and no Lead holds, written
  * to it. Every Lead's name is held for as long as its file exists, so the name stays across restarts. */
 export function leadName(runDir, state) {
@@ -297,13 +328,22 @@ function main(argv, env) {
   const sessionLine = resume
     ? `session: resume ${resume} (newest of ${earlier.count} ${earlier.count === 1 ? 'copy' : 'copies'} in ${transcripts})`
     : `session: new (${flags.includes('--new') ? '--new' : `no copy in ${transcripts}`})`;
+  // A resumed session ignores a new --append-system-prompt, so a changed role text goes as its first message (#316; piggery's card_hash).
+  const hash = roleHash(roleText);
+  const recorded = recordedRole(runDir);
+  const roleLine = !resume
+    ? 'role: new session, the role text goes as the system prompt'
+    : recorded === hash
+      ? `role: unchanged since ${hash.slice(0, 7)}, no message`
+      : `role: ${recorded ? `changed since ${recorded.slice(0, 7)}` : 'no record'}, the first message gives the role text`;
+  const message = resume && recorded !== hash ? `${ROLE_CHANGED}\n${roleText}` : null;
   const node = findNode(env.PATH);
   if (!node) {
     process.stderr.write('bin/lead: no node on PATH, which the transcript hook needs\n');
     return 2;
   }
   const hookScript = hookPath({ root, runDir });
-  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, root, roleText, node, resume, hookScript });
+  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, root, roleText, node, resume, message, hookScript });
   const wanted = enabledPlugins(readSettings(cwd));
   // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
   const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
@@ -319,7 +359,7 @@ function main(argv, env) {
   }
 
   if (flags.includes('--dry-run')) {
-    const shown = leadArgs({ repo, team, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, hookScript }).argv;
+    const shown = leadArgs({ repo, team, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', hookScript }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
     process.stdout.write(`plugin root: ${pluginRoot}\n`);
@@ -327,6 +367,7 @@ function main(argv, env) {
     process.stdout.write(`${shown.join(' ')}\n`);
     process.stdout.write(`team: ${team}\n`);
     process.stdout.write(`${sessionLine}\n`);
+    process.stdout.write(`${roleLine}\n`);
     process.stdout.write(`account: ${account} (row ${row})\n`);
     return 0;
   }
@@ -377,6 +418,16 @@ function main(argv, env) {
     return 1;
   }
   if (claudeDirt(cwd) !== before) process.stderr.write(`bin/lead: the install changed .claude/ in ${cwd}; check git status there\n`);
+
+  // Last step before claude, so a start refused or stopped above records nothing; an unchanged record is not written again.
+  if (recorded !== hash) {
+    try {
+      recordRole(runDir, hash);
+    } catch (e) {
+      process.stderr.write(`bin/lead: could not record the role text's hash in ${join(runDir, 'role.sha')}: ${e.code ?? e.message}\n`);
+      return 1;
+    }
+  }
 
   // The token goes to claude's environment alone, never to the plugin installs above or to a message.
   const childEnv = { ...env, CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginRoot, CLAUDE_CODE_OAUTH_TOKEN: token };
