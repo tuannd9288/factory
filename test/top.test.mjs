@@ -114,6 +114,47 @@ test('a Lead runs while a claude process names it with --name <repo>-lead, the r
   assert.equal(leadRunning('factory', ps()), false);
 });
 
+test('leadOf reads { repo, team } from --name <repo>-<team>, splitting at the last dash, and needs a claude command and a valid team (#196)', async () => {
+  const { leadOf } = await top();
+  assert.deepEqual(leadOf('claude --model opus --name factory-probe-lead --continue'), { repo: 'factory-probe', team: 'lead' });
+  assert.deepEqual(leadOf('claude --name factory-probe-b'), { repo: 'factory-probe', team: 'b' });
+  assert.deepEqual(leadOf('claude --name factory-lead'), { repo: 'factory', team: 'lead' });
+  assert.equal(leadOf('claude --name factory'), null, 'a name with no team');
+  assert.equal(leadOf('claude --name factory-probe-3'), null, 'a digit first is an issue folder, not a team');
+  assert.equal(leadOf('claude --name factory-Lead'), null);
+  assert.equal(leadOf('claude --name factory-a_b'), null);
+  assert.equal(leadOf(`claude --name factory-${'a'.repeat(33)}`), null);
+  assert.equal(leadOf('vim --name factory-lead x'), null);
+});
+
+test('leadRunning is true when some process is a Lead of the repository, whichever its team (#196)', async () => {
+  const { leadRunning } = await top();
+  const ps = (...commands) => () => commands.map((command, i) => ({ pid: i + 1, command }));
+  assert.equal(leadRunning('factory-probe', ps('claude --name factory-probe-b')), true);
+  assert.equal(leadRunning('factory', ps('claude --name factory-probe-b')), false);
+  assert.equal(leadRunning('factory-probe', ps('claude --name factory-probe-b', 'claude --name factory-probe-lead')), true);
+});
+
+test('top shows each running team of a repository as its own Lead row, naming the team, in the block and the answer line (#196)', async () => {
+  const w = world();
+  const dir = join(w.opts.runs, 'factory-b');
+  mkdirSync(join(dir, 'transcripts'), { recursive: true });
+  writeFileSync(join(dir, 'name'), 'badger\n');
+  writeFileSync(join(dir, 'pane'), 'p-8\n');
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ event: 'Notification', type: 'permission_prompt', at: new Date(NOW - 30_000).toISOString() }));
+  const { snapshot, render } = await top();
+  const snap = await withPath(w.bin, () => snapshot({ ...w.opts, processes: () => [
+    { pid: 1, command: 'claude --model opus --name factory-lead --continue' },
+    { pid: 2, command: 'claude --model opus --name factory-b' },
+  ] }));
+  const leads = snap.sessions.filter((s) => s.role === 'lead');
+  assert.deepEqual(leads.map((s) => [s.name, s.team]).sort(), [['aardvark', 'lead'], ['badger', 'b']]);
+  const lines = render(snap, { width: 200 }).split('\n');
+  assert.ok(lines.some((l) => /^ {2}aardvark +Lead lead +idle/.test(l)));
+  assert.ok(lines.some((l) => /^ {2}badger +Lead b +waiting/.test(l)));
+  assert.ok(lines.includes('  answer   badger (factory Lead, team b)  pane p-8'));
+});
+
 test('parseLog reads model, turns, tokens, context and the last result cost; a resumed log takes the last total', async () => {
   const { parseLog } = await top();
   const u = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100 };
@@ -173,7 +214,7 @@ test('the frame: a header in plain words, what waits on you, one block per team,
     '  alert    digest.failed  09:00 digest failed',
   ]);
   assert.equal(lines[5], 'tuannd9288/factory');
-  const lead = lines.findIndex((l) => /^ {2}aardvark +Lead +idle +\?/.test(l));
+  const lead = lines.findIndex((l) => /^ {2}aardvark +Lead lead +idle +\?/.test(l));
   const group = lines.findIndex((l) => /#174 factory top, the repo view/.test(l));
   assert.ok(lead > 5 && lead < group, 'the Lead\'s line opens its block');
   assert.match(lines[group], /alpha/);
@@ -625,7 +666,7 @@ test('a Lead with the new hooks, alive over a minute, with no event since its st
     assert.equal(lead.state, 'waiting');
     assert.equal(lead.waitNote, 'login or folder trust?');
     const text = (await top()).render(snap, { width: 200 });
-    assert.match(text, /^ {2}answer {3}aardvark \(factory Lead\) {2}pane p-7 {2}login or folder trust\?$/m);
+    assert.match(text, /^ {2}answer {3}aardvark \(factory Lead, team lead\) {2}pane p-7 {2}login or folder trust\?$/m);
     assert.match(text.split('\n')[0], /1 agent waiting/);
   }
   assert.equal((await leadOf(w, { pid: 1, command: HOOKED, ageMs: 30_000 }, null)).lead.state, 'idle', 'not yet a minute');
@@ -637,7 +678,7 @@ test('a Lead waiting on a prompt is listed as an item that names its pane; with 
   const state = { event: 'Notification', type: 'permission_prompt', at: new Date(NOW - 5000).toISOString() };
   const { snap } = await leadOf(w, { pid: 1, command: HOOKED, ageMs: 600_000 }, state);
   const { render } = await top();
-  assert.match(render(snap, { width: 200 }), /^ {2}answer {3}aardvark \(factory Lead\) {2}pane aardvark$/m);
+  assert.match(render(snap, { width: 200 }), /^ {2}answer {3}aardvark \(factory Lead, team lead\) {2}pane aardvark$/m);
 });
 
 test('the accounts come from the accounts file and the seats\' quota; none named, no section', async () => {

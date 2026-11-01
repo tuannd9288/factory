@@ -165,12 +165,13 @@ test('use <row> <letter> rewrites the accounts file through a rename, mode 600, 
 });
 
 /** A Lead's pane as `bin/lead` leaves it, and what herdr was asked, in order. */
-const withPane = (s, pane = 'p-7', { event = 'Stop', repo = 'alpha', running = true } = {}) => {
-  mkdirSync(join(s.env.FACTORY_RUNS, `${repo}-lead`), { recursive: true });
-  if (pane) writeFileSync(join(s.env.FACTORY_RUNS, `${repo}-lead/pane`), `${pane}\n`);
-  // what the Lead's hooks leave (#286); a Lead runs only while its process does, as `factory top` finds it: claude --name <repo>-lead
-  if (event) writeFileSync(join(s.env.FACTORY_RUNS, `${repo}-lead/state.json`), `${JSON.stringify({ event, type: null, at: new Date().toISOString() })}\n`);
-  if (running) s.kids.push(spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', '--', 'claude', '--name', `${repo}-lead`], { stdio: 'ignore' }));
+const withPane = (s, pane = 'p-7', { event = 'Stop', repo = 'alpha', running = true, team = 'lead' } = {}) => {
+  const folder = `${repo}-${team}`;
+  mkdirSync(join(s.env.FACTORY_RUNS, folder), { recursive: true });
+  if (pane) writeFileSync(join(s.env.FACTORY_RUNS, `${folder}/pane`), `${pane}\n`);
+  // what the Lead's hooks leave (#286); a Lead runs only while its process does, as `factory top` finds it: claude --name <repo>-<team>
+  if (event) writeFileSync(join(s.env.FACTORY_RUNS, `${folder}/state.json`), `${JSON.stringify({ event, type: null, at: new Date().toISOString() })}\n`);
+  if (running) s.kids.push(spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', '--', 'claude', '--name', folder], { stdio: 'ignore' }));
 };
 /** A sandbox whose done() also stops the fake Lead processes. */
 function box() {
@@ -213,6 +214,47 @@ for (const state of ['idle', 'done']) {
     }
   });
 }
+
+test('use on a repository with two running teams restarts each in its own pane, one after the other, teams in name order (#196)', () => {
+  const s = box();
+  try {
+    mini(s);
+    withPane(s, 'p-7');
+    withPane(s, 'p-8', { team: 'b' });
+    const r = s.fac('use', '3', 'a');
+    assert.equal(r.code, 0, r.out);
+    const calls = herdrCalls(s);
+    assert.deepEqual(calls.slice(0, 4), ['agent wait p-8 --timeout 600000', 'agent get p-8', 'agent prompt p-8 /exit', 'agent get p-8']);
+    assert.match(calls[4], /^pane run p-8 '\S*\/packs\/pstack\/bin\/lead' alpha --team b$/);
+    assert.deepEqual(calls.slice(5, 9), ['agent wait p-7 --timeout 600000', 'agent get p-7', 'agent prompt p-7 /exit', 'agent get p-7']);
+    assert.match(calls[9], /^pane run p-7 '\S*\/packs\/pstack\/bin\/lead' alpha$/);
+    assert.equal(calls.length, 10);
+    assert.match(r.out, /Lead of alpha \(team b\)/);
+    assert.match(r.out, /Lead of alpha \(team lead\)/);
+  } finally {
+    s.done();
+  }
+});
+
+test('use goes on to the second team when the first stays busy, and exits 1 (#196)', () => {
+  const s = box();
+  try {
+    mini(s);
+    withPane(s, 'p-7');
+    withPane(s, 'p-8', { team: 'b' });
+    s.w('herdr-busy-p-8', '');
+    const r = s.fac('use', '3', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /team b\).*not idle/);
+    const calls = herdrCalls(s);
+    assert.equal(calls[0], 'agent wait p-8 --timeout 600000');
+    assert.equal(calls[1], 'agent wait p-7 --timeout 600000');
+    assert.ok(calls.some((c) => /^pane run p-7 /.test(c)), 'the second team was restarted');
+    assert.ok(!calls.some((c) => /^pane run p-8 /.test(c)), 'the busy one was not');
+  } finally {
+    s.done();
+  }
+});
 
 test('use on a Lead\'s row that stays busy rewrites the file, restarts nothing and exits 1, saying so (#179)', () => {
   const s = box();
