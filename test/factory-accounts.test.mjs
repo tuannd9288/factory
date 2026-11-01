@@ -16,6 +16,8 @@ const BOB = 'sk-ant-oat01-BOBBOBBOBBOB1234567890efgh';
 // process table, so the name is this run's own: the process id is unique among the processes alive at once, which two runs of this file
 // at once are (#313). One name for the whole file run, since each test stops its fake Leads in done().
 const REPO = `alpha${process.pid}`;
+// The factory's own repository is always `factory`, so a fake Lead of it takes this run's own team instead: factory-<OWN>.
+const OWN = `t${process.pid}`;
 const utc = (sec) => new Date(sec * 1000).toISOString().slice(5, 16).replace('T', ' ');
 // The recorded event with its resets moved to the future, since a window that reset since is not shown with its time.
 const FIVE = Math.floor(Date.now() / 1000) + 3 * 3600;
@@ -298,13 +300,13 @@ test('the LIVE column of a team row counts the live runs of its account; teams o
 test('use factory-lead names no launcher command, since the launcher refuses the factory as a repository: the Lead takes the account at its next start (#311)', () => {
   const s = box();
   try {
-    mini(s, { accounts: 'factory/factory-lead=ann\n' });
-    const idle = s.fac('use', 'factory-lead', 'b');
+    mini(s, { accounts: `factory/factory-${OWN}=ann\n` });
+    const idle = s.fac('use', `factory-${OWN}`, 'b');
     assert.equal(idle.code, 0, idle.out);
     assert.match(idle.out, /takes bob at its next start/);
     assert.doesNotMatch(idle.out, /factory lead factory/);
-    withPane(s, null, { repo: 'factory' });
-    const running = s.fac('use', 'factory-lead', 'a');
+    withPane(s, null, { repo: 'factory', team: OWN });
+    const running = s.fac('use', `factory-${OWN}`, 'a');
     assert.equal(running.code, 1, running.out);
     assert.match(running.out, /next start/);
     assert.doesNotMatch(running.out, /factory lead factory/);
