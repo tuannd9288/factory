@@ -10,6 +10,8 @@
 #    rule, then stops with "tier 3 waits for the Human's approval" until its tier check ends.
 # 4. runs scripts/live-verify <pr>, and arms auto-merge (--auto --merge) only on PASS or PASS+NOTES (with no driver on main: the author's "no driver" note in place of a verdict) and a base of main;
 #    when scripts/live-verify --covered already passes, it arms again without a new run.
+# 5. stops, before any note or verdict, on a pull request that is not armed and is ready to merge (gh would merge it),
+#    and when GitHub refuses the arm because auto-merge is off: the Human merges it.
 # Exit 0 a step taken or nothing to do, 1 refused or stopped, 2 could not run.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 2
