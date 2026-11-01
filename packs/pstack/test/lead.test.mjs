@@ -99,6 +99,33 @@ describe('leadArgs', () => {
     assert.ok(!withId.includes('--continue'));
   });
 
+  test('a resume\'s message is claude\'s prompt argument, right after --resume <id> and before every option that takes a list (#316)', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const message = '[factory] your role changed:\n# the role';
+    const withMessage = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id, message }).argv;
+    const at = withMessage.indexOf('--resume');
+    assert.equal(withMessage[at + 1], id);
+    assert.equal(withMessage[at + 2], message);
+    assert.equal(withMessage.filter((a) => a === message).length, 1);
+    assert.ok(at + 2 < withMessage.indexOf('--allowedTools') && at + 2 < withMessage.indexOf('--disallowedTools'));
+    assert.equal(withMessage[at + 3], '--allowedTools');
+    assert.equal(withMessage[withMessage.indexOf('--append-system-prompt') + 1], roleText, 'the role text stays a system prompt');
+    const without = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id }).argv;
+    assert.equal(without[without.indexOf('--resume') + 2], '--allowedTools');
+    assert.ok(!leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, message }).argv.includes(message), 'a new session gets no message');
+  });
+
+  test('a new session\'s id goes as --session-id before the list options, and never with --resume (#316)', () => {
+    const id = '33333333-3333-4333-8333-333333333333';
+    const fresh = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, sessionId: id }).argv;
+    assert.equal(fresh[fresh.indexOf('--session-id') + 1], id);
+    assert.equal(fresh[fresh.indexOf('--session-id') + 2], '--allowedTools');
+    assert.ok(!fresh.includes('--resume'));
+    const resumed = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id, sessionId: id }).argv;
+    assert.ok(!resumed.includes('--session-id'));
+    assert.ok(!leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).argv.includes('--session-id'));
+  });
+
   test('the allow list is exactly the Lead\'s, with no blanket gh or git', () => {
     assert.deepEqual(list('--allowedTools'), [
       'Read', 'Glob', 'Grep', 'Write', 'Edit',
