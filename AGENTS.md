@@ -524,8 +524,8 @@ MacBook terminal without Herdr, `factory lead <repo>` does the same over ssh. `f
 none is given, and a repository's teams share its account row. A resumed session ignores a new `--append-system-prompt` (2.1.316), so
 `<repo>-<team>/role.sha` keeps the SHA-256 of the role text and the id of the session it was last given to (#316): a resume of any other
 session, or whose current text hashes differently, or whose file is missing or malformed, gets that text as its first message under
-`[factory] your role changed:`, and one of the same session and hash gets none; a new session removes the file. Known limit: `/compact`
-(piggery keeps a like record, `card_hash`, v0.10.3). `factory lead` resumes
+`[factory] your role changed:`, and one of the same session and hash gets none; a new session gets the text as its system prompt, with its own id from `--session-id`, and
+records that id with the hash (piggery keeps a like record, `card_hash`, v0.10.3). `factory lead` resumes
 the team's newest earlier session and starts a new one when there is none; `--new` starts a new one anyway. The only record it reads is the newest plain-session-id
 copy in `~/factory-runs/<repo>-<team>/transcripts/` (never a profile); a session killed before any Stop hook ran leaves no copy, so
 the next `factory lead` starts a new one. `--dry-run` prints the folder,

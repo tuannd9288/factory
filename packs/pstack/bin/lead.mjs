@@ -5,12 +5,14 @@
 // environment alone (CLAUDE_CODE_OAUTH_TOKEN), with no scrub, in auto mode (the Human, 2026-11-01); it prints none of it. It also
 // sets hasCompletedOnboarding in the profile's .claude.json, since a token on a fresh profile would replay onboarding.
 // A resumed session ignores a new --append-system-prompt (2.1.316), so <run folder>/role.sha keeps "<hash of the role text> <session id>"
-// of the last resume that was given the text, and a resume of any other session, or with another hash, or with no record, gets the current
-// text as its first message under "[factory] your role changed:"; a new session removes the file (#316). piggery v0.10.3 keeps the same
-// kind of record, card_hash for each participant (internal/store/migrate_15.sql, internal/core/harness.go newCard and giveCard), but hashes
-// team, role and name and gives the card before every turn's text; here the whole text is hashed and given once, on a resume.
+// of the session that was last given the text, and a resume of any other session, or with another hash, or with no record, gets the current
+// text as its first message under "[factory] your role changed:" (#316). A new session picks its own id (--session-id) and records it
+// with the hash, as piggery records card_hash when a new participant gets its card (internal/core/session.go). piggery v0.10.3 keeps
+// the same kind of record for each participant (internal/store/migrate_15.sql, internal/core/harness.go newCard and giveCard), but hashes
+// team, role and name, checks at every turn and, when it changed, gives the card before the turn's text; here the whole text is hashed
+// and given once, as the first message of a resume.
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -116,7 +118,7 @@ const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop',
  * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-<team>/
  * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
  * exec bit. */
-export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node, resume = null, message = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
+export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
   const cwd = join(root, repo);
   const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
@@ -132,7 +134,7 @@ export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node
       '--name', `${repo}-${team}`,
       '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])) }),
       // The prompt argument goes right after the id: --allowedTools and --disallowedTools take every word up to the next option.
-      ...(resume ? ['--resume', resume, ...(message ? [message] : [])] : []),
+      ...(resume ? ['--resume', resume, ...(message ? [message] : [])] : sessionId ? ['--session-id', sessionId] : []),
       '--allowedTools', ...allowOf(root),
       '--disallowedTools', ...denyOf(cwd),
     ],
@@ -352,13 +354,14 @@ function main(argv, env) {
       ? `role: unchanged since ${hash.slice(0, 7)}, no message`
       : `role: ${earlierRole.hash === hash ? 'given to another session, not to this one' : earlierRole.hash ? `changed since ${earlierRole.hash.slice(0, 7)}` : 'no record'}, the first message gives the role text`;
   const message = resume && !given ? `${ROLE_CHANGED}\n${roleText}` : null;
+  const sessionId = resume ? null : randomUUID(); // a new session's own id, so the record can name it
   const node = findNode(env.PATH);
   if (!node) {
     process.stderr.write('bin/lead: no node on PATH, which the transcript hook needs\n');
     return 2;
   }
   const hookScript = hookPath({ root, runDir });
-  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, root, roleText, node, resume, message, hookScript });
+  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, root, roleText, node, resume, message, sessionId, hookScript });
   const wanted = enabledPlugins(readSettings(cwd));
   // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
   const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
@@ -374,7 +377,7 @@ function main(argv, env) {
   }
 
   if (flags.includes('--dry-run')) {
-    const shown = leadArgs({ repo, team, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', hookScript }).argv;
+    const shown = leadArgs({ repo, team, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', sessionId: sessionId && '<new session id>', hookScript }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
     process.stdout.write(`plugin root: ${pluginRoot}\n`);
@@ -435,11 +438,10 @@ function main(argv, env) {
   if (claudeDirt(cwd) !== before) process.stderr.write(`bin/lead: the install changed .claude/ in ${cwd}; check git status there\n`);
 
   // Last step before claude, so a start refused or stopped above records nothing. A resume that was given the text leaves the file
-  // alone; one that gets the message records its hash and session; a new session removes the file, since its id is not known here.
+  // alone; one that gets the message, and a new session (which got the text as its system prompt), record the hash and the session id.
   if (!given) {
     try {
-      if (resume) writeRole(runDir, `${hash} ${resume}\n`);
-      else restoreRole(runDir, null);
+      writeRole(runDir, `${hash} ${resume ?? sessionId}\n`);
     } catch (e) {
       process.stderr.write(`bin/lead: could not record the role text's hash in ${join(runDir, 'role.sha')}: ${e.code ?? e.message}\n`);
       return 1;
