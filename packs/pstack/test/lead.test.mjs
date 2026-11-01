@@ -61,6 +61,8 @@ describe('refusal', () => {
   });
 });
 
+const hookOf = (argv) => JSON.parse(argv[argv.indexOf('--settings') + 1]).hooks.Stop[0].hooks[0].command;
+
 describe('leadArgs', () => {
   const root = '/fx/WORKSPACES';
   const roleText = '# the role\nline two';
@@ -143,6 +145,14 @@ describe('leadArgs', () => {
     assert.deepEqual(Object.keys(hooks).sort(), ['Notification', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit']);
     for (const event of Object.keys(hooks)) assert.deepEqual(hooks[event], [{ hooks: [{ type: 'command', command }] }]);
     assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).hook, command);
+  });
+
+  test('a team names the session and the hook\'s folder, <repo>-<team>; with none the team is lead, today\'s <repo>-lead (#196)', () => {
+    const b = leadArgs({ repo: 'zalo-gateway', team: 'b', home, root, roleText, node });
+    assert.equal(b.argv[b.argv.indexOf('--name') + 1], 'zalo-gateway-b');
+    assert.equal(b.hook, `'${node}' '${root}/packs/pstack/bin/transcript-copy.mjs' '${home}/factory-runs/zalo-gateway-b/transcripts'`);
+    assert.equal(after('--name'), 'zalo-gateway-lead');
+    assert.ok(hookOf(argv).includes('/factory-runs/zalo-gateway-lead/transcripts'));
   });
 
   test('--settings turns auto memory off (#285)', () => {

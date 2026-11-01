@@ -13,7 +13,7 @@ differs from the factory, the gate's rule wins (sources: the factory's `packs/ps
 
 A session that `bin/seat` or `factory lead` starts is denied its profile. Where pstack's docs say `~/.claude/`, its
 plugin is under `~/.local/share/factory/plugins/`; `recall` and `reflect` read a seat's `run-<tag>.jsonl` in its run
-folder, or a Lead's `~/factory-runs/<repo>-lead/transcripts/`; no profile gets a rules file, so a role uses its
+folder, or a Lead's `~/factory-runs/<repo>-<team>/transcripts/`; no profile gets a rules file, so a role uses its
 skill's default model.
 
 ## Shipping with pstack

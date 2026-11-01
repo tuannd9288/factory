@@ -15,6 +15,7 @@ import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
 import { REQUIRED, clonesUnder, costOf, lastRecords as lastOfSession, readSessions } from './ledger.mjs';
 import { quotaRows, windowsOf } from './quota.mjs';
 import { PRESETS, SEATS, liveCount, resetPassed, runLive } from './seat.mjs';
+import { TEAM } from './names.mjs';
 import { accountList, readAccounts } from './token.mjs';
 
 const run = promisify(execFile);
@@ -128,14 +129,18 @@ function psList() {
   return [];
 }
 
-/** The repository a process is the Lead of, or null: a `claude` command with `--name <repo>-lead` (packs/pstack/bin/lead). */
-export function leadRepoOf(command) {
-  const m = /(?:^|\s)--name\s+(\S+)-lead(?:\s|$)/.exec(command);
-  return m && /\bclaude\b/.test(command) ? m[1] : null;
+/** The repository and team a process is the Lead of, or null: a `claude` command with `--name <repo>-<team>` (packs/pstack/bin/lead),
+ * split at the last `-`, the team in the grammar (#196). */
+export function leadOf(command) {
+  const m = /(?:^|\s)--name\s+(\S+)-([^-\s]+)(?:\s|$)/.exec(command);
+  return m && TEAM.test(m[2]) && /\bclaude\b/.test(command) ? { repo: m[1], team: m[2] } : null;
 }
 
-/** Whether the Lead of a repository runs: the one rule `top` and `factory use` share (#179). */
-export const leadRunning = (repo, processes = psList) => processes().some((p) => leadRepoOf(p.command) === repo);
+/** The teams whose Lead runs on a repository, sorted. */
+export const leadTeams = (repo, processes = psList) => [...new Set(processes().map((p) => leadOf(p.command)).filter((l) => l?.repo === repo).map((l) => l.team))].sort();
+
+/** Whether a Lead of a repository runs: the one rule `top` and `factory use` share (#179). */
+export const leadRunning = (repo, processes = psList) => leadTeams(repo, processes).length > 0;
 
 function branchIn(cwd) {
   if (!cwd) return null;
@@ -222,10 +227,10 @@ function leadStateOf({ event, command, ageMs, now }) {
   return /"SessionStart"/.test(command) && ageMs > LOGIN_MS ? { state: 'waiting', waitNote: 'login or folder trust?' } : null;
 }
 
-function shape(p, { record, role, name, issue, folder, seat, live, mtime, start, cwd, repo, branch, harness, now, override = null, pane = null }) {
+function shape(p, { record, role, name, issue, folder, seat, live, mtime, start, cwd, repo, branch, harness, now, override = null, pane = null, team = null }) {
   const ageMs = now - mtime;
   return {
-    name, role, issue, folder, repo, seat, harness, live, pane,
+    name, role, team, issue, folder, repo, seat, harness, live, pane,
     ...(override ?? stateOf(p, { live, ageMs, record, now })),
     model: p.model ?? record?.model?.split(',')[0] ?? null,
     effort: PRESETS[role]?.effort ?? (role === 'lead' ? 'high' : null),
@@ -278,9 +283,10 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     }
   }
   for (const proc of processes()) {
-    const repoName = leadRepoOf(proc.command);
-    if (!repoName) continue;
-    const leadDir = join(runs, `${repoName}-lead`);
+    const found = leadOf(proc.command);
+    if (!found) continue;
+    const { repo: repoName, team } = found;
+    const leadDir = join(runs, `${repoName}-${team}`);
     const dir = join(leadDir, 'transcripts');
     let newest = null;
     for (const n of existsSync(dir) ? readdirSync(dir).filter((x) => x.endsWith('.jsonl')) : []) {
@@ -296,7 +302,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
       // no state yet: the log gives the state
     }
     out.push(shape(newest ? parseLog(readText(newest.file)) : parseLog(''), {
-      record: null, role: 'lead', name: readText(join(leadDir, 'name')).trim() || `${repoName}-lead`, issue: null, folder: null, seat: null, live: true,
+      record: null, role: 'lead', name: readText(join(leadDir, 'name')).trim() || `${repoName}-${team}`, team, issue: null, folder: null, seat: null, live: true,
       mtime: newest?.mtimeMs ?? now, start: null, cwd, repo, branch: branchOf(cwd), harness: 'claude', now,
       override: leadStateOf({ event, command: proc.command, ageMs: proc.ageMs, now }), pane: readText(join(leadDir, 'pane')).trim() || null,
     }));
@@ -560,7 +566,7 @@ function sessionRow(s, now, indent, width, full) {
   const cost = s.cost !== null ? `$${s.cost.toFixed(2)}` : s.estCost !== null && s.estCost !== undefined ? `~$${s.estCost.toFixed(2)}` : '?';
   // A Lead is shown since its newest hook event; any other session by how long it has run (or ran).
   const span = s.role === 'lead' ? (s.stateAt ? `since ${local(s.stateAt, now)}` : '?') : s.startedAt ? age((s.live ? now : s.lastAt) - s.startedAt) : '?';
-  const cells = [`${' '.repeat(indent)}${s.name}`, s.role === 'lead' ? 'Lead' : s.role, stateText(s, now), span, cost];
+  const cells = [`${' '.repeat(indent)}${s.name}`, s.role === 'lead' ? `Lead ${s.team}` : s.role, stateText(s, now), span, cost];
   const more = full ? [s.harness, model, s.seat ?? '?', kilo(s.ctx), s.turns ?? '?', s.tokensIn === null ? '?' : `${kilo(s.tokensIn)}/${kilo(s.tokensOut)}`] : [];
   const cols = [...COLS, ...(full ? FULL_COLS : [])];
   return clip([...cells, ...more].map((c, i) => pad(c, cols[i][1])).join(' ').trimEnd() + (full ? ` ${tail(s.cwd)} ${s.branch ?? '?'}` : ''), width);
@@ -597,7 +603,7 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
   const item = (verb, text) => clip(`  ${verb.padEnd(7)}  ${text}`, width);
   const waits = [
     ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => item('approve', `${r.repo}#${g.pr.number} ${g.pr.title}  https://github.com/${r.repo}/pull/${g.pr.number}`))),
-    ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => item('answer', `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead)  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`)),
+    ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => item('answer', `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`)),
     ...queue.failed.map((f) => item('alert', `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`)),
   ];
   lines.push(...(waits.length ? ['Waiting on you', ...waits] : ['Nothing waits on you']));

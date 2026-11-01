@@ -167,6 +167,74 @@ describe('lead resumes by default', () => {
   }));
 });
 
+describe('lead --team (#196)', () => {
+  const nameOf = (call) => call.argv[call.argv.indexOf('--name') + 1];
+  const roleOf = (call) => call.argv[call.argv.indexOf('--append-system-prompt') + 1];
+
+  test('a name outside a letter then at most 31 lowercase letters and digits is refused before anything runs, in the launcher (#196)', () => world((w) => {
+    for (const team of ['a-b', 'a/b', '1a', 'A', 'aB', 'a'.repeat(33), '', '-x', 'a b']) {
+      const r = w.lead(['--team', team]);
+      assert.equal(r.code, 2, JSON.stringify(team));
+      assert.match(r.err, /team/, JSON.stringify(team));
+    }
+    for (const args of [['--team'], ['--team', 'b', '--team', 'c'], ['--team', '--new']]) assert.equal(w.lead(args).code, 2, args.join(' '));
+    assert.equal(w.lead(['--team', 'a'.repeat(32), '--dry-run']).code, 0, '32 characters are allowed');
+    assert.deepEqual(w.log(), []);
+    assert.ok(!w.ran());
+    assert.ok(!existsSync(join(w.home, 'factory-runs')));
+  }));
+
+  test('--team b names the session zalo-b, keeps its folder, pane and name there, and hooks its transcripts there (#196)', () => world((w) => {
+    const dry = w.lead(['--team', 'b', '--dry-run']);
+    assert.equal(dry.code, 0, dry.err);
+    assert.match(dry.out, /^team: b$/m);
+    assert.match(dry.out, new RegExp(`^transcript hook: '${w.bin}/node' '${w.home}/factory-runs/zalo-b/hooks/transcript-copy-[0-9a-f]{7}\\.mjs' '${w.home}/factory-runs/zalo-b/transcripts'$`, 'm'));
+    assert.equal(w.lead(['--team', 'b'], { HERDR_PANE_ID: 'p-7' }).code, 0);
+    assert.equal(nameOf(w.log().at(-1)), 'zalo-b');
+    assert.equal(readFileSync(join(w.home, 'factory-runs/zalo-b/pane'), 'utf8').trim(), 'p-7');
+    assert.ok(existsSync(join(w.home, 'factory-runs/zalo-b/name')));
+    assert.ok(readdirSync(join(w.home, 'factory-runs/zalo-b/hooks')).some((f) => /^transcript-copy-[0-9a-f]{7}\.mjs$/.test(f)));
+    assert.ok(!existsSync(join(w.home, 'factory-runs/zalo-lead')), 'the default team\'s folder is not made');
+    // the account row is the repository's, shared by its teams
+    assert.match(w.lead(['--team', 'b', '--dry-run']).out, /^account: ann \(row factory\/lead-zalo\)$/m);
+  }));
+
+  test('with no --team the team is lead: zalo-lead, as today, and the dry run says so (#196)', () => world((w) => {
+    assert.match(w.lead(['--dry-run']).out, /^team: lead$/m);
+    assert.equal(w.lead().code, 0);
+    assert.equal(nameOf(w.log().at(-1)), 'zalo-lead');
+    assert.ok(existsSync(join(w.home, 'factory-runs/zalo-lead/name')));
+  }));
+
+  test('a team resumes from its own transcripts and a new team from none; the teams hold different animals (#196)', () => world((w) => {
+    const B2 = '33333333-3333-4333-8333-333333333333';
+    mkdirSync(join(w.home, 'factory-runs/zalo-b/transcripts'), { recursive: true });
+    writeFileSync(join(w.home, 'factory-runs/zalo-b/transcripts', `${B2}.jsonl`), 'x\n');
+    w.copy(`${A}.jsonl`, 4000); // the default team's
+    assert.match(w.lead(['--team', 'b', '--dry-run']).out, new RegExp(`^session: resume ${B2} `, 'm'));
+    assert.match(w.lead(['--team', 'c', '--dry-run']).out, /^session: new \(no copy in /m);
+    assert.match(w.lead(['--dry-run']).out, new RegExp(`^session: resume ${A} `, 'm'));
+    assert.equal(w.lead().code, 0);
+    assert.equal(w.lead(['--team', 'b']).code, 0);
+    const a = readFileSync(join(w.home, 'factory-runs/zalo-lead/name'), 'utf8');
+    const b = readFileSync(join(w.home, 'factory-runs/zalo-b/name'), 'utf8');
+    assert.notEqual(a, b);
+  }));
+
+  test('the role text gets the team in its three places and no token is left in what claude gets (#196)', () => world((w) => {
+    writeFileSync(join(w.tree, 'packs/pstack/lead.md'), readFileSync(join(real, 'packs/pstack/lead.md')));
+    for (const [args, team] of [[['--team', 'b'], 'b'], [[], 'lead']]) {
+      assert.equal(w.lead(args).code, 0);
+      const text = roleOf(w.log().at(-1));
+      assert.ok(text.includes(`You are the Lead of team \`${team}\``), team);
+      assert.ok(text.includes(`.gate/bin/claim <n> ${team}`), team);
+      assert.ok(text.includes(`Team: ${team}`), team);
+      assert.ok(!/\{\{|\}\}/.test(text), 'no token is left');
+      assert.ok(!text.includes('pstack`'), 'the old fixed team is gone');
+    }
+  }));
+});
+
 describe('lead name (#286)', () => {
   test('a start picks a free animal once and keeps it; another Lead\'s name is held, a dry run writes none', () => world((w) => {
     assert.equal(w.lead(['--dry-run']).code, 0);
