@@ -1,7 +1,8 @@
 // The lines a pull request body carries: Issue, Claim, Team, Session, Cost. One line each, at the start of a line.
 //   node .gate/bin/lib/prbody.mjs --team <body file>   exit 0 when Team: names a team, 1 when it does not, 2 when unreadable
-// Team gates at `verify` (verify-trusted), Issue and Claim at `tier` (claim.mjs check); Session and Cost only inform and
-// no check reads them. The body is data: only these shapes are taken from it, nothing is run.
+// Team gates at `verify` (verify-trusted), Issue and Claim at `tier` (claim.mjs check), which also refuses a Team that
+// is not the claim's holder; Session and Cost only inform and no check reads them. The body is data: only these shapes
+// are taken from it, nothing is run.
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
