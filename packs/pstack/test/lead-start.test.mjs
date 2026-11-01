@@ -7,6 +7,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const real = fileURLToPath(new URL('../../..', import.meta.url));
@@ -164,6 +165,126 @@ describe('lead resumes by default', () => {
     w.copy(`--${B}.jsonl`, 7000);
     mkdirSync(join(w.home, 'factory-runs/zalo-lead/transcripts', `${B}.jsonl`));
     assert.match(w.lead(['--dry-run']).out, new RegExp(`^session: resume ${A} `, 'm'));
+  }));
+});
+
+describe('lead role.sha (#316)', () => {
+  const HEAD = '[factory] your role changed:\n';
+  const hashOf = (text) => createHash('sha256').update(text).digest('hex');
+  const sha = (w) => w.leadFile('role.sha');
+  const messageOf = (call) => {
+    const at = call.argv.indexOf('--resume');
+    return at < 0 || call.argv[at + 2].startsWith('--') ? null : call.argv[at + 2];
+  };
+  const setRole = (w, text) => writeFileSync(join(w.tree, 'packs/pstack/lead.md'), text);
+  const recorded = (w, text) => {
+    mkdirSync(dirname(sha(w)), { recursive: true });
+    writeFileSync(sha(w), text);
+  };
+
+  test('a resume with no role.sha gives the role text, team filled in, as its first message, and records the hash (#316)', () => world((w) => {
+    setRole(w, 'Lead of {{TEAM}}\nline two\n');
+    w.copy(`${A}.jsonl`, 4000);
+    assert.equal(w.lead(['--team', 'lead']).code, 0);
+    const call = w.log().at(-1);
+    assert.equal(messageOf(call), `${HEAD}Lead of lead\nline two\n`);
+    assert.equal(readFileSync(sha(w), 'utf8'), `${hashOf('Lead of lead\nline two\n')}\n`);
+    assert.equal(call.argv[call.argv.indexOf('--append-system-prompt') + 1], 'Lead of lead\nline two\n', 'the system prompt stays');
+    assert.deepEqual(readdirSync(dirname(sha(w))).filter((f) => f.endsWith('.tmp')), []);
+  }));
+
+  test('a resume with an equal role.sha gives no message and leaves the file as it is (#316)', () => world((w) => {
+    w.copy(`${A}.jsonl`, 4000);
+    recorded(w, `${hashOf('# role\n')}\n`);
+    utimesSync(sha(w), 1000, 1000);
+    assert.equal(w.lead().code, 0);
+    const call = w.log().at(-1);
+    assert.equal(messageOf(call), null);
+    assert.equal(call.argv[call.argv.indexOf('--resume') + 2], '--allowedTools');
+    assert.equal(readFileSync(sha(w), 'utf8'), `${hashOf('# role\n')}\n`);
+    assert.equal(statSync(sha(w)).mtimeMs, 1000000, 'not written again');
+  }));
+
+  test('lead.md changed between two resumes: the message comes once, with the new text, and the third start gives none (#316)', () => world((w) => {
+    w.copy(`${A}.jsonl`, 4000);
+    recorded(w, `${hashOf('# role\n')}\n`);
+    assert.equal(w.lead().code, 0);
+    assert.equal(messageOf(w.log().at(-1)), null);
+    setRole(w, '# role, new\n');
+    assert.equal(w.lead().code, 0);
+    assert.equal(messageOf(w.log().at(-1)), `${HEAD}# role, new\n`);
+    assert.equal(readFileSync(sha(w), 'utf8'), `${hashOf('# role, new\n')}\n`);
+    assert.equal(w.lead().code, 0);
+    assert.equal(messageOf(w.log().at(-1)), null);
+  }));
+
+  test('a role.sha that is not one 64-character lowercase hex line counts as changed (#316)', () => world((w) => {
+    w.copy(`${A}.jsonl`, 4000);
+    const good = hashOf('# role\n');
+    for (const text of ['', 'x\n', `${good.toUpperCase()}\n`, `${good}\n${good}\n`, `${good.slice(1)}\n`, `${good}x\n`]) {
+      recorded(w, text);
+      assert.equal(w.lead().code, 0);
+      assert.equal(messageOf(w.log().at(-1)), `${HEAD}# role\n`, JSON.stringify(text));
+      assert.equal(readFileSync(sha(w), 'utf8'), `${good}\n`);
+    }
+  }));
+
+  test('a new session, with no copy and with --new, gives no message and records the hash (#316)', () => world((w) => {
+    assert.equal(w.lead().code, 0);
+    assert.equal(messageOf(w.log().at(-1)), null);
+    assert.equal(w.log().at(-1).argv[w.log().at(-1).argv.indexOf('--append-system-prompt') + 1], '# role\n');
+    assert.equal(readFileSync(sha(w), 'utf8'), `${hashOf('# role\n')}\n`);
+    rmSync(sha(w));
+    w.copy(`${A}.jsonl`, 4000);
+    assert.equal(w.lead(['--new']).code, 0);
+    assert.ok(!w.log().at(-1).argv.includes('--resume'));
+    assert.equal(readFileSync(sha(w), 'utf8'), `${hashOf('# role\n')}\n`);
+  }));
+
+  test('--dry-run writes no role.sha and says which of the three cases it is (#316)', () => world((w) => {
+    const line = (args) => /^role: .*$/m.exec(w.lead(['--dry-run', ...args]).out)?.[0];
+    assert.match(line([]), /^role: new session, .*system prompt/);
+    w.copy(`${A}.jsonl`, 4000);
+    assert.match(line([]), /^role: no record, .*first message/);
+    assert.match(line(['--new']), /^role: new session/);
+    recorded(w, `${'ab'.repeat(32)}\n`);
+    assert.match(line([]), /^role: changed since abababa, .*first message/);
+    recorded(w, `${hashOf('# role\n')}\n`);
+    assert.match(line([]), new RegExp(`^role: unchanged since ${hashOf('# role\n').slice(0, 7)}, no message`));
+    const shown = w.lead(['--dry-run']).out;
+    assert.ok(shown.split('\n').findIndex((l) => l.startsWith('role: ')) === shown.split('\n').findIndex((l) => l.startsWith('session: ')) + 1);
+    assert.equal(readFileSync(sha(w), 'utf8'), `${hashOf('# role\n')}\n`);
+    rmSync(sha(w));
+    w.lead(['--dry-run']);
+    assert.ok(!existsSync(sha(w)));
+    assert.ok(!existsSync(dirname(sha(w))) || !existsSync(join(dirname(sha(w)), 'hooks')));
+  }));
+
+  test('--dry-run shows the message as a placeholder, as it does the role text (#316)', () => world((w) => {
+    w.copy(`${A}.jsonl`, 4000);
+    const r = w.lead(['--dry-run']);
+    assert.ok(r.out.includes(`--resume ${A} <`), 'a placeholder follows the session id');
+    assert.ok(!r.out.includes('your role changed'));
+  }));
+
+  test('a start refused or stopped before claude records nothing (#316)', () => world((w) => {
+    w.copy(`${A}.jsonl`, 4000);
+    rmSync(join(w.home, '.local/state/factory/accounts'));
+    assert.equal(w.lead().code, 2);
+    assert.ok(!existsSync(sha(w)));
+    w.row('bob');
+    assert.equal(w.lead().code, 2);
+    assert.ok(!existsSync(sha(w)));
+    w.row('bob', KEY);
+    writeFileSync(join(w.bin, 'plugin-mode'), 'fail');
+    assert.equal(w.lead().code, 1);
+    assert.ok(!existsSync(sha(w)));
+    rmSync(join(w.bin, 'plugin-mode'));
+    const old = `${'cd'.repeat(32)}\n`;
+    recorded(w, old);
+    rmSync(join(w.home, '.local/state/factory/accounts'));
+    assert.equal(w.lead().code, 2);
+    assert.equal(readFileSync(sha(w), 'utf8'), old, 'a refused start leaves an earlier record');
   }));
 });
 
