@@ -170,7 +170,7 @@ function step(pr, head, branch) {
     if (r.status !== 0) return say(2, `could not run: live-verify exited ${r.status ?? r.signal}`);
   }
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
-  // Read fresh: live-verify ran for minutes, CI may have ended, and arming a ready pull request would merge it.
+  // Read fresh: live-verify may have run for minutes, CI may have ended, and arming a ready pull request would merge it.
   if (READY.includes(JSON.parse(gh(['pr', 'view', String(n), '--json', 'mergeStateStatus'])).mergeStateStatus))
     return say(1, `stopped on #${n}: it is ready to merge and not armed; the Human merges it`);
   try {
