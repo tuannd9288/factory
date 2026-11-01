@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # The one command for the Human's agent accounts (#177; its list is #173's).
-#   factory [--all] [--json]       every agent profile's login, account and plan in a table, the seats' quota in a second one; on the Mac mini
-#                                  the rows are numbered and the accounts lettered, with 5h, 7d, reset and the rows that share each (#178)
+#   factory [--all] [--json]       every agent profile's login, account and plan in a table, each account's quota in a second one; on the Mac mini
+#                                  the rows are the teams, numbered and the accounts lettered, with 5h, 7d, reset and the rows that share each (#178)
 #   factory login <account> [--no-setup]   runs `claude setup-token`, takes the token from a hidden prompt, stores it
 #   factory store <account>        on the Mac mini: reads one token from stdin and stores it (what login runs over ssh)
-#   factory use [<row|lead-repo> [<letter>]]  on the Mac mini: the row's account in the accounts file becomes the letter's (a seat takes it at its
-#                                  next session); lead-<repo> makes the row of an onboarded repository's Lead, and every running Lead of it (a team each) is restarted
-#                                  once Herdr reports it idle (#179, #196)
+#   factory use [<row|repo-team> [<letter>]]  on the Mac mini: the row's account in the accounts file becomes the letter's (the team's next seat
+#                                  session takes it); <repo>-<team> makes the row of a team of an onboarded repository or of the factory, and that team's running
+#                                  Lead alone is restarted once Herdr reports it idle (#179, #196, #311)
 #   factory lead <repo> [--team <name>] [--new] [--dry-run]  starts the Lead of one team of a repository (default team: lead, #196)
 #   factory logout <account>       on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
-# it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes quota and live sessions from the seats' run logs. On the
+# it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes each account's quota from the run logs of its sessions. On the
 # MacBook a plain run is --all (still accepted; refused on the host), and its spare Claude rows are the ~/.claude-acc<N> folders that exist. --all
 # adds the factory rows and the piggery rows over ssh to the Mac mini. --json prints the rows as one JSON line.
 # A row that is not logged in shows its login command; the Human runs it. The profiles are committed in lib/factory.mjs, with no

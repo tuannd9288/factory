@@ -11,6 +11,14 @@ test('the list is the 45 animals of the released code names, in alphabetical ord
   assert.ok(!ANIMALS.includes('trex'));
 });
 
+test('parseTeam splits <repo>-<team> at the last dash, the team in the grammar, and takes nothing else (#311)', async () => {
+  const { parseTeam } = await import('../bin/lib/names.mjs');
+  assert.deepEqual(parseTeam('zalo-lead'), { repo: 'zalo', team: 'lead' });
+  assert.deepEqual(parseTeam('factory-probe-b2'), { repo: 'factory-probe', team: 'b2' });
+  assert.deepEqual(parseTeam('a.b_c-x'), { repo: 'a.b_c', team: 'x' });
+  for (const bad of ['probe', 'probe-Alpha', '-alpha', 'probe-', 'probe-1a', 'seat-1', 'a b-c', 'a/b-c', '..-x', 'a--x', '', undefined, null, 'x-'.concat('y'.repeat(33))]) assert.equal(parseTeam(bad), null, String(bad));
+});
+
 test('firstFree gives the first name in list order that is not taken', () => {
   assert.equal(firstFree(new Set()), 'aardvark');
   assert.equal(firstFree(new Set(['aardvark', 'badger'])), 'beaver');

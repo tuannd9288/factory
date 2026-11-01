@@ -16,10 +16,11 @@ const ledger = () => import('../bin/lib/ledger.mjs');
 function withRuns(logs, body) {
   const runs = mkdtempSync(join(tmpdir(), 'quota-table-'));
   try {
-    for (const [folder, seatNo, file, mtime] of logs) {
+    for (const [folder, account, file, mtime] of logs) {
       mkdirSync(join(runs, folder), { recursive: true });
       writeFileSync(join(runs, folder, 'run-worker.jsonl'), `{"type":"system","subtype":"init"}\n${readFileSync(fixturePath(file), 'utf8')}`);
-      writeFileSync(join(runs, folder, 'run-worker.seat'), `${seatNo}\n`);
+      writeFileSync(join(runs, folder, 'run-worker.seat'), '2\n');
+      writeFileSync(join(runs, folder, 'run-worker.account'), `${account}\n`);
       utimesSync(join(runs, folder, 'run-worker.jsonl'), new Date(mtime), new Date(mtime));
     }
     return body(runs);
@@ -36,38 +37,40 @@ const BEFORE = Date.parse('2026-10-26T05:00:00Z'); // before the windows of the 
 const AFTER = Date.parse('2026-11-01T00:00:00Z');
 const table = (lines) => lines.filter((l) => l.startsWith('|'));
 
-test('a seat with no session shows no number and says so; a seat with a log shows both windows, their resets, status and the log\'s time', async () => {
+const ACCOUNTS = ['acct-a', 'acct-b'];
+
+test('an account with no session shows no number and says so; an account with a log shows both windows, their resets, status and the log\'s time (#311)', async () => {
   const { quotaRows, quotaSection } = await quota();
-  withRuns([['issue-1', 2, 'real-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
-    const lines = quotaSection(quotaRows({ runs }), { now: BEFORE });
+  withRuns([['issue-1', 'acct-b', 'real-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
+    const lines = quotaSection(quotaRows({ runs, accounts: ACCOUNTS }), { now: BEFORE });
     assert.deepEqual(table(lines), [
       ...HEAD,
-      '| seat 1 | rate_limit_event | – | – | – | – | no session has run on it | – |',
-      '| seat 2 | rate_limit_event | 13% | 2026-10-26 07:10 | 3% | 2026-10-31 03:00 | allowed | 2026-10-25 00:00 |',
+      '| account acct-a | rate_limit_event | – | – | – | – | no session has run on it | – |',
+      '| account acct-b | rate_limit_event | 13% | 2026-10-26 07:10 | 3% | 2026-10-31 03:00 | allowed | 2026-10-25 00:00 |',
     ]);
     assert.ok(lines.some((l) => /no status-line file/i.test(l)), 'with none given, the section says so');
   });
 });
 
-test('a window whose reset time has passed is marked "reset since", not shown as current', async () => {
+test('a window whose reset time has passed is marked "reset since", not shown as current (#311)', async () => {
   const { quotaRows, quotaSection } = await quota();
-  withRuns([['issue-1', 2, 'real-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
-    assert.ok(table(quotaSection(quotaRows({ runs }), { now: AFTER })).includes(
-      '| seat 2 | rate_limit_event | 13% (reset since) | 2026-10-26 07:10 | 3% (reset since) | 2026-10-31 03:00 | allowed | 2026-10-25 00:00 |',
+  withRuns([['issue-1', 'acct-b', 'real-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
+    assert.ok(table(quotaSection(quotaRows({ runs, accounts: ACCOUNTS }), { now: AFTER })).includes(
+      '| account acct-b | rate_limit_event | 13% (reset since) | 2026-10-26 07:10 | 3% (reset since) | 2026-10-31 03:00 | allowed | 2026-10-25 00:00 |',
     ));
   });
 });
 
-test('a rejected window shows in the status column, with the window\'s name', async () => {
+test('a rejected window shows in the status column, with the window\'s name (#311)', async () => {
   const { quotaRows, quotaSection } = await quota();
-  withRuns([['issue-1', 1, 'synthetic-rejected-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
-    assert.ok(table(quotaSection(quotaRows({ runs }), { now: BEFORE })).includes(
-      '| seat 1 | rate_limit_event | 100% | 2026-10-26 07:10 | 74% | 2026-10-31 03:00 | rejected (five_hour) | 2026-10-25 00:00 |',
+  withRuns([['issue-1', 'acct-a', 'synthetic-rejected-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
+    assert.ok(table(quotaSection(quotaRows({ runs, accounts: ACCOUNTS }), { now: BEFORE })).includes(
+      '| account acct-a | rate_limit_event | 100% | 2026-10-26 07:10 | 74% | 2026-10-31 03:00 | rejected (five_hour) | 2026-10-25 00:00 |',
     ));
   });
 });
 
-test('a status-line file that was given adds a row from its last record that holds rate_limits, with that record\'s time', async () => {
+test('a status-line file that was given adds a row from its last record that holds rate_limits, with that record\'s time (#311)', async () => {
   const { quotaRows, quotaSection } = await quota();
   withRuns([], (runs) => {
     const file = join(runs, 'sl.jsonl');
@@ -102,28 +105,35 @@ test('the role map counts each session once, by role, model and seat; the accoun
   ]);
 });
 
-test('the digest prints the table and the role map', async () => {
+test('the digest prints the table and the role map; a record\'s own account is the role map\'s, an older one falls back to its seat\'s row (#311)', async () => {
   const { quotaRows } = await quota();
   const { digest } = await ledger();
-  withRuns([['issue-1', 2, 'real-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
-    const text = digest([], { since: '2026-10-20', until: '2026-10-27', sessions: records, quota: { rows: quotaRows({ runs }), now: BEFORE }, accounts: { 2: 'acct-b' } });
+  withRuns([['issue-1', 'acct-b', 'real-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
+    const sessions = [...records, rec({ session: 's4', tag: 'z', account: 'acct-c', team: 'probe-alpha', start: '2026-10-24T11:00:00.000Z', end: '2026-10-24T11:10:00.000Z' })];
+    const text = digest([], { since: '2026-10-20', until: '2026-10-27', sessions, quota: { rows: quotaRows({ runs, accounts: ACCOUNTS }), now: BEFORE }, accounts: { 2: 'acct-b' } });
     const block = text.slice(text.indexOf('## Quota windows'), text.indexOf('\n\nTask: '));
     assert.deepEqual(table(block.split('\n')).slice(0, 4), [
       ...HEAD,
-      '| seat 1 | rate_limit_event | – | – | – | – | no session has run on it | – |',
-      '| seat 2 | rate_limit_event | 13% | 2026-10-26 07:10 | 3% | 2026-10-31 03:00 | allowed | 2026-10-25 00:00 |',
+      '| account acct-a | rate_limit_event | – | – | – | – | no session has run on it | – |',
+      '| account acct-b | rate_limit_event | 13% | 2026-10-26 07:10 | 3% | 2026-10-31 03:00 | allowed | 2026-10-25 00:00 |',
     ]);
     assert.ok(block.includes('| worker | claude-sonnet-5-5 | 2 | 2 | acct-b |'));
+    assert.ok(block.includes('| worker | claude-sonnet-5-5 | 2 | 1 | acct-c |'));
     assert.ok(text.indexOf('## Quota windows') > text.indexOf('## Sessions'));
   });
 });
 
-// Fix round 1 (#63): one log that cannot be read (seat 1's, mode 000) must not take the ledger down.
+// The rows of the two teams of the factory's own repository, on the two accounts.
+const TEAM_ROWS = 'factory/factory-lead=acct-a\nfactory/factory-alpha=acct-b\n';
+
+// Fix round 1 (#63): one log that cannot be read (one account's, mode 000) must not take the ledger down.
 function withUnreadable(body) {
-  withRuns([['issue-1', 2, 'real-event.jsonl', '2026-10-25T00:00:00Z'], ['issue-2', 1, 'synthetic-rejected-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
+  withRuns([['issue-1', 'acct-b', 'real-event.jsonl', '2026-10-25T00:00:00Z'], ['issue-2', 'acct-a', 'synthetic-rejected-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
     chmodSync(join(runs, 'issue-2', 'run-worker.jsonl'), 0);
     mkdirSync(join(runs, 'bin'));
     mkdirSync(join(runs, 'root'));
+    mkdirSync(join(runs, 'state'));
+    writeFileSync(join(runs, 'state/accounts'), TEAM_ROWS);
     symlinkSync(process.execPath, join(runs, 'bin/node'));
     // A gh that answers the digest's calls for an empty period.
     writeFileSync(join(runs, 'bin/gh'), '#!/bin/sh\ncase "$*" in\n  "api --paginate"*) echo "[[]]" ;;\n  "api repos/o/app/actions/secrets") echo \'{"secrets":[]}\' ;;\n  *) exit 1 ;;\nesac\n');
@@ -142,7 +152,7 @@ test('--rows does not compute the quota, so an unreadable log does not fail it',
   });
 });
 
-test('--quota says in one line that a log could not be read, and exits 0', root, () => {
+test('--quota says in one line that a log could not be read, and exits 0 (#311)', root, () => {
   withUnreadable((ledgerRun) => {
     const r = ledgerRun(['--quota']);
     assert.equal(r.code, 0, r.out);
@@ -150,7 +160,7 @@ test('--quota says in one line that a log could not be read, and exits 0', root,
   });
 });
 
-test('the digest says so in its quota section, and the rest of the digest still prints', root, () => {
+test('the digest says so in its quota section, and the rest of the digest still prints (#311)', root, () => {
   withUnreadable((ledgerRun) => {
     const r = ledgerRun([]);
     assert.equal(r.code, 0, r.out);
@@ -161,15 +171,17 @@ test('the digest says so in its quota section, and the rest of the digest still 
   });
 });
 
-test('bin/factory-ledger --quota prints the table from FACTORY_RUNS and a --statusline file, and runs no gh', () => {
-  withRuns([['issue-1', 2, 'real-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
+test('bin/factory-ledger --quota prints the table from FACTORY_RUNS and a --statusline file, and runs no gh (#311)', () => {
+  withRuns([['issue-1', 'acct-b', 'real-event.jsonl', '2026-10-25T00:00:00Z']], (runs) => {
     // A PATH with node and the system tools only, so a gh call would fail.
     mkdirSync(join(runs, 'bin'));
+    mkdirSync(join(runs, 'state'));
+    writeFileSync(join(runs, 'state/accounts'), TEAM_ROWS);
     symlinkSync(process.execPath, join(runs, 'bin/node'));
-    const r = run(factory, join(factory, 'bin/factory-ledger'), ['--quota', '--statusline', fixturePath('synthetic-statusline.jsonl')], { FACTORY_RUNS: runs, PATH: `${join(runs, 'bin')}:/usr/bin:/bin` });
+    const r = run(factory, join(factory, 'bin/factory-ledger'), ['--quota', '--statusline', fixturePath('synthetic-statusline.jsonl')], { FACTORY_RUNS: runs, FACTORY_STATE: join(runs, 'state'), PATH: `${join(runs, 'bin')}:/usr/bin:/bin` });
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /^\| seat 1 \| rate_limit_event \| – \|/m);
-    assert.match(r.out, /^\| seat 2 \| rate_limit_event \| 13%/m);
+    assert.match(r.out, /^\| account acct-a \| rate_limit_event \| – \|/m);
+    assert.match(r.out, /^\| account acct-b \| rate_limit_event \| 13%/m);
     assert.match(r.out, /^\| status line synthetic-statusline\.jsonl \| status line \| 93%/m);
   });
 });

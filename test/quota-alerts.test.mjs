@@ -28,10 +28,13 @@ function world(body) {
   const [state, runs] = [join(dir, 'state'), join(dir, 'runs')];
   mkdirSync(state);
   mkdirSync(runs);
-  const log = (seatNo, line) => {
-    mkdirSync(join(runs, `issue-${seatNo}`), { recursive: true });
-    writeFileSync(join(runs, `issue-${seatNo}`, 'run-worker.jsonl'), `{"type":"system","subtype":"init"}\n${line}`);
-    writeFileSync(join(runs, `issue-${seatNo}`, 'run-worker.seat'), `${seatNo}\n`);
+  // Two teams of the factory's repository, on the accounts acct-1 and acct-2 (#311); a log is a run of one account.
+  writeFileSync(join(state, 'accounts'), 'factory/factory-lead=acct-1\nfactory/factory-alpha=acct-2\n');
+  const log = (n, line) => {
+    mkdirSync(join(runs, `issue-${n}`), { recursive: true });
+    writeFileSync(join(runs, `issue-${n}`, 'run-worker.jsonl'), `{"type":"system","subtype":"init"}\n${line}`);
+    writeFileSync(join(runs, `issue-${n}`, 'run-worker.seat'), `${n}\n`);
+    writeFileSync(join(runs, `issue-${n}`, 'run-worker.account'), `acct-${n}\n`);
   };
   const alerts = (args = ['--text'], env = {}) => {
     const { FACTORY_NO_ALERTS, FACTORY_STATUSLINE, ...outer } = process.env;
@@ -45,13 +48,14 @@ function world(body) {
   }
 }
 
-test('a rejected window is named with its seat, and nothing else: its seven-day use of 0.74 gives no line', () => {
+test('a rejected window is named with its account, and nothing else: its seven-day use of 0.74 gives no line (#311)', () => {
   world(({ log, alerts }) => {
     log(1, eventLine('synthetic-rejected-event.jsonl', {}));
     const r = alerts();
     assert.equal(r.code, 0, r.err);
     assert.equal(r.lines.length, 1, r.out);
-    assert.match(r.lines[0], /seat 1.*five-hour.*rejected/);
+    assert.match(r.lines[0], /account acct-1.*five-hour.*rejected/);
+    assert.doesNotMatch(r.lines[0], /seat/);
   });
 });
 
@@ -90,14 +94,14 @@ test('a status-line file gives no line for its use: its five-hour 93% is not nam
   });
 });
 
-test('the JSON the hook prints carries the quota lines beside a *.failed line, to the Human and to Claude', () => {
+test('the JSON the hook prints carries the quota lines beside a *.failed line, to the Human and to Claude (#311)', () => {
   world(({ state, log, alerts }) => {
     writeFileSync(join(state, 'queue-o-app.failed'), 'o/app: gh timed out\n');
     log(1, eventLine('synthetic-rejected-event.jsonl', {}));
     const o = JSON.parse(alerts([]).out);
     assert.match(o.systemMessage, /queue-o-app\.failed/);
-    assert.match(o.systemMessage, /seat 1.*rejected/);
-    assert.match(o.hookSpecificOutput.additionalContext, /seat 1.*rejected/);
+    assert.match(o.systemMessage, /account acct-1.*rejected/);
+    assert.match(o.hookSpecificOutput.additionalContext, /account acct-1.*rejected/);
   });
 });
 
@@ -125,12 +129,12 @@ function warningLine({ seven = 0.78, five = 0.3, sevenIn = 24 * HOUR }) {
   return `${JSON.stringify(e)}\n`;
 }
 
-test('an allowed_warning window is named once, with its seat, window and reset', () => {
+test('an allowed_warning window is named once, with its account, window and reset (#311)', () => {
   world(({ log, alerts }) => {
     log(2, warningLine({}));
     const r = alerts();
     assert.equal(r.lines.length, 1, r.out);
-    assert.match(r.lines[0], /seat 2.*seven-day.*warning.*78%.*resets/);
+    assert.match(r.lines[0], /account acct-2.*seven-day.*warning.*78%.*resets/);
   });
 });
 
@@ -155,7 +159,7 @@ test('a runs folder that cannot be read leaves the *.failed lines printed', () =
   });
 });
 
-test('a rejected event of another rateLimitType expires at the event\'s own resetsAt', () => {
+test('a rejected event of another rateLimitType expires at the event\'s own resetsAt (#311)', () => {
   const opus = (inSeconds) => {
     const e = JSON.parse(eventLine('synthetic-rejected-event.jsonl', { five: 0.1, seven: 0.1 }));
     e.rate_limit_info.rateLimitType = 'seven_day_opus';
@@ -166,6 +170,6 @@ test('a rejected event of another rateLimitType expires at the event\'s own rese
     log(1, opus(-HOUR));
     assert.equal(alerts().out, '');
     log(1, opus(HOUR));
-    assert.match(alerts().out, /seat 1.*rejected.*resets/);
+    assert.match(alerts().out, /account acct-1.*rejected.*resets/);
   });
 });

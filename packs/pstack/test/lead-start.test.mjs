@@ -29,7 +29,7 @@ const CLAUDE = `${node}
 const fs = require('fs');
 const dir = require('path').dirname(process.argv[1]);
 const e = process.env;
-fs.appendFileSync(dir + '/log.jsonl', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), cache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, config: e.CLAUDE_CONFIG_DIR ?? null, token: e.CLAUDE_CODE_OAUTH_TOKEN ?? null, scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null }) + '\\n');
+fs.appendFileSync(dir + '/log.jsonl', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), cache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, config: e.CLAUDE_CONFIG_DIR ?? null, token: e.CLAUDE_CODE_OAUTH_TOKEN ?? null, team: e.FACTORY_TEAM ?? null, scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null }) + '\\n');
 if (process.argv[2] === 'plugin' && fs.existsSync(dir + '/plugin-mode')) { console.error('boom'); process.exit(1); }
 `;
 
@@ -74,11 +74,12 @@ function world(body, { settings = PSTACK } = {}) {
     utimesSync(join(dir, name), mtime, mtime);
   };
   w.herdr = () => (existsSync(join(w.bin, 'herdr.log')) ? readFileSync(join(w.bin, 'herdr.log'), 'utf8').split('\n').filter(Boolean) : []);
-  // The Lead's row in the accounts file, and the account's token file (#179)
+  // The rows of the teams lead and b of zalo (factory/<repo>-<team>, #311), and the account's token file (#179). The seat-1 and
+  // lead-zalo lines are old lines of the file, which nothing reads any more.
   w.row = (account, token) => {
     const state = join(w.home, '.local/state/factory');
     mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, 'accounts'), `factory/seat-1=ann\nfactory/lead-zalo=${account}\n`);
+    writeFileSync(join(state, 'accounts'), `factory/seat-1=ann\nfactory/lead-zalo=${account}\nfactory/zalo-lead=${account}\nfactory/zalo-b=${account}\nfactory/zalo-c=${account}\nfactory/zalo-${'a'.repeat(32)}=${account}\n`);
     if (token !== undefined) {
       mkdirSync(join(w.home, '.agent-profiles/tokens'), { recursive: true });
       writeFileSync(join(w.home, '.agent-profiles/tokens', account), `${token}\n`);
@@ -413,8 +414,27 @@ describe('lead --team (#196)', () => {
     assert.ok(existsSync(join(w.home, 'factory-runs/zalo-b/name')));
     assert.ok(readdirSync(join(w.home, 'factory-runs/zalo-b/hooks')).some((f) => /^transcript-copy-[0-9a-f]{7}\.mjs$/.test(f)));
     assert.ok(!existsSync(join(w.home, 'factory-runs/zalo-lead')), 'the default team\'s folder is not made');
-    // the account row is the repository's, shared by its teams
-    assert.match(w.lead(['--team', 'b', '--dry-run']).out, /^account: ann \(row factory\/lead-zalo\)$/m);
+    // the account row is the team's own (#311)
+    assert.match(w.lead(['--team', 'b', '--dry-run']).out, /^account: ann \(row factory\/zalo-b\)$/m);
+    assert.match(w.lead(['--dry-run']).out, /^account: ann \(row factory\/zalo-lead\)$/m);
+  }));
+
+  test('each team starts on its own row, with FACTORY_TEAM=<repo>-<team> in claude\'s environment; a team with no row is refused (#311)', () => world((w) => {
+    assert.equal(w.lead(['--team', 'b']).code, 0);
+    assert.equal(w.log().at(-1).team, 'zalo-b');
+    assert.equal(w.lead().code, 0);
+    assert.equal(w.log().at(-1).team, 'zalo-lead');
+    assert.equal(w.log().filter((c) => c.argv[0] !== '--model').every((c) => c.team === null), true, 'the plugin installs do not get it');
+    const none = w.lead(['--team', 'd']);
+    assert.equal(none.code, 2);
+    assert.match(none.err, /factory use zalo-d <letter>/);
+    assert.match(none.err, /row factory\/zalo-d/);
+    const before = w.log().length;
+    assert.equal(w.lead(['--team', 'd', '--dry-run']).code, 2);
+    assert.equal(w.log().length, before);
+    // an inherited FACTORY_TEAM is replaced, never kept
+    assert.equal(w.lead(['--team', 'b'], { FACTORY_TEAM: 'other-lead' }).code, 0);
+    assert.equal(w.log().at(-1).team, 'zalo-b');
   }));
 
   test('with no --team the team is lead: zalo-lead, as today, and the dry run says so (#196)', () => world((w) => {
@@ -505,21 +525,21 @@ describe('lead token (#179)', () => {
     assert.ok(!`${r.out}${r.err}${w.herdr().join('\n')}`.includes(KEY));
   }));
 
-  test('--dry-run names the row and its account and never the token (#179)', () => world((w) => {
+  test('--dry-run names the row and its account and never the token (#311)', () => world((w) => {
     w.row('bob', KEY);
     const r = w.lead(['--dry-run']);
     assert.equal(r.code, 0, r.err);
-    assert.match(r.out, /^account: bob \(row factory\/lead-zalo\)$/m);
+    assert.match(r.out, /^account: bob \(row factory\/zalo-lead\)$/m);
     assert.ok(!`${r.out}${r.err}`.includes(KEY));
     assert.deepEqual(w.log(), []);
   }));
 
-  test('with no row nothing runs: exit 2, the command to run, and a dry run says the same (#179)', () => world((w) => {
+  test('with no row nothing runs: exit 2, the command to run, and a dry run says the same (#311)', () => world((w) => {
     rmSync(join(w.home, '.local/state/factory/accounts'));
     for (const args of [[], ['--dry-run']]) {
       const r = w.lead(args, { HERDR_PANE_ID: 'p-7' });
       assert.equal(r.code, 2);
-      assert.match(r.err, /factory use lead-zalo <letter>/);
+      assert.match(r.err, /factory use zalo-lead <letter>/);
       assert.match(r.err, /`factory`/);
     }
     assert.ok(!w.ran() && !existsSync(w.leadFile('pane')) && !existsSync(w.config));

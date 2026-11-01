@@ -53,7 +53,9 @@ function world() {
   writeFileSync(join(runs, 'factory-lead/name'), 'aardvark\n');
   writeFileSync(join(lead, 'abc.jsonl'), assistant('l1', u));
   utimesSync(join(lead, 'abc.jsonl'), NOW / 1000 - 10000, NOW / 1000 - 10000);
-  writeFileSync(join(state, 'accounts'), 'factory/seat-1=acct-one\nfactory/seat-2=acct-two\nfactory/lead-factory=acct-one\n');
+  // Two teams of the factory's own repository (#311); the seat rows and the old Lead row are old lines: they name no user of an account,
+  // and only attribute a run or a record that has no account of its own (the 170 run, the s9 record).
+  writeFileSync(join(state, 'accounts'), 'factory/factory-lead=acct-one\nfactory/factory-b=acct-two\nfactory/seat-1=acct-one\nfactory/seat-2=acct-two\nfactory/lead-factory=acct-one\n');
   writeFileSync(
     join(state, 'sessions.jsonl'),
     line({ session: 's1', role: 'reviewer', seat: 2, tag: 'reviewer', run: join(runs, 'issue-174'), repo: 'tuannd9288/factory', branch: 'issue-174-top', start: '2026-10-31T10:00:00Z', end: '2026-10-31T10:30:00Z', total_cost_usd: 1.5, model: 'claude-opus-5-5', ended: 'success' }) +
@@ -198,7 +200,7 @@ test('a run shows the name in its run-<tag>.name, a Lead the name in its folder\
   assert.ok(!names.includes('174-worker') && !names.includes('factory-lead'));
 });
 
-test('the frame: a header in plain words, what waits on you, one block per team, the accounts, today and the keys', async () => {
+test('the frame: a header in plain words, what waits on you, one block per team, the accounts, today and the keys (#311)', async () => {
   const w = world();
   const { text } = await frame(w);
   const lines = text.split('\n');
@@ -228,9 +230,10 @@ test('the frame: a header in plain words, what waits on you, one block per team,
   assert.ok(!lines.some((l) => /HARNESS|claude -p|CTX|TOKENS/.test(l)), 'the engineering columns are behind a key');
   const accounts = lines.findIndex((l) => l === 'Accounts');
   assert.deepEqual(lines.slice(accounts + 1, accounts + 3), [
-    '  a  acct-one  5h 100% resets 13:00 · 7d 20% resets 11-01 13:00 · seat 1, factory Lead',
-    '  b  acct-two  5h ? · 7d ? · seat 2',
+    '  a  acct-one  5h 100% resets 13:00 · 7d 20% resets 11-01 13:00 · factory-lead',
+    '  b  acct-two  5h ? · 7d ? · factory-b',
   ]);
+  assert.doesNotMatch(lines.slice(accounts, accounts + 3).join('\n'), /seat/);
   assert.equal(lines.at(-2), 'Today  1 pull request merged · workers and reviewers cost $1.60 on account b · waited on you 1h30');
   assert.equal(lines.at(-1), 'keys: 1-9 or Tab switch tabs, c full columns, q quits');
 });
@@ -607,14 +610,16 @@ test('the queue and the alerts come from the state folder files', async () => {
   assert.equal(queueOf(join(w.root, 'missing')).lastSweep, null);
 });
 
-test('the ledger\'s lastRecords is the one reader of "a session\'s last record", and Today counts a resumed session once', async () => {
+test('the ledger\'s lastRecords is the one reader of "a session\'s last record", and Today counts a resumed session once (#311)', async () => {
   const { lastRecords } = await import('../bin/lib/ledger.mjs');
   const rec = (end, cost) => ({ session: 's1', role: 'worker', seat: 2, tag: 't', run: '/r', start: '2026-10-31T08:00:00Z', end, total_cost_usd: cost });
   assert.deepEqual(lastRecords([rec('2026-10-31T10:00:00Z', 1), rec('2026-10-31T09:00:00Z', 0.5)]).map((r) => r.total_cost_usd), [1]);
   const { todayOf } = await top();
-  const accounts = [{ letter: 'a', users: ['seat 2'] }];
-  const t = todayOf({ now: NOW, repos: [], github: { repos: {} }, records: [rec('2026-10-31T09:00:00Z', 0.5), rec('2026-10-31T10:00:00Z', 1)], accounts });
-  assert.deepEqual(t.cost, [['a', 1]]);
+  const accounts = [{ letter: 'a', name: 'acct-one', users: ['factory-lead'] }, { letter: 'b', name: 'acct-two', users: [] }];
+  const t = todayOf({ now: NOW, repos: [], github: { repos: {} }, records: [rec('2026-10-31T09:00:00Z', 0.5), rec('2026-10-31T10:00:00Z', 1)], accounts, seatRows: { 2: 'acct-one' } });
+  assert.deepEqual(t.cost, [['a', 1]], 'a record with no account of its own is its seat\'s old row\'s');
+  const own = todayOf({ now: NOW, repos: [], github: { repos: {} }, records: [{ ...rec('2026-10-31T10:00:00Z', 2), account: 'acct-two', team: 'factory-b' }], accounts, seatRows: { 2: 'acct-one' } });
+  assert.deepEqual(own.cost, [['b', 2]], 'a record\'s own account wins');
 });
 
 test('local times: HH:MM on the day of now, MM-DD HH:MM on another, ? for no time', async () => {
@@ -681,10 +686,10 @@ test('a Lead waiting on a prompt is listed as an item that names its pane; with 
   assert.match(render(snap, { width: 200 }), /^ {2}answer {3}aardvark \(factory Lead, team lead\) {2}pane aardvark$/m);
 });
 
-test('the accounts come from the accounts file and the seats\' quota; none named, no section', async () => {
+test('the accounts come from the accounts file and each account\'s own newest event; their users are teams; none named, no section (#311)', async () => {
   const w = world();
   const { snap } = await frame(w);
-  assert.deepEqual(snap.accounts.map((a) => [a.letter, a.name, a.users]), [['a', 'acct-one', ['seat 1', 'factory Lead']], ['b', 'acct-two', ['seat 2']]]);
+  assert.deepEqual(snap.accounts.map((a) => [a.letter, a.name, a.users]), [['a', 'acct-one', ['factory-lead']], ['b', 'acct-two', ['factory-b']]]);
   rmSync(join(w.opts.state, 'accounts'));
   const none = (await frame(w)).text;
   assert.ok(!none.includes('Accounts'));
