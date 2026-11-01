@@ -3,8 +3,8 @@
 # opens one, and takes the next step. It refuses a wrong step with the reason; it never refuses a push.
 #   scripts/ship [--body-file <file>] [--title <title>]
 # 1. no pull request: opens it, only when origin's copy of the branch is HEAD (push first; the same before arming) and HEAD
-#    has a verify stamp and a red-check stamp against origin/main (a full
-#    .gate/bin/verify and .gate/bin/red-check leave them in the git dir); the body is --body-file, with `Closes #<issue>` filled in.
+#    has a red-check stamp against origin/main (.gate/bin/red-check leaves it in the git dir; the full suite runs on CI);
+#    the body is --body-file, with `Closes #<issue>` filled in.
 # 2. an armed pull request whose HEAD is past what was verified, or no longer covered: disarms it first.
 # 3. stops while the pull request carries needs-human; arms a tier 3 (labels, or .gate/bin/tier on the paths) by the same
 #    rule, then stops with "tier 3 waits for the Human's approval" until its tier check ends.

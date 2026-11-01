@@ -12,6 +12,7 @@ import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
 import { coverage } from '../../packs/pstack/scripts/lib/verdict.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 import { job, plist } from './queue.mjs';
+import { readSessions } from './records.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PRICES = JSON.parse(readFileSync(join(here, 'prices.json'), 'utf8')).models;
@@ -418,18 +419,7 @@ export function revertCount(rows, { since, until }) {
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
 
-/** The records bin/seat appended to sessions.jsonl in the state folder (#91), none when the file is absent. */
-export function readSessions(dir) {
-  const file = join(dir, 'sessions.jsonl');
-  if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8').split('\n').flatMap((l) => {
-    try {
-      return l.trim() ? [JSON.parse(l)] : [];
-    } catch {
-      return [];
-    }
-  });
-}
+export { readSessions };
 
 /** The sessions that ran in the period, one record each: a resumed session's total_cost_usd covers the whole session, so a
  * session counts once, by its last record; the records of one session are never added (#89). */
@@ -439,7 +429,7 @@ export function keptSessions(records, since, until) {
 }
 
 /** One record for each session, its last, in the order the sessions started. */
-function lastRecords(records) {
+export function lastRecords(records) {
   const last = new Map();
   for (const r of [...records].sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(r.session ?? `${r.run}#${r.tag}`, r);
   return [...last.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));

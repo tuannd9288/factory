@@ -55,7 +55,7 @@ Progress:
 - [ ] 5. Remove every mention the head still holds: `git grep -n <path>` and `git grep -n <basename>`. A mention in a
       doc or a comment you may delete in the same pull request; a mention in source means the code is used: put the
       file back.
-- [ ] 6. Validate: `.gate/bin/verify`, then `.gate/bin/red-check --base origin/main`. It must print
+- [ ] 6. Validate: `.gate/bin/verify --fast`, then `.gate/bin/red-check --base origin/main`. It must print
       `red-check: passed as a pure deletion`. On `not a pure deletion`, read `references/refusals.md`, fix, run again.
 - [ ] 7. Open the pull request as `AGENTS.md` step 4 says, with no `No-red:` line. Say in the body that it only
       deletes files knip listed at the base, and paste the `red-check` line.

@@ -176,7 +176,7 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
-- **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify`, `red-check`.
+- **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify --fast`, the tests of the part changed, `red-check`; the full suite runs on CI (#281).
 - **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit.
 - **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
 - **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
@@ -202,7 +202,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
   Checked by: `packs/pstack/test/pstack.test.mjs`.
   Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
 - **H6**: Tools are commands; permissions live outside the instructions.
-  Checked by: `kit/.claude/settings.json:3-28`.
+  Checked by: `kit/.claude/settings.json:3-12`.
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
@@ -248,7 +248,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | Path | What it is |
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
-| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
+| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
 | `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment), which Colly runs on the Human's login after his one approval |
 | `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
@@ -258,7 +258,7 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; it charges a task from the records `bin/seat` appends to `sessions.jsonl` (each names its repository and branch; an older record, or one with neither, is counted in the digest as charged to no task) and from `cwd` under `<root>/<repo>` in `--profile-dir` folders, and reads no repository profile; `--check` is its canary on Claude Code's session format |
 | `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH). With no argument: every agent profile's login, account and quota in a table, and the quota of the seats in a second one (on the MacBook a plain run is `--all`: it adds the Mac mini's and piggery's rows over ssh, and its spare Claude rows are the `~/.claude-acc<N>` folders that exist; `--json`); it runs only the vendors' status commands, reads no token and commits no account name. On the Mac mini the table is the numbered rows (seat 1, seat 2, each Lead `$FACTORY_STATE/accounts` names, sorted, the verifier) and the lettered accounts (every account the file names and every file of `~/.agent-profiles/tokens/`, read by name and by mode and date only), each with its 5h, 7d, reset, the rows that share it, and `?` where no seat reported; a row whose account has no token file is red with the line to run. `$FACTORY_STATE/accounts` (`<profile>=<account>` a line, mode 600, written through a temporary file and a rename) is the one source of a row's account (#178). `factory use <row> <letter>` rewrites it (from the MacBook, `use` and `logout` run on the Mac mini over ssh, their arguments checked first, `ssh -t` when `use` lacks one; with an argument missing: on a terminal the list and a question, else the list and exit 2); the verifier's row is refused, a Lead's waits for #179, a seat takes the new account at its next session. `factory logout <account>` moves `tokens/<account>` to `~/.agent-profiles/archive/tokens/<UTC stamp>-<account>` (folder 700, by rename, never deleting it); its rows then start nothing. Seat 1's old `seats/1/oauth-token` moves to `archive/seat-1/` at the next `login` or `use` once seat 1's account has a token. `factory login <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into (`--no-setup` skips setup-token) and stores it at `~/.agent-profiles/tokens/<account>` (mode 600, folder 700): on the Mac mini directly, from the MacBook over ssh's stdin to `factory store <account>`, never in an argument. Only the Human runs `login`, `store`, `use` and `logout`: every `bin/seat` role and the pstack Lead deny them (#177, #178) |
-| `bin/factory top` | The read-only view of every session and repository (#174): live on a terminal, or one frame with `--once`; on the MacBook it runs on the Mac mini by ssh |
+| `bin/factory top` | The read-only view of every session and repository (#174, #286): what waits on the Human first (pull requests to approve, a Lead at a prompt or a login, alerts), then one block per repository with its Lead, issues and workers, the accounts with local reset times, and Today; live on a terminal (`c` adds #174's engineering columns), or one frame with `--once [--width N] [--full]`; on the MacBook it runs on the Mac mini by ssh. Every session has an animal name from Ubuntu's release code names (`bin/lib/names.mjs`): `bin/seat` writes `run-<tag>.name`, a Lead keeps `~/factory-runs/<repo>-lead/name` and its Herdr pane carries it. A Lead's state is its newest hook event in `<repo>-lead/state.json` (`packs/pstack/bin/transcript-copy.mjs`) |
 | `bin/factory lead` | `factory lead <repo> [--new] [--dry-run]` (#166): starts the pstack Lead of a repository, resuming its newest earlier session; on the Mac mini it runs `packs/pstack/bin/lead`, on the MacBook it runs that by ssh |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH: `~/.local/bin/factory` becomes a symlink to this clone's `bin/factory`; he runs it on the MacBook and as `factory` on the Mac mini; it can be run again and replaces nothing that is not already that symlink |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
@@ -420,6 +420,11 @@ for days. The sweep also renders the two LaunchDaemon plists with the new code a
 (`/Library/LaunchDaemons`, read only): while they differ, or a plist cannot be rendered (`could not render <label>`), `queue-plist.failed` says so and `$FACTORY_STATE/plist-wanted/` holds what
 the Human installs with sudo; it goes away on the first sweep after he does. Until then the old plist still starts the same
 files, so a change to the plist's arguments or environment must keep the old ones working.
+Then, where it follows `main`, the sweep removes the worktrees of landed work (#279, `bin/lib/worktrees.mjs`), in the checkout
+and each clone under it: a linked worktree whose branch is the head of a merged pull request (`gh pr list`), whose `HEAD` holds
+no commit that is on none of the clone's remote refs (`git rev-list --count HEAD --not --remotes` prints `0`; no fetch), that is
+clean and that no live run holds. It runs `git worktree remove`, never `--force`; the branch and the run folder stay. Merged work
+left dirty or unpushed is kept and named in `queue-worktrees.failed`, whose first line names the first path.
 
 Claude Code updates itself on the stable channel; nothing in the factory pins its version (the canary, #24, is at the tag
 `before-271`).
@@ -451,7 +456,7 @@ and names `factory login <account>`. It passes a seat over only while Claude Cod
 rejected it: the last `rate_limit_event` of the seat's newest log has status
 `rejected`, until that event's `resetsAt`. No share of a window and no number of live sessions stops a seat (#194, #280): how
 many sessions run at once is the Lead's call. When the machine's load is above its cores (`sysctl -n vm.loadavg hw.ncpu`),
-start fewer workers and wait for other full verifies to finish. One team, one account by default: until
+start fewer workers. One team, one account by default: until
 #196 names teams, every session is one team's, whose account is that of the first seat its role tries (the first of the
 role's seats, or the `--seat` of a resume); a seat of another account is passed over, with a reason, and never started on, and
 when no seat of that account is free the refusal names the reset and points to `factory` and `factory use`, which the Human
@@ -503,8 +508,9 @@ denied `Read(~/factory-runs/*-lead/transcripts/**)`.
 
 A pack is what the factory holds only for one way of working, and a team copies it; the kit lays none (#132). `packs/pstack/`
 holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the pin (`settings.json`), the prose for the repository's
-own `AGENTS.md` (`section.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that
-chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no `--pack`.
+own `AGENTS.md` (`section.md`) and its sources (`yields.md`), two rows for `.gate/enforced-rules.md` and `INSTALL.md`,
+the steps; a repository that chooses it copies them in its own tier-3 pull request. There is no `.gate/pack` and no
+`--pack`.
 The Human starts a repository's pstack Lead, an interactive session, with `factory lead <repo>` (#163, #166), which runs
 `packs/pstack/bin/lead` of this clone on the Mac mini. Every day he attaches from the MacBook with
 `herdr --remote factory@tuans-mac-mini` (through Rex or any terminal) and runs `factory lead <repo>` in a pane there; from any
@@ -578,7 +584,7 @@ factory does not use these parts:
   model family runs on Claude until #182 sends it to Codex.
 - Autopilot's owners and swarm of verifiers: the adapter runs a Cursor cloud agent as a worktree subagent of the
   session, outside `bin/seat` (#182). Shipping's one verifier per pull request is taken, on the Codex CLI instead
-  (`packs/pstack/scripts/live-verify`, `packs/pstack/section.md`); its verdict is no gate
+  (`packs/pstack/scripts/live-verify`, `packs/pstack/yields.md`); its verdict is no gate
   input, so the gate's reviewer (`review`, `verdict`) stays the only judge the merge waits for.
 - The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): the adapter points them
   at `~/.claude/projects/<slug>/`, which the kit's deny rules refuse. A factory profile keeps its transcripts under its

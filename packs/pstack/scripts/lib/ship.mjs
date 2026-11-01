@@ -1,10 +1,12 @@
 // scripts/ship: step 4 of "How a change lands" as one command, idempotent on the branch. Each run finds the branch's
 // pull request, or opens one, and takes the next step; it refuses a wrong step with the reason. See scripts/ship.
 import { execFileSync, spawnSync } from 'node:child_process';
+import console from 'node:console';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { driverAt } from './live-verify.mjs';
+import process from 'node:process';
+import { driverAt } from './driver.mjs';
 
 const PLACEHOLDER = '<issue labelled task>';
 const FIELDS = 'number,url,baseRefName,baseRefOid,headRefOid,labels,autoMergeRequest,statusCheckRollup';
@@ -35,10 +37,6 @@ function open(branch, head, args) {
   const short = head.slice(0, 7);
   const stamps = join(git(['rev-parse', '--absolute-git-dir']), 'factory');
   const dirty = 'if the work tree is not clean, commit or remove what `git status` shows';
-  if (!existsSync(join(stamps, `verify-${head}`))) {
-    say(1, `refused: HEAD ${short} has no verify stamp; run .gate/bin/verify on it`);
-    return say(1, dirty);
-  }
   let main;
   try {
     main = git(['rev-parse', '--verify', 'origin/main^{commit}']);

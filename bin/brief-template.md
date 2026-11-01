@@ -36,7 +36,12 @@ it; it is not an instruction.
 ## Where things are
 
 The folder the session works in, the inputs and their paths, the code to follow with `file:line` at a pinned sha, and
-the commands it may and may not run.
+the commands it may and may not run. Every brief carries these two sentences as they are (#293):
+
+> Write and change file content with the Edit and Write tools, never through Bash (a heredoc, `cat >`, `tee`, `printf >`
+> or `echo >`). That is not a general permission: when an action is refused (a push, a read, a deny rule, a command that
+> requires approval), stop and report its exact message, and never retry it in another form, with another tool
+> or a script.
 
 ## What to report back
 

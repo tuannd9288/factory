@@ -12,7 +12,7 @@ test('on the factory host, top --once prints one frame and exits 0', () => {
     s.onHost();
     const r = s.fac('top', '--once');
     assert.equal(r.code, 0, r.out);
-    assert.match(r.stdout, /^factory top {2}load /);
+    assert.match(r.stdout, /^Mac mini {2}load /);
     assert.match(r.stdout, /\[1 All\]/);
     assert.deepEqual(SSH(s), []);
   } finally {
@@ -49,12 +49,35 @@ test('on the MacBook, top alone asks ssh for a terminal (-t); --width N goes thr
 test('top takes --once and --width N (digits) and nothing else: the usage, exit 2, and no ssh call', () => {
   const s = sandbox();
   try {
-    for (const args of [['--width', '9x'], ['--rm'], ['--width'], ['--once', 'extra'], ['--width', '90;id']]) {
+    for (const args of [['--width', '9x'], ['--rm'], ['--width'], ['--once', 'extra'], ['--width', '90;id'], ['--full', '--full'], ['--once', '--once']]) {
       const r = s.fac('top', ...args);
       assert.equal(r.code, 2, args.join(' '));
-      assert.match(r.out, /bin\/factory top \[--once\] \[--width N\]/);
+      assert.match(r.out, /bin\/factory top \[--once\] \[--width N\] \[--full\]/);
     }
     assert.deepEqual(SSH(s), []);
+  } finally {
+    s.done();
+  }
+});
+
+test('--full goes through ssh to the host, and on the host it prints the full columns header', () => {
+  const s = sandbox();
+  try {
+    s.w('ssh-factory.json', '[]');
+    s.fac('top', '--once', '--full');
+    assert.deepEqual(SSH(s), ["ssh -o ConnectTimeout=10 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory top --once --full'"]);
+  } finally {
+    s.done();
+  }
+});
+
+test('on the factory host, top --once --full prints the full columns', () => {
+  const s = sandbox();
+  try {
+    s.onHost();
+    const r = s.fac('top', '--once', '--full');
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.stdout, /^NAME .*HARNESS .*CWD BRANCH$/m);
   } finally {
     s.done();
   }

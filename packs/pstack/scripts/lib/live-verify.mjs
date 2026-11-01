@@ -11,6 +11,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realp
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { driverAt } from './driver.mjs';
 import { SCHEMA, brief, check, comment, coverage, verdictOf } from './verdict.mjs';
 
 const EXIT = { PASS: 0, 'PASS+NOTES': 0, FAIL: 1, BLOCKED: 2 };
@@ -36,16 +37,6 @@ function fetched(view) {
   if (has(view.baseRefOid) && has(view.headRefOid)) return true;
   spawnSync('git', ['fetch', '--quiet', 'origin', `refs/pull/${view.number}/head`, view.baseRefName], { stdio: 'ignore' });
   return has(view.baseRefOid) && has(view.headRefOid);
-}
-
-/** Main's driver, read from the base commit, never the candidate's: a pull request cannot redefine its own proof. */
-export function driverAt(base) {
-  try {
-    const d = JSON.parse(git(['show', `${base}:.gate/driver.json`]));
-    return String(d.name ?? '').trim() && String(d.drive ?? '').trim() ? { name: d.name, start: d.start ?? '', drive: d.drive, network: d.network === true } : null;
-  } catch {
-    return null;
-  }
 }
 
 function owners() {

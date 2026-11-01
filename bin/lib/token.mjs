@@ -60,6 +60,15 @@ export function tokenAccounts(agentProfiles) {
   return entries.filter((e) => e.isFile() && accountRefusal(e.name) === null).map((e) => e.name).sort();
 }
 
+const letterOf = (i) => (i >= 26 ? letterOf(Math.floor(i / 26) - 1) : '') + String.fromCharCode(97 + (i % 26));
+
+/** The lettered accounts, sorted: every account the accounts file names, and every token file's name. Names come from the file and
+ * from readdir; no token file is read. */
+export function accountList({ state, agentProfiles }) {
+  const names = [...new Set([...Object.values(readAccounts(state)), ...tokenAccounts(agentProfiles)])].sort();
+  return names.map((name, i) => ({ name, letter: letterOf(i) }));
+}
+
 /** The accounts file (#178), $FACTORY_STATE/accounts: "<profile>=<account>" a line, the one source of every row's account. It is
  * read as { profile: account }; a comment, a blank line or a line with no name is skipped. No file is no rows. */
 export function readAccounts(state) {

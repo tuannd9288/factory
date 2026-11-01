@@ -60,13 +60,14 @@ process.exit(verdict === 'FAIL' ? 1 : 2);
 const BODY = 'Closes #3\n\n## Summary for the Human\n- Purpose: names the operation\n';
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
-function world({ driver = true } = {}) {
+function world({ driver = true, liveVerify = true } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
   const repo = join(dir, 'app');
   const sh = join(dir, 'sh');
   cpSync(join(factory, 'kit'), repo, { recursive: true });
   // What a pstack team copies into its repository (packs/pstack/section.md): the pack's scripts and its .gate files.
-  cpSync(join(factory, 'packs/pstack/scripts'), join(repo, 'scripts'), { recursive: true });
+  // Until #264, packs/pstack/INSTALL.md lays only ship, lib/ship.mjs and lib/driver.mjs: ship must run with those alone.
+  for (const f of liveVerify ? ['.'] : ['ship', 'lib/ship.mjs', 'lib/driver.mjs']) cpSync(join(factory, 'packs/pstack/scripts', f), join(repo, 'scripts', f), { recursive: true });
   cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
   // main's driver, which ship reads at the base: filled by default, the pack's empty one when `driver` is false.
   if (driver) writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ name: 'cli', start: '', drive: 'node cli.js', network: false }));
@@ -80,12 +81,14 @@ function world({ driver = true } = {}) {
   git(repo, 'switch', '-q', '-c', 'work');
   commit(repo, { 'cli.js': 'console.log(2);\n' }, 'Print two');
   git(repo, 'push', '-q', 'origin', 'work');
-  writeFileSync(join(repo, 'scripts/live-verify'), FAKE_LIVE_VERIFY);
-  git(repo, 'update-index', '--assume-unchanged', 'scripts/live-verify');
+  if (liveVerify) {
+    writeFileSync(join(repo, 'scripts/live-verify'), FAKE_LIVE_VERIFY);
+    git(repo, 'update-index', '--assume-unchanged', 'scripts/live-verify');
+  }
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin/gh'), FAKE_GH);
   chmodSync(join(dir, 'bin/gh'), 0o755);
-  chmodSync(join(repo, 'scripts/live-verify'), 0o755);
+  if (liveVerify) chmodSync(join(repo, 'scripts/live-verify'), 0o755);
   writeFileSync(join(sh, 'verdict'), 'PASS\n');
   writeFileSync(join(dir, 'body.md'), BODY);
   const gitdir = () => join(git(repo, 'rev-parse', '--absolute-git-dir'), 'factory');
@@ -99,7 +102,6 @@ function world({ driver = true } = {}) {
       writeFileSync(join(gitdir(), name), '');
     },
     passed: (base = git(repo, 'rev-parse', 'origin/main')) => {
-      w.stamp(`verify-${w.head()}`);
       w.stamp(`red-check-${w.head()}-${base}`);
     },
     ship: (args = ['--body-file', join(dir, 'body.md')]) => {
@@ -115,18 +117,8 @@ function world({ driver = true } = {}) {
 }
 
 describe('opening the pull request', () => {
-  test('is refused without a verify stamp for the head, and says so', () => {
-    const w = world();
-    w.stamp(`red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`);
-    const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} has no verify stamp; run \.gate\/bin\/verify on it$/m);
-    assert.ok(!w.calls().some((c) => c.startsWith('pr create')), w.calls().join('\n'));
-  });
-
   test('is refused without a red-check stamp, and for one against another base', () => {
     const w = world();
-    w.stamp(`verify-${w.head()}`);
     let out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} has no red-check stamp against origin\/main [0-9a-f]{7}; run \.gate\/bin\/red-check --base origin\/main$/m);
@@ -150,7 +142,7 @@ describe('opening the pull request', () => {
     assert.match(out.out, /no red-check stamp against origin\/main/);
   });
 
-  test('opens it through gh pr create --body-file once both stamps name the head', () => {
+  test('opens it through gh pr create --body-file once the red-check stamp names the head, with no verify stamp', () => {
     const w = world();
     w.passed();
     const out = w.ship();
@@ -462,7 +454,6 @@ describe('a red-check that passed by the body\'s No-red line', () => {
   const LINE = 'No-red: a rename with no behaviour to show first';
   const passedByLine = () => {
     const w = world();
-    w.stamp(`verify-${w.head()}`);
     w.stamp(`red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`);
     writeFileSync(join(git(w.repo, 'rev-parse', '--absolute-git-dir'), 'factory', `red-check-${w.head()}-${git(w.repo, 'rev-parse', 'origin/main')}`), `${LINE}\n`);
     return w;
@@ -559,14 +550,9 @@ describe('a remote branch at a commit HEAD does not contain', () => {
 describe('a missing stamp', () => {
   const HINT = /^ship: if the work tree is not clean, commit or remove what `git status` shows$/m;
 
-  test('adds, to the refusal for a verify stamp and for a red-check stamp, what to do when the tree is not clean', () => {
+  test('adds, to the refusal for a red-check stamp, what to do when the tree is not clean', () => {
     const w = world();
-    let out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /has no verify stamp/);
-    assert.match(out.out, HINT);
-    w.stamp(`verify-${w.head()}`);
-    out = w.ship();
+    const out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /has no red-check stamp/);
     assert.match(out.out, HINT);
@@ -625,6 +611,18 @@ describe('a repository with no driver on main', () => {
   const notes = (w) => (w.read('comments.json') ? JSON.parse(w.read('comments.json')) : []);
   const plant = (w, comment) => writeFileSync(join(w.sh, 'comments.json'), JSON.stringify([...notes(w), { author: { login: 'agent' }, includesCreatedEdit: false, ...comment }]));
   const posts = (w) => w.calls().filter((c) => c.startsWith('pr comment'));
+
+  test('ships the same in a repository that has no live-verify (#288), as INSTALL.md lays the pack until #264', () => {
+    const w = world({ driver: false, liveVerify: false });
+    w.passed();
+    let out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(posts(w).length, 1, w.calls().join('\n'));
+    assert.equal(notes(w)[0].body.split('\n')[0], noteFor(w.head()));
+    assert.ok(w.calls().includes('pr merge 7 --auto --merge'), w.calls().join('\n'));
+  });
 
   test('posts one note for the head, never runs live-verify, arms, and the next run does neither again', () => {
     const w = opened();
