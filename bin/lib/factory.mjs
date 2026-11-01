@@ -550,7 +550,7 @@ const startNote = (repo, flag) => (repo === FACTORY_REPO ? '' : ` (factory lead 
 
 /** The second half of `use` on a team's row (#179, #196, #311), after the accounts file changed: that team's Lead alone, by
  * `restartTeam`, if it runs; the other teams of the repository are not touched. 0 when it was restarted or does not run, else 1. */
-async function restartLead(repo, team, account, ctx) {
+async function restartLead(repo, team, account, ctx, oldAccount) {
   const hasToken = tokenState(ctx.agentProfiles, account).ok;
   const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
   // `factory top`'s rule: a claude process with --name <repo>-<team>. A recorded pane may hold something else by now.
@@ -563,14 +563,16 @@ async function restartLead(repo, team, account, ctx) {
     console.log(`${account} has no token file yet: factory login ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
     return 1;
   }
-  return restartTeam(repo, team, account, ctx);
+  return restartTeam(repo, team, account, ctx, oldAccount);
 }
 
 /** One team's Lead: through `herdr` on PATH, waits for its pane (<runs>/<repo>-<team>/pane, written by bin/lead inside Herdr) to
  * settle, restarts it only if idle or done (`/exit`, then until Herdr reports no agent there, then
- * `packs/pstack/bin/lead <repo> [--team <team>]` in the pane, which resumes the conversation), and otherwise leaves it running. 0 once
- * the start was sent, else 1 with the reason. */
-async function restartTeam(repo, team, account, ctx) {
+ * `packs/pstack/bin/lead <repo> [--team <team>]` in the pane, which resumes the conversation), and otherwise leaves it running. When
+ * /exit leaves the pane `blocked`, Claude Code's exit dialog for background work (#315), it sends Esc, so that Claude Code stays, starts
+ * nothing, and says the Lead keeps running on `oldAccount` while its new workers take `account`. 0 once the start was sent, else 1
+ * with the reason. */
+async function restartTeam(repo, team, account, ctx, oldAccount) {
   const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
   const who = `the Lead of ${repo} (team ${team})`;
   const next = `${who} takes it at its next start${startNote(repo, flag)}`;
@@ -601,7 +603,16 @@ async function restartTeam(repo, team, account, ctx) {
     return 1;
   }
   const until = Date.now() + (Number(ctx.env.FACTORY_GONE_MS) || 30000);
-  while (stateOf(herdr(['agent', 'get', pane], 10000)) !== null) {
+  for (let at = stateOf(herdr(['agent', 'get', pane], 10000)); at !== null; at = stateOf(herdr(['agent', 'get', pane], 10000))) {
+    if (at === 'blocked') {
+      // Claude Code's exit dialog ("Background work is running"): Esc stays, and nothing is started in the pane (#315).
+      if (herdr(['agent', 'send-keys', pane, 'esc'], 10000).status !== 0) {
+        console.log(`herdr did not take Esc at the dialog ${who} was left at after /exit; it may still be waiting there; it was not started again; ${next}`);
+        return 1;
+      }
+      console.log(`${who} has background work running and was not restarted; the Lead keeps running on ${oldAccount ?? 'its old account'} until its next start; its new workers start on ${account} now`);
+      return 1;
+    }
     if (Date.now() > until) {
       console.log(`herdr still reports an agent in pane ${pane} after /exit; it was not started again; ${next}`);
       return 1;
@@ -662,6 +673,8 @@ async function use(args, env, io) {
     return 2;
   }
   let moved;
+  // The row's account before this rewrite: what a Lead that is not restarted keeps running on.
+  const oldAccount = readAccounts(ctx.state)[target.profile];
   try {
     setAccount(ctx.state, target.profile, account.name);
     moved = movedOld(ctx.agentProfiles, ctx.state);
@@ -672,7 +685,7 @@ async function use(args, env, io) {
   console.log(`${target.profile} now uses ${account.name} (${account.letter}); its next seat session takes it, and nothing else running is touched.`);
   if (moved) console.log(moved);
   const t = parseTeam(target.profile.slice('factory/'.length));
-  return t ? restartLead(t.repo, t.team, account.name, ctx) : 0;
+  return t ? restartLead(t.repo, t.team, account.name, ctx, oldAccount) : 0;
 }
 
 /** `factory logout <account>`: the account's token file moves into archive/tokens, never deleted. The rows that name it stay in the

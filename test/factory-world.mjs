@@ -41,14 +41,19 @@ CLAUDE_CONFIG_DIR="$FAKE/lead-$(basename "$PWD")" exec "$@"
   // Logs its arguments to herdr.log. `agent wait` fails while herdr-busy exists; `agent get` prints the state in herdr-state (idle
   // by default) until `agent prompt` has been sent, then fails as a pane with no agent does; herdr-stuck keeps the agent there.
   // herdr-busy-<pane> busies one pane only, and a prompt exits only the pane it names (herdr-exited-<pane>, #196).
+  // herdr-dialog: the prompt leaves the pane it names at Claude Code's exit dialog, so \`agent get\` prints blocked (#315);
+  // \`agent send-keys\` exits 1 while herdr-keys-fail exists.
   herdr: `#!/bin/sh
 echo "$*" >> "$FAKE/herdr.log"
 case "$1 $2" in
   "agent wait") if [ -f "$FAKE/herdr-busy" ] || [ -f "$FAKE/herdr-busy-$3" ]; then echo "timed out" >&2; exit 1; fi; exit 0;;
   "agent get")
     if [ -f "$FAKE/herdr-exited" ] || [ -f "$FAKE/herdr-exited-$3" ]; then echo '{"error":{"code":"agent_not_found"}}' >&2; exit 1; fi
+    if [ -f "$FAKE/herdr-blocked-$3" ]; then printf '{"agent":"claude","agent_status":"blocked"}\\n'; exit 0; fi
     printf '{"agent":"claude","agent_status":"%s"}\\n' "$(cat "$FAKE/herdr-state" 2>/dev/null || echo idle)"; exit 0;;
-  "agent prompt") if [ ! -f "$FAKE/herdr-stuck" ]; then : > "$FAKE/herdr-exited-$3"; fi; exit 0;;
+  "agent prompt")
+    if [ -f "$FAKE/herdr-dialog" ]; then : > "$FAKE/herdr-blocked-$3"; elif [ ! -f "$FAKE/herdr-stuck" ]; then : > "$FAKE/herdr-exited-$3"; fi; exit 0;;
+  "agent send-keys") if [ -f "$FAKE/herdr-keys-fail" ]; then echo "send-keys failed" >&2; exit 1; fi; exit 0;;
 esac
 exit 0
 `,
