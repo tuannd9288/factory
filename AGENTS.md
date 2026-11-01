@@ -471,9 +471,10 @@ scrub, so its commands, hooks and MCP servers get no credential from the environ
 list, seat 2, and (#188) `Write`, `Edit` and output redirects only in the session's own folders (run, work and each
 `--add-dir`), through one `Edit` rule a folder, each a real absolute path with no glob character (#192), and none of
 `mv`, `cp`, `rm`, `rmdir`, `touch` or `sed`, so it cannot move or remove the folder `research-git` clones into. Only a
-pull request the Human approves sets `hideKey` to `false`, and no agent can at run time. The scrub also drops
-`GH_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` there (probe, 2.1.308), so a `gh` started inside a command finds the `factory`
-user's own login; `gh` itself stays denied, and every seat gets an empty `GH_CONFIG_DIR`. The researcher is denied `git` itself; its git is
+pull request the Human approves sets `hideKey` to `false`, and no agent can at run time. Every seat gets an empty
+`GH_CONFIG_DIR`, so a `gh` started inside a command has no login; the scrub drops it, with `CLAUDE_CONFIG_DIR` (probe,
+2.1.308), so inside the researcher's commands such a `gh` finds the `factory` user's own login. `gh` itself stays denied
+for every role. The researcher is denied `git` itself; its git is
 `bin/research-git`, named in its brief by absolute path. It clones over https into `<run>/clones/<name>` and reads only
 those clones, by name, with `log`, `show`, `diff-tree`, `ls-files`, `rev-parse`, `rev-list` and `blame`; it refuses each
 option that runs a program or reads or writes a file the caller names, and runs git with no configuration but the
@@ -481,8 +482,8 @@ clone's own. So a brief that needs a repository's history gives its https URL an
 factory's own repository included. Known limit: the token files sit on disk, and the team holds the key by decision (#307):
 a worker or a reviewer in auto mode may run commands that read any file the `factory` user can, so the deny rules for the
 tokens folder, the archive folder and seat 1's old file (every seat, every role) cover the `Read` tool only (#183 puts their
-commands in a sandbox). The researcher reads untrusted pages and can send them out, and since #178
-its seat 2 holds a token too; while `hideKey` is `true` its grants were reviewed for that (2026-10-31): it has `Read`, `Glob`, `Grep`, `WebFetch`,
+commands in a sandbox). The researcher reads untrusted pages and can send them out, and since #178 its seat 2 holds a
+token too; while `hideKey` is `true` its grants were reviewed for that (2026-10-31): it has `Read`, `Glob`, `Grep`, `WebFetch`,
 `WebSearch`, `bin/research-git` and `ls`, `wc`, `mkdir`, `date`, `cd`, so the only tool that returns a file's content is
 `Read`, which the deny rules refuse on the tokens, the archive and the whole `~/.agent-profiles/`, and `research-git` reads
 only its own clones; the token is in `claude`'s environment alone, which the scrub keeps from every command. It has no
