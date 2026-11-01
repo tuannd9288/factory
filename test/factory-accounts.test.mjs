@@ -415,6 +415,75 @@ test('use does not start the Lead again while herdr still reports its agent afte
   }
 });
 
+const SENTENCE = (old, now, team = 'lead') => `the Lead of alpha (team ${team}) has background work running and was not restarted; the Lead keeps running on ${old} until its next start; its new workers start on ${now} now`;
+
+test('use sends Esc to a Lead left at the exit dialog, does not start it again, says so with both accounts and exits 1 (#315)', () => {
+  const s = box();
+  try {
+    mini(s);
+    withPane(s);
+    s.w('herdr-dialog', '');
+    const r = s.fac('use', '1', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes(SENTENCE('bob', 'ann')), r.out);
+    assert.equal(accountsOf(s), 'factory/alpha-lead=ann\nfactory/factory-lead=ann\n', 'the row is rewritten all the same');
+    assert.deepEqual(herdrCalls(s), ['agent wait p-7 --timeout 600000', 'agent get p-7', 'agent prompt p-7 /exit', 'agent get p-7', 'agent send-keys p-7 esc']);
+  } finally {
+    s.done();
+  }
+});
+
+test('use says "its old account" when the row had none before use made it (#315)', () => {
+  const s = box();
+  try {
+    mini(s);
+    withPane(s, 'p-9', { team: 'c' });
+    s.w('herdr-dialog', '');
+    const r = s.fac('use', 'alpha-c', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes(SENTENCE('its old account', 'ann', 'c')), r.out);
+    assert.ok(herdrCalls(s).includes('agent send-keys p-9 esc'));
+    assert.ok(!herdrCalls(s).some((c) => c.startsWith('pane run')));
+  } finally {
+    s.done();
+  }
+});
+
+test('use, when herdr does not take Esc at the exit dialog, says so, starts nothing and exits 1 (#315)', () => {
+  const s = box();
+  try {
+    mini(s);
+    withPane(s);
+    s.w('herdr-dialog', '');
+    s.w('herdr-keys-fail', '');
+    const r = s.fac('use', '1', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /herdr did not take Esc/);
+    assert.ok(herdrCalls(s).includes('agent send-keys p-7 esc'));
+    assert.ok(!herdrCalls(s).some((c) => c.startsWith('pane run')));
+  } finally {
+    s.done();
+  }
+});
+
+test('use leaves the other team of the repository alone when the named team\'s Lead is left at the exit dialog (#315)', () => {
+  const s = box();
+  try {
+    mini(s, { accounts: TWO_TEAMS });
+    withPane(s, 'p-7');
+    withPane(s, 'p-8', { team: 'b' });
+    s.w('herdr-dialog', '');
+    const r = s.fac('use', 'alpha-b', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.ok(r.out.includes(SENTENCE('bob', 'ann', 'b')), r.out);
+    assert.ok(herdrCalls(s).includes('agent send-keys p-8 esc'));
+    assert.ok(!herdrCalls(s).some((c) => c.includes('p-7')), 'no call names the other team\'s pane');
+    assert.equal(accountsOf(s), 'factory/alpha-b=ann\nfactory/alpha-lead=bob\nfactory/factory-lead=ann\n');
+  } finally {
+    s.done();
+  }
+});
+
 test('use on a Lead with no process calls no herdr, whatever state.json says, and exits 0 (#311)', () => {
   for (const event of [null, 'SessionEnd', 'Stop', 'Notification']) {
     const s = box();
