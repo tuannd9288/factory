@@ -163,7 +163,111 @@ test('use <row> <letter> rewrites the accounts file through a rename, mode 600, 
   }
 });
 
-test('use refuses the verifier\'s row, a Lead\'s row for now, an unknown row or letter, and a row that is not a number', () => {
+/** A Lead's pane as `bin/lead` leaves it, and what herdr was asked, in order. */
+const withPane = (s, pane = 'p-7') => {
+  mkdirSync(join(s.env.FACTORY_RUNS, 'alpha-lead'), { recursive: true });
+  writeFileSync(join(s.env.FACTORY_RUNS, 'alpha-lead/pane'), `${pane}\n`);
+};
+const herdrCalls = (s) => (existsSync(join(s.fake, 'herdr.log')) ? readFileSync(join(s.fake, 'herdr.log'), 'utf8').split('\n').filter(Boolean) : []);
+const accountsOf = (s) => readFileSync(join(s.state, 'accounts'), 'utf8');
+
+for (const state of ['idle', 'done']) {
+  test(`use on a Lead's row that is ${state} rewrites the file, then waits, exits the Lead and starts it again in its pane, in this order (#179)`, () => {
+    const s = sandbox();
+    try {
+      mini(s);
+      withPane(s);
+      s.w('herdr-state', state);
+      const r = s.fac('use', '3', 'a');
+      assert.equal(r.code, 0, r.out);
+      assert.equal(accountsOf(s), 'factory/seat-1=ann\nfactory/seat-2=ann\nfactory/lead-alpha=ann\n');
+      const calls = herdrCalls(s);
+      assert.deepEqual(calls.slice(0, 4), ['agent wait p-7 --timeout 600000', 'agent get p-7', 'agent prompt p-7 /exit', 'agent get p-7']);
+      assert.equal(calls.length, 5);
+      assert.match(calls[4], /^pane run p-7 \S*\/packs\/pstack\/bin\/lead alpha$/);
+      assert.ok(!r.out.includes(ANN) && !r.out.includes(BOB), 'no token in the output');
+    } finally {
+      s.done();
+    }
+  });
+}
+
+test('use on a Lead\'s row that stays busy rewrites the file, restarts nothing and exits 1, saying so (#179)', () => {
+  const s = sandbox();
+  try {
+    mini(s);
+    withPane(s);
+    s.w('herdr-busy', '');
+    const r = s.fac('use', '3', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /not idle/);
+    assert.match(accountsOf(s), /factory\/lead-alpha=ann/);
+    assert.deepEqual(herdrCalls(s), ['agent wait p-7 --timeout 600000']);
+  } finally {
+    s.done();
+  }
+});
+
+test('use on a Lead\'s row that is blocked at a prompt leaves it running and names the state it saw (#179)', () => {
+  const s = sandbox();
+  try {
+    mini(s);
+    withPane(s);
+    s.w('herdr-state', 'blocked');
+    const r = s.fac('use', '3', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /blocked/);
+    assert.deepEqual(herdrCalls(s), ['agent wait p-7 --timeout 600000', 'agent get p-7']);
+  } finally {
+    s.done();
+  }
+});
+
+test('use on a Lead\'s row with no pane file rewrites the file, calls no herdr and says the Lead takes it at its next start (#179)', () => {
+  const s = sandbox();
+  try {
+    mini(s);
+    const r = s.fac('use', '3', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /factory lead alpha/);
+    assert.match(accountsOf(s), /factory\/lead-alpha=ann/);
+    assert.deepEqual(herdrCalls(s), []);
+  } finally {
+    s.done();
+  }
+});
+
+test('use on a Lead\'s row to an account with no token file restarts nothing (#179)', () => {
+  const s = sandbox();
+  try {
+    mini(s, { tokens: { bob: BOB } });
+    withPane(s);
+    const r = s.fac('use', '3', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /factory login ann/);
+    assert.deepEqual(herdrCalls(s), []);
+  } finally {
+    s.done();
+  }
+});
+
+test('use does not start the Lead again while herdr still reports its agent after /exit (#179)', () => {
+  const s = sandbox();
+  try {
+    mini(s);
+    withPane(s);
+    s.w('herdr-stuck', '');
+    s.env.FACTORY_GONE_MS = '300';
+    const r = s.fac('use', '3', 'a');
+    assert.equal(r.code, 1, r.out);
+    assert.ok(herdrCalls(s).includes('agent prompt p-7 /exit'));
+    assert.ok(!herdrCalls(s).some((c) => c.startsWith('pane run')));
+  } finally {
+    s.done();
+  }
+});
+
+test('use refuses the verifier\'s row, an unknown row or letter, and a row that is not a number', () => {
   const s = sandbox();
   try {
     mini(s);
@@ -171,9 +275,6 @@ test('use refuses the verifier\'s row, a Lead\'s row for now, an unknown row or 
     const verifier = s.fac('use', '4', 'a');
     assert.equal(verifier.code, 2, verifier.out);
     assert.match(verifier.out, /Codex/);
-    const lead = s.fac('use', '3', 'a');
-    assert.equal(lead.code, 2, lead.out);
-    assert.match(lead.out, /#179/);
     for (const args of [['9', 'a'], ['1', 'z'], ['x', 'a'], ['1', '1'], ['0', 'a'], ['1', 'a', 'extra']]) {
       const r = s.fac('use', ...args);
       assert.equal(r.code, 2, args.join(' ') + r.out);
