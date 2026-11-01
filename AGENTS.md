@@ -143,8 +143,8 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy.
 - His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
-  `reviewer` environment), which Colly then applies on his login; and the reviewer's secret, where a repository uses
-  the kit's Claude reviewer.
+  `reviewer` environment, "Allow auto-merge"), which Colly then applies on his login; and the reviewer's secret, where a
+  repository uses the kit's Claude reviewer.
 - Logging into a repository's profile and the verifier's Codex profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.

@@ -1,12 +1,11 @@
-// The admin step of taking a repository in, run by Colly from the factory clone, on the Human's gh login, after his
-// one approval of what it prints: it checks the repository is the one he names, by name and id, shows every change,
-// and with --apply invites the agents' account (write), sets the four repository variables the kit reads (#210), then
-// the factory's rulesets, creates the reviewer environment and turns on the repository's "Allow auto-merge" (#139), then
-// reads back what it set; the gate's ruleset follows
-// the repository variable GATE_REVIEWER (#155: entire has its own), as it is being set. It prints the four values it
-// sets and no other variable's. It calls only gh against GitHub's API, with the factory's own files: never git, never the
-// target's .envrc, scripts or hooks, so nothing the target holds runs with his authority. A second run changes
-// nothing. See bin/onboard-owner for the arguments.
+// The admin step of taking a repository in, run by Colly from the factory clone, on the Human's gh login, after his one
+// approval of what it prints: it checks the repository is the one he names, by name and id, shows every change, and
+// with --apply invites the agents' account (write), sets the four repository variables the kit reads (#210), then the
+// factory's rulesets, creates the reviewer environment and turns on the repository's "Allow auto-merge" (#139), then
+// reads back what it set; the gate's ruleset follows the repository variable GATE_REVIEWER (#155: entire has its own),
+// as it is being set. It prints the four values it sets and no other variable's. It calls only gh against GitHub's API,
+// with the factory's own files: never git, never the target's .envrc, scripts or hooks, so nothing the target holds
+// runs with his authority. A second run changes nothing. See bin/onboard-owner for the arguments.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -168,7 +167,7 @@ export function plan(slug, agent, have, want) {
     calls.push({ what: `environment ${ENV}`, method: 'PUT', path: `${repo}/environments/${ENV}`, body: { deployment_branch_policy: BRANCH_POLICY } });
   if (!have.policies.some((p) => p.name === want.branch && (p.type ?? 'branch') === 'branch'))
     calls.push({ what: `environment ${ENV} deploys from ${want.branch}`, method: 'POST', path: `${repo}/environments/${ENV}/deployment-branch-policies`, body: { name: want.branch, type: 'branch' } });
-  if (have.autoMerge !== true) calls.push({ what: 'allow auto-merge', method: 'PATCH', path: repo, body: { allow_auto_merge: true } });
+  if (!have.autoMerge) calls.push({ what: 'allow auto-merge', method: 'PATCH', path: repo, body: { allow_auto_merge: true } });
   for (const name of want.drop) {
     const now = have.rulesets.find((x) => x.name === name);
     if (now) calls.push({ what: `ruleset ${name}, which the kit's gate replaces`, method: 'DELETE', path: `${repo}/rulesets/${now.id}` });
