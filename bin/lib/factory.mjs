@@ -7,7 +7,7 @@
 // The committed profile list below holds no account name: the factory repository is public, and an account is an email local
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { join, resolve } from 'node:path';
@@ -513,8 +513,73 @@ const defaultAsk = async (question) => {
   }
 };
 
-/** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only and a
- * Lead's waits for #179, which restarts the Lead; a seat takes its new account at its next session and nothing running is touched. */
+const herdr = (args, timeout) => spawnSync('herdr', args, { encoding: 'utf8', timeout });
+const stateOf = (r) => {
+  const find = (v) => (v && typeof v === 'object' ? Object.entries(v).reduce((found, [k, x]) => found ?? (k === 'agent_status' && typeof x === 'string' ? x : find(x)), null) : null);
+  try {
+    return r.status === 0 ? find(JSON.parse(r.stdout)) : null;
+  } catch {
+    return null;
+  }
+};
+const shellWord = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** The second half of `use` on a Lead's row (#179), after the accounts file changed: through `herdr` on PATH, waits for the Lead's
+ * pane (<runs>/<repo>-lead/pane, written by bin/lead inside Herdr) to settle, restarts it only if idle or done (`/exit`, then until
+ * Herdr reports no agent there, then `packs/pstack/bin/lead <repo>` in the pane, which resumes the conversation), and otherwise
+ * leaves it running. 0 once the start was sent, else 1 with the reason. */
+async function restartLead(repo, account, ctx) {
+  const next = `the Lead takes it at its next start (factory lead ${repo})`;
+  if (!tokenState(ctx.agentProfiles, account).ok) {
+    console.log(`${account} has no token file yet: factory login ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
+    return 1;
+  }
+  let pane = '';
+  try {
+    pane = readFileSync(join(ctx.runs, `${repo}-lead`, 'pane'), 'utf8').trim();
+  } catch {
+    // no pane file: the Lead did not start inside Herdr
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(pane)) {
+    console.log(`no Herdr pane is recorded for the Lead of ${repo}; ${next}`);
+    return 1;
+  }
+  console.log(`waiting for the Lead of ${repo} in pane ${pane} to settle (up to 10 minutes)`);
+  const waited = herdr(['agent', 'wait', pane, '--timeout', '600000'], 610000);
+  if (waited.status !== 0) {
+    console.log(`the Lead of ${repo} is not idle after the wait (or herdr failed); it keeps running and was not restarted; ${next}`);
+    return 1;
+  }
+  const seen = stateOf(herdr(['agent', 'get', pane], 10000));
+  if (seen !== 'idle' && seen !== 'done') {
+    console.log(`the Lead of ${repo} is ${seen ?? 'in a state herdr did not report'}, not idle; it keeps running and was not restarted; ${next}`);
+    return 1;
+  }
+  console.log(`the Lead of ${repo} is ${seen}; sending /exit`);
+  if (herdr(['agent', 'prompt', pane, '/exit'], 10000).status !== 0) {
+    console.log(`herdr did not take /exit; the Lead of ${repo} keeps running; ${next}`);
+    return 1;
+  }
+  const until = Date.now() + (Number(ctx.env.FACTORY_GONE_MS) || 30000);
+  while (stateOf(herdr(['agent', 'get', pane], 10000)) !== null) {
+    if (Date.now() > until) {
+      console.log(`herdr still reports an agent in pane ${pane} after /exit; it was not started again; ${next}`);
+      return 1;
+    }
+    await sleep(200);
+  }
+  const lead = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/bin/lead');
+  if (herdr(['pane', 'run', pane, `${shellWord(lead)} ${repo}`], 10000).status !== 0) {
+    console.log(`herdr did not run the start in pane ${pane}; ${next}`);
+    return 1;
+  }
+  console.log(`started the Lead of ${repo} again in pane ${pane}; it resumes its conversation on ${account}`);
+  return 0;
+}
+
+/** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only; a
+ * seat takes its new account at its next session and nothing running is touched; a Lead's row also restarts that Lead (#179). */
 async function use(args, env, io) {
   if (placeOf(env) !== 'factory') return remote('use', args, env);
   if (args.length > 2) {
@@ -547,10 +612,7 @@ async function use(args, env, io) {
     console.error('bin/factory: the verifier\'s row is read-only: Codex has no token file, so use does not apply to it');
     return 2;
   }
-  if (!/^factory\/seat-[12]$/.test(target.profile)) {
-    console.error(`bin/factory: ${target.profile} is a Lead's row; moving it restarts the Lead, which comes with #179. Nothing was changed.`);
-    return 2;
-  }
+  const isLead = target.profile.startsWith('factory/lead-');
   let moved;
   try {
     setAccount(ctx.state, target.profile, account.name);
@@ -558,6 +620,11 @@ async function use(args, env, io) {
   } catch (e) {
     console.error(`bin/factory: ${e.message}`);
     return 1;
+  }
+  if (isLead) {
+    console.log(`${target.profile} now uses ${account.name} (${account.letter}).`);
+    if (moved) console.log(moved);
+    return restartLead(target.profile.slice('factory/lead-'.length), account.name, ctx);
   }
   console.log(`${target.profile.replace('factory/seat-', 'seat ')} now uses ${account.name} (${account.letter}); it takes effect at its next session, and nothing running is touched.`);
   if (!tokenState(ctx.agentProfiles, account.name).ok) console.log(`${account.name} has no token file yet: factory login ${account.name}`);

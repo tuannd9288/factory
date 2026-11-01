@@ -10,7 +10,7 @@ import { ROOT, reexec, withStartLock } from './checkout.mjs';
 import { firstFree } from './names.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
-import { seatAccounts, tokenDir } from './token.mjs';
+import { readTokenFile, seatAccounts, tokenDir } from './token.mjs';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. */
@@ -349,16 +349,10 @@ export function parseArgs(argv) {
  * file is missing (and then names `factory login`), empty or holds any byte outside printable ASCII (0x21-0x7E): such a value
  * would make Node throw an error that quotes it. */
 function readToken(path, seat, account) {
-  let text = '';
-  let missing = false;
-  try {
-    text = readFileSync(path, 'latin1').replace(/[\r\n]+$/, '');
-  } catch (e) {
-    missing = e.code === 'ENOENT';
-  }
-  if (missing) throw new Refused(`seat ${seat}: the account ${account} has no token file ${path}; the Human runs \`factory login ${account}\``);
-  if (!/^[\x21-\x7e]+$/.test(text)) throw new Refused(`seat ${seat}: the token file ${path} is empty or not printable ASCII`);
-  return text;
+  const r = readTokenFile(path);
+  if (r.error === 'missing') throw new Refused(`seat ${seat}: the account ${account} has no token file ${path}; the Human runs \`factory login ${account}\``);
+  if (r.error) throw new Refused(`seat ${seat}: the token file ${path} is empty or not printable ASCII`);
+  return r.token;
 }
 
 const onPath = (name, PATH) => (PATH ?? '').split(':').some((d) => d && existsSync(join(d, name)));

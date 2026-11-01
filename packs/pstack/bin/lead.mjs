@@ -1,5 +1,7 @@
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one repository. This file holds the pure parts (the arguments of
-// claude, the enabled plugins, the refusals) and the start. Nothing here reads a credential or logs in.
+// claude, the enabled plugins, the refusals) and the start. It never logs in. When the accounts file has a row for the Lead
+// (factory/lead-<repo>, #179), it reads that account's token file just before it starts claude and gives it to claude's
+// environment alone (CLAUDE_CODE_OAUTH_TOKEN), with no scrub, in auto mode (the Human, 2026-11-01); it prints none of it.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -9,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { firstFree } from '../../../bin/lib/names.mjs';
 import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
+import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
 const USAGE = 'usage: factory lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
@@ -247,6 +250,14 @@ function main(argv, env) {
     return 1;
   }
 
+  const state = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  const row = `factory/lead-${repo}`;
+  const account = readAccounts(state)[row] ?? null;
+  if (account && accountRefusal(account)) {
+    process.stderr.write(`bin/lead: the account of ${row} is not a plain account name\n`);
+    return 2;
+  }
+
   if (flags.includes('--dry-run')) {
     const shown = leadArgs({ repo, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, hookScript }).argv;
     process.stdout.write(`${cwd}\n`);
@@ -255,6 +266,7 @@ function main(argv, env) {
     process.stdout.write(`transcript hook: ${hook}\n`);
     process.stdout.write(`${shown.join(' ')}\n`);
     process.stdout.write(`${sessionLine}\n`);
+    process.stdout.write(`${account ? `account: ${account} (row ${row})` : `account: none (no row ${row})`}\n`);
     return 0;
   }
 
@@ -265,7 +277,7 @@ function main(argv, env) {
     return 1;
   }
 
-  const name = leadName(runDir, resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')));
+  const name = leadName(runDir, state);
   if (env.HERDR_PANE_ID) renamePane(runDir, name, env.HERDR_PANE_ID);
 
   const setup = spawnSync('.gate/bin/setup', [], { cwd, stdio: 'inherit' });
@@ -290,9 +302,23 @@ function main(argv, env) {
   }
   if (claudeDirt(cwd) !== before) process.stderr.write(`bin/lead: the install changed .claude/ in ${cwd}; check git status there\n`);
 
+  // The token goes to claude's environment alone, never to the plugin installs above or to a message below.
+  const childEnv = { ...env, CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginRoot };
+  if (account) {
+    const path = join(tokenDir(profiles), account);
+    const t = readTokenFile(path);
+    if (t.error) {
+      process.stderr.write(`bin/lead: ${t.error === 'missing' ? `the account ${account} has no token file ${path}; the Human runs \`factory login ${account}\`` : `the token file ${path} is empty or not printable ASCII`}\n`);
+      return 2;
+    }
+    childEnv.CLAUDE_CODE_OAUTH_TOKEN = t.token;
+  } else {
+    process.stderr.write(`bin/lead: note: no row ${row} in the accounts file; the Lead runs on its profile's own login\n`);
+  }
+
   // Ctrl-C reaches this process as well as claude, which uses it itself; like system(), ignore SIGINT and SIGQUIT while the child runs.
   for (const s of ['SIGINT', 'SIGQUIT']) process.on(s, () => {});
-  const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit', env: { ...env, CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginRoot } });
+  const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit', env: childEnv });
   if (r.error) {
     process.stderr.write(`bin/lead: ${command[0]}: ${r.error.message}\n`);
     return 1;
