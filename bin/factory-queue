@@ -13,4 +13,36 @@
 # None found is a sweep of nothing that says so, not an error. --repo gives an explicit list in place of the search.
 # A rollback is a revert pull request through the gate. Turning the ruleset off is the Human's emergency step alone,
 # with auto-merge off on every open pull request first: with the ruleset off, every one of them would land unjudged.
+# The lock: a sweep that holds it records its pid in queue.lock; the next sweep takes over a lock whose pid is not running,
+# and one it cannot read once it is ten minutes old (takeLock in bin/lib/queue.mjs), so nobody removes it by hand.
+# The job: `plist` prints io.github.tuannd9288.factory.queue, which lists no repository: every 60 s from this clone, with the
+# gh and node the shell finds, logging to ~/Library/Logs/factory/queue.log. With --daemon it is a LaunchDaemon run by the
+# account that printed it, factory, with that account's HOME, and never KeepAlive: a sweep exits after each run, so it would
+# restart at once, in a loop. Before loading it, run `check` from the same shell: it runs one sweep in the job's environment,
+# makes the log's folder, which launchd does not, and says whether the job is ready. factory's gh login keeps its token in a
+# file (gh auth login --insecure-storage), since the keychain is locked over SSH and under launchd. The Human installs the
+# plist with `sudo install -o root -g wheel -m 644 <plist> /Library/LaunchDaemons/io.github.tuannd9288.factory.queue.plist`,
+# loads it with `sudo launchctl bootstrap system <that path>` and stops it with
+# `sudo launchctl bootout system/io.github.tuannd9288.factory.queue`.
+# The checkout the daemons and bin/seat run from, ~/WORKSPACES, follows main (#257) in the first step of each sweep
+# (bin/lib/checkout.mjs, in ~/WORKSPACES only, or where FACTORY_CHECKOUT names a clone, which is how the tests run it): git
+# fetch, then git merge --ff-only --no-overwrite-ignore of the tip it fetched, and nothing else moves the checkout. It
+# refuses, moving nothing and leaving queue-checkout.failed (the alerts hook and the digest show it): local changes, a branch
+# that is not main, a failed fetch, a main that is not a fast-forward, a failed pull. It moves a file in the way (an ignored
+# one that a commit brings in) to $FACTORY_STATE/archive/<sha7>-<time>/ and deletes nothing. It waits until liveRuns (every
+# run-*.pid in ~/factory-runs/*/, and claims, of any seat) is 0, under $FACTORY_STATE/checkout.lock, which every start of a
+# run (bin/seat) holds from before it registers until its claim is written, and no longer (the plugin install and the spawn
+# come after); a refused start names the lock's holder; a start that loaded older code than the checkout now holds starts
+# again once (FACTORY_REEXEC). A deferral says nothing until two hours, then queue-checkout.failed says how far behind and why.
+# The Lead's Stop and SessionEnd hooks run a copy of transcript-copy.mjs in its run folder (hooks/transcript-copy-<sha7>.mjs,
+# reused, never removed), since its pane stays open for days. The sweep also renders the two LaunchDaemon plists with the new
+# code and compares them with the installed ones (/Library/LaunchDaemons, read only): while they differ, or a plist cannot be
+# rendered (`could not render <label>`), queue-plist.failed says so and $FACTORY_STATE/plist-wanted/ holds what the Human
+# installs with sudo; it goes away on the first sweep after he does. Until then the old plist still starts the same files, so a
+# change to the plist's arguments or environment must keep the old ones working.
+# Then, where it follows main, the sweep removes the worktrees of landed work (#279, bin/lib/worktrees.mjs), in the checkout
+# and each clone under it: a linked worktree whose branch is the head of a merged pull request (gh pr list), whose HEAD holds
+# no commit that is on none of the clone's remote refs (git rev-list --count HEAD --not --remotes prints 0; no fetch), that is
+# clean and that no live run holds. It runs git worktree remove, never --force; the branch and the run folder stay. Merged work
+# left dirty or unpushed is kept and named in queue-worktrees.failed, whose first line names the first path.
 exec node "$(dirname "$0")/lib/queue.mjs" "$@"
