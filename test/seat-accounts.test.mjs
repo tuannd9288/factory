@@ -89,7 +89,7 @@ test('an old factory/lead-<repo> line is no team: FACTORY_TEAM=lead-<repo> is re
 }));
 
 test('a row of a repository that is not onboarded starts nothing: refused before anything is claimed, naming the repository (#311)', () => world((w) => {
-  w.accounts('factory/nosuchrepo-lead=acct-one\nfactory/probe-lead=acct-one\n');
+  w.accounts('factory/nosuchrepo-lead=acct-one\nfactory/probe-lead=acct-one\nfactory/factory-lead=acct-one\n');
   const r = w.start('worker', ['--tag', 'x'], { FACTORY_TEAM: 'nosuchrepo-lead' });
   assert.equal(r.code, 2, r.out + r.err);
   assert.match(r.err, /nosuchrepo.*not an onboarded repository/);

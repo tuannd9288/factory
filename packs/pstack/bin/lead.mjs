@@ -1,5 +1,5 @@
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one team of a repository (#196: --team, default lead; the session is named
-// <repo>-<team> and its folder is ~/factory-runs/<repo>-<team>/; the account row is the repository's). This file holds the pure parts (the arguments of
+// <repo>-<team> and its folder is ~/factory-runs/<repo>-<team>/; the account row is the team's, factory/<repo>-<team>). This file holds the pure parts (the arguments of
 // claude, the enabled plugins, the refusals) and the start. Nobody logs in (#179): the Lead needs the row factory/<repo>-<team> in the
 // accounts file (#311) and refuses to start without it; it sets FACTORY_TEAM=<repo>-<team> in claude's environment for bin/seat; it reads that account's token file once, before setup, and gives it to claude's
 // environment alone (CLAUDE_CODE_OAUTH_TOKEN), with no scrub, in auto mode (the Human, 2026-11-01); it prints none of it. It also
@@ -12,6 +12,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { DEFAULT_TEAM, TEAM, firstFree } from '../../../bin/lib/names.mjs';
+import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
@@ -65,25 +66,8 @@ const denyOf = (cwd) => [
   'Read(~/.agent-profiles/tokens/**)', 'Read(~/.agent-profiles/archive/**)', 'Read(~/.agent-profiles/seats/1/oauth-token)',
 ];
 
-/** The reason to refuse a start, or null: repo is a plain folder name and root/repo is a real folder with .git, .gate/ and .envrc. */
-export function refusal(repo, root) {
-  // GitHub's own name characters only: the name goes into the deny rules' paths, where a glob character would bend them.
-  if (typeof repo !== 'string' || !/^[A-Za-z0-9._-]+$/.test(repo) || repo === '.' || repo.startsWith('-') || repo.includes('..')) {
-    return `bin/lead: "${repo ?? ''}" is not a plain folder name`;
-  }
-  const dir = join(root, repo);
-  let st = null;
-  try {
-    st = lstatSync(dir);
-  } catch {
-    // a missing folder is refused below
-  }
-  if (!st || st.isSymbolicLink() || !st.isDirectory()) return `bin/lead: ${dir} is not a folder of its own (missing, a symlink or a file)`;
-  if (!existsSync(join(dir, '.git'))) return `bin/lead: ${dir} has no .git of its own, so it is not a clone`;
-  if (!existsSync(join(dir, '.gate'))) return `bin/lead: ${dir} has no .gate/, so it is not an onboarded clone`;
-  if (!existsSync(join(dir, '.envrc'))) return `bin/lead: ${dir} has no .envrc, so it has no profile`;
-  return null;
-}
+// The reason to refuse a start, or null, lives in bin/lib/repos.mjs (#311), which bin/seat and the teams use too.
+export { refusal };
 
 export const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 

@@ -151,6 +151,21 @@ test('a resume keeps its seat: it is refused only while its account is rejected,
   });
 });
 
+test('liveOfAccount counts the live runs of an account, an old run through its seat\'s row, and not a run whose process is gone (#311)', async () => {
+  const { liveOfAccount } = await lib();
+  world((runs, add) => {
+    add(2, { account: A });
+    add(1, { account: A, folder: 'issue-2' });
+    add(1, { account: B });
+    add(2, { account: A, live: false });
+    add(2); // an old run: no .account file
+    assert.equal(liveOfAccount(runs, A), 2);
+    assert.equal(liveOfAccount(runs, A, { 2: A }), 3, 'the old run counts under its seat\'s row');
+    assert.equal(liveOfAccount(runs, B), 1);
+    assert.equal(liveOfAccount(runs, 'acct-none'), 0);
+  });
+});
+
 test('a seat other than 1 or 2 is refused (#311)', async () => {
   const { chooseSeat } = await lib();
   world((runs) => assert.throws(() => chooseSeat({ runs, account: A, resumeSeat: 3 }), /seat 3/));

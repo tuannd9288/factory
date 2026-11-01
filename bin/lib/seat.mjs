@@ -10,7 +10,8 @@ import { ROOT, reexec, withStartLock } from './checkout.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
-import { readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
+import { repoOk } from './repos.mjs';
+import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. */
@@ -213,6 +214,12 @@ export function liveRuns(runs, list = runFiles) {
   return countLive(runs, () => true, list);
 }
 
+/** How many runs of an account have a live process (#311), counted as liveCount does. A run with no .account file counts under the
+ * account its seat's old row names (seatRows, { seat: account }) while that row is in the file, as accountEvent reads it. */
+export function liveOfAccount(runs, account, seatRows = {}, list = runFiles) {
+  return countLive(runs, (p) => accountOf(p, seatRows) === account, list);
+}
+
 function countLive(runs, keep, list) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const before = list(runs, '.pid').sort();
@@ -367,10 +374,18 @@ export function launch(argv, env = process.env) {
   // The session runs on its team's account (#311): the team comes from the Lead that started it, in FACTORY_TEAM, and a start without
   // one, with a malformed one or with a team that has no row is refused here, before anything is claimed.
   const team = env.FACTORY_TEAM;
-  if (!team) throw new Refused('FACTORY_TEAM is not set: a session runs on its team\'s account, and bin/seat takes the team from the Lead that started it, as <repo>-<team>');
-  if (!parseTeam(team)) throw new Refused(`FACTORY_TEAM ${JSON.stringify(String(team).slice(0, 80))} is not <repo>-<team> (the team is a letter, then at most 31 lowercase letters and digits)`);
+  if (!team) throw new Refused('FACTORY_TEAM is not set: a session runs on its team\'s account, and bin/seat takes the team from the Lead that started it, as <repo>-<team>. A Lead started before #311 has none: start it again with `factory lead <repo> [--team <team>]`');
+  // The value is not quoted: a pasted secret must not come back (as token.mjs does for names).
+  const parsed = parseTeam(team);
+  if (!parsed) throw new Refused('FACTORY_TEAM is malformed: it must be <repo>-<team> (the team is a letter, then at most 31 lowercase letters and digits)');
+  // Like AO's `pick`, which refuses an account that is unknown, being removed or signed out and takes no fallback
+  // (backend/internal/service/agentaccounts/service.go:819-855@9dc1c14): a team of a repository that is neither onboarded nor the
+  // factory is no team, so an old factory/lead-<repo> line, or a row of a repository taken out, starts nothing. AO's fallbacks to a
+  // default or to another signed-in account (service.go:268-282, 376-416) are not taken: nothing picks an account by itself.
+  if (!repoOk(parsed.repo, env.FACTORY_ROOT ?? ROOT)) throw new Refused(`the repository ${parsed.repo} of the team ${team} is not an onboarded repository or the factory, so ${team} is no team`);
   const account = readAccounts(state)[`factory/${team}`];
   if (!account) throw new Refused(`the team ${team} has no row factory/${team} in the accounts file ${join(state, 'accounts')}; the Human sets one with \`factory use ${team} <letter>\``);
+  if (accountRefusal(account)) throw new Refused(`the account of the row factory/${team} is not a plain account name`);
   const tag = o.tag ?? (o.resume ? basename(brief, extname(brief)) : o.role);
   // run-<tag>.claim.pid is the claim of a start of <tag>, so a tag of that shape, in any case on a disk that ignores case, would
   // take another's claim files as its run files.

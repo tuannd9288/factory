@@ -14,11 +14,12 @@ import { createInterface } from 'node:readline/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quotaRows } from './quota.mjs';
+import { liveOfAccount } from './seat.mjs';
 import { quote } from '../../packs/pstack/bin/lead.mjs';
 import { DEFAULT_TEAM, TEAM, parseTeam } from './names.mjs';
-import { repoOk, teamRows } from './teams.mjs';
+import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { leadTeams } from './top.mjs';
-import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
+import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -164,13 +165,21 @@ export function readPlace(place, ctx) {
     }
   }
   const accounts = place === 'factory' ? readAccounts(ctx.state) : {};
+  const seatRows = place === 'factory' ? seatAccounts(ctx.state) : {};
   const letters = place === 'factory' ? new Map(accountList(ctx).map((a) => [a.name, a.letter])) : new Map();
   let numbered = 0;
   return profilesOf(place, ctx).map((p) => {
     const c = check(p, { ...ctx, accounts });
     const n = p.numbered ? (numbered += 1) : null;
     const q = c.account ? quota.find((x) => x.account === c.account) : null;
-    const live = null;
+    let live = null;
+    if (c.account) {
+      try {
+        live = liveOfAccount(ctx.runs, c.account, seatRows);
+      } catch {
+        live = null;
+      }
+    }
     // A row of the file that is not logged in shows both ways out: log its account in, or move the row to another account.
     const login = p.byFile && c.loggedIn === false ? [...(c.account ? [`factory login ${c.account}`] : []), `factory use ${n} <letter>`].join('\n') : p.login;
     return {
@@ -259,7 +268,7 @@ const sharedCell = (names) => (names.join(', ').length <= 24 ? names.join(', ') 
 const red = (text) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[31m${text}\x1b[0m` : text);
 
 /** The lines of the lettered accounts (Mac mini): for each, its 5h and 7d use with the reset, the token file, and the numbers of the
- * rows that name it. The quota is the newest a seat of that account reported; "?" where none did. */
+ * rows that name it. The quota is the newest a run of that account reported; "?" where none did. */
 export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }) {
   const win = (w) => (w ? windowCell(w, now) : '?');
   const heads = accounts.map(({ name, letter }) => {
@@ -534,6 +543,10 @@ const stateOf = (r) => {
 };
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
+/** The command that starts a team's Lead, in brackets, or nothing for the factory itself: the launcher refuses `factory`, which is the
+ * checkout's root and not a folder under it. */
+const startNote = (repo, flag) => (repo === FACTORY_REPO ? '' : ` (factory lead ${repo}${flag})`);
+
 /** The second half of `use` on a team's row (#179, #196, #311), after the accounts file changed: that team's Lead alone, by
  * `restartTeam`, if it runs; the other teams of the repository are not touched. 0 when it was restarted or does not run, else 1. */
 async function restartLead(repo, team, account, ctx) {
@@ -541,7 +554,7 @@ async function restartLead(repo, team, account, ctx) {
   const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
   // `factory top`'s rule: a claude process with --name <repo>-<team>. A recorded pane may hold something else by now.
   if (!leadTeams(repo).includes(team)) {
-    console.log(`the Lead of ${repo} (team ${team}) is not running; it takes ${account} at its next start (factory lead ${repo}${flag})`);
+    console.log(`the Lead of ${repo} (team ${team}) is not running; it takes ${account} at its next start${startNote(repo, flag)}`);
     if (!hasToken) console.log(`${account} has no token file yet: that next start is refused until factory login ${account}`);
     return 0;
   }
@@ -559,7 +572,7 @@ async function restartLead(repo, team, account, ctx) {
 async function restartTeam(repo, team, account, ctx) {
   const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
   const who = `the Lead of ${repo} (team ${team})`;
-  const next = `${who} takes it at its next start (factory lead ${repo}${flag})`;
+  const next = `${who} takes it at its next start${startNote(repo, flag)}`;
   let pane = '';
   try {
     pane = readFileSync(join(ctx.runs, `${repo}-${team}`, 'pane'), 'utf8').trim();
@@ -604,8 +617,8 @@ async function restartTeam(repo, team, account, ctx) {
 }
 
 /** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only; a
- * seat takes its new account at its next session and nothing running is touched; a Lead's row also restarts that Lead if it runs
- * (#179). The row is a number, or `<repo>-<team>` for an onboarded repository or the factory, which makes the row when the file has none. */
+ * team's next seat session takes its new account and nothing else running is touched; the row also restarts that team's Lead alone,
+ * if it runs (#179, #311). The row is a number, or `<repo>-<team>` for an onboarded repository or the factory, which makes the row when the file has none. */
 async function use(args, env, io) {
   if (placeOf(env) !== 'factory') return remote('use', args, env);
   if (args.length > 2) {

@@ -453,9 +453,12 @@ environment only (#311). The team is `FACTORY_TEAM`, `<repo>-<team>`, which the 
 runs; the account is the team's row `factory/<repo>-<team>` in `$FACTORY_STATE/accounts`, the token
 `~/.agent-profiles/tokens/<account>`. With no `FACTORY_TEAM`, a malformed one or a team with no row it starts nothing, before it
 claims anything, naming what is missing (`factory use <repo>-<team> <letter>`); an account with no token file starts nothing and
-names `factory login <account>`. The seat rows (`factory/seat-N`) and `factory/lead-<repo>` are read no more (a hard cut, no
-alias); only a run or a record from before #311, with no account of its own, is counted under the account its seat's old row
-names. A seat is a slot: a new session takes the first seat of its role's list, a resume keeps its own (`--seat`). Each run
+names `factory login <account>`. A team of a repository that is neither onboarded nor `factory` is no team and is refused
+too, so an old `factory/lead-<repo>` line starts nothing, as AO's account `pick` refuses an unknown one and takes no fallback
+(agent-orchestrator `backend/internal/service/agentaccounts/service.go:819-855@9dc1c14`); piggery likewise hands a child a name
+and resolves it at launch (`internal/driver/local/runner.go:361-379@67c083e`). The seat rows (`factory/seat-N`) and
+`factory/lead-<repo>` are read no more by any start (a hard cut, no alias); only a run or a record from before #311, with no
+account of its own, is counted under the account its seat's old row names. A seat is a slot: a new session takes the first seat of its role's list, a resume keeps its own (`--seat`). Each run
 writes `run-<tag>.account` beside `run-<tag>.seat`, and its `sessions.jsonl` record names its `team` and `account`. A team's
 account is out only while Claude Code has rejected it: the last `rate_limit_event` of the newest log among that account's runs
 has status `rejected`, until that event's `resetsAt`; the session is then refused, naming the account and the reset, and never

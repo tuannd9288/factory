@@ -4,13 +4,10 @@
 // row is no team at all.
 import { ROOT } from './checkout.mjs';
 import { parseTeam } from './names.mjs';
-import { refusal } from '../../packs/pstack/bin/lead.mjs';
+import { FACTORY_REPO, repoOk } from './repos.mjs';
 import { readAccounts } from './token.mjs';
 
-export const FACTORY_REPO = 'factory';
-
-/** Whether repo can have teams: the factory itself, or an onboarded clone under root. */
-export const repoOk = (repo, root = ROOT) => repo === FACTORY_REPO || refusal(repo, root) === null;
+export { FACTORY_REPO, repoOk };
 
 /** The teams the file names, sorted by name: { name, row, repo, team, account }. */
 export function teamRows(state, root = ROOT) {
