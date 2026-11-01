@@ -125,6 +125,14 @@ export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   // lines of an accounts file: only a run from before #311, with no .account file, is attributed through them; no start reads them.
   w.account = 'acct-one';
   w.team = 'factory-lead';
+  // The factory's root (FACTORY_ROOT) holds the onboarded repository probe, as bin/onboard leaves one (#311); `factory` needs no folder.
+  w.froot = join(root, 'froot');
+  w.onboard = (name) => {
+    mkdirSync(join(w.froot, name, '.git'), { recursive: true });
+    mkdirSync(join(w.froot, name, '.gate'));
+    writeFileSync(join(w.froot, name, '.envrc'), 'x\n');
+  };
+  w.onboard('probe');
   writeFileSync(join(w.state, 'accounts'), 'factory/factory-lead=acct-one\nfactory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
   w.tokenOf = (account) => join(w.profiles, 'tokens', account);
   w.tokenFile = w.tokenOf('acct-one');
@@ -134,7 +142,7 @@ export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   // A null in extra takes the variable out (FACTORY_TEAM: null is a start with no team).
   w.env = (extra = {}) => Object.fromEntries(Object.entries({
     PATH: `${w.bin}:${dirname(process.execPath)}`, HOME: w.home, AGENT_PROFILES: w.profiles, FACTORY_RUNS: w.runs, FACTORY_STATE: w.state,
-    FACTORY_TEAM: w.team, FAKE_OUT: w.out(), ...extra,
+    FACTORY_TEAM: w.team, FACTORY_ROOT: w.froot, FAKE_OUT: w.out(), ...extra,
   }).filter(([, v]) => v !== null));
   w.seat = (args, extra = {}) => {
     const r = spawnSync(process.execPath, [SEAT_JS, ...args], { encoding: 'utf8', env: w.env(extra), cwd: w.root, timeout: 20000 });

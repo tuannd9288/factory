@@ -78,6 +78,48 @@ test('no FACTORY_TEAM, a malformed one, or a team with no row: refused before an
   assert.equal(w.records().length, 0);
 }));
 
+test('an old factory/lead-<repo> line is no team: FACTORY_TEAM=lead-<repo> is refused before anything is claimed, naming the repository (#311)', () => world((w) => {
+  w.onboard('alpha');
+  w.accounts('factory/lead-alpha=acct-one\n');
+  const r = w.start('worker', ['--tag', 'x'], { FACTORY_TEAM: 'lead-alpha' });
+  assert.equal(r.code, 2, r.out + r.err);
+  assert.match(r.err, /\blead\b.*not an onboarded repository/);
+  assert.deepEqual(started(w), [], 'the run folder stays empty');
+  assert.equal(w.records().length, 0);
+}));
+
+test('a row of a repository that is not onboarded starts nothing: refused before anything is claimed, naming the repository (#311)', () => world((w) => {
+  w.accounts('factory/nosuchrepo-lead=acct-one\nfactory/probe-lead=acct-one\n');
+  const r = w.start('worker', ['--tag', 'x'], { FACTORY_TEAM: 'nosuchrepo-lead' });
+  assert.equal(r.code, 2, r.out + r.err);
+  assert.match(r.err, /nosuchrepo.*not an onboarded repository/);
+  assert.deepEqual(started(w), []);
+  assert.equal(w.start('worker', ['--tag', 'y'], { FACTORY_TEAM: 'probe-lead' }).code, 0, 'an onboarded repository is accepted');
+  assert.equal(w.start('worker', ['--tag', 'z'], { FACTORY_TEAM: 'factory-lead' }).code, 0, 'and so is the factory, which has no folder');
+}));
+
+test('the refusal of a start with no FACTORY_TEAM names the restart of the Lead; one with a malformed value does not quote it (#311)', () => world((w) => {
+  const none = w.start('worker', ['--tag', 'x'], { FACTORY_TEAM: null });
+  assert.equal(none.code, 2, none.out + none.err);
+  assert.match(none.err, /factory lead <repo> \[--team <team>\]/);
+  const bad = w.start('worker', ['--tag', 'y'], { FACTORY_TEAM: 'sk-ant-oat01-SECRETSECRET' });
+  assert.equal(bad.code, 2, bad.out + bad.err);
+  assert.match(bad.err, /FACTORY_TEAM.*<repo>-<team>/s);
+  assert.ok(!(bad.out + bad.err).includes('SECRETSECRET'), 'the value does not come back');
+  assert.deepEqual(started(w), []);
+}));
+
+test('an account name in the row that is not a plain account name is refused before a token path is built (#311)', () => world((w) => {
+  w.accounts('factory/factory-lead=../acct-one\n');
+  mkdirSync(join(w.profiles, 'x'), { recursive: true });
+  writeFileSync(join(w.profiles, 'x/acct-one'), `${TWO}\n`);
+  const r = w.start('worker', ['--tag', 'x']);
+  assert.equal(r.code, 2, r.out + r.err);
+  assert.match(r.err, /account/);
+  assert.ok(!(r.out + r.err).includes('../acct-one'), 'the name is not quoted');
+  assert.deepEqual(started(w), []);
+}));
+
 test('the seat rows are not read: with only factory/seat-N in the file, every start is refused (#311)', () => world((w) => {
   w.accounts('factory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
   for (const team of ['seat-1', 'factory-lead', null]) {

@@ -1,4 +1,4 @@
-// #178: `factory` on the Mac mini lists numbered rows (seat 1, seat 2, each Lead the accounts file names, the verifier) and lettered
+// #178, #311: `factory` on the Mac mini lists numbered rows (each team the accounts file names, the verifier) and lettered
 // accounts; `factory use <row> <letter>` rewrites the accounts file; `factory logout <account>` moves a token into the archive.
 // Fake claude, codex, gh and ssh on PATH and fixture folders; every name and token below is invented.
 import { test } from 'node:test';
@@ -256,6 +256,53 @@ test('use <repo>-<team> with a busy Lead exits 1 and does not touch the other te
     assert.equal(r.code, 1, r.out);
     assert.match(r.out, /team b\).*not idle/);
     assert.deepEqual(herdrCalls(s), ['agent wait p-8 --timeout 600000']);
+  } finally {
+    s.done();
+  }
+});
+
+test('the LIVE column of a team row counts the live runs of its account; teams on one account show the same number (#311)', () => {
+  const s = box();
+  try {
+    mini(s, { accounts: 'factory/alpha-b=ann\nfactory/alpha-lead=bob\nfactory/factory-lead=ann\nfactory/gamma-lead=cat\nfactory/seat-2=ann\n' });
+    onboarded(s, 'gamma');
+    const folder = join(s.env.FACTORY_RUNS, 'issue-1');
+    mkdirSync(folder, { recursive: true });
+    const live = (tag, files) => {
+      writeFileSync(join(folder, `run-${tag}.pid`), `${process.pid}\n`);
+      for (const [ext, text] of Object.entries(files)) writeFileSync(join(folder, `run-${tag}.${ext}`), text);
+    };
+    live('a1', { account: 'ann\n', seat: '2\n' });
+    live('a2', { seat: '2\n' }); // an old run: its seat's old row names ann
+    live('b1', { account: 'bob\n', seat: '1\n' });
+    writeFileSync(join(folder, 'run-dead.pid'), '999999\n');
+    writeFileSync(join(folder, 'run-dead.account'), 'bob\n');
+    const rows = JSON.parse(s.fac('--json').out);
+    const liveOf = (p) => rows.find((x) => x.profile === p).live;
+    assert.equal(liveOf('factory/alpha-b'), 2);
+    assert.equal(liveOf('factory/factory-lead'), 2);
+    assert.equal(liveOf('factory/alpha-lead'), 1);
+    assert.equal(liveOf('factory/gamma-lead'), 0);
+    assert.equal(rows.find((x) => x.profile === 'factory/verifier').live, null);
+  } finally {
+    s.done();
+  }
+});
+
+test('use factory-lead names no launcher command, since the launcher refuses the factory as a repository: the Lead takes the account at its next start (#311)', () => {
+  const s = box();
+  try {
+    mini(s, { accounts: 'factory/factory-lead=ann\n' });
+    const idle = s.fac('use', 'factory-lead', 'b');
+    assert.equal(idle.code, 0, idle.out);
+    assert.match(idle.out, /takes bob at its next start/);
+    assert.doesNotMatch(idle.out, /factory lead factory/);
+    withPane(s, null, { repo: 'factory' });
+    const running = s.fac('use', 'factory-lead', 'a');
+    assert.equal(running.code, 1, running.out);
+    assert.match(running.out, /next start/);
+    assert.doesNotMatch(running.out, /factory lead factory/);
+    assert.deepEqual(herdrCalls(s), []);
   } finally {
     s.done();
   }
