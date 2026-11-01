@@ -277,6 +277,7 @@ test('the LIVE column of a team row counts the live runs of its account; teams o
     live('b1', { account: 'bob\n', seat: '1\n' });
     writeFileSync(join(folder, 'run-dead.pid'), '999999\n');
     writeFileSync(join(folder, 'run-dead.account'), 'bob\n');
+    s.w('gh-factory', 'agent-x'); // a logged-in gh row names an account but runs no session
     const rows = JSON.parse(s.fac('--json').out);
     const liveOf = (p) => rows.find((x) => x.profile === p).live;
     assert.equal(liveOf('factory/alpha-b'), 2);
@@ -284,6 +285,7 @@ test('the LIVE column of a team row counts the live runs of its account; teams o
     assert.equal(liveOf('factory/alpha-lead'), 1);
     assert.equal(liveOf('factory/gamma-lead'), 0);
     assert.equal(rows.find((x) => x.profile === 'factory/verifier').live, null);
+    assert.equal(rows.find((x) => x.profile === 'factory/gh').live, null);
   } finally {
     s.done();
   }
