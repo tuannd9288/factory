@@ -111,10 +111,10 @@ test('the session gets its preset, the brief on stdin, the work folder as cwd, a
   assert.equal(saw.env.spec, null, 'the supervisor\'s own settings do not reach the session');
 }));
 
-test('an --add-dir reaches claude as a directory and as an Edit rule (#192)', () => world(async (w) => {
+test('an --add-dir reaches claude as a directory, and as an Edit rule for the researcher (#192, #307)', () => world(async (w) => {
   const extra = join(w.root, 'extra');
   mkdirSync(extra);
-  const r = w.start('worker', ['--add-dir', extra]);
+  const r = w.start('researcher', ['--add-dir', extra, '--seat', '2']);
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => existsSync(w.out()) && w.records().length === 1, 'the session');
   const { argv } = w.saw();
