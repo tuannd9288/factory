@@ -463,26 +463,26 @@ when no seat of that account is free the refusal names the reset and points to `
 runs to move the team. A session the limit cut off is
 resumed by the Lead after that reset, which the refusal names and `factory` shows, with `bin/seat <role>
 <brief> --run <folder> --work <folder> --resume <session id> --seat <n>`; nothing resumes it in the background. Every
-session runs with
-`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, so its commands, hooks and MCP servers get no credential from the environment, and
-every role is denied `env` and `printenv` (#181). With the scrub set, Claude Code forces the `default` permission mode,
-so bin/seat asks for it. Every role's `Write` and `Edit` tools and output redirects reach only the session's own folders
-(run, work and each `--add-dir`), through one `Edit` rule a folder, as `acceptEdits` limited them; the worker and the
-reviewer also get the filesystem commands `acceptEdits` approved (`mv`, `cp`, `rm`, `rmdir`, `touch`, and the worker
-`sed`), and the researcher none of them, so it cannot move or remove the folder `research-git` clones into (#188).
-Each folder must be a real absolute path with no glob character, because its rule is a gitignore pattern (#192). The
-scrub also drops `GH_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` there (probe, 2.1.308), so a `gh` started inside a command
-finds the `factory` user's own login; `gh` itself stays denied. The researcher is denied `git` itself; its git is
+seat runs in auto mode with no role allow list and every deny rule, `env` and `printenv` included, and holds the team's
+key: the Human's decision of 2026-11-01 (#307), with no scrub, since `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` makes Claude Code
+force the `default` mode (2.1.308 to 2.1.316). Only `StructuredOutput`, the run's `--skill` and its own `--allow` rules are
+granted. The one exception is the researcher while `hideKey` on its row in `PRESETS` is `true` (the default): it keeps the
+scrub, so its commands, hooks and MCP servers get no credential from the environment, the `default` mode, its short allow
+list, seat 2, and (#188) `Write`, `Edit` and output redirects only in the session's own folders (run, work and each
+`--add-dir`), through one `Edit` rule a folder, each a real absolute path with no glob character (#192), and none of
+`mv`, `cp`, `rm`, `rmdir`, `touch` or `sed`, so it cannot move or remove the folder `research-git` clones into. Only a
+pull request the Human approves sets `hideKey` to `false`, and no agent can at run time. The scrub also drops
+`GH_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` there (probe, 2.1.308), so a `gh` started inside a command finds the `factory`
+user's own login; `gh` itself stays denied, and every seat gets an empty `GH_CONFIG_DIR`. The researcher is denied `git` itself; its git is
 `bin/research-git`, named in its brief by absolute path. It clones over https into `<run>/clones/<name>` and reads only
 those clones, by name, with `log`, `show`, `diff-tree`, `ls-files`, `rev-parse`, `rev-list` and `blame`; it refuses each
 option that runs a program or reads or writes a file the caller names, and runs git with no configuration but the
 clone's own. So a brief that needs a repository's history gives its https URL and a pushed commit, never a path, the
-factory's own repository included. Known limit: the token files sit on disk. Claude Code refuses `cat`, `grep` or
-`git -C` on a path outside the session's folders (probe, 2.1.308), but the worker and the reviewer may run `node` and
-`git -c`, which read and write any file the `factory` user can, and the worker's `sed` can write any such file too; the
-deny rules for the tokens folder, the archive folder and seat 1's old file (every seat, every role) cover the `Read` tool
-only (#183 puts their commands in a sandbox). The researcher reads untrusted pages and can send them out, and since #178
-its seat 2 holds a token too; its grants were reviewed for that (2026-10-31): it has `Read`, `Glob`, `Grep`, `WebFetch`,
+factory's own repository included. Known limit: the token files sit on disk, and the team holds the key by decision (#307):
+a worker or a reviewer in auto mode may run commands that read any file the `factory` user can, so the deny rules for the
+tokens folder, the archive folder and seat 1's old file (every seat, every role) cover the `Read` tool only (#183 puts their
+commands in a sandbox). The researcher reads untrusted pages and can send them out, and since #178
+its seat 2 holds a token too; while `hideKey` is `true` its grants were reviewed for that (2026-10-31): it has `Read`, `Glob`, `Grep`, `WebFetch`,
 `WebSearch`, `bin/research-git` and `ls`, `wc`, `mkdir`, `date`, `cd`, so the only tool that returns a file's content is
 `Read`, which the deny rules refuse on the tokens, the archive and the whole `~/.agent-profiles/`, and `research-git` reads
 only its own clones; the token is in `claude`'s environment alone, which the scrub keeps from every command. It has no
