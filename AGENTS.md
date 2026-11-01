@@ -4,39 +4,44 @@ This repository (`tuannd9288/factory`) is the root of the Human's software facto
 in the agents' own macOS account, `factory` (#24), as `~/WORKSPACES`; each repository in the factory is a subfolder
 there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`tuan9288-agent`
 alone), their profiles and their Herdr; the Human reaches it with `ssh factory@<the Mac mini>`. His own account keeps
-his SSH keys and gh login behind its home, `drwx------` on the Mac mini (Colly's measure, 2026-10-24); the canary's
-`#24 file` lines (at the tag `before-271`) checked that both files are refused. The clone is outside `~/Desktop`, which macOS privacy controls (TCC)
-close to launchd jobs that were not granted access; not tested here. This file covers the factory's rules and taking a repository in. Inside a repository, that
-repository's own `AGENTS.md` governs.
+his SSH keys and gh login behind its home, which is `drwx------` on the Mac mini. The clone is outside `~/Desktop`, which
+macOS privacy controls (TCC) close to launchd jobs that were not granted access. This file covers the factory's rules
+and taking a repository in. Inside a repository, that repository's own `AGENTS.md` governs.
 
 ## Decisions
 
-- **K1, 2026-10-21 (the Human: "Triển khai theo đề xuất đi").** A reversible change in tier 1 or 2 merges by rule
-  once the repository's gate is green on its head commit. The Human keeps tier 3, a change stuck after three
-  rounds, and every deploy.
-- No change auto-merges in a repository until its gate has passed the attacks and the 20 seeded + 20 clean probes
-  on a scratch repository against two bars (the Human, 2026-10-21): the mechanical bar, every mechanical defect
-  caught; and the full-gate bar, with the real reviewer, at least 18/20 seeded caught, every load-bearing one caught,
-  at most 1/20 clean blocked. `probes/plan.md` states both; `probes/results.md` has the first run's numbers (both at the tag `before-271`).
-- agent-desk stays parked. Every lead, worker and reviewer runs through Claude Code. (In this section since 2026-10-21,
-  `1b319ee`.)
-
-Each line below gives the Human's decision or decisions on one matter, its date and its source; the lines run by date.
-A quote keeps his words and his language. The WORKSPACES map is
+Each line below gives the Human's decisions on one matter, with their dates and sources, and says what holds now; the
+lines run by the date each matter was first decided. A quote keeps his words and his language. A decision he later
+replaced is no longer stated here; its source link stays, and git keeps the old line. The WORKSPACES map is
 https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-25, relayed by Colly.
 
 - **Use what exists first, 2026-10-18.** Use a ready-made product first; build only when it falls short. Source:
   agent-desk issue #269, as the map's "Đã quyết" block records it.
 - **First product repository, 2026-10-20.** It is not docparse or tuanhub-notifier: "đang ổn, không cần". Source:
   the live copy of the page "Môi trường repo cho agent", decision 3, as the map records it.
+- **Merging, 2026-10-21 and 2026-10-30.** A reversible change in tier 1 or 2 merges by rule once the repository's gate
+  is green on its head commit; the Human keeps tier 3, a change stuck after three rounds, and every deploy (K1,
+  2026-10-21: "Triển khai theo đề xuất đi"). A pull request auto-merges once the required checks (3a) are green on its
+  head commit, and tier 3 still waits for his approval (#203, which he approved "theo đề xuất" on 2026-10-30). Attack 12
+  and the 20 seeded + 20 clean probes re-run when real use calls for them (#153; the Human, 2026-10-29: "ok, đưa về
+  Triage, và theo dõi thực tế factory triển khai có hiệu quả hơn là đi xử lý cái vấn đề có thể không xảy ra không?").
+  The pack's Lead arms auto-merge through `scripts/ship` (#163, #304). Sources:
+  https://github.com/tuannd9288/factory/issues/203 (area 4) and https://github.com/tuannd9288/factory/issues/153; the
+  bar of 2026-10-21 is `probes/plan.md` at the tag `before-271`.
+- **agent-desk and Claude Code, 2026-10-21 and 2026-10-27.** agent-desk stays parked. Every lead, worker and reviewer
+  the factory itself runs goes through Claude Code. The instruction file is for any harness, and `ship` and the live
+  verifier are the pstack team's, in `packs/pstack/` (#132, 2026-10-27). Sources: `1b319ee`;
+  https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962.
 - **seatwork, 2026-10-21.** seatwork may be used freely, its code and its text alike. Source: the page "Factory của
   anh", p:372, as the map records it (the page's wording: "seatwork dùng thoải mái, cả mã lẫn chữ").
-- **One thin core, a pack for each way of working, 2026-10-22.** The core is the environment, the gate and the ledger;
-  a way of working is a pack that a repository chooses by one tier-3 line; only the pstack pack is built now. There
-  is no piggery pack (T1 off), OTel stays off (T2 off, as the map records it), and only the Human can bypass
-  the tag ruleset. The Human agreed to all eight decisions on the page as it recommended them. Source:
+- **One thin core, a folder for each way of working, 2026-10-22 and 2026-10-27.** The core is the environment, the
+  gate and the ledger. A way of working is a folder in `packs/` that a team copies into its repository; the kit lays
+  none (#132, 2026-10-27), and only the pstack pack is built now. There is no piggery pack (T1 off), OTel stays off
+  (T2 off, as the map records it), and only the Human can bypass the tag ruleset. The Human agreed to all eight
+  decisions on the 2026-10-22 page as it recommended them. Sources:
   https://github.com/tuannd9288/factory/issues/2#issuecomment-6337959043 (the page:
-  https://github.com/tuannd9288/factory/issues/2#issuecomment-6336996220).
+  https://github.com/tuannd9288/factory/issues/2#issuecomment-6336996220) and
+  https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962.
 - **Cleanup of unused code, 2026-10-22.** C1, C2 and C3 all take option B; T1 and T2 on, T3 off; the Human approved
   all five as the page recommended. As the Lead's summary of the page puts it: one sweep of each repository when it
   joins, then the weekly digest counts again (C1); for a pull request that only deletes, a machine proof stands in for
@@ -70,17 +75,22 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   open task, computed in the sweep. T2 off: HumanLayer's phone plugin is not taken. Sources: the bodies of
   https://github.com/tuannd9288/factory/issues/62, /63 (K2), /64 (T1) and /68 (T2); his words:
   https://github.com/tuannd9288/factory/issues/63#issuecomment-6401665776.
-- **Control surfaces (#68), 2026-10-25.** K3: keep Paseo's usage plugin as it is. K1 = C, which holds on his own check
-  (still waiting on him): Rex replaces Ghostty, and Herdr for the interactive sessions on the MacBook, and Herdr keeps
-  the factory's sessions on the Mac mini; if a Claude Code session at a permission prompt in an unfocused tab shows no
-  blocked mark in the tab header and the session picker, K1 becomes B. K2 = B: layer 1e and contract H9 are added.
+- **Control surfaces (#68), 2026-10-25 and 2026-10-29.** The factory runs on Ghostty and Herdr until it is finished,
+  and Rex and Paseo are rolled out after that. His words to Colly in chat, relayed by Colly: "trước mắt cứ chạy với
+  ghostty + herdr cho hoàn thành cái factory rồi triển khai rex và paseo" (2026-10-29), and "nếu đang bị mở rộng ra thì
+  dừng lại, dùng Herdr TUI hoặc APP đã" (2026-10-31; the Lead's translation: "if it is widening, stop, and use Herdr's
+  TUI or app for now"). Then K1 = C, which holds on his own check (still waiting on him): Rex replaces Ghostty, and
+  Herdr for the interactive sessions on the MacBook, and Herdr keeps the factory's sessions on the Mac mini; if a
+  Claude Code session at a permission prompt in an unfocused tab shows no blocked mark in the tab header and the
+  session picker, K1 becomes B. K3: keep Paseo's usage plugin as it is. K2 = B: layer 1e and contract H9 are added.
   T3 = on (#78's body): Remote Control for Colly's and the Lead's interactive sessions, beside Paseo, following
   whichever account the session runs on. On 2026-10-26 the Human deferred it until he moves to an account that can use
   it: "Tài khoản này tau không dùng được /remote-control delay sau được không Hoặc tau chuyển tài khoản khác khi
-  tiện?" (https://github.com/tuannd9288/factory/issues/78#issuecomment-6400797388). Paseo stays. Sources:
+  tiện?" (https://github.com/tuannd9288/factory/issues/78#issuecomment-6400797388). Sources:
   https://github.com/tuannd9288/factory/issues/68#issuecomment-6393212307 (K3),
-  https://github.com/tuannd9288/factory/issues/68#issuecomment-6394536120 (K1, K2; T3 was pending there) and
-  https://github.com/tuannd9288/factory/issues/78 (T3 on).
+  https://github.com/tuannd9288/factory/issues/68#issuecomment-6394536120 (K1, K2; T3 was pending there),
+  https://github.com/tuannd9288/factory/issues/78 (T3 on) and
+  https://github.com/tuannd9288/factory/issues/203#issuecomment-6560905773 (2026-10-29 and 2026-10-31).
 - **Evidence for a deletion-only pull request (#70), 2026-10-25.** K1 = (iv), in two steps: a module that each
   repository turns on, outside the `kit/` core. K2 = B: the proof refuses when the base holds a plugin config file that
   knip runs and it is not in `.gate/protected`. Decision (a) stands: no parser is added to the gate, and option (v) is
@@ -99,13 +109,15 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **The order of the gaps, 2026-10-25.** "Theo thứ tự này (Recommended)": 0c (in progress), then 1b, then 3c, then 4a;
   0d follows #75 and #77; 2c comes last. Source: his answer in Colly's session, relayed by Colly, in the map's report
   §0 and https://github.com/tuannd9288/factory/issues/81.
-- **The live verifier, decided 2026-10-25; not built yet.** It was open at the map (it runs on Codex, against the
-  rule above, "Every lead, worker and reviewer runs through Claude Code."), and he decided it on #79's choice page:
-  "Ô cài đặt, mặc định Claude (Recommended)". The verifier's model is a setting for each repository, Claude
-  by default; Codex or both can be chosen; the verifier stays (#25). #95 builds it; until then it runs on Codex only,
-  as "The live verifier" paragraph below says. Sources:
-  https://github.com/tuannd9288/factory/issues/79#issuecomment-6398968431 and
-  https://github.com/tuannd9288/factory/issues/95.
+- **The live verifier, 2026-10-25 and 2026-10-30.** The verifier stays (#25). He approved #182's D1 and D2 as
+  proposed, "D1 và D2 theo đề xuất", relayed by Colly. D2, in Colly's words: "pstack's other-family steps run on Codex
+  through a factory script on `codex exec`, like `scripts/live-verify`, on the verifier's Codex profile." So the
+  verifier's steps run on its Codex profile; that step from D2 to the verifier is Colly's, in closing #95 as superseded,
+  on the Human's approval of the cleanup that #203 records ("theo đề xuất", 2026-10-30). Sources:
+  https://github.com/tuannd9288/factory/issues/182#issuecomment-6513127448,
+  https://github.com/tuannd9288/factory/issues/95#issuecomment-6525022374,
+  https://github.com/tuannd9288/factory/issues/203 (area 4), and for 2026-10-25
+  https://github.com/tuannd9288/factory/issues/79#issuecomment-6398968431.
 - **The instruction layer (#131, #132), 2026-10-27.** On #131: "Viết từ A (Recommended)" and "Làm F1–F2 ngay, F3 sau 1/11
   (Recommended)"; that evening, "Ok, cho các đội triển khai đi, song song nếu được." ("Ok, let the teams carry it out, in
   parallel where possible", Colly's translation), which replaced the wait for 1/11. On #132's instruction layer he answered
@@ -113,29 +125,19 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   and so took Colly's recommendations: the composed root `AGENTS.md` stays at most 150 lines and gains a 32 KiB cap (K1);
   neither `ARCHITECTURE.md` nor `docs/` is required (K2); the Gate block states the gate's obligations directly, and
   `CLAUDE.md` is `@AGENTS.md`, an addendum allowed, or a relative symlink to `AGENTS.md` (K3). He had asked for it after the
-  review: "Cho Astra review lại rồi đề xuất cho đúng thiết kế". This revises two earlier decisions: the pack decision of
-  2026-10-22 (a way of working is a folder a team copies, not a pack a repository chooses by `.gate/pack`) and the scope of
-  "Every lead, worker and reviewer runs through Claude Code" (the instruction file is for any harness; `ship` and the
-  live verifier are the pstack team's, in `packs/pstack/`). 2a and H4 stay as they are, and so does "Cho file một phần đuôi
-  của repo (Recommended)" of 2026-10-25: the kit owns a smaller head, one marked `## Gate` block, and the repository owns the
+  review: "Cho Astra review lại rồi đề xuất cho đúng thiết kế". Its pack and harness parts are in the two entries of
+  2026-10-21 and 2026-10-22 above. 2a and H4 stay as they are, and so does "Cho file một phần đuôi của repo
+  (Recommended)" of 2026-10-25: the kit owns a smaller head, one marked `## Gate` block, and the repository owns the
   tail, with its own headings. Sources: https://github.com/tuannd9288/factory/issues/131#issuecomment-6445068794 and
   https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962 (the questions and K1 to K3), and
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6446708922 (the evening words), all relayed by Colly.
-- **Control surfaces, 2026-10-29.** Rex, which K1 of "Control surfaces (#68), 2026-10-25" brings in, waits: the factory
-  runs on Ghostty and Herdr until it is finished, and Rex and Paseo are rolled out after that. His words to Colly in
-  chat, relayed by Colly: "trước mắt cứ chạy với ghostty + herdr cho hoàn thành cái factory rồi triển khai rex và paseo"
-  (2026-10-29), and "nếu đang bị mở rộng ra thì dừng lại, dùng Herdr TUI hoặc APP đã" (2026-10-31; the Lead's
-  translation: "if it is widening, stop, and use Herdr's TUI or app for now"). Source:
-  https://github.com/tuannd9288/factory/issues/203#issuecomment-6560905773.
-- **The live verifier, 2026-10-30.** This takes the place of "The live verifier, decided 2026-10-25": he approved
-  #182's D1 and D2 as proposed, "D1 và D2 theo đề xuất", relayed by Colly. D2, in Colly's words: "pstack's other-family
-  steps run on Codex through a factory script on `codex exec`, like `scripts/live-verify`, on the verifier's Codex
-  profile." #95, which was to make the verifier's model a setting for each repository with Claude by default, was closed
-  as superseded by D2: "the verifier's steps run on its Codex profile". That step from D2 to the verifier is Colly's, in
-  closing #95, on the Human's approval of the cleanup that #203 records ("theo đề xuất", 2026-10-30); #203's area 4
-  lists `:103` as "#95, now #182". Sources: https://github.com/tuannd9288/factory/issues/182#issuecomment-6513127448,
-  https://github.com/tuannd9288/factory/issues/95#issuecomment-6525022374 and
-  https://github.com/tuannd9288/factory/issues/203 (area 4).
+- **Scope freeze, 2026-10-28.** "Duyệt, đóng băng như đề xuất": until #131 closes, only its path is worked, and the
+  issues it lists wait in Triage. An issue leaves the freeze only on his later words on it: #203 (its cleanup, approved
+  "theo đề xuất" on 2026-10-30; and on 2026-11-02, "#203 sao không triển khai luôn?", relayed by Colly), #271 (his
+  words of 2026-10-31 in its body) and #286 (his words of 2026-11-01 in its body). Sources:
+  https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
+  https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
+  https://github.com/tuannd9288/factory/issues/271 and https://github.com/tuannd9288/factory/issues/286.
 - **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
 
 ## Tiers
@@ -186,14 +188,17 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **0a Environment** [S2, OA1]: the `factory` account, `~/WORKSPACES`, the worktrees: under a repository's
   `.claude/worktrees/`, and a pack Lead's under `~/factory-runs/<repo>-<n>/w` (`packs/pstack/lead.md`).
 - **0b Tools & permissions** [A5, A2]: the deny rules, the permission mode, the agents' `gh` login.
-- **0c Model configuration** [MODELCFG]: which model a role runs on; one profile for each repository; the factory's own runs use one profile per seat, `~/.agent-profiles/seats/<n>/claude`, which the launcher picks.
-- **0d Harness & session** [A2]: the loop that runs Claude Code: `direnv exec`.
+- **0c Model configuration** [MODELCFG]: which model a role runs on; one profile for each repository; the factory's
+  own runs use one config folder per seat, `~/.agent-profiles/seats/<n>/claude`, which `bin/seat` picks, and the token
+  of the team's account (#311).
+- **0d Harness & session** [A2]: the loop that runs Claude Code: `bin/seat` for every unattended role, and
+  `packs/pstack/bin/lead` for a team's Lead.
 - **1a Issues** [GH2]: where work comes in: one issue labelled `task`.
 - **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger.
 - **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
-- **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, the ledger's canary.
+- **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, `bin/factory top`, the ledger's canary.
 - **1e Surfaces** [GH2, #68]: the Human's own screens: Ghostty with the Herdr TUI or app until the factory is finished, then
-  Rex on the MacBook (K1 = C, pending his check) and Paseo's app (Control surfaces, 2026-10-29), and Remote Control (T3,
+  Rex on the MacBook (K1 = C, pending his check) and Paseo's app (Control surfaces, in Decisions), and Remote Control (T3,
   pending). Herdr's server and Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
@@ -204,16 +209,19 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
 - **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
 - **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
-- **4b Evals** [A8]: the attacks and the 20 seeded + 20 clean probes.
+- **4b Evals** [A8]: the pack's attacks (`packs/pstack/attacks.md`); the gate's attacks and the 20 seeded + 20 clean
+  probes, at the tag `before-271`, which re-run when real use calls for them (#153).
 
 A sublayer may change anything inside it while its contracts hold; a change to a contract is tier 3 (as is every change
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
-decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization that does the same.
+decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organization that does the same.
 
-- **H1**: Work enters through one issue. Checked by: `kit/.gate/gate-section.md` (the Gate block).
+- **H1**: Work enters through one issue. Checked by: `tier` (`check` in `kit/.gate/bin/lib/claim.mjs`): the body names
+  one open issue and its claim, or says `Issue: none` and closes no issue of the repository.
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
-  Checked by: `kit/.github/pull_request_template.md:1-9`.
+  Checked by: `tier` and `verify-trusted`, which read the body's `Issue:`, `Claim:` and `Team:` lines, and `review`,
+  which reads the body; `kit/.github/pull_request_template.md` asks for the rest.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
   Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:27` (one reviewer call per head).
@@ -221,11 +229,12 @@ decisions (#58, #79, #68) and the map. A "Prior art" line quotes an organization
 - **H4**: Knowledge is files in the repository, changed by pull request.
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
   Prior art [OA1]: "Repository-local, versioned artifacts (e.g., code, markdown, schemas, executable plans) are all it can see."
-- **H5**: A way of working is a pack of data.
-  Checked by: `packs/pstack/test/pstack.test.mjs`.
+- **H5**: A way of working is a folder in `packs/` that a team copies into its repository; the kit lays none (#132).
+  Checked by: none yet; `packs/pstack/test/pstack.test.mjs` checks only the pack's pin.
   Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
 - **H6**: Tools are commands; permissions live outside the instructions.
-  Checked by: `kit/.claude/settings.json:3-12`.
+  Checked by: the deny rules `bin/seat` and `packs/pstack/bin/lead` give each session (`denyOf` in `bin/lib/seat.mjs`
+  and in `packs/pstack/bin/lead.mjs`), and their tests; the kit's `kit/.claude/settings.json` binds Claude Code only (#134).
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
