@@ -4,9 +4,9 @@ This repository (`tuannd9288/factory`) is the root of the Human's software facto
 in the agents' own macOS account, `factory` (#24), as `~/WORKSPACES`; each repository in the factory is a subfolder
 there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`tuan9288-agent`
 alone), their profiles and their Herdr; the Human reaches it with `ssh factory@<the Mac mini>`. His own account keeps
-his SSH keys and gh login behind its home, which is `drwx------` on the Mac mini. The clone is outside `~/Desktop`, which
-macOS privacy controls (TCC) close to launchd jobs that were not granted access. This file covers the factory's rules
-and taking a repository in. Inside a repository, that repository's own `AGENTS.md` governs.
+his SSH keys and gh login behind its home, which is `drwx------` on the Mac mini. The clone is outside `~/Desktop`,
+which macOS privacy controls (TCC) close to launchd jobs that were not granted access; not tested here. This file
+covers the factory's rules and taking a repository in. Inside a repository, that repository's own `AGENTS.md` governs.
 
 ## Decisions
 
@@ -19,29 +19,32 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   agent-desk issue #269, as the map's "Đã quyết" block records it.
 - **First product repository, 2026-10-20.** It is not docparse or tuanhub-notifier: "đang ổn, không cần". Source:
   the live copy of the page "Môi trường repo cho agent", decision 3, as the map records it.
-- **Merging, 2026-10-21 and 2026-10-30.** A reversible change in tier 1 or 2 merges by rule once the repository's gate
-  is green on its head commit; the Human keeps tier 3, a change stuck after three rounds, and every deploy (K1,
-  2026-10-21: "Triển khai theo đề xuất đi"). A pull request auto-merges once the required checks (3a) are green on its
-  head commit, and tier 3 still waits for his approval (#203, which he approved "theo đề xuất" on 2026-10-30). Attack 12
+- **Merging, 2026-10-21 to 2026-10-30.** A reversible change in tier 1 or 2 merges by rule once the repository's
+  gate is green on its head commit; the Human keeps tier 3, a change stuck after three rounds, and every deploy (K1,
+  2026-10-21: "Triển khai theo đề xuất đi"). A pull request auto-merges once the four checks are green on its head
+  commit, and tier 3 still waits for his approval (#203, which he approved "theo đề xuất" on 2026-10-30). Attack 12
   and the 20 seeded + 20 clean probes re-run when real use calls for them (#153; the Human, 2026-10-29: "ok, đưa về
   Triage, và theo dõi thực tế factory triển khai có hiệu quả hơn là đi xử lý cái vấn đề có thể không xảy ra không?").
   The pack's Lead arms auto-merge through `scripts/ship` (#163, #304). Sources:
   https://github.com/tuannd9288/factory/issues/203 (area 4) and https://github.com/tuannd9288/factory/issues/153; the
   bar of 2026-10-21 is `probes/plan.md` at the tag `before-271`.
 - **agent-desk and Claude Code, 2026-10-21 and 2026-10-27.** agent-desk stays parked. Every lead, worker and reviewer
-  the factory itself runs goes through Claude Code. The instruction file is for any harness, and `ship` and the live
-  verifier are the pstack team's, in `packs/pstack/` (#132, 2026-10-27). Sources: `1b319ee`;
-  https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962.
+  of the factory's own team runs through Claude Code, apart from pstack's other-family steps, which D2 sends to Codex
+  (the live verifier's entry below); another team may bring its own harness (#131). The instruction file is for any
+  harness, and `ship` and the live verifier are the pstack team's, in `packs/pstack/` (#132). Sources: `1b319ee`;
+  https://github.com/tuannd9288/factory/issues/131 (its body, Limits) and
+  https://github.com/tuannd9288/factory/issues/132 (its body).
 - **seatwork, 2026-10-21.** seatwork may be used freely, its code and its text alike. Source: the page "Factory của
   anh", p:372, as the map records it (the page's wording: "seatwork dùng thoải mái, cả mã lẫn chữ").
 - **One thin core, a folder for each way of working, 2026-10-22 and 2026-10-27.** The core is the environment, the
   gate and the ledger. A way of working is a folder in `packs/` that a team copies into its repository; the kit lays
-  none (#132, 2026-10-27), and only the pstack pack is built now. There is no piggery pack (T1 off), OTel stays off
-  (T2 off, as the map records it), and only the Human can bypass the tag ruleset. The Human agreed to all eight
+  none (#131, #132; 2026-10-27), and only the pstack pack is built now. There is no piggery pack (T1 off), OTel stays
+  off (T2 off, as the map records it), and only the Human can bypass the tag ruleset. The Human agreed to all eight
   decisions on the 2026-10-22 page as it recommended them. Sources:
   https://github.com/tuannd9288/factory/issues/2#issuecomment-6337959043 (the page:
-  https://github.com/tuannd9288/factory/issues/2#issuecomment-6336996220) and
-  https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962.
+  https://github.com/tuannd9288/factory/issues/2#issuecomment-6336996220), and for 2026-10-27
+  https://github.com/tuannd9288/factory/issues/131 (its body, Limits) and
+  https://github.com/tuannd9288/factory/issues/132 (its body).
 - **Cleanup of unused code, 2026-10-22.** C1, C2 and C3 all take option B; T1 and T2 on, T3 off; the Human approved
   all five as the page recommended. As the Lead's summary of the page puts it: one sweep of each repository when it
   joins, then the weekly digest counts again (C1); for a pull request that only deletes, a machine proof stands in for
@@ -75,7 +78,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   open task, computed in the sweep. T2 off: HumanLayer's phone plugin is not taken. Sources: the bodies of
   https://github.com/tuannd9288/factory/issues/62, /63 (K2), /64 (T1) and /68 (T2); his words:
   https://github.com/tuannd9288/factory/issues/63#issuecomment-6401665776.
-- **Control surfaces (#68), 2026-10-25 and 2026-10-29.** The factory runs on Ghostty and Herdr until it is finished,
+- **Control surfaces (#68), 2026-10-25 to 2026-10-31.** The factory runs on Ghostty and Herdr until it is finished,
   and Rex and Paseo are rolled out after that. His words to Colly in chat, relayed by Colly: "trước mắt cứ chạy với
   ghostty + herdr cho hoàn thành cái factory rồi triển khai rex và paseo" (2026-10-29), and "nếu đang bị mở rộng ra thì
   dừng lại, dùng Herdr TUI hoặc APP đã" (2026-10-31; the Lead's translation: "if it is widening, stop, and use Herdr's
@@ -102,7 +105,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **The module and the protected tail (#71, #72), 2026-10-25.** His labels: "S2: chỉ chép vào repo bật (Recommended)",
   so the module's skill is copied only into a repository that turns the module on; "Đồng ý (Recommended)", so two
   lines are added to `kit/.gate/bin/prove-check`; "Cho file một phần đuôi của repo (Recommended)", so `.gate/protected`
-  keeps a tail the repository owns, as `AGENTS.md` has Layout and Facts, while `kit-update` keeps updating the kit's
+  keeps a tail the repository owns, while `kit-update` keeps updating the kit's
   head, and the end of `.github/CODEOWNERS` follows. Sources:
   https://github.com/tuannd9288/factory/issues/71#issuecomment-6395151620 and
   https://github.com/tuannd9288/factory/issues/72#issuecomment-6395151814.
@@ -118,17 +121,18 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/95#issuecomment-6525022374,
   https://github.com/tuannd9288/factory/issues/203 (area 4), and for 2026-10-25
   https://github.com/tuannd9288/factory/issues/79#issuecomment-6398968431.
-- **The instruction layer (#131, #132), 2026-10-27.** On #131: "Viết từ A (Recommended)" and "Làm F1–F2 ngay, F3 sau 1/11
-  (Recommended)"; that evening, "Ok, cho các đội triển khai đi, song song nếu được." ("Ok, let the teams carry it out, in
-  parallel where possible", Colly's translation), which replaced the wait for 1/11. On #132's instruction layer he answered
-  the three questions of the decision page (https://claude.ai/artifact/SLNEk1B5nTict8swrmbBqD) with "Theo đề xuất của mày",
+- **The instruction layer (#131, #132), 2026-10-27.** On #131: "Viết từ A (Recommended)"; that evening,
+  "Ok, cho các đội triển khai đi, song song nếu được." ("Ok, let the teams carry it out, in parallel where possible",
+  Colly's translation). On #132's instruction layer he answered the three questions of the decision page
+  (https://claude.ai/artifact/SLNEk1B5nTict8swrmbBqD) with "Theo đề xuất của mày",
   and so took Colly's recommendations: the composed root `AGENTS.md` stays at most 150 lines and gains a 32 KiB cap (K1);
   neither `ARCHITECTURE.md` nor `docs/` is required (K2); the Gate block states the gate's obligations directly, and
   `CLAUDE.md` is `@AGENTS.md`, an addendum allowed, or a relative symlink to `AGENTS.md` (K3). He had asked for it after the
   review: "Cho Astra review lại rồi đề xuất cho đúng thiết kế". Its pack and harness parts are in the two entries of
   2026-10-21 and 2026-10-22 above. 2a and H4 stay as they are, and so does "Cho file một phần đuôi của repo
   (Recommended)" of 2026-10-25: the kit owns a smaller head, one marked `## Gate` block, and the repository owns the
-  tail, with its own headings. Sources: https://github.com/tuannd9288/factory/issues/131#issuecomment-6445068794 and
+  tail, with its own headings. Sources: https://github.com/tuannd9288/factory/issues/131#issuecomment-6436306027 (the
+  choice of A), https://github.com/tuannd9288/factory/issues/131#issuecomment-6445068794 and
   https://github.com/tuannd9288/factory/issues/132#issuecomment-6445063962 (the questions and K1 to K3), and
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6446708922 (the evening words), all relayed by Colly.
 - **Scope freeze, 2026-10-28.** "Duyệt, đóng băng như đề xuất": until #131 closes, only its path is worked, and the
