@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +40,7 @@ const logSeat = (s, seat, text = EVENT) => {
 };
 
 test('the frame: numbered rows, lettered accounts with 5h, 7d, reset and the rows that share each; a Lead on its own account', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     logSeat(s, 2);
@@ -68,7 +69,7 @@ test('the frame: numbered rows, lettered accounts with 5h, 7d, reset and the row
 });
 
 test('an account with a token file and no row is lettered, and an account a row names with no token file is red with the line to run', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s, { accounts: 'factory/seat-1=ann\nfactory/seat-2=cat\n', tokens: { ann: ANN, zed: BOB } });
     const r = s.fac();
@@ -87,7 +88,7 @@ test('an account with a token file and no row is lettered, and an account a row 
 });
 
 test('a token file shows its mode and date in the accounts block, never the content', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     chmodSync(join(s.tokens(), 'bob'), 0o644);
@@ -101,7 +102,7 @@ test('a token file shows its mode and date in the accounts block, never the cont
 });
 
 test('a row with no account row is red and names factory use; FACTORY_SEAT_ACCOUNTS names nothing any more', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s, { accounts: 'factory/seat-1=ann\n' });
     s.env.FACTORY_SEAT_ACCOUNTS = '2=zed';
@@ -116,7 +117,7 @@ test('a row with no account row is red and names factory use; FACTORY_SEAT_ACCOU
 });
 
 test('the Lead rows are the file\'s, sorted; no folder is scanned and no direnv runs', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s, { accounts: 'factory/seat-1=ann\nfactory/seat-2=ann\nfactory/lead-zeta=ann\nfactory/lead-alpha=bob\n' });
     mkdirSync(join(s.env.FACTORY_ROOT, 'gamma'), { recursive: true });
@@ -130,7 +131,7 @@ test('the Lead rows are the file\'s, sorted; no folder is scanned and no direnv 
 });
 
 test('the JSON keeps its list of rows and adds the number and the letter of each', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     const rows = JSON.parse(s.fac('--json').out);
@@ -148,7 +149,7 @@ test('the JSON keeps its list of rows and adds the number and the letter of each
 });
 
 test('use <row> <letter> rewrites the accounts file through a rename, mode 600, and touches no other line', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s, { accounts: '# mine\nfactory/seat-1=ann\nfactory/seat-2=ann\nfactory/lead-alpha=bob\n' });
     const r = s.fac('use', '2', 'b');
@@ -164,12 +165,24 @@ test('use <row> <letter> rewrites the accounts file through a rename, mode 600, 
 });
 
 /** A Lead's pane as `bin/lead` leaves it, and what herdr was asked, in order. */
-const withPane = (s, pane = 'p-7', { event = 'Stop', repo = 'alpha' } = {}) => {
+const withPane = (s, pane = 'p-7', { event = 'Stop', repo = 'alpha', running = true } = {}) => {
   mkdirSync(join(s.env.FACTORY_RUNS, `${repo}-lead`), { recursive: true });
   if (pane) writeFileSync(join(s.env.FACTORY_RUNS, `${repo}-lead/pane`), `${pane}\n`);
-  // what the Lead's hooks leave (#286): its newest event, so the Lead is running unless that is SessionEnd
+  // what the Lead's hooks leave (#286); a Lead runs only while its process does, as `factory top` finds it: claude --name <repo>-lead
   if (event) writeFileSync(join(s.env.FACTORY_RUNS, `${repo}-lead/state.json`), `${JSON.stringify({ event, type: null, at: new Date().toISOString() })}\n`);
+  if (running) s.kids.push(spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', '--', 'claude', '--name', `${repo}-lead`], { stdio: 'ignore' }));
 };
+/** A sandbox whose done() also stops the fake Lead processes. */
+function box() {
+  const s = sandbox();
+  const done = s.done;
+  s.kids = [];
+  s.done = () => {
+    for (const k of s.kids) k.kill('SIGKILL');
+    done();
+  };
+  return s;
+}
 /** A repository folder as `bin/onboard` leaves it, in the factory root. */
 const onboarded = (s, name) => {
   const dir = join(s.env.FACTORY_ROOT, name);
@@ -182,7 +195,7 @@ const accountsOf = (s) => readFileSync(join(s.state, 'accounts'), 'utf8');
 
 for (const state of ['idle', 'done']) {
   test(`use on a Lead's row that is ${state} rewrites the file, then waits, exits the Lead and starts it again in its pane, in this order (#179)`, () => {
-    const s = sandbox();
+    const s = box();
     try {
       mini(s);
       withPane(s);
@@ -202,7 +215,7 @@ for (const state of ['idle', 'done']) {
 }
 
 test('use on a Lead\'s row that stays busy rewrites the file, restarts nothing and exits 1, saying so (#179)', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     withPane(s);
@@ -218,7 +231,7 @@ test('use on a Lead\'s row that stays busy rewrites the file, restarts nothing a
 });
 
 test('use on a Lead\'s row that is blocked at a prompt leaves it running and names the state it saw (#179)', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     withPane(s);
@@ -233,7 +246,7 @@ test('use on a Lead\'s row that is blocked at a prompt leaves it running and nam
 });
 
 test('use on a Lead\'s row with no pane file rewrites the file, calls no herdr and says the Lead takes it at its next start (#179)', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     withPane(s, null);
@@ -247,8 +260,8 @@ test('use on a Lead\'s row with no pane file rewrites the file, calls no herdr a
   }
 });
 
-test('use on a Lead\'s row to an account with no token file restarts nothing (#179)', () => {
-  const s = sandbox();
+test('use on a running Lead to an account with no token file restarts nothing and exits 1 (#179)', () => {
+  const s = box();
   try {
     mini(s, { tokens: { bob: BOB } });
     withPane(s);
@@ -261,8 +274,22 @@ test('use on a Lead\'s row to an account with no token file restarts nothing (#1
   }
 });
 
+test('use on a Lead that is not running, to an account with no token file, says its next start is refused and exits 0 (#179)', () => {
+  const s = box();
+  try {
+    mini(s, { tokens: { bob: BOB } });
+    withPane(s, 'p-7', { running: false });
+    const r = s.fac('use', '3', 'a');
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /next start is refused until factory login ann/);
+    assert.deepEqual(herdrCalls(s), []);
+  } finally {
+    s.done();
+  }
+});
+
 test('use does not start the Lead again while herdr still reports its agent after /exit (#179)', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     withPane(s);
@@ -277,12 +304,12 @@ test('use does not start the Lead again while herdr still reports its agent afte
   }
 });
 
-test('use on a Lead that is not running (no state, or SessionEnd) calls no herdr, says the next start and exits 0 (#179)', () => {
-  for (const event of [null, 'SessionEnd']) {
-    const s = sandbox();
+test('use on a Lead with no process calls no herdr, whatever state.json says, and exits 0 (#179)', () => {
+  for (const event of [null, 'SessionEnd', 'Stop', 'Notification']) {
+    const s = box();
     try {
       mini(s);
-      withPane(s, 'p-7', { event });
+      withPane(s, 'p-7', { event, running: false });
       const r = s.fac('use', '3', 'a');
       assert.equal(r.code, 0, r.out);
       assert.match(r.out, /factory lead alpha/);
@@ -295,7 +322,7 @@ test('use on a Lead that is not running (no state, or SessionEnd) calls no herdr
 });
 
 test('use lead-<repo> creates the row of an onboarded repository, or takes the row it has (#179)', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     onboarded(s, 'gamma');
@@ -315,7 +342,7 @@ test('use lead-<repo> creates the row of an onboarded repository, or takes the r
 });
 
 test('use lead-<repo> of a name that is not onboarded, or not a plain name, is refused and changes nothing (#179)', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     mkdirSync(join(s.env.FACTORY_ROOT, 'bare'), { recursive: true });
@@ -332,7 +359,7 @@ test('use lead-<repo> of a name that is not onboarded, or not a plain name, is r
 });
 
 test('use refuses the verifier\'s row, an unknown row or letter, and a row that is not a number', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     const before = readFileSync(join(s.state, 'accounts'), 'utf8');
@@ -350,7 +377,7 @@ test('use refuses the verifier\'s row, an unknown row or letter, and a row that 
 });
 
 test('use with an argument missing prints the list and exits 2 when there is no terminal', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     for (const args of [['use'], ['use', '2']]) {
@@ -365,7 +392,7 @@ test('use with an argument missing prints the list and exits 2 when there is no 
 });
 
 test('use with an argument missing, on a terminal, prints the list and asks for the row and the letter', async () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     const { main } = await import('../bin/lib/factory.mjs');
@@ -401,7 +428,7 @@ function far(s, tokens = { ann: ANN, bob: BOB }) {
 }
 
 test('from the MacBook, use runs on the Mac mini over ssh with its arguments', () => {
-  const s = sandbox();
+  const s = box();
   try {
     far(s);
     const r = s.fac('use', '2', 'b');
@@ -416,7 +443,7 @@ test('from the MacBook, use runs on the Mac mini over ssh with its arguments', (
 });
 
 test('from the MacBook, use checks its arguments first: a bad row, letter or count never reaches ssh', () => {
-  const s = sandbox();
+  const s = box();
   try {
     far(s);
     for (const args of [['x', 'b'], ['0', 'b'], ['1', '1'], ['1', 'B'], ['1', 'a', 'extra'], ['1; ls', 'a']]) {
@@ -430,7 +457,7 @@ test('from the MacBook, use checks its arguments first: a bad row, letter or cou
 });
 
 test('from the MacBook, use with an argument missing runs ssh -t, so the host asks', () => {
-  const s = sandbox();
+  const s = box();
   try {
     far(s);
     s.fac('use');
@@ -446,7 +473,7 @@ test('from the MacBook, use with an argument missing runs ssh -t, so the host as
 });
 
 test('from the MacBook, logout runs on the Mac mini over ssh, and a bad account never reaches it', () => {
-  const s = sandbox();
+  const s = box();
   try {
     const dir = far(s);
     assert.equal(s.fac('logout', '../x').code, 2);
@@ -465,7 +492,7 @@ test('from the MacBook, logout runs on the Mac mini over ssh, and a bad account 
 });
 
 test('from the MacBook, an unreachable Mac mini is exit 1 and the ssh error', () => {
-  const s = sandbox();
+  const s = box();
   try {
     s.w('ssh-factory.error', 'ssh: Could not resolve hostname tuans-mac-mini\n');
     const r = s.fac('use', '1', 'a');
@@ -477,7 +504,7 @@ test('from the MacBook, an unreachable Mac mini is exit 1 and the ssh error', ()
 });
 
 test('logout moves the token into archive/tokens by rename, never deletes it, and every row naming the account is red', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     const r = s.fac('logout', 'ann');
@@ -503,7 +530,7 @@ test('logout moves the token into archive/tokens by rename, never deletes it, an
 });
 
 test('logout refuses an account with no token file, a bad name and a missing name; login again brings the account back', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     assert.equal(s.fac('logout', 'nobody').code, 1);
@@ -527,7 +554,7 @@ function withOld(s) {
 }
 
 test('while seat 1\'s old token file is there, factory prints one line about it, and not its content', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     withOld(s);
@@ -542,7 +569,7 @@ test('while seat 1\'s old token file is there, factory prints one line about it,
 });
 
 test('use on seat 1, with a token for the new account, moves the old file to archive/seat-1 by rename; with no token it stays', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s, { accounts: 'factory/seat-1=ann\nfactory/seat-2=ann\n', tokens: { bob: BOB } });
     withOld(s);
@@ -560,7 +587,7 @@ test('use on seat 1, with a token for the new account, moves the old file to arc
   } finally {
     s.done();
   }
-  const t = sandbox();
+  const t = box();
   try {
     mini(t, { accounts: 'factory/seat-1=ann\nfactory/seat-2=ann\n', tokens: { ann: ANN } });
     withOld(t);
@@ -574,7 +601,7 @@ test('use on seat 1, with a token for the new account, moves the old file to arc
 });
 
 test('login on the Mac mini moves the old seat 1 file when seat 1\'s account now has a token', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s, { accounts: 'factory/seat-1=ann\nfactory/seat-2=ann\n', tokens: {} });
     withOld(s);
@@ -591,7 +618,7 @@ test('login on the Mac mini moves the old seat 1 file when seat 1\'s account now
 });
 
 test('store (the far side of a login from the MacBook) moves the old seat 1 file too', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s, { accounts: 'factory/seat-1=ann\n', tokens: {} });
     withOld(s);
@@ -604,7 +631,7 @@ test('store (the far side of a login from the MacBook) moves the old seat 1 file
 });
 
 test('the verifier\'s row is read-only: it shows its Codex login and has no account letter', () => {
-  const s = sandbox();
+  const s = box();
   try {
     mini(s);
     s.w('codex-codex', '');

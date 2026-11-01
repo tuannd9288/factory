@@ -380,3 +380,26 @@ test('no part of a seat\'s token reaches the table or the JSON', () => {
     s.done();
   }
 });
+
+test('from the MacBook, use waits as long as the Mac mini does while every other command keeps 60 seconds (#179)', async () => {
+  const { remoteTimeout } = await import('../bin/lib/factory.mjs');
+  assert.equal(remoteTimeout('use'), undefined);
+  assert.equal(remoteTimeout('logout'), 60000);
+});
+
+test('from the MacBook, use passes lead-<repo> on to the Mac mini and refuses a row that is neither a number nor that (#179)', () => {
+  const s = sandbox();
+  try {
+    const ok = s.fac('use', 'lead-alpha', 'b');
+    assert.match(s.calls(), /ssh .*factory use lead-alpha b/, ok.out);
+    for (const row of ['lead-', 'lead-a/b', 'lead-a b', 'alpha', '0']) {
+      const before = s.calls();
+      const r = s.fac('use', row, 'b');
+      assert.equal(r.code, 2, `${row}: ${r.out}`);
+      assert.match(r.out, /the row is a number or lead-<repo>/);
+      assert.equal(s.calls(), before, `${row}: no ssh call`);
+    }
+  } finally {
+    s.done();
+  }
+});
