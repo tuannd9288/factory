@@ -4,7 +4,9 @@
 #                                  the rows are numbered and the accounts lettered, with 5h, 7d, reset and the rows that share each (#178)
 #   factory login <account> [--no-setup]   runs `claude setup-token`, takes the token from a hidden prompt, stores it
 #   factory store <account>        on the Mac mini: reads one token from stdin and stores it (what login runs over ssh)
-#   factory use [<row> [<letter>]] on the Mac mini: the row's account in the accounts file becomes the letter's (a seat, at its next session)
+#   factory use [<row|lead-repo> [<letter>]]  on the Mac mini: the row's account in the accounts file becomes the letter's (a seat takes it at its
+#                                  next session); lead-<repo> makes the row of an onboarded repository's Lead, and a running Lead is restarted
+#                                  once Herdr reports it idle (#179)
 #   factory logout <account>       on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
 # it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes quota and live sessions from the seats' run logs. On the

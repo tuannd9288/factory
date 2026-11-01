@@ -104,6 +104,16 @@ const frame = async (w, tab = 0, width = 200) => {
   return { snap, text: render(snap, { width, tab }) };
 };
 
+test('a Lead runs while a claude process names it with --name <repo>-lead, the rule the sessions use (#179)', async () => {
+  const { leadRunning } = await top();
+  const ps = (...commands) => () => commands.map((command, i) => ({ pid: i + 1, command }));
+  assert.equal(leadRunning('factory', ps('claude --model opus --name factory-lead --continue')), true);
+  assert.equal(leadRunning('factory', ps('claude --name factory-lead')), true);
+  assert.equal(leadRunning('factory', ps('claude --name other-lead', 'vim --name factory-lead x')), false);
+  assert.equal(leadRunning('factory', ps('claude --name factory-lead-two')), false);
+  assert.equal(leadRunning('factory', ps()), false);
+});
+
 test('parseLog reads model, turns, tokens, context and the last result cost; a resumed log takes the last total', async () => {
   const { parseLog } = await top();
   const u = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100 };

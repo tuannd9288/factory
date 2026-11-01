@@ -1,14 +1,18 @@
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one repository. This file holds the pure parts (the arguments of
-// claude, the enabled plugins, the refusals) and the start. Nothing here reads a credential or logs in.
+// claude, the enabled plugins, the refusals) and the start. Nobody logs in (#179): the Lead needs the row factory/lead-<repo> in the
+// accounts file and refuses to start without it; it reads that account's token file once, before setup, and gives it to claude's
+// environment alone (CLAUDE_CODE_OAUTH_TOKEN), with no scrub, in auto mode (the Human, 2026-11-01); it prints none of it. It also
+// sets hasCompletedOnboarding in the profile's .claude.json, since a token on a fresh profile would replay onboarding.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { firstFree } from '../../../bin/lib/names.mjs';
 import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
+import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
 const USAGE = 'usage: factory lead <repo> [--new] [--dry-run]   (--new starts a fresh session; otherwise the newest earlier one is resumed)';
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
@@ -79,7 +83,7 @@ export function refusal(repo, root) {
   return null;
 }
 
-const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
+export const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 
 /** The first `node` that PATH names, as PATH names it (a link stays a link: brew upgrade keeps /opt/homebrew/bin/node and removes
  * the Cellar path behind it), or null. Only absolute folders count. */
@@ -173,6 +177,40 @@ function profileConfig(cwd) {
   return config;
 }
 
+/** With a token in its environment a fresh profile replays onboarding (theme, login method; probe on 2.1.308, 2026-11-01), so the
+ * profile's <config>/.claude.json gets "hasCompletedOnboarding": true, set only when it is not true, every other key and the file's
+ * mode kept, through a temporary file and a rename. A trust key is never set: trust stays the Human's. Throws an Error whose message
+ * names the file when it does not parse into an object; the file is then unchanged. */
+export function markOnboarded(config) {
+  const file = join(config, '.claude.json');
+  let text = '{}';
+  let mode = 0o600;
+  try {
+    text = readFileSync(file, 'utf8');
+    mode = statSync(file).mode & 0o777;
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw new Error(`could not read ${file}: ${e.code ?? e.message}`);
+  }
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = null;
+  }
+  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error(`${file} does not hold a JSON object; fix or move it`);
+  if (json.hasCompletedOnboarding === true) return;
+  mkdirSync(config, { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify({ ...json, hasCompletedOnboarding: true }, null, 2)}\n`, { mode, flag: 'wx' });
+    chmodSync(tmp, mode);
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw new Error(`could not write ${file}: ${e.code ?? e.message}`);
+  }
+}
+
 /** The Lead's name (#286): the file <runDir>/name when it is there, else the first animal no live run and no Lead holds, written
  * to it. Every Lead's name is held for as long as its file exists, so the name stays across restarts. */
 export function leadName(runDir, state) {
@@ -219,6 +257,18 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;
   }
+  // No row, no start: the Lead runs on a row's token, never on a login (the Human, 2026-11-01).
+  const state = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  const row = `factory/lead-${repo}`;
+  const account = readAccounts(state)[row] ?? null;
+  if (!account) {
+    process.stderr.write(`bin/lead: no row ${row} in the accounts file; the Human runs \`factory use lead-${repo} <letter>\` (\`factory\` lists the letters)\n`);
+    return 2;
+  }
+  if (accountRefusal(account)) {
+    process.stderr.write(`bin/lead: the account of ${row} is not a plain account name\n`);
+    return 2;
+  }
   const transcripts = join(env.HOME, 'factory-runs', `${repo}-lead`, 'transcripts');
   const earlier = flags.includes('--new') ? null : newestSession(transcripts);
   const resume = earlier?.id ?? null;
@@ -255,7 +305,23 @@ function main(argv, env) {
     process.stdout.write(`transcript hook: ${hook}\n`);
     process.stdout.write(`${shown.join(' ')}\n`);
     process.stdout.write(`${sessionLine}\n`);
+    process.stdout.write(`account: ${account} (row ${row})\n`);
     return 0;
+  }
+
+  // The token is read once, before anything runs, and held for claude's environment alone.
+  const tokenPath = join(tokenDir(profiles), account);
+  const t = readTokenFile(tokenPath);
+  if (t.error) {
+    process.stderr.write(`bin/lead: ${t.error === 'missing' ? `the account ${account} has no token file ${tokenPath}; the Human runs \`factory login ${account}\`` : `the token file ${tokenPath} is empty or not printable ASCII`}\n`);
+    return 2;
+  }
+  const token = t.token;
+  try {
+    markOnboarded(config);
+  } catch (e) {
+    process.stderr.write(`bin/lead: ${e.message}\n`);
+    return 2;
   }
 
   try {
@@ -265,7 +331,7 @@ function main(argv, env) {
     return 1;
   }
 
-  const name = leadName(runDir, resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')));
+  const name = leadName(runDir, state);
   if (env.HERDR_PANE_ID) renamePane(runDir, name, env.HERDR_PANE_ID);
 
   const setup = spawnSync('.gate/bin/setup', [], { cwd, stdio: 'inherit' });
@@ -290,9 +356,11 @@ function main(argv, env) {
   }
   if (claudeDirt(cwd) !== before) process.stderr.write(`bin/lead: the install changed .claude/ in ${cwd}; check git status there\n`);
 
+  // The token goes to claude's environment alone, never to the plugin installs above or to a message.
+  const childEnv = { ...env, CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginRoot, CLAUDE_CODE_OAUTH_TOKEN: token };
   // Ctrl-C reaches this process as well as claude, which uses it itself; like system(), ignore SIGINT and SIGQUIT while the child runs.
   for (const s of ['SIGINT', 'SIGQUIT']) process.on(s, () => {});
-  const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit', env: { ...env, CLAUDE_CODE_PLUGIN_CACHE_DIR: pluginRoot } });
+  const r = spawnSync(command[0], command.slice(1), { cwd, stdio: 'inherit', env: childEnv });
   if (r.error) {
     process.stderr.write(`bin/lead: ${command[0]}: ${r.error.message}\n`);
     return 1;

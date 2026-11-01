@@ -1,19 +1,22 @@
 // bin/factory (#173, #177, #178): the list of every agent profile in a table with the seats' quota in a second one, and `login`,
 // `store`, `use` and `logout`. On the Mac mini the rows are numbered (seat 1, seat 2, each Lead the accounts file names, the
-// verifier) and the accounts lettered; `use` rewrites the accounts file and `logout` moves a token into the archive; `login` and
+// verifier) and the accounts lettered; `use` rewrites the accounts file (`use lead-<repo>` makes a Lead's row; a running Lead is
+// restarted once Herdr reports it idle, #179) and `logout` moves a token into the archive; `login` and
 // `store` put a token in the factory's token store. The list runs only the vendors' own status commands (codex login status,
 // gh auth status; on the MacBook claude auth status too), reads quota through quotaRows() and liveCount(), and keeps from each answer
 // only the logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and date).
 // The committed profile list below holds no account name: the factory repository is public, and an account is an email local
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quotaRows } from './quota.mjs';
 import { liveCount } from './seat.mjs';
+import { quote, refusal } from '../../packs/pstack/bin/lead.mjs';
+import { leadRunning } from './top.mjs';
 import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
@@ -317,7 +320,7 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin)
-       bin/factory use [<row> [<letter>]]   (the row's account becomes the letter's; on the Mac mini, by ssh from the MacBook)
+       bin/factory use [<row|lead-repo> [<letter>]]   (the row's account becomes the letter's; lead-<repo> makes a Lead's row, and a running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
        bin/factory lead <repo> [--new] [--dry-run]`;
@@ -476,19 +479,23 @@ async function store(args, env) {
   return 0;
 }
 
+/** How long ssh may run for a command: none for `use`, whose restart waits up to ten minutes for a busy Lead (`ConnectTimeout`
+ * already covers a Mac mini that cannot be reached); 60 seconds for every other. */
+export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
+
 /** `use` and `logout` from the MacBook run on the Mac mini, as `login` does: the arguments are checked here first (a row is a number,
  * a letter is a to z, an account matches the account pattern), then the host runs the command in a login shell over ssh, on the
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
 function remote(cmd, args, env) {
   const bad = cmd === 'use'
-    ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) ? 'the row is a number' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
+    ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^([1-9][0-9]*|lead-[A-Za-z0-9._-]+)$/.test(args[0]) ? 'the row is a number or lead-<repo>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
     : (args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account');
   if (bad) {
     console.error(`bin/factory: ${bad}\n${USAGE}`);
     return 2;
   }
   const tty = cmd === 'use' && args.length < 2;
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: tty ? undefined : 60000, killSignal: 'SIGKILL' });
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: remoteTimeout(cmd), killSignal: 'SIGKILL' });
   if (r.error) {
     console.error(`bin/factory: ${cmd} did not reach the Mac mini: ${r.error.code === 'ETIMEDOUT' ? 'timed out' : (r.error.code ?? 'failed')}`);
     return 1;
@@ -513,8 +520,80 @@ const defaultAsk = async (question) => {
   }
 };
 
-/** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only and a
- * Lead's waits for #179, which restarts the Lead; a seat takes its new account at its next session and nothing running is touched. */
+const herdr = (args, timeout) => spawnSync('herdr', args, { encoding: 'utf8', timeout });
+const stateOf = (r) => {
+  const find = (v) => (v && typeof v === 'object' ? Object.entries(v).reduce((found, [k, x]) => found ?? (k === 'agent_status' && typeof x === 'string' ? x : find(x)), null) : null);
+  try {
+    return r.status === 0 ? find(JSON.parse(r.stdout)) : null;
+  } catch {
+    return null;
+  }
+};
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** The second half of `use` on a Lead's row (#179), after the accounts file changed: through `herdr` on PATH, waits for the Lead's
+ * pane (<runs>/<repo>-lead/pane, written by bin/lead inside Herdr) to settle, restarts it only if idle or done (`/exit`, then until
+ * Herdr reports no agent there, then `packs/pstack/bin/lead <repo>` in the pane, which resumes the conversation), and otherwise
+ * leaves it running. 0 once the start was sent, else 1 with the reason. */
+async function restartLead(repo, account, ctx) {
+  const next = `the Lead takes it at its next start (factory lead ${repo})`;
+  const hasToken = tokenState(ctx.agentProfiles, account).ok;
+  // `factory top`'s rule: a claude process with --name <repo>-lead. A recorded pane may hold something else by now.
+  if (!leadRunning(repo)) {
+    console.log(`the Lead of ${repo} is not running; it takes ${account} at its next start (factory lead ${repo})`);
+    if (!hasToken) console.log(`${account} has no token file yet: that next start is refused until factory login ${account}`);
+    return 0;
+  }
+  if (!hasToken) {
+    console.log(`${account} has no token file yet: factory login ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
+    return 1;
+  }
+  let pane = '';
+  try {
+    pane = readFileSync(join(ctx.runs, `${repo}-lead`, 'pane'), 'utf8').trim();
+  } catch {
+    // no pane file: the Lead did not start inside Herdr
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(pane)) {
+    console.log(`no Herdr pane is recorded for the Lead of ${repo}; ${next}`);
+    return 1;
+  }
+  console.log(`waiting for the Lead of ${repo} in pane ${pane} to settle (up to 10 minutes)`);
+  const waited = herdr(['agent', 'wait', pane, '--timeout', '600000'], 610000);
+  if (waited.status !== 0) {
+    console.log(`the Lead of ${repo} is not idle after the wait (or herdr failed); it keeps running and was not restarted; ${next}`);
+    return 1;
+  }
+  const seen = stateOf(herdr(['agent', 'get', pane], 10000));
+  if (seen !== 'idle' && seen !== 'done') {
+    console.log(`the Lead of ${repo} is ${seen ?? 'in a state herdr did not report'}, not idle; it keeps running and was not restarted; ${next}`);
+    return 1;
+  }
+  console.log(`the Lead of ${repo} is ${seen}; sending /exit`);
+  if (herdr(['agent', 'prompt', pane, '/exit'], 10000).status !== 0) {
+    console.log(`herdr did not take /exit; the Lead of ${repo} keeps running; ${next}`);
+    return 1;
+  }
+  const until = Date.now() + (Number(ctx.env.FACTORY_GONE_MS) || 30000);
+  while (stateOf(herdr(['agent', 'get', pane], 10000)) !== null) {
+    if (Date.now() > until) {
+      console.log(`herdr still reports an agent in pane ${pane} after /exit; it was not started again; ${next}`);
+      return 1;
+    }
+    await sleep(200);
+  }
+  const lead = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/bin/lead');
+  if (herdr(['pane', 'run', pane, `${quote(lead)} ${repo}`], 10000).status !== 0) {
+    console.log(`herdr did not run the start in pane ${pane}; ${next}`);
+    return 1;
+  }
+  console.log(`started the Lead of ${repo} again in pane ${pane}; it resumes its conversation on ${account}`);
+  return 0;
+}
+
+/** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only; a
+ * seat takes its new account at its next session and nothing running is touched; a Lead's row also restarts that Lead if it runs
+ * (#179). The row is a number, or `lead-<repo>` for an onboarded repository, which makes the row when the file has none. */
 async function use(args, env, io) {
   if (placeOf(env) !== 'factory') return remote('use', args, env);
   if (args.length > 2) {
@@ -533,7 +612,17 @@ async function use(args, env, io) {
     if (row === undefined) row = (await io.ask('Row number: ')).trim();
     if (letter === undefined) letter = (await io.ask('Account letter: ')).trim();
   }
-  const target = /^[1-9][0-9]*$/.test(row) ? rows.find((r) => r.n === Number(row)) : null;
+  let target = /^[1-9][0-9]*$/.test(row) ? rows.find((r) => r.n === Number(row)) : null;
+  if (row.startsWith('lead-')) {
+    // `lead-<repo>` names the Lead of an onboarded repository, and makes its row when the file has none (#179).
+    const repo = row.slice('lead-'.length);
+    const why = refusal(repo, env.FACTORY_ROOT ?? resolve(fileURLToPath(import.meta.url), '../../..'));
+    if (why) {
+      console.error(`${why}\nnothing was changed`);
+      return 2;
+    }
+    target = rows.find((r) => r.profile === `factory/lead-${repo}`) ?? { profile: `factory/lead-${repo}` };
+  }
   if (!target) {
     console.error(`bin/factory: there is no row ${row}; the rows are numbered 1 to ${rows.filter((r) => r.n).length}`);
     return 2;
@@ -547,10 +636,7 @@ async function use(args, env, io) {
     console.error('bin/factory: the verifier\'s row is read-only: Codex has no token file, so use does not apply to it');
     return 2;
   }
-  if (!/^factory\/seat-[12]$/.test(target.profile)) {
-    console.error(`bin/factory: ${target.profile} is a Lead's row; moving it restarts the Lead, which comes with #179. Nothing was changed.`);
-    return 2;
-  }
+  const isLead = target.profile.startsWith('factory/lead-');
   let moved;
   try {
     setAccount(ctx.state, target.profile, account.name);
@@ -558,6 +644,11 @@ async function use(args, env, io) {
   } catch (e) {
     console.error(`bin/factory: ${e.message}`);
     return 1;
+  }
+  if (isLead) {
+    console.log(`${target.profile} now uses ${account.name} (${account.letter}).`);
+    if (moved) console.log(moved);
+    return restartLead(target.profile.slice('factory/lead-'.length), account.name, ctx);
   }
   console.log(`${target.profile.replace('factory/seat-', 'seat ')} now uses ${account.name} (${account.letter}); it takes effect at its next session, and nothing running is touched.`);
   if (!tokenState(ctx.agentProfiles, account.name).ok) console.log(`${account.name} has no token file yet: factory login ${account.name}`);

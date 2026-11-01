@@ -26,6 +26,19 @@ export function tokenOf(text) {
 
 export const tokenDir = (agentProfiles) => join(agentProfiles, 'tokens');
 
+/** What a token file holds, for the seats and the Leads: { token } with trailing newlines stripped, or { error: 'missing' } for no
+ * such file, or { error: 'unprintable' } for an empty file or any byte outside printable ASCII (0x21-0x7E), since Node's error for
+ * such a value in an environment quotes it. The error never holds the value. */
+export function readTokenFile(path) {
+  let text = '';
+  try {
+    text = readFileSync(path, 'latin1').replace(/[\r\n]+$/, '');
+  } catch (e) {
+    if (e.code === 'ENOENT') return { error: 'missing' };
+  }
+  return /^[\x21-\x7e]+$/.test(text) ? { token: text } : { error: 'unprintable' };
+}
+
 /** Writes the token to a temporary file in the store and renames it over <account>. The caller has checked both. */
 export function writeToken(agentProfiles, account, token) {
   const dir = tokenDir(agentProfiles);
