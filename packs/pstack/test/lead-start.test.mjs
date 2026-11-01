@@ -3,7 +3,7 @@
 // root as its plugin cache.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -24,7 +24,7 @@ const CLAUDE = `${node}
 const fs = require('fs');
 const dir = require('path').dirname(process.argv[1]);
 const e = process.env;
-fs.appendFileSync(dir + '/log.jsonl', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), cache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, config: e.CLAUDE_CONFIG_DIR ?? null }) + '\\n');
+fs.appendFileSync(dir + '/log.jsonl', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), cache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, config: e.CLAUDE_CONFIG_DIR ?? null, token: e.CLAUDE_CODE_OAUTH_TOKEN ?? null, scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null }) + '\\n');
 if (process.argv[2] === 'plugin' && fs.existsSync(dir + '/plugin-mode')) { console.error('boom'); process.exit(1); }
 `;
 
@@ -50,7 +50,7 @@ function world(body, { settings = PSTACK } = {}) {
   mkdirSync(join(repo, '.gate/bin'), { recursive: true });
   mkdirSync(join(repo, '.claude'));
   writeFileSync(join(repo, '.envrc'), 'x\n');
-  writeFileSync(join(repo, '.gate/bin/setup'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(repo, '.gate/bin/setup'), '#!/bin/sh\n: > "$0.ran"\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(repo, '.claude/settings.json'), JSON.stringify(settings));
   for (const [n, text] of [['direnv', DIRENV], ['claude', CLAUDE], ['herdr', HERDR]]) writeFileSync(join(w.bin, n), text, { mode: 0o755 });
   symlinkSync(process.execPath, join(w.bin, 'node')); // like /opt/homebrew/bin/node, a link to a Cellar path
@@ -69,8 +69,20 @@ function world(body, { settings = PSTACK } = {}) {
     utimesSync(join(dir, name), mtime, mtime);
   };
   w.herdr = () => (existsSync(join(w.bin, 'herdr.log')) ? readFileSync(join(w.bin, 'herdr.log'), 'utf8').split('\n').filter(Boolean) : []);
+  // The Lead's row in the accounts file, and the account's token file (#179)
+  w.row = (account, token) => {
+    const state = join(w.home, '.local/state/factory');
+    mkdirSync(state, { recursive: true });
+    writeFileSync(join(state, 'accounts'), `factory/seat-1=ann\nfactory/lead-zalo=${account}\n`);
+    if (token !== undefined) {
+      mkdirSync(join(w.home, '.agent-profiles/tokens'), { recursive: true });
+      writeFileSync(join(w.home, '.agent-profiles/tokens', account), `${token}\n`);
+    }
+  };
   w.leadFile = (name, repo = 'zalo') => join(w.home, 'factory-runs', `${repo}-lead`, name);
   w.log = () => (existsSync(join(w.bin, 'log.jsonl')) ? readFileSync(join(w.bin, 'log.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  w.row('ann', 'sk-ant-oat01-DEFAULTDEFAULT1234567890ab'); // a Lead with no row is refused (#179)
+  w.ran = () => existsSync(join(repo, '.gate/bin/setup.ran'));
   try {
     return body(w);
   } finally {
@@ -184,9 +196,120 @@ describe('lead name (#286)', () => {
     writeFileSync(join(w.bin, 'herdr-mode'), 'fail');
     const r = w.lead([], { HERDR_PANE_ID: 'p-7' });
     assert.equal(r.code, 0, r.err);
-    assert.equal(r.err.trim().split('\n').filter((l) => /^bin\/lead: note:/.test(l)).length, 1);
+    assert.equal(r.err.trim().split('\n').filter((l) => /^bin\/lead: note: could not rename/.test(l)).length, 1);
     assert.match(r.err, /bin\/lead: note: could not rename the Herdr pane/);
     assert.equal(w.log().at(-1).argv[0], '--model');
+  }));
+});
+
+const KEY = 'sk-ant-oat01-LEADLEADLEAD1234567890abcd';
+
+describe('lead token (#179)', () => {
+  test('the row\'s token reaches claude\'s environment alone, with no scrub and in auto mode, and no output holds it (#179)', () => world((w) => {
+    w.row('bob', KEY);
+    const r = w.lead([], { HERDR_PANE_ID: 'p-7' });
+    assert.equal(r.code, 0, r.err);
+    const calls = w.log();
+    const start = calls.at(-1);
+    assert.equal(start.argv[0], '--model');
+    assert.equal(start.token, KEY);
+    assert.equal(start.scrub, null);
+    assert.equal(start.argv[start.argv.indexOf('--permission-mode') + 1], 'auto');
+    assert.deepEqual(calls.slice(0, -1).map((c) => c.token), [null, null], 'the plugin installs never see it');
+    assert.ok(!`${r.out}${r.err}${w.herdr().join('\n')}`.includes(KEY));
+  }));
+
+  test('--dry-run names the row and its account and never the token (#179)', () => world((w) => {
+    w.row('bob', KEY);
+    const r = w.lead(['--dry-run']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /^account: bob \(row factory\/lead-zalo\)$/m);
+    assert.ok(!`${r.out}${r.err}`.includes(KEY));
+    assert.deepEqual(w.log(), []);
+  }));
+
+  test('with no row nothing runs: exit 2, the command to run, and a dry run says the same (#179)', () => world((w) => {
+    rmSync(join(w.home, '.local/state/factory/accounts'));
+    for (const args of [[], ['--dry-run']]) {
+      const r = w.lead(args, { HERDR_PANE_ID: 'p-7' });
+      assert.equal(r.code, 2);
+      assert.match(r.err, /factory use lead-zalo <letter>/);
+      assert.match(r.err, /`factory`/);
+    }
+    assert.ok(!w.ran() && !existsSync(w.leadFile('pane')) && !existsSync(w.config));
+    assert.deepEqual([w.log(), w.herdr()], [[], []]);
+  }));
+
+  test('a row whose account has no token file refuses the start with exit 2 and names factory login (#179)', () => world((w) => {
+    w.row('bob');
+    const r = w.lead();
+    assert.equal(r.code, 2);
+    assert.match(r.err, /factory login bob/);
+    assert.ok(!w.ran() && !existsSync(w.config), 'refused before setup');
+    assert.ok(!w.log().some((c) => c.argv[0] === '--model'), 'claude was not started');
+  }));
+
+  test('a malformed token file refuses the start with exit 2 and quotes nothing of it (#179)', () => world((w) => {
+    w.row('bob', 'SECRETPART bad\u0001token');
+    const r = w.lead();
+    assert.equal(r.code, 2);
+    assert.match(r.err, /bin\/lead: .*not printable ASCII/);
+    assert.ok(!`${r.out}${r.err}`.includes('SECRETPART'));
+    assert.ok(!w.ran() && !existsSync(w.config), 'refused before setup');
+    assert.ok(!w.log().some((c) => c.argv[0] === '--model'));
+  }));
+
+  test('an account name that is not a plain account name refuses the start (#179)', () => world((w) => {
+    w.row('../bob', KEY);
+    const r = w.lead();
+    assert.equal(r.code, 2);
+    assert.ok(!w.log().some((c) => c.argv[0] === '--model'));
+  }));
+});
+
+describe('lead onboarding key (#179)', () => {
+  const file = (w) => join(w.config, '.claude.json');
+
+  test('a fresh profile gets hasCompletedOnboarding true, mode 600, and no trust key (#179)', () => world((w) => {
+    assert.equal(w.lead().code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(file(w), 'utf8')), { hasCompletedOnboarding: true });
+    assert.equal((statSync(file(w)).mode & 0o777).toString(8), '600');
+    assert.deepEqual(readdirSync(w.config), ['.claude.json'], 'no temporary file is left');
+  }));
+
+  test('a file that holds other keys keeps them and its mode (#179)', () => world((w) => {
+    mkdirSync(w.config, { recursive: true });
+    writeFileSync(file(w), '{"projects":{"/x":{"hasTrustDialogAccepted":true}},"hasCompletedOnboarding":false}');
+    chmodSync(file(w), 0o640);
+    assert.equal(w.lead().code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(file(w), 'utf8')), { projects: { '/x': { hasTrustDialogAccepted: true } }, hasCompletedOnboarding: true });
+    assert.equal((statSync(file(w)).mode & 0o777).toString(8), '640');
+  }));
+
+  test('a file that already says true is left byte for byte (#179)', () => world((w) => {
+    mkdirSync(w.config, { recursive: true });
+    const text = '{ "hasCompletedOnboarding": true,\n  "x": [1,\n2] }';
+    writeFileSync(file(w), text);
+    assert.equal(w.lead().code, 0);
+    assert.equal(readFileSync(file(w), 'utf8'), text);
+  }));
+
+  test('a dry run writes nothing (#179)', () => world((w) => {
+    assert.equal(w.lead(['--dry-run']).code, 0);
+    assert.ok(!existsSync(w.config));
+  }));
+
+  test('a file that does not parse, or is not an object, refuses the start and is left as it is (#179)', () => world((w) => {
+    mkdirSync(w.config, { recursive: true });
+    for (const text of ['{not json', '[1]', 'null']) {
+      writeFileSync(file(w), text);
+      const r = w.lead();
+      assert.equal(r.code, 2, text);
+      assert.match(r.err, /bin\/lead: .*\.claude\.json/);
+      assert.equal(readFileSync(file(w), 'utf8'), text);
+    }
+    assert.ok(!w.ran());
+    assert.ok(!w.log().some((c) => c.argv[0] === '--model'));
   }));
 });
 
@@ -200,7 +323,7 @@ describe('lead start', () => {
     for (const c of calls.slice(0, 2)) assert.deepEqual([c.config, c.cache], [install, w.pluginRoot]);
     assert.equal(calls[2].cache, w.pluginRoot);
     assert.ok(calls[2].argv.includes('--settings'));
-    assert.ok(!existsSync(join(w.home, '.agent-profiles')), 'nothing was made under the profiles');
+    assert.deepEqual(readdirSync(w.config), ['.claude.json'], 'the profile got the onboarding key and nothing else');
   }));
 
   test('a failed install stops the start, with the reason', () => world((w) => {
@@ -216,6 +339,6 @@ describe('lead start', () => {
     assert.equal(r.code, 1);
     assert.match(r.err, /bin\/lead: plugins: .* enables other@mk, but only the factory's pin/);
     assert.deepEqual(w.log(), []);
-    assert.ok(!existsSync(join(w.home, '.local')));
+    assert.ok(!existsSync(join(w.home, '.local/share')));
   }, { settings: { enabledPlugins: { 'other@mk': true } } }));
 });

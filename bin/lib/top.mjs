@@ -128,6 +128,15 @@ function psList() {
   return [];
 }
 
+/** The repository a process is the Lead of, or null: a `claude` command with `--name <repo>-lead` (packs/pstack/bin/lead). */
+export function leadRepoOf(command) {
+  const m = /(?:^|\s)--name\s+(\S+)-lead(?:\s|$)/.exec(command);
+  return m && /\bclaude\b/.test(command) ? m[1] : null;
+}
+
+/** Whether the Lead of a repository runs: the one rule `top` and `factory use` share (#179). */
+export const leadRunning = (repo, processes = psList) => processes().some((p) => leadRepoOf(p.command) === repo);
+
 function branchIn(cwd) {
   if (!cwd) return null;
   try {
@@ -269,16 +278,16 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     }
   }
   for (const proc of processes()) {
-    const m = /(?:^|\s)--name\s+(\S+)-lead(?:\s|$)/.exec(proc.command);
-    if (!m || !/\bclaude\b/.test(proc.command)) continue;
-    const leadDir = join(runs, `${m[1]}-lead`);
+    const repoName = leadRepoOf(proc.command);
+    if (!repoName) continue;
+    const leadDir = join(runs, `${repoName}-lead`);
     const dir = join(leadDir, 'transcripts');
     let newest = null;
     for (const n of existsSync(dir) ? readdirSync(dir).filter((x) => x.endsWith('.jsonl')) : []) {
       const s = statSync(join(dir, n));
       if (!newest || s.mtimeMs > newest.mtimeMs) newest = { file: join(dir, n), mtimeMs: s.mtimeMs };
     }
-    const repo = [...clones.keys()].find((r) => r.split('/')[1] === m[1]) ?? null;
+    const repo = [...clones.keys()].find((r) => r.split('/')[1] === repoName) ?? null;
     const cwd = repo ? clones.get(repo) : null;
     let event = null;
     try {
@@ -287,7 +296,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
       // no state yet: the log gives the state
     }
     out.push(shape(newest ? parseLog(readText(newest.file)) : parseLog(''), {
-      record: null, role: 'lead', name: readText(join(leadDir, 'name')).trim() || `${m[1]}-lead`, issue: null, folder: null, seat: null, live: true,
+      record: null, role: 'lead', name: readText(join(leadDir, 'name')).trim() || `${repoName}-lead`, issue: null, folder: null, seat: null, live: true,
       mtime: newest?.mtimeMs ?? now, start: null, cwd, repo, branch: branchOf(cwd), harness: 'claude', now,
       override: leadStateOf({ event, command: proc.command, ageMs: proc.ageMs, now }), pane: readText(join(leadDir, 'pane')).trim() || null,
     }));

@@ -38,6 +38,19 @@ echo "direnv $* in $(basename "$PWD")" >> "$FAKE/calls.log"
 shift 2
 CLAUDE_CONFIG_DIR="$FAKE/lead-$(basename "$PWD")" exec "$@"
 `,
+  // Logs its arguments to herdr.log. `agent wait` fails while herdr-busy exists; `agent get` prints the state in herdr-state (idle
+  // by default) until `agent prompt` has been sent, then fails as a pane with no agent does; herdr-stuck keeps the agent there.
+  herdr: `#!/bin/sh
+echo "$*" >> "$FAKE/herdr.log"
+case "$1 $2" in
+  "agent wait") if [ -f "$FAKE/herdr-busy" ]; then echo "timed out" >&2; exit 1; fi; exit 0;;
+  "agent get")
+    if [ -f "$FAKE/herdr-exited" ]; then echo '{"error":{"code":"agent_not_found"}}' >&2; exit 1; fi
+    printf '{"agent":"claude","agent_status":"%s"}\\n' "$(cat "$FAKE/herdr-state" 2>/dev/null || echo idle)"; exit 0;;
+  "agent prompt") if [ ! -f "$FAKE/herdr-stuck" ]; then : > "$FAKE/herdr-exited"; fi; exit 0;;
+esac
+exit 0
+`,
   pig: `#!/bin/sh
 echo "pig $*" >> "$FAKE/calls.log"
 c="$1"; shift
