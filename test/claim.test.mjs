@@ -444,7 +444,7 @@ describe('a look-alike branch is not the claim ref or main', () => {
   });
 
   test('check reads the real claim: its sha passes and the look-alike\'s is not the claim', () => {
-    body(`Issue: #7\nClaim: ${real}\n`);
+    body(`Issue: #7\nClaim: ${real}\nTeam: team-x\n`);
     const ok = claim('check', '--repo', 'o/app', '--pr', '7');
     assert.equal(ok.code, 0, ok.out);
     body(`Issue: #7\nClaim: ${hostile}\n`);

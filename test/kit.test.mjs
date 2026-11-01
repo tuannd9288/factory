@@ -766,9 +766,9 @@ describe('review, verdict, tier and rounds', () => {
     const sha = claimTip('claim 7 team-x');
     prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(9)]);
     assert.equal(tierRun().code, 1);
-    prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(7)]);
+    prBody(`Issue: #7\nClaim: ${sha}\nTeam: team-x\n`, [closes(7)]);
     assert.equal(tierRun().code, 0);
-    prBody(`Issue: #7\nClaim: ${sha}\n`, [closes(9, ['o', 'elsewhere'])]);
+    prBody(`Issue: #7\nClaim: ${sha}\nTeam: team-x\n`, [closes(9, ['o', 'elsewhere'])]);
     assert.equal(tierRun().code, 0);
   });
   // Scratch #11 (2026-10-28): team-x's merged pull request closed #8, the claim was then handed to team-y, and team-y's
@@ -823,7 +823,7 @@ describe('review, verdict, tier and rounds', () => {
   });
   test('tier reads the claim again after it waited for the review: a claim moved during the wait fails it', () => {
     const first = claimTip('claim 7 team-x');
-    prBody(`Issue: #7\nClaim: ${first}\n`);
+    prBody(`Issue: #7\nClaim: ${first}\nTeam: team-x\n`);
     reviewJob('in_progress');
     const done = JSON.stringify({ jobs: [{ id: 501, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(501), status: 'completed', conclusion: 'success' }], total_count: 1 });
     write(fake, { 'jobs-done.json': done });
