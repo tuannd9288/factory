@@ -5,7 +5,8 @@
 #   bin/onboard-owner <owner/name> --id <repository id> --apply    invite the agents' account (write), set the
 #        factory's rulesets (no rewrite on any branch; on main, a bootstrap one until the kit lands, then the kit's
 #        gate, which with the repository variable GATE_REVIEWER=entire requires verify, tier and Entire's check
-#        Entire Gates instead of review and verdict), create the reviewer environment, and read it all back
+#        Entire Gates instead of review and verdict), create the reviewer environment, allow auto-merge (#139),
+#        and read it all back
 #   options, one for each repository variable the kit reads (#210), set before the gate's ruleset, which follows the
 #   reviewer being set; a value is printed only for the four, and an option left out leaves its variable as it is:
 #        --runner <json>          GATE_RUNNER          the runner of main's jobs

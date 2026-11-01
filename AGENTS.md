@@ -301,7 +301,7 @@ Step 2 in detail: `bin/onboard-owner <owner/repo> --id <id>` takes the id of the
 the agents' account (write), sets `factory-branches` (every branch: no rewrite), `factory-tags` (every tag: no create,
 update or delete, but for a repository admin), `factory-claims` (`refs/heads/claim/**`: no deletion, no rewrite, no
 bypass) and `factory-bootstrap` (`main`: a pull request, one approval of the
-last push, merge commits only), creates the `reviewer` environment for `main`, and
+last push, merge commits only), creates the `reviewer` environment for `main`, turns on "Allow auto-merge", and
 reads it all back; it calls only `gh api`, never `git` and nothing the repository holds. A claim on an issue is the ref
 `claim/<n>`, taken with `.gate/bin/claim`; `verify-trusted` checks the pull request body's `Team:` line, and `tier` its
 `Issue:` and `Claim:` lines against that ref (`Session:` and `Cost:` inform only). Once the agents' account
