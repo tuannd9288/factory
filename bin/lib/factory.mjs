@@ -1,6 +1,7 @@
 // bin/factory (#173, #177, #178): the list of every agent profile in a table with the seats' quota in a second one, and `login`,
 // `store`, `use` and `logout`. On the Mac mini the rows are numbered (seat 1, seat 2, each Lead the accounts file names, the
-// verifier) and the accounts lettered; `use` rewrites the accounts file and `logout` moves a token into the archive; `login` and
+// verifier) and the accounts lettered; `use` rewrites the accounts file (on a Lead's row it also restarts that Lead once Herdr
+// reports it idle, #179) and `logout` moves a token into the archive; `login` and
 // `store` put a token in the factory's token store. The list runs only the vendors' own status commands (codex login status,
 // gh auth status; on the MacBook claude auth status too), reads quota through quotaRows() and liveCount(), and keeps from each answer
 // only the logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and date).
@@ -317,7 +318,7 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin)
-       bin/factory use [<row> [<letter>]]   (the row's account becomes the letter's; on the Mac mini, by ssh from the MacBook)
+       bin/factory use [<row> [<letter>]]   (the row's account becomes the letter's; a Lead's row also restarts that Lead when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
        bin/factory lead <repo> [--new] [--dry-run]`;
