@@ -1,11 +1,11 @@
-// The admin step of taking a repository in, run by Colly from the factory clone, on the Human's gh login, after his
-// one approval of what it prints: it checks the repository is the one he names, by name and id, shows every change,
-// and with --apply invites the agents' account (write), sets the four repository variables the kit reads (#210), then
-// the factory's rulesets, and creates the reviewer environment, then reads back what it set; the gate's ruleset follows
-// the repository variable GATE_REVIEWER (#155: entire has its own), as it is being set. It prints the four values it
-// sets and no other variable's. It calls only gh against GitHub's API, with the factory's own files: never git, never the
-// target's .envrc, scripts or hooks, so nothing the target holds runs with his authority. A second run changes
-// nothing. See bin/onboard-owner for the arguments.
+// The admin step of taking a repository in, run by Colly from the factory clone, on the Human's gh login, after his one
+// approval of what it prints: it checks the repository is the one he names, by name and id, shows every change, and
+// with --apply invites the agents' account (write), sets the four repository variables the kit reads (#210), then the
+// factory's rulesets, creates the reviewer environment and turns on the repository's "Allow auto-merge" (#139), then
+// reads back what it set; the gate's ruleset follows the repository variable GATE_REVIEWER (#155: entire has its own),
+// as it is being set. It prints the four values it sets and no other variable's. It calls only gh against GitHub's API,
+// with the factory's own files: never git, never the target's .envrc, scripts or hooks, so nothing the target holds
+// runs with his authority. A second run changes nothing. See bin/onboard-owner for the arguments.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -167,6 +167,7 @@ export function plan(slug, agent, have, want) {
     calls.push({ what: `environment ${ENV}`, method: 'PUT', path: `${repo}/environments/${ENV}`, body: { deployment_branch_policy: BRANCH_POLICY } });
   if (!have.policies.some((p) => p.name === want.branch && (p.type ?? 'branch') === 'branch'))
     calls.push({ what: `environment ${ENV} deploys from ${want.branch}`, method: 'POST', path: `${repo}/environments/${ENV}/deployment-branch-policies`, body: { name: want.branch, type: 'branch' } });
+  if (!have.autoMerge) calls.push({ what: 'allow auto-merge', method: 'PATCH', path: repo, body: { allow_auto_merge: true } });
   for (const name of want.drop) {
     const now = have.rulesets.find((x) => x.name === name);
     if (now) calls.push({ what: `ruleset ${name}, which the kit's gate replaces`, method: 'DELETE', path: `${repo}/rulesets/${now.id}` });
@@ -200,6 +201,8 @@ export function current(slug, agent, names, read = gh) {
     // GitHub may answer 404 for an account that is not a collaborator yet, the case the invitation is for.
     collaborator: maybe(`${repo}/collaborators/${agent}/permission`, read)?.permission ?? 'none',
     variables: variablesOf(slug, read),
+    // GitHub shows the setting to an admin only (identify has checked that), so an absent field reads as off.
+    autoMerge: read(['api', repo])?.allow_auto_merge === true,
     invited: invitations.some((i) => i.invitee?.login?.toLowerCase() === agent.toLowerCase() && i.permissions === 'write'),
     rulesets: list.filter((r) => names.has(r.name)).map((r) => read(['api', `${repo}/rulesets/${r.id}`])),
     environment,
@@ -319,7 +322,9 @@ function main(argv) {
   if (reviewer === 'entire' && sharedRunners(after).length)
     console.log('onboard-owner: the runners are shared under the Human\'s exception (#155, kit/.gate/enforced-rules.md), which holds ' +
       'only while there is no reviewer secret in the environment reviewer; this command does not read secrets, so that is his to keep');
-  const calls = plan(slug, agent, current(slug, agent, names), want);
+  const now = current(slug, agent, names);
+  const calls = plan(slug, agent, now, want);
+  if (now.autoMerge) console.log('onboard-owner: allow auto-merge is on');
   for (const c of calls) console.log(`  change  ${c.what}: ${show(c)}`);
   if (!calls.length) console.log('  nothing to change');
   if (!apply) {

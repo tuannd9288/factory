@@ -102,7 +102,7 @@ function format(ok, label, result, reads) {
 }
 
 function checkSettings(ctx) {
-  const reads = 'rulesets env collab invites kit vars';
+  const reads = 'repo rulesets env collab invites kit vars';
   const { slug, agent, branch, kitLanded, reviewer, isPrivate } = ctx;
   const want = wanted({ kitLanded: true, branch, reviewer });
   const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
