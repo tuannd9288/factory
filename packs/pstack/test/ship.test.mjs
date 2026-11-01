@@ -35,6 +35,11 @@ if (a[0] === 'pr' && a[1] === 'comment') {
   out('https://github.com/o/app/pull/7#issuecomment-1\n');
 }
 if (a[0] === 'pr' && a[1] === 'merge') {
+  // $SH/arm-refused: GitHub refuses to enable auto-merge, as gh 2.102.0 reports it.
+  if (a.includes('--auto') && fs.existsSync(sh + '/arm-refused')) {
+    process.stderr.write('GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)\n');
+    process.exit(1);
+  }
   const pr = read();
   pr.autoMergeRequest = a.includes('--auto') ? { mergeMethod: 'MERGE' } : null;
   fs.writeFileSync(sh + '/pr.json', JSON.stringify(pr));
@@ -220,6 +225,32 @@ describe('the steps after it opened', () => {
     assert.equal(out.code, 2, out.out);
     assert.match(out.out, /^ship: stopped on #7: live-verify is BLOCKED; put the reason and your recommended answer in the pull request$/m);
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
+  });
+
+  test('stops on a ready pull request that is not armed, before any note, verdict or merge (#304)', () => {
+    for (const driver of [true, false]) {
+      for (const mergeStateStatus of ['CLEAN', 'HAS_HOOKS', 'UNSTABLE']) {
+        const w = world({ driver });
+        w.passed();
+        assert.equal(w.ship().code, 0);
+        w.pr({ mergeStateStatus });
+        const out = w.ship();
+        assert.equal(out.code, 1, out.out);
+        assert.match(out.out, /^ship: stopped on #7: it is ready to merge and not armed; the Human merges it$/m);
+        assert.equal(w.read('lv-calls'), '');
+        assert.ok(!w.calls().some((c) => c.startsWith('pr merge') || c.startsWith('pr comment')), w.calls().join('\n'));
+      }
+    }
+  });
+
+  test('stops when GitHub refuses the arm because auto-merge is off (#304)', () => {
+    const w = opened();
+    w.pr({ mergeStateStatus: 'BLOCKED' });
+    writeFileSync(join(w.sh, 'arm-refused'), '');
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /^ship: stopped on #7: auto-merge is off on this repository; the Human merges it$/m);
+    assert.doesNotMatch(out.out, /could not run|armed #7/);
   });
 
   test('refuses to arm when the base is not main, and says which', () => {
