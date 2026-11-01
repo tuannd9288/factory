@@ -83,7 +83,7 @@ export function refusal(repo, root) {
   return null;
 }
 
-const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
+export const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 
 /** The first `node` that PATH names, as PATH names it (a link stays a link: brew upgrade keeps /opt/homebrew/bin/node and removes
  * the Cellar path behind it), or null. Only absolute folders count. */

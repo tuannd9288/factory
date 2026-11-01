@@ -15,7 +15,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quotaRows } from './quota.mjs';
 import { liveCount } from './seat.mjs';
-import { refusal } from '../../packs/pstack/bin/lead.mjs';
+import { quote, refusal } from '../../packs/pstack/bin/lead.mjs';
+import { leadRunning } from './top.mjs';
 import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
@@ -478,11 +479,14 @@ async function store(args, env) {
   return 0;
 }
 
+/** How long ssh may run for a command: none for `use`, whose restart waits up to ten minutes for a busy Lead (`ConnectTimeout`
+ * already covers a Mac mini that cannot be reached); 60 seconds for every other. */
+export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
+
 /** `use` and `logout` from the MacBook run on the Mac mini, as `login` does: the arguments are checked here first (a row is a number,
  * a letter is a to z, an account matches the account pattern), then the host runs the command in a login shell over ssh, on the
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
-function remote(cmd, args, env) {
-  const bad = cmd === 'use'
+function remote(cmd, args, env) {  const bad = cmd === 'use'
     ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^([1-9][0-9]*|lead-[A-Za-z0-9._-]+)$/.test(args[0]) ? 'the row is a number or lead-<repo>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
     : (args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account');
   if (bad) {
@@ -490,7 +494,7 @@ function remote(cmd, args, env) {
     return 2;
   }
   const tty = cmd === 'use' && args.length < 2;
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: tty ? undefined : 60000, killSignal: 'SIGKILL' });
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: remoteTimeout(cmd), killSignal: 'SIGKILL' });
   if (r.error) {
     console.error(`bin/factory: ${cmd} did not reach the Mac mini: ${r.error.code === 'ETIMEDOUT' ? 'timed out' : (r.error.code ?? 'failed')}`);
     return 1;
@@ -524,7 +528,6 @@ const stateOf = (r) => {
     return null;
   }
 };
-const shellWord = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replaceAll("'", "'\\''")}'`);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 /** The second half of `use` on a Lead's row (#179), after the accounts file changed: through `herdr` on PATH, waits for the Lead's
@@ -533,20 +536,16 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
  * leaves it running. 0 once the start was sent, else 1 with the reason. */
 async function restartLead(repo, account, ctx) {
   const next = `the Lead takes it at its next start (factory lead ${repo})`;
-  if (!tokenState(ctx.agentProfiles, account).ok) {
+  const hasToken = tokenState(ctx.agentProfiles, account).ok;
+  // `factory top`'s rule: a claude process with --name <repo>-lead. A recorded pane may hold something else by now.
+  if (!leadRunning(repo)) {
+    console.log(`the Lead of ${repo} is not running; it takes ${account} at its next start (factory lead ${repo})`);
+    if (!hasToken) console.log(`${account} has no token file yet: that next start is refused until factory login ${account}`);
+    return 0;
+  }
+  if (!hasToken) {
     console.log(`${account} has no token file yet: factory login ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
     return 1;
-  }
-  // A Lead is running unless it has no state or its newest hook event is SessionEnd (#286); its pane may hold something else by now.
-  let event = null;
-  try {
-    event = JSON.parse(readFileSync(join(ctx.runs, `${repo}-lead`, 'state.json'), 'utf8')).event;
-  } catch {
-    // no state: the Lead never ran, or its file is unreadable
-  }
-  if (!event || event === 'SessionEnd') {
-    console.log(`the Lead of ${repo} is not running; it takes ${account} at its next start (factory lead ${repo})`);
-    return 0;
   }
   let pane = '';
   try {
@@ -583,7 +582,7 @@ async function restartLead(repo, account, ctx) {
     await sleep(200);
   }
   const lead = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/bin/lead');
-  if (herdr(['pane', 'run', pane, `${shellWord(lead)} ${repo}`], 10000).status !== 0) {
+  if (herdr(['pane', 'run', pane, `${quote(lead)} ${repo}`], 10000).status !== 0) {
     console.log(`herdr did not run the start in pane ${pane}; ${next}`);
     return 1;
   }
@@ -618,7 +617,7 @@ async function use(args, env, io) {
     const repo = row.slice('lead-'.length);
     const why = refusal(repo, env.FACTORY_ROOT ?? resolve(fileURLToPath(import.meta.url), '../../..'));
     if (why) {
-      console.error(`bin/factory: ${why.replace(/^bin\/lead: /, '')}; nothing was changed`);
+      console.error(`${why}\nnothing was changed`);
       return 2;
     }
     target = rows.find((r) => r.profile === `factory/lead-${repo}`) ?? { profile: `factory/lead-${repo}` };
