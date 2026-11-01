@@ -143,8 +143,8 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy.
 - His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
-  `reviewer` environment), which Colly then applies on his login; and the reviewer's secret, where a repository uses
-  the kit's Claude reviewer.
+  `reviewer` environment, "Allow auto-merge"), which Colly then applies on his login; and the reviewer's secret, where a
+  repository uses the kit's Claude reviewer.
 - Logging into a repository's profile and the verifier's Codex profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.
@@ -301,7 +301,7 @@ Step 2 in detail: `bin/onboard-owner <owner/repo> --id <id>` takes the id of the
 the agents' account (write), sets `factory-branches` (every branch: no rewrite), `factory-tags` (every tag: no create,
 update or delete, but for a repository admin), `factory-claims` (`refs/heads/claim/**`: no deletion, no rewrite, no
 bypass) and `factory-bootstrap` (`main`: a pull request, one approval of the
-last push, merge commits only), creates the `reviewer` environment for `main`, and
+last push, merge commits only), creates the `reviewer` environment for `main`, turns on "Allow auto-merge", and
 reads it all back; it calls only `gh api`, never `git` and nothing the repository holds. A claim on an issue is the ref
 `claim/<n>`, taken with `.gate/bin/claim`; `verify-trusted` checks the pull request body's `Team:` line, and `tier` its
 `Issue:` and `Claim:` lines against that ref (`Session:` and `Cost:` inform only). Once the agents' account

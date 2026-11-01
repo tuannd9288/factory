@@ -33,6 +33,11 @@ if (args[0] === 'variable' && args[1] === 'list') done(state.variables ?? []);
 if (args[0] !== 'api') process.exit(1);
 if (path === 'user') done({ login: state.login });
 if (path.startsWith('apps/')) state.apps?.[path.slice(5)] ? done(state.apps[path.slice(5)]) : missing();
+// #139: the repository's own settings are changed by a PATCH of its path.
+if (path === repo && method === 'PATCH') {
+  if (kept('repository')) Object.assign(state.repo, body);
+  done(state.repo);
+}
 if (path === repo) done(state.repo);
 if (path.startsWith(repo + '/contents/.gate/kit-files')) state.kitLanded ? done({ path: '.gate/kit-files' }) : missing();
 if (path === repo + '/collaborators/' + agent + '/permission') {
@@ -99,7 +104,7 @@ function world(over = {}) {
   const state = {
     login: 'tuannd9288',
     agent: 'tuan9288-agent',
-    repo: { id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true } },
+    repo: { id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true },
     kitLanded: false,
     collaborator: null,
     invitations: [],
@@ -350,6 +355,41 @@ test('a variable GitHub accepts and drops leaves the onboarding incomplete (#210
     assert.match(out.out, /incomplete: .*variable GATE_REVIEWER/);
   } finally {
     w.cleanup();
+  }
+});
+
+test('allow auto-merge is listed, turned on by --apply, read back, and said to be on when it is (#139)', () => {
+  const patch = 'api -X PATCH repos/tuannd9288/app --input -';
+  const turnOff = (x) => x.set({ repo: { ...x.state().repo, allow_auto_merge: false } });
+  const w = world();
+  try {
+    turnOff(w);
+    let out = w.owner(['tuannd9288/app', '--id', '1234']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /change  allow auto-merge: PATCH repos\/tuannd9288\/app \{"allow_auto_merge":true\}/);
+    assert.deepEqual(w.writes(), []);
+    out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(w.writes().filter((l) => l.includes(' PATCH ')), [patch]);
+    assert.equal(w.state().repo.allow_auto_merge, true);
+    assert.match(out.out, /read back: every setting as planned/);
+    w.clear();
+    out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /onboard-owner: allow auto-merge is on/);
+    assert.doesNotMatch(out.out, /change  allow auto-merge/);
+    assert.deepEqual(w.writes().filter((l) => l.includes(' PATCH ')), []);
+  } finally {
+    w.cleanup();
+  }
+  const dropped = world({ ignore: 'repository' });
+  try {
+    turnOff(dropped);
+    const out = dropped.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /incomplete: .*allow auto-merge/);
+  } finally {
+    dropped.cleanup();
   }
 });
 

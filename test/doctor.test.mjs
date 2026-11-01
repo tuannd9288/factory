@@ -128,7 +128,7 @@ function state(head, over = {}) {
   return {
     login: 'tuannd9288',
     agent: 'tuan9288-agent',
-    repo: { id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true } },
+    repo: { id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true },
     kitLanded: true,
     collaborator: 'write',
     invitations: [],
@@ -224,7 +224,7 @@ test('settings: shared runners under entire are green, the #155 exception; the s
 });
 
 test('settings: unset runners are red on a private repository only; an unset GATE_REVIEWER is red on both (#210)', () => {
-  const repo = (isPrivate) => ({ id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, private: isPrivate });
+  const repo = (isPrivate) => ({ id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true, private: isPrivate });
   const unset = { GATE_RUNNER: null, GATE_PR_RUNNER: null, GATE_TRUSTED_RUNNER: null };
   let r = doctor({ held: state(kitMerge, { repo: repo(false), variables: gateVariables(unset) }) });
   assert.equal(r.code, 0, r.out);
