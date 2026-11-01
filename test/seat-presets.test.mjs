@@ -20,33 +20,33 @@ const DENY = [
   'Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)',
   'Read(~/factory-runs/*/transcripts/**)',
 ];
-const BASE = ['Read', 'Glob', 'Grep', 'Bash(node:*)', 'Bash(git:*)', 'Bash(/r/issue-1/sv)', 'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(cd:*)', 'Bash(mktemp:*)', 'Bash(grep:*)', 'Bash(diff:*)'];
-const WORKER_ALLOW = [...BASE, 'Bash(cp:*)', 'Bash(sed:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(cmp:*)', 'Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)'];
-// Write, Edit and redirects only in the session's own folders: the run folder and the work folder (#188).
+// The researcher's own allow list, which it keeps while hideKey is true (#307).
+const RESEARCHER_ALLOW = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${join(factory, 'bin/research-git')}:*)`, 'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)'];
+// Write, Edit and redirects only in the session's own folders: the run folder and the work folder (#188); the researcher's only.
 const EDITS = ['Edit(//r/issue-1/**)', 'Edit(//r/w/**)'];
 
 const ALERTS = JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: join(factory, 'bin/factory-alerts'), timeout: 10 }] }] } });
 const tail = ['--output-format', 'stream-json', '--verbose', '--json-schema', SCHEMA];
 
-test('worker: sonnet, medium effort, 400 turns, the worker allow list and the common deny list', async () => {
+test('worker: sonnet, medium effort, 400 turns, auto mode, no role allow list and the common deny list (#307)', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'worker', run: RUN, home: HOME, work: WORK }), [
-    '-p', '--model', 'sonnet', '--effort', 'medium', '--max-turns', '400', '--permission-mode', 'default',
+    '-p', '--model', 'sonnet', '--effort', 'medium', '--max-turns', '400', '--permission-mode', 'auto',
     '--settings', ALERTS,
     '--add-dir', RUN,
-    '--allowedTools', ...WORKER_ALLOW, ...EDITS, 'StructuredOutput',
+    '--allowedTools', 'StructuredOutput',
     '--disallowedTools', ...DENY,
     ...tail,
   ]);
 });
 
-test('reviewer: opus, high effort, 300 turns, the base allow list, cp and the commands acceptEdits approved, edits in its folders', async () => {
+test('reviewer: opus, high effort, 300 turns, auto mode, no role allow list and the common deny list (#307)', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'reviewer', run: RUN, home: HOME, work: WORK }), [
-    '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'default',
+    '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'auto',
     '--settings', ALERTS,
     '--add-dir', RUN,
-    '--allowedTools', ...BASE, 'Bash(cp:*)', 'Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)', ...EDITS, 'StructuredOutput',
+    '--allowedTools', 'StructuredOutput',
     '--disallowedTools', ...DENY,
     ...tail,
   ]);
@@ -58,8 +58,7 @@ test('researcher: opus, high effort, 300 turns, the web and git only through bin
     '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'default',
     '--settings', ALERTS,
     '--add-dir', RUN,
-    '--allowedTools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${join(factory, 'bin/research-git')}:*)`,
-    'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)', ...EDITS, 'StructuredOutput',
+    '--allowedTools', ...RESEARCHER_ALLOW, ...EDITS, 'StructuredOutput',
     '--disallowedTools', ...DENY.filter((r) => r !== 'WebFetch' && r !== 'WebSearch'), 'Bash(git:*)',
     ...tail,
   ]);
@@ -80,12 +79,12 @@ test('--skill adds Skill(<name>) and --allow a run\'s own rule, after the preset
   assert.equal(args[args.indexOf('--max-turns') + 1], '50');
   assert.deepEqual(args.slice(args.indexOf('--add-dir'), args.indexOf('--allowedTools')), ['--add-dir', RUN, '--add-dir', '/x']);
   const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
-  assert.deepEqual(allowed, [...WORKER_ALLOW, ...EDITS, 'Edit(//x/**)', 'StructuredOutput', 'Skill(deletion-proof)', 'Bash(/r/issue-1/other:*)']);
+  assert.deepEqual(allowed, ['StructuredOutput', 'Skill(deletion-proof)', 'Bash(/r/issue-1/other:*)']);
 });
 
-test('with no work folder, the only Edit rule is the run folder\'s: no rule for a missing folder (#192)', async () => {
+test('with no work folder, the researcher\'s only Edit rule is the run folder\'s: no rule for a missing folder (#192)', async () => {
   const { buildArgs } = await lib();
-  const args = buildArgs({ role: 'worker', run: RUN, home: HOME });
+  const args = buildArgs({ role: 'researcher', run: RUN, home: HOME });
   const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
   assert.deepEqual(allowed.filter((r) => r.startsWith('Edit(')), ['Edit(//r/issue-1/**)']);
 });
@@ -110,11 +109,32 @@ test('a researcher\'s resume takes 200 turns', async () => {
   assert.deepEqual(resumed.slice(9), buildArgs({ role: 'researcher', run: RUN, home: HOME }).slice(7));
 });
 
-test('no role writes or edits outside its folders: no bare Write or Edit, and one Edit rule for each folder (#188)', async () => {
+test('no role is granted a bare Write or Edit; the researcher alone gets one Edit rule for each folder (#188, #307)', async () => {
   const { buildArgs, ROLES } = await lib();
   for (const role of ROLES) {
     const args = buildArgs({ role, run: RUN, home: HOME, work: WORK, addDirs: ['/x', RUN] });
     const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'));
-    assert.deepEqual(allowed.filter((r) => /^(Write|Edit|NotebookEdit|MultiEdit)\b/.test(r)), [...EDITS, 'Edit(//x/**)'], role);
+    assert.deepEqual(allowed.filter((r) => /^(Write|Edit|NotebookEdit|MultiEdit)\b/.test(r)), role === 'researcher' ? [...EDITS, 'Edit(//x/**)'] : [], role);
+  }
+});
+
+test('hideKey is on the researcher alone and decides its mode and allow list: true keeps today\'s, false is the team\'s (#307)', async () => {
+  const { buildArgs, PRESETS } = await lib();
+  assert.deepEqual(Object.keys(PRESETS).filter((r) => Object.hasOwn(PRESETS[r], 'hideKey')), ['researcher']);
+  const part = (args) => ({ mode: args[args.indexOf('--permission-mode') + 1], allowed: args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools')), denied: args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--output-format')) });
+  const was = PRESETS.researcher.hideKey;
+  try {
+    assert.equal(was, true, 'the default hides the key');
+    PRESETS.researcher.hideKey = true;
+    const on = part(buildArgs({ role: 'researcher', run: RUN, home: HOME, work: WORK }));
+    assert.equal(on.mode, 'default');
+    assert.deepEqual(on.allowed, [...RESEARCHER_ALLOW, ...EDITS, 'StructuredOutput']);
+    PRESETS.researcher.hideKey = false;
+    const off = part(buildArgs({ role: 'researcher', run: RUN, home: HOME, work: WORK }));
+    assert.equal(off.mode, 'auto');
+    assert.deepEqual(off.allowed, ['StructuredOutput']);
+    assert.deepEqual(off.denied, on.denied, 'the deny rules do not change');
+  } finally {
+    PRESETS.researcher.hideKey = was;
   }
 });

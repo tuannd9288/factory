@@ -53,32 +53,23 @@ const denyOf = (home, web) => [
   'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead, leadTranscripts,
 ];
 
-// --json-schema adds the StructuredOutput tool to the session, so each allow list admits it (claude-reviewer.mjs).
-const builderAllow = (run) => [
-  'Read', 'Glob', 'Grep', 'Bash(node:*)', 'Bash(git:*)', `Bash(${run}/sv)`, 'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(cd:*)', 'Bash(mktemp:*)', 'Bash(grep:*)', 'Bash(diff:*)',
-];
-
-// The filesystem commands acceptEdits approved in the session's folders, which the default mode bin/seat runs in does not
-// (#188). The researcher gets none of them, nor cp or sed, so it cannot move or remove the folder research-git clones into.
-const fsCommands = ['Bash(mv:*)', 'Bash(rm:*)', 'Bash(rmdir:*)', 'Bash(touch:*)'];
-
 /** The presets. turns is a new session's --max-turns, resumeTurns a resumed one's. No preset has a spend cap: a figure the
  * factory picked, on a subscription that bills no dollars, is a stop of the kind #194 removed; --max-turns guards a runaway.
  * worker: run-90.sh worker (sonnet, medium, 400 turns); its fix rounds (run-90fix.sh) resume with 200.
  * reviewer: run-90.sh reviewer (opus, high, 300 turns); its rounds (run-90rr family) resume with 300 or 200, 300 here.
  * researcher: run-79.sh, run-71.sh and run-58.sh (opus, high, 300 turns, the web and read-only git); resumed with 200
  *   (run-71tx.sh, run-71rc.sh). Its git goes through bin/research-git, and every other form of git is denied (#181).
- * deny is a role's own deny rules, after the common ones. */
+ * deny is a role's own deny rules, after the common ones. A preset without hideKey runs in auto mode with no role allow list and
+ * no scrub, holding the team's key, and keeps every deny rule (the Human, 2026-11-01, #307). hideKey: true is the researcher's
+ * switch alone (below); only a pull request the Human approves changes it. */
 export const PRESETS = {
-  worker: {
-    model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, web: false,
-    allow: (run) => [...builderAllow(run), 'Bash(cp:*)', 'Bash(sed:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(cmp:*)', ...fsCommands],
-  },
-  reviewer: {
-    model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, web: false,
-    allow: (run) => [...builderAllow(run), 'Bash(cp:*)', ...fsCommands],
-  },
+  worker: { model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, web: false },
+  reviewer: { model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, web: false },
   researcher: {
+    // hideKey: true is today's setup: the scrub, the default mode, the short allow list below and seat 2. false makes it run like
+    // the rest of the team (the Human, 2026-11-01: "Làm, mặc định giấu"). Flipping it is a pull request the Human approves,
+    // which also changes the researcher tests that pin today's value (#307).
+    hideKey: true,
     // The Lead's proposal (review of #91, #6), agreed by Colly on 2026-10-26: the researcher reads untrusted pages and can send
     // them out with WebFetch, so it never runs on seat 1. Since #178 seat 2 holds a token too; its grants were reviewed for that
     // (AGENTS.md): no tool of its own returns a file's content but Read, which the deny rules refuse on the tokens.
@@ -93,24 +84,25 @@ export const PRESETS = {
 
 export const ROLES = Object.keys(PRESETS);
 
-/** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories and run its
- * `sv`); skills become Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, adds three deny
+/** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories); skills become
+ * Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, adds three deny
  * rules for every seat (#178): the tokens folder, the archive folder and seat 1's old token file; deny is a run's own extra deny
- * rules (#92), which come after the role's and before those three. The mode is
- * default: with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set, Claude Code 2.1.308 forces it whatever is asked (#188). Write, Edit
- * and redirects reach the session's own folders only (run, work and each --add-dir), as acceptEdits limited them. */
+ * rules (#92), which come after the role's and before those three. The mode is auto and the only grants are StructuredOutput,
+ * the skills and the run's own allow, the deny rules staying whole (#307). With hideKey the mode is default (the scrub forces it,
+ * Claude Code 2.1.308, #188), with the role's allow list and one Edit rule for each of the session's own folders (run, work and
+ * each --add-dir): Write, Edit and redirects reach those only. */
 export function buildArgs({ role, run, work = null, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, profiles = null }) {
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
-  const edits = [...new Set([run, work, ...addDirs].filter(Boolean))].map((d) => `Edit(/${d}/**)`);
+  const edits = p.hideKey ? [...new Set([run, work, ...addDirs].filter(Boolean))].map((d) => `Edit(/${d}/**)`) : [];
   const deny = [...denyOf(home, p.web), ...(p.deny ?? []), ...extraDeny, ...(profiles ? [`Read(/${profiles}/tokens/**)`, `Read(/${profiles}/archive/**)`, `Read(/${profiles}/seats/1/oauth-token)`] : [])];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
-    '--permission-mode', 'default',
+    '--permission-mode', p.hideKey ? 'default' : 'auto',
     '--settings', ALERTS_SETTINGS,
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
-    '--allowedTools', ...p.allow(run), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
+    '--allowedTools', ...(p.hideKey ? p.allow(run) : []), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
     '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA),
   ];
@@ -331,7 +323,8 @@ export function parseArgs(argv) {
   for (const [flag, value] of [['--resume', o.resume], ...o.allow.map((v) => ['--allow', v]), ...o.deny.map((v) => ['--deny', v]), ...o.addDirs.map((v) => ['--add-dir', v])]) {
     if (typeof value === 'string' && value.startsWith('-')) throw new Refused(`${flag} ${value}: a value that starts with a dash is refused, since claude would read it as a flag`);
   }
-  // A folder's Edit rule is a gitignore pattern, so a glob character widens it, and a path that is not already real (relative,
+  // A folder becomes an --add-dir and, for the researcher with hideKey, an Edit rule, which is a gitignore pattern: a glob
+  // character widens it, and a path that is not already real (relative,
   // a link, a trailing slash, a `..` step) is not the path the rule would name once claude resolves it (#192).
   for (const [flag, value] of [['--run', o.run], ['--work', o.work], ...o.addDirs.map((v) => ['--add-dir', v])]) {
     if (/[*?[]/.test(value)) throw new Refused(`${flag} ${value}: a folder with a glob character (*, ? or [) is refused, since its permission rule would reach other folders`);
@@ -464,9 +457,12 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const tokenPath = join(tokenDir(profiles), account);
   readToken(tokenPath, seat, account); // refuses now; the supervisor reads it again, just before it starts claude
 
-  // Neither bin/seat's environment nor the supervisor's holds the token, nor the caller's GitHub or API credentials. The
-  // scrub has claude take credentials out of the environment of each command, hook and MCP server it starts (#181).
-  const child = { ...env, GH_CONFIG_DIR: join(run, '.gh-empty'), CLAUDE_CONFIG_DIR: join(profiles, 'seats', String(seat), 'claude'), CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' };
+  // Neither bin/seat's environment nor the supervisor's holds the token, nor the caller's GitHub or API credentials. With
+  // hideKey, the scrub has claude take credentials out of the environment of each command, hook and MCP server it starts (#181);
+  // without it the scrub is not set, whatever the caller had, since it would force the default mode (#307).
+  const child = { ...env, GH_CONFIG_DIR: join(run, '.gh-empty'), CLAUDE_CONFIG_DIR: join(profiles, 'seats', String(seat), 'claude') };
+  if (PRESETS[o.role].hideKey) child.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
+  else delete child.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB;
   for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete child[name];
   // The researcher's git clones under its run folder, and only there (bin/research-git).
   if (o.role === 'researcher') child.FACTORY_RESEARCH_CLONES = join(run, 'clones');
