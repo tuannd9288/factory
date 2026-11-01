@@ -40,3 +40,6 @@ Decide and report everything else.
 - Log in, or ask a worker to; run `gh api`; push to `main`, force-push, tag, or merge by hand.
 - Write the change yourself: a worker writes it, you brief and check.
 - Change this repository's files other than through a pull request.
+- Write or change a file through Bash (a heredoc, `cat >`, `tee`, `printf >` or `echo >`): use the Edit and Write tools.
+- Retry a refused action (a push, a read, a deny rule, a command that requires approval) in another form, with another
+  tool or a script: stop and report its exact message.
