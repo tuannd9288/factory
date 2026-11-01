@@ -297,7 +297,7 @@ test('the LIVE column of a team row counts the live runs of its account; teams o
   }
 });
 
-test('use factory-lead names no launcher command, since the launcher refuses the factory as a repository: the Lead takes the account at its next start (#311)', () => {
+test('use factory-<team> names no launcher command, since the launcher refuses the factory as a repository: the Lead takes the account at its next start (#311)', () => {
   const s = box();
   try {
     mini(s, { accounts: `factory/factory-${OWN}=ann\n` });
