@@ -321,7 +321,7 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin)
-       bin/factory use [<row|lead-repo> [<letter>]]   (the row's account becomes the letter's; lead-<repo> makes a Lead's row, and a running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
+       bin/factory use [<row|lead-repo> [<letter>]]   (the row's account becomes the letter's; lead-<repo> makes a Lead's row, and each running Lead of the repository restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
        bin/factory lead <repo> [--team <name>] [--new] [--dry-run]`;
