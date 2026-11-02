@@ -8,13 +8,18 @@
 //   lead-at-dialog     a Lead whose newest hook event is a permission prompt or an elicitation dialog
 //   out-of-quota       an account Claude Code has rejected until a reset that has not come
 //   gh-refused         the sweep's own gh refused for a rate limit or a login
-// Only the sweep writes (record, under its lock): $FACTORY_STATE/events-active.json remembers which conditions hold and since when,
+// The sweep writes them (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
+// of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
+// which are no condition and are never cleared. The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
+// of that write alone, and `seq` stays unique and increasing across both.
+// Only record and appendStart write: $FACTORY_STATE/events-active.json remembers which conditions hold and since when,
 // and a repository the sweep could not read keeps its conditions, since only a read that succeeded can end one. `factory top` and
 // `bin/factory-events` only read. `bin/factory-events [--follow]` prints the start lines after its cursor ($FACTORY_STATE/events.cursor);
 // only --follow moves the cursor and then follows the file, and no run prints a clear line. A text holds no token and no e-mail address.
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { redact } from './redact.mjs';
 import { accountOut } from './seat.mjs';
 import { accountList, seatAccounts } from './token.mjs';
 import { leadOf, leadStateOf, readProcesses } from './top.mjs';
@@ -27,17 +32,10 @@ const STARTED = new Set(['IN_PROGRESS', 'COMPLETED']);
 const HUMAN = new Set(['tier-3', 'needs-human']);
 const stateDir = () => process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
 
-/** A text with every e-mail address as [account] and every token-like string (GitHub's prefixes, any run of 32 or more letters, digits,
- * _ or -) as [redacted]. */
-export function redact(text) {
-  return String(text)
-    .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '[account]')
-    .replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '[redacted]')
-    .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]');
-}
+export { redact };
 
 /** The first non-empty line of a text, redacted, with its control characters gone, at most 200 characters. */
-const oneLine = (text) => redact(String(text).split('\n').find((l) => l.trim()) ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
+export const oneLine =(text) => redact(String(text).split('\n').find((l) => l.trim()) ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
 
 // What gh prints when GitHub refuses it, from its own messages: the API's "API rate limit exceeded" / "secondary rate limit" and a 429
 // for a rate limit; "HTTP 401: Bad credentials", "To get started with GitHub CLI, please run:  gh auth login" and "The token in ... is
@@ -164,11 +162,56 @@ function writeAtomic(file, text) {
   renameSync(tmp, file);
 }
 
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** Runs fn holding $state/events.lock, a folder made with mkdir (one process wins). A write holds it for milliseconds, so a lock older
+ * than 30 s is a dead writer's and is removed; a writer waits up to 10 s for it. */
+function withEventsLock(state, fn) {
+  mkdirSync(state, { recursive: true });
+  const lock = join(state, 'events.lock');
+  const until = Date.now() + 10_000;
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    try {
+      if (Date.now() - statSync(lock).mtimeMs > 30_000) rmSync(lock, { recursive: true, force: true });
+    } catch {
+      continue;
+    }
+    if (Date.now() > until) throw new Error('events.lock is held');
+    sleep(10);
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
+}
+
 /** Brings the events up to what holds now, and returns the lines it wrote. `found` is every condition that holds in what the sweep read
  * ({ key, scope, text, afterMs?, top?, url? }); `read` is the set of scopes it could read this time (a repository, 'leads', 'quota',
- * 'gh'). A condition of a scope not read stays as it was; one of a scope read that is not found ends, with a clear if it had started. A
- * condition with `afterMs` starts once that long has passed from the first sweep that saw it. */
-export function record({ state, found, read, now = Date.now() }) {
+ * 'gh', 'reader'). A condition of a scope not read stays as it was; one of a scope read that is not found ends, with a clear if it had
+ * started. A condition with `afterMs` starts once that long has passed from the first sweep that saw it. */
+export function record(args) {
+  return withEventsLock(args.state, () => recordLocked(args));
+}
+
+/** One line that is no condition: a `start` that nothing clears (the reader's findings, #339). Returns its seq. */
+export function appendStart({ state, kind, key, text, now = Date.now() }) {
+  return withEventsLock(state, () => {
+    const active = readActive(state);
+    const seq = Math.max(active.seq, ...readLines(state).map((e) => e.seq)) + 1;
+    appendFileSync(join(state, 'events.jsonl'), `${JSON.stringify({ seq, at: new Date(now).toISOString(), type: 'start', kind, key, text: oneLine(text) })}\n`);
+    writeAtomic(join(state, 'events-active.json'), `${JSON.stringify({ seq, conditions: active.conditions })}\n`);
+    return seq;
+  });
+}
+
+function recordLocked({ state, found, read, now = Date.now() }) {
   const active = readActive(state);
   const next = {};
   const changes = [];
