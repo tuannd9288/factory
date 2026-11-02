@@ -30,8 +30,8 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
      label, so no team can claim it: it waits in Triage. Then go on with issue <n>; the fix is never on its branch.
    - The issue's premise proved wrong, or the work would change its goal or cost: write it on issue <n> with
      `gh issue comment`, with your recommendation, label it with `gh issue edit <n> --add-label needs-human`,
-     and stop work on <n> at that question. When the answer is on the issue, remove the label with
-     `gh issue edit <n> --remove-label needs-human` and go on.
+     and stop work on <n> at that question. Colly decides it, or takes it to the Human. When the answer is on the
+     issue, remove the label with `gh issue edit <n> --remove-label needs-human` and go on.
 
    How many workers run at once is your call:
    when the load is above the cores (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Your `bin/seat` calls inherit
@@ -59,8 +59,8 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
 9. When it has landed, check that the issue closed. The queue's sweep removes the worktree.
 
 ## What you ask the Human
-Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login, a
-cost, a premise of the issue that proved wrong, or a change of its goal or cost (step 4).
+Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login or a
+cost.
 Number each question and give your recommended answer. While you wait on any decision, label your issue `needs-human`;
 remove the label once the answer is on the issue or its pull request.
 Decide and report everything else.
