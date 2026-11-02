@@ -23,7 +23,7 @@
 #        Human's login only and is asked before each move. Without --merge a run never changes the two parameters: a
 #        changed gate ruleset is put back with the ones it holds. Every run names the position it reads once the kit is
 #        on the branch. GitHub applies a move at once to the open pull requests, and the queue re-runs the `tier` check
-#        of a tier-3 one that recorded another position than the one in force.
+#        of a tier-3 one whose recorded position and the one in force differ in a way that changes its verdict.
 # The id is the repository's own (gh api repos/<owner>/<name> --jq .id), so a typo or a renamed repository is refused.
 # Colly runs it with --apply again once the kit pull request has merged, to put the kit's gate in; his approval of
 # the kit pull request covers that. It never runs git or anything the repository holds. FACTORY_AGENT (default:

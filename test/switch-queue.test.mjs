@@ -27,7 +27,7 @@ function world() {
       // A call that does not ask for every page fails; with them the rules come as one page of a list of pages.
       '  *rules/branches*) case "$*" in *"--paginate --slurp"*) printf "["; cat "$Q/rules.json"; printf "]" ;; *) echo "fake gh: the rules are asked without --paginate --slurp" >&2; exit 1 ;; esac ;;',
       // The records of check runs, asked by node id apart from the pull requests (a few points, not a hundred times as many).
-      '  *"nodes(ids"*) cat "$Q/records.json" ;;',
+      '  *"nodes(ids"*) if [ -e "$Q/recfail" ]; then echo "HTTP 502" >&2; exit 1; fi; cat "$Q/records.json" ;;',
       '  *graphql*) cat "$Q/prs.json" ;;',
       '  "run rerun --job "*) case " $(cat "$Q/fail" 2>/dev/null) " in *" $4 "*) echo "HTTP 403: Workflow run cannot be rerun" >&2; exit 1 ;; esac ;;',
       '  *) exit 1 ;;',
@@ -70,7 +70,7 @@ function world() {
 
 /** An open pull request as the queue's query returns it, with its latest `tier` job. `record` is the position that job
  * recorded on its check run (null: none); `notes` replaces its annotations; `running` leaves the job unfinished. */
-const pull = (number, { labels = ['tier-3'], conclusion = 'FAILURE', running = false, record = null, notes = null, auto = true, draft = false, approvedBy = null, jobId = `${number}1`, head = `h${number}`, base = 'main', startedAt = '2026-11-02T01:00:00Z' } = {}) => ({
+const pull = (number, { labels = ['tier-3'], conclusion = 'FAILURE', running = false, record = null, notes = null, auto = true, draft = false, approvedBy = null, jobId = `${number}1`, head = `h${number}`, base = 'main', startedAt = '2026-11-02T01:00:00Z', completedMinutesAgo = 60 } = {}) => ({
   number,
   isDraft: draft,
   createdAt: `2026-11-02T0${number % 10}:00:00Z`,
@@ -95,6 +95,7 @@ const pull = (number, { labels = ['tier-3'], conclusion = 'FAILURE', running = f
                   status: running ? 'IN_PROGRESS' : 'COMPLETED',
                   conclusion: running ? null : conclusion,
                   startedAt,
+                  completedAt: running ? null : new Date(Date.now() - completedMinutesAgo * 60_000).toISOString(),
                   detailsUrl: `https://github.com/o/app/actions/runs/1/job/${jobId}`,
                   annotations: { nodes: notes ?? (record ? [{ title: 'merge switch', message: record }] : []) },
                   checkSuite: { app: { slug: 'github-actions' } },
@@ -278,6 +279,64 @@ test('the pull requests\' query asks no annotations; the record query is made on
     records = out.calls.filter((c) => c.includes('nodes(ids'));
     assert.equal(records.length, 1);
     assert.ok(/CR_81/.test(records[0]) && /CR_91/.test(records[0]) && !/CR_71/.test(records[0]), 'only the runs not known');
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a read that found no position is not kept for a run that completed a minute ago: it is read again, and the record then followed', () => {
+  const w = world();
+  try {
+    w.rules('1-2');
+    w.pulls([pull(7, { conclusion: 'SUCCESS', completedMinutesAgo: 1 })]);
+    let out = w.sweep();
+    assert.equal(out.calls.filter((c) => c.includes('nodes(ids')).length, 1);
+    assert.deepEqual(out.reruns, []);
+    assert.doesNotMatch(out.out, /does not record/, 'not judged while it may still be early');
+    out = w.sweep();
+    assert.equal(out.calls.filter((c) => c.includes('nodes(ids')).length, 1, 'read again');
+    // The listing has caught up with the job: its annotation is there now.
+    w.pulls([pull(7, { conclusion: 'SUCCESS', completedMinutesAgo: 1, record: 'all' })]);
+    out = w.sweep();
+    assert.deepEqual(out.reruns, [job(71)]);
+    assert.equal(w.sweep().calls.filter((c) => c.includes('nodes(ids')).length, 0, 'a position is kept at once');
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a read that found no position six minutes after the run completed is kept and not read again', () => {
+  const w = world();
+  try {
+    w.rules('1-2');
+    w.pulls([pull(7, { conclusion: 'SUCCESS', completedMinutesAgo: 6 })]);
+    let out = w.sweep();
+    assert.equal(out.calls.filter((c) => c.includes('nodes(ids')).length, 1);
+    assert.match(out.out, /does not record its position yet/);
+    out = w.sweep();
+    assert.equal(out.calls.filter((c) => c.includes('nodes(ids')).length, 0);
+    assert.doesNotMatch(out.out, /does not record/, 'said once');
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a failed record read is told in one line, judges none of those runs, and is asked again on the next sweep', () => {
+  const w = world();
+  try {
+    w.rules('1-2');
+    w.pulls([pull(7, { conclusion: 'SUCCESS', record: 'all' })]);
+    writeFileSync(join(w.dir, 'recfail'), '');
+    let out = w.sweep();
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(out.reruns, []);
+    assert.equal(out.out.split('\n').filter((l) => /merge switch records of o\/app could not be read: HTTP 502/.test(l)).length, 1, out.out);
+    assert.doesNotMatch(out.out, /does not record/);
+    out = w.sweep();
+    assert.equal(out.calls.filter((c) => c.includes('nodes(ids')).length, 1, 'asked again');
+    rmSync(join(w.dir, 'recfail'));
+    out = w.sweep();
+    assert.deepEqual(out.reruns, [job(71)], 'the record is followed once the query answers');
   } finally {
     w.cleanup();
   }

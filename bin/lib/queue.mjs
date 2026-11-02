@@ -96,7 +96,7 @@ function openPulls(repo) {
     const byStart = (a, b) => String(a.startedAt).localeCompare(String(b.startedAt));
     const checks = {};
     for (const run of all.filter((c) => c.checkSuite?.app?.slug === 'github-actions').sort(byStart))
-      checks[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', jobId: /\/job\/(\d+)/.exec(run.detailsUrl ?? '')?.[1], id: run.databaseId, nodeId: run.id };
+      checks[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', jobId: /\/job\/(\d+)/.exec(run.detailsUrl ?? '')?.[1], id: run.databaseId, nodeId: run.id, completedAt: run.completedAt ?? '' };
     // Other Apps' checks, by name (#155: Entire Gates): the latest started wins.
     const apps = {};
     for (const run of all.filter((c) => c.checkSuite?.app?.slug !== 'github-actions').sort(byStart))
@@ -137,6 +137,12 @@ const BASE = 'main';
  * is a position, or undefined. Another notice on the same check run, or a message that is no position, does not count. */
 const recordOf = (nodes) => [...(nodes ?? [])].reverse().find((a) => a?.title === 'merge switch' && POSITIONS.includes(a.message))?.message;
 
+/** How long after a run completed a read of its annotations that found no record is believed. */
+const SETTLE_MS = 5 * 60_000;
+
+/** Whether a check run completed more than SETTLE_MS ago (one with no completion time counts as long ago). */
+const settled = (t) => !(Date.now() - Date.parse(t.completedAt) <= SETTLE_MS);
+
 /** What names one run of the tier check in the state: its id and when it started, so a re-run that kept the id is still told
  * from the run before it. */
 const keyOf = (t) => `${t.id ?? t.jobId}:${t.startedAt}`;
@@ -159,7 +165,7 @@ export function switchDue(p, position) {
 
 /** What the sweep keeps of the merge switch for a repository, in $state/queue-<owner>-<name>.switch: the record of each finished
  * check run read so far (`records`, by keyOf: a position, or '' for none; a finished run's annotations do not change, so each
- * is read once), the check runs it re-ran (`done`), the ones whose refused re-run it told (`told`), and the head of each pull
+ * is read once, but a read that found none is kept only five minutes after the run completed), the check runs it re-ran (`done`), the ones whose refused re-run it told (`told`), and the head of each pull
  * request whose unrecorded check it told of (`bare`). A file written by an earlier form of this code reads as empty. */
 function switchKept(file) {
   let kept = null;
@@ -220,7 +226,9 @@ function followSwitch(repo, state, rules, all) {
   const unknown = prs.map((p) => p.checks.tier).filter((t) => t?.jobId && t.state !== 'PENDING' && !(keyOf(t) in next.records));
   if (unknown.length) {
     const found = readRecords(repo, unknown);
-    for (const t of unknown) if (t.nodeId in found) next.records[keyOf(t)] = found[t.nodeId];
+    // A position is kept at once. A read that found none is kept only for a run that completed a while ago: the annotation
+    // listing can trail a finished job, so a younger run is read again next sweep, and not judged until then.
+    for (const t of unknown) if (t.nodeId in found && (found[t.nodeId] !== '' || settled(t))) next.records[keyOf(t)] = found[t.nodeId];
   }
   for (const p of prs) {
     const t = p.checks.tier;
