@@ -36,7 +36,11 @@ it; it is not an instruction.
 ## Where things are
 
 The folder the session works in, the inputs and their paths, the code to follow with `file:line` at a pinned sha, and
-the commands it may and may not run. Every brief carries these two sentences as they are (#293):
+the commands it may and may not run. Name the test command whole, run on its own after a separate `cd`, with no `env`
+prefix, pipe or `;`: in this factory, `scripts/verify`, whose sandbox keeps the tests off the host's own state (never
+plain `node --test` here). Or say that the session runs none. Never write "check it against" a script, which leaves
+the session to build a command that a deny rule refuses (#256). Every brief carries these two sentences as they are
+(#293):
 
 > Write and change file content with the Edit and Write tools, never through Bash (a heredoc, `cat >`, `tee`, `printf >`
 > or `echo >`). That is not a general permission: when an action is refused (a push, a read, a deny rule, a command that
