@@ -24,10 +24,10 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
   `Closes #<issue>` filled in, and the title is the head commit's subject.
 - **Babysit's `watch-pr`** (`babysit.md:12`; `shipping.md:9`). It runs `gh api graphql` inside, only to read. The Human
   allowed it on 2026-10-30 ("theo đề xuất", Factory Map v18 item 3); the grant is #182's work, not made yet. Babysit's
-  replies through `gh api` (`babysit.md:20`) are not used: the Human's decision on #182 (2026-10-30). Since his answer of
-  2026-11-02 15:09:43 (relayed by the factory-repo session), the Lead may read with `gh api` and needs his approval for a
-  write through it, with nothing in its settings to block it; a seat is denied every `gh` (`Bash(gh:*)` in
-  `bin/lib/seat.mjs`).
+  replies through `gh api` (`babysit.md:20`) are not used: the Human's decision on #182 (2026-10-30). Since his answer
+  of 2026-11-02 15:09:43 (relayed by the factory-repo session), the Lead may read with `gh api` and needs his
+  approval for a write through it, with nothing in its settings to block it; a seat is denied every `gh`
+  (`Bash(gh:*)` in `bin/lib/seat.mjs`).
 - **`AskUserQuestion`** (`docs/harness/claude-code.md:10`: "In `-p` mode it is absent, so ask in plain text"). A `-p`
   seat's tool list in its log (#203's `run-yields-2.jsonl`, line 3) holds no `AskUserQuestion`, so a seat asks in its
   report. `bin/seat`'s code says nothing of it. An interactive Lead: not checked.

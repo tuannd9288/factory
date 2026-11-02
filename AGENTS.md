@@ -148,11 +148,12 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/330#issuecomment-6567816736,
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 and
   https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675.
-- **`gh api`, 2026-11-02.** Agents may use `gh api` to read: a GET or a GraphQL query, with `-X GET` for a read with
-  parameters, since `-f` and `-F` turn a call into a POST. A write through it (a POST, PUT, PATCH or DELETE, or a GraphQL
-  mutation: changing settings, branch rules, variables, deleting) still needs his approval. Nothing in settings blocks
-  it. His words: "Nới: đọc tự do (Recommended)". Source: his answer 2026-11-02 15:09:43, relayed by the factory-repo
-  session (#343).
+- **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
+  variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
+  which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and
+  `-F` turn a call into a POST; a write is a REST POST, PUT, PATCH or DELETE, or a GraphQL mutation. A seat stays denied
+  every `gh` (`Bash(gh:*)` in `bin/lib/seat.mjs`), which is #343's open question 1. His words: "Nới: đọc tự do
+  (Recommended)". Source: his answer 2026-11-02 15:09:43, relayed by the factory-repo session (#343).
 
 ## Tiers
 
