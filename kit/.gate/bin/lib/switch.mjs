@@ -11,7 +11,8 @@
 //   1 or more                         either                      none
 // The count decides first. No `pull_request` rule in force is 1-2, the position of a switch nobody set. A rule with a
 // count or a flag that is not a number or a boolean is no reading: the caller fails closed.
-//   node .gate/bin/lib/switch.mjs      the rules' JSON on stdin; prints the position, or why it could not read them (exit 2)
+//   node .gate/bin/lib/switch.mjs      the rules' JSON on stdin, as one list or as the pages `gh api --paginate --slurp` gives;
+//                                      prints the position, or why it could not read them (exit 2)
 // The gate (`tier`), the queue and bin/onboard-owner share this file.
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -24,17 +25,20 @@ export const PARAMETERS = {
 };
 export const POSITIONS = Object.keys(PARAMETERS);
 
-/** The position the rules in force give, or an Error saying why they give none. */
+/** The rules as one list: `gh api --paginate --slurp` gives a list of pages, one list for each page of the rules in force. */
+export const pagesOf = (rules) => (Array.isArray(rules) && rules.length && rules.every(Array.isArray) ? rules.flat() : rules);
+
+/** The position the rules in force give, or an Error saying why they give none and naming the value it met. */
 export function positionOf(rules) {
-  if (!Array.isArray(rules)) throw new Error('the rules in force are not a list');
+  if (!Array.isArray(rules)) throw new Error(`the rules in force are not a list: ${JSON.stringify(rules)?.slice(0, 80)}`);
   const pulls = rules.filter((r) => r?.type === 'pull_request');
   let count = 0;
   let owner = false;
   for (const { parameters } of pulls) {
     const n = parameters?.required_approving_review_count;
     const o = parameters?.require_code_owner_review;
-    if (!Number.isInteger(n) || n < 0) throw new Error('a pull_request rule has no required_approving_review_count');
-    if (typeof o !== 'boolean') throw new Error('a pull_request rule has no require_code_owner_review');
+    if (!Number.isInteger(n) || n < 0) throw new Error(`a pull_request rule has required_approving_review_count ${JSON.stringify(n) ?? 'unset'}, not a number from 0`);
+    if (typeof o !== 'boolean') throw new Error(`a pull_request rule has require_code_owner_review ${JSON.stringify(o) ?? 'unset'}, not true or false`);
     count = Math.max(count, n);
     owner ||= o;
   }
@@ -44,7 +48,7 @@ export function positionOf(rules) {
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    console.log(positionOf(JSON.parse(readFileSync(0, 'utf8'))));
+    console.log(positionOf(pagesOf(JSON.parse(readFileSync(0, 'utf8')))));
   } catch (error) {
     console.log(`switch: the rules in force could not be read as a position (${error.message})`);
     process.exitCode = 2;

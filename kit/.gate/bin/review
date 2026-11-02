@@ -69,7 +69,7 @@ if [ "$job" = rounds ]; then
   echo "rounds: $n head commits judged red"
   [ "$n" -ge 3 ] || exit 0
   gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label needs-human >/dev/null || { echo "rounds: could not add the label needs-human"; exit 1; }
-  echo "rounds: labelled needs-human after three red rounds; the tier check now waits for the Human's approval"
+  echo "rounds: labelled needs-human after three red rounds; the tier check now waits for the Human's approval, unless the merge switch is at all"
   exit 0
 fi
 head=$(git rev-parse --verify --quiet "${head:-none}^{commit}") && fork=$(git merge-base "${base:-none}" "$head" 2>/dev/null) ||
@@ -244,7 +244,7 @@ case "$job" in
     [ "$n" = 3 ] || exit 0
     # The merge switch (#333), read from the rules in force on the base branch (GATE_BASE_REF): at all, the Human's approval of
     # tier 3 is not asked; at 1-2 and none it is, as before. Rules that cannot be read as a position fail closed.
-    position=$(gh api "repos/${GITHUB_REPOSITORY:-}/rules/branches/${GATE_BASE_REF:-main}" 2>&1 | node .gate/bin/lib/switch.mjs) ||
+    position=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/rules/branches/${GATE_BASE_REF:-main}" 2>&1 | node .gate/bin/lib/switch.mjs) ||
       { echo "tier: the merge switch could not be read ($position), so this check fails closed"; exit 1; }
     if [ "$position" = all ]; then
       echo "tier: the merge switch of this repository is at all, so the Human's approval of tier 3 is not asked"

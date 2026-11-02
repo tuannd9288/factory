@@ -3,7 +3,7 @@
 // updates one waiting pull request per repository, the oldest first, so the update triggers the gate, and re-runs a
 // tier check that failed before the Human approved the head. It follows the repository's merge switch (#333), read from the
 // rules in force on main that the sweep fetches already: when the position moved since the last sweep, it re-runs, once, the
-// tier job of each waiting tier-3 pull request, and keeps the position and what it re-ran in
+// tier job of each open tier-3 pull request, armed or not, and keeps the position and what it re-ran in
 // $FACTORY_STATE/queue-<owner>-<name>.switch. It runs once and exits: launchd repeats it. It reads
 // GitHub afresh each time, holds a lock so two sweeps never overlap, bounds every gh call, refuses the Human's login,
 // and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds; a run that fails
@@ -20,7 +20,7 @@ import { hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, checkPlists, followMain } from './checkout.mjs';
-import { POSITIONS, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
+import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
 import { clonesUnder } from './ledger.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
@@ -34,16 +34,20 @@ const ENTIRE = 'Entire Gates';
  * the Human), unless another one waiting on auto-merge is up to date and still being judged. One that conflicts with
  * its base is not being judged: pull_request never runs on it, so its verify stays missing, and it cannot land until
  * its owner resolves the conflict. A tier-3 one waits behind until its tier check passed, the Human's approval given:
- * his approval then holds on the updated head, whose patch is unchanged, and he is asked once. A required check of
- * another App (#155: Entire's) is read from `apps`; one it concluded other than success has failed: Entire is neutral
- * while it blocks, and an update would only buy another review. */
-export function pickUpdate(prs, required) {
+ * his approval then holds on the updated head, whose patch is unchanged, and he is asked once. At the merge switch's
+ * position none (#333) every pull request waits for him, so one with no approval from someone other than its author is
+ * left behind too: an update would make a new head and call the reviewer again for a pull request that only waits. A
+ * required check of another App (#155: Entire's) is read from `apps`; one it concluded other than success has failed:
+ * Entire is neutral while it blocks, and an update would only buy another review. */
+export function pickUpdate(prs, required, position) {
   const waiting = prs.filter((p) => p.autoMerge && !p.isDraft);
   const check = (p, name) => p.checks[name] ?? p.apps?.[name];
   const judging = (p) => required.some((name) => !check(p, name) || check(p, name).state === 'PENDING');
   const failed = (p) =>
     required.some((name) => name !== 'tier' && (p.checks[name] ? RED.has(p.checks[name].state) : Boolean(p.apps?.[name]) && !['SUCCESS', 'PENDING'].includes(p.apps[name].state)));
-  const unapproved = (p) => p.labels.some((l) => l === 'tier-3' || l === 'needs-human') && p.checks.tier?.state !== 'SUCCESS';
+  const unapproved = (p) =>
+    (p.labels.some((l) => l === 'tier-3' || l === 'needs-human') && p.checks.tier?.state !== 'SUCCESS') ||
+    (position === 'none' && !p.approvals.some((a) => a.login !== p.author));
   if (waiting.some((p) => !['BEHIND', 'DIRTY'].includes(p.mergeStateStatus) && judging(p))) return null;
   const behind = waiting
     .filter((p) => p.mergeStateStatus === 'BEHIND' && !failed(p) && !unapproved(p))
@@ -107,18 +111,19 @@ function openPulls(repo) {
 }
 
 /** The rules in force on main now: one call, which gives the required checks and the merge switch. */
-const rulesIn = (repo) => JSON.parse(gh(['api', `repos/${repo}/rules/branches/main`]));
+const rulesIn = (repo) => JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/rules/branches/main`]));
 
 /** The checks GitHub requires on main, from the rules in force there: what gates the merge, whatever kit the repository has. */
 const requiredIn = (rules) => [...new Set(rules.filter((r) => r.type === 'required_status_checks').flatMap((r) => r.parameters.required_status_checks.map((c) => c.context)))];
 
-/** The tier jobs to re-run when the merge switch moved (#333), alone, red or green: the latest tier job of each pull request
- * waiting on auto-merge that is labelled tier-3, once its job ended. A move to all turns a red one green, a move away from
- * all turns a green one red again, since its approval was skipped. `done` holds what this move already re-run
- * ({ number, head }), so a retry after a failure re-runs nothing twice. */
+/** The tier jobs to re-run when the merge switch moved (#333), alone, red or green: the latest tier job of each open pull
+ * request labelled tier-3, armed or not, a draft or not, once its job ended. A move to all turns a red one green, a move
+ * away from all turns a green one red again, since its approval was skipped: one not armed yet would otherwise keep that
+ * green and merge once armed. `done` holds what this move already re-run ({ number, head }), so a retry after a failure
+ * re-runs nothing twice. */
 export function pickSwitchReruns(prs, done) {
   return prs
-    .filter((p) => p.autoMerge && !p.isDraft && p.labels.includes('tier-3') && p.checks.tier?.jobId && p.checks.tier.state !== 'PENDING')
+    .filter((p) => p.labels.includes('tier-3') && p.checks.tier?.jobId && p.checks.tier.state !== 'PENDING')
     .filter((p) => !done.some((d) => d.number === p.number && d.head === p.head))
     .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId, head: p.head }));
 }
@@ -139,14 +144,14 @@ function switchKept(file) {
  * one kept in $state/queue-<owner>-<name>.switch (none yet reads as 1-2, the default); the tier jobs of the waiting
  * tier-3 pull requests are re-run once, and what was re-run is kept with the head and the position, so no later sweep
  * repeats it. The last position is kept only once every re-run was made. Rules that read as no position change nothing.
- * Returns the numbers of the pull requests re-run. */
+ * Returns the numbers of the pull requests re-run, and the position read (undefined when the rules gave none). */
 function followSwitch(repo, state, rules, prs) {
   let position;
   try {
     position = positionOf(rules);
   } catch (error) {
     console.log(`queue: the merge switch of ${repo} could not be read (${error.message}); no tier check re-run for it`);
-    return new Set();
+    return { ran: new Set(), position: undefined };
   }
   const file = join(state, `queue-${repo.replace('/', '-')}.switch`);
   const kept = switchKept(file);
@@ -158,31 +163,45 @@ function followSwitch(repo, state, rules, prs) {
   const ran = new Set();
   if (position === last) {
     if (!kept) save(position, []);
-    return ran;
+    return { ran, position };
   }
   console.log(`queue: the merge switch of ${repo} moved from ${last} to ${position}`);
   const reran = (kept?.reran ?? []).filter((e) => e.position === position);
+  let failed = false;
   for (const { number, jobId, head } of pickSwitchReruns(prs, reran)) {
-    gh(['run', 'rerun', '--job', jobId, '--repo', repo]);
+    if (!rerun(repo, number, jobId, `after the merge switch moved to ${position}`)) {
+      failed = true;
+      continue;
+    }
     reran.push({ number, head, position });
     ran.add(number);
     save(last, reran);
-    console.log(`queue: re-ran the tier check of ${repo}#${number} after the merge switch moved to ${position}`);
   }
-  save(position, reran);
-  return ran;
+  // A re-run that failed keeps the last position, so the next sweep sees the move again and tries only what is left.
+  save(failed ? last : position, reran);
+  return { ran, position };
+}
+
+/** Re-runs one tier job and says so; a re-run GitHub refuses (a run over 30 days old, one still in progress) is told in one
+ * line and returns false, and never stops the sweep. */
+function rerun(repo, number, jobId, why) {
+  try {
+    gh(['run', 'rerun', '--job', jobId, '--repo', repo]);
+  } catch (error) {
+    console.log(`queue: could not re-run the tier check of ${repo}#${number} ${why}: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
+    return false;
+  }
+  console.log(`queue: re-ran the tier check of ${repo}#${number} ${why}`);
+  return true;
 }
 
 function sweep(repo, state) {
-  const rules = rulesIn(repo);
+  const rules = pagesOf(rulesIn(repo));
   const required = requiredIn(rules);
   const prs = openPulls(repo);
-  const moved = followSwitch(repo, state, rules, prs);
-  for (const { number, jobId } of pickReruns(prs).filter((p) => !moved.has(p.number))) {
-    gh(['run', 'rerun', '--job', jobId, '--repo', repo]);
-    console.log(`queue: re-ran the tier check of ${repo}#${number} after its approval or Entire's check`);
-  }
-  const pr = pickUpdate(prs, required);
+  const { ran, position } = followSwitch(repo, state, rules, prs);
+  for (const { number, jobId } of pickReruns(prs).filter((p) => !ran.has(p.number))) rerun(repo, number, jobId, "after its approval or Entire's check");
+  const pr = pickUpdate(prs, required, position);
   if (!pr) return;
   gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
   console.log(`queue: updated ${repo}#${pr.number} to its base`);

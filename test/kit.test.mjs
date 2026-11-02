@@ -901,6 +901,24 @@ describe('review, verdict, tier and rounds', () => {
     assert.match(out.out, /tier: the merge switch of this repository is at all, so the Human's approval of tier 3 is not asked/);
     assert.doesNotMatch(out.out, /waits for @tuannd9288/);
   });
+  test('tier reads the rules in full: as the pages gh api --paginate --slurp gives, a second pull_request rule on a later page counts', () => {
+    rulesAre([switchRules(0, false), [{ type: 'deletion' }]]);
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(first.code, 0, first.out);
+    assert.match(first.out, /is at all/);
+    rulesAre([switchRules(0, false), switchRules(0, true)]);
+    const out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /waits for @tuannd9288 to approve/);
+  });
+  test('at all, a needs-human pull request needs no approval either, as the rest of tier 3', () => {
+    rulesAre(switchRules(0, false));
+    labels('needs-human');
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^tier 3\n/);
+    assert.match(out.out, /is at all/);
+  });
   test('on tier 3, tier needs the approval at 1-2 and at none, as it did before the switch', () => {
     for (const [rules, name] of [[switchRules(0, true), '1-2'], [switchRules(1, true), 'none'], [switchRules(1, false), 'none'], [[], '1-2 (no pull_request rule)']]) {
       rulesAre(rules);
