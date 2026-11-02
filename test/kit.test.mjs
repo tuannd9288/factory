@@ -519,7 +519,7 @@ describe('review, verdict, tier and rounds', () => {
         '  *actions/runs/98/jobs?filter=all*) cat "$FAKE/jobs98.json" ;;',
         '  *actions/workflows/gate-trusted.yml/runs?head_sha=*) echo runs >>"$FAKE/calls"; cat "$FAKE/runs.json" ;;',
         // #155: the rules in force on main and the "Entire Gates" check runs, for GATE_REVIEWER=entire; the app_id is asked for.
-        '  *rules/branches/main) echo rules >>"$FAKE/calls"; cat "$FAKE/rules.json" ;;',
+        '  *rules/branches/main) cat "$FAKE/rules.json" ;;',
         '  *"check-runs?check_name=Entire%20Gates&app_id="*) echo entire >>"$FAKE/calls"; cat "$FAKE/entire.json" ;;',
         '  *check-runs*) cat "$FAKE/verify.json" ;;',
         // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
@@ -591,9 +591,13 @@ describe('review, verdict, tier and rounds', () => {
     annotations();
     labels();
     reviews([]);
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': null, 'entire.json': null });
+    // The rules in force on main are the kit's gate: the merge switch at 1-2 (#333).
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null });
   });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
+  /** The rules in force on main with one pull_request rule: the merge switch's two parameters (#333). */
+  const switchRules = (count, owner) => [{ type: 'pull_request', parameters: { required_approving_review_count: count, require_code_owner_review: owner } }];
+  const rulesAre = (rules) => write(fake, { 'rules.json': typeof rules === 'string' ? rules : JSON.stringify(rules) });
 
   test('review fails closed with no reviewer configured, and reads the candidate with no work tree', () => {
     assert.ok(!existsSync(join(trusted, 'src/auth')));
@@ -886,6 +890,59 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
     assert.equal(out.calls, '');
+  });
+  // #333: the merge switch is the two review parameters of the rules in force on main. At all, the Human's approval of a
+  // tier 3 change is not asked; the other checks, and the claim, still are.
+  test('on tier 3, tier passes with no approval at all, and says the switch is at all', () => {
+    rulesAre(switchRules(0, false));
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^tier 3\n/);
+    assert.match(out.out, /tier: the merge switch of this repository is at all, so the Human's approval of tier 3 is not asked/);
+    assert.doesNotMatch(out.out, /waits for @tuannd9288/);
+  });
+  test('on tier 3, tier needs the approval at 1-2 and at none, as it did before the switch', () => {
+    for (const [rules, name] of [[switchRules(0, true), '1-2'], [switchRules(1, true), 'none'], [switchRules(1, false), 'none'], [[], '1-2 (no pull_request rule)']]) {
+      rulesAre(rules);
+      reviews([]);
+      const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+      assert.equal(first.code, 1, `${name}: ${first.out}`);
+      assert.match(first.out, /tier 3 waits for @tuannd9288 to approve/);
+      assert.doesNotMatch(first.out, /merge switch/);
+      reviews([review('tuannd9288', 'APPROVED', first.head)]);
+      assert.equal(again('tier', first.head, pr).code, 0, name);
+    }
+  });
+  test('on tier 3, tier is red when the rules in force cannot be read, whatever they might say', () => {
+    for (const rules of ['not json', '{}', JSON.stringify([{ type: 'pull_request', parameters: {} }]), '']) {
+      rulesAre(rules);
+      reviews([review('tuannd9288', 'APPROVED', 'x'.repeat(40))]);
+      const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+      assert.equal(out.code, 1, `${JSON.stringify(rules)}: ${out.out}`);
+      assert.match(out.out, /tier: the merge switch could not be read/);
+      assert.match(out.out, /fails closed/);
+    }
+    write(fake, { 'rules.json': null });
+    assert.equal(job('tier', { 'AGENTS.md': '# app\n' }, pr).code, 1, 'no answer at all');
+  });
+  test('tier 1 and 2 read no switch, at any position', () => {
+    for (const rules of [switchRules(0, false), switchRules(1, true), 'not json']) {
+      rulesAre(rules);
+      assert.equal(job('tier', { 'src/math.js': MUL }, pr).code, 0);
+    }
+  });
+  test('at all, a stale claim still fails a tier 3 change, and the labels are still read', () => {
+    rulesAre(switchRules(0, false));
+    const first = claimTip('claim 7 team-x');
+    claimTip('handoff 7 team-y', first);
+    prBody(`Issue: #7\nClaim: ${first}\n`);
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /handoff 7 team-y/);
+    prBody(`Issue: none\nTeam: team-x\n`);
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}' });
+    assert.equal(job('tier', { 'AGENTS.md': '# app\n' }, pr).code, 1, 'labels that cannot be read fail it');
+    labels();
   });
   test('a missing label raised fails tier closed and names the fix', () => {
     labels();
@@ -1696,7 +1753,7 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
   const entire = (runs, pinned = [ENTIRE_APP]) =>
     write(fake, {
       'rules.json': JSON.stringify([
-        { type: 'pull_request', parameters: {} },
+        ...switchRules(0, true),
         ...pinned.map((id) => ({ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'verify', integration_id: 15368 }, { context: 'tier', integration_id: 15368 }, { context: 'Entire Gates', ...(id === null ? {} : { integration_id: id }) }] } })),
       ]),
       'entire.json': JSON.stringify({

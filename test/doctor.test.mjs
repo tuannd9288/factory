@@ -39,6 +39,8 @@ if (path === repo + '/invitations') out(state.invitations ?? []);
 if (path.startsWith(repo + '/rulesets') && !/rulesets\/\d+/.test(path)) out(state.rulesets.map(({ id, name }) => ({ id, name })));
 const one = /rulesets\/(\d+)$/.exec(path);
 if (one) { const r = state.rulesets.find((x) => x.id === Number(one[1])); r ? out(r) : missing(); }
+// #333: the rules in force on main, as bin/onboard-owner's fake gives them; a state may name them itself.
+if (path === repo + '/rules/branches/main') out(state.rulesInForce ?? state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules));
 const env = repo + '/environments/reviewer';
 if (path === env) state.environment ? out(state.environment) : missing();
 if (path === env + '/deployment-branch-policies') state.environment ? out({ branch_policies: state.environment.policies ?? [] }) : missing();
@@ -51,7 +53,7 @@ const OTHER_VALUE = 'zz-other-variable-value';
 const OLD_VALUE = 'zz-old-gate-variable-value';
 /** The gate's settings the target is onboarded with (#335): three self-hosted runners that share no machine. */
 const SETTINGS = ['--reviewer', 'claude', '--runner', '["self-hosted","zz-main-label"]', '--pr-runner', '["self-hosted","zz-pr-label"]', '--trusted-runner', '["self-hosted","zz-trusted-label"]'];
-const LABELS = ['settings', 'gate-block', 'verify', 'claude-md', 'size', 'kit-evidence'];
+const LABELS = ['settings', 'merge', 'gate-block', 'verify', 'claude-md', 'size', 'kit-evidence'];
 const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
 
 let dir;
@@ -171,6 +173,32 @@ test('a repository as the factory wants it: every line ok, exit 0, one line a ch
   assert.deepEqual(marks(r), green, r.out);
   for (const line of Object.values(r.lines)) assert.ok(line.length <= 120, line);
   assert.deepEqual(r.left, [], 'the bare clone is removed');
+});
+
+/** The held state with the gate's review parameters as the Human left them. */
+const reviewed = (head, count, owner) => {
+  const held = state(head);
+  return { ...held, rulesets: held.rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_approving_review_count: count, require_code_owner_review: owner } } : x)) })) };
+};
+
+test('merge: names the position of the merge switch, and keeps the review parameters the Human set (#333)', () => {
+  for (const [position, count, owner] of [['1-2', 0, true], ['all', 0, false], ['none', 1, true]]) {
+    const r = doctor({ held: reviewed(kitMerge, count, owner) });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(marks(r), green, r.out);
+    assert.match(r.lines.merge, new RegExp(`^ok\\s+merge\\s+the merge switch is at ${position}\\b`));
+    assert.ok(r.lines.merge.length <= 120, r.lines.merge);
+    assert.ok(r.calls.every((c) => c[0] === 'api' || c[0] === 'pr' || c[0] === 'variable'), 'only reads');
+  }
+});
+
+test('merge: red only when the rules in force cannot be read as a position (#333)', () => {
+  for (const rulesInForce of [[{ type: 'pull_request', parameters: {} }], 'not a list']) {
+    const r = doctor({ held: { ...state(kitMerge), rulesInForce } });
+    assert.equal(r.code, 1, r.out);
+    assert.deepEqual(marks(r), { ...green, merge: 'RED' }, r.out);
+    assert.match(flat(r), /RED merge .*could not be read/);
+  }
 });
 
 test('settings: red names each call left, and when the kit is not on the default branch', () => {
