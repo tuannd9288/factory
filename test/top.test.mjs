@@ -2,7 +2,7 @@
 // gh on PATH. Nothing here runs claude, a live gh or the network. Frames are rendered at a fixed width.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -358,6 +358,58 @@ test('a pid file whose pid is alive but belongs to a later process start is not 
   const { live, ...rest } = w.opts;
   const snap = await withPath(w.bin, () => snapshot({ ...rest, runs }));
   assert.equal(snap.seats['2'].live, 0);
+});
+
+// A same-size rewrite that keeps the modification time: only a read would show it (#340).
+const rewrite = (file, text) => {
+  const { mtimeMs } = statSync(file);
+  writeFileSync(file, text);
+  utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
+};
+
+test('with a shared cache a log whose size and time did not change is not read again; one that grew or was replaced is; without a cache every log is read (#340)', async () => {
+  const w = world();
+  const runs = join(w.root, 'runs-cache');
+  const out = (n) => init('/x') + assistant('m1', { input_tokens: 1, output_tokens: n });
+  session(runs, 'issue-301', 'worker', { log: out(1) });
+  const file = join(runs, 'issue-301/run-worker.jsonl');
+  const { gatherSessions } = await top();
+  const base = { runs, state: w.opts.state, now: NOW, processes: () => [], live: () => false };
+  const tokens = (cache) => gatherSessions({ ...base, cache })[0].tokensOut;
+  const cache = {};
+  assert.equal(tokens(cache), 1);
+  rewrite(file, out(2));
+  assert.equal(tokens(cache), 1, 'same size and time: the cached parse');
+  assert.equal(tokens(null), 2, 'no cache: read as before');
+  assert.equal(tokens({}), 2, 'a fresh cache reads');
+  writeFileSync(file, out(2) + assistant('m2', { input_tokens: 1, output_tokens: 3 }));
+  assert.equal(tokens(cache), 5, 'a log that grew is read whole');
+  const t = new Date(NOW + 60000);
+  rewrite(file, out(7) + assistant('m2', { input_tokens: 1, output_tokens: 3 }));
+  utimesSync(file, t, t);
+  assert.equal(tokens(cache), 10, 'same size, newer time: replaced, read');
+  rmSync(file);
+  assert.deepEqual(gatherSessions({ ...base, cache }), []);
+  assert.equal(cache.logs.size, 0, 'a log that is gone leaves the cache');
+});
+
+test('with a shared cache sessions.jsonl is read again only when its size or time changed (#340)', async () => {
+  const w = world();
+  const state = join(w.root, 'state-cache');
+  mkdirSync(state);
+  const file = join(state, 'sessions.jsonl');
+  const rec = (cost) => line({ session: 's1', run: 'r', tag: 't', total_cost_usd: cost });
+  const { sessionRecords } = await top();
+  writeFileSync(file, rec(1));
+  const cache = {};
+  assert.equal(sessionRecords(state, cache)[0].total_cost_usd, 1);
+  rewrite(file, rec(2));
+  assert.equal(sessionRecords(state, cache)[0].total_cost_usd, 1, 'unchanged size and time: cached');
+  assert.equal(sessionRecords(state)[0].total_cost_usd, 2, 'no cache: read');
+  writeFileSync(file, rec(2) + rec(3));
+  assert.equal(sessionRecords(state, cache).length, 2, 'grown: read');
+  rmSync(file);
+  assert.deepEqual(sessionRecords(state, cache), []);
 });
 
 test('a run\'s repository is its record\'s, else a live run\'s origin, else ?; every such repository has its issues read', async () => {
