@@ -2032,8 +2032,8 @@ describe('workflows and ruleset', () => {
         if (!runsCandidate(j)) continue;
         candidate += 1;
         assert.deepEqual(events(wf), ['pull_request'], `${wf.file} ${id} runs the candidate's code on ${events(wf).join(', ')}`);
-        // GitHub-hosted Ubuntu, or the repository variable GATE_PR_RUNNER with hosted Ubuntu as its default (test/gate-workflows.test.mjs).
-        assert.match(String(j['runs-on']), /^(ubuntu-[\w.]+|\$\{\{ fromJSON\(vars\.GATE_PR_RUNNER \|\| '"ubuntu-[\w.]+"'\) \}\})$/, `${wf.file} ${id} runs the candidate's code on ${j['runs-on']}`);
+        // GitHub-hosted Ubuntu in the kit, which bin/onboard fills in with the repository's own runner (#335, test/gate-settings.test.mjs).
+        assert.deepEqual(j['runs-on'], ['ubuntu-latest'], `${wf.file} ${id} runs the candidate's code on ${j['runs-on']}`);
         assert.equal(j.environment, undefined, `${wf.file} ${id} runs the candidate's code in an environment`);
         assert.doesNotMatch(JSON.stringify(j), /secrets\./, `${wf.file} ${id} hands the candidate's code a secret`);
         assert.deepEqual(j.permissions ?? wf.permissions, { contents: 'read' }, `${wf.file} ${id} gives the candidate's code more than read`);

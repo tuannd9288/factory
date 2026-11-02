@@ -33,15 +33,16 @@
 #   the base branch pin (GATE_BASE_REF; the rules need only metadata, which every token reads) concluded success on the
 #   head; a No-red line in the body makes it tier 3. The queue re-runs it once that check concludes.
 # The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json); with GATE_REVIEWER=entire,
-# verify, tier and Entire Gates (bin/onboard-owner writes that ruleset from the variable). No required job here has
-# `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
+# verify, tier and Entire Gates (bin/onboard-owner writes that ruleset from GATE_REVIEWER as main holds it). No required job
+# here has `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
 # review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
-# Every job runs on the repository variable GATE_TRUSTED_RUNNER (a JSON label list, as gate.yml's GATE_PR_RUNNER),
-# GitHub-hosted Ubuntu when unset: never a runner a candidate's, main's or a deploy's job uses, nor one another workflow
-# can reach, for these jobs hold the reviewer's credential and a token that writes labels (.gate/enforced-rules.md,
-# which names the Human's one exception, with GATE_REVIEWER=entire). With the Claude reviewer, verdict and tier wait
-# for review and review for verify, so runners shared with verify must take four jobs at once; with Entire, only
-# verdict waits, for review, and two do.
+# GATE_REVIEWER below and every job's runs-on are the repository's own settings, which bin/onboard fills in and a pull
+# request changes, at tier 3 (#335): no repository variable holds them, since one changes without a pull request. The
+# runner is GitHub-hosted Ubuntu in the kit, and never a runner a candidate's, main's or a deploy's job uses, nor one
+# another workflow can reach, for these jobs hold the reviewer's credential and a token that writes labels
+# (.gate/enforced-rules.md, which names the Human's one exception, with GATE_REVIEWER=entire). With the Claude
+# reviewer, verdict and tier wait for review and review for verify, so runners shared with verify must take four jobs
+# at once; with Entire, only verdict waits, for review, and two do.
 name: gate-trusted
 
 on:
@@ -56,6 +57,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Which reviewer `review` runs: stub, claude or entire, filled in by bin/onboard. Empty, review and verdict fail closed.
+  # pull_request_target runs main's copy of this file, so a pull request cannot change its own reviewer.
+  GATE_REVIEWER: ''
   BASE: ${{ github.event.pull_request.base.sha }}
   HEAD: ${{ github.event.pull_request.head.sha }}
   GATE_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -64,7 +68,7 @@ env:
 jobs:
   review:
     name: review
-    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ["ubuntu-latest"]
     environment: reviewer
     timeout-minutes: 90
     permissions:
@@ -104,7 +108,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Install the pinned Claude Code
-        if: vars.GATE_REVIEWER == 'claude'
+        if: env.GATE_REVIEWER == 'claude'
         run: |
           # A failed install is the reviewer being unavailable, not a finding on the change, and no red round.
           down() { echo "::notice title=review-result::unavailable: not-installed"; echo "review: reviewer unavailable (not-installed); $1"; exit 1; }
@@ -120,7 +124,6 @@ jobs:
           GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" .gate/bin/review review --base "$BASE" --head "$HEAD"
         working-directory: trusted
         env:
-          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
           GATE_JOB_MINUTES: '90'
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           BODY: ${{ github.event.pull_request.body }}
@@ -128,7 +131,7 @@ jobs:
 
   verdict:
     name: verdict
-    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ["ubuntu-latest"]
     timeout-minutes: 100
     permissions:
       actions: read
@@ -156,7 +159,7 @@ jobs:
 
   tier:
     name: tier
-    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ["ubuntu-latest"]
     timeout-minutes: 105
     permissions:
       actions: read
@@ -185,7 +188,6 @@ jobs:
         working-directory: trusted
         env:
           GATE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}
           GATE_BASE_REF: ${{ github.event.pull_request.base.ref }}
           BODY: ${{ github.event.pull_request.body }}
           GH_TOKEN: ${{ github.token }}
@@ -194,7 +196,7 @@ jobs:
     name: rounds
     needs: [review, verdict]
     if: failure()
-    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ["ubuntu-latest"]
     timeout-minutes: 10
     permissions:
       contents: read
