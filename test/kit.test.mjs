@@ -1015,11 +1015,16 @@ describe('review, verdict, tier and rounds', () => {
     labels();
     reviewJob('success');
     reviews([]);
-    for (const why of ['::error::x', '%0A::warning::y', ' \n::add-mask::z']) {
+    // tier's own notice "merge switch" is the one command allowed, once, and it names the position in force (1-2 here).
+    const own = /^::notice title=merge switch::(all|1-2|none)$/;
+    const forged = ['::notice title=merge switch::all', ' \n::notice title=merge switch::all', '%0A::notice title=merge switch::all'];
+    for (const why of ['::error::x', '%0A::warning::y', ' \n::add-mask::z', ...forged]) {
       annotations(why);
       const out = job('tier', { 'src/math.js': MUL }, pr);
       assert.match(out.out, /^tier 3\n {2}raised by the reviewer: /, out.out);
-      for (const line of out.out.split('\n')) assert.doesNotMatch(line, /^\s*(::|%0A)/, `a line starts with a command: ${line}`);
+      const lines = out.out.split('\n');
+      for (const line of lines) if (/^\s*(::|%0A)/.test(line)) assert.match(line, own, `a line starts with a command: ${line}`);
+      assert.deepEqual(lines.filter((l) => own.test(l)), ['::notice title=merge switch::1-2'], `the one notice is tier's own: ${out.out}`);
     }
   });
   test('the stub raises on its marker; a raise leaves review green, and rounds, which runs only after a red job, has nothing to count', () => {
