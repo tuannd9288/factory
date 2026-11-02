@@ -2,7 +2,8 @@
 // GitHub never updates one by itself, so a pull request waiting on auto-merge strands once another lands. One sweep
 // updates one waiting pull request per repository, the oldest first, so the update triggers the gate, and re-runs a
 // tier check that failed before the Human approved the head. It follows the repository's merge switch (#333) by state: each
-// finished tier check records the position it ran at (an annotation on its own check run), and the sweep re-runs, once, the
+// finished tier check records the position it ran at (an annotation on its own check run, read once for each run in one
+// batched query by node id and kept in the state), and the sweep re-runs, once, the
 // tier job of any open tier-3 pull request, armed or not, whose recorded position and the one in force (read from the rules the sweep
 // fetches already) differ in a way that changes its verdict; what it re-ran is kept in
 // $FACTORY_STATE/queue-<owner>-<name>.switch. It runs once and exits: launchd repeats it. It reads
@@ -73,9 +74,14 @@ export function pickReruns(prs) {
 }
 
 const QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100){nodes{
-number isDraft createdAt mergeStateStatus autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
+number isDraft createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
-commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{databaseId name status conclusion startedAt completedAt detailsUrl annotations(first:10){nodes{title message}} checkSuite{app{slug}}}}}}}}}}}}}`;
+commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{id databaseId name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
+
+/** The merge switch records of finished check runs, by node id: one batched query, a few points, for the runs whose record the
+ * state does not hold yet. The annotations are not asked in QUERY: they would be counted for every context of every pull
+ * request, a hundred times the cost of the rest. */
+const recordsQuery = (ids) => `query{nodes(ids:${JSON.stringify(ids)}){... on CheckRun{id databaseId annotations(first:10){nodes{title message}}}}}`;
 
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS });
 
@@ -90,7 +96,7 @@ function openPulls(repo) {
     const byStart = (a, b) => String(a.startedAt).localeCompare(String(b.startedAt));
     const checks = {};
     for (const run of all.filter((c) => c.checkSuite?.app?.slug === 'github-actions').sort(byStart))
-      checks[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', jobId: /\/job\/(\d+)/.exec(run.detailsUrl ?? '')?.[1], id: run.databaseId, recorded: recordOf(run) };
+      checks[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', jobId: /\/job\/(\d+)/.exec(run.detailsUrl ?? '')?.[1], id: run.databaseId, nodeId: run.id };
     // Other Apps' checks, by name (#155: Entire Gates): the latest started wins.
     const apps = {};
     for (const run of all.filter((c) => c.checkSuite?.app?.slug !== 'github-actions').sort(byStart))
@@ -100,6 +106,7 @@ function openPulls(repo) {
       isDraft: p.isDraft,
       createdAt: p.createdAt,
       mergeStateStatus: p.mergeStateStatus,
+      base: p.baseRefName,
       autoMerge: Boolean(p.autoMergeRequest),
       author: p.author?.login,
       head: p.headRefOid,
@@ -117,53 +124,81 @@ const rulesIn = (repo) => JSON.parse(gh(['api', '--paginate', '--slurp', `repos/
 /** The checks GitHub requires on main, from the rules in force there: what gates the merge, whatever kit the repository has. */
 const requiredIn = (rules) => [...new Set(rules.filter((r) => r.type === 'required_status_checks').flatMap((r) => r.parameters.required_status_checks.map((c) => c.context)))];
 
-// How loose each position is for a tier-3 change: the lower, the looser. Only tier 3 follows the switch: the verdict of a
-// tier 1 or 2 check does not depend on it, and at none GitHub's own review rule holds those.
-const LOOSE = { all: 0, '1-2': 1, none: 2 };
+// How loose each position is for a tier-3 change: the lower, the looser. Only `all` differs: tier asks the approval at 1-2 and
+// at none alike. Only tier 3 follows the switch: the verdict of a tier 1 or 2 check does not depend on it, and at none
+// GitHub's own review rule holds those.
+const LOOSE = { all: 0, '1-2': 1, none: 1 };
 
-/** The position a `tier` check run recorded on itself (the annotation titled "merge switch", which only that job prints),
- * or undefined: another notice on the same check run, or a message that is no position, does not count. */
-const recordOf = (run) => {
-  const message = run.annotations?.nodes?.find((a) => a.title === 'merge switch')?.message;
-  return POSITIONS.includes(message) ? message : undefined;
-};
+/** The branch the sweep reads the rules for: the switch is read from the rules in force there, and tier reads it from the rules
+ * of its own pull request's base, so only a pull request on this base is judged. */
+const BASE = 'main';
+
+/** The position a `tier` check run recorded on itself, from its annotations: the last one titled "merge switch" whose message
+ * is a position, or undefined. Another notice on the same check run, or a message that is no position, does not count. */
+const recordOf = (nodes) => [...(nodes ?? [])].reverse().find((a) => a?.title === 'merge switch' && POSITIONS.includes(a.message))?.message;
+
+/** What names one run of the tier check in the state: its id and when it started, so a re-run that kept the id is still told
+ * from the run before it. */
+const keyOf = (t) => `${t.id ?? t.jobId}:${t.startedAt}`;
 
 /** Why a tier-3 pull request's finished `tier` check is due a re-run for the merge switch (#333), or null. The check records the
  * position it ran at; the queue compares that with the position in force, so a move is seen however many there were between
  * two sweeps, and a job that was running at a move is judged once it ends. 'tighter': it ran at a looser position than the
  * one in force and is not red, so it may hold an approval it skipped. 'looser': it ran at a tighter one and is red, so it may
- * pass now. 'bare': it records none (a gate that predates the record), and is only told of. Only tier 3 is judged; a check
- * still running is left to finish. */
+ * pass now. 'bare': a green check of a tier-3 pull request that records none (a gate that predates the record), only told of;
+ * a red one failed before it read the switch and is no hole. Only tier 3 is judged, known by the label or by a record, which
+ * only tier 3 makes; a check still running, or whose record could not be read, is left. */
 export function switchDue(p, position) {
   const t = p.checks.tier;
-  if (!position || !t?.jobId || t.state === 'PENDING' || !p.labels.includes('tier-3')) return null;
-  if (t.recorded === undefined) return 'bare';
+  if (!position || !t?.jobId || t.state === 'PENDING' || t.unread) return null;
+  if (t.recorded === undefined) return p.labels.includes('tier-3') && !RED.has(t.state) ? 'bare' : null;
   if (LOOSE[t.recorded] < LOOSE[position]) return RED.has(t.state) ? null : 'tighter';
   if (LOOSE[t.recorded] > LOOSE[position]) return RED.has(t.state) ? 'looser' : null;
   return null;
 }
 
-/** What the sweep keeps of the merge switch for a repository, in $state/queue-<owner>-<name>.switch: the check runs it
- * re-ran (`done`), the ones whose refused re-run it told (`told`), and the head of each pull request whose unrecorded
- * check it told of (`bare`). A file written by an earlier form of this code reads as empty. */
+/** What the sweep keeps of the merge switch for a repository, in $state/queue-<owner>-<name>.switch: the record of each finished
+ * check run read so far (`records`, by keyOf: a position, or '' for none; a finished run's annotations do not change, so each
+ * is read once), the check runs it re-ran (`done`), the ones whose refused re-run it told (`told`), and the head of each pull
+ * request whose unrecorded check it told of (`bare`). A file written by an earlier form of this code reads as empty. */
 function switchKept(file) {
   let kept = null;
   try {
     kept = JSON.parse(readFileSync(file, 'utf8'));
   } catch {}
   const list = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' || typeof x === 'number').map(String) : []);
-  return { done: list(kept?.done), told: list(kept?.told), bare: kept?.bare && typeof kept.bare === 'object' && !Array.isArray(kept.bare) ? kept.bare : {} };
+  const plain = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+  const records = Object.fromEntries(Object.entries(plain(kept?.records)).filter(([, v]) => v === '' || POSITIONS.includes(v)));
+  return { records, done: list(kept?.done), told: list(kept?.told), bare: plain(kept?.bare) };
+}
+
+/** Reads, in batches of 100 node ids, the records of the finished check runs in `runs`; returns { node id: record or '' }. A batch
+ * that fails is told in one line and leaves its runs unread (the next sweep asks again). */
+function readRecords(repo, runs) {
+  const found = {};
+  const ids = runs.map((t) => t.nodeId).filter((id) => /^[\w=+/-]+$/.test(id ?? ''));
+  for (let i = 0; i < ids.length; i += 100) {
+    try {
+      const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${recordsQuery(ids.slice(i, i + 100))}`]));
+      for (const node of data.data?.nodes ?? []) if (node?.id) found[node.id] = recordOf(node.annotations?.nodes) ?? '';
+    } catch (error) {
+      console.log(`queue: the merge switch records of ${repo} could not be read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
+      break;
+    }
+  }
+  return found;
 }
 
 /** Follows the merge switch (#333) by state, from the rules the sweep already fetched: GitHub applies a move at once, but a
  * tier check that ran before it keeps its verdict. On every sweep, each open tier-3 pull request's finished tier check (armed or
- * not, a draft or not) is re-run once when the position it recorded and the position in force differ in a way that changes
- * its verdict (switchDue). A re-run records the position in force, which clears the condition; one check run is re-run at most
+ * not, a draft or not, on the branch the rules were read for) is re-run once when the position it recorded and the position in
+ * force differ in a way that changes its verdict (switchDue). Each finished run's record is read once, in one batched query,
+ * and kept in the state. A re-run records the position in force, which clears the condition; one check run is re-run at most
  * once. A re-run GitHub refuses stays due and is tried again on each sweep, its line printed once. A tier-3 check that
  * records no position is not re-run (a re-run keeps its gate): one line for each head says so. Rules that read as no position
  * change nothing.
  * Returns the numbers of the pull requests re-run, and the position read (undefined when the rules gave none). */
-function followSwitch(repo, state, rules, prs) {
+function followSwitch(repo, state, rules, all) {
   let position;
   try {
     position = positionOf(rules);
@@ -171,15 +206,28 @@ function followSwitch(repo, state, rules, prs) {
     console.log(`queue: the merge switch of ${repo} could not be read (${error.message}); no tier check re-run for it`);
     return { ran: new Set(), position: undefined };
   }
+  const prs = all.filter((p) => p.base === BASE);
   const file = join(state, `queue-${repo.replace('/', '-')}.switch`);
   const kept = switchKept(file);
-  const keyOf = (t) => String(t.id ?? t.jobId);
   const now = new Set(prs.filter((p) => p.checks.tier).map((p) => keyOf(p.checks.tier)));
   const next = {
+    records: Object.fromEntries(Object.entries(kept.records).filter(([k]) => now.has(k))),
     done: kept.done.filter((k) => now.has(k)),
     told: kept.told.filter((k) => now.has(k)),
     bare: Object.fromEntries(Object.entries(kept.bare).filter(([n]) => prs.some((p) => String(p.number) === n))),
   };
+  // The record of each finished tier check run is read once, in one batched query for the runs not known yet.
+  const unknown = prs.map((p) => p.checks.tier).filter((t) => t?.jobId && t.state !== 'PENDING' && !(keyOf(t) in next.records));
+  if (unknown.length) {
+    const found = readRecords(repo, unknown);
+    for (const t of unknown) if (t.nodeId in found) next.records[keyOf(t)] = found[t.nodeId];
+  }
+  for (const p of prs) {
+    const t = p.checks.tier;
+    if (!t || t.state === 'PENDING') continue;
+    if (keyOf(t) in next.records) t.recorded = next.records[keyOf(t)] || undefined;
+    else t.unread = true;
+  }
   const ran = new Set();
   for (const p of prs) {
     const due = switchDue(p, position);
@@ -201,7 +249,7 @@ function followSwitch(repo, state, rules, prs) {
       ran.add(p.number);
     } else if (!next.told.includes(key)) next.told.push(key);
   }
-  if (JSON.stringify(next) !== JSON.stringify({ done: kept.done, told: kept.told, bare: kept.bare })) {
+  if (JSON.stringify(next) !== JSON.stringify(kept)) {
     mkdirSync(state, { recursive: true });
     writeFileSync(file, JSON.stringify(next));
   }

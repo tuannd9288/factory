@@ -26,6 +26,8 @@ function world() {
       '  "api user"*) echo agent-bot ;;',
       // A call that does not ask for every page fails; with them the rules come as one page of a list of pages.
       '  *rules/branches*) case "$*" in *"--paginate --slurp"*) printf "["; cat "$Q/rules.json"; printf "]" ;; *) echo "fake gh: the rules are asked without --paginate --slurp" >&2; exit 1 ;; esac ;;',
+      // The records of check runs, asked by node id apart from the pull requests (a few points, not a hundred times as many).
+      '  *"nodes(ids"*) cat "$Q/records.json" ;;',
       '  *graphql*) cat "$Q/prs.json" ;;',
       '  "run rerun --job "*) case " $(cat "$Q/fail" 2>/dev/null) " in *" $4 "*) echo "HTTP 403: Workflow run cannot be rerun" >&2; exit 1 ;; esac ;;',
       '  *) exit 1 ;;',
@@ -43,7 +45,18 @@ function world() {
     rulesText: (text) => writeFileSync(join(dir, 'rules.json'), text),
     /** The jobs whose re-run GitHub refuses, space-separated; none with no argument. */
     refuse: (jobs = '') => writeFileSync(join(dir, 'fail'), jobs),
-    pulls: (list) => put('prs.json', { data: { repository: { pullRequests: { nodes: list } } } }),
+    // The annotations of the check runs go to the record query's answer, not into the pull requests' query, as in GitHub's.
+    pulls: (list) => {
+      const records = [];
+      const bare = JSON.parse(JSON.stringify(list));
+      for (const p of bare)
+        for (const n of p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes) {
+          records.push({ id: n.id, databaseId: n.databaseId, annotations: n.annotations });
+          delete n.annotations;
+        }
+      put('prs.json', { data: { repository: { pullRequests: { nodes: bare } } } });
+      put('records.json', { data: { nodes: records } });
+    },
     /** One sweep, with the gh calls it made. */
     sweep: () => {
       writeFileSync(join(dir, 'calls'), '');
@@ -57,11 +70,12 @@ function world() {
 
 /** An open pull request as the queue's query returns it, with its latest `tier` job. `record` is the position that job
  * recorded on its check run (null: none); `notes` replaces its annotations; `running` leaves the job unfinished. */
-const pull = (number, { labels = ['tier-3'], conclusion = 'FAILURE', running = false, record = null, notes = null, auto = true, draft = false, approvedBy = null, jobId = `${number}1`, head = `h${number}` } = {}) => ({
+const pull = (number, { labels = ['tier-3'], conclusion = 'FAILURE', running = false, record = null, notes = null, auto = true, draft = false, approvedBy = null, jobId = `${number}1`, head = `h${number}`, base = 'main', startedAt = '2026-11-02T01:00:00Z' } = {}) => ({
   number,
   isDraft: draft,
   createdAt: `2026-11-02T0${number % 10}:00:00Z`,
   mergeStateStatus: 'BLOCKED',
+  baseRefName: base,
   autoMergeRequest: auto ? { enabledAt: '2026-11-02T00:00:00Z' } : null,
   author: { login: 'agent-bot' },
   headRefOid: head,
@@ -75,11 +89,12 @@ const pull = (number, { labels = ['tier-3'], conclusion = 'FAILURE', running = f
             contexts: {
               nodes: [
                 {
+                  id: `CR_${jobId}`,
                   databaseId: Number(jobId),
                   name: 'tier',
                   status: running ? 'IN_PROGRESS' : 'COMPLETED',
                   conclusion: running ? null : conclusion,
-                  startedAt: '2026-11-02T01:00:00Z',
+                  startedAt,
                   detailsUrl: `https://github.com/o/app/actions/runs/1/job/${jobId}`,
                   annotations: { nodes: notes ?? (record ? [{ title: 'merge switch', message: record }] : []) },
                   checkSuite: { app: { slug: 'github-actions' } },
@@ -100,18 +115,24 @@ test('switchDue: a finished tier check is due only when its record and the posit
   const T3 = ['tier-3'];
   assert.equal(switchDue(p(T3, 'SUCCESS', 'all'), '1-2'), 'tighter');
   assert.equal(switchDue(p(T3, 'SUCCESS', 'all'), 'none'), 'tighter');
-  assert.equal(switchDue(p(T3, 'SUCCESS', '1-2'), 'none'), 'tighter');
+  assert.equal(switchDue(p(T3, 'SUCCESS', '1-2'), 'none'), null, '1-2 and none ask the approval alike');
   assert.equal(switchDue(p(T3, 'FAILURE', 'all'), '1-2'), null, 'red stays red when tighter');
   assert.equal(switchDue(p(T3, 'FAILURE', '1-2'), 'all'), 'looser');
-  assert.equal(switchDue(p(T3, 'FAILURE', 'none'), '1-2'), 'looser');
+  assert.equal(switchDue(p(T3, 'FAILURE', 'none'), 'all'), 'looser');
+  assert.equal(switchDue(p(T3, 'FAILURE', 'none'), '1-2'), null);
+  assert.equal(switchDue(p(T3, 'SUCCESS', 'none'), '1-2'), null);
   assert.equal(switchDue(p(T3, 'SUCCESS', '1-2'), 'all'), null, 'green stays green when looser');
   assert.equal(switchDue(p(T3, 'SUCCESS', '1-2'), '1-2'), null);
   assert.equal(switchDue(p(T3, 'PENDING', 'all'), '1-2'), null, 'a running check is left to finish');
   assert.equal(switchDue(p(T3, 'SUCCESS', undefined), '1-2'), 'bare');
+  assert.equal(switchDue(p(T3, 'FAILURE', undefined), '1-2'), null, 'a red check with no record failed before it read the switch');
   for (const labels of [['tier-1'], ['tier-2'], []]) {
-    for (const [state, recorded, position] of [['SUCCESS', '1-2', 'none'], ['SUCCESS', undefined, 'none'], ['FAILURE', 'none', '1-2'], ['SUCCESS', 'all', '1-2']])
-      assert.equal(switchDue(p(labels, state, recorded), position), null, `${labels} ${state} ${recorded} -> ${position}: only tier 3 follows the switch`);
+    for (const [state, position] of [['SUCCESS', 'none'], ['SUCCESS', 'all'], ['FAILURE', '1-2']])
+      assert.equal(switchDue(p(labels, state, undefined), position), null, `${labels} ${state} -> ${position}: only tier 3 follows the switch`);
   }
+  assert.equal(switchDue(p([], 'SUCCESS', 'all'), '1-2'), 'tighter', 'a check with a record is tier 3 whatever its labels say');
+  assert.equal(switchDue(p(['tier-1'], 'FAILURE', '1-2'), 'all'), 'looser');
+  assert.equal(switchDue({ labels: T3, checks: { tier: { jobId: '1', state: 'SUCCESS', recorded: 'all', unread: true } } }, '1-2'), null, 'a record not read is no record');
   assert.equal(switchDue(p(T3, 'SUCCESS', 'all'), undefined), null, 'no position read, nothing');
   assert.equal(switchDue({ labels: T3, checks: {} }, '1-2'), null);
 });
@@ -164,32 +185,114 @@ test('no loop: equal record and position re-run nothing, a re-run is not repeate
     w.pulls([pull(7, { conclusion: 'SUCCESS', record: '1-2' })]);
     const quiet = w.sweep();
     assert.deepEqual(quiet.reruns, []);
-    assert.equal(quiet.calls.length, 3, `calls: ${quiet.calls.join(' | ')}`);
-    w.pulls([pull(7, { conclusion: 'SUCCESS', record: 'all' })]);
-    assert.deepEqual(w.sweep().reruns, [job(71)]);
+    assert.equal(quiet.calls.length, 4, `the first sweep reads the record once: ${quiet.calls.join(' | ')}`);
+    assert.equal(w.sweep().calls.length, 3, 'a known record is not read again');
+    w.pulls([pull(7, { conclusion: 'SUCCESS', record: 'all', jobId: '72' })]);
+    assert.deepEqual(w.sweep().reruns, [job(72)]);
     assert.deepEqual(w.sweep().reruns, [], 'the same check run is re-run at most once');
     assert.deepEqual(w.sweep().reruns, []);
-    w.pulls([pull(7, { conclusion: 'SUCCESS', record: '1-2', jobId: '72' })]);
+    w.pulls([pull(7, { conclusion: 'SUCCESS', record: '1-2', jobId: '73' })]);
     assert.deepEqual(w.sweep().reruns, [], 'the new run records the position in force');
   } finally {
     w.cleanup();
   }
 });
 
-test('a tier-1 or 2 check never follows the switch: at none, with 1-2 recorded or nothing recorded, it is not re-run', () => {
+test('a tier-1 or 2 check, which records nothing, never follows the switch, at any position', () => {
+  const w = world();
+  try {
+    for (const position of ['none', '1-2', 'all']) {
+      w.rules(position);
+      w.pulls([pull(5, { labels: ['tier-1'], conclusion: 'SUCCESS', jobId: `5${position.length}` }), pull(8, { labels: ['tier-2'], conclusion: 'FAILURE', jobId: `8${position.length}` })]);
+      for (let k = 0; k < 2; k += 1) {
+        const out = w.sweep();
+        assert.deepEqual(out.reruns, [], position);
+        assert.doesNotMatch(out.out, /does not record/);
+      }
+    }
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a move between 1-2 and none re-runs nothing: tier asks the approval at both', () => {
   const w = world();
   try {
     w.rules('none');
-    w.pulls([
-      pull(5, { labels: ['tier-1'], conclusion: 'SUCCESS', record: '1-2' }),
-      pull(6, { labels: ['tier-1'], conclusion: 'SUCCESS' }),
-      pull(8, { labels: ['tier-2'], conclusion: 'SUCCESS', record: 'all' }),
-    ]);
-    for (let k = 0; k < 2; k += 1) {
-      const out = w.sweep();
-      assert.deepEqual(out.reruns, []);
-      assert.doesNotMatch(out.out, /does not record/);
+    w.pulls([pull(7, { conclusion: 'SUCCESS', record: '1-2' }), pull(8, { conclusion: 'FAILURE', record: '1-2', jobId: '82' })]);
+    assert.deepEqual(w.sweep().reruns, []);
+    w.rules('1-2');
+    w.pulls([pull(7, { conclusion: 'SUCCESS', record: 'none', jobId: '73' }), pull(8, { conclusion: 'FAILURE', record: 'none', jobId: '83' })]);
+    assert.deepEqual(w.sweep().reruns, []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a check with a record is tier 3 whatever its labels say, and is followed', () => {
+  const w = world();
+  try {
+    w.rules('1-2');
+    w.pulls([pull(7, { labels: [], conclusion: 'SUCCESS', record: 'all' })]);
+    assert.deepEqual(w.sweep().reruns, [job(71)]);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('only the pull requests on the branch the rules were read for are judged, at any position', () => {
+  const w = world();
+  try {
+    for (const position of ['all', '1-2', 'none']) {
+      w.rules(position);
+      w.pulls([pull(7, { base: 'dev', conclusion: position === 'all' ? 'FAILURE' : 'SUCCESS', record: position === 'all' ? '1-2' : 'all', jobId: `7${position.length}` })]);
+      for (let k = 0; k < 2; k += 1) {
+        const out = w.sweep();
+        assert.deepEqual(out.reruns, [], position);
+        assert.ok(!out.calls.some((c) => c.includes('nodes(ids')), 'its record was not even read');
+      }
     }
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the pull requests\' query asks no annotations; the record query is made only for finished check runs not known yet', () => {
+  const w = world();
+  try {
+    w.rules('1-2');
+    w.pulls([pull(7, { conclusion: 'SUCCESS', record: '1-2' }), pull(8, { running: true })]);
+    let out = w.sweep();
+    const main = out.calls.filter((c) => c.includes('pullRequests'));
+    assert.equal(main.length, 1);
+    assert.doesNotMatch(main[0], /annotations/);
+    assert.match(main[0], /baseRefName/);
+    let records = out.calls.filter((c) => c.includes('nodes(ids'));
+    assert.equal(records.length, 1, out.calls.join('\n'));
+    assert.match(records[0], /CR_71/);
+    assert.doesNotMatch(records[0], /CR_81/, 'a running check has no record to read yet');
+    assert.match(records[0], /annotations\(first:10\)\{nodes\{title message\}\}/);
+    assert.equal(w.sweep().calls.filter((c) => c.includes('nodes(ids')).length, 0, 'every record is known');
+    w.pulls([pull(7, { conclusion: 'SUCCESS', record: '1-2' }), pull(8, { conclusion: 'SUCCESS', record: '1-2' }), pull(9, { conclusion: 'SUCCESS', record: '1-2' })]);
+    out = w.sweep();
+    records = out.calls.filter((c) => c.includes('nodes(ids'));
+    assert.equal(records.length, 1);
+    assert.ok(/CR_81/.test(records[0]) && /CR_91/.test(records[0]) && !/CR_71/.test(records[0]), 'only the runs not known');
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the record is the last "merge switch" annotation that is a position, and a re-run that kept its id but started again is judged', () => {
+  const w = world();
+  try {
+    w.rules('1-2');
+    const lone = [{ title: 'merge switch', message: 'banana' }, { title: 'merge switch', message: 'all' }, { title: 'merge switch', message: 'not a position' }];
+    w.pulls([pull(7, { conclusion: 'SUCCESS', notes: lone })]);
+    assert.deepEqual(w.sweep().reruns, [job(71)], 'a non-position first or last does not hide the real one');
+    assert.deepEqual(w.sweep().reruns, []);
+    w.pulls([pull(7, { conclusion: 'SUCCESS', notes: lone, startedAt: '2026-11-02T05:00:00Z' })]);
+    assert.deepEqual(w.sweep().reruns, [job(71)], 'the same id, started again, is another run');
   } finally {
     w.cleanup();
   }
