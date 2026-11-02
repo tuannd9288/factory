@@ -45,7 +45,15 @@ const stdin = name === 'codex' ? fs.readFileSync(0, 'utf8') : '';
 const at = argv.find((a) => a.startsWith('@'));
 const input = at ? fs.readFileSync(at.slice(1), 'utf8') : stdin;
 fs.appendFileSync(Q + '/calls.jsonl', JSON.stringify({ name, argv, cwd: process.cwd(), input, stdin }) + '\\n');
-if (fs.existsSync(Q + '/hang')) setInterval(() => {}, 1000);
+const n = fs.readFileSync(Q + '/calls.jsonl', 'utf8').split('\\n').filter(Boolean).length;
+if (fs.existsSync(Q + '/tree')) {
+  // A grandchild that holds our stdout and outlives us, as a model CLI's helper process might.
+  const g = require('child_process').spawn('sleep', ['60'], { stdio: ['ignore', 'inherit', 'inherit'] });
+  fs.writeFileSync(Q + '/grandchild', String(g.pid));
+  setInterval(() => {}, 1000);
+}
+else if (fs.existsSync(Q + '/hang')) setInterval(() => {}, 1000);
+else if (fs.existsSync(Q + '/answer-' + n + '.txt')) process.stdout.write(fs.readFileSync(Q + '/answer-' + n + '.txt', 'utf8'));
 else if (fs.existsSync(Q + '/fail')) { process.stderr.write('boom ghp_abcdefghijklmnopqrstuvwxyz0123456789\\n'); process.exit(1); }
 else process.stdout.write(fs.readFileSync(Q + '/answer.txt', 'utf8'));
 `;
@@ -401,6 +409,62 @@ test('a failed command, or one that outlasts the timeout, writes reader-failed c
     await w.pass({ now: T0 + 60 * MIN });
     assert.deepEqual(w.shape(), ['start reader-failed command', 'clear reader-failed command']);
     assert.equal(w.cursors()['issue-333/run-fix9.jsonl'], statSync(w.seatFile()).size);
+  });
+});
+
+test('a call that outlasts the timeout ends the pass even when a grandchild holds the pipes, and leaves no lock', async () => {
+  await withDir(async (dir) => {
+    const w = world(dir);
+    w.put(w.seatFile(), '');
+    await w.pass({ now: T0 });
+    appendFileSync(w.seatFile(), say('some words'));
+    w.flag('tree');
+    const t = Date.now();
+    try {
+      const r = await w.pass({ now: T0 + 15 * MIN, timeoutMs: 400 });
+      assert.ok(Date.now() - t < 20_000, 'the pass ended well within the grandchild\'s 60 s sleep');
+      assert.deepEqual(r.failed, ['command']);
+      assert.deepEqual(w.shape(), ['start reader-failed command']);
+      assert.ok(!existsSync(join(w.state, 'reader.lock')));
+      const pid = Number(readFileSync(join(w.q, 'grandchild'), 'utf8'));
+      let alive = true;
+      for (let i = 0; i < 50 && alive; i += 1) {
+        try {
+          process.kill(pid, 0);
+          await new Promise((res) => setTimeout(res, 100));
+        } catch {
+          alive = false;
+        }
+      }
+      assert.ok(!alive, 'the whole process group was killed');
+    } finally {
+      // Whatever happened, no sleep outlives the test.
+      try {
+        process.kill(Number(readFileSync(join(w.q, 'grandchild'), 'utf8')), 'SIGKILL');
+      } catch {
+        // gone already
+      }
+    }
+  });
+});
+
+test('a failed second call keeps the cursors of the first call and moves none of the others', async () => {
+  await withDir(async (dir) => {
+    const w = world(dir);
+    const names = ['issue-a', 'issue-b', 'issue-c'];
+    for (const n of names) w.put(w.seatFile(n), '');
+    await w.pass({ now: T0 });
+    // One line of about 300,000 characters each: no two fit in one call.
+    for (const n of names) appendFileSync(w.seatFile(n), say('word '.repeat(60_000)));
+    writeFileSync(join(w.q, 'answer-2.txt'), 'this is not JSON');
+    const r = await w.pass({ now: T0 + 15 * MIN });
+    assert.equal(w.calls().length, 2, 'the pass stopped at the second call');
+    assert.deepEqual(r.failed, ['answer']);
+    assert.deepEqual(w.shape(), ['start reader-failed answer']);
+    const c = w.cursors();
+    assert.equal(c['issue-a/run-fix9.jsonl'], statSync(w.seatFile('issue-a')).size, 'call 1 had been answered');
+    assert.equal(c['issue-b/run-fix9.jsonl'], 0);
+    assert.equal(c['issue-c/run-fix9.jsonl'], 0);
   });
 });
 

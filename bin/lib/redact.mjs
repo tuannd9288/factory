@@ -2,7 +2,7 @@
 // plugin/server/redact.ts at f537341 (tuannd9288's seatwork; "seatwork may be used freely, its code and its text alike", AGENTS.md,
 // Decisions, 2026-10-21): its token forms (TOKENS), SURE patterns (which match only secrets) and LIKELY ones (which read a word as a
 // value because its name says secret), and `looksGenerated`, with the types gone. The kit's hand-in patterns (.gate/handin.json) hold no
-// secret rule, so seatwork's stand in for them. The older patterns run first, so what they hid keeps its [account] / [redacted] mark.
+// secret rule, so seatwork's stand in for them. seatwork's safety/gate/rules/secrets.ts is not ported: it holds secret file paths, not text patterns. The older patterns run first, so what they hid keeps its [account] / [redacted] mark.
 
 const TOKENS = new RegExp(
   [
