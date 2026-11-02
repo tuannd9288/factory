@@ -420,16 +420,22 @@ test('--after starts after that seq in place of the cursor, and still moves the 
     withFollowers(async (start) => {
       const state = join(dir, 'state');
       seed(state, [['start', 'out-of-quota a'], ['start', 'gh-refused'], ['clear', 'gh-refused'], ['start', 'lead-at-dialog app-lead']]);
-      writeFileSync(join(state, 'events.cursor'), '4\n');
+      writeFileSync(join(state, 'events.cursor'), '1\n');
       const look = spawnSync(join(factory, 'bin/factory-events'), ['--after', '1'], { encoding: 'utf8', env: eventsEnv(state) });
       assert.equal(look.status, 0, look.stderr);
-      assert.deepEqual(look.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).seq), [2, 4], 'the cursor at 4 is ignored');
-      assert.equal(cursorOf(state), '4', 'a look moves nothing');
-      const f = start(state, ['--after', '2']);
-      await f.until(1);
+      assert.deepEqual(look.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).seq), [2, 4], 'the cursor at 1 is ignored');
+      assert.equal(cursorOf(state), '1', 'a look leaves a lower cursor alone');
+      const raising = start(state, ['--after', '2']);
+      await raising.until(1);
       await sleep(800);
-      assert.deepEqual(f.lines().map((l) => l.seq), [4]);
-      assert.equal(cursorOf(state), '4');
+      assert.deepEqual(raising.lines().map((l) => l.seq), [4]);
+      assert.equal(cursorOf(state), '4', 'a follower raises the cursor to what it printed');
+      await raising.stop();
+      const lower = start(state, ['--after', '0']);
+      await lower.until(3);
+      await sleep(800);
+      assert.deepEqual(lower.lines().map((l) => l.seq), [1, 2, 4]);
+      assert.equal(cursorOf(state), '4', 'printing lower seqs never lowers the cursor');
     }),
   );
 });
@@ -464,6 +470,20 @@ test('a remade events file does not mute --follow: a cursor above its highest se
   );
 });
 
+test('a follower that is already running prints the lines of an events file made anew', async () => {
+  await withDir((dir) =>
+    withFollowers(async (start) => {
+      const state = join(dir, 'state');
+      seed(state, [['start', 'out-of-quota a'], ['start', 'gh-refused']]);
+      const f = start(state);
+      await f.until(2);
+      seed(state, [['start', 'lead-at-dialog app-lead']]);
+      await f.until(3);
+      assert.deepEqual(f.lines().map((l) => l.key), ['out-of-quota a', 'gh-refused', 'lead-at-dialog app-lead']);
+    }),
+  );
+});
+
 test('--after takes a whole number of 0 or more; anything else is a usage error', () => {
   withDir((dir) => {
     const state = join(dir, 'state');
@@ -478,6 +498,14 @@ test('--after takes a whole number of 0 or more; anything else is a usage error'
     assert.equal(zero.status, 0, zero.stderr);
     assert.equal(zero.stdout.split('\n').filter(Boolean).length, 1);
   });
+});
+
+test('the Leads are read with the reader that throws when ps fails, not the one that shows none', async () => {
+  const e = await events();
+  const top = await import('../bin/lib/top.mjs');
+  assert.equal(e.defaultProcesses, top.readProcesses);
+  assert.throws(() => top.readProcesses(['/nonexistent/ps']), /ps is not on this host/);
+  assert.throws(() => top.readProcesses(['/usr/bin/false']));
 });
 
 test('a process list or accounts that cannot be read leave their conditions as they were; a reading that succeeded ends them', async () => {

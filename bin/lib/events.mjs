@@ -100,7 +100,8 @@ const readText = (file) => {
 /** Condition 3: the Leads running now whose newest hook event is a permission prompt or an elicitation dialog (the `waiting` state of
  * top's LEAD_STATES, read by top's own rule). The guess of a Lead at a login or a folder trust is not a dialog and is left out. A process
  * list that cannot be read throws (readProcesses), unlike top's, which shows none. */
-export function leadsAtDialog({ runs, now, processes = readProcesses }) {
+export const defaultProcesses = readProcesses;
+export function leadsAtDialog({ runs, now, processes = defaultProcesses }) {
   const out = [];
   for (const proc of processes()) {
     const lead = leadOf(proc.command);
@@ -283,8 +284,10 @@ function main(argv) {
       return;
     }
     if (size < offset) {
+      // The file was made anew: its seq counts from 1 again.
       offset = 0;
       partial = '';
+      queued = 0;
     }
     if (size === offset) return;
     const buf = Buffer.alloc(size - offset);

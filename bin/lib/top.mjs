@@ -119,8 +119,8 @@ export function etimeMs(text) {
 
 /** The processes as { pid, ageMs, command }, from ps; throws when ps is not here or cannot run (the events step needs to tell that
  * from no process). */
-export function readProcesses() {
-  for (const ps of ['/bin/ps', '/usr/bin/ps']) {
+export function readProcesses(paths = ['/bin/ps', '/usr/bin/ps']) {
+  for (const ps of paths) {
     if (!existsSync(ps)) continue;
     return execFileSync(ps, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
       .split('\n')
