@@ -60,4 +60,5 @@ while [ -L "$src" ]; do
   src=$(readlink "$src")
   case $src in /*) ;; *) src=$dir/$src ;; esac
 done
-exec node "$(cd -P "$(dirname "$src")" && pwd)/lib/factory.mjs" "$@"
+# After --, node takes no argument as its own, so `--env-file` and the like reach lib/factory.mjs (gh's --env-file is one).
+exec node -- "$(cd -P "$(dirname "$src")" && pwd)/lib/factory.mjs" "$@"

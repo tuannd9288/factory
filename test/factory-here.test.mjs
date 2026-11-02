@@ -55,9 +55,9 @@ function world() {
   const w = (name, text) => writeFileSync(join(fake, name), text);
   const read = (name) => (existsSync(join(fake, name)) ? readFileSync(join(fake, name), 'utf8') : '');
   const nuls = (name) => read(name).split('\0').slice(0, -1);
-  const fac = (args, input) => {
+  const fac = (args, input, cwd = factory) => {
     const { NODE_TEST_CONTEXT, ...outer } = process.env;
-    const r = spawnSync(join(factory, 'bin/factory'), args, { cwd: factory, encoding: 'utf8', env: { ...outer, ...env }, input });
+    const r = spawnSync(join(factory, 'bin/factory'), args, { cwd, encoding: 'utf8', env: { ...outer, ...env }, input });
     return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
   return {
@@ -318,6 +318,21 @@ test('gh refuses an argument that names a file on the MacBook, before any ssh, a
       assert.equal(r.code, 2, `${args.join(' ')}: ${r.out}`);
       assert.match(r.out, /stdin/);
       assert.match(r.out, /@-/);
+    }
+    assert.equal(s.calls(), '', 'no ssh call');
+  } finally {
+    s.done();
+  }
+});
+
+test('factory passes --env-file to its own code, not to node, even with that file present', () => {
+  const s = world();
+  try {
+    writeFileSync(join(s.dir, 'f.env'), 'FACTORY_HOST_USER=elsewhere\n');
+    for (const flag of [['--env-file', 'f.env'], ['--env-file=f.env']]) {
+      const r = s.fac(['gh', 'secret', 'set', 'X', ...flag], undefined, s.dir);
+      assert.equal(r.code, 2, `${flag}: ${r.out}`);
+      assert.match(r.out, /stdin/);
     }
     assert.equal(s.calls(), '', 'no ssh call');
   } finally {
