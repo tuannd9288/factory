@@ -29,9 +29,9 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
      titled for the finding, whose body says "Found while working on #<n>" and gives the worker's line. Give it no `task`
      label, so no team can claim it: it waits in Triage. Then go on with issue <n>; the fix is never on its branch.
    - The issue's premise proved wrong, or the work would change its goal or cost: write it on issue <n> with
-     `gh issue comment`, with your recommendation, label it `needs-human` with `gh issue edit <n> --add-label
-     needs-human`, and stop work on <n> at that question. When the answer is on the issue, remove the label with `gh
-     issue edit <n> --remove-label needs-human` and go on.
+     `gh issue comment`, with your recommendation, label it with `gh issue edit <n> --add-label needs-human`,
+     and stop work on <n> at that question. When the answer is on the issue, remove the label with
+     `gh issue edit <n> --remove-label needs-human` and go on.
 
    How many workers run at once is your call:
    when the load is above the cores (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Your `bin/seat` calls inherit
@@ -40,14 +40,14 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    and `.gate/bin/red-check --base origin/main`, with the Bash tool's `run_in_background` where one outlasts the tool's
    two-minute limit. The full suite runs on CI, as the required `verify`. On a red, brief a fix round to the
    same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; wait for the
-   record with `"tag":"fix<k>"` the same way.
+   record with `"tag":"fix<k>"` the same way, and sort its `foundOutside` as in step 4.
 6. Have a peer reviewer read the change before you push; it writes no code. Write its brief beside the worker's: the
    issue's acceptance, the worktree, that it reads `git diff origin/main...HEAD` there, the test commands it may run,
    named as in step 3 (`.gate/bin/verify --tests <files>` and `.gate/bin/red-check --base origin/main`; `--fast`
    checks only staged files, and a committed change has none), or that it runs none, since step 5 ran them, that it
    writes nothing in the worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists
    what it found. Start it with step 4's command, with `reviewer` in place of `worker`, its own brief and
-   `--tag review<k>`, and wait for its record with `"tag":"review<k>"` the same way. On `FAIL`, brief a fix round as in
+   `--tag review<k>`, and wait for its record with `"tag":"review<k>"` the same way; sort its `foundOutside` as in step 4. On `FAIL`, brief a fix round as in
    step 5, run step 5's checks again, then review again. A `fix<k>` or `review<k>` tag is used once in a run: `<k>`
    counts on and never restarts. Push only after a `PASS`; after three `FAIL` rounds, ask the Human.
 7. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run
@@ -62,7 +62,7 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
 Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login, a
 cost, a premise of the issue that proved wrong, or a change of its goal or cost (step 4).
 Number each question and give your recommended answer. While you wait on any decision, label your issue `needs-human`;
-remove the label once the answer is on the issue.
+remove the label once the answer is on the issue or its pull request.
 Decide and report everything else.
 
 ## Never
