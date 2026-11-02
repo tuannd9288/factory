@@ -38,7 +38,7 @@ function world() {
   chmodSync(join(dir, 'gh'), 0o755);
   const state = join(dir, 'state');
   mkdirSync(join(dir, 'runs'));
-  const put =(name, value) => writeFileSync(join(dir, name), JSON.stringify(value));
+  const put = (name, value) => writeFileSync(join(dir, name), JSON.stringify(value));
   return {
     dir,
     state,
