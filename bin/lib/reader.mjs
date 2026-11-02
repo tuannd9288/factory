@@ -371,12 +371,15 @@ async function readAndSend({ state, dir, runs, setting, home, env, timeoutMs, no
       aborted = true;
       break;
     }
+    // A dropped event does not stop the pass: the call was answered, so its cursors move (the same text is not sent again and again for
+    // a quote that was bad once) and the good events are written.
     const { kept, dropped } = judge(answer, call.parts);
     if (dropped.length) causes.set('answer', `${dropped.length} event(s) named a session or a quote that was not in the input sent`);
     for (const e of kept) {
       appendStart({ state, kind: e.kind, key: `${e.kind} ${flat(e.session)}`, text: eventText(e), now: Date.now() });
       result.events += 1;
     }
+    // Cursors move call by call, past what that call sent and had answered: a later call that fails leaves the earlier ones moved.
     Object.assign(cursors, call.advance);
     save();
   }
@@ -391,6 +394,7 @@ async function readAndSend({ state, dir, runs, setting, home, env, timeoutMs, no
  * event, lock or file but its temporary input, which is removed. Returns the exit code. */
 async function tryFile(file, side, env = process.env) {
   const setting = loadSetting(SETTING_FILE, side);
+  // The header of the one part is `try <first 8 characters of the file's name>`: a file has no run folder or session id to name.
   const header = `try ${basename(file).replace(/\.jsonl$/, '').slice(0, 8)}`;
   const w = wholeLines(file, 0);
   const streams = [{ key: header, header, pieces: piecesOf(w), end: w.end }];

@@ -331,7 +331,9 @@ export const READER_EVERY_MS = 15 * 60_000;
 /** Starts one pass of the stream reader (#339) and returns true, when 15 minutes have passed since the last pass began (`reader/started`, in
  * ms; the pass and this both write it), no pass holds `reader.lock` (a lock whose pid is gone is none), and some stream exists to read. The pass
  * is a node process of its own, detached (a new process group, so launchd does not end it with the sweep), with this process's environment
- * unchanged, and nothing here waits for it. */
+ * unchanged, and nothing here waits for it. It runs bin/lib/reader.mjs with process.execPath, which is what bin/factory-reader (a bash
+ * wrapper that finds node) execs, since a bash script cannot be started with a node path. With no stream there is nothing to read, so no
+ * pass starts; the first pass then puts the first streams at their end, as it would have. */
 export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, env = process.env }) {
   const holder = holderOf(join(state, 'reader.lock'));
   if (holder && !gone(holder)) return false;
