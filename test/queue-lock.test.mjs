@@ -18,6 +18,7 @@ function world() {
   const dir = mkdtempSync(join(tmpdir(), 'qlock-'));
   const state = join(dir, 'state');
   mkdirSync(state);
+  mkdirSync(join(dir, 'runs'));
   writeFileSync(
     join(dir, 'gh'),
     [
@@ -36,7 +37,7 @@ function world() {
     ].join('\n'),
   );
   chmodSync(join(dir, 'gh'), 0o755);
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state };
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs') };
   const lockFile = join(state, 'queue.lock');
   const children = [];
   return {

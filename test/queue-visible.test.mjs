@@ -24,7 +24,8 @@ test('a queue run that fails before its repository loop leaves queue-run.failed 
     writeFileSync(join(dir, 'gh'), '#!/bin/sh\ncase "$*" in\n  "api user"*) echo "${Q_LOGIN:-agent-bot}" ;;\n  *) exit 1 ;;\nesac\n');
     chmodSync(join(dir, 'gh'), 0o755);
     const state = join(dir, 'state');
-    const sweep = (env = {}) => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, ...env } });
+    mkdirSync(join(dir, 'runs'));
+    const sweep = (env = {}) => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), ...env } });
     const report = join(state, 'queue-run.failed');
     let out = sweep({ Q_LOGIN: 'tuannd9288' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
