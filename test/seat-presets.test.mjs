@@ -10,7 +10,7 @@ const lib = () => import('../bin/lib/seat.mjs');
 const RUN = '/r/issue-1';
 const WORK = '/r/w';
 const HOME = '/h';
-const SCHEMA = '{"type":"object","additionalProperties":false,"required":["conclusion","evidence","couldNotRead","needsHuman"],"properties":{"conclusion":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"couldNotRead":{"type":"array","items":{"type":"string"}},"needsHuman":{"type":"array","items":{"type":"string"}}}}';
+const SCHEMA = '{"type":"object","additionalProperties":false,"required":["conclusion","evidence","couldNotRead","needsHuman","foundOutside"],"properties":{"conclusion":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"couldNotRead":{"type":"array","items":{"type":"string"}},"needsHuman":{"type":"array","items":{"type":"string"}},"foundOutside":{"type":"array","items":{"type":"string"}}}}';
 
 const DENY = [
   'Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)',

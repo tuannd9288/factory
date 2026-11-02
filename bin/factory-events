@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# What the queue's sweep tells Colly (#309):
+#   bin/factory-events [--after <seq>]            print the lines that begin a condition (`start`), after the cursor, and leave the cursor
+#   bin/factory-events --follow [--after <seq>]   print them, move the cursor after each line is written, and follow the file;
+#                                                 it never prints a `clear` line
+# The sweep writes $FACTORY_STATE/events.jsonl (bin/lib/events.mjs has the five conditions and the shape of a line); the cursor is
+# $FACTORY_STATE/events.cursor. Only --follow moves it, and only Colly's Monitor runs that, so a look never takes Colly's lines; to look,
+# use `factory top`. Started again after it stopped, --follow prints the start lines it missed and none it printed already.
+# `--after <seq>` (a whole number, 0 or more) starts after that seq in place of the cursor; it is how the reader says how far it got,
+# since a write to a link that has died, unnoticed by the Mac mini, is lost. A seq (or a cursor) above the file's highest starts from
+# its first line and says so on stderr. Colly runs it from the MacBook, and a dead link ends the ssh and the Monitor with it:
+#   ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 factory@tuans-mac-mini /Users/factory/WORKSPACES/bin/factory-events --follow
+# When the Monitor ends, start it again with `--after <the last seq Colly saw>` added; in a new session, which knows no seq, leave
+# `--after` out.
+# A non-login ssh command has PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no node, so the places Homebrew puts it are added here.
+PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+export PATH
+command -v node >/dev/null 2>&1 || { echo "factory-events: node is not on PATH ($PATH)" >&2; exit 127; }
+exec node "$(dirname "$0")/lib/events.mjs" "$@"

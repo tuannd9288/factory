@@ -63,5 +63,14 @@ test('two result events: turns and duration summed, cost and subtype from the la
   assert.equal(rec.duration_ms, 1734);
   assert.equal(rec.total_cost_usd, 2.5);
   assert.equal(rec.ended, 'error_max_turns');
-  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [] });
+  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [], foundOutside: [] });
+}));
+
+test('a report that lists work found outside the task leaves it in the record as given (#338)', () => world(async (w) => {
+  const found = 'bin/x.mjs:3 reads a stale path; outside the task, which is about y';
+  const r = w.start('worker', ['--tag', 'found'], { FAKE_FOUND: found });
+  assert.equal(r.code, 0, r.out + r.err);
+  await until(() => w.records().length === 1, 'the record');
+  const [rec] = w.records();
+  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [], foundOutside: [found] });
 }));
