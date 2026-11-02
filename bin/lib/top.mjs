@@ -117,22 +117,28 @@ export function etimeMs(text) {
   return m ? ((Number(m[1] ?? 0) * 24 + Number(m[2] ?? 0)) * 3600 + Number(m[3]) * 60 + Number(m[4])) * 1000 : null;
 }
 
-/** The processes as { pid, ageMs, command }, from ps; [] when ps cannot run. */
-export function psList() {
+/** The processes as { pid, ageMs, command }, from ps; throws when ps is not here or cannot run (the events step needs to tell that
+ * from no process). */
+export function readProcesses() {
   for (const ps of ['/bin/ps', '/usr/bin/ps']) {
     if (!existsSync(ps)) continue;
-    try {
-      return execFileSync(ps, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
-        .split('\n')
-        .flatMap((l) => {
-          const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
-          return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
-        });
-    } catch {
-      return [];
-    }
+    return execFileSync(ps, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\n')
+      .flatMap((l) => {
+        const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
+        return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
+      });
   }
-  return [];
+  throw new Error('ps is not on this host');
+}
+
+/** The same, with [] when ps cannot run: what the view shows. */
+function psList() {
+  try {
+    return readProcesses();
+  } catch {
+    return [];
+  }
 }
 
 /** The repository and team a process is the Lead of, or null: a `claude` command with `--name <repo>-<team>` (packs/pstack/bin/lead),

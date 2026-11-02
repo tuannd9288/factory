@@ -13,13 +13,22 @@ process.env.TZ = 'UTC';
 
 const events = () => import('../bin/lib/events.mjs');
 
+/** Runs body in a fresh folder and removes it when body is done: for an async body, once its promise has settled. */
 function withDir(body) {
   const dir = mkdtempSync(join(tmpdir(), 'events-'));
+  const remove = () => rmSync(dir, { recursive: true, force: true });
+  let result;
   try {
-    return body(dir);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+    result = body(dir);
+  } catch (error) {
+    remove();
+    throw error;
   }
+  if (typeof result?.then !== 'function') {
+    remove();
+    return result;
+  }
+  return result.finally(remove);
 }
 
 const linesOf = (state) => {
@@ -324,40 +333,173 @@ test('factory-events without --follow prints the start lines after the cursor an
   });
 });
 
-/** factory-events --follow, with what it has printed so far. */
-function follow(state) {
-  const child = spawn(join(factory, 'bin/factory-events'), ['--follow'], { env: eventsEnv(state), stdio: ['ignore', 'pipe', 'pipe'] });
-  const seen = { out: '' };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** factory-events --follow (with these args), with what it has printed so far. */
+function follow(state, args = []) {
+  const child = spawn(join(factory, 'bin/factory-events'), ['--follow', ...args], { env: eventsEnv(state), stdio: ['ignore', 'pipe', 'pipe'] });
+  const seen = { out: '', err: '' };
   child.stdout.on('data', (d) => (seen.out += d));
+  child.stderr.on('data', (d) => (seen.err += d));
   const lines = () => seen.out.split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const until = async (n) => {
-    for (let i = 0; i < 100 && lines().length < n; i += 1) await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 100 && lines().length < n; i += 1) await sleep(100);
     assert.equal(lines().length >= n, true, `waited for ${n} lines, saw ${seen.out}`);
   };
-  const stop = () => new Promise((r) => (child.exitCode !== null ? r() : (child.once('exit', r), child.kill())));
-  return { lines, until, stop };
+  const ended = () => child.exitCode !== null || child.signalCode !== null;
+  const stop = () => new Promise((r) => (ended() ? r() : (child.once('exit', r), child.kill())));
+  const exits = async () => {
+    for (let i = 0; i < 100 && !ended(); i += 1) await sleep(100);
+    return ended();
+  };
+  return { child, lines, until, stop, exits, err: () => seen.err };
 }
 
+/** Runs body with a function that starts a follower; every follower it started is stopped when body ends, a failed body included. */
+async function withFollowers(body) {
+  const all = [];
+  try {
+    return await body((state, args) => {
+      const f = follow(state, args);
+      all.push(f);
+      return f;
+    });
+  } finally {
+    await Promise.all(all.map((f) => f.stop()));
+  }
+}
+
+const cursorOf = (state) => readFileSync(join(state, 'events.cursor'), 'utf8').trim();
+
 test('factory-events --follow prints each start line once and no clear line; started again it prints the ones it missed and none it printed', async () => {
+  await withDir((dir) =>
+    withFollowers(async (start) => {
+      const state = join(dir, 'state');
+      seed(state, [['start', 'out-of-quota a'], ['clear', 'out-of-quota a'], ['start', 'gh-refused']]);
+      const first = start(state);
+      await first.until(2);
+      append(state, 4, 'clear', 'gh-refused');
+      append(state, 5, 'start', 'waiting-on-human o/app#40');
+      await first.until(3);
+      await sleep(1200);
+      assert.deepEqual(first.lines().map((l) => l.seq), [1, 3, 5]);
+      assert.equal(cursorOf(state), '5');
+      await first.stop();
+      append(state, 6, 'start', 'lead-at-dialog app-lead');
+      append(state, 7, 'clear', 'lead-at-dialog app-lead');
+      append(state, 8, 'start', 'out-of-quota b');
+      const second = start(state);
+      await second.until(2);
+      await sleep(1200);
+      assert.deepEqual(second.lines().map((l) => l.seq), [6, 8]);
+    }),
+  );
+});
+
+test('a follower whose reader has gone leaves the cursor before the line it could not deliver, and the next follower prints that line', async () => {
+  await withDir((dir) =>
+    withFollowers(async (start) => {
+      const state = join(dir, 'state');
+      seed(state, [['start', 'out-of-quota a']]);
+      const first = start(state);
+      await first.until(1);
+      first.child.stdout.destroy();
+      append(state, 2, 'start', 'gh-refused');
+      assert.equal(await first.exits(), true, 'the follower ends on its failed write');
+      assert.equal(cursorOf(state), '1');
+      const second = start(state);
+      await second.until(1);
+      assert.deepEqual(second.lines().map((l) => l.seq), [2]);
+      assert.equal(cursorOf(state), '2');
+    }),
+  );
+});
+
+test('--after starts after that seq in place of the cursor, and still moves the cursor only with --follow', async () => {
+  await withDir((dir) =>
+    withFollowers(async (start) => {
+      const state = join(dir, 'state');
+      seed(state, [['start', 'out-of-quota a'], ['start', 'gh-refused'], ['clear', 'gh-refused'], ['start', 'lead-at-dialog app-lead']]);
+      writeFileSync(join(state, 'events.cursor'), '4\n');
+      const look = spawnSync(join(factory, 'bin/factory-events'), ['--after', '1'], { encoding: 'utf8', env: eventsEnv(state) });
+      assert.equal(look.status, 0, look.stderr);
+      assert.deepEqual(look.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).seq), [2, 4], 'the cursor at 4 is ignored');
+      assert.equal(cursorOf(state), '4', 'a look moves nothing');
+      const f = start(state, ['--after', '2']);
+      await f.until(1);
+      await sleep(800);
+      assert.deepEqual(f.lines().map((l) => l.seq), [4]);
+      assert.equal(cursorOf(state), '4');
+    }),
+  );
+});
+
+test('--after above the highest seq starts from the first line and says so; so does a cursor above it', () => {
+  withDir((dir) => {
+    const state = join(dir, 'state');
+    seed(state, [['start', 'out-of-quota a'], ['start', 'gh-refused']]);
+    const after = spawnSync(join(factory, 'bin/factory-events'), ['--after', '9'], { encoding: 'utf8', env: eventsEnv(state) });
+    assert.deepEqual(after.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).seq), [1, 2]);
+    assert.match(after.stderr, /--after 9 is above the highest seq.*\(2\).*first line/);
+    writeFileSync(join(state, 'events.cursor'), '9\n');
+    const cursor = spawnSync(join(factory, 'bin/factory-events'), [], { encoding: 'utf8', env: eventsEnv(state) });
+    assert.deepEqual(cursor.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).seq), [1, 2]);
+    assert.match(cursor.stderr, /the cursor 9 is above the highest seq/);
+  });
+});
+
+test('a remade events file does not mute --follow: a cursor above its highest seq starts it over, and the cursor follows', async () => {
+  await withDir((dir) =>
+    withFollowers(async (start) => {
+      const state = join(dir, 'state');
+      seed(state, [['start', 'out-of-quota a'], ['start', 'gh-refused']]);
+      writeFileSync(join(state, 'events.cursor'), '9\n');
+      const f = start(state);
+      await f.until(2);
+      await sleep(800);
+      assert.deepEqual(f.lines().map((l) => l.seq), [1, 2]);
+      assert.match(f.err(), /the cursor 9 is above the highest seq/);
+      assert.equal(cursorOf(state), '2');
+    }),
+  );
+});
+
+test('--after takes a whole number of 0 or more; anything else is a usage error', () => {
+  withDir((dir) => {
+    const state = join(dir, 'state');
+    seed(state, [['start', 'gh-refused']]);
+    for (const args of [['--after'], ['--after', 'x'], ['--after', '-1'], ['--after', '1.5'], ['--after', ''], ['--after', '1e3'], ['--frob']]) {
+      const r = spawnSync(join(factory, 'bin/factory-events'), args, { encoding: 'utf8', env: eventsEnv(state) });
+      assert.equal(r.status, 2, args.join(' '));
+      assert.match(r.stderr, /usage: factory-events \[--follow\] \[--after <seq>\]/);
+      assert.equal(r.stdout, '');
+    }
+    const zero = spawnSync(join(factory, 'bin/factory-events'), ['--after', '0'], { encoding: 'utf8', env: eventsEnv(state) });
+    assert.equal(zero.status, 0, zero.stderr);
+    assert.equal(zero.stdout.split('\n').filter(Boolean).length, 1);
+  });
+});
+
+test('a process list or accounts that cannot be read leave their conditions as they were; a reading that succeeded ends them', async () => {
+  const e = await events();
   await withDir(async (dir) => {
     const state = join(dir, 'state');
-    seed(state, [['start', 'out-of-quota a'], ['clear', 'out-of-quota a'], ['start', 'gh-refused']]);
-    const first = follow(state);
-    await first.until(2);
-    append(state, 4, 'clear', 'gh-refused');
-    append(state, 5, 'start', 'waiting-on-human o/app#40');
-    await first.until(3);
-    await new Promise((r) => setTimeout(r, 1200));
-    assert.deepEqual(first.lines().map((l) => l.seq), [1, 3, 5]);
-    await first.stop();
-    append(state, 6, 'start', 'lead-at-dialog app-lead');
-    append(state, 7, 'clear', 'lead-at-dialog app-lead');
-    append(state, 8, 'start', 'out-of-quota b');
-    const second = follow(state);
-    await second.until(2);
-    await new Promise((r) => setTimeout(r, 1200));
-    assert.deepEqual(second.lines().map((l) => l.seq), [6, 8]);
-    await second.stop();
+    const runs = join(dir, 'runs');
+    const profiles = join(dir, 'profiles');
+    mkdirSync(runs);
+    mkdirSync(profiles);
+    const lead = { key: 'lead-at-dialog app-lead', scope: 'leads', text: 'Lead waits' };
+    const quota = { key: 'out-of-quota a', scope: 'quota', text: 'account a is out' };
+    record(e, state, [lead, quota], new Set(['leads', 'quota']), T0);
+    assert.deepEqual(shape(state), ['start lead-at-dialog app-lead', 'start out-of-quota a']);
+    const observe = (processes) => e.observe({ state, reads: new Map(), runs, agentProfiles: profiles, now: T0 + MIN, processes });
+    observe(() => {
+      throw new Error('ps failed');
+    });
+    assert.deepEqual(shape(state), ['start lead-at-dialog app-lead', 'start out-of-quota a'], 'no process list and no accounts: neither clears');
+    writeFileSync(join(state, 'accounts'), 'factory/factory-lead=acct-one\n');
+    observe(() => []);
+    assert.deepEqual(shape(state).slice(2).sort(), ['clear lead-at-dialog app-lead', 'clear out-of-quota a']);
   });
 });
 

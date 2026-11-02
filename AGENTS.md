@@ -358,7 +358,8 @@ and the alerts hook's in `bin/factory-alerts`'s.
 The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of five conditions begins (a required check
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, the sweep's own `gh` refused)
 and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
-and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`.
+and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
+starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out.
 
 The live verifier's Codex profile and its login are in `packs/pstack/INSTALL.md`, "The live verifier's login". What unattended runs
 need, and how `bin/seat` picks the team, the account and the seat, sets the permission mode and the grants, and handles the

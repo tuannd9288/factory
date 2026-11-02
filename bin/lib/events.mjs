@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { accountOut } from './seat.mjs';
 import { accountList, seatAccounts } from './token.mjs';
-import { leadOf, leadStateOf, psList } from './top.mjs';
+import { leadOf, leadStateOf, readProcesses } from './top.mjs';
 
 /** How long a required check may sit unstarted before it is told: half as much again as the slowest normal wait seen on 2026-11-02
  * (1,208 s on a busy self-hosted runner, from the run's creation), so only a real stall passes it. */
@@ -98,8 +98,9 @@ const readText = (file) => {
 };
 
 /** Condition 3: the Leads running now whose newest hook event is a permission prompt or an elicitation dialog (the `waiting` state of
- * top's LEAD_STATES, read by top's own rule). The guess of a Lead at a login or a folder trust is not a dialog and is left out. */
-export function leadsAtDialog({ runs, now, processes = psList }) {
+ * top's LEAD_STATES, read by top's own rule). The guess of a Lead at a login or a folder trust is not a dialog and is left out. A process
+ * list that cannot be read throws (readProcesses), unlike top's, which shows none. */
+export function leadsAtDialog({ runs, now, processes = readProcesses }) {
   const out = [];
   for (const proc of processes()) {
     const lead = leadOf(proc.command);
@@ -120,10 +121,13 @@ export function leadsAtDialog({ runs, now, processes = psList }) {
 }
 
 /** Condition 4: one for each account Claude Code has rejected until a reset that has not come (accountOut, the signal that stops a
- * session), named by its letter. */
+ * session), named by its letter. The account readers give an empty list for a file or folder they cannot read, so a host with no
+ * account at all throws: it is not a reading, and cannot clear a condition. */
 export function accountsOut({ runs, state, agentProfiles, now }) {
   const seatRows = seatAccounts(state);
-  return accountList({ state, agentProfiles }).flatMap(({ name, letter }) => {
+  const accounts = accountList({ state, agentProfiles });
+  if (!accounts.length) throw new Error('no account could be read');
+  return accounts.flatMap(({ name, letter }) => {
     const why = accountOut(runs, name, seatRows, now);
     return why ? [{ key: `out-of-quota ${letter}`, scope: 'quota', text: `account ${letter} is ${why}` }] : [];
   });
@@ -223,17 +227,53 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
   return record({ state, found, read, now });
 }
 
-/** `factory-events [--follow]`: the start lines after the cursor, one JSON line each. Without --follow it prints them and leaves the
- * cursor; with it, each line printed moves the cursor, and the file is followed. It never prints a clear line. */
+/** `factory-events [--follow] [--after <seq>]`: the start lines after the cursor (or after <seq>, which the reader says it got as far
+ * as, in place of the cursor), one JSON line each. Without --follow it prints them and leaves the cursor; with it, a line moves the
+ * cursor only once its write succeeded, lines go out one at a time, and the file is followed. It never prints a clear line. A cursor
+ * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. */
 function main(argv) {
-  const follow = argv.includes('--follow');
-  if (argv.some((a) => a !== '--follow')) throw new Error('usage: factory-events [--follow]');
+  let follow = false;
+  let after = null;
+  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>]');
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--follow') follow = true;
+    else if (argv[i] === '--after') {
+      const v = argv[++i] ?? '';
+      if (!/^\d+$/.test(v) || !Number.isSafeInteger(Number(v))) throw usage();
+      after = Number(v);
+    } else throw usage();
+  }
   const state = stateDir();
   const file = join(state, 'events.jsonl');
   const cursorFile = join(state, 'events.cursor');
   let cursor = Number(readText(cursorFile).trim()) || 0;
+  const highest = Math.max(0, ...readLines(state).map((e) => e.seq));
+  let queued = after ?? cursor;
+  if (queued > highest) {
+    console.error(`factory-events: ${after === null ? 'the cursor' : '--after'} ${queued} is above the highest seq in events.jsonl (${highest}); starting from its first line`);
+    queued = 0;
+  }
+  if (cursor > highest) cursor = 0;
   let offset = 0;
   let partial = '';
+  const pending = [];
+  let writing = false;
+  // One line at a time; the cursor moves in the write's callback, and only when the write succeeded.
+  const pump = () => {
+    if (writing || !pending.length) return;
+    writing = true;
+    const { seq, line } = pending.shift();
+    process.stdout.write(`${line}\n`, (error) => {
+      if (error) process.exit(0);
+      writing = false;
+      if (follow) {
+        cursor = Math.max(cursor, seq);
+        mkdirSync(state, { recursive: true });
+        writeAtomic(cursorFile, `${cursor}\n`);
+      }
+      pump();
+    });
+  };
   process.stdout.on('error', () => process.exit(0));
   const drain = () => {
     let size;
@@ -264,14 +304,11 @@ function main(argv) {
       } catch {
         continue;
       }
-      if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= cursor) continue;
-      process.stdout.write(`${l}\n`);
-      cursor = e.seq;
-      if (follow) {
-        mkdirSync(state, { recursive: true });
-        writeAtomic(cursorFile, `${cursor}\n`);
-      }
+      if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= queued) continue;
+      queued = e.seq;
+      pending.push({ seq: e.seq, line: l });
     }
+    pump();
   };
   drain();
   if (follow) setInterval(drain, 500);
