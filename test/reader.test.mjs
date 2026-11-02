@@ -620,21 +620,21 @@ test('the sweep starts a pass when 15 minutes have passed since the last began a
 
 test('a sweep starts the pass detached and returns at once, with the gh calls it had before, and a second sweep within 15 minutes starts none', () => {
   withDir((dir) => {
-    mkdirSync(join(dir, 'bin'));
+    // The world's bin holds the fake pi and codex; the fake gh joins them, so a pass this sweep starts never reaches a real model.
+    const w = world(dir);
     mkdirSync(join(dir, 'home'));
-    mkdirSync(join(dir, 'runs/issue-333'), { recursive: true });
-    writeFileSync(join(dir, 'runs/issue-333/run-fix9.jsonl'), say('words'));
+    w.put(w.seatFile(), say('words'));
     writeFileSync(join(dir, 'bin/gh'), '#!/bin/sh\necho "$*" >>"$Q/calls"\ncase "$*" in\n  "api user"*) echo agent-bot ;;\n  *graphql*) echo \'{"data":{"repository":{"issues":{"nodes":[]},"pullRequests":{"nodes":[]}}}}\' ;;\n  *rules/branches*) echo "[]" ;;\n  *) exit 1 ;;\nesac\n');
     chmodSync(join(dir, 'bin/gh'), 0o755);
     const state = join(dir, 'state');
     const sweep = () =>
       spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], {
         encoding: 'utf8',
-        env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, Q: dir, HOME: join(dir, 'home'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_ROOT: join(dir, 'root') },
+        env: { ...w.env, HOME: join(dir, 'home'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_ROOT: join(dir, 'root') },
       });
     const r = sweep();
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.equal(readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter((l) => /^(api|pr|run|issue|repo) /.test(l)).length, 3);
+    assert.equal(readFileSync(join(w.q, 'calls'), 'utf8').split('\n').filter((l) => /^(api|pr|run|issue|repo) /.test(l)).length, 3);
     assert.ok(existsSync(join(state, 'reader/started')));
     const until = Date.now() + 15_000;
     while ((!existsSync(join(state, 'reader/cursors.json')) || existsSync(join(state, 'reader.lock'))) && Date.now() < until) spawnSync('sleep', ['0.1']);

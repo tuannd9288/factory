@@ -208,7 +208,8 @@ test('a sweep runs once, alone, never as the Human, and leaves a failure report 
     writeFileSync(join(dir, 'gh'), '#!/bin/sh\necho "$*" >>"$Q/calls"\ncase "$*" in\n  "api user"*) echo "${Q_LOGIN:-agent-bot}" ;;\n  *graphql*) cat "$Q/pulls.json" ;;\n  *rules/branches*) echo \'[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"verify"}]}}]\' ;;\n  *) exit 1 ;;\nesac\n');
     chmodSync(join(dir, 'gh'), 0o755);
     const state = join(dir, 'state');
-    const sweep = (env = {}) => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, ...env } });
+    mkdirSync(join(dir, 'runs'));
+    const sweep = (env = {}) => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), ...env } });
     const report = join(state, 'queue-o-app.failed');
     writeFileSync(join(dir, 'pulls.json'), 'not json');
     let out = sweep();
