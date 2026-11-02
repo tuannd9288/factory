@@ -512,8 +512,8 @@ describe('review, verdict, tier and rounds', () => {
         // tier's claim check reads the named issue's state (#133): open unless the test leaves state-<n>.json.
         '  "issue view "*" --repo o/app --json state") cat "$FAKE/state-$3.json" 2>/dev/null || echo \'{"state":"OPEN"}\' ;;',
         // A test that moves something while a job waits leaves $FAKE/mover.sh, which runs once at the first listing.
-        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
-        '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
+        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; echo jobs >>"$FAKE/order"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
+        '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; echo annotations >>"$FAKE/order"; cat "$FAKE/annotations.json" ;;',
         '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
         '  *check-runs/777/annotations*) cat "$FAKE/ann777.json" 2>/dev/null || echo "[]" ;;',
         '  *actions/runs/98/jobs?filter=all*) cat "$FAKE/jobs98.json" ;;',
@@ -521,7 +521,7 @@ describe('review, verdict, tier and rounds', () => {
         // #155: the rules in force on main and the "Entire Gates" check runs, for GATE_REVIEWER=entire; the app_id is asked for.
         // #333: the merge switch asks for every page, and a call that does not fails. Entire's own read of the rules (#155) is
         // not the switch's, and is let through while a test sets $FAKE/entire-rules.
-        '  *rules/branches/main) echo rules >>"$FAKE/rules-calls"; case "$*" in *"--paginate --slurp"*) ;; *) [ -e "$FAKE/entire-rules" ] || { echo "fake gh: the rules are asked without --paginate --slurp" >&2; exit 1; } ;; esac; cat "$FAKE/rules.json" ;;',
+        '  *rules/branches/main) echo rules >>"$FAKE/rules-calls"; echo rules >>"$FAKE/order"; case "$*" in *"--paginate --slurp"*) ;; *) [ -e "$FAKE/entire-rules" ] || { echo "fake gh: the rules are asked without --paginate --slurp" >&2; exit 1; } ;; esac; cat "$FAKE/rules.json" ;;',
         '  *"check-runs?check_name=Entire%20Gates&app_id="*) echo entire >>"$FAKE/calls"; cat "$FAKE/entire.json" ;;',
         '  *check-runs*) cat "$FAKE/verify.json" ;;',
         // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
@@ -574,7 +574,14 @@ describe('review, verdict, tier and rounds', () => {
       GATE_RESULT_POLL: '0',
       ...env,
     });
-    return { ...out, head, edits: readFileSync(join(fake, 'edits'), 'utf8'), calls: readFileSync(join(fake, 'calls'), 'utf8') };
+    // `out` is the log without the ::stop-commands:: markers that hold the pull request's text (tier prints them, #333); `raw` is whole.
+    const marks = new Set();
+    for (const l of out.out.split('\n')) {
+      const m = /^::stop-commands::([0-9a-f]{16,})$/.exec(l);
+      if (m) marks.add(`::${m[1]}::`);
+    }
+    const plain = out.out.split('\n').filter((l) => !/^::stop-commands::[0-9a-f]{16,}$/.test(l) && !marks.has(l)).join('\n');
+    return { ...out, raw: out.out, out: plain, head, edits: readFileSync(join(fake, 'edits'), 'utf8'), calls: readFileSync(join(fake, 'calls'), 'utf8') };
   };
   /** Commits files on a candidate branch, fetches it into the trusted checkout, and runs one job there. */
   const job = (kind, files, env = {}) => {
@@ -864,8 +871,10 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /tuannd9288 approved/);
     assert.doesNotMatch(out.out, /reviewer is configured/);
-    // The labels already give tier 3: nothing the review said could add to that, so its jobs were not even listed.
-    assert.equal(out.calls, '');
+    // The labels already give tier 3: nothing the review said could add to that. tier 3 reads the review of its run all the same
+    // (#333), so the switch is read once it is in; the raise changes no label and prints nothing.
+    assert.match(out.calls, /jobs/);
+    assert.doesNotMatch(out.out, /raised by the reviewer/);
     assert.doesNotMatch(out.edits, /raised/);
   });
   test('the review of the latest attempt is the one read', () => {
@@ -884,14 +893,52 @@ describe('review, verdict, tier and rounds', () => {
     const out = job('tier', { 'src/math.js': MUL }, pr);
     assert.match(out.out, /raised by the reviewer: why/, out.out);
   });
-  test('when paths and labels already give tier 3, tier does not wait for the review', () => {
+  // #333: tier 3 waits for the review of its run too, and reads the merge switch only then, when the gate's run is nearly over.
+  test('at tier 3, tier waits for the review and reads the rules only after its result is in', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    write(fake, { order: null });
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    const order = readFileSync(join(fake, 'order'), 'utf8').split('\n').filter(Boolean);
+    assert.ok(order.includes('jobs') && order.includes('annotations') && order.includes('rules'), order.join(','));
+    assert.ok(order.indexOf('rules') > order.lastIndexOf('annotations'), `rules read before the review's result: ${order.join(',')}`);
+  });
+  test('at tier 3, a review that has not ended fails tier on timeout and reads no rules', () => {
     labels();
     reviews([]);
     reviewJob('in_progress');
+    write(fake, { order: null });
     const out = job('tier', { 'AGENTS.md': '# app\n' }, { ...pr, GATE_WAIT: '0' });
     assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
-    assert.equal(out.calls, '');
+    assert.match(out.out, /tier: review did not finish in time/);
+    assert.ok(!(existsSync(join(fake, 'order')) && /rules/.test(readFileSync(join(fake, 'order'), 'utf8'))), 'the rules were read');
+  });
+  test('at tier 3, a reviewer unavailable fails tier closed and reads no rules', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, false));
+    write(fake, { 'annotations.json': JSON.stringify([result('unavailable: timeout')]), order: null });
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    annotations();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier: reviewer unavailable \(timeout\)/);
+    assert.doesNotMatch(out.out, /title=merge switch/);
+    assert.ok(!/rules/.test(readFileSync(join(fake, 'order'), 'utf8')), 'the rules were read');
+  });
+  test('at tier 3, a red review fails tier and reads no rules', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, false));
+    reviewJob('failure');
+    write(fake, { order: null });
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    reviewJob('success');
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /review is red; tier follows it/);
+    assert.ok(!/rules/.test(readFileSync(join(fake, 'order'), 'utf8')), 'the rules were read');
   });
   // #333: the merge switch is the two review parameters of the rules in force on main. At all, the Human's approval of a
   // tier 3 change is not asked; the other checks, and the claim, still are.
@@ -1046,6 +1093,52 @@ describe('review, verdict, tier and rounds', () => {
     }
     assert.deepEqual(lines.filter((l) => /^::notice title=merge switch::/.test(l)), ['::notice title=merge switch::1-2']);
     assert.ok(lines.some((l) => l.includes('tsconfig.json (protected')), 'the paths are still shown');
+  });
+  // A runner may trim more than ASCII white space before it looks for a command: the pull request's text is held between
+  // ::stop-commands::<token> and ::<token>:: with a fresh random token, and tier's own notice comes after, outside.
+  const blocks = (raw) => {
+    const lines = raw.split('\n');
+    const found = [];
+    let open = null;
+    for (const [i, line] of lines.entries()) {
+      const m = /^::stop-commands::(\S+)$/.exec(line);
+      if (open === null && m) open = { token: m[1], from: i };
+      else if (open && line === `::${open.token}::`) {
+        found.push({ ...open, to: i });
+        open = null;
+      }
+    }
+    assert.equal(open, null, 'a block was left open');
+    return { lines, found };
+  };
+  test('a path led by a no-break or other wide space that reads as a command cannot swallow tier\'s notice, which stays outside the stop-commands block', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    const lead = [' ', ' ', ' '];
+    const files = {};
+    for (const c of lead) {
+      files[`${c}::stop-commands::x/package.json`] = '{ "scripts": { "test": "true" } }\n';
+      files[`${c}::notice title=merge switch::all/package.json`] = '{ "scripts": { "test": "true" } }\n';
+    }
+    const first = job('tier', files, pr);
+    const second = again('tier', first.head, pr);
+    const tokens = [];
+    for (const out of [first, second]) {
+      assert.match(out.out, /^tier 3\n/, out.out);
+      const { lines, found } = blocks(out.raw);
+      assert.ok(found.length >= 1, 'the pull request\'s text is held in a block');
+      for (const b of found) {
+        assert.ok(b.token.length >= 16, 'a token of at least 16 characters');
+        assert.ok(!lines.slice(b.from + 1, b.to).includes(`::${b.token}::`), 'no line inside equals the closing marker');
+      }
+      const notices = lines.map((l, i) => [l, i]).filter(([l]) => l === '::notice title=merge switch::1-2');
+      assert.equal(notices.length, 1, out.raw);
+      assert.ok(found.every((b) => notices[0][1] > b.to || notices[0][1] < b.from), 'the notice is inside no block');
+      assert.ok(found.every((b) => notices[0][1] > b.to), 'the notice comes after the text it follows');
+      tokens.push(found[0].token);
+    }
+    assert.notEqual(tokens[0], tokens[1], 'the token differs between runs');
   });
   test('the stub raises on its marker; a raise leaves review green, and rounds, which runs only after a red job, has nothing to count', () => {
     let out = job('review', { 'src/math.js': `${MUL}// GATE-STUB-RAISE deletes a sign-in var\n` }, { GATE_REVIEWER: 'stub' });
