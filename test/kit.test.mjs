@@ -928,7 +928,7 @@ describe('review, verdict, tier and rounds', () => {
       const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
       assert.equal(first.code, 1, `${name}: ${first.out}`);
       assert.match(first.out, /tier 3 waits for @tuannd9288 to approve/);
-      assert.doesNotMatch(first.out, /merge switch/);
+      assert.doesNotMatch(first.out, /the merge switch of this repository/);
       reviews([review('tuannd9288', 'APPROVED', first.head)]);
       assert.equal(again('tier', first.head, pr).code, 0, name);
     }
@@ -945,11 +945,29 @@ describe('review, verdict, tier and rounds', () => {
     write(fake, { 'rules.json': null });
     assert.equal(job('tier', { 'AGENTS.md': '# app\n' }, pr).code, 1, 'no answer at all');
   });
-  test('tier 1 and 2 read no switch, at any position', () => {
+  test('tier 1 and 2 are not failed by the switch, at any position, or by rules that cannot be read', () => {
     for (const rules of [switchRules(0, false), switchRules(1, true), 'not json']) {
       rulesAre(rules);
       assert.equal(job('tier', { 'src/math.js': MUL }, pr).code, 0);
     }
+  });
+  // The queue follows the switch by state: tier records the position it read on its own check run, as a workflow notice.
+  test('tier records the position it ran at as the notice "merge switch", on tier 3 before the all exit, and on tier 1 and 2', () => {
+    for (const [rules, position] of [[switchRules(0, false), 'all'], [switchRules(0, true), '1-2'], [switchRules(1, true), 'none']]) {
+      rulesAre(rules);
+      reviews([review('tuannd9288', 'APPROVED', 'x'.repeat(40))]);
+      for (const [files, tier] of [[{ 'AGENTS.md': '# app\n' }, 3], [{ 'src/auth/t.js': 'export const t = 1;\n' }, 2], [{ 'src/math.js': MUL }, 1]]) {
+        const out = job('tier', files, pr);
+        const lines = out.out.split('\n');
+        assert.equal(lines.filter((l) => l.startsWith('::notice title=merge switch::')).length, 1, `${position} tier ${tier}: ${out.out}`);
+        assert.ok(lines.includes(`::notice title=merge switch::${position}`), `${position} tier ${tier}: ${out.out}`);
+        if (position === 'all' && tier === 3) assert.ok(lines.indexOf(`::notice title=merge switch::all`) < lines.findIndex((l) => /is at all/.test(l)), 'recorded before the exit');
+      }
+    }
+  });
+  test('tier records nothing when the rules cannot be read', () => {
+    rulesAre('not json');
+    for (const files of [{ 'AGENTS.md': '# app\n' }, { 'src/math.js': MUL }]) assert.doesNotMatch(job('tier', files, pr).out, /title=merge switch/);
   });
   test('at all, a stale claim still fails a tier 3 change, and the labels are still read', () => {
     rulesAre(switchRules(0, false));
