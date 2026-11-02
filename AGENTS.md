@@ -381,8 +381,9 @@ Claude Code updates itself on the stable channel; nothing in the factory pins th
 (`kit/.gate/bin/reviewer/package.json`, `kit/.gate/bin/lib/reviewer.json`). The digest's job is in `bin/factory-ledger`'s header,
 and the alerts hook's in `bin/factory-alerts`'s.
 
-The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of five conditions begins (a required check
-that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, the sweep's own `gh` refused)
+The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of six conditions begins (a required check
+that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, the sweep's own `gh` refused,
+a repository's merge switch moved)
 and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
 starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out.

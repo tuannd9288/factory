@@ -17,7 +17,7 @@
 // The last step, under the lock, writes the events of #309 (bin/lib/events.mjs): one line to $FACTORY_STATE/events.jsonl when a condition
 // begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call. A sixth (#333) tells each move of a
 // repository's merge switch, from the position file queue-<owner>-<name>.position (bin/lib/switch-watch.mjs); the factory's own
-// repository is read for it too, by its rules alone (one call), where the checkout is named.
+// repository is read for it too, by its rules alone (one call), where there is a checkout.
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -505,7 +505,7 @@ function sweepLanded(state) {
   }
 }
 
-/** The last step of a sweep (#309), under its lock: the five conditions written to the events file from what the sweep read and from the
+/** The last step of a sweep (#309), under its lock: the conditions written to the events file from what the sweep read and from the
  * Leads and the accounts on this host (bin/lib/events.mjs). A failure is told in queue-events.failed and never changes the sweep's result. */
 function recordEvents(state, reads, switches) {
   const failure = join(state, 'queue-events.failed');

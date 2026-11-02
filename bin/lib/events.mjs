@@ -1,7 +1,7 @@
-// The factory's events (#309): the queue's sweep writes one line to $FACTORY_STATE/events.jsonl when one of five conditions
+// The factory's events (#309): the queue's sweep writes one line to $FACTORY_STATE/events.jsonl when one of its conditions
 // begins (`start`) and one when it ends (`clear`); a condition that holds writes nothing more. A line is one JSON object:
 // { seq, at, type, kind, key, text }. `seq` counts up from 1 across the file and is what a reader's cursor holds; `key` names the
-// condition (it begins with the kind), so a clear matches its start. The five kinds:
+// condition (it begins with the kind), so a clear matches its start. The first five kinds:
 //   check-not-started  a check `main` requires is missing from the head commit of a pull request waiting on auto-merge, or is there
 //                      and has not started, for NOT_STARTED_MS from the first sweep that saw it (a dead runner leaves it so)
 //   waiting-on-human   a tier-3 or needs-human pull request whose tier check did not succeed, or an open issue labelled needs-human

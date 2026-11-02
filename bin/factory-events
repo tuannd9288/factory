@@ -3,7 +3,7 @@
 #   bin/factory-events [--after <seq>]            print the lines that begin a condition (`start`), after the cursor, and leave the cursor
 #   bin/factory-events --follow [--after <seq>]   print them, move the cursor after each line is written, and follow the file;
 #                                                 it never prints a `clear` line
-# The sweep writes $FACTORY_STATE/events.jsonl (bin/lib/events.mjs has the five conditions and the shape of a line); the cursor is
+# The sweep writes $FACTORY_STATE/events.jsonl (bin/lib/events.mjs has the conditions and the shape of a line); the cursor is
 # $FACTORY_STATE/events.cursor. Only --follow moves it, and only Colly's Monitor runs that, so a look never takes Colly's lines; to look,
 # use `factory top`. Started again after it stopped, --follow prints the start lines it missed and none it printed already.
 # `--after <seq>` (a whole number, 0 or more) starts after that seq in place of the cursor; it is how the reader says how far it got,
