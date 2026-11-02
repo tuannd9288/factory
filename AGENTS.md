@@ -33,9 +33,10 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   him); a repository taken in starts at "1–2", and zalo-gateway keeps its present setting, GitHub's "Allow auto-merge"
   off, until he moves it. It is the two review parameters of the `factory-gate` ruleset ("Luật review của GitHub
   (Recommended)", 12:14:34), so GitHub holds it and a move applies at once to the open pull requests, which the queue
-  follows by re-running `tier` on the open tier-3 pull requests. At `all` the code also lets a `needs-human` pull request
-  merge once its checks are green: the Lead's reading, awaiting his choice on the pull request. Only he moves it, on his
-  login, asked before each move: `bin/onboard-owner --merge`, which Colly runs. "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
+  follows by re-running a `tier` that recorded another position than the one in force. At `all` the code also lets a
+  `needs-human` pull request merge once its checks are green: the Lead's reading, awaiting his choice on the pull
+  request. Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`, which Colly runs.
+  "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
   (Recommended)" are his answers; the factory's own repository is unchanged. Sources:
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 (09:51 to about 10:00),
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568380227 (10:11 and 10:21) and
