@@ -10,7 +10,10 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w origin/main`.
 3. Save the issue in the run folder: read it with `gh issue view <n> --json body,comments` and write that output to
    `~/factory-runs/<repo>-<n>/issue.json`. Write a brief beside it: the goal, the acceptance, the files the worker may
-   change, the commands it runs to check, and that it commits but never pushes.
+   change, the exact commands it runs to check, and that it commits but never pushes. Name each check command whole:
+   `.gate/bin/verify --fast` and the test command of the part changed, each run on its own after a separate
+   `cd <worktree>`, with no `env` prefix, pipe or `;`. Never write "check it against" a script: the session then builds
+   its own command, a deny rule refuses it, and it stops with no test run (#256).
 4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
    `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
    the background, and has ended only when `~/.local/state/factory/sessions.jsonl` holds its record, a line that
@@ -26,8 +29,9 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; wait for the
    record with `"tag":"fix<k>"` the same way.
 6. Have a peer reviewer read the change before you push; it writes no code. Write its brief beside the worker's: the
-   issue's acceptance, the worktree, that it reads `git diff origin/main...HEAD` there, that it writes nothing in the
-   worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists what it found. Start
+   issue's acceptance, the worktree, that it reads `git diff origin/main...HEAD` there, the test commands it may run,
+   named as in step 3 (or that it runs none, since step 5 ran them), that it writes nothing in the worktree and commits
+   nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists what it found. Start
    it with step 4's command, with `reviewer` in place of `worker`, its own brief and `--tag review<k>`, and wait for its
    record with `"tag":"review<k>"` the same way. On `FAIL`, brief a fix round as in step 5, run step 5's checks again,
    then review again. A `fix<k>` or `review<k>` tag is used once in a run: `<k>` counts on and never restarts. Push only
