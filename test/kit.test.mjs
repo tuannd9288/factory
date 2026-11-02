@@ -1188,8 +1188,12 @@ describe('review, verdict, tier and rounds', () => {
       const { lines, found } = blocks(out.raw);
       assert.ok(found.length >= 1, out.raw);
       const outside = lines.filter((l, i) => !found.some((b) => i >= b.from && i <= b.to));
-      assert.ok(!outside.some((l) => l.includes(hostile)), `the text is outside a block: ${out.raw}`);
-      assert.ok(lines.some((l, i) => l.includes(hostile) && found.some((b) => i > b.from && i < b.to)), 'the text is inside one');
+      // The line that names the path is found by the path's tail: its line-start `::` is broken by tier_of's neutralising, so the
+      // hostile text is not there verbatim, and the block holds it either way.
+      const named = 'x/package.json';
+      assert.ok(!outside.some((l) => l.includes(named)), `the text is outside a block: ${out.raw}`);
+      assert.ok(lines.some((l, i) => l.includes(named) && found.some((b) => i > b.from && i < b.to)), 'the line naming the path is inside a block');
+      assert.ok(!outside.some((l) => /^\s*::notice title=review-result::/.test(l)), 'no result notice outside a block');
     }
     // A tier 1 verdict passes at once and holds its reasons in a block as well.
     const one = job('verdict', { 'src/math.js': MUL }, { ...pr, GATE_REVIEWER: '' });
