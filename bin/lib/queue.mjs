@@ -128,12 +128,12 @@ export function pickSwitchReruns(prs, done) {
     .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId, head: p.head }));
 }
 
-/** The merge switch's last position the sweep saw for a repository, and what it re-ran for the move to it: null when the
- * file is absent or is not that. */
+/** The merge switch's last position the sweep saw for a repository, what it re-ran for the move to it, and the re-runs
+ * GitHub refused that are still pending: null when the file is absent or is not that. */
 function switchKept(file) {
   try {
     const kept = JSON.parse(readFileSync(file, 'utf8'));
-    return POSITIONS.includes(kept?.position) && Array.isArray(kept.reran) ? kept : null;
+    return POSITIONS.includes(kept?.position) && Array.isArray(kept.reran) ? { ...kept, pending: Array.isArray(kept.pending) ? kept.pending : [] } : null;
   } catch {
     return null;
   }
@@ -141,9 +141,12 @@ function switchKept(file) {
 
 /** Follows the merge switch (#333), from the rules the sweep already fetched: GitHub applies a move at once, but a tier-3
  * pull request's tier check ran before it and nothing re-runs it. A move is seen when the position differs from the last
- * one kept in $state/queue-<owner>-<name>.switch (none yet reads as 1-2, the default); the tier jobs of the waiting
- * tier-3 pull requests are re-run once, and what was re-run is kept with the head and the position, so no later sweep
- * repeats it. The last position is kept only once every re-run was made. Rules that read as no position change nothing.
+ * one kept in $state/queue-<owner>-<name>.switch (none yet reads as 1-2, the default); the tier jobs of every open tier-3
+ * pull request, armed or not, are re-run once, and what was re-run is kept with the head and the position, so no later
+ * sweep repeats it. The position read is always the one kept, so a move back is a move whatever became of the re-runs.
+ * A re-run GitHub refuses is told once and kept as pending, with its pull request, head and position; each later sweep
+ * retries it while the position holds, the pull request is open and tier-3 and its head is the same, and drops it when
+ * one of those stops holding or its re-run is made. Rules that read as no position change nothing.
  * Returns the numbers of the pull requests re-run, and the position read (undefined when the rules gave none). */
 function followSwitch(repo, state, rules, prs) {
   let position;
@@ -156,39 +159,48 @@ function followSwitch(repo, state, rules, prs) {
   const file = join(state, `queue-${repo.replace('/', '-')}.switch`);
   const kept = switchKept(file);
   const last = kept?.position ?? '1-2';
-  const save = (at, reran) => {
+  const save = (at, reran, pending) => {
     mkdirSync(state, { recursive: true });
-    writeFileSync(file, JSON.stringify({ position: at, reran }));
+    writeFileSync(file, JSON.stringify({ position: at, reran, pending }));
   };
+  const why = `after the merge switch moved to ${position}`;
   const ran = new Set();
   if (position === last) {
-    if (!kept) save(position, []);
+    const open = new Map(prs.map((p) => [p.number, p]));
+    const pending = [];
+    for (const entry of kept?.pending ?? []) {
+      const p = open.get(entry.number);
+      if (entry.position !== position || !p || !p.labels.includes('tier-3') || p.head !== entry.head) continue;
+      if (!p.checks.tier?.jobId || p.checks.tier.state === 'PENDING') pending.push(entry);
+      else if (rerun(repo, entry.number, p.checks.tier.jobId, why, true)) ran.add(entry.number);
+      else pending.push(entry);
+    }
+    if (!kept || pending.length !== kept.pending.length) save(position, kept?.reran ?? [], pending);
     return { ran, position };
   }
   console.log(`queue: the merge switch of ${repo} moved from ${last} to ${position}`);
   const reran = (kept?.reran ?? []).filter((e) => e.position === position);
-  let failed = false;
+  const pending = [];
   for (const { number, jobId, head } of pickSwitchReruns(prs, reran)) {
-    if (!rerun(repo, number, jobId, `after the merge switch moved to ${position}`)) {
-      failed = true;
+    if (!rerun(repo, number, jobId, why)) {
+      pending.push({ number, head, position });
       continue;
     }
     reran.push({ number, head, position });
     ran.add(number);
-    save(last, reran);
+    save(last, reran, pending);
   }
-  // A re-run that failed keeps the last position, so the next sweep sees the move again and tries only what is left.
-  save(failed ? last : position, reran);
+  save(position, reran, pending);
   return { ran, position };
 }
 
 /** Re-runs one tier job and says so; a re-run GitHub refuses (a run over 30 days old, one still in progress) is told in one
- * line and returns false, and never stops the sweep. */
-function rerun(repo, number, jobId, why) {
+ * line, unless `quiet` says it was told already, and returns false, and never stops the sweep. */
+function rerun(repo, number, jobId, why, quiet = false) {
   try {
     gh(['run', 'rerun', '--job', jobId, '--repo', repo]);
   } catch (error) {
-    console.log(`queue: could not re-run the tier check of ${repo}#${number} ${why}: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
+    if (!quiet) console.log(`queue: could not re-run the tier check of ${repo}#${number} ${why}: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
     return false;
   }
   console.log(`queue: re-ran the tier check of ${repo}#${number} ${why}`);

@@ -95,7 +95,8 @@ function world() {
       'printf \'%s\\n\' "$(printf \'%s\' "$*" | tr \'\\n\' \' \')" >>"$Q/calls"',
       'case "$*" in',
       '  "api user"*) echo agent-bot ;;',
-      '  *rules/branches*) cat "$Q/rules.json" ;;',
+      // A call that does not ask for every page fails; with them the rules come as one page of a list of pages.
+      '  *rules/branches*) case "$*" in *"--paginate --slurp"*) printf "["; cat "$Q/rules.json"; printf "]" ;; *) echo "fake gh: the rules are asked without --paginate --slurp" >&2; exit 1 ;; esac ;;',
       '  *graphql*) cat "$Q/prs.json" ;;',
       '  "run rerun --job "*) case " $(cat "$Q/fail" 2>/dev/null) " in *" $4 "*) echo "HTTP 403: Workflow run cannot be rerun" >&2; exit 1 ;; esac ;;',
       '  *) exit 1 ;;',
@@ -240,6 +241,74 @@ test('a re-run GitHub refuses is told in one line and stops no sweep; the switch
     assert.deepEqual(out.reruns, ['run rerun --job 71 --repo o/app']);
     assert.match(out.out, /re-ran the tier check of o\/app#7 after the merge switch moved to all/);
     assert.deepEqual(w.sweep().reruns, []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a move back is seen whatever became of the re-runs of the move before it', () => {
+  const w = world();
+  try {
+    w.pulls(waiting());
+    w.rules('1-2');
+    w.sweep();
+    w.refuse('81');
+    w.rules('all');
+    let out = w.sweep();
+    assert.deepEqual(out.reruns, ['run rerun --job 71 --repo o/app', 'run rerun --job 81 --repo o/app'], 'A is re-run, B\'s re-run is refused');
+    w.refuse();
+    w.rules('1-2');
+    out = w.sweep();
+    assert.match(out.out, /moved from all to 1-2/);
+    assert.deepEqual(out.reruns, ['run rerun --job 71 --repo o/app', 'run rerun --job 81 --repo o/app'], 'A keeps no green tier it got at all, and B is re-run too');
+    assert.deepEqual(w.sweep().reruns, []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a refused re-run is told once, retried on each later sweep and made when GitHub takes it', () => {
+  const w = world();
+  try {
+    w.pulls(waiting());
+    w.rules('1-2');
+    w.sweep();
+    w.refuse('81');
+    w.rules('all');
+    const told = [];
+    for (let k = 0; k < 3; k += 1) {
+      const out = w.sweep();
+      assert.equal(out.code, 0, out.out);
+      told.push(...out.out.split('\n').filter((l) => /could not re-run/.test(l)));
+      if (k > 0) assert.deepEqual(out.reruns, ['run rerun --job 81 --repo o/app'], 'the pending one is retried, nothing else');
+      if (k > 0) assert.doesNotMatch(out.out, /moved from/);
+    }
+    assert.equal(told.length, 1, told.join('\n'));
+    w.refuse();
+    let out = w.sweep();
+    assert.deepEqual(out.reruns, ['run rerun --job 81 --repo o/app']);
+    assert.match(out.out, /re-ran the tier check of o\/app#8 after the merge switch moved to all/);
+    out = w.sweep();
+    assert.deepEqual(out.reruns, [], 'made, so no longer pending');
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a pending re-run is dropped when its pull request gets a new head or stops being tier 3', () => {
+  const w = world();
+  try {
+    w.pulls(waiting());
+    w.rules('1-2');
+    w.sweep();
+    w.refuse('71 81');
+    w.rules('all');
+    w.sweep();
+    w.refuse();
+    w.pulls([pull(7, { labels: ['tier-2'] }), pull(8, { conclusion: 'SUCCESS', head: 'pushed' }), pull(9, { labels: ['tier-1'], conclusion: 'SUCCESS' })]);
+    assert.deepEqual(w.sweep().reruns, [], 'neither is retried');
+    w.pulls(waiting());
+    assert.deepEqual(w.sweep().reruns, [], 'and neither comes back');
   } finally {
     w.cleanup();
   }
