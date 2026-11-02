@@ -7,7 +7,8 @@ differs from the factory, the gate's rule wins (sources: the factory's `packs/ps
 - No stacked pull requests: `scripts/ship` opens against `main` and arms no other base.
 - No merge by hand: `factory-gate` allows merge commits only, and `scripts/ship` arms `--auto --merge`.
 - Title: the head commit's subject; body: the repository's template with `Closes #<issue>` (`scripts/ship` sends them).
-- `gh api` only to read (a GET or a GraphQL query; `-X GET` with `-f`/`-F`), and a write through it only with the Human's approval; a seat has no `gh` at all.
+- `gh api` only to read (a GET or a GraphQL query; `-X GET` with `-f`/`-F`), and a write through it only with the
+  Human's approval; a seat has no `gh` at all.
 - `claude -p` has no `AskUserQuestion`: ask in the report.
 - `/repo-refresh` runs only when the Human types it (`skillOverrides`), and changes a repository only by pull request.
 
