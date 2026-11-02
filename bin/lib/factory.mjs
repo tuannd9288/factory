@@ -387,8 +387,9 @@ function hostIdentity(env) {
   return name && email ? { name, email } : null;
 }
 
-// A push to GitHub from the MacBook fails at once, by any transport, with this unreachable URL and its reason in the message; a
-// fetch is not rewritten, so reads stay on the MacBook. The credential.helper entry empties every helper git has been given.
+// A push over HTTPS to GitHub fails at once, with this unreachable URL and its reason in the message; git over ssh is off (see
+// GIT_SSH_COMMAND). A fetch over HTTPS is not rewritten, so it stays on the MacBook. The credential.helper entry empties every helper
+// git has been given.
 const PUSH_BASE = 'file:///nonexistent/factory-lead-pushes-from-the-mac-mini/';
 // Git runs this in place of ssh, so no ssh connection or key is used: it says why on stderr and exits 1.
 const GIT_SSH_COMMAND = "sh -c 'echo git over ssh is off for a MacBook Lead, pushes go from the Mac mini >&2; exit 1'";
@@ -401,8 +402,8 @@ const GIT_CONFIG = [
  * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
  * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
  * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
- * prompt, and a push URL that cannot be reached for GitHub's HTTPS and SSH addresses (a push goes from the Mac mini); `gh auth` is
- * denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
+ * prompt, a push URL that cannot be reached for GitHub's HTTPS addresses, and an ssh command that only fails (a push goes from the
+ * Mac mini); `gh auth` is denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
 function leadHere(repo, team, passed, env) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
