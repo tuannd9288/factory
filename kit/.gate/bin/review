@@ -21,9 +21,9 @@
 #            click. Before that it reads the repository's merge switch (#333, .gate/bin/lib/switch.mjs) from the rules in
 #            force on the base branch and records the position on its own check run (the annotation "merge switch"): on
 #            tier 3, at `all` the approval is not asked, at `1-2` and `none` it is, and rules it cannot read as a position
-#            fail it; below tier 3 the record is made when the rules can be read, and nothing fails. The claim, the labels
-#            and the other checks are asked at every position; the queue re-runs a tier check whose recorded position and
-#            the one in force differ in a way that changes its verdict
+#            fail it; below tier 3 nothing is read. The claim, the labels and the other checks are asked at every position;
+#            the queue re-runs a tier 3 check whose recorded position and the one in force differ in a way that changes
+#            its verdict
 #   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3)
 # The tier is main's policy on the diff from the merge-base, raised by every label the pull request ever had (GATE_PR
 # and GITHUB_REPOSITORY, read with gh). GATE_HEAD, the pull request's head, must be the head judged.
@@ -243,18 +243,15 @@ case "$job" in
       done
     fi
     [ -z "$entire" ] || entire_check || exit 1
-    # The merge switch (#333), read from the rules in force on the base branch (GATE_BASE_REF). The position read is recorded on
-    # this job's own check run, as the annotation "merge switch", which only this job can write: the queue compares it with the
-    # position in force and re-runs a check that ran at another. Below tier 3 the read is for the record alone and its failure
-    # fails nothing; on tier 3, at all the Human's approval is not asked, at 1-2 and none it is, as before, and rules that
-    # cannot be read as a position fail closed (no record is written then).
-    if position=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/rules/branches/${GATE_BASE_REF:-main}" 2>&1 | node .gate/bin/lib/switch.mjs); then
-      echo "::notice title=merge switch::$position"
-    elif [ "$n" = 3 ]; then
-      echo "tier: the merge switch could not be read ($position), so this check fails closed"
-      exit 1
-    fi
     [ "$n" = 3 ] || exit 0
+    # The merge switch (#333), read from the rules in force on the base branch (GATE_BASE_REF): at all, the Human's approval of
+    # tier 3 is not asked; at 1-2 and none it is, as before. Rules that cannot be read as a position fail closed. The position
+    # read is recorded on this job's own check run, as the annotation "merge switch", which only this job can write: the queue
+    # compares it with the position in force and re-runs a tier 3 check that ran at another. No record is written when the
+    # rules cannot be read.
+    position=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/rules/branches/${GATE_BASE_REF:-main}" 2>&1 | node .gate/bin/lib/switch.mjs) ||
+      { echo "tier: the merge switch could not be read ($position), so this check fails closed"; exit 1; }
+    echo "::notice title=merge switch::$position"
     if [ "$position" = all ]; then
       echo "tier: the merge switch of this repository is at all, so the Human's approval of tier 3 is not asked"
       exit 0

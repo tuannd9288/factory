@@ -3,7 +3,7 @@
 // updates one waiting pull request per repository, the oldest first, so the update triggers the gate, and re-runs a
 // tier check that failed before the Human approved the head. It follows the repository's merge switch (#333) by state: each
 // finished tier check records the position it ran at (an annotation on its own check run), and the sweep re-runs, once, the
-// tier job of any open pull request, armed or not, whose recorded position and the one in force (read from the rules the sweep
+// tier job of any open tier-3 pull request, armed or not, whose recorded position and the one in force (read from the rules the sweep
 // fetches already) differ in a way that changes its verdict; what it re-ran is kept in
 // $FACTORY_STATE/queue-<owner>-<name>.switch. It runs once and exits: launchd repeats it. It reads
 // GitHub afresh each time, holds a lock so two sweeps never overlap, bounds every gh call, refuses the Human's login,
@@ -117,10 +117,9 @@ const rulesIn = (repo) => JSON.parse(gh(['api', '--paginate', '--slurp', `repos/
 /** The checks GitHub requires on main, from the rules in force there: what gates the merge, whatever kit the repository has. */
 const requiredIn = (rules) => [...new Set(rules.filter((r) => r.type === 'required_status_checks').flatMap((r) => r.parameters.required_status_checks.map((c) => c.context)))];
 
-// How loose each position is, for a tier-3 change and for a tier-1 or 2 one: the lower, the looser. A tier-1 or 2 change
-// merges at all and at 1-2 alike; none holds it for an approval.
-const LOOSE3 = { all: 0, '1-2': 1, none: 2 };
-const LOOSE12 = { all: 0, '1-2': 0, none: 1 };
+// How loose each position is for a tier-3 change: the lower, the looser. Only tier 3 follows the switch: the verdict of a
+// tier 1 or 2 check does not depend on it, and at none GitHub's own review rule holds those.
+const LOOSE = { all: 0, '1-2': 1, none: 2 };
 
 /** The position a `tier` check run recorded on itself (the annotation titled "merge switch", which only that job prints),
  * or undefined: another notice on the same check run, or a message that is no position, does not count. */
@@ -129,24 +128,24 @@ const recordOf = (run) => {
   return POSITIONS.includes(message) ? message : undefined;
 };
 
-/** Why a pull request's finished `tier` check is due a re-run for the merge switch (#333), or null. The check records the
+/** Why a tier-3 pull request's finished `tier` check is due a re-run for the merge switch (#333), or null. The check records the
  * position it ran at; the queue compares that with the position in force, so a move is seen however many there were between
  * two sweeps, and a job that was running at a move is judged once it ends. 'tighter': it ran at a looser position than the
  * one in force and is not red, so it may hold an approval it skipped. 'looser': it ran at a tighter one and is red, so it may
- * pass now. 'bare': it records none (a gate that predates the record). A check still running is left to finish. */
+ * pass now. 'bare': it records none (a gate that predates the record), and is only told of. Only tier 3 is judged; a check
+ * still running is left to finish. */
 export function switchDue(p, position) {
   const t = p.checks.tier;
-  if (!position || !t?.jobId || t.state === 'PENDING') return null;
+  if (!position || !t?.jobId || t.state === 'PENDING' || !p.labels.includes('tier-3')) return null;
   if (t.recorded === undefined) return 'bare';
-  const rank = p.labels.includes('tier-3') ? LOOSE3 : LOOSE12;
-  if (rank[t.recorded] < rank[position]) return RED.has(t.state) ? null : 'tighter';
-  if (rank[t.recorded] > rank[position]) return RED.has(t.state) ? 'looser' : null;
+  if (LOOSE[t.recorded] < LOOSE[position]) return RED.has(t.state) ? null : 'tighter';
+  if (LOOSE[t.recorded] > LOOSE[position]) return RED.has(t.state) ? 'looser' : null;
   return null;
 }
 
 /** What the sweep keeps of the merge switch for a repository, in $state/queue-<owner>-<name>.switch: the check runs it
  * re-ran (`done`), the ones whose refused re-run it told (`told`), and the head of each pull request whose unrecorded
- * check it re-ran (`bare`). A file written by an earlier form of this code reads as empty. */
+ * check it told of (`bare`). A file written by an earlier form of this code reads as empty. */
 function switchKept(file) {
   let kept = null;
   try {
@@ -157,11 +156,12 @@ function switchKept(file) {
 }
 
 /** Follows the merge switch (#333) by state, from the rules the sweep already fetched: GitHub applies a move at once, but a
- * tier check that ran before it keeps its verdict. On every sweep, each open pull request's finished tier check (armed or
+ * tier check that ran before it keeps its verdict. On every sweep, each open tier-3 pull request's finished tier check (armed or
  * not, a draft or not) is re-run once when the position it recorded and the position in force differ in a way that changes
  * its verdict (switchDue). A re-run records the position in force, which clears the condition; one check run is re-run at most
- * once. A re-run GitHub refuses stays due and is tried again on each sweep, its line printed once. A check that records no
- * position is re-run at most once for each head, with one line. Rules that read as no position change nothing.
+ * once. A re-run GitHub refuses stays due and is tried again on each sweep, its line printed once. A tier-3 check that
+ * records no position is not re-run (a re-run keeps its gate): one line for each head says so. Rules that read as no position
+ * change nothing.
  * Returns the numbers of the pull requests re-run, and the position read (undefined when the rules gave none). */
 function followSwitch(repo, state, rules, prs) {
   let position;
@@ -186,15 +186,16 @@ function followSwitch(repo, state, rules, prs) {
     if (!due) continue;
     const t = p.checks.tier;
     const key = keyOf(t);
-    if (next.done.includes(key)) continue;
-    let why;
     if (due === 'bare') {
-      if (next.bare[p.number] === p.head) continue;
-      next.bare[p.number] = p.head;
-      why = 'because it records no merge switch position (that repository\'s gate does not record its position yet)';
-    } else {
-      why = `because it ran at the merge switch's position ${t.recorded} and ${position} is in force`;
+      // Nothing to re-run: a re-run keeps the original run's gate. Said once for each head.
+      if (next.bare[p.number] !== p.head) {
+        next.bare[p.number] = p.head;
+        console.log(`queue: the tier check of ${repo}#${p.number} records no merge switch position: that repository's gate does not record its position yet`);
+      }
+      continue;
     }
+    if (next.done.includes(key)) continue;
+    const why = `because it ran at the merge switch's position ${t.recorded} and ${position} is in force`;
     if (rerun(repo, p.number, t.jobId, why, next.told.includes(key))) {
       next.done.push(key);
       ran.add(p.number);

@@ -108,10 +108,10 @@ test('switchDue: a finished tier check is due only when its record and the posit
   assert.equal(switchDue(p(T3, 'SUCCESS', '1-2'), '1-2'), null);
   assert.equal(switchDue(p(T3, 'PENDING', 'all'), '1-2'), null, 'a running check is left to finish');
   assert.equal(switchDue(p(T3, 'SUCCESS', undefined), '1-2'), 'bare');
-  assert.equal(switchDue(p(['tier-1'], 'SUCCESS', '1-2'), 'none'), 'tighter');
-  assert.equal(switchDue(p(['tier-2'], 'SUCCESS', 'none'), 'all'), null, 'green stays green when looser');
-  assert.equal(switchDue(p(['tier-1'], 'SUCCESS', 'all'), '1-2'), null, 'all and 1-2 are one for tier 1 and 2');
-  assert.equal(switchDue(p(['tier-1'], 'SUCCESS', '1-2'), 'all'), null);
+  for (const labels of [['tier-1'], ['tier-2'], []]) {
+    for (const [state, recorded, position] of [['SUCCESS', '1-2', 'none'], ['SUCCESS', undefined, 'none'], ['FAILURE', 'none', '1-2'], ['SUCCESS', 'all', '1-2']])
+      assert.equal(switchDue(p(labels, state, recorded), position), null, `${labels} ${state} ${recorded} -> ${position}: only tier 3 follows the switch`);
+  }
   assert.equal(switchDue(p(T3, 'SUCCESS', 'all'), undefined), null, 'no position read, nothing');
   assert.equal(switchDue({ labels: T3, checks: {} }, '1-2'), null);
 });
@@ -176,15 +176,20 @@ test('no loop: equal record and position re-run nothing, a re-run is not repeate
   }
 });
 
-test('a tier-1 or 2 check follows none alone: none against a record of 1-2 is re-run, 1-2 against all is not', () => {
+test('a tier-1 or 2 check never follows the switch: at none, with 1-2 recorded or nothing recorded, it is not re-run', () => {
   const w = world();
   try {
     w.rules('none');
-    w.pulls([pull(5, { labels: ['tier-1'], conclusion: 'SUCCESS', record: '1-2' })]);
-    assert.deepEqual(w.sweep().reruns, [job(51)]);
-    w.rules('1-2');
-    w.pulls([pull(6, { labels: ['tier-1'], conclusion: 'SUCCESS', record: 'all' }), pull(8, { labels: ['tier-2'], conclusion: 'SUCCESS', record: '1-2' })]);
-    assert.deepEqual(w.sweep().reruns, []);
+    w.pulls([
+      pull(5, { labels: ['tier-1'], conclusion: 'SUCCESS', record: '1-2' }),
+      pull(6, { labels: ['tier-1'], conclusion: 'SUCCESS' }),
+      pull(8, { labels: ['tier-2'], conclusion: 'SUCCESS', record: 'all' }),
+    ]);
+    for (let k = 0; k < 2; k += 1) {
+      const out = w.sweep();
+      assert.deepEqual(out.reruns, []);
+      assert.doesNotMatch(out.out, /does not record/);
+    }
   } finally {
     w.cleanup();
   }
@@ -201,7 +206,7 @@ test('a pull request not armed, and a draft, are judged too', () => {
   }
 });
 
-test('a tier check that records no position is re-run at most once for each head, with one line, never every sweep', () => {
+test('a tier-3 check that records no position is not re-run: one line for each head says so, never every sweep', () => {
   const w = world();
   try {
     w.rules('1-2');
@@ -214,11 +219,13 @@ test('a tier check that records no position is re-run at most once for each head
       total += out.reruns.length;
       lines.push(...out.out.split('\n').filter((l) => /does not record its position yet/.test(l)));
     }
-    assert.equal(total, 1);
+    assert.equal(total, 0, 'a re-run would keep the old gate');
     assert.equal(lines.length, 1, lines.join('\n'));
     w.pulls([pull(7, { conclusion: 'SUCCESS', head: 'pushed', jobId: '72' })]);
-    assert.deepEqual(w.sweep().reruns, [job(72)], 'a new head is a new question');
-    assert.deepEqual(w.sweep().reruns, []);
+    const out = w.sweep();
+    assert.deepEqual(out.reruns, []);
+    assert.equal(out.out.split('\n').filter((l) => /does not record its position yet/.test(l)).length, 1, 'a new head is said once more');
+    assert.equal(w.sweep().out.split('\n').filter((l) => /does not record/.test(l)).length, 0);
   } finally {
     w.cleanup();
   }
@@ -261,7 +268,7 @@ test('another notice on the same check run does not confuse the match, and a tit
     assert.deepEqual(w.sweep().reruns, [job(71)], 'only the one that recorded all');
     w.pulls([pull(9, { conclusion: 'SUCCESS', notes: [{ title: 'other', message: 'all' }] }), pull(10, { conclusion: 'SUCCESS', notes: [{ title: 'merge switch', message: 'banana' }] })]);
     const out = w.sweep();
-    assert.deepEqual(out.reruns, [job(91), job(101)], 'neither is a record: each is re-run once as bare');
+    assert.deepEqual(out.reruns, [], 'neither is a record: each is told as unrecorded, not re-run');
     assert.equal(out.out.split('\n').filter((l) => /does not record its position yet/.test(l)).length, 2);
   } finally {
     w.cleanup();
