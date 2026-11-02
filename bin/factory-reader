@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# The stream reader's pass (#339); the queue's sweep starts it every 15 minutes (bin/lib/queue.mjs, startReader), and it needs no one to run it:
+#   bin/factory-reader                                 one pass: what the Leads and the seats wrote since the last pass goes to the model
+#                                                      the setting picks (bin/lib/reader.json), and what it finds becomes lines in the
+#                                                      events file (bin/factory-events prints them)
+#   bin/factory-reader --try <file> [--side pi|codex]  reduce one stream file, send it once to the side named (else the setting's), and
+#                                                      print the parsed answer and the result of the quote check; it reads no cursor and
+#                                                      writes no event, lock or file but its temporary input
+# bin/lib/reader.mjs has the rest. A non-login shell has a bare PATH, so the places Homebrew puts node, pi and codex are added here.
+PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+export PATH
+command -v node >/dev/null 2>&1 || { echo "factory-reader: node is not on PATH ($PATH)" >&2; exit 127; }
+exec node "$(dirname "$0")/lib/reader.mjs" "$@"
