@@ -37,6 +37,7 @@ function world() {
   );
   chmodSync(join(dir, 'gh'), 0o755);
   const state = join(dir, 'state');
+  mkdirSync(join(dir, 'runs'));
   const put = (name, value) => writeFileSync(join(dir, name), JSON.stringify(value));
   return {
     dir,
@@ -60,7 +61,7 @@ function world() {
     /** One sweep, with the gh calls it made. */
     sweep: () => {
       writeFileSync(join(dir, 'calls'), '');
-      const out = spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state } });
+      const out = spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs') } });
       const calls = readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean);
       return { code: out.status, out: out.stdout + out.stderr, calls, reruns: calls.filter((c) => c.startsWith('run rerun')) };
     },

@@ -8,7 +8,7 @@
 // The committed profile list below holds no account name: the factory repository is public, and an account is an email local
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { join, resolve } from 'node:path';
@@ -327,7 +327,9 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory use [<row|repo-team> [<letter>]]   (the row's account becomes the letter's; <repo>-<team> makes a team's row, and that team's running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
-       bin/factory lead <repo> [--team <name>] [--new] [--dry-run]`;
+       bin/factory lead <repo> [--team <name>] [--new] [--dry-run]
+       bin/factory lead <repo> [--team <name>] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
+       bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
  * -t asks for a terminal of its own. The exit code is the remote command's. */
@@ -343,25 +345,166 @@ function onHostBySsh(sub, args, tty, env) {
 /** `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository. On
  * the factory host it runs this clone's packs/pstack/bin/lead; on the MacBook it runs the same command there by ssh. The name, the
  * team (the grammar of bin/lib/names.mjs) and the flags are checked before anything runs. */
-function lead(args, env) {
+function lead(all, env) {
+  // What follows `--` is for claude, and only `--here` takes it.
+  const dd = all.indexOf('--');
+  const args = dd === -1 ? all : all.slice(0, dd);
+  const passed = dd === -1 ? null : all.slice(dd + 1);
   const [repo, ...more] = args;
   const flags = [];
   let teams = 0;
   let okTeam = true;
+  let team = DEFAULT_TEAM;
   for (let i = 0; i < more.length; i++) {
     if (more[i] === '--team') {
       teams += 1;
-      okTeam = okTeam && TEAM.test(more[++i] ?? '');
+      team = more[++i] ?? '';
+      okTeam = okTeam && TEAM.test(team);
     } else flags.push(more[i]);
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '') || teams > 1 || !okTeam || flags.some((f) => f !== '--new' && f !== '--dry-run') || new Set(flags).size !== flags.length) {
+  const here = flags.includes('--here');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '') || teams > 1 || !okTeam || flags.some((f) => f !== '--new' && f !== '--dry-run' && f !== '--here') || new Set(flags).size !== flags.length || (here ? flags.length > 1 : passed !== null)) {
     console.error(USAGE);
     return 2;
   }
+  if (here) return leadHere(repo, team, passed ?? [], env);
   if (placeOf(env) !== 'factory') return onHostBySsh('lead', args, true, env);
   const r = spawnSync(resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/bin/lead'), args, { stdio: 'inherit', env });
   if (r.error) {
     console.error(`bin/factory: lead: ${r.error.code ?? 'error'}`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
+/** The agents' git name and e-mail, read on the factory host as the host's user, from its own git settings: no account is named in
+ * this repository (#349). { name, email }, or null when ssh fails or either is empty. */
+function hostIdentity(env) {
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc 'echo "name:$(git config --global user.name)"; echo "email:$(git config --global user.email)"'`], { encoding: 'utf8', env, timeout: 30000, killSignal: 'SIGKILL' });
+  if (r.error || r.status !== 0) return null;
+  const name = /^name:(.+)$/m.exec(r.stdout)?.[1].trim();
+  const email = /^email:(.+)$/m.exec(r.stdout)?.[1].trim();
+  return name && email ? { name, email } : null;
+}
+
+// A push over HTTPS to GitHub fails at once, with this unreachable URL and its reason in the message; git over ssh is off (see
+// GIT_SSH_COMMAND). A fetch over HTTPS is not rewritten, so it stays on the MacBook. The credential.helper entry empties every helper
+// git has been given.
+const PUSH_BASE = 'file:///nonexistent/factory-lead-pushes-from-the-mac-mini/';
+// Git runs this in place of ssh, so no ssh connection or key is used: it says why on stderr and exits 1.
+const GIT_SSH_COMMAND = "sh -c 'echo git over ssh is off for a MacBook Lead, pushes go from the Mac mini >&2; exit 1'";
+const GIT_CONFIG = [
+  ['credential.helper', ''],
+  ...['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].map((from) => [`url.${PUSH_BASE}.pushInsteadOf`, from]),
+];
+
+/** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
+ * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
+ * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
+ * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
+ * prompt, a push URL that cannot be reached for GitHub's HTTPS addresses, and an ssh command that only fails (a push goes from the
+ * Mac mini); `gh auth` and `security` (the Keychain) are denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
+function leadHere(repo, team, passed, env) {
+  if (placeOf(env) === 'factory') {
+    console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
+    return 2;
+  }
+  const id = hostIdentity(env);
+  if (!id) {
+    console.error("bin/factory: lead --here: could not read the factory host's git user.name and user.email; nothing was started");
+    return 1;
+  }
+  const { state } = contextOf(env);
+  const parent = join(state, 'lead-here');
+  const empty = join(parent, 'gh-empty');
+  try {
+    mkdirSync(empty, { recursive: true, mode: 0o700 });
+    chmodSync(parent, 0o700);
+    chmodSync(empty, 0o700);
+  } catch (e) {
+    console.error(`bin/factory: lead --here: ${e.message}`);
+    return 1;
+  }
+  if (readdirSync(empty).includes('hosts.yml')) {
+    console.error(`bin/factory: lead --here: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
+    return 1;
+  }
+  const settings = {
+    env: {
+      GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '',
+      GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
+      GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND,
+      GIT_CONFIG_COUNT: String(GIT_CONFIG.length),
+      ...Object.fromEntries(GIT_CONFIG.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
+    },
+    permissions: { deny: ['Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
+  };
+  const r = spawnSync('claude', ['--name', `${repo}-${team}`, '--settings', JSON.stringify(settings), ...passed], { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
+// A word that starts with `=` is never bare: zsh would read it as a command's path.
+const SAFE_WORD = /^[A-Za-z0-9_.,:/@%+-][A-Za-z0-9_.,:/=@%+-]*$/;
+
+/** The reason `gh <args>` may not go to the Mac mini, or null. Refused: `gh auth` but `status`, and `gh auth status` with
+ * `-t` or `--show-token`, which print a token; `--recover`; and a file given with `--body-file`, `--notes-file`, `--env-file`,
+ * `--input`, `--field` or `-F` (alone or in a cluster of short flags), which names a file on this Mac and not on the Mac mini, so
+ * the file must come on stdin (`-`, `@-`). */
+function ghRefusal(args) {
+  if (args[0] === 'auth' && args[1] !== 'status') return 'gh auth is refused here; only gh auth status runs';
+  if (args[0] === 'auth' && args.slice(2).some((a) => /^--show-token(=.*)?$/s.test(a) || /^-[A-Za-z]*t[A-Za-z]*(=.*)?$/s.test(a))) return 'gh auth status -t / --show-token is refused here; it prints a token';
+  const api = args[0] === 'api';
+  const stdinHint = 'the Mac mini cannot read a file on this Mac; pass it on stdin with - (--body-file -, --input -) or @- (-F name=@-)';
+  const fieldFile = (v) => {
+    const path = /^[^=]+=@(.*)$/s.exec(v)?.[1];
+    return path !== undefined && path !== '-';
+  };
+  const longFlags = ['--body-file', '--notes-file', '--env-file', '--input', '--field', '--recover'];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    let flag = null;
+    let value;
+    const long = new RegExp(`^(${longFlags.join('|')})=(.*)$`, 's').exec(a);
+    const cluster = /^-[A-Za-z]*F(.*)$/s.exec(a);
+    if (long) [, flag, value] = long;
+    else if (cluster) [flag, value] = ['-F', cluster[1] === '' ? args[++i] : cluster[1].replace(/^=/, '')];
+    else if (longFlags.includes(a)) [flag, value] = [a, args[++i]];
+    if (flag === null || value === undefined) continue;
+    const field = flag === '-F' || flag === '--field';
+    const file = flag === '--recover' || (field ? (api || value.includes('=') ? fieldFile(value) : value !== '-') : value !== '-');
+    if (file) return `${flag} ${value} names a file on this Mac; ${stdinHint}`;
+  }
+  return null;
+}
+
+/** `factory gh <args>` (#349): on the MacBook, `gh <args>` on the factory host, in the host user's login shell over ssh, under the
+ * agents' login; stdin passes through, the exit code is gh's. The command first makes a new temporary folder on the host with
+ * `mktemp -d` and enters it, so that a relative path in an argument names nothing, and removes it after gh, keeping gh's exit
+ * code. Each argument is quoted for `zsh -lc`, and the whole line once
+ * more for the remote login shell. On the factory host it runs gh itself. */
+function ghCmd(args, env) {
+  if (placeOf(env) === 'factory') {
+    const r = spawnSync('gh', args, { stdio: 'inherit', env });
+    if (r.error) {
+      console.error(`bin/factory: gh: ${r.error.code ?? 'error'}`);
+      return 1;
+    }
+    return r.status ?? 1;
+  }
+  const refused = ghRefusal(args);
+  if (refused) {
+    console.error(`bin/factory: gh: ${refused}`);
+    return 2;
+  }
+  const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
+  const script = `d=$(mktemp -d) && cd "$d" || exit 2; ${['gh', ...args.map(word)].join(' ')}; c=$?; cd /; rm -rf "$d"; exit $c`;
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: gh: ssh did not run (${r.error.code ?? 'error'})`);
     return 1;
   }
   return r.status ?? 1;
@@ -717,6 +860,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'logout') return logout(rest, env);
   if (cmd === 'top') return top(rest, env);
   if (cmd === 'lead') return lead(rest, env);
+  if (cmd === 'gh') return ghCmd(rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);
     return 2;
