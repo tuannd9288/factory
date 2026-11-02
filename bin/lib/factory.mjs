@@ -403,7 +403,7 @@ const GIT_CONFIG = [
  * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
  * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
  * prompt, a push URL that cannot be reached for GitHub's HTTPS addresses, and an ssh command that only fails (a push goes from the
- * Mac mini); `gh auth` is denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
+ * Mac mini); `gh auth` and `security` (the Keychain) are denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
 function leadHere(repo, team, passed, env) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -437,7 +437,7 @@ function leadHere(repo, team, passed, env) {
       GIT_CONFIG_COUNT: String(GIT_CONFIG.length),
       ...Object.fromEntries(GIT_CONFIG.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
     },
-    permissions: { deny: ['Bash(gh auth:*)'] },
+    permissions: { deny: ['Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
   const r = spawnSync('claude', ['--name', `${repo}-${team}`, '--settings', JSON.stringify(settings), ...passed], { stdio: 'inherit', env });
   if (r.error) {
