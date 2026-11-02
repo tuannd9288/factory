@@ -69,7 +69,7 @@ const one = /rulesets\/(\d+)$/.exec(path);
 if (one) {
   const i = state.rulesets.findIndex((r) => r.id === Number(one[1]));
   if (i < 0) missing();
-  if (method === 'PUT') { if (kept('rulesets')) state.rulesets[i] = { ...state.rulesets[i], ...body }; done(state.rulesets[i]); }
+  if (method === 'PUT') { (state.puts ??= []).push(body); if (kept('rulesets')) state.rulesets[i] = { ...state.rulesets[i], ...body }; done(state.rulesets[i]); }
   if (method === 'DELETE') { state.rulesets.splice(i, 1); done(); }
   // GitHub answers with defaults the request did not set; a read-back compares only what was asked for.
   const r = state.rulesets[i];
@@ -80,9 +80,11 @@ if (one) {
 }
 // #333: the rules in force on the default branch, which the merge switch is read from: every rule of every active branch ruleset.
 // With --slurp, as gh gives it, the list is a page of a list of pages.
+// A call that does not ask for every page fails, so a command that drops --paginate or --slurp turns a test red.
 if (path === repo + '/rules/branches/main') {
+  if (!args.includes('--paginate') || !args.includes('--slurp')) { process.stderr.write('fake gh: the rules are asked without --paginate --slurp\n'); process.exit(1); }
   const list = state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules.map((x) => ({ ...x, ruleset_id: r.id })));
-  done(args.includes('--slurp') ? [list] : list);
+  done([list]);
 }
 const env = repo + '/environments/reviewer';
 if (path === env) {
@@ -514,14 +516,14 @@ test('--merge sets the two parameters and nothing else: a dry run without --appl
   const w = inForce();
   try {
     assert.equal(w.owner([...ME, '--apply']).code, 0);
-    const masked = () => JSON.stringify(gateOf(w).rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_approving_review_count: 0, require_code_owner_review: 0 } } : x)));
+    const masked = () => JSON.stringify(gateOf(w).rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_reviewers: undefined, required_approving_review_count: 0, require_code_owner_review: 0 } } : x)));
     const rest = masked();
     for (const [position, count, owner] of [POSITIONS[0], POSITIONS[2], POSITIONS[1]]) {
       const was = reviewOf(w);
       w.clear();
       let out = w.owner([...ME, '--merge', position]);
       assert.equal(out.code, 0, out.out);
-      assert.match(out.out, new RegExp(`change  ruleset factory-gate: PUT repos/tuannd9288/app/rulesets/\\d+ .*"required_approving_review_count":${count}.*"require_code_owner_review":${owner}`));
+      assert.match(out.out, new RegExp(`change  ruleset factory-gate: PUT repos/tuannd9288/app/rulesets/\\d+: required_approving_review_count ${was[0]} -> ${count}, require_code_owner_review ${was[1]} -> ${owner}; the rest of the ruleset is left as it is`));
       assert.match(out.out, /dry run: nothing changed; rerun with --apply/);
       assert.deepEqual(w.writes(), []);
       assert.deepEqual(reviewOf(w), was, 'a dry run moved the switch');
@@ -578,6 +580,62 @@ test('--merge on a repository that has drifted from the kit changes the two para
     assert.equal(w.state().repo.allow_auto_merge, false, 'allow auto-merge stays off');
     assert.ok(!w.state().rulesets.some((r) => r.name === 'factory-claims'));
     assert.match(out.out, /read back: the merge switch is all/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge writes the live gate ruleset back with the two parameters changed, and whatever else differs from the kit stays (#333)', () => {
+  const w = inForce();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    // Drift inside the ruleset: a required check taken out and one added, and fields GitHub reads back but does not take.
+    const drifted = w.state().rulesets.map((r) =>
+      r.name !== 'factory-gate'
+        ? r
+        : {
+            ...r,
+            source_type: 'Repository',
+            created_at: '2026-11-01T00:00:00Z',
+            _links: { self: { href: 'x' } },
+            current_user_can_bypass: 'never',
+            rules: r.rules.map((x) => (x.type === 'required_status_checks' ? { ...x, parameters: { ...x.parameters, required_status_checks: [...x.parameters.required_status_checks.filter((c) => c.context !== 'verdict'), { context: 'extra', integration_id: 15368 }] } } : x)),
+          },
+    );
+    w.set({ rulesets: drifted });
+    const live = JSON.parse(JSON.stringify(gateOf(w)));
+    w.clear();
+    const dry = w.owner([...ME, '--merge', 'none']);
+    assert.equal(dry.code, 0, dry.out);
+    assert.match(dry.out, /change  ruleset factory-gate: PUT repos\/tuannd9288\/app\/rulesets\/\d+: required_approving_review_count 0 -> 1, require_code_owner_review true -> true; the rest of the ruleset is left as it is/);
+    assert.deepEqual(w.writes(), []);
+    const out = w.owner([...ME, '--merge', 'none', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const body = w.state().puts.at(-1);
+    assert.deepEqual(Object.keys(body).sort(), ['bypass_actors', 'conditions', 'enforcement', 'name', 'rules', 'target'], 'only what GitHub takes back');
+    const checks = body.rules.find((x) => x.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
+    assert.ok(checks.includes('extra') && !checks.includes('verdict'), `the live difference stayed: ${checks}`);
+    // (The fake's read adds required_reviewers: [], as GitHub does; it is not a difference.)
+    const mask = (rules) => JSON.stringify(rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_reviewers: undefined, required_approving_review_count: 0, require_code_owner_review: 0 } } : x)));
+    assert.equal(mask(body.rules), mask(live.rules), 'only the two parameters changed');
+    for (const key of ['name', 'target', 'enforcement', 'bypass_actors', 'conditions']) assert.deepEqual(body[key], live[key], key);
+    assert.deepEqual(reviewOf(w), [1, true]);
+    assert.match(out.out, /read back: the merge switch is none/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge is refused with one line when the live gate ruleset has no pull_request rule (#333)', () => {
+  const w = inForce();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    w.set({ rulesets: w.state().rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.filter((x) => x.type !== 'pull_request') })) });
+    w.clear();
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /--merge: the factory-gate ruleset has no pull_request rule with both review parameters, so there is no switch to move/);
+    assert.deepEqual(w.writes(), []);
   } finally {
     w.cleanup();
   }

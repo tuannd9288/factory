@@ -40,10 +40,12 @@ if (path.startsWith(repo + '/rulesets') && !/rulesets\/\d+/.test(path)) out(stat
 const one = /rulesets\/(\d+)$/.exec(path);
 if (one) { const r = state.rulesets.find((x) => x.id === Number(one[1])); r ? out(r) : missing(); }
 // #333: the rules in force on main, as bin/onboard-owner's fake gives them; a state may name them itself.
-// With --slurp, as gh gives it, the list is a page of a list of pages.
+// A call that does not ask for every page fails, so a doctor that drops --paginate or --slurp turns a test red. With
+// --slurp, as gh gives it, the list is a page of a list of pages.
 if (path === repo + '/rules/branches/main') {
+  if (!args.includes('--paginate') || !args.includes('--slurp')) { process.stderr.write('fake gh: the rules are asked without --paginate --slurp\n'); process.exit(1); }
   const list = state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules);
-  out(state.rulesInForce !== undefined ? state.rulesInForce : args.includes('--slurp') ? [list] : list);
+  out(state.rulesInForce !== undefined ? state.rulesInForce : [list]);
 }
 const env = repo + '/environments/reviewer';
 if (path === env) state.environment ? out(state.environment) : missing();

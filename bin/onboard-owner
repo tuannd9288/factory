@@ -13,10 +13,11 @@
 #   variable, as the kit did before #335, has it from GATE_REVIEWER until its kit update lands. The four old options are
 #   refused, with nothing done.
 #   bin/onboard-owner <owner/name> --id <repository id> --merge all|1-2|none [--apply]
-#        moves the repository's merge switch (#333): the two review parameters of the kit's gate ruleset, the only thing the
-#        run writes with --merge (any other difference from the kit is listed "not changed" and left, and a gate not yet in
-#        force is refused); without --apply it shows the change and makes none; with it, it reads the position back
-#        from the rules in force. all: every pull request merges by itself once its checks are green, tier 3 included; 1-2:
+#        moves the repository's merge switch (#333): the two review parameters of the gate ruleset. The run writes the live
+#        ruleset back with those two changed and nothing else in it (whatever else it holds stays as it is), and no other
+#        setting: any other difference from the kit is listed "not changed" and left; a gate not yet in force, or with no
+#        pull_request rule, is refused. Without --apply it shows the two parameters, from and to, and makes no change; with
+#        it, it reads the two parameters and the position back from the rules in force. all: every pull request merges by itself once its checks are green, tier 3 included; 1-2:
 #        tier 1 and 2 do, and tier 3 waits for the Human's approval (the default of a new gate); none: every pull request
 #        waits for an approval. It runs under the Human's login only and is asked before each move. Without --merge a run
 #        never changes the two parameters: a changed gate ruleset is put back with the ones it holds. Every run names the

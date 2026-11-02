@@ -6,7 +6,8 @@
 // bin/onboard fills in and a pull request changes (#335); this command sets none of them, since the Human's approval of
 // that pull request is what changes one. Nor does it set the gate's merge switch (#333), the two review parameters of the
 // gate's pull_request rule, unless --merge all|1-2|none says so: it takes them from the live ruleset when it puts one back,
-// and from the kit's (1-2) when it makes one. With --merge it writes that ruleset and nothing else. A main whose gate-trusted.yml cannot be read stops the run when the kit is on
+// and from the kit's (1-2) when it makes one. With --merge it writes the live gate ruleset back with those two parameters changed and
+// nothing else in it. A main whose gate-trusted.yml cannot be read stops the run when the kit is on
 // it, since the reviewer chooses the ruleset. It calls only gh against GitHub's API, with the factory's own files: never git,
 // never the target's .envrc, scripts or hooks, so nothing the target holds runs with his authority. A second run changes
 // nothing. See bin/onboard-owner for the arguments.
@@ -90,6 +91,22 @@ export function reviewOf(ruleset) {
     return null;
   }
   return { required_approving_review_count: p.required_approving_review_count, require_code_owner_review: p.require_code_owner_review };
+}
+
+/** The fields of a ruleset GitHub takes in a write (Update a repository ruleset); the rest of what it reads back (ids,
+ * links, dates, source, current_user_can_bypass and the like) is not sent. */
+const WRITABLE = ['name', 'target', 'enforcement', 'bypass_actors', 'conditions', 'rules'];
+
+/** The live ruleset as a write body with only the pull_request rule's two review parameters set to `review`: everything
+ * else in it stays as it is live. { body, from, to } with the two parameters before and after, or null when the ruleset
+ * has no pull_request rule, and so no switch. */
+export function moveSwitch(live, review) {
+  const rule = live?.rules?.find((r) => r.type === 'pull_request');
+  const from = reviewOf(live);
+  if (!rule || !from) return null;
+  const body = Object.fromEntries(WRITABLE.filter((k) => k in live).map((k) => [k, live[k]]));
+  body.rules = live.rules.map((r) => (r.type === 'pull_request' ? { ...r, parameters: { ...r.parameters, ...review } } : r));
+  return { body, from, to: review };
 }
 
 /** `want` with the gate's two review parameters set to `review` (the live ones, or the position --merge names): the
@@ -248,7 +265,7 @@ export function parseArguments(argv) {
   return parsed;
 }
 
-const show = (c) => `${c.method} ${c.path}${c.body ? ` ${JSON.stringify(c.body)}` : ''}`;
+const show = (c) => c.shown ?? `${c.method} ${c.path}${c.body ? ` ${JSON.stringify(c.body)}` : ''}`;
 
 function main(argv) {
   const { slug, id, apply, merge, problem } = parseArguments(argv);
@@ -300,20 +317,36 @@ function main(argv) {
   if (reviewer === 'entire' && sharedRunners(settings).length)
     console.log('onboard-owner: the runners are shared under the Human\'s exception (#155, kit/.gate/enforced-rules.md), which holds ' +
       'only while there is no reviewer secret in the environment reviewer; this command does not read secrets, so that is his to keep');
-  const gateCall = (c) => c.what === `ruleset ${GATE_NAME}`;
-  // --merge writes the gate's ruleset and nothing else: every other difference from the kit (auto-merge, a missing
-  // ruleset, the environment) is listed as not changed and left. The ruleset is one write, so a difference inside it, if
-  // there is one, is in the PUT the dry run shows. It moves a switch that exists, so a gate not in force yet is a plain
-  // run's to put in.
-  if (merge && !now.rulesets.some((r) => r.name === GATE_NAME)) {
-    console.error(`onboard-owner: --merge moves the switch of the ${GATE_NAME} ruleset, which is not in force on ${branch} yet: run without --merge first; nothing changes`);
-    return 2;
-  }
-  const planned = plan(slug, agent, now, want);
-  const calls = merge ? planned.filter(gateCall) : planned;
+  const live = now.rulesets.find((r) => r.name === GATE_NAME);
+  // --merge writes the live gate ruleset back with its two review parameters changed and nothing else in it: whatever else
+  // it holds, drift from the kit included, stays as it is. Every other difference from the kit (auto-merge, a missing
+  // ruleset, the environment) is listed as not changed and left. It moves a switch that exists, so a gate not in force yet
+  // is a plain run's to put in, and a gate with no pull_request rule has no switch to move.
+  let calls = [];
+  let leftAlone = [];
+  if (merge) {
+    if (!live) {
+      console.error(`onboard-owner: --merge moves the switch of the ${GATE_NAME} ruleset, which is not in force on ${branch} yet: run without --merge first; nothing changes`);
+      return 2;
+    }
+    const move = moveSwitch(live, PARAMETERS[merge]);
+    if (!move) {
+      console.error(`onboard-owner: --merge: the ${GATE_NAME} ruleset has no pull_request rule with both review parameters, so there is no switch to move: nothing changes`);
+      return 2;
+    }
+    const [from, to] = [move.from, move.to];
+    const same = from.required_approving_review_count === to.required_approving_review_count && from.require_code_owner_review === to.require_code_owner_review;
+    if (!same)
+      calls = [{
+        what: `ruleset ${GATE_NAME}`, method: 'PUT', path: `repos/${slug}/rulesets/${live.id}`, body: move.body,
+        shown: `PUT repos/${slug}/rulesets/${live.id}: required_approving_review_count ${from.required_approving_review_count} -> ${to.required_approving_review_count}, ` +
+          `require_code_owner_review ${from.require_code_owner_review} -> ${to.require_code_owner_review}; the rest of the ruleset is left as it is`,
+      }];
+    leftAlone = plan(slug, agent, now, want).filter((c) => c.what !== `ruleset ${GATE_NAME}`);
+  } else calls = plan(slug, agent, now, want);
   if (now.autoMerge) console.log('onboard-owner: allow auto-merge is on');
   for (const c of calls) console.log(`  change  ${c.what}: ${show(c)}`);
-  for (const c of merge ? planned.filter((x) => !gateCall(x)) : []) console.log(`  not changed  ${c.what}: --merge moves the merge switch only`);
+  for (const c of leftAlone) console.log(`  not changed  ${c.what}: --merge moves the merge switch only`);
   if (!calls.length) console.log('  nothing to change');
   if (!apply) {
     if (calls.length) console.log('onboard-owner: dry run: nothing changed; rerun with --apply to make these changes');
@@ -326,9 +359,9 @@ function main(argv) {
   }
   const have = current(slug, agent, names);
   if (merge) {
-    const undone = plan(slug, agent, have, want).filter(gateCall);
+    const set = reviewOf(have.rulesets.find((r) => r.name === GATE_NAME));
     const after = switchNow(slug, branch);
-    if (undone.length || after.position !== merge) {
+    if (set?.required_approving_review_count !== PARAMETERS[merge].required_approving_review_count || set?.require_code_owner_review !== PARAMETERS[merge].require_code_owner_review || after.position !== merge) {
       console.log(`onboard-owner: incomplete: the merge switch ${after.position ? `reads ${after.position}` : `could not be read (${after.problem})`}, not ${merge}`);
       return 1;
     }
