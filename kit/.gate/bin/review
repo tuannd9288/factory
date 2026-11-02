@@ -21,7 +21,7 @@
 #            click. Before that it reads the repository's merge switch (#333, .gate/bin/lib/switch.mjs) from the rules in
 #            force on the base branch: at `all` the approval is not asked, at `1-2` and `none` it is, and rules it cannot
 #            read as a position fail it. The claim, the labels and the other checks are asked at every position; the queue
-#            re-runs tier on the waiting tier 3 pull requests when the switch moves
+#            re-runs tier on the open tier 3 pull requests when the switch moves
 #   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3)
 # The tier is main's policy on the diff from the merge-base, raised by every label the pull request ever had (GATE_PR
 # and GITHUB_REPOSITORY, read with gh). GATE_HEAD, the pull request's head, must be the head judged.
@@ -69,7 +69,7 @@ if [ "$job" = rounds ]; then
   echo "rounds: $n head commits judged red"
   [ "$n" -ge 3 ] || exit 0
   gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label needs-human >/dev/null || { echo "rounds: could not add the label needs-human"; exit 1; }
-  echo "rounds: labelled needs-human after three red rounds; the tier check now waits for the Human's approval, unless the merge switch is at all"
+  echo "rounds: labelled needs-human after three red rounds; the tier check now waits for the Human's approval; at the merge switch's position all it does not wait for one"
   exit 0
 fi
 head=$(git rev-parse --verify --quiet "${head:-none}^{commit}") && fork=$(git merge-base "${base:-none}" "$head" 2>/dev/null) ||
