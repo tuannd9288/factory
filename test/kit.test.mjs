@@ -928,6 +928,46 @@ describe('review, verdict, tier and rounds', () => {
     assert.doesNotMatch(out.out, /title=merge switch/);
     assert.ok(!/rules/.test(readFileSync(join(fake, 'order'), 'utf8')), 'the rules were read');
   });
+  test('at tier 3 by paths, a reviewer\'s raise sets nothing: the Human\'s approval given before the re-run counts, and the re-run passes', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    annotations('deletes a sign-in var in wrangler.jsonc');
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(first.code, 1, first.out);
+    assert.match(first.out, /tier 3 waits for @tuannd9288 to approve/);
+    assert.doesNotMatch(first.out, /raised by the reviewer/);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T10:00:00Z')]);
+    const out = again('tier', first.head, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /tuannd9288 approved/);
+    assert.doesNotMatch(out.edits, /raised/, 'the raise labels nothing at tier 3');
+    assert.doesNotMatch(out.out, /raised by the reviewer/);
+  });
+  test('at tier 3, a run with no review job, or no run id, fails tier closed and reads no rules', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, false));
+    write(fake, { 'jobs.json': JSON.stringify({ jobs: [{ id: 502, name: 'tier', run_attempt: 1, status: 'completed', conclusion: 'success' }], total_count: 1 }), order: null });
+    let out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /run 99 has no review job/);
+    reviewJob('success');
+    write(fake, { order: null });
+    out = again('tier', out.head, { ...pr, GITHUB_RUN_ID: '' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /GITHUB_RUN_ID is unset/);
+    assert.ok(!(existsSync(join(fake, 'order')) && /rules/.test(readFileSync(join(fake, 'order'), 'utf8'))), 'the rules were read');
+    assert.doesNotMatch(out.out, /title=merge switch/);
+  });
+  test('at tier 3, tier reads the label events once for the tier and once for the approval time, no more', () => {
+    labels('tier-3');
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    write(fake, { 'labels.n': null });
+    job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(readFileSync(join(fake, 'labels.n'), 'utf8').trim(), '2', 'one read for the tier, one for raised-at');
+  });
   test('at tier 3, a red review fails tier and reads no rules', () => {
     labels();
     reviews([]);

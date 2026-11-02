@@ -222,7 +222,10 @@ case "$job" in
         echo "tier: reviewer unavailable ($unavailable); this is not a finding on the change, so this check fails closed. Re-run the failed jobs when the reviewer is back"
         exit 1
       fi
-      if [ -n "$did_raise" ] && [ "$was" != 3 ]; then
+      # At tier 3 a raise adds nothing: it labels nothing, prints nothing, and must not set the time an approval has to follow
+      # (the approval check below reads $did_raise), so an approval given before this run still counts.
+      [ "$was" != 3 ] || did_raise=""
+      if [ -n "$did_raise" ]; then
         # Adding a label a pull request already has makes no event, and the approval must follow this one's: remove first.
         if ! gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label raised >/dev/null 2>&1; then
           # A failed remove is fine when raised is not there. When another account's raised is, tier would add nothing new
@@ -234,10 +237,12 @@ case "$job" in
         gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label raised --add-label tier-3 >/dev/null ||
           { echo "tier: the reviewer raised this change, and the labels raised and tier-3 could not be added; if raised does not exist, create it: gh label create raised --repo ${GITHUB_REPOSITORY:-}"; exit 1; }
       fi
-      # The labels are read again: a label added during the wait counts.
-      out=$(tier_of) || { guarded "$out"; exit 1; }
-      n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
-      if [ -n "$did_raise" ] && [ "$was" != 3 ]; then
+      # The labels are read again: a label added during the wait counts. A tier never drops, so a tier 3 needs no second read.
+      if [ "$was" != 3 ]; then
+        out=$(tier_of) || { guarded "$out"; exit 1; }
+        n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
+      fi
+      if [ -n "$did_raise" ]; then
         out="tier 3
   raised by the reviewer: $raised"
         n=3
