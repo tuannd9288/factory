@@ -198,16 +198,19 @@ test('lead --here: git runs no credential helper from the system, global or URL-
   }
 });
 
-test('lead --here refuses to start when its empty gh folder holds anything, and names the folder', () => {
+test('lead --here refuses to start when its gh folder holds a login (hosts.yml), names the folder and file, and lets config.yml alone pass', () => {
   const s = world();
   try {
     s.identity();
     const empty = join(s.state, 'lead-here/gh-empty');
     mkdirSync(empty, { recursive: true });
+    writeFileSync(join(empty, 'config.yml'), 'version: "1"\n');
+    assert.equal(s.fac(['lead', 'alpha', '--here']).code, 0, 'a config file is no login');
+    rmSync(join(s.fake, 'claude.args'));
     writeFileSync(join(empty, 'hosts.yml'), 'x');
     const r = s.fac(['lead', 'alpha', '--here']);
     assert.notEqual(r.code, 0, r.out);
-    assert.ok(r.out.includes(empty), r.out);
+    assert.ok(r.out.includes(join(empty, 'hosts.yml')), r.out);
     assert.equal(s.read('claude.args'), '', 'claude never ran');
   } finally {
     s.done();

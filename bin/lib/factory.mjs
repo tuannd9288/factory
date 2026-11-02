@@ -400,7 +400,7 @@ const GIT_CONFIG = [
  * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
  * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
  * prompt, and a push URL that cannot be reached for GitHub's HTTPS and SSH addresses (a push goes from the Mac mini); `gh auth` is
- * denied. It refuses to start when the empty gh folder holds anything. */
+ * denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
 function leadHere(repo, team, passed, env) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -422,8 +422,8 @@ function leadHere(repo, team, passed, env) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 1;
   }
-  if (readdirSync(empty).length) {
-    console.error(`bin/factory: lead --here: ${empty} holds files; it must be empty, so nothing was started`);
+  if (readdirSync(empty).includes('hosts.yml')) {
+    console.error(`bin/factory: lead --here: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
     return 1;
   }
   const settings = {
