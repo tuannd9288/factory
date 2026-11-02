@@ -11,8 +11,10 @@
 // origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
 // The last step, under the lock, writes the events of #309 (bin/lib/events.mjs): one line to $FACTORY_STATE/events.jsonl when a condition
 // begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call.
+// After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
+// the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
@@ -22,6 +24,7 @@ import { ROOT, checkPlists, followMain } from './checkout.mjs';
 import { noteGh, observe, resetNotes } from './events.mjs';
 import { clonesUnder } from './ledger.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
+import { listStreams } from './streams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
@@ -323,6 +326,44 @@ function recordEvents(state, reads) {
   }
 }
 
+export const READER_EVERY_MS = 15 * 60_000;
+
+/** Starts one pass of the stream reader (#339) and returns true, when 15 minutes have passed since the last pass began (`reader/started`, in
+ * ms; the pass and this both write it), no pass holds `reader.lock` (a lock whose pid is gone is none), and some stream exists to read. The pass
+ * is a node process of its own, detached (a new process group, so launchd does not end it with the sweep), with this process's environment
+ * unchanged, and nothing here waits for it. */
+export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, env = process.env }) {
+  const holder = holderOf(join(state, 'reader.lock'));
+  if (holder && !gone(holder)) return false;
+  let last = 0;
+  try {
+    last = Number(readFileSync(join(state, 'reader/started'), 'utf8').trim()) || 0;
+  } catch {
+    // no pass has begun yet
+  }
+  if (last <= now && now - last < READER_EVERY_MS) return false;
+  if (!listStreams(runs).length) return false;
+  mkdirSync(join(state, 'reader'), { recursive: true });
+  writeFileSync(join(state, 'reader/started'), `${now}\n`);
+  const child = spawnFn(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), 'reader.mjs')], { detached: true, stdio: 'ignore', env });
+  child.on('error', () => {});
+  child.unref();
+  return true;
+}
+
+/** The step after the events: a failure is told in queue-reader.failed and never changes the sweep's result. */
+function startReaderPass(state) {
+  const failure = join(state, 'queue-reader.failed');
+  try {
+    startReader({ state, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
+    rmSync(failure, { force: true });
+  } catch (error) {
+    mkdirSync(state, { recursive: true });
+    writeFileSync(failure, `${new Date().toISOString()} starting the reader raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    console.error(`queue: reader: ${error.message}`);
+  }
+}
+
 const LABEL = 'io.github.tuannd9288.factory.queue';
 
 /** The first executable `name` on a PATH, or null. */
@@ -486,6 +527,7 @@ function main(argv) {
     return failed ? 1 : 0;
   } finally {
     recordEvents(state, reads);
+    startReaderPass(state);
     releaseLock(held, mine.token);
   }
 }

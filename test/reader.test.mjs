@@ -362,6 +362,7 @@ test('a folder that is not empty gets no model call and one reader-failed folder
     w.put(w.seatFile(), '');
     await w.pass({ now: T0 });
     appendFileSync(w.seatFile(), say('words'));
+    mkdirSync(join(w.state, 'reader/empty'), { recursive: true });
     writeFileSync(join(w.state, 'reader/empty/stray'), 'x');
     const r = await w.pass({ now: T0 + 15 * MIN });
     assert.deepEqual(w.calls(), []);
@@ -580,14 +581,18 @@ test('the sweep starts a pass when 15 minutes have passed since the last began a
   const { startReader } = await import('../bin/lib/queue.mjs');
   await withDir(async (dir) => {
     const state = join(dir, 'state');
+    const runs = join(dir, 'runs');
     mkdirSync(state);
+    mkdirSync(join(runs, 'issue-333'), { recursive: true });
     const started = [];
     const spawnFn = (cmd, args, opts) => {
       started.push({ cmd, args, opts });
       return { unref() {}, on() {} };
     };
     const env = { HOME: '/h', PATH: '/opt/homebrew/bin:/usr/bin' };
-    const go = (now) => startReader({ state, now, spawnFn, env });
+    const go = (now) => startReader({ state, runs, now, spawnFn, env });
+    assert.equal(go(T0), false, 'no stream exists to read');
+    writeFileSync(join(runs, 'issue-333/run-fix9.jsonl'), '');
     assert.equal(go(T0), true, 'none began yet');
     assert.equal(started.length, 1);
     assert.equal(started[0].cmd, process.execPath);
@@ -629,11 +634,11 @@ test('a sweep starts the pass detached and returns at once, with the gh calls it
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.equal(readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter((l) => /^(api|pr|run|issue|repo) /.test(l)).length, 3);
     assert.ok(existsSync(join(state, 'reader/started')));
-    const began = readFileSync(join(state, 'reader/started'), 'utf8');
     const until = Date.now() + 15_000;
     while ((!existsSync(join(state, 'reader/cursors.json')) || existsSync(join(state, 'reader.lock'))) && Date.now() < until) spawnSync('sleep', ['0.1']);
     assert.ok(existsSync(join(state, 'reader/cursors.json')), 'the first pass ran and put the stream at its end');
     assert.ok(!existsSync(join(state, 'reader.lock')));
+    const began = readFileSync(join(state, 'reader/started'), 'utf8');
     assert.equal(sweep().status, 0);
     assert.equal(readFileSync(join(state, 'reader/started'), 'utf8'), began, 'no second pass within 15 minutes');
   });
