@@ -401,6 +401,7 @@ test('with a shared cache sessions.jsonl is read again only when its size or tim
   const rec = (cost) => line({ session: 's1', run: 'r', tag: 't', total_cost_usd: cost });
   const { sessionRecords } = await top();
   writeFileSync(file, rec(1));
+  utimesSync(file, NOW / 1000, NOW / 1000); // a whole second, which utimesSync can put back exactly
   const cache = {};
   assert.equal(sessionRecords(state, cache)[0].total_cost_usd, 1);
   rewrite(file, rec(2));
