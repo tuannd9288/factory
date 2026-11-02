@@ -78,23 +78,24 @@ describe('the fork guard of review (item 12)', () => {
   });
 });
 
-describe('the runner of the candidate\'s code (item 10)', () => {
-  test('gate.yml reads GATE_PR_RUNNER, and with it unset the runner is GitHub-hosted', () => {
-    const runsOn = gate.jobs.verify['runs-on'];
-    const m = /^\$\{\{ fromJSON\(vars\.GATE_PR_RUNNER \|\| '(.+)'\) \}\}$/.exec(runsOn);
-    assert.ok(m, runsOn);
-    assert.equal(JSON.parse(m[1]), 'ubuntu-latest');
+describe('the runners and the reviewer, which bin/onboard fills in (item 10, #154, #335)', () => {
+  const main = yaml('main.yml');
+  test('every job of the kit\'s workflows runs on GitHub-hosted Ubuntu, a literal list, until bin/onboard fills it in', () => {
+    for (const [file, workflow] of [['main.yml', main], ['gate.yml', gate], ['gate-trusted.yml', trusted]]) {
+      for (const [id, job] of Object.entries(workflow.jobs)) assert.deepEqual(job['runs-on'], ['ubuntu-latest'], `${file} ${id}`);
+    }
     assert.doesNotMatch(JSON.stringify(gate), /self-hosted/);
   });
-});
 
-describe('the runner of gate-trusted\'s jobs (#154)', () => {
-  test('every job reads GATE_TRUSTED_RUNNER, and with it unset the runner is GitHub-hosted', () => {
-    for (const [id, job] of Object.entries(trusted.jobs)) {
-      const m = /^\$\{\{ fromJSON\(vars\.GATE_TRUSTED_RUNNER \|\| '(.+)'\) \}\}$/.exec(job['runs-on']);
-      assert.ok(m, `${id} runs on ${job['runs-on']}`);
-      assert.equal(JSON.parse(m[1]), 'ubuntu-latest', id);
-    }
+  test('no kit workflow reads a repository variable, which changes without a pull request (#335)', () => {
+    for (const file of ['main.yml', 'gate.yml', 'gate-trusted.yml']) assert.doesNotMatch(readFileSync(join(factory, 'kit/.github/workflows', file), 'utf8'), /\bvars\./, file);
+  });
+
+  test('gate-trusted.yml holds the reviewer once, empty in the kit, at the workflow\'s level, and the reviewer\'s install follows it', () => {
+    assert.equal(trusted.env.GATE_REVIEWER, '');
+    assert.equal(JSON.stringify(trusted.jobs).includes('GATE_REVIEWER:'), false);
+    const install = Object.values(trusted.jobs).flatMap((job) => job.steps).filter((step) => /GATE_REVIEWER/.test(String(step.if ?? '')));
+    assert.deepEqual(install.map((step) => step.if), ["env.GATE_REVIEWER == 'claude'"]);
   });
 });
 

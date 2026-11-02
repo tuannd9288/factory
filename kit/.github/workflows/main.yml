@@ -1,6 +1,6 @@
 # Verify on main after each merge: main's own checks on the merged tree, so a red main shows on the commit that made
-# it. A pull request's checks are in gate.yml and gate-trusted.yml. Only main's code runs here, so this job may use
-# the repository variable GATE_RUNNER (a JSON label list; hosted Ubuntu when unset), a runner no candidate job uses.
+# it. A pull request's checks are in gate.yml and gate-trusted.yml. Only main's code runs here, so this job may use a
+# runner no candidate job uses: the repository's own setting, which bin/onboard fills in (#335; hosted Ubuntu in the kit).
 # Node is main's .node-version, else 24, which the kit's scripts need at least, and pnpm the version its package.json's
 # packageManager names (#155), set up whatever the runner has installed.
 name: main
@@ -15,7 +15,7 @@ permissions:
 jobs:
   verify:
     name: verify on main
-    runs-on: ${{ fromJSON(vars.GATE_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ["ubuntu-latest"]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

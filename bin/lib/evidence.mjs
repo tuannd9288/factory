@@ -1,7 +1,8 @@
 // The kit pull request's evidence: its files against the kit at one factory commit, over the whole inventory, with
 // contents, modes and symlinks compared by git object, never by running anything the repository holds. It reads both
 // sides with ls-tree and cat-file only. A managed file is one of these kinds: as in the kit (same mode, same blob);
-// rendered (.github/CODEOWNERS, which bin/onboard fills in, shown line by line); kept (the repository had the path, and the
+// rendered (.github/CODEOWNERS and the three gate workflows, which bin/onboard fills in with the owner and the gate's settings,
+// bin/lib/gate-settings.mjs, shown line by line); kept (the repository had the path, and the
 // pull request left its file as it was); updated (the base held a past blob of kit/<path>, or a past rendering of it, and
 // the head holds the kit's now: only bin/kit-update's pull requests make one, and a file the kit dropped that the base held
 // as a past blob is removed the same way); generated (.gate/kit-files, the sorted inventory; .gate/kit-commit, the factory
@@ -26,12 +27,13 @@ import { fileURLToPath } from 'node:url';
 import { MODULES_FILE, mergedTree, offFiles, parseModules } from './module.mjs';
 import { carrierProblems, insertGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { HOOK, NATIVE, adapterBlock } from './adapter.mjs';
+import { DEFAULTS, FILLED, SETTINGS as GATE_SETTINGS, WORKFLOWS, describe, render, runnerProblems, shown, valuesIn, valuesOf } from './gate-settings.mjs';
 import { addDeny } from './settings.mjs';
 
 export const INVENTORY = '.gate/kit-files';
 export const SETTINGS = '.claude/settings.json';
 export const CONFIG = '.gate/config.sh';
-export const FILLED = { '.github/CODEOWNERS': (v) => ['@OWNER', `@${v.human}`] };
+export { FILLED, render };
 export const KIT_COMMIT = '.gate/kit-commit';
 export const SECTION = '.gate/gate-section.md';
 // The repository's own, which the kit puts its block in or leaves alone: no kit file, and never in the inventory.
@@ -53,16 +55,6 @@ export function tree(dir, rev, prefix = '') {
     entries.set(prefix ? path.slice(prefix.length) : path, { mode, oid });
   }
   return entries;
-}
-
-/** What bin/onboard writes for a kit file it fills in: sed's s/from/to/, the first match on each line. */
-export function render(path, text, { name, human }) {
-  if (!FILLED[path]) return null;
-  const [from, to] = FILLED[path]({ name, human });
-  return text
-    .split('\n')
-    .map((line) => line.replace(from, () => to))
-    .join('\n');
 }
 
 /** The modules a tree's .gate/modules names: { names }, with a failure line in `why` when the file is not what onboard writes. */
@@ -118,12 +110,14 @@ export function pastBlobs(factory, rev, path) {
   return pastCache.get(key);
 }
 
-/** The CODEOWNERS (the one file the kit still fills in) as the kit rendered it: 'now' when it is the rendering of the kit at
- * this factory commit, 'past' when it is one an older commit rendered, or null (the repository's own). */
-export function renderedAs({ factory, fac, path, text, name, human }) {
+/** A file the kit fills in (CODEOWNERS, the gate workflows) as the kit rendered it, with the settings the text itself holds:
+ * 'now' when it is the rendering of the kit at this factory commit, 'past' when it is one an older commit rendered, or null
+ * (the repository's own). */
+export function renderedAs({ factory, fac, path, text, human }) {
   const states = [showQuiet(factory, fac, `kit/${path}`)];
   for (const rev of git(factory, ['--literal-pathspecs', 'log', '--format=%H', fac, '--', `kit/${path}`]).split('\n').filter(Boolean)) states.push(showQuiet(factory, rev, `kit/${path}`));
-  const matches = (kit) => kit !== null && render(path, kit, { name, human }) === text;
+  const values = { human, ...valuesOf(path, text) };
+  const matches = (kit) => kit !== null && render(path, kit, values) === text;
   const [now, ...before] = states;
   if (matches(now)) return 'now';
   return before.some(matches) ? 'past' : null;
@@ -229,9 +223,9 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
     }
     let isOwn = had && (had.mode !== want.mode || had.oid !== want.oid);
     let older = false;
-    // CODEOWNERS never equals its raw blob: the base is the repository's own unless it is the rendering now, or an older one.
+    // A filled-in file never equals its raw blob: the base is the repository's own unless it is the rendering now, or an older one.
     if (had && FILLED[path] && had.mode === want.mode) {
-      const as = renderedAs({ factory, fac, path, text: blob(repo, had.oid), name, human });
+      const as = renderedAs({ factory, fac, path, text: blob(repo, had.oid), human });
       isOwn = as !== 'now';
       older = as === 'past';
     }
@@ -268,7 +262,8 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
       }
     } else {
       const from = blob(factory, want.oid);
-      const to = render(path, from, { name, human });
+      // The kit filled in with the settings the head's own text holds: a head that holds anything more fails.
+      const to = render(path, from, { human, ...valuesOf(path, blob(repo, have.oid)) });
       if (blob(repo, have.oid) !== to) fails.push(`differs: ${path} (content)`);
       else {
         filled.add(path);
@@ -336,6 +331,18 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
     else fails.push(`extra: ${path} (not a kit file)`);
   }
   if (now.has('.gate/pack')) fails.push('extra: .gate/pack (the kit lays no pack file now)');
+  // The gate's settings as the head's workflows hold them, and the runner rule over them (#335). One the head changes from
+  // the base's is marked, so a pull request that moves the reviewer or a runner says so where the Human reads it.
+  const settingsAt = (entries) => valuesIn(Object.fromEntries(WORKFLOWS.filter((p) => entries.get(p)?.mode === '100644').map((p) => [p, blob(repo, entries.get(p).oid)])));
+  const settings = settingsAt(now);
+  const before = settingsAt(at);
+  const moved = Object.fromEntries(
+    GATE_SETTINGS.filter((s) => at.has(s.file) && JSON.stringify(before[s.key]) !== JSON.stringify(settings[s.key] ?? DEFAULTS[s.key])).map((s) => [
+      s.key,
+      before[s.key] === undefined ? "CHANGED: the base held none in the kit's form (a repository variable, before #335)" : `CHANGED from ${shown(s.key, before[s.key])}`,
+    ]),
+  );
+  for (const problem of runnerProblems(settings)) fails.push(`runners: ${problem} (kit/.gate/enforced-rules.md)`);
   // The repository's own scripts/ and hooks, which the kit does not ship: they are in the head as they were in the base.
   const untouched = [...at].filter(([path, e]) => UNTOUCHED(path) && !kit.has(path) && !listed.has(path) && now.get(path)?.oid === e.oid && now.get(path)?.mode === e.mode).map(([path]) => path).sort();
   const lines = [
@@ -350,6 +357,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   if (fails.length) lines.push('failures:', ...fails.map((f) => `  ${f}`));
   lines.push("instructions (the repository's own AGENTS.md and CLAUDE.md; the kit's part is the Gate block):", ...(instructions.length ? instructions.map((l) => `  ${l}`) : ['  none']));
   lines.push('rendered (bin/onboard fills these in):', ...(rendered.length ? rendered.map((l) => `  ${l}`) : ['  none']));
+  lines.push("settings (the gate's, as the head's workflows hold them; a pull request changes one at tier 3):", ...describe(settings, moved).map((l) => `  ${l}`));
   if (merged.length) lines.push("merged (the repository's own file with the kit's deny lines inserted as text; every other byte is the base's):", ...merged.map((p) => `  ${p}`));
   if (adapted.length) lines.push("adapter (the kit's text with the lines bin/lib/adapter.mjs writes for the repository's own files):", ...adapted.map((p) => `  ${p}`));
   if (untouched.length) lines.push("untouched (the repository's own scripts/ and hooks, which the kit does not ship; unchanged):", ...untouched.map((p) => `  ${p}`));

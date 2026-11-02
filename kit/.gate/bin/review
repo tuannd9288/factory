@@ -22,7 +22,8 @@
 #   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3)
 # The tier is main's policy on the diff from the merge-base, raised by every label the pull request ever had (GATE_PR
 # and GITHUB_REPOSITORY, read with gh). GATE_HEAD, the pull request's head, must be the head judged.
-# GATE_REVIEWER picks the reviewer; it is a repository variable, which only an admin sets:
+# GATE_REVIEWER picks the reviewer; gate-trusted.yml on main holds it, filled in by bin/onboard, so only a pull request the
+# Human approves changes it (#335):
 #   stub    scratch repositories only: .gate/bin/lib/stub-reviewer.mjs, no model
 #   claude  .gate/bin/lib/claude-reviewer.mjs: Claude Code, Opus at max effort, read-only tools, in `review` only, once per head:
 #           an earlier review of this head, base, No-red line and closing issues (any run of this workflow) is reused, not asked
@@ -139,7 +140,7 @@ entire_check() {
     { echo "tier: Entire's check on ${head:0:8} could not be read ($state), so this check fails closed"; return 1; }
   case "$state" in
     success) echo "tier: Entire Gates passed ${head:0:8}" ;;
-    unpinned) echo "tier: the rules in force on $GATE_BASE_REF do not require Entire Gates from one App, so its check cannot be told from a copy, and this check fails closed; the owner runs bin/onboard-owner --apply with GATE_REVIEWER=entire"; return 1 ;;
+    unpinned) echo "tier: the rules in force on $GATE_BASE_REF do not require Entire Gates from one App, so its check cannot be told from a copy, and this check fails closed; the owner runs bin/onboard-owner --apply once main's gate-trusted.yml holds GATE_REVIEWER: 'entire'"; return 1 ;;
     pending) echo "tier: Entire Gates has not concluded on ${head:0:8}; the queue re-runs this check when it does"; return 1 ;;
     *) echo "tier: Entire Gates is $state on ${head:0:8}; only success passes (Entire is neutral while a gate blocks), so this check fails"; return 1 ;;
   esac
@@ -347,7 +348,7 @@ case "${GATE_REVIEWER:-}" in
     ;;
   "")
     echo "::notice title=review-result::unavailable: no-reviewer"
-    echo "$job: reviewer unavailable (no-reviewer); no reviewer is configured (repository variable GATE_REVIEWER is unset), so this check fails closed"
+    echo "$job: reviewer unavailable (no-reviewer); no reviewer is configured (GATE_REVIEWER is empty in gate-trusted.yml on main), so this check fails closed"
     exit 1
     ;;
   *)

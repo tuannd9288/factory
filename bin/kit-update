@@ -2,11 +2,15 @@
 # Brings an onboarded repository up to the factory's main: the counterpart of bin/onboard for a repository that already
 # has the kit. It works on the clone onboard made, $FACTORY_ROOT/<name>, and opens "Bring the kit up to factory main
 # <sha7>" from the branch factory/kit-<sha7>.
-#   bin/kit-update <repo-url|name> [--no-pr] [--module <name>]... [--no-module <name>]...
+#   bin/kit-update <repo-url|name> [--no-pr] [--module <name>]... [--no-module <name>]... [--reviewer <name>]
+#     [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]
 # From a fresh branch off origin/main, for every path of kit/ at this clone's HEAD (bin/lib/kitupdate.mjs):
 #   - the Gate block of AGENTS.md is replaced and nothing else of it: the repository's head and tail stay byte for byte;
 #     a text with no block, malformed markers, a CLAUDE.md that does not reach AGENTS.md, or a result over 150 lines
 #     or 32 KiB stops it, to merge by hand. CLAUDE.md is otherwise left as it is. CODEOWNERS is rendered as onboard does;
+#   - the gate's settings (#335), which the three workflows hold, are carried from the base; --reviewer, --runner,
+#     --pr-runner and --trusted-runner change one, in the form bin/onboard takes. A base whose workflows still read the
+#     repository variables (the kit before #335) holds none, so its update must name each from its variable's value;
 #   - a .claude/settings.json the repository has gets the kit's deny lines it lacks inserted as text, as onboard does;
 #   - a kit file the repository lacks is added; one it holds as an older kit had it is replaced by the kit's;
 #   - a kit file the repository changed is kept and named; the repository's own scripts/ and .githooks/ are not the kit's
@@ -48,16 +52,20 @@ open_pr=1
 target=""
 module_on=""
 module_off=""
+settings=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --no-pr) open_pr=0; shift ;;
     --module) module_on="$module_on,${2:?kit-update: --module needs a name}"; shift 2 ;;
     --no-module) module_off="$module_off,${2:?kit-update: --no-module needs a name}"; shift 2 ;;
+    --reviewer | --runner | --pr-runner | --trusted-runner)
+      [ "$#" -ge 2 ] || { echo "kit-update: $1 needs a value; nothing done"; exit 2; }
+      settings+=("$1" "$2"); shift 2 ;;
     -*) echo "kit-update: unknown argument $1; nothing done"; exit 2 ;;
     *) [ -z "$target" ] || { echo "kit-update: unknown argument $1; nothing done"; exit 2; }; target=$1; shift ;;
   esac
 done
-[ -n "$target" ] || { echo "usage: bin/kit-update <repo-url|name> [--no-pr] [--module <name>]... [--no-module <name>]..."; exit 2; }
+[ -n "$target" ] || { echo "usage: bin/kit-update <repo-url|name> [--no-pr] [--module <name>]... [--no-module <name>]... [--reviewer <name>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]"; exit 2; }
 path=${target%/}
 path=${path%.git}
 name=$(basename "$path")
@@ -122,7 +130,7 @@ if [ -n "$modules" ]; then
   why=$(node "$factory/bin/lib/module.mjs" check "$factory" $modules 2>&1) || refuse "$why"
 fi
 modules_csv=$(printf '%s' "$modules" | paste -sd, -)
-args=(--factory "$factory" --commit "$kit_commit" --repo "$dest" --base origin/main --name "$name" --human "$human" --modules "$modules_csv")
+args=(--factory "$factory" --commit "$kit_commit" --repo "$dest" --base origin/main --name "$name" --human "$human" --modules "$modules_csv" ${settings[@]+"${settings[@]}"})
 if ! plan=$(node "$factory/bin/lib/kitupdate.mjs" plan "${args[@]}"); then
   printf '%s\n' "$plan"
   echo "kit-update: nothing done"
