@@ -15,8 +15,9 @@
 #            same head and base (`actions: read` lists the run's jobs and `checks: read` their annotations). It holds no
 #            environment and no secret.
 #   tier     the tier, and on tier 3 the Human's approval of the head, or of a commit whose patch the head carries
-#            unchanged, unless the merge switch (the review parameters of the rules in force) is at all. Below tier 3 by paths and labels it waits for `review` of its own run (GITHUB_RUN_ID, through
-#            the run's jobs, so it holds `actions: read` and `checks: read`), so it is never green before the reviewer
+#            unchanged, unless the merge switch (the review parameters of the rules in force) is at all. Below tier 3
+#            by paths and labels it waits for `review` of its own run (GITHUB_RUN_ID, through the run's jobs, so it
+#            holds `actions: read` and `checks: read`), so it is never green before the reviewer
 #            ended, and it follows `review`: a red or cancelled one fails it, so "Re-run failed jobs" re-runs both. It
 #            reads the review's result annotation whatever the conclusion; a raise there, or in any review on this head,
 #            makes it label the pull request raised and tier-3 (`pull-requests: write`) and wait for an approval given

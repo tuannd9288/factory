@@ -34,8 +34,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   off, until he moves it. It is the two review parameters of the `factory-gate` ruleset ("Luật review của GitHub
   (Recommended)", 12:14:34), so GitHub holds it and a move applies at once to the open pull requests, which the queue
   follows by re-running `tier` on the open tier-3 pull requests. At `all` the code also lets a `needs-human` pull request
-  merge once its checks are green: the Lead's reading, awaiting his choice on the pull request. Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`,
-  which Colly runs. "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
+  merge once its checks are green: the Lead's reading, awaiting his choice on the pull request. Only he moves it, on his
+  login, asked before each move: `bin/onboard-owner --merge`, which Colly runs. "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
   (Recommended)" are his answers; the factory's own repository is unchanged. Sources:
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 (09:51 to about 10:00),
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568380227 (10:11 and 10:21) and
@@ -186,7 +186,8 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 ## What the Human keeps
 
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy. Where a repository's merge
-  switch is at `all` (#333), a tier-3 pull request needs no approval of his (a `needs-human` one too, as the code does: the Lead's reading, awaiting his choice); a deploy is still his.
+  switch is at `all` (#333), a tier-3 pull request needs no approval of his (a `needs-human` one too, as the code does:
+  the Lead's reading, awaiting his choice); a deploy is still his.
 - His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
   `reviewer` environment, "Allow auto-merge"), which Colly then applies on his login; and the reviewer's secret, where a
   repository uses the kit's Claude reviewer.
