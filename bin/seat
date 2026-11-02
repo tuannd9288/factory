@@ -2,4 +2,61 @@
 # bin/seat <role> <brief> --run <run folder> --work <work folder> [options] (#91): starts one unattended `claude -p` session
 # in the background, on a seat, with the role's preset, and appends its record to $FACTORY_STATE/sessions.jsonl when it ends.
 # Exits 2 on a usage error, a missing seat token or no free seat. See bin/lib/seat.mjs.
+# Unattended runs (launchd, `herdr pane run`) start no shell and never load .envrc. With no permission mode `claude -p` starts
+# in `default` and denies every call that needs approval (2.1.308, 2026-10-22: `git branch x` gave "This command requires
+# approval"); name the mode and the exact commands the run may use (code.claude.com/docs/en/permissions, fetched 2026-10-22). A
+# rule matches the text before its first `*` as written, so a blanket `git` or `gh` grant also allows `git -C . tag y` and
+# `gh -R x pr merge`, and a trailing `*` admits any arguments, a refspec included (`git push origin b:refs/tags/y`): grant a
+# push with no `*`. A deny rule still wins over a grant; a command holding a variable or `$(…)` is denied even under a matching
+# grant (2.1.308, grants-check): use `--body-file`, a plain `-m '…'`.
+# Every unattended session of a role (worker, the Lead's reviewer, researcher; not the gate's reviewer) starts through bin/seat,
+# run from the factory checkout, not through a repository's `direnv exec`. It sets the role's model, grants and report shape,
+# and loads the token of the team's account into the child's environment only (#311). The team is FACTORY_TEAM,
+# `<repo>-<team>`, which the Lead's launcher sets for every bin/seat it runs; the account is the team's row
+# `factory/<repo>-<team>` in $FACTORY_STATE/accounts, the token `~/.agent-profiles/tokens/<account>`. With no FACTORY_TEAM, a
+# malformed one or a team with no row it starts nothing, before it claims anything, naming what is missing
+# (`factory use <repo>-<team> <letter>`); an account with no token file starts nothing and names `factory login <account>`. A
+# team of a repository that is neither onboarded nor `factory` is no team and is refused too, so an old `factory/lead-<repo>`
+# line starts nothing, as AO's account `pick` refuses an unknown one and takes no fallback (agent-orchestrator
+# `backend/internal/service/agentaccounts/service.go:819-855@9dc1c14`); piggery likewise hands a child a name and resolves it
+# at launch (`internal/driver/local/runner.go:361-379@67c083e`). The seat rows (`factory/seat-N`) and `factory/lead-<repo>` are
+# read no more by any start (a hard cut, no alias); only a run or a record from before #311, with no account of its own, is
+# counted under the account its seat's old row names. A seat is a slot: a new session takes the first seat of its role's list,
+# a resume keeps its own (`--seat`). Each run writes run-<tag>.account beside run-<tag>.seat, and its sessions.jsonl record
+# names its `team` and `account`.
+# A team's account is out only while Claude Code has rejected it: the last `rate_limit_event` of the newest log among that
+# account's runs has status `rejected`, until that event's `resetsAt`; the session is then refused, naming the account and the
+# reset, and never runs on another seat or account. No share of a window and no number of live sessions stops a session (#194,
+# #280): how many sessions run at once is the Lead's call. When the machine's load is above its cores
+# (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Nothing picks or switches an account by itself; only the Human's
+# `factory use` does. A session the limit cut off is resumed by the Lead after that reset, which the refusal names and `factory`
+# shows, with `bin/seat <role> <brief> --run <folder> --work <folder> --resume <session id> --seat <n>`; nothing resumes it in
+# the background.
+# Every seat runs in auto mode with no role allow list and every deny rule, `env` and `printenv` included, and holds the team's
+# key: the Human's decision of 2026-11-01 (#307), with no scrub, since CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 makes Claude Code
+# force the `default` mode (2.1.308 to 2.1.316). Even without the scrub, Claude Code 2.1.316 keeps CLAUDE_CODE_OAUTH_TOKEN out
+# of a command's environment (probe, #307; hooks, MCP servers and other versions not probed). Only `StructuredOutput`, the
+# run's `--skill` and its own `--allow` rules are granted. The one exception is the researcher while `hideKey` on its row in
+# PRESETS is `true` (the default), so that it, which reads untrusted pages, cannot run a shell read of the token file, the path
+# auto mode leaves to the classifier: it keeps the scrub, so its commands, hooks and MCP servers get no credential from the
+# environment, the `default` mode, its short allow list, seat 2, and (#188) `Write`, `Edit` and output redirects only in the
+# session's own folders (run, work and each `--add-dir`), through one `Edit` rule a folder, each a real absolute path with no
+# glob character (#192), and none of `mv`, `cp`, `rm`, `rmdir`, `touch` or `sed`, so it cannot move or remove the folder
+# `research-git` clones into. Only a pull request the Human approves sets `hideKey` to `false`, and no agent can at run time.
+# Every seat gets an empty GH_CONFIG_DIR, so a `gh` started inside a command has no login; the scrub drops it, with
+# CLAUDE_CONFIG_DIR (probe, 2.1.308), so inside the researcher's commands such a `gh` finds the `factory` user's own login. `gh`
+# itself stays denied for every role. The researcher is denied `git` itself; its git is bin/research-git, named in its brief by
+# absolute path. It clones over https into `<run>/clones/<name>` and reads only those clones, by name, with `log`, `show`,
+# `diff-tree`, `ls-files`, `rev-parse`, `rev-list` and `blame`; it refuses each option that runs a program or reads or writes a
+# file the caller names, and runs git with no configuration but the clone's own. So a brief that needs a repository's history
+# gives its https URL and a pushed commit, never a path, the factory's own repository included.
+# Known limit (#311): a session can set FACTORY_TEAM itself in a command it types, and so start a seat on another team's
+# account; lead.md says it must not. Known limit: the token files sit on disk, and the team holds the key by decision (#307): a
+# worker or a reviewer in auto mode may run commands that read any file the `factory` user can, so the deny rules for the tokens
+# folder, the archive folder and seat 1's old file (every seat, every role) cover the `Read` tool only (#183 puts their commands
+# in a sandbox). The researcher reads untrusted pages and can send them out, and since #178 its seat 2 holds a token too; while
+# `hideKey` is `true` its grants were reviewed for that (2026-10-31): it has `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`,
+# `bin/research-git` and `ls`, `wc`, `mkdir`, `date`, `cd`, so the only tool that returns a file's content is `Read`, which the
+# deny rules refuse on the tokens, the archive and the whole `~/.agent-profiles/`, and `research-git` reads only its own clones;
+# the token is in claude's environment alone, which the scrub keeps from every command. It has no `node`, `cp`, `sed` or `git`.
 exec node "$(dirname "$0")/lib/seat.mjs" "$@"

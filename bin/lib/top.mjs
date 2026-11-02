@@ -5,6 +5,11 @@
 // #286: what waits on the Human first, one block per repository (the Lead of each team in it), the accounts (factory.mjs's list, each account's quota) and Today.
 // It runs as `factory top [--once] [--width N] [--full]` (bin/lib/factory.mjs); `node bin/lib/top.mjs --once` prints one frame as well.
 // `c` (or --full) adds #174's engineering columns.
+// What waits on the Human comes first (pull requests to approve, a Lead at a prompt or a login, alerts), then one block per
+// repository with the Lead of each team, issues and workers, the accounts with local reset times, and Today; it is live on a
+// terminal; on the MacBook it runs on the Mac mini by ssh. Every session has an animal name from Ubuntu's release code names (bin/lib/names.mjs): bin/seat writes
+// run-<tag>.name, a Lead keeps ~/factory-runs/<repo>-<team>/name and its Herdr pane carries it. A Lead's state is its newest hook
+// event in <repo>-<team>/state.json (packs/pstack/bin/transcript-copy.mjs).
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { cpus, homedir, loadavg } from 'node:os';
