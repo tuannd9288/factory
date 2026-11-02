@@ -29,7 +29,7 @@ if (args[0] === 'pr' && args[1] === 'checks') {
   process.exit(checks.every((c) => c.state === 'SUCCESS') ? 0 : 1);
 }
 if (args[0] !== 'api') process.exit(1);
-const path = args[1].replace(/^\//, '');
+const path = args.at(-1).replace(/^\//, '');
 const repo = 'repos/' + state.repo.full_name;
 if (path === 'user') out({ login: state.login });
 if (path === repo) out(state.repo);
@@ -40,7 +40,11 @@ if (path.startsWith(repo + '/rulesets') && !/rulesets\/\d+/.test(path)) out(stat
 const one = /rulesets\/(\d+)$/.exec(path);
 if (one) { const r = state.rulesets.find((x) => x.id === Number(one[1])); r ? out(r) : missing(); }
 // #333: the rules in force on main, as bin/onboard-owner's fake gives them; a state may name them itself.
-if (path === repo + '/rules/branches/main') out(state.rulesInForce ?? state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules));
+// With --slurp, as gh gives it, the list is a page of a list of pages.
+if (path === repo + '/rules/branches/main') {
+  const list = state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules);
+  out(state.rulesInForce !== undefined ? state.rulesInForce : args.includes('--slurp') ? [list] : list);
+}
 const env = repo + '/environments/reviewer';
 if (path === env) state.environment ? out(state.environment) : missing();
 if (path === env + '/deployment-branch-policies') state.environment ? out({ branch_policies: state.environment.policies ?? [] }) : missing();
@@ -334,7 +338,8 @@ test('every gh call is a read: a GET with its query in the path, or a list or a 
   assert.ok(r.calls.length > 8);
   for (const args of r.calls) {
     assert.ok(!args.some((a) => /^(-X|--method|-f|-F|--field|--raw-field|--input)/.test(a)), JSON.stringify(args));
-    if (args[0] === 'api') assert.deepEqual(args.filter((a) => a.startsWith('-')), [], JSON.stringify(args));
+    // The one flags of a read: the rules in force are read in full, page by page.
+    if (args[0] === 'api') assert.deepEqual(args.filter((a) => a.startsWith('-') && a !== '--paginate' && a !== '--slurp'), [], JSON.stringify(args));
     else assert.ok(['variable list', 'pr list', 'pr checks'].includes(`${args[0]} ${args[1]}`), JSON.stringify(args));
   }
 });

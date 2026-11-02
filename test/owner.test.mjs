@@ -79,7 +79,11 @@ if (one) {
   done(read);
 }
 // #333: the rules in force on the default branch, which the merge switch is read from: every rule of every active branch ruleset.
-if (path === repo + '/rules/branches/main') done(state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules.map((x) => ({ ...x, ruleset_id: r.id }))));
+// With --slurp, as gh gives it, the list is a page of a list of pages.
+if (path === repo + '/rules/branches/main') {
+  const list = state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules.map((x) => ({ ...x, ruleset_id: r.id })));
+  done(args.includes('--slurp') ? [list] : list);
+}
 const env = repo + '/environments/reviewer';
 if (path === env) {
   if (method === 'PUT') { if (kept('environment')) state.environment = { name: 'reviewer', ...body }; done(state.environment ?? {}); }
@@ -539,11 +543,56 @@ test('--merge sets the two parameters and nothing else: a dry run without --appl
 });
 
 test('--merge reads back the position from the rules in force, and a write that did not take leaves the run incomplete (#333)', () => {
-  const w = inForce({ ignore: 'rulesets' });
+  const w = inForce();
   try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    w.set({ ignore: 'rulesets' });
     const out = w.owner([...ME, '--merge', 'all', '--apply']);
     assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /incomplete: /);
+    assert.match(out.out, /incomplete: the merge switch reads 1-2, not all/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge on a repository that has drifted from the kit changes the two parameters and nothing else (#333)', () => {
+  const w = inForce();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    // Auto-merge off, as zalo-gateway has it, a ruleset gone, and the environment's branch policy gone.
+    w.set({ repo: { ...w.state().repo, allow_auto_merge: false }, rulesets: w.state().rulesets.filter((r) => r.name !== 'factory-claims'), environment: { ...w.state().environment, policies: [] } });
+    w.clear();
+    const dry = w.owner([...ME, '--merge', 'all']);
+    assert.equal(dry.code, 0, dry.out);
+    assert.match(dry.out, /change  ruleset factory-gate: PUT/);
+    assert.match(dry.out, /not changed  allow auto-merge: .*--merge moves the merge switch only/);
+    assert.match(dry.out, /not changed  ruleset factory-claims:/);
+    assert.match(dry.out, /not changed  environment reviewer deploys from main:/);
+    assert.deepEqual(w.writes(), []);
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const writes = w.writes();
+    assert.equal(writes.length, 1, writes.join('\n'));
+    assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${gateOf(w).id} `));
+    assert.deepEqual(reviewOf(w), [0, false]);
+    assert.equal(w.state().repo.allow_auto_merge, false, 'allow auto-merge stays off');
+    assert.ok(!w.state().rulesets.some((r) => r.name === 'factory-claims'));
+    assert.match(out.out, /read back: the merge switch is all/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge is refused while the gate ruleset is not in force, and the bootstrap ruleset is left (#333)', () => {
+  const w = world();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
+    w.clear();
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /--merge moves the switch of the factory-gate ruleset, which is not in force on main yet/);
+    assert.deepEqual(w.writes(), []);
   } finally {
     w.cleanup();
   }

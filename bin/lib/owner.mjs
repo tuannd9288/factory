@@ -6,7 +6,7 @@
 // bin/onboard fills in and a pull request changes (#335); this command sets none of them, since the Human's approval of
 // that pull request is what changes one. Nor does it set the gate's merge switch (#333), the two review parameters of the
 // gate's pull_request rule, unless --merge all|1-2|none says so: it takes them from the live ruleset when it puts one back,
-// and from the kit's (1-2) when it makes one. A main whose gate-trusted.yml cannot be read stops the run when the kit is on
+// and from the kit's (1-2) when it makes one. With --merge it writes that ruleset and nothing else. A main whose gate-trusted.yml cannot be read stops the run when the kit is on
 // it, since the reviewer chooses the ruleset. It calls only gh against GitHub's API, with the factory's own files: never git,
 // never the target's .envrc, scripts or hooks, so nothing the target holds runs with his authority. A second run changes
 // nothing. See bin/onboard-owner for the arguments.
@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { POSITIONS, PARAMETERS, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
+import { POSITIONS, PARAMETERS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
 import { SETTINGS, TRUSTED, WORKFLOWS, readsVariables, sharedRunners, valuesIn } from './gate-settings.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -102,7 +102,7 @@ export function withReview(want, review) {
 /** The merge switch as the rules in force on the branch read now: { position }, or { problem } saying why they do not. */
 export function switchNow(slug, branch, read = gh) {
   try {
-    return { position: positionOf(read(['api', `repos/${slug}/rules/branches/${branch}`])) };
+    return { position: positionOf(pagesOf(read(['api', '--paginate', '--slurp', `repos/${slug}/rules/branches/${branch}`]))) };
   } catch (error) {
     return { problem: String(error.stderr || error.message).trim().split('\n')[0] };
   }
@@ -300,9 +300,20 @@ function main(argv) {
   if (reviewer === 'entire' && sharedRunners(settings).length)
     console.log('onboard-owner: the runners are shared under the Human\'s exception (#155, kit/.gate/enforced-rules.md), which holds ' +
       'only while there is no reviewer secret in the environment reviewer; this command does not read secrets, so that is his to keep');
-  const calls = plan(slug, agent, now, want);
+  const gateCall = (c) => c.what === `ruleset ${GATE_NAME}`;
+  // --merge writes the gate's ruleset and nothing else: every other difference from the kit (auto-merge, a missing
+  // ruleset, the environment) is listed as not changed and left. The ruleset is one write, so a difference inside it, if
+  // there is one, is in the PUT the dry run shows. It moves a switch that exists, so a gate not in force yet is a plain
+  // run's to put in.
+  if (merge && !now.rulesets.some((r) => r.name === GATE_NAME)) {
+    console.error(`onboard-owner: --merge moves the switch of the ${GATE_NAME} ruleset, which is not in force on ${branch} yet: run without --merge first; nothing changes`);
+    return 2;
+  }
+  const planned = plan(slug, agent, now, want);
+  const calls = merge ? planned.filter(gateCall) : planned;
   if (now.autoMerge) console.log('onboard-owner: allow auto-merge is on');
   for (const c of calls) console.log(`  change  ${c.what}: ${show(c)}`);
+  for (const c of merge ? planned.filter((x) => !gateCall(x)) : []) console.log(`  not changed  ${c.what}: --merge moves the merge switch only`);
   if (!calls.length) console.log('  nothing to change');
   if (!apply) {
     if (calls.length) console.log('onboard-owner: dry run: nothing changed; rerun with --apply to make these changes');
@@ -314,20 +325,22 @@ function main(argv) {
     console.log(`  done    ${c.what}`);
   }
   const have = current(slug, agent, names);
+  if (merge) {
+    const undone = plan(slug, agent, have, want).filter(gateCall);
+    const after = switchNow(slug, branch);
+    if (undone.length || after.position !== merge) {
+      console.log(`onboard-owner: incomplete: the merge switch ${after.position ? `reads ${after.position}` : `could not be read (${after.problem})`}, not ${merge}`);
+      return 1;
+    }
+    console.log(`onboard-owner: read back: the merge switch is ${merge}`);
+    return 0;
+  }
   const undone = left(slug, agent, have, want);
   if (undone.length) {
     console.log(`onboard-owner: incomplete: ${undone.join('; ')}`);
     return 1;
   }
   console.log('onboard-owner: read back: every setting as planned');
-  if (merge) {
-    const after = switchNow(slug, branch);
-    if (after.position !== merge) {
-      console.log(`onboard-owner: incomplete: the merge switch ${after.position ? `reads ${after.position}` : `could not be read (${after.problem})`}, not ${merge}`);
-      return 1;
-    }
-    console.log(`onboard-owner: read back: the merge switch is ${merge}`);
-  }
   if (have.collaborator !== 'write')
     console.log(`onboard-owner: waiting: ${agent} accepts the invitation, logged in as itself; then the team that ` +
       'claimed the issue runs bin/onboard, which opens the kit pull request');

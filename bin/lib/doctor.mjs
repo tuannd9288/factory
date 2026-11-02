@@ -1,7 +1,8 @@
 // The doctor: reads one repository the factory has taken in, prints one line per check, green or red, and changes
 // nothing. The Human's login runs it (Colly runs it from the MacBook, as bin/onboard-owner), so its code is made to be
 // reviewed as code that only reads:
-//   - every gh call goes through `get`, which refuses all but `gh api <path>` with no flag, `gh variable list`,
+//   - every gh call goes through `get`, which refuses all but `gh api <path>` with no flag but --paginate and --slurp (the
+//     rules in force are read in full), `gh variable list`,
 //     `gh pr list` and `gh pr checks`, and any -X, --method, -f, -F, --field, --raw-field or --input; a query is in the path;
 //   - it runs only from a commit on the first-parent line of origin/main, with no uncommitted, untracked or ignored
 //     file under bin/ or kit/, as bin/onboard asks of its clone;
@@ -36,7 +37,7 @@ class Refusal extends Error {}
 /** The one way this command calls gh: a read. Every call is remembered, for the list at the end. */
 const calls = new Set();
 function get(args) {
-  const plain = args[0] === 'api' ? args.length === 2 && !args[1].startsWith('-') : NOT_A_WRITE.some(([a, b]) => args[0] === a && args[1] === b);
+  const plain = args[0] === 'api' ? args.length >= 2 && !args.at(-1).startsWith('-') && args.slice(1, -1).every((a) => a === '--paginate' || a === '--slurp') : NOT_A_WRITE.some(([a, b]) => args[0] === a && args[1] === b);
   if (!plain || args.some((a) => WRITES.test(a))) throw new Error(`the doctor only reads: refused gh ${args.join(' ')}`);
   calls.add(`gh ${args.join(' ')}`);
   return gh(args);

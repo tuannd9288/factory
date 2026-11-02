@@ -14,7 +14,8 @@
 #   refused, with nothing done.
 #   bin/onboard-owner <owner/name> --id <repository id> --merge all|1-2|none [--apply]
 #        moves the repository's merge switch (#333): the two review parameters of the kit's gate ruleset, the only thing the
-#        run changes with --merge; without --apply it shows the change and makes none; with it, it reads the position back
+#        run writes with --merge (any other difference from the kit is listed "not changed" and left, and a gate not yet in
+#        force is refused); without --apply it shows the change and makes none; with it, it reads the position back
 #        from the rules in force. all: every pull request merges by itself once its checks are green, tier 3 included; 1-2:
 #        tier 1 and 2 do, and tier 3 waits for the Human's approval (the default of a new gate); none: every pull request
 #        waits for an approval. It runs under the Human's login only and is asked before each move. Without --merge a run
