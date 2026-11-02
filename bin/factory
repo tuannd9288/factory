@@ -8,6 +8,14 @@
 #                                  session takes it); <repo>-<team> makes the row of a team of an onboarded repository or of the factory, and that team's running
 #                                  Lead alone is restarted once Herdr reports it idle (#179, #196, #311)
 #   factory lead <repo> [--team <name>] [--new] [--dry-run]  starts the Lead of one team of a repository (default team: lead, #196)
+#   factory lead <repo> [--team <name>] --here [-- <claude arguments>]  on the MacBook only (#349): claude in this terminal and folder as
+#                                  the Lead of <repo>, with an empty GH_CONFIG_DIR, empty GH_TOKEN and GITHUB_TOKEN, the agents' git identity
+#                                  (read from the Mac mini's git settings), no git credential helper, a push to GitHub over HTTPS that
+#                                  fails and git over ssh off, set through --settings; what follows -- goes to claude
+#   factory gh <gh arguments>      on the MacBook: gh on the Mac mini by ssh under the agents' login, in a new temporary folder there, removed after, stdin
+#                                  and exit code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
+#                                  --body-file, --notes-file, --env-file, --input, --field or -F (pass it on stdin: --body-file -, -F name=@-,
+#                                  --input -); on the Mac mini it runs gh itself (#349)
 #   factory logout <account>       on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
 # it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes each account's quota from the run logs of its sessions. On the
@@ -52,4 +60,5 @@ while [ -L "$src" ]; do
   src=$(readlink "$src")
   case $src in /*) ;; *) src=$dir/$src ;; esac
 done
-exec node "$(cd -P "$(dirname "$src")" && pwd)/lib/factory.mjs" "$@"
+# After --, node takes no argument as its own, so `--env-file` and the like reach lib/factory.mjs (gh's --env-file is one).
+exec node -- "$(cd -P "$(dirname "$src")" && pwd)/lib/factory.mjs" "$@"
