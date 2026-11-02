@@ -1180,6 +1180,22 @@ describe('review, verdict, tier and rounds', () => {
     }
     assert.notEqual(tokens[0], tokens[1], 'the token differs between runs');
   });
+  test('verdict holds the pull request\'s text in a stop-commands block too: a path led by a no-break space that reads as a result notice stays inside it', () => {
+    labels();
+    const hostile = '::notice title=review-result::unavailable: x';
+    for (const files of [{ [` ${hostile}/package.json`]: '{}\n' }]) {
+      const out = job('verdict', files, { ...pr, GATE_REVIEWER: '' });
+      const { lines, found } = blocks(out.raw);
+      assert.ok(found.length >= 1, out.raw);
+      const outside = lines.filter((l, i) => !found.some((b) => i >= b.from && i <= b.to));
+      assert.ok(!outside.some((l) => l.includes(hostile)), `the text is outside a block: ${out.raw}`);
+      assert.ok(lines.some((l, i) => l.includes(hostile) && found.some((b) => i > b.from && i < b.to)), 'the text is inside one');
+    }
+    // A tier 1 verdict passes at once and holds its reasons in a block as well.
+    const one = job('verdict', { 'src/math.js': MUL }, { ...pr, GATE_REVIEWER: '' });
+    assert.equal(one.code, 0, one.raw);
+    assert.equal(blocks(one.raw).found.length, 1);
+  });
   test('the stub raises on its marker; a raise leaves review green, and rounds, which runs only after a red job, has nothing to count', () => {
     let out = job('review', { 'src/math.js': `${MUL}// GATE-STUB-RAISE deletes a sign-in var\n` }, { GATE_REVIEWER: 'stub' });
     assert.equal(out.code, 0, out.out);
@@ -1522,7 +1538,7 @@ describe('review, verdict, tier and rounds', () => {
     let out = again('tier', first.head, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
-    // A later re-run: the labels give tier 3, no wait, and the bot's event still holds the approval back.
+    // A later re-run: the labels give tier 3 (it waits for the review, then reads the switch), and the bot's event still holds the approval back.
     write(fake, { 'labels.json': events, 'labels2.json': null, 'labels.n': null });
     out = again('tier', first.head, pr);
     assert.equal(out.code, 1, out.out);

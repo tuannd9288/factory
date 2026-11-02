@@ -67,8 +67,8 @@ function open(branch, head, args) {
 
 /**
  * Whether the pull request is a tier 3 that waits for the Human: the label tier-3 or raised, or the kit's .gate/bin/tier on
- * the paths, and a tier check that is anything but a SUCCESS (the kit's job fails at once on a tier 3 without his
- * approval, so a red check is the wait). Returns a string when .gate/bin/tier could not judge. The local .gate/bin/tier is
+ * the paths, and a tier check that is anything but a SUCCESS (the kit's job waits for the review, then fails on a
+ * tier 3 without his approval where the merge switch asks it, so a red check is the wait). Returns a string when .gate/bin/tier could not judge. The local .gate/bin/tier is
  * advisory: the branch can edit its own policy. GitHub's tier job runs main's copy and labels every pull request
  * tier-<n>, so the labels are the main signal and GitHub still requires the approval.
  */

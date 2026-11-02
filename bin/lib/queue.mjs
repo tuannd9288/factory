@@ -165,8 +165,9 @@ export function switchDue(p, position) {
 
 /** What the sweep keeps of the merge switch for a repository, in $state/queue-<owner>-<name>.switch: the record of each finished
  * check run read so far (`records`, by keyOf: a position, or '' for none; a finished run's annotations do not change, so each
- * is read once, but a read that found none is kept only five minutes after the run completed), the check runs it re-ran (`done`), the ones whose refused re-run it told (`told`), and the head of each pull
- * request whose unrecorded check it told of (`bare`). A file written by an earlier form of this code reads as empty. */
+ * is read once, but a read that found none is kept only five minutes after the run completed), the check runs it re-ran
+ * (`done`), the ones whose refused re-run it told (`told`), and the head of each pull request whose unrecorded check it told
+ * of (`bare`). A file written by an earlier form of this code reads as empty. */
 function switchKept(file) {
   let kept = null;
   try {

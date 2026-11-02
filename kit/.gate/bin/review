@@ -16,8 +16,8 @@
 #            green before the reviewer ended, and follows it: a red or cancelled `review` fails it. It reads the review's
 #            result annotation whatever the conclusion; below tier 3 a raise there (or in any review on this head) labels
 #            the pull request raised and tier-3, and a result left absent fails it. A raise needs an approval given after
-#            it. Text drawn from the pull request is printed between ::stop-commands:: markers with a random token. On tier 3 it requires a code owner who is not the
-#            author to have approved the head commit, or a commit whose own patch the head carries unchanged
+#            it. Text drawn from the pull request is printed between ::stop-commands:: markers with a random token. On tier 3
+#            it requires a code owner who is not the author to have approved the head commit, or a commit whose own patch the head carries unchanged
 #            (.gate/bin/lib/approval.mjs); the queue re-runs it after that approval, so the reviewer never runs again for a
 #            click. Before that it reads the repository's merge switch (#333, .gate/bin/lib/switch.mjs) from the rules in
 #            force on the base branch and records the position on its own check run (the annotation "merge switch"): on
@@ -287,14 +287,14 @@ case "$job" in
     exit 0
     ;;
   verdict)
-    out=$(tier_of) || { echo "$out"; exit 1; }
-    case "$out" in "tier 1"*) echo "$out"; echo "verdict: tier 1: not required"; exit 0 ;; esac
+    out=$(tier_of) || { guarded "$out"; exit 1; }
+    case "$out" in "tier 1"*) guarded "$out"; echo "verdict: tier 1: not required"; exit 0 ;; esac
     # From tier 2 it takes review's result: the one reviewer call of this pull request was review's.
     msg=$(wait_verdict)
     code=$?
     case "$msg" in
-      "::notice"*) printf '%s\n' "$msg"; echo "$out" ;; # the unavailable notice comes first
-      *) echo "$out"; printf '%s\n' "$msg" ;;
+      "::notice"*) printf '%s\n' "$msg"; guarded "$out" ;; # the unavailable notice comes first
+      *) guarded "$out"; printf '%s\n' "$msg" ;;
     esac
     exit "$code"
     ;;
