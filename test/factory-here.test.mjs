@@ -348,11 +348,11 @@ test('gh refuses an argument that names a file on the MacBook, before any ssh, a
   }
 });
 
-test('factory passes --env-file to its own code, not to node, even with that file present', () => {
+test('factory passes --env-file to its own code, not to node, which would exit 9 on a file that does not exist', () => {
   const s = world();
   try {
-    writeFileSync(join(s.dir, 'f.env'), 'FACTORY_HOST_USER=elsewhere\n');
-    for (const flag of [['--env-file', 'f.env'], ['--env-file=f.env']]) {
+    assert.ok(!existsSync(join(s.dir, 'missing.env')));
+    for (const flag of [['--env-file', 'missing.env'], ['--env-file=missing.env']]) {
       const r = s.fac(['gh', 'secret', 'set', 'X', ...flag], undefined, s.dir);
       assert.equal(r.code, 2, `${flag}: ${r.out}`);
       assert.match(r.out, /stdin/);
