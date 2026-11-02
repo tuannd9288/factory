@@ -2,11 +2,15 @@
 // (origin/main) holds against what the kit's history has held. Reads git objects of both sides (ls-tree, cat-file, log);
 // it runs nothing the repository holds. bin/kit-evidence then proves the result against the same commit.
 //   node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <repo name>
-//     --human <login> [--modules <a,b>] [--out <dir>]
+//     --human <login> [--modules <a,b>] [--out <dir>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>]
+//     [--trusted-runner <json>]
 // `plan` only checks; `lay` also writes the files into the repository's working tree and, with --out, one list per
 // kind (added, updated, kept, removed, dropped-kept; one path a line). Per path:
-//   .github/CODEOWNERS (rendered): added when missing; left alone when the base is this commit's rendering; rendered anew
-//     when the base is an older rendering of the kit; otherwise the repository's own, and kept;
+//   .github/CODEOWNERS and the three gate workflows (rendered, bin/lib/gate-settings.mjs): added when missing; when the base
+//     is a rendering of the kit, now or older, rendered anew with the gate's settings the base holds, each one an option names
+//     taking its place (#335), and left alone when that changes nothing; otherwise the repository's own, and kept. A base
+//     workflow that still reads a repository variable (the kit before #335) holds no setting, so its option must be given,
+//     or that is a conflict; so are settings that break the runner rule;
 //   .claude/settings.json: added as the kit's file when missing; otherwise the base's bytes with the kit's deny lines it
 //     lacks inserted as text (bin/lib/settings.mjs), every other byte kept, a shape the lines cannot be added to a conflict;
 //   other: added when missing; left alone when it is the kit's; replaced by the kit's when it is a blob the kit's history
@@ -27,12 +31,13 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { carrierProblems, replaceGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, KIT_COMMIT, SECTION, SETTINGS, blockFor, denyOf, git, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
+import { SETTINGS as GATE_SETTINGS, WORKFLOWS, describe, parseOptions, runnerProblems, valuesIn } from './gate-settings.mjs';
 import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { addDeny } from './settings.mjs';
 
 const RENDERED = (path) => Boolean(FILLED[path]);
 
-export function plan({ factory, commit, repo, base, name, human, modules }) {
+export function plan({ factory, commit, repo, base, name, human, modules, given = {} }) {
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
   const baseSha = git(repo, ['rev-parse', '--verify', `${base}^{commit}`]).trim();
   const names = modules ? modules.split(',') : [];
@@ -49,7 +54,11 @@ export function plan({ factory, commit, repo, base, name, human, modules }) {
     lost.push(error.message);
   }
   const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: lost, writes: [], removes: [] };
-  const rendering = (path, want) => render(path, text(factory, want.oid), { name, human });
+  // The gate's settings: each as an option gives it, else as the base's workflows hold it, else the kit's default.
+  const baseValues = valuesIn(Object.fromEntries(WORKFLOWS.filter((p) => at.get(p)?.mode === '100644').map((p) => [p, text(repo, at.get(p).oid)])));
+  const values = { ...baseValues, ...given };
+  const from = Object.fromEntries(GATE_SETTINGS.map((s) => [s.key, given[s.key] !== undefined ? 'given' : baseValues[s.key] !== undefined ? "the base's" : "the kit's default"]));
+  const rendering = (path, want) => render(path, text(factory, want.oid), { ...values, human });
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const had = at.get(path);
     if (path === SETTINGS && had) {
@@ -76,12 +85,21 @@ export function plan({ factory, commit, repo, base, name, human, modules }) {
         out.writes.push({ path, mode: want.mode, text: to });
         continue;
       }
-      const as = had.mode === want.mode ? renderedAs({ factory, fac, path, text: text(repo, had.oid), name, human }) : null;
-      if (as === 'now') out.same.push(path);
-      else if (as === 'past') {
+      const was = text(repo, had.oid);
+      const as = had.mode === want.mode ? renderedAs({ factory, fac, path, text: was, human }) : null;
+      if (as === null) {
+        out.keep.push(path);
+        continue;
+      }
+      // A setting the base reads from a repository variable is in no file: its value comes only from its option.
+      const lost = GATE_SETTINGS.filter((s) => s.file === path && given[s.key] === undefined && was.includes(`vars.${s.variable}`));
+      for (const s of lost) out.conflicts.push(`${path}: the base reads the repository variable ${s.variable}, as the kit did before #335, so ${s.words} is in no file; name it with ${s.option} (the variable's value, gh variable list)`);
+      if (lost.length) continue;
+      if (to === was) out.same.push(path);
+      else {
         out.update.push(path);
         out.writes.push({ path, mode: want.mode, text: to });
-      } else out.keep.push(path);
+      }
       continue;
     }
     if (!had) {
@@ -106,6 +124,7 @@ export function plan({ factory, commit, repo, base, name, human, modules }) {
       out.removes.push(path);
     } else out.conflicts.push(`${path}: the repository's own, which module ${e.module} laid and is now off; a module's file is never kept`);
   }
+  for (const problem of runnerProblems(values)) out.conflicts.push(`runners: ${problem} (kit/.gate/enforced-rules.md)`);
   instructions({ out, at, repo, factory, fac, name, kit, text });
   // What the base lists as the kit's that kit/ no longer has.
   const listed = at.get(INVENTORY) ? text(repo, at.get(INVENTORY).oid).split('\n').filter(Boolean) : [];
@@ -117,7 +136,7 @@ export function plan({ factory, commit, repo, base, name, human, modules }) {
       out.removes.push(path);
     } else out.droppedKept.push(path);
   }
-  return { ...out, fac, baseSha, kit, factory };
+  return { ...out, fac, baseSha, kit, factory, settings: describe(values, from) };
 }
 
 /** The repository's own instruction files and the commit the kit comes from. AGENTS.md: its block replaced; CLAUDE.md: left as it is; .gate/kit-commit: the factory commit; the old .gate/pack: removed. */
@@ -196,17 +215,25 @@ export function lay(result, repo) {
 function main(argv) {
   const [verb, ...rest] = argv;
   const opt = {};
-  for (let i = 0; i < rest.length; i += 2) opt[rest[i].replace(/^--/, '')] = rest[i + 1];
-  if (!['plan', 'lay'].includes(verb) || ['factory', 'commit', 'repo', 'base', 'name', 'human'].some((k) => !opt[k])) {
-    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> [--modules <a,b>] [--out <dir>]');
+  const settings = [];
+  for (let i = 0; i < rest.length; i += 2) {
+    if (GATE_SETTINGS.some((s) => s.option === rest[i])) settings.push(rest[i], rest[i + 1]);
+    else opt[rest[i].replace(/^--/, '')] = rest[i + 1];
+  }
+  const { values: given, problem } = parseOptions(settings);
+  if (problem || !['plan', 'lay'].includes(verb) || ['factory', 'commit', 'repo', 'base', 'name', 'human'].some((k) => !opt[k])) {
+    if (problem) console.error(`kit-update: ${problem}`);
+    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> [--modules <a,b>] [--out <dir>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]');
     return 2;
   }
-  const result = plan(opt);
+  const result = plan({ ...opt, given });
   if (result.conflicts.length) {
-    console.log("kit-update: these files are the repository's own and the kit cannot take them over; merge them by hand (or put the repository's own parts where the kit keeps them), then run again:");
+    console.log("kit-update: the kit cannot be laid as the base stands; for each line, merge the repository's own file by hand (or put its own parts where the kit keeps them), or give the option the line names, then run again:");
     for (const c of result.conflicts) console.log(`  ${c}`);
     return 1;
   }
+  console.log("kit-update: the gate's settings this update lays (#335):");
+  for (const line of result.settings) console.log(`  ${line}`);
   if (verb === 'lay') {
     lay(result, opt.repo);
     if (opt.out) {
