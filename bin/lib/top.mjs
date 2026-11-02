@@ -118,7 +118,7 @@ export function etimeMs(text) {
 }
 
 /** The processes as { pid, ageMs, command }, from ps; [] when ps cannot run. */
-function psList() {
+export function psList() {
   for (const ps of ['/bin/ps', '/usr/bin/ps']) {
     if (!existsSync(ps)) continue;
     try {
@@ -224,7 +224,7 @@ const LEAD_STATES = {
  * has run none of its hooks waits at the login or the folder trust. That is an inference: whether SessionStart fires only after the
  * trust dialog has not been seen yet; it is seen at zalo-gateway's first Lead start. A Lead started before the hook existed never
  * gets this line. */
-function leadStateOf({ event, command, ageMs, now }) {
+export function leadStateOf({ event, command, ageMs, now }) {
   const at = event ? Date.parse(event.at) : NaN;
   if (Number.isFinite(at) && (ageMs == null || at >= now - ageMs)) {
     const state = LEAD_STATES[event.type ? `${event.event}:${event.type}` : event.event];
@@ -329,6 +329,17 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
   }
   const rank = (s) => ROLE_ORDER.indexOf(s.role) === -1 ? ROLE_ORDER.length : ROLE_ORDER.indexOf(s.role);
   return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { numeric: true }));
+}
+
+/** The conditions of #309 that began and still hold and that this view does not list itself (a check that never started, an issue
+ * labelled needs-human, a refused gh), as the sweep keeps them in events-active.json (bin/lib/events.mjs, which writes it). */
+export function eventsOf(state) {
+  try {
+    const a = JSON.parse(readText(join(state, 'events-active.json')));
+    return Object.values(a.conditions ?? {}).filter((c) => c.started && c.top).map((c) => ({ kind: c.kind, text: String(c.text), url: c.url ?? null }));
+  } catch {
+    return [];
+  }
 }
 
 /** The queue's and the alerts' state: the time in the newest `queue-*.ok`, the `queue-*.failed` files, every `*.failed` file. */
@@ -482,7 +493,7 @@ export async function snapshot(opts = {}) {
   const agentProfiles = opts.agentProfiles ?? process.env.AGENT_PROFILES ?? join(home, '.agent-profiles');
   const accounts = accountRows({ state, runs, agentProfiles, root });
   return {
-    now, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), accounts,
+    now, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), events: eventsOf(state), accounts,
     seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: readSessions(state), accounts, seatRows: seatAccounts(state) }),
   };
 }
@@ -590,6 +601,8 @@ export function tabsOf(snap) {
   ];
 }
 
+const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer', 'gh-refused': 'alert' };
+
 /** One frame as text, no colour, each line at most width characters. tab indexes tabsOf(snap). */
 export function render(snap, { width = 120, tab = 0, rows = null, full = false } = {}) {
   const { sessions, queue, github, now } = snap;
@@ -607,6 +620,7 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
   const waits = [
     ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => item('approve', `${r.repo}#${g.pr.number} ${g.pr.title}  https://github.com/${r.repo}/pull/${g.pr.number}`))),
     ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => item('answer', `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`)),
+    ...(snap.events ?? []).map((c) => item(EVENT_VERBS[c.kind] ?? 'look', `${c.text}${c.url ? `  ${c.url}` : ''}`)),
     ...queue.failed.map((f) => item('alert', `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`)),
   ];
   lines.push(...(waits.length ? ['Waiting on you', ...waits] : ['Nothing waits on you']));

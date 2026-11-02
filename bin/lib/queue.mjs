@@ -9,6 +9,8 @@
 // With no --repo it sweeps the repositories taken in (#211), found as the ledger finds them (clonesUnder): a folder
 // of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its
 // origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
+// The last step, under the lock, writes the events of #309 (bin/lib/events.mjs): one line to $FACTORY_STATE/events.jsonl when a condition
+// begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call.
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -17,6 +19,7 @@ import { hostname, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, checkPlists, followMain } from './checkout.mjs';
+import { noteGh, observe, resetNotes } from './events.mjs';
 import { clonesUnder } from './ledger.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
@@ -63,29 +66,39 @@ export function pickReruns(prs) {
     .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId }));
 }
 
-const QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100){nodes{
+const QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} pullRequests(states:OPEN,first:100){nodes{
 number isDraft createdAt mergeStateStatus autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
 
-const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS });
+// A failed call is noted for the events (#309: gh-refused) and thrown as before.
+const gh = (args) => {
+  try {
+    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS });
+  } catch (error) {
+    noteGh(args, error);
+    throw error;
+  }
+};
 
 /** A check run's state as the queue reads it: its conclusion once completed, PENDING before. */
 const stateOf = (run) => (run.status === 'COMPLETED' ? run.conclusion : 'PENDING');
 
+/** The open pull requests and, from the same query, the open issues labelled needs-human (#309). */
 function openPulls(repo) {
   const [owner, name] = repo.split('/');
   const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`]));
-  return data.data.repository.pullRequests.nodes.map((p) => {
+  const issues = (data.data.repository.issues?.nodes ?? []).map((i) => ({ number: i.number, title: i.title }));
+  const prs = data.data.repository.pullRequests.nodes.map((p) => {
     const all = (p.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).filter((c) => c.name);
     const byStart = (a, b) => String(a.startedAt).localeCompare(String(b.startedAt));
     const checks = {};
     for (const run of all.filter((c) => c.checkSuite?.app?.slug === 'github-actions').sort(byStart))
-      checks[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', jobId: /\/job\/(\d+)/.exec(run.detailsUrl ?? '')?.[1] };
+      checks[run.name] = { state: stateOf(run), status: run.status, startedAt: run.startedAt ?? '', jobId: /\/job\/(\d+)/.exec(run.detailsUrl ?? '')?.[1] };
     // Other Apps' checks, by name (#155: Entire Gates): the latest started wins.
     const apps = {};
     for (const run of all.filter((c) => c.checkSuite?.app?.slug !== 'github-actions').sort(byStart))
-      apps[run.name] = { state: stateOf(run), startedAt: run.startedAt ?? '', completedAt: run.completedAt ?? '' };
+      apps[run.name] = { state: stateOf(run), status: run.status, startedAt: run.startedAt ?? '', completedAt: run.completedAt ?? '' };
     return {
       number: p.number,
       isDraft: p.isDraft,
@@ -100,6 +113,7 @@ function openPulls(repo) {
       apps,
     };
   });
+  return { prs, issues };
 }
 
 /** The checks GitHub requires on main now, from the rules in force there: what gates the merge, whatever kit the
@@ -109,9 +123,12 @@ function requiredOf(repo) {
   return [...new Set(rules.filter((r) => r.type === 'required_status_checks').flatMap((r) => r.parameters.required_status_checks.map((c) => c.context)))];
 }
 
-function sweep(repo) {
+/** One repository's sweep. What it read is put in `reads` as soon as the reads succeeded, so a later failed action does not make the
+ * read a failed one; a repository whose read failed is not in `reads`, and its conditions stay as they were (#309). */
+function sweep(repo, reads) {
   const required = requiredOf(repo);
-  const prs = openPulls(repo);
+  const { prs, issues } = openPulls(repo);
+  reads.set(repo, { required, prs, issues });
   for (const { number, jobId } of pickReruns(prs)) {
     gh(['run', 'rerun', '--job', jobId, '--repo', repo]);
     console.log(`queue: re-ran the tier check of ${repo}#${number} after its approval or Entire's check`);
@@ -291,6 +308,21 @@ function sweepLanded(state) {
   }
 }
 
+/** The last step of a sweep (#309), under its lock: the five conditions written to the events file from what the sweep read and from the
+ * Leads and the accounts on this host (bin/lib/events.mjs). A failure is told in queue-events.failed and never changes the sweep's result. */
+function recordEvents(state, reads) {
+  const failure = join(state, 'queue-events.failed');
+  try {
+    const home = process.env.HOME;
+    observe({ state, reads, runs: process.env.FACTORY_RUNS ?? join(home, 'factory-runs'), agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles') });
+    rmSync(failure, { force: true });
+  } catch (error) {
+    mkdirSync(state, { recursive: true });
+    writeFileSync(failure, `${new Date().toISOString()} the events step raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    console.error(`queue: events: ${error.message}`);
+  }
+}
+
 const LABEL = 'io.github.tuannd9288.factory.queue';
 
 /** The first executable `name` on a PATH, or null. */
@@ -426,6 +458,8 @@ function main(argv) {
     const other = holderOf(held);
     return console.log(`queue: another sweep is running${other ? ` (pid ${other.pid}, started ${other.start})` : ''}; nothing done`);
   }
+  const reads = new Map();
+  resetNotes();
   try {
     followCheckout(state);
     sweepLanded(state);
@@ -439,7 +473,7 @@ function main(argv) {
     for (const repo of swept) {
       const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
-        sweep(repo);
+        sweep(repo, reads);
         rmSync(report, { force: true });
         writeFileSync(join(state, `queue-${repo.replace('/', '-')}.ok`), `${new Date().toISOString()}\n`);
       } catch (error) {
@@ -451,6 +485,7 @@ function main(argv) {
     }
     return failed ? 1 : 0;
   } finally {
+    recordEvents(state, reads);
     releaseLock(held, mine.token);
   }
 }
