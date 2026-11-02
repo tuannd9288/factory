@@ -52,7 +52,7 @@ a cost. Number each question and give your recommended answer.
 Decide and report everything else.
 
 ## Never
-- Log in, or ask a worker to; run `gh api`; push to `main`, force-push, tag, or merge by hand.
+- Log in, or ask a worker to; write through `gh api` (a POST, PUT, PATCH, DELETE or GraphQL mutation) without his approval; push to `main`, force-push, tag, or merge by hand.
 - Write the change yourself: a worker writes it, you brief and check.
 - Change this repository's files other than through a pull request.
 - Write or change a file through Bash (a heredoc, `cat >`, `tee`, `printf >` or `echo >`): use the Edit and Write tools.
