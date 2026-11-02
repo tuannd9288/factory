@@ -14,6 +14,8 @@ test('on the factory host, top --once prints one frame and exits 0', () => {
     assert.equal(r.code, 0, r.out);
     assert.match(r.stdout, /^Mac mini {2}load /);
     assert.match(r.stdout, /\[1 All\]/);
+    assert.ok(!r.stdout.includes('keys:'), '--once prints no keys line');
+    assert.ok(!r.stdout.includes('\x1b'), 'off a terminal it prints plain text');
     assert.deepEqual(SSH(s), []);
   } finally {
     s.done();

@@ -152,8 +152,8 @@ test('top shows each running team of a repository as its own Lead row, naming th
   const leads = snap.sessions.filter((s) => s.role === 'lead');
   assert.deepEqual(leads.map((s) => [s.name, s.team]).sort(), [['aardvark', 'lead'], ['badger', 'b']]);
   const lines = render(snap, { width: 200 }).split('\n');
-  assert.ok(lines.some((l) => /^ {2}aardvark +Lead lead +idle/.test(l)));
-  assert.ok(lines.some((l) => /^ {2}badger +Lead b +waiting/.test(l)));
+  assert.ok(lines.some((l) => /^ {2}aardvark +Lead lead +○ idle/.test(l)));
+  assert.ok(lines.some((l) => /^ {2}badger +Lead b +! waiting/.test(l)));
   assert.ok(lines.includes('  answer   badger (factory Lead, team b)  pane p-8'));
 });
 
@@ -200,11 +200,12 @@ test('a run shows the name in its run-<tag>.name, a Lead the name in its folder\
   assert.ok(!names.includes('174-worker') && !names.includes('factory-lead'));
 });
 
-test('the frame: a header in plain words, what waits on you, one block per team, the accounts, today and the keys (#311)', async () => {
+test('the frame: a header in plain words, what waits on you, one block per team, the accounts and today, no keys line (#311, #174)', async () => {
   const w = world();
   const { text } = await frame(w);
   const lines = text.split('\n');
   assert.ok(lines.every((l) => l.length <= 200));
+  assert.ok(!lines.some((l) => l.startsWith('keys:')), 'the keys line is asked for, and --once does not');
   assert.match(lines[0], /^Mac mini {2}load 2\.3 of 8 cores {2}·  1 working · 1 idle · 0 agents waiting {2}·  12:00 {2}·/);
   assert.match(lines[0], /queue ok 11:59/);
   assert.match(lines[0], /alerts 1/);
@@ -216,17 +217,19 @@ test('the frame: a header in plain words, what waits on you, one block per team,
     '  alert    digest.failed  09:00 digest failed',
   ]);
   assert.equal(lines[5], 'tuannd9288/factory');
-  const lead = lines.findIndex((l) => /^ {2}aardvark +Lead lead +idle +\?/.test(l));
-  const group = lines.findIndex((l) => /#174 factory top, the repo view/.test(l));
-  assert.ok(lead > 5 && lead < group, 'the Lead\'s line opens its block');
-  assert.match(lines[group], /alpha/);
-  assert.match(lines[group], /PR #260/);
-  assert.match(lines[group], /verify✓ review… verdict– tier✗/);
-  assert.match(lines[group], /waiting on the Human/);
-  const worker = lines.findIndex((l) => /^ {4}badger +worker +working /.test(l));
-  const reviewer = lines.findIndex((l) => /^ {4}beaver +reviewer +done +53m +\$1\.50/.test(l));
-  assert.ok(group < worker && worker < reviewer, 'workers before reviewers, under the issue');
-  assert.ok(lines.some((l) => /^ {4}170-worker +worker +out of quota until 13:00/.test(l)));
+  // One block per team, the worst state first: alpha waits on the Human, beta is stuck, the Lead's own team is idle.
+  const at = (re) => lines.findIndex((l) => re.test(l));
+  const [alpha, beta, lead] = [at(/^ {2}team alpha$/), at(/^ {2}team beta$/), at(/^ {2}aardvark +Lead lead +○ idle +\?/)];
+  assert.ok(5 < alpha && alpha < beta && beta < lead, `${alpha} ${beta} ${lead}`);
+  // The issue row: its state first, then #n, team, step, the pull request with its checks, the title last.
+  const group = at(/#174 /);
+  assert.match(lines[group], /^ {4}! on you #174 alpha +PR open +PR #260 verify✓ review… verdict– tier✗ factory top, the repo view$/);
+  assert.ok(alpha < group && group < beta);
+  const worker = at(/^ {6}badger +worker +● working /);
+  const reviewer = at(/^ {6}beaver +reviewer +✓ done +53m +\$1\.50/);
+  assert.ok(group < worker && worker < reviewer, 'working before done, under the issue');
+  assert.ok(beta < at(/^ {4}× stuck +#170 /));
+  assert.ok(at(/^ {4}× stuck +#170 /) < at(/^ {6}170-worker +worker +× out of quota .*until 13:00$/));
   assert.ok(!lines.some((l) => /HARNESS|claude -p|CTX|TOKENS/.test(l)), 'the engineering columns are behind a key');
   const accounts = lines.findIndex((l) => l === 'Accounts');
   assert.deepEqual(lines.slice(accounts + 1, accounts + 3), [
@@ -234,8 +237,7 @@ test('the frame: a header in plain words, what waits on you, one block per team,
     '  b  acct-two  5h ? · 7d ? · factory-b',
   ]);
   assert.doesNotMatch(lines.slice(accounts, accounts + 3).join('\n'), /seat/);
-  assert.equal(lines.at(-2), 'Today  1 pull request merged · workers and reviewers cost $1.60 on account b · waited on you 1h30');
-  assert.equal(lines.at(-1), 'keys: 1-9 or Tab switch tabs, c full columns, q quits');
+  assert.equal(lines.at(-1), 'Today  1 pull request merged · workers and reviewers cost $1.60 on account b · waited on you 1h30');
 });
 
 test('--full adds the engineering columns to every session row, and a header for them', async () => {
@@ -245,8 +247,8 @@ test('--full adds the engineering columns to every session row, and a header for
   const lines = render(snap, { width: 200, full: true }).split('\n');
   const head = lines.find((l) => l.startsWith('NAME'));
   for (const col of ['ROLE', 'STATE', 'COST', 'HARNESS', 'MODEL', 'SEAT', 'CTX', 'TURNS', 'TOKENS', 'CWD', 'BRANCH']) assert.ok(head.includes(col), col);
-  const worker = lines.find((l) => /^ {4}badger /.test(l));
-  assert.match(worker, /worker +working .* claude -p +sonnet-5-5 medium +2 /);
+  const worker = lines.find((l) => /^ {6}badger /.test(l));
+  assert.match(worker, /worker +● working .* claude -p +sonnet-5-5 medium +2 /);
   assert.match(worker, /issue-174-top/);
   assert.ok(!render(snap, { width: 200 }).split('\n').some((l) => l.startsWith('NAME')));
 });
@@ -258,7 +260,7 @@ test('a block folds the sessions that ended before today of all its issues into 
   const lines = (await frame(w, 0)).text.split('\n');
   const folded = lines.flatMap((l, i) => (/ended before today/.test(l) ? [i] : []));
   assert.deepEqual(folded.map((i) => lines[i]), ['  2 ended before today'], 'one row for the block: 174-old and 170-old');
-  const last = lines.findIndex((l) => /^ {4}beaver /.test(l));
+  const last = lines.findIndex((l) => /^ {6}beaver /.test(l));
   assert.ok(folded[0] > last, 'it comes after the issues\' rows');
   assert.match(lines[folded[0] + 1], /^ {2}2 older$/);
   assert.ok(!lines.some((l) => /^\s*174-old /.test(l)));
@@ -277,7 +279,7 @@ test('Today names each account after its cost: "$1.00 on account a, $2.00 on acc
   const w = world();
   const { snap } = await frame(w);
   const { render } = await top();
-  const today = (cost) => render({ ...snap, today: { ...snap.today, cost } }, { width: 200 }).split('\n').at(-2);
+  const today = (cost) => render({ ...snap, today: { ...snap.today, cost } }, { width: 200 }).split('\n').at(-1);
   assert.match(today([['a', 1], ['b', 2]]), /workers and reviewers cost \$1\.00 on account a, \$2\.00 on account b · waited/);
   assert.match(today([]), /workers and reviewers cost nothing yet · waited/);
 });
@@ -314,17 +316,17 @@ test('a repository\'s tab lists an issue whose session ended in the last 24 hour
   const issues = JSON.parse(readFileSync(join(w.fx, 'issues.json'), 'utf8'));
   writeFileSync(join(w.fx, 'issues.json'), JSON.stringify([...issues, { number: 171, title: 'Ended yesterday', state: 'OPEN', labels: [] }]));
   const tab = (await frame(w, 1)).text;
-  for (const n of [174, 170, 171]) assert.match(tab, new RegExp(`^ {2}#${n} `, 'm'));
+  for (const n of [174, 170, 171]) assert.match(tab, new RegExp(`^ {4}\\S.* #${n} `, 'm'));
   assert.ok(!/#169 /.test(tab), 'a session over 24 hours old is gone');
   assert.match(tab, /^\s*2 older$/m);
-  assert.ok(!/^ {2}#171 /m.test((await frame(w, 0)).text), 'All folds it');
+  assert.ok(!/ #171 /.test((await frame(w, 0)).text), 'All folds it');
 });
 
 test('the Done tab holds the closed issues, merged or not', async () => {
   const w = world();
   const done = (await frame(w, 2)).text;
-  assert.match(done, /#150 An old task.*step merged/);
-  assert.match(done, /#151 Closed with no PR.*step closed/);
+  assert.match(done, /✓ merged +#150 .*An old task/);
+  assert.match(done, /✓ closed +#151 .*Closed with no PR/);
   assert.ok(!/#174 /.test(done));
 });
 
@@ -501,10 +503,213 @@ test('the claim reader runs git in its own cache: no option in a url, no config 
   assert.ok(!existsSync(mark));
 });
 
-test('every line of the frame, the column header included, is cut to the width', async () => {
+const SGR_OURS = /\x1b\[(?:1;33|1|2|3[0-7]|0)m/g;
+const plain = (s) => s.replace(SGR_OURS, '');
+
+// A world whose texts are hard on a width counter: wide characters, an emoji (a surrogate pair), a long title with spaces, a long note.
+function hardWorld() {
   const w = world();
+  const issues = JSON.parse(readFileSync(join(w.fx, 'issues.json'), 'utf8'));
+  issues[0].title = '漢字 the top view 😀 reads at a glance and never runs one line into another on a narrow phone window';
+  writeFileSync(join(w.fx, 'issues.json'), JSON.stringify(issues));
+  const prs = JSON.parse(readFileSync(join(w.fx, 'prs.json'), 'utf8'));
+  prs[0].title = '漢字 😀 a pull request with a long title that is cut when the line is too wide for it';
+  writeFileSync(join(w.fx, 'prs.json'), JSON.stringify(prs));
+  writeFileSync(join(w.opts.runs, 'factory-lead/pane'), 'p-7\n');
+  return w;
+}
+
+test('at 45, 80, 120 and 200 columns no line of a full frame is wider than the width in display cells, with colour on and off, --full too', async () => {
+  const { cells, clip, snapshot, render } = await top();
+  const w = hardWorld();
+  const waiting = { event: 'Notification', type: 'permission_prompt', at: new Date(NOW - 5000).toISOString() };
+  writeFileSync(join(w.opts.runs, 'factory-lead/state.json'), JSON.stringify(waiting));
+  const snap = await withPath(w.bin, () => snapshot({ ...w.opts, processes: () => [{ pid: 1, command: 'claude --name factory-lead --settings {"hooks":{"SessionStart":[]}}', ageMs: 600_000 }] }));
+  for (const width of [45, 80, 120, 200]) {
+    for (const color of [false, true]) {
+      for (const full of [false, true]) {
+        const text = render(snap, { width, color, full, keys: true });
+        for (const l of text.split('\n')) assert.ok(cells(l) <= width, `${width} ${color} ${full}: ${cells(l)} cells: ${l}`);
+        assert.equal(/\x1b/.test(text), color, `${width}: ESC bytes appear only with colour on`);
+        assert.equal(plain(render(snap, { width, color: true, full, keys: true })), render(snap, { width, color: false, full, keys: true }), 'colour changes no character');
+        assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(text), 'no surrogate pair is split');
+      }
+    }
+  }
+  assert.equal(cells('漢字'), 4);
+  assert.equal(cells('a😀b'), 4);
+  assert.equal(cells('\x1b[1;33mab\x1b[0m'), 2);
+  assert.equal(clip('a😀b', 3), 'a…', 'the pair is cut whole, never in half');
+  assert.equal(clip('abc', 3), 'abc');
+});
+
+test('a title is cut at a word boundary, with …, and only the last free-text cell is cut', async () => {
+  const { cutWord } = await top();
+  assert.equal(cutWord('one two three', 10), 'one two…');
+  assert.equal(cutWord('one two three', 8), 'one two…');
+  assert.equal(cutWord('one two three', 13), 'one two three');
+  assert.equal(cutWord('unbroken', 5), 'unbr…');
+  const w = hardWorld();
   const { text } = await frame(w, 0, 80);
-  for (const l of text.split('\n')) assert.ok(l.length <= 80, `${l.length}: ${l}`);
+  const row = text.split('\n').find((l) => / #174 /.test(l));
+  const title = JSON.parse(readFileSync(join(w.fx, 'issues.json'), 'utf8'))[0].title;
+  assert.ok(row.endsWith('…'), row);
+  const kept = row.slice(row.indexOf('漢字')).slice(0, -1);
+  assert.ok(kept.length > 2 && title.startsWith(kept), row);
+  assert.equal(title[kept.length], ' ', 'the cut falls between words');
+  assert.match(row, /^ {4}! on you #174 /, 'the state, #n and the pull request stay');
+});
+
+test('a session row keeps its state at every width and drops whole columns in a fixed order: the full columns, COST, ROLE, FOR, then NAME shrinks', async () => {
+  const w = hardWorld();
+  const { snapshot, render } = await top();
+  const snap = await withPath(w.bin, () => snapshot(w.opts));
+  const order = ['BRANCH', 'CWD', 'TOKENS', 'TURNS', 'CTX', 'SEAT', 'MODEL', 'HARNESS', 'COST', 'ROLE', 'FOR'];
+  let gone = 0;
+  for (let width = 200; width >= 45; width -= 5) {
+    const lines = render(snap, { width, full: true }).split('\n');
+    const head = lines.find((l) => l.startsWith('NAME'));
+    const missing = ['NAME', 'STATE', ...order].filter((c) => !head.includes(c));
+    const k = missing.length;
+    assert.deepEqual(missing, order.slice(0, k), `${width}: columns go from the end of the order, one whole column at a time`);
+    assert.ok(k >= gone, `${width}: a column that went does not come back at a narrower width`);
+    gone = k;
+    assert.ok(head.includes('NAME') && head.includes('STATE'));
+    for (const name of ['badger', 'beaver', '170-worker']) assert.match(lines.find((l) => l.includes(name) && /^ +\S/.test(l)), /[●○✓×!] \S/, `${width}: ${name} keeps a mark and a word`);
+  }
+  assert.ok(gone >= order.indexOf('COST') + 1, 'at 45 the full columns and COST are gone');
+  const at45 = render(snap, { width: 45 }).split('\n').find((l) => l.includes('badger'));
+  assert.doesNotMatch(at45, /\$/, 'COST goes before ROLE');
+  const at80 = render(snap, { width: 80 }).split('\n').find((l) => l.includes('badger'));
+  assert.match(at80, /worker/);
+});
+
+test('the sections come in order: waits on you, the repositories by team, the folded lines, the accounts, Today; a block runs from waiting to done', async () => {
+  const w = hardWorld();
+  const { text } = await frame(w, 0, 120);
+  const lines = text.split('\n');
+  const at = (re) => lines.findIndex((l) => re.test(l));
+  const order = [at(/^Waiting on you$/), at(/^tuannd9288\/factory$/), at(/^ {2}team alpha$/), at(/^ {2}team beta$/), at(/^ {2}aardvark /), at(/ended before today$/), at(/^Accounts$/), at(/^Today /)];
+  assert.ok(order.every((i, n) => i > (order[n - 1] ?? -1)), order.join(' '));
+  const rank = (l) => ['!', '×', '●', '○', '✓'].indexOf(/[!×●○✓]/.exec(l)?.[0]);
+  const sessionsOfAlpha = lines.slice(at(/ #174 /) + 1, at(/^ {2}team beta$/)).filter((l) => /^ {6}\S/.test(l));
+  assert.ok(sessionsOfAlpha.length >= 2);
+  assert.deepEqual(sessionsOfAlpha.map(rank), [...sessionsOfAlpha.map(rank)].sort((a, b) => a - b), 'working before done inside an issue');
+});
+
+test('each state prints a mark and a word, and with colour its cell is coloured: waits on you bold yellow, working green, stuck red, done dim, idle plain', async () => {
+  const w = hardWorld();
+  const { snap } = await frame(w);
+  const { render } = await top();
+  const lines = render(snap, { width: 120, color: true }).split('\n');
+  const line = (re) => lines.find((l) => re.test(plain(l)));
+  assert.ok(line(/^ {6}badger /).includes('\x1b[32m● working\x1b[0m'));
+  assert.ok(line(/^ {6}beaver /).includes('\x1b[2m✓ done\x1b[0m'));
+  assert.ok(line(/^ {6}170-worker /).includes('\x1b[31m× out of quota\x1b[0m'));
+  assert.ok(line(/^ {4}! on you /).includes('\x1b[1;33m! on you\x1b[0m'));
+  assert.ok(line(/^ {2}aardvark /).includes('○ idle') && !line(/^ {2}aardvark /).includes('\x1b[3'), 'idle has no colour');
+  assert.equal(lines.find((l) => plain(l) === 'Waiting on you'), '\x1b[1;33mWaiting on you\x1b[0m');
+  assert.ok(lines.find((l) => plain(l).startsWith('  approve ')).startsWith('\x1b[1;33m'));
+  assert.ok(lines.includes('\x1b[1mtuannd9288/factory\x1b[0m'), 'the repository\'s name is bold');
+  assert.ok(!/\x1b\[(?!(?:1;33|1|2|3[0-7]|0)m)/.test(lines.join('\n')), 'only basic SGR');
+  assert.ok(!render(snap, { width: 120 }).includes('\x1b'), 'with colour off no ESC byte appears');
+});
+
+test('an empty "Waiting on you" is one line; a quiet repository folds into one line naming it', async () => {
+  const w = hardWorld();
+  writeFileSync(join(w.fx, 'prs.json'), '[]');
+  rmSync(join(w.opts.state, 'digest.failed'));
+  const { snap } = await frame(w);
+  const { render } = await top();
+  const base = snap.sessions.find((s) => s.name === 'beaver');
+  const old = { ...base, name: 'moth', repo: 'o/quiet', issue: null, folder: null, live: false, state: 'done', lastAt: NOW - 3 * 86400_000 };
+  const quiet = { ...snap, sessions: [...snap.sessions, old], repos: [...snap.repos, { repo: 'o/quiet', groups: [{ ...snap.repos[0].groups[0], number: 9, done: false, active: false, recent: false, sessions: [] }], other: [old], ghStatus: null }] };
+  const lines = render(quiet, { width: 200 }).split('\n');
+  assert.equal(lines[2], 'Nothing waits on you');
+  assert.ok(!lines.includes('Waiting on you'));
+  const mine = lines.flatMap((l, i) => (l.startsWith('o/quiet') ? [i] : []));
+  assert.equal(mine.length, 1, 'one line');
+  assert.ok(mine[0] > lines.findLastIndex((l) => /^ {6}\S/.test(l)), 'after the active blocks');
+  assert.match(lines[mine[0]], /\b1\b.*\b1\b/, 'its folded counts');
+  assert.ok(!/^ {2}\d+ (older|ended)/.test(lines[mine[0] + 1]), 'no lines of its own under it');
+});
+
+test('a worker resumed for three fix rounds is one row with its rounds counted; reviewers are one row each; a session with no issue sits under "no issue" at the end of its repository', async () => {
+  const w = hardWorld();
+  const cwd = join(w.root, 'WORKSPACES/factory/.claude/worktrees/w');
+  const done = (n) => init(cwd) + assistant('m1', { input_tokens: 1, output_tokens: 1 }) + result({ total_cost_usd: n });
+  for (const [tag, age, cost] of [['build-1', 900, 0.1], ['fix-1', 600, 0.2], ['fix-2', 300, 0.3]]) {
+    session(w.opts.runs, 'issue-174', tag, { log: done(cost), ageSecs: age });
+    writeFileSync(join(w.opts.runs, `issue-174/run-${tag}.name`), 'koala\n');
+  }
+  for (const [tag, name] of [['review-1', 'lynx'], ['review-2', 'puffin']]) {
+    session(w.opts.runs, 'issue-174', tag, { log: done(1), ageSecs: 200 });
+    writeFileSync(join(w.opts.runs, `issue-174/run-${tag}.name`), `${name}\n`);
+  }
+  session(w.opts.runs, 'notes-1', 'build-1', { log: init('/x/other-w') + assistant('m1', { input_tokens: 1, output_tokens: 1 }) + result({}), ageSecs: 100 });
+  writeFileSync(join(w.opts.runs, 'notes-1/run-build-1.name'), 'ocelot\n');
+  const { snapshot, render } = await top();
+  const snap = await withPath(w.bin, () => snapshot({ ...w.opts, originOf: (dir) => (dir === '/x/other-w' ? 'tuannd9288/factory' : null) }));
+  const lines = render(snap, { width: 120 }).split('\n');
+  const rows = (name) => lines.filter((l) => new RegExp(`^ +${name} `).test(l));
+  assert.equal(rows('koala').length, 1);
+  assert.match(rows('koala')[0], /\b3\b/, 'its three rounds');
+  assert.equal(rows('lynx').length + rows('puffin').length, 2);
+  const noIssue = lines.indexOf('  no issue');
+  assert.ok(noIssue > lines.findLastIndex((l) => / #\d+ /.test(l)), 'after every issue of the repository');
+  assert.match(lines[noIssue + 1], /^ {4}ocelot +worker +✓ done/);
+  assert.ok(lines.indexOf('Accounts') > noIssue);
+});
+
+test('a part of the frame that does not fit: the URL of a waiting item goes first and #n stays; the status line and the tab bar wrap whole items', async () => {
+  const w = hardWorld();
+  const { cells, snapshot, render } = await top();
+  const snap = await withPath(w.bin, () => snapshot(w.opts));
+  const wide = render(snap, { width: 200 }).split('\n').find((l) => l.startsWith('  approve'));
+  assert.match(wide, /https:\/\/github\.com\/tuannd9288\/factory\/pull\/260$/);
+  for (const width of [60, 45]) {
+    const lines = render(snap, { width }).split('\n');
+    const item = lines.find((l) => l.startsWith('  approve'));
+    assert.ok(!item.includes('https'), `${width}: the URL is dropped first`);
+    assert.match(item, /tuannd9288\/factory#260/);
+    assert.ok(cells(item) <= width);
+  }
+  const narrow = render(snap, { width: 45 }).split('\n');
+  const head = narrow.slice(0, narrow.findIndex((l) => l.startsWith('Waiting on you'))).join('\n');
+  for (const piece of ['load 2.3 of 8 cores', 'queue ok 11:59', 'alerts 1', '▸[1 All]', '[3 Done 2]']) assert.ok(head.includes(piece), `${piece} is whole on one line`);
+  assert.ok(narrow.findIndex((l) => l.startsWith('Waiting on you')) > 2, 'the status line wraps onto more than one line');
+});
+
+test('columns do not jump: the state column sits at the same cell on every tab, and a folded session\'s name counts in it', async () => {
+  const w = hardWorld();
+  const col = (text) => text.split('\n').find((l) => /^ {6}badger /.test(l)).indexOf('●');
+  const before = col((await frame(w, 0, 120)).text);
+  assert.equal(col((await frame(w, 1, 120)).text), before, 'the repository tab and All agree');
+  writeFileSync(join(w.opts.runs, 'issue-174/run-old.name'), 'hippopotamus\n');
+  const after = col((await frame(w, 0, 120)).text);
+  assert.ok(after > before, 'the folded session\'s longer name widens the column for the rows that print');
+  assert.equal(col((await frame(w, 1, 120)).text), after);
+});
+
+test('the data fields are cleaned before they are styled: no control character reaches a coloured frame but our own SGR', async () => {
+  const w = world();
+  writeFileSync(join(w.fx, 'issues.json'), JSON.stringify([{ number: 174, title: 'evil\x1b[2J\x1b]0;x\x07 title', state: 'OPEN', labels: [] }]));
+  const { snap } = await frame(w);
+  const { render } = await top();
+  const text = render(snap, { width: 120, color: true });
+  assert.ok(!/[\x00-\x09\x0b-\x1a\x1c-\x1f\x7f]/.test(plain(text)), 'no stray control character');
+  assert.ok(!/\x1b(?!\[(?:1;33|1|2|3[0-7]|0)m)/.test(text), 'no escape sequence but ours');
+  assert.match(plain(text), /evil\[2J\]0;x title/);
+});
+
+test('--once leaves out the keys line; the keys line is the loop\'s option, and wraps within the width', async () => {
+  const w = world();
+  const { snap } = await frame(w);
+  const { cells, render } = await top();
+  assert.ok(!render(snap, { width: 120 }).includes('keys:'));
+  const lines = render(snap, { width: 45, keys: true }).split('\n');
+  const first = lines.findIndex((l) => l.startsWith('keys:'));
+  assert.ok(first > 0 && lines.slice(first).every((l) => cells(l) <= 45));
 });
 
 test('a frame given the terminal\'s rows keeps the header, what waits on you, the accounts, today and the keys, cuts the tree, and says how much is left out', async () => {
@@ -531,14 +736,12 @@ test('a failed gh read keeps the last good one and says when; with none, the fie
   assert.equal(later.github.ok, false);
   const text = render(later, { width: 200 });
   assert.match(text, /tuannd9288\/factory +gh failed 12:01, showing 12:00/);
-  assert.match(text, /#174 factory top, the repo view .*PR #260/);
-  assert.ok(!/step unclaimed|no PR/.test(text.split('\n').filter((l) => /#174 /.test(l)).join('\n')));
+  assert.match(text, /#174 .*PR #260 .*factory top, the repo view/);
+  assert.ok(!/unclaimed|no PR/.test(text.split('\n').filter((l) => /#174 /.test(l)).join('\n')));
   const none = await withPath(w.bin, () => snapshot({ ...w.opts, cache: {} }));
-  const row = render(none, { width: 200 }).split('\n').find((l) => /^\s*#170 /.test(l));
-  assert.match(row, /step \?/);
-  assert.match(row, /PR \?/);
-  assert.match(row, /waiting on \?/);
-  assert.ok(!/unclaimed|no PR|waiting on –/.test(row));
+  const row = render(none, { width: 200 }).split('\n').find((l) => /^\s*\S.* #170 /.test(l));
+  assert.match(row, /^ {4}× stuck +#170 \? +\? +PR \? +\?$/, 'team, step, pull request and title are ?');
+  assert.ok(!/unclaimed|no PR|idle/.test(row));
 });
 
 test('a repository without the kit lists verify alone; a PR with it green and reviewDecision REVIEW_REQUIRED waits on the Human', async () => {
@@ -549,8 +752,8 @@ test('a repository without the kit lists verify alone; a PR with it green and re
     { number: 260, title: 'top view', state: 'OPEN', headRefName: 'issue-174-top', body: 'Issue: #174\nTeam: alpha', labels: [], mergedAt: null, reviewDecision: 'REVIEW_REQUIRED', statusCheckRollup: [{ name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS' }] },
   ]));
   const { text } = await frame(w);
-  const row = text.split('\n').find((l) => /^\s*#174 /.test(l));
-  assert.match(row, /PR #260 verify✓\s+waiting on the Human/);
+  const row = text.split('\n').find((l) => / #174 /.test(l));
+  assert.match(row, /^ {4}! on you #174 .*PR #260 verify✓ /);
   assert.ok(!/review|verdict|tier/.test(row));
   assert.match(readFileSync(w.log, 'utf8'), /pr list .*reviewDecision/);
 });
