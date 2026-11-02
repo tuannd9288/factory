@@ -253,17 +253,19 @@ test('a quote that is not in the input, in another session\'s part or too short 
     w.put(w.seatFile('issue-333', 'fix9'), '');
     w.put(w.leadFile(), '');
     await w.pass({ now: T0 });
-    appendFileSync(w.seatFile('issue-333', 'fix9'), say('I keep going in circles on this test'));
-    appendFileSync(w.leadFile(), say('Lead words that are only the Lead\'s own'));
     let at = T0;
-    for (const e of [
+    // A dropped event counts as answered and moves the cursors, so each case is sent new text of its own.
+    for (const [n, e] of [
       { kind: 'drift', session: 'issue-333 fix9', quote: 'a made up quote that was never said', why: 'w' },
       { kind: 'drift', session: 'issue-333 fix9', quote: 'Lead words that are only the Lead\'s own', why: 'w' },
       { kind: 'drift', session: 'issue-333 fix9', quote: 'circles', why: 'w' },
-    ]) {
+    ].entries()) {
+      appendFileSync(w.seatFile('issue-333', 'fix9'), say(`I keep going in circles on this test, round ${n}`));
+      appendFileSync(w.leadFile(), say(`Lead words that are only the Lead's own, round ${n}`));
       w.answer({ events: [e] });
       at += 15 * MIN;
       const r = await w.pass({ now: at });
+      assert.equal(w.calls().length, n + 1, `the model was called for ${JSON.stringify(e)}`);
       assert.deepEqual(r.failed, ['answer'], JSON.stringify(e));
     }
     assert.deepEqual(w.events().filter((l) => l.kind === 'drift'), []);
