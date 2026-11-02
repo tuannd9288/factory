@@ -29,7 +29,7 @@ process.stdin.on('end', () => {
   }
   if (e.FAKE_MODE === 'noresult') process.exit(3);
   line({ type: 'result', subtype: e.FAKE_SUBTYPE ?? 'success', is_error: false, session_id: sid, num_turns: 7, duration_ms: 1234,
-    total_cost_usd: Number(e.FAKE_COST ?? 1.25), modelUsage: { 'claude-sonnet-5-5': {} }, structured_output: { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [] } });
+    total_cost_usd: Number(e.FAKE_COST ?? 1.25), modelUsage: { 'claude-sonnet-5-5': {} }, structured_output: { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [], foundOutside: [] } });
 });
 `;
 
@@ -236,7 +236,7 @@ test('the record: one line when the session ends, with the result event\'s cost,
   assert.equal(rec.turns, 7);
   assert.equal(rec.duration_ms, 1234);
   assert.equal(rec.total_cost_usd, 1.25);
-  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [] });
+  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [], foundOutside: [] });
   assert.equal(rec.ended, 'success');
   assert.equal(rec.exitCode, 0);
   assert.ok(Date.parse(rec.start) >= before - 1000 && Date.parse(rec.end) >= Date.parse(rec.start));
