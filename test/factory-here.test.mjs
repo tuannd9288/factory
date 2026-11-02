@@ -3,7 +3,7 @@
 // Nothing live runs, and every name below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -27,6 +27,7 @@ f="$FAKE/git-$3"
 if [ -f "$f" ]; then cat "$f"; else exit 1; fi
 `,
   gh: `#!/bin/sh
+pwd > "$FAKE/gh.cwd"
 : > "$FAKE/gh.args"
 for a; do printf '%s\\0' "$a" >> "$FAKE/gh.args"; done
 cat > "$FAKE/gh.stdin"
@@ -303,6 +304,14 @@ test('gh refuses an argument that names a file on the MacBook, before any ssh, a
       ['api', 'x', '--field=body=@note.md'],
       ['api', 'x', '--input', 'note.json'],
       ['api', 'x', '--input=note.json'],
+      ['release', 'create', 'v1', '--notes-file', 'notes.md'],
+      ['release', 'create', 'v1', '--notes-file=notes.md'],
+      ['secret', 'set', 'X', '--env-file', '.env'],
+      ['secret', 'set', 'X', '--env-file=.env'],
+      ['issue', 'create', '--recover', 'saved'],
+      ['issue', 'create', '--recover=saved'],
+      ['api', 'x', '-iFbody=@note.md'],
+      ['api', 'x', '-iF', 'body=@note.md'],
     ];
     for (const args of files) {
       const r = s.fac(['gh', ...args]);
@@ -327,6 +336,10 @@ test('gh lets a file on stdin through: --body-file -, -F x=@-, --input - and a f
       ['api', 'x', '--field', 'body=@-'],
       ['api', 'x', '--input', '-'],
       ['api', 'x', '--input=-'],
+      ['release', 'create', 'v1', '--notes-file', '-'],
+      ['secret', 'set', 'X', '--env-file=-'],
+      ['api', 'x', '-iFbody=@-'],
+      ['auth', 'status', '--hostname', 'github.com'],
       ['api', 'x', '-F', 'draft=true'],
       ['api', 'x', '-f', 'body=me@example.invalid'],
       ['issue', 'comment', '1', '--body', 'a file note.md is named in this text'],
@@ -336,6 +349,50 @@ test('gh lets a file on stdin through: --body-file -, -F x=@-, --input - and a f
       assert.equal(r.code, 0, `${args.join(' ')}: ${r.out}`);
       assert.deepEqual(s.nuls('gh.args'), args);
     }
+  } finally {
+    s.done();
+  }
+});
+
+test('gh refuses gh auth status with -t or --show-token, before any ssh', () => {
+  const s = world();
+  try {
+    for (const flag of ['-t', '--show-token', '-at']) {
+      const r = s.fac(['gh', 'auth', 'status', flag]);
+      assert.equal(r.code, 2, `${flag}: ${r.out}`);
+      assert.match(r.out, /token/);
+    }
+    assert.equal(s.calls(), '', 'no ssh call');
+  } finally {
+    s.done();
+  }
+});
+
+test('gh quotes an argument that starts with =', () => {
+  const s = world();
+  try {
+    assert.equal(s.fac(['gh', 'api', '=gh', 'a=b']).code, 0);
+    assert.deepEqual(s.nuls('gh.args'), ['api', '=gh', 'a=b']);
+    assert.ok(s.calls().includes("'\\''=gh'\\''"), s.calls());
+    assert.ok(!s.calls().includes(' =gh'), s.calls());
+  } finally {
+    s.done();
+  }
+});
+
+test('gh runs the remote gh in an empty folder under the host user\'s home, and refuses when that folder holds anything', () => {
+  const s = world();
+  try {
+    const dir = join(s.home, '.local/state/factory/factory-gh/empty');
+    assert.equal(s.fac(['gh', 'issue', 'list']).code, 0);
+    assert.equal(realpathSync(s.read('gh.cwd').trim()), realpathSync(dir));
+    assert.equal(statSync(dir).mode & 0o777, 0o700);
+    rmSync(join(s.fake, 'gh.cwd'));
+    writeFileSync(join(dir, 'notes.md'), 'x');
+    const r = s.fac(['gh', 'issue', 'list']);
+    assert.equal(r.code, 2, r.out);
+    assert.ok(r.out.includes(dir), r.out);
+    assert.equal(s.read('gh.cwd'), '', 'gh never ran');
   } finally {
     s.done();
   }

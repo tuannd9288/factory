@@ -9,12 +9,14 @@
 #                                  Lead alone is restarted once Herdr reports it idle (#179, #196, #311)
 #   factory lead <repo> [--team <name>] [--new] [--dry-run]  starts the Lead of one team of a repository (default team: lead, #196)
 #   factory lead <repo> [--team <name>] --here [-- <claude arguments>]  on the MacBook only (#349): claude in this terminal and folder as
-#                                  the Lead of <repo>, with an empty GH_CONFIG_DIR, the agents' git identity (read from the Mac mini's git
-#                                  settings) and no git credential helper, set through --settings; what follows -- goes to claude
-#   factory gh <gh arguments>      on the MacBook: gh on the Mac mini by ssh under the agents' login, stdin and exit code kept; refuses
-#                                  gh auth but status, and a path on the MacBook (pass a file on stdin: --body-file -, -F name=@-, --input -);
-#                                  on the Mac mini it runs gh itself (#349)
-#   factory logout <account>      on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
+#                                  the Lead of <repo>, with an empty GH_CONFIG_DIR, empty GH_TOKEN and GITHUB_TOKEN, the agents' git identity
+#                                  (read from the Mac mini's git settings), no git credential helper and no push to GitHub, set through
+#                                  --settings; what follows -- goes to claude
+#   factory gh <gh arguments>      on the MacBook: gh on the Mac mini by ssh under the agents' login, in an empty folder there, stdin and exit
+#                                  code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
+#                                  --body-file, --notes-file, --env-file, --input, --field or -F (pass it on stdin: --body-file -, -F name=@-,
+#                                  --input -); on the Mac mini it runs gh itself (#349)
+#   factory logout <account>       on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
 # it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes each account's quota from the run logs of its sessions. On the
 # MacBook a plain run is --all (still accepted; refused on the host), and its spare Claude rows are the ~/.claude-acc<N> folders that exist. --all

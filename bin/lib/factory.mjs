@@ -444,37 +444,47 @@ function leadHere(repo, team, passed, env) {
   return r.status ?? 1;
 }
 
-const SAFE_WORD = /^[A-Za-z0-9_.,:/=@%+-]+$/;
+// A word that starts with `=` is never bare: zsh would read it as a command's path.
+const SAFE_WORD = /^[A-Za-z0-9_.,:/@%+-][A-Za-z0-9_.,:/=@%+-]*$/;
 
-/** The reason `gh <args>` may not go to the Mac mini, or null: `gh auth` but `status` would sign in or hand out a token, and a path
- * on this Mac is no file on the Mac mini, so a file must come on stdin (`-`, `@-`). */
+/** The reason `gh <args>` may not go to the Mac mini, or null. Refused: `gh auth` but `status`, and `gh auth status` with
+ * `-t` or `--show-token`, which print a token; `--recover`; and a file given with `--body-file`, `--notes-file`, `--env-file`,
+ * `--input`, `--field` or `-F` (alone or in a cluster of short flags), which names a file on this Mac and not on the Mac mini, so
+ * the file must come on stdin (`-`, `@-`). */
 function ghRefusal(args) {
   if (args[0] === 'auth' && args[1] !== 'status') return 'gh auth is refused here; only gh auth status runs';
+  if (args[0] === 'auth' && args.slice(2).some((a) => a === '--show-token' || /^-[A-Za-z]*t[A-Za-z]*$/.test(a))) return 'gh auth status -t / --show-token is refused here; it prints a token';
   const api = args[0] === 'api';
   const stdinHint = 'the Mac mini cannot read a file on this Mac; pass it on stdin with - (--body-file -, --input -) or @- (-F name=@-)';
   const fieldFile = (v) => {
     const path = /^[^=]+=@(.*)$/s.exec(v)?.[1];
     return path !== undefined && path !== '-';
   };
+  const longFlags = ['--body-file', '--notes-file', '--env-file', '--input', '--field', '--recover'];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     let flag = null;
     let value;
-    const long = /^(--body-file|--input|--field)=(.*)$/s.exec(a);
+    const long = new RegExp(`^(${longFlags.join('|')})=(.*)$`, 's').exec(a);
+    const cluster = /^-[A-Za-z]*F(.*)$/s.exec(a);
     if (long) [, flag, value] = long;
-    else if (/^-F./s.test(a)) [flag, value] = ['-F', a.slice(2).replace(/^=/, '')];
-    else if (['--body-file', '--input', '--field', '-F'].includes(a)) [flag, value] = [a, args[++i]];
+    else if (cluster) [flag, value] = ['-F', cluster[1] === '' ? args[++i] : cluster[1].replace(/^=/, '')];
+    else if (longFlags.includes(a)) [flag, value] = [a, args[++i]];
     if (flag === null || value === undefined) continue;
     const field = flag === '-F' || flag === '--field';
-    const file = field ? (api || value.includes('=') ? fieldFile(value) : value !== '-') : value !== '-';
+    const file = flag === '--recover' || (field ? (api || value.includes('=') ? fieldFile(value) : value !== '-') : value !== '-');
     if (file) return `${flag} ${value} names a file on this Mac; ${stdinHint}`;
   }
   return null;
 }
 
+/** The folder gh runs in on the Mac mini, under the host user's home: empty, so that a relative path in an argument names nothing. */
+const GH_WORKDIR = '$HOME/.local/state/factory/factory-gh/empty';
+
 /** `factory gh <args>` (#349): on the MacBook, `gh <args>` on the factory host, in the host user's login shell over ssh, under the
- * agents' login; stdin passes through, the exit code is gh's. Each argument is quoted once for the remote shell and the whole
- * command once more for `zsh -lc`. On the factory host it runs gh itself. */
+ * agents' login; stdin passes through, the exit code is gh's. The command first makes (mode 700) and enters an empty folder on the
+ * host, and exits 2 with a message if that folder holds anything. Each argument is quoted for `zsh -lc`, and the whole line once
+ * more for the remote login shell. On the factory host it runs gh itself. */
 function ghCmd(args, env) {
   if (placeOf(env) === 'factory') {
     const r = spawnSync('gh', args, { stdio: 'inherit', env });
@@ -490,7 +500,8 @@ function ghCmd(args, env) {
     return 2;
   }
   const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
-  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(['gh', ...args.map(word)].join(' '))}`], { stdio: 'inherit', env });
+  const script = `d="${GH_WORKDIR}"; mkdir -p -m 700 "$d" && cd "$d" || exit 2; if [ -n "$(ls -A)" ]; then echo "bin/factory: gh: $d is not empty; nothing was run" >&2; exit 2; fi; exec ${['gh', ...args.map(word)].join(' ')}`;
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { stdio: 'inherit', env });
   if (r.error) {
     console.error(`bin/factory: gh: ssh did not run (${r.error.code ?? 'error'})`);
     return 1;
