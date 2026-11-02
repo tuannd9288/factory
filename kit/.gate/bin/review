@@ -86,7 +86,9 @@ tier_of() {
   local out code
   out=$(.gate/bin/tier --base "$fork" --head "$head" --rules "$trusted" ${GATE_PR:+--pr "$GATE_PR"})
   code=$?
-  echo "$out"
+  # The reasons hold changed paths, which a pull request names: none may read as a workflow command in the log, even after
+  # white space (the runner trims it), as a legacy `##[` command or as an escaped line break at the start of a line.
+  echo "$out" | sed -e 's/^\([[:space:]]*\)::/\1: :/' -e 's/^\([[:space:]]*\)%0[aA]/\1% 0A/' -e 's/##\[/## [/g'
   [ "$code" -eq 0 ] || { echo "$job: the tier could not be computed, so this check fails closed"; return 1; }
 }
 

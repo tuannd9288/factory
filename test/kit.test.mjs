@@ -1027,6 +1027,26 @@ describe('review, verdict, tier and rounds', () => {
       assert.deepEqual(lines.filter((l) => own.test(l)), ['::notice title=merge switch::1-2'], `the one notice is tier's own: ${out.out}`);
     }
   });
+  test('a changed path that reads as a workflow command puts no command in the log, and tier\'s own notice is there once', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    const files = {
+      '::notice title=merge switch::all/tsconfig.json': '{}\n',
+      '::stop-commands::x/.gitattributes': 'x\n',
+      '##[error]x/tsconfig.json': '{}\n',
+      '%0A::warning::y/tsconfig.json': '{}\n',
+    };
+    const out = job('tier', files, pr);
+    assert.match(out.out, /^tier 3\n/, out.out);
+    const lines = out.out.split('\n');
+    for (const line of lines) {
+      assert.doesNotMatch(line, /##\[/, `a legacy command: ${line}`);
+      if (/^\s*(::|%0[aA])/.test(line)) assert.match(line, /^::notice title=merge switch::(all|1-2|none)$/, `a line starts with a command: ${line}`);
+    }
+    assert.deepEqual(lines.filter((l) => /^::notice title=merge switch::/.test(l)), ['::notice title=merge switch::1-2']);
+    assert.ok(lines.some((l) => l.includes('tsconfig.json (protected')), 'the paths are still shown');
+  });
   test('the stub raises on its marker; a raise leaves review green, and rounds, which runs only after a red job, has nothing to count', () => {
     let out = job('review', { 'src/math.js': `${MUL}// GATE-STUB-RAISE deletes a sign-in var\n` }, { GATE_REVIEWER: 'stub' });
     assert.equal(out.code, 0, out.out);
