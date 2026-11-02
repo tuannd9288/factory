@@ -140,7 +140,7 @@ function step(pr, head, branch) {
   if (pr.labels.some((l) => l.name === 'needs-human')) return say(1, `stopped on #${n}: it carries needs-human; the Human decides`);
   const wait = tierWait(pr);
   if (typeof wait === 'string') return say(2, `could not judge the tier (${wait})`);
-  const stop = () => (wait ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval`) : 0);
+  const stop = () => (wait ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval (unless the merge switch is at all)`) : 0);
   if (armed) return stop() || say(0, `#${n} is armed and ${how}; nothing to do`);
   if (ahead) return say(1, `refused: HEAD ${short} has commits #${n} lacks; git push first`);
 

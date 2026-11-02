@@ -19,7 +19,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   agent-desk issue #269, as the map's "Đã quyết" block records it.
 - **First product repository, 2026-10-20.** It is not docparse or tuanhub-notifier: "đang ổn, không cần". Source:
   the live copy of the page "Môi trường repo cho agent", decision 3, as the map records it.
-- **Merging, 2026-10-21 to 2026-10-30.** A reversible change in tier 1 or 2 merges by rule once the repository's
+- **Merging, 2026-10-21 to 2026-11-02.** A reversible change in tier 1 or 2 merges by rule once the repository's
   gate is green on its head commit; the Human keeps tier 3, a change stuck after three rounds, and every deploy (K1,
   2026-10-21: "Triển khai theo đề xuất đi"). A pull request auto-merges once the four checks are green on its head
   commit, and tier 3 still waits for his approval (#203, which he approved "theo đề xuất" on 2026-10-30). Attack 12
@@ -33,7 +33,9 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   him); a repository taken in starts at "1–2", and zalo-gateway keeps its present setting, GitHub's "Allow auto-merge"
   off, until he moves it. It is the two review parameters of the `factory-gate` ruleset ("Luật review của GitHub
   (Recommended)", 12:14:34), so GitHub holds it and a move applies at once to the open pull requests, which the queue
-  follows by re-running `tier`. Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`,
+  follows by re-running `tier` on the open tier-3 pull requests. At `all` nothing holds the gate, as his option read
+  ("ở vị trí 'tự động hết' thì không gì giữ cổng"): a `needs-human` pull request merges once its checks are green too.
+  Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`,
   which Colly runs. "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
   (Recommended)" are his answers; the factory's own repository is unchanged. Sources:
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 (09:51 to about 10:00),
@@ -169,7 +171,7 @@ The change sets the tier, by the paths it touches (`.gate/bin/tier`), never the 
 |---|---|---|---|
 | 1 | no tier-2 or tier-3 path | `verify`, `review`, `verdict`, `tier` green on the head commit; `verdict` passes at once | none |
 | 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
-| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks | approves from the summary |
+| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the summary |
 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
 removed.
@@ -184,7 +186,8 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 
 ## What the Human keeps
 
-- Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy.
+- Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy. Where a repository's merge
+  switch is at `all` (#333), a tier-3 or `needs-human` pull request needs no approval of his; a deploy is still his.
 - His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
   `reviewer` environment, "Allow auto-merge"), which Colly then applies on his login; and the reviewer's secret, where a
   repository uses the kit's Claude reviewer.
