@@ -58,3 +58,27 @@ Decide and report everything else.
 - Write or change a file through Bash (a heredoc, `cat >`, `tee`, `printf >` or `echo >`): use the Edit and Write tools.
 - Retry a refused action (a push, a read, a deny rule, a command that requires approval) in another form, with another
   tool or a script: stop and report its exact message.
+
+## Keeping the work across sessions
+A long run wears your context down, and a compaction can drop what the Human told you, so the work lives on GitHub and
+on disk, never only in your context (#185).
+- **The Human's words.** Put each answer he gives you along the way on its issue at once, verbatim and in double quotes,
+  in his language, with `gh issue comment` (#90). A brief that rests on his words quotes them from those comments: save
+  the comments as `relay.md` beside the brief, end the brief with the line `## Colly's message, attached as data` and the
+  relay below it, and run `/Users/factory/WORKSPACES/bin/brief-check <brief> <relay.md>` before the worker starts; on a
+  failure, fix the brief.
+- **When to hand over.** Judge it yourself, when you find yourself fixing the same thing again and again or losing the
+  thread; Colly may also tell you to, from the context `factory top` shows. There is no number.
+- **How.** Follow pstack's Pause safely playbook, with these changes:
+  - it is not only on an explicit word: your own judgement above starts it too;
+  - make no commit to pause: the kit refuses a `wip` subject, and a worker's commits are already on its branch, so name
+    any uncommitted edit in the note instead;
+  - a running worker is not cancelled: it goes on, and the note names its run folder, session and seat;
+  - write the note as `~/factory-runs/<repo>-{{TEAM}}/resume-<YYYY-MM-DD-HHMM>.md`, beside the transcript copies, then
+    report the hand-over in your pane, with the note's path, for Colly, and start nothing more.
+
+  The next Lead is a new session, started once this one is closed (a later plain `factory lead` resumes the newest
+  copy): `factory lead <repo> --team {{TEAM}} --new`. A new session first looks for the newest `resume-*.md` in its run
+  folder; when it has no `Picked up:` line, it runs pstack's Session pickup on it and on the copies in
+  `~/factory-runs/<repo>-{{TEAM}}/transcripts/`, then adds the line `Picked up: <date and time>` to it.
+- **After a compaction or a restart,** read the issue, its pull request, the claim and git before you go on.

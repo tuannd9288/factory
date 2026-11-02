@@ -136,6 +136,7 @@ describe('leadArgs', () => {
       'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
       'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)',
       'Bash(' + root + '/bin/seat:*)',
+      'Bash(' + root + '/bin/brief-check:*)',
     ]);
     for (const bad of ['Bash(gh:*)', 'Bash(git:*)']) assert.ok(!list('--allowedTools').includes(bad));
   });
