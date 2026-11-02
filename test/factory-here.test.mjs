@@ -78,11 +78,17 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
     const args = s.nuls('claude.args');
     const { env, permissions } = settingsOf(args);
     const empty = join(s.state, 'lead-here/gh-empty');
+    const push = 'url.file:///nonexistent/factory-lead-pushes-from-the-mac-mini/.pushInsteadOf';
     assert.deepEqual(env, {
-      GH_CONFIG_DIR: empty,
+      GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: 'Agent Ánh', GIT_AUTHOR_EMAIL: 'agent.anh@example.invalid',
       GIT_COMMITTER_NAME: 'Agent Ánh', GIT_COMMITTER_EMAIL: 'agent.anh@example.invalid',
-      GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_CONFIG_COUNT: '4',
+      GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
+      GIT_CONFIG_KEY_1: push, GIT_CONFIG_VALUE_1: 'https://github.com/',
+      GIT_CONFIG_KEY_2: push, GIT_CONFIG_VALUE_2: 'git@github.com:',
+      GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
     });
     assert.ok(permissions.deny.includes('Bash(gh auth:*)'), JSON.stringify(permissions));
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === 'alpha-lead', args.join(' '));
@@ -125,6 +131,96 @@ test('lead --here refuses to start when the identity cannot be read, and starts 
     const down = s.fac(['lead', 'alpha', '--here']);
     assert.notEqual(down.code, 0, down.out);
     assert.equal(s.read('claude.args'), '', 'claude never ran');
+  } finally {
+    s.done();
+  }
+});
+
+// Real git, in a temporary repository, with the system and global config files replaced by temporary ones; nothing connects anywhere.
+function realGit(s, extra) {
+  const base = join(s.dir, 'gitworld');
+  mkdirSync(base, { recursive: true });
+  const env = { PATH: process.env.PATH, HOME: s.home, GIT_CONFIG_SYSTEM: join(base, 'system.conf'), GIT_CONFIG_GLOBAL: join(base, 'global.conf'), GIT_TERMINAL_PROMPT: '0', ...extra };
+  const repo = join(base, 'repo');
+  mkdirSync(repo, { recursive: true });
+  const git = (args, input) => spawnSync('git', args, { cwd: repo, env, encoding: 'utf8', input });
+  return { base, env, git };
+}
+
+test('lead --here: a remote of each GitHub form pushes to the unreachable URL and fetches from its own', () => {
+  const s = world();
+  try {
+    s.identity();
+    assert.equal(s.fac(['lead', 'alpha', '--here']).code, 0);
+    const { env: hereEnv } = settingsOf(s.nuls('claude.args'));
+    const { git } = realGit(s, hereEnv);
+    writeFileSync(join(s.dir, 'gitworld/system.conf'), '');
+    writeFileSync(join(s.dir, 'gitworld/global.conf'), '');
+    assert.equal(git(['init', '-q']).status, 0);
+    const base = 'file:///nonexistent/factory-lead-pushes-from-the-mac-mini/';
+    for (const [name, url, rest] of [['a', 'https://github.com/owner/repo.git', 'owner/repo.git'], ['b', 'git@github.com:owner/repo.git', 'owner/repo.git'], ['c', 'ssh://git@github.com/owner/repo.git', 'owner/repo.git']]) {
+      assert.equal(git(['remote', 'add', name, url]).status, 0);
+      assert.equal(git(['remote', 'get-url', '--push', name]).stdout.trim(), `${base}${rest}`, url);
+      assert.equal(git(['remote', 'get-url', name]).stdout.trim(), url, url);
+    }
+  } finally {
+    s.done();
+  }
+});
+
+test('lead --here: git runs no credential helper from the system, global or URL-specific config', () => {
+  const s = world();
+  try {
+    s.identity();
+    assert.equal(s.fac(['lead', 'alpha', '--here']).code, 0);
+    const { env: hereEnv } = settingsOf(s.nuls('claude.args'));
+    const withEnv = realGit(s, hereEnv);
+    const without = realGit(s, {});
+    const marks = join(s.dir, 'marks');
+    mkdirSync(marks);
+    const helper = (name) => {
+      const path = join(s.dir, `helper-${name}.sh`);
+      writeFileSync(path, `#!/bin/sh\necho ran >> '${join(marks, name)}'\n`);
+      chmodSync(path, 0o755);
+      return path;
+    };
+    writeFileSync(join(withEnv.base, 'system.conf'), `[credential]\n\thelper = ${helper('system')}\n`);
+    writeFileSync(join(withEnv.base, 'global.conf'), `[credential]\n\thelper = ${helper('global')}\n[credential "https://github.com"]\n\thelper =\n\thelper = ${helper('url')}\n`);
+    const fill = (g) => g.git(['credential', 'fill'], 'protocol=https\nhost=github.com\n\n');
+    assert.equal(withEnv.git(['init', '-q']).status, 0);
+    fill(withEnv);
+    assert.deepEqual(readdirSync(marks), [], 'a helper ran under the --here env');
+    fill(without);
+    assert.ok(readdirSync(marks).length >= 1, 'no helper ran without it, so the test shows nothing');
+  } finally {
+    s.done();
+  }
+});
+
+test('lead --here refuses to start when its empty gh folder holds anything, and names the folder', () => {
+  const s = world();
+  try {
+    s.identity();
+    const empty = join(s.state, 'lead-here/gh-empty');
+    mkdirSync(empty, { recursive: true });
+    writeFileSync(join(empty, 'hosts.yml'), 'x');
+    const r = s.fac(['lead', 'alpha', '--here']);
+    assert.notEqual(r.code, 0, r.out);
+    assert.ok(r.out.includes(empty), r.out);
+    assert.equal(s.read('claude.args'), '', 'claude never ran');
+  } finally {
+    s.done();
+  }
+});
+
+test('lead passes arguments after -- to claude only with --here', () => {
+  const s = world();
+  try {
+    s.identity();
+    const r = s.fac(['lead', 'alpha', '--', 'x']);
+    assert.equal(r.code, 2, r.out);
+    assert.equal(s.calls(), '', 'no ssh call');
+    assert.equal(s.read('claude.args'), '');
   } finally {
     s.done();
   }

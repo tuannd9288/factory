@@ -387,11 +387,20 @@ function hostIdentity(env) {
   return name && email ? { name, email } : null;
 }
 
+// A push to GitHub from the MacBook fails at once, by any transport, with this unreachable URL and its reason in the message; a
+// fetch is not rewritten, so reads stay on the MacBook. The credential.helper entry empties every helper git has been given.
+const PUSH_BASE = 'file:///nonexistent/factory-lead-pushes-from-the-mac-mini/';
+const GIT_CONFIG = [
+  ['credential.helper', ''],
+  ...['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].map((from) => [`url.${PUSH_BASE}.pushInsteadOf`, from]),
+];
+
 /** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
  * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
- * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR (gh has no login here; `factory gh` runs it
- * on the Mac mini), the agents' git identity, and an emptied credential.helper list (a push cannot take the Keychain's login);
- * `gh auth` is denied. */
+ * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
+ * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
+ * prompt, and a push URL that cannot be reached for GitHub's HTTPS and SSH addresses (a push goes from the Mac mini); `gh auth` is
+ * denied. It refuses to start when the empty gh folder holds anything. */
 function leadHere(repo, team, passed, env) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -413,11 +422,17 @@ function leadHere(repo, team, passed, env) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 1;
   }
+  if (readdirSync(empty).length) {
+    console.error(`bin/factory: lead --here: ${empty} holds files; it must be empty, so nothing was started`);
+    return 1;
+  }
   const settings = {
     env: {
-      GH_CONFIG_DIR: empty,
+      GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
-      GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_CONFIG_COUNT: String(GIT_CONFIG.length),
+      ...Object.fromEntries(GIT_CONFIG.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
     },
     permissions: { deny: ['Bash(gh auth:*)'] },
   };
