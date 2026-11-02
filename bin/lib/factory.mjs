@@ -456,7 +456,7 @@ const SAFE_WORD = /^[A-Za-z0-9_.,:/@%+-][A-Za-z0-9_.,:/=@%+-]*$/;
  * the file must come on stdin (`-`, `@-`). */
 function ghRefusal(args) {
   if (args[0] === 'auth' && args[1] !== 'status') return 'gh auth is refused here; only gh auth status runs';
-  if (args[0] === 'auth' && args.slice(2).some((a) => a === '--show-token' || /^-[A-Za-z]*t[A-Za-z]*$/.test(a))) return 'gh auth status -t / --show-token is refused here; it prints a token';
+  if (args[0] === 'auth' && args.slice(2).some((a) => /^--show-token(=.*)?$/s.test(a) || /^-[A-Za-z]*t[A-Za-z]*(=.*)?$/s.test(a))) return 'gh auth status -t / --show-token is refused here; it prints a token';
   const api = args[0] === 'api';
   const stdinHint = 'the Mac mini cannot read a file on this Mac; pass it on stdin with - (--body-file -, --input -) or @- (-F name=@-)';
   const fieldFile = (v) => {

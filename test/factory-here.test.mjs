@@ -395,7 +395,7 @@ test('gh lets a file on stdin through: --body-file -, -F x=@-, --input - and a f
 test('gh refuses gh auth status with -t or --show-token, before any ssh', () => {
   const s = world();
   try {
-    for (const flag of ['-t', '--show-token', '-at']) {
+    for (const flag of ['-t', '--show-token', '-at', '--show-token=true', '--show-token=false', '-t=true', '-at=true']) {
       const r = s.fac(['gh', 'auth', 'status', flag]);
       assert.equal(r.code, 2, `${flag}: ${r.out}`);
       assert.match(r.out, /token/);
