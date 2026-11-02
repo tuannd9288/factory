@@ -1,0 +1,14 @@
+{"type":"last-prompt","lastPrompt":"LAST-PROMPT-MARKER","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"custom-title","customTitle":"TITLE-MARKER","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"mode","mode":"normal","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"permission-mode","permissionMode":"default","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"api-request-blob","blob":"BLOB-MARKER message text that is not the assistant's","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"user","message":{"role":"user","content":"USER-MARKER please start on issue 12"},"isSidechain":false,"sessionId":"0a1b2c3d-1111-2222-3333-444455556666","uuid":"l1"}
+{"type":"assistant","parentUuid":"l1","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_a","role":"assistant","content":[{"type":"thinking","thinking":"LEAD-THINKING-MARKER","signature":"sig"}],"stop_reason":"end_turn"},"uuid":"l2","timestamp":"2026-11-02T10:01:00Z","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"assistant","parentUuid":"l2","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_b","role":"assistant","content":[{"type":"text","text":"I am now also refactoring the build script, which issue 12 did not plan."}],"stop_reason":"end_turn"},"uuid":"l3","timestamp":"2026-11-02T10:01:05Z","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"assistant","parentUuid":"l3","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_c","role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Edit","input":{"file_path":"/repo/LEAD-INPUT-MARKER.js","old_string":"a","new_string":"b"}}],"stop_reason":"tool_use"},"uuid":"l4","timestamp":"2026-11-02T10:01:10Z","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"user","parentUuid":"l4","isSidechain":false,"message":{"role":"user","content":[{"tool_use_id":"toolu_a","type":"tool_result","content":"LEAD-OUTPUT-MARKER"}]},"uuid":"l5","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"assistant","parentUuid":"l4","isSidechain":true,"message":{"model":"claude-opus-5-5","id":"msg_d","role":"assistant","content":[{"type":"text","text":"SIDECHAIN-MARKER a subagent's words"}],"stop_reason":"end_turn"},"uuid":"l6","timestamp":"2026-11-02T10:01:12Z","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"attachment","attachment":{"type":"hook","text":"ATTACHMENT-MARKER"},"sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
+{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{}},"messageId":"l1"}
+{"type":"assistant","parentUuid":"l5","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_e","role":"assistant","content":[{"type":"text","text":"Tests are red again and I do not know why; I am trying the same fix a third time."}],"stop_reason":"end_turn"},"uuid":"l7","timestamp":"2026-11-02T10:02:00Z","sessionId":"0a1b2c3d-1111-2222-3333-444455556666"}
