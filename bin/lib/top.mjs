@@ -707,12 +707,13 @@ const byState = (a, b) => stateOfRow(a).rank - stateOfRow(b).rank || roleRank(a)
 function issueState(g, all) {
   if (g.done) return { mark: '✓', word: g.step === 'merged' ? 'merged' : 'closed', code: DIM, rank: 4 };
   if (g.waiting === 'the Human') return { mark: '!', word: 'on you', code: YELLOW, rank: 0 };
-  if (g.step === 'merged' || g.step === 'closed') return { mark: '✓', word: g.step, code: DIM, rank: 4 };
   const newest = all.filter((v) => v.state !== 'gone').sort((a, b) => b.lastAt - a.lastAt)[0];
-  if (!g.pr && newest && !all.some((v) => v.live) && (newest.state === 'failed' || newest.state === 'stopped')) return { mark: '×', word: 'stuck', code: RED, rank: 1 };
+  if ((!g.pr || g.step === 'merged') && newest && !all.some((v) => v.live) && (newest.state === 'failed' || newest.state === 'stopped')) return { mark: '×', word: 'stuck', code: RED, rank: 1 };
   if (g.waiting === 'the reviewer') return { mark: '●', word: 'on reviewer', code: GREEN, rank: 2 };
   if (g.waiting === 'the team') return { mark: '●', word: 'on team', code: GREEN, rank: 2 };
   if (g.waiting === '?') return { mark: '○', word: '?', code: null, rank: 3 };
+  // An open issue whose pull request merged, with nothing live or failed on it, is done for now: this replaces only "idle".
+  if (g.step === 'merged') return { mark: '✓', word: 'merged', code: DIM, rank: 4 };
   return { mark: '○', word: 'idle', code: null, rank: 3 };
 }
 
@@ -895,7 +896,8 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
     ...(snap.accounts.length ? ['Accounts', ...snap.accounts.flatMap((a) => wrapped([win('5h', a.five_hour), win('7d', a.seven_day), a.users.join(', ') || 'no row'], { first: `  ${a.letter}  ${a.name.padEnd(nameW)}  `, next: '     ' }))] : []),
     ...wrapped([
       `${merged} pull request${merged === 1 ? '' : 's'} merged`,
-      ...(cost.length ? cost.map(([letter, usd], i) => ({ text: `${i ? '' : 'workers and reviewers cost '}$${usd.toFixed(2)} on account ${letter}`, lead: i ? ', ' : ' · ' })) : ['workers and reviewers cost nothing yet']),
+      'workers and reviewers cost',
+      ...(cost.length ? cost.map(([letter, usd], i) => ({ text: `$${usd.toFixed(2)} on account ${letter}`, lead: i ? ', ' : ' ' })) : [{ text: 'nothing yet', lead: ' ' }]),
       `waited on you ${age(waitedMs)}`,
     ], { first: 'Today  ', next: '  ' }),
     ...(keys ? wrapped(['keys:', '1-9 or Tab switch tabs,', 'c full columns,', 'q quits'], { lead: ' ' }) : []),

@@ -953,16 +953,32 @@ test('a folded repository line is whole items, wrapped onto an indented line, ne
   assert.match(lines[at + 1], /^ {2}1 .*, 1 \S+$/, 'both counts, whole, on an indented line');
 });
 
-test('an issue whose pull request merged, with nothing waiting on the Human, is ✓ merged, dim; it is not idle', async () => {
+test('an open issue whose pull request merged is ✓ merged, dim, only where it would be idle: live work reads on team, a failure reads stuck', async () => {
   const w = world();
   const prs = JSON.parse(readFileSync(join(w.fx, 'prs.json'), 'utf8'));
   prs[0] = { ...prs[0], state: 'MERGED', mergedAt: '2026-10-31T10:00:00Z' };
   writeFileSync(join(w.fx, 'prs.json'), JSON.stringify(prs));
   const { snap } = await frame(w);
   const { render } = await top();
-  const row = (text) => text.split('\n').find((l) => / #174 /.test(l));
-  assert.match(row(render(snap, { width: 200 })), /^ {4}✓ merged +#174 /);
-  assert.ok(row(render(snap, { width: 200, color: true })).includes('\x1b[2m✓ merged\x1b[0m'));
-  const closed = { ...snap, repos: snap.repos.map((r) => ({ ...r, groups: r.groups.map((g) => (g.number === 170 ? { ...g, step: 'closed', done: false } : g)) })) };
-  assert.match(render(closed, { width: 200 }).split('\n').find((l) => / #170 /.test(l)), /^ {4}✓ closed +#170 /);
+  const row = (s, opts = {}) => render(s, { width: 200, ...opts }).split('\n').find((l) => / #174 /.test(l));
+  const variant = (sessions) => ({ ...snap, repos: snap.repos.map((r) => ({ ...r, groups: r.groups.map((g) => (g.number === 174 ? { ...g, sessions, waiting: '–' } : g)) })) });
+  const done = snap.sessions.find((s) => s.name === 'beaver');
+  assert.match(row(snap), /^ {4}● on team +#174 /, 'a worker still runs on its next round');
+  assert.match(row(variant([{ ...done, name: 'ember', state: 'failed', lastAt: NOW - 1000 }])), /^ {4}× stuck +#174 /);
+  assert.match(row(variant([done])), /^ {4}✓ merged +#174 /);
+  assert.ok(row(variant([done]), { color: true }).includes('\x1b[2m✓ merged\x1b[0m'));
+  assert.match(row(variant([])), /^ {4}✓ merged +#174 /, 'with no session at all');
+});
+
+test('at 45 columns each cost of Today is whole on its line, with its account, and no line of Today is cut', async () => {
+  const w = world();
+  const { snap } = await frame(w);
+  const { render } = await top();
+  const cost = [['a', 3.57], ['b', 30.01]];
+  const lines = render({ ...snap, today: { ...snap.today, cost } }, { width: 45 }).split('\n');
+  const today = lines.slice(lines.findIndex((l) => l.startsWith('Today')));
+  assert.ok(today.length > 1);
+  assert.ok(!today.some((l) => l.includes('…')), 'nothing is cut');
+  for (const piece of ['$3.57 on account a', '$30.01 on account b']) assert.equal(today.filter((l) => l.includes(piece)).length, 1, piece);
+  assert.equal(render({ ...snap, today: { ...snap.today, cost } }, { width: 200 }).split('\n').at(-1), 'Today  1 pull request merged · workers and reviewers cost $3.57 on account a, $30.01 on account b · waited on you 1h30');
 });
