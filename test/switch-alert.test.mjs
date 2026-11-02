@@ -7,8 +7,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
-import { observe, readActive, readLines } from '../bin/lib/events.mjs';
-import { HOLD_MS, watchSwitch } from '../bin/lib/switch-watch.mjs';
+import { SWITCH_HOLD_MS as HOLD_MS, observe, readActive, readLines } from '../bin/lib/events.mjs';
+import { watchSwitch } from '../bin/lib/switch-watch.mjs';
 
 const T0 = Date.parse('2026-11-02T13:00:00Z');
 const HOUR = 60 * 60_000;
@@ -142,6 +142,8 @@ function world(dir) {
       'printf \'%s\\n\' "$(printf \'%s\' "$*" | tr \'\\n\' \' \')" >>"$Q/calls"',
       'case "$*" in',
       '  "api user"*) echo agent-bot ;;',
+      // The factory's own rules fail alone when $Q/ownfail exists.
+      '  *repos/o/factory/rules*) if [ -e "$Q/ownfail" ]; then echo "HTTP 502" >&2; exit 1; fi; printf "["; cat "$Q/rules.json"; printf "]" ;;',
       '  *rules/branches*) if [ -e "$Q/rulesfail" ]; then echo "HTTP 502" >&2; exit 1; fi; printf "["; cat "$Q/rules.json"; printf "]" ;;',
       '  *graphql*) echo \'{"data":{"repository":{"pullRequests":{"nodes":[]}}}}\' ;;',
       '  *) exit 1 ;;',
@@ -229,7 +231,7 @@ test('the factory\'s own repository: its rules are read once a sweep and none of
     const withOwn = { FACTORY_CHECKOUT: w.checkout };
     let r = w.sweep(withOwn);
     assert.equal(r.code, 0, r.out);
-    const own =r.calls.filter((c) => c.includes('repos/o/factory/rules/branches/main'));
+    const own = r.calls.filter((c) => c.includes('repos/o/factory/rules/branches/main'));
     assert.equal(own.length, 1);
     assert.match(own[0], /^api --paginate --slurp /);
     assert.ok(!r.calls.some((c) => c.includes('graphql') && c.includes('name=factory')), 'no pull request of its own is listed');
@@ -243,4 +245,44 @@ test('the factory\'s own repository: its rules are read once a sweep and none of
     r = w.sweep();
     assert.ok(!r.calls.some((c) => c.includes('o/factory')), 'no checkout, no read');
     assert.ok(!existsSync(positionFile(w.state, 'o/factory')));
+  }));
+
+test('rules that give no position write no position file and start no condition, and the sweep goes on', () =>
+  withDir((dir) => {
+    const w = world(dir);
+    const bad = () =>
+      writeFileSync(join(dir, 'rules.json'), JSON.stringify([{ type: 'pull_request', parameters: { required_approving_review_count: '1', require_code_owner_review: true } }]));
+    bad();
+    let r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /merge switch of o\/app could not be read/);
+    assert.ok(!existsSync(positionFile(w.state, 'o/app')));
+    assert.deepEqual(lines(w.state), []);
+    w.rules('1-2');
+    w.sweep();
+    bad();
+    r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(saved(w.state, 'o/app'), { position: '1-2', move: null });
+    assert.deepEqual(lines(w.state), []);
+  }));
+
+test('the factory\'s own repository whose rules cannot be read: one line says so, the exit code is the sweep\'s, the file and the condition stay', () =>
+  withDir((dir) => {
+    const w = world(dir);
+    const withOwn = { FACTORY_CHECKOUT: w.checkout };
+    const ownLines = () => lines(w.state).filter((l) => l.includes(' switch-moved o/factory '));
+    w.rules('1-2');
+    w.sweep(withOwn);
+    w.rules('none');
+    w.sweep(withOwn);
+    assert.equal(ownLines().length, 1);
+    const kept = saved(w.state, 'o/factory');
+    assert.equal(kept.position, 'none');
+    writeFileSync(join(dir, 'ownfail'), '');
+    const r = w.sweep(withOwn);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.out.split('\n').filter((l) => l.includes('merge switch of o/factory could not be read')).length, 1);
+    assert.deepEqual(saved(w.state, 'o/factory'), kept);
+    assert.equal(ownLines().length, 1, 'neither started again nor cleared');
   }));

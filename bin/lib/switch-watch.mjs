@@ -8,9 +8,6 @@ import { join } from 'node:path';
 import { POSITIONS } from '../../kit/.gate/bin/lib/switch.mjs';
 import { writeAtomic } from './events.mjs';
 
-/** How long a move stays reported, from the time the sweep saw it. */
-export const HOLD_MS = 24 * 60 * 60_000;
-
 const moveOf = (m) => (m && POSITIONS.includes(m.from) && POSITIONS.includes(m.to) && typeof m.at === 'string' && Number.isFinite(Date.parse(m.at)) ? { from: m.from, to: m.to, at: m.at } : null);
 
 /** What the file holds: { position, move }, or null when there is none or it cannot be parsed. */
