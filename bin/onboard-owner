@@ -12,6 +12,18 @@
 #   changes. It reads the reviewer from main's gate-trusted.yml; a main whose gate-trusted.yml still reads the repository
 #   variable, as the kit did before #335, has it from GATE_REVIEWER until its kit update lands. The four old options are
 #   refused, with nothing done.
+#   bin/onboard-owner <owner/name> --id <repository id> --merge all|1-2|none [--apply]
+#        moves the repository's merge switch (#333): the two review parameters of the gate ruleset. The run writes the live
+#        ruleset back with those two changed and nothing else in it (whatever else it holds stays as it is), and no other
+#        setting: any other difference from the kit is listed "not changed" and left; a gate not yet in force, or with no
+#        pull_request rule, is refused. Without --apply it shows the two parameters, from and to, and makes no change; with
+#        it, it reads the two parameters from the ruleset and the position from the rules in force. all: every pull request
+#        merges by itself once its checks are green, tier 3 included; 1-2: tier 1 and 2 do, and tier 3 waits for the
+#        Human's approval (the default of a new gate); none: every pull request waits for an approval. It runs under the
+#        Human's login only and is asked before each move. Without --merge a run never changes the two parameters: a
+#        changed gate ruleset is put back with the ones it holds. Every run names the position it reads once the kit is
+#        on the branch. GitHub applies a move at once to the open pull requests, and the queue re-runs the `tier` check
+#        of a tier-3 one whose recorded position and the one in force differ in a way that changes its verdict.
 # The id is the repository's own (gh api repos/<owner>/<name> --jq .id), so a typo or a renamed repository is refused.
 # Colly runs it with --apply again once the kit pull request has merged, to put the kit's gate in; his approval of
 # the kit pull request covers that. It never runs git or anything the repository holds. FACTORY_AGENT (default:

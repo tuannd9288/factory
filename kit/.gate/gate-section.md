@@ -14,7 +14,7 @@ file. What a program enforces: `.gate/enforced-rules.md`.
 - A source change carries a test that fails at the base. Where none can, the pull request body says
   `No-red: <why, 20 characters or more>`; the reviewer judges it (where Entire reviews, the Human: tier 3).
 - `.gate/bin/tier` prints the tier. Tier 2: commit the failing test first, alone, with `Failing-test: <command>`.
-  Tier 3 (a path in `.gate/protected`, this block included): the Human approves the head commit.
+  Tier 3 (a path in `.gate/protected`, this block included): the Human approves the head commit, unless the repository's merge switch is at `all`.
 - Four checks decide on the exact head commit, from `main`'s copies: `verify`, `review`, `verdict`, `tier` (where Entire
   reviews, `tier` needs its check `Entire Gates` to be success). When one is red, read `.claude/skills/gate-red/SKILL.md` first.
 - The Human (2026-10-29), to the reviewer: "Rate each bug from 1 to 10 on how often it would happen and how bad it would be. If the two scores multiplied are below 5, just file it as an issue and leave the code alone." To the writer: "Do not design for rare or future cases nobody asked about."
