@@ -119,22 +119,28 @@ export function etimeMs(text) {
   return m ? ((Number(m[1] ?? 0) * 24 + Number(m[2] ?? 0)) * 3600 + Number(m[3]) * 60 + Number(m[4])) * 1000 : null;
 }
 
-/** The processes as { pid, ageMs, command }, from ps; [] when ps cannot run. */
-function psList() {
-  for (const ps of ['/bin/ps', '/usr/bin/ps']) {
+/** The processes as { pid, ageMs, command }, from ps; throws when ps is not here or cannot run (the events step needs to tell that
+ * from no process). */
+export function readProcesses(paths = ['/bin/ps', '/usr/bin/ps']) {
+  for (const ps of paths) {
     if (!existsSync(ps)) continue;
-    try {
-      return execFileSync(ps, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
-        .split('\n')
-        .flatMap((l) => {
-          const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
-          return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
-        });
-    } catch {
-      return [];
-    }
+    return execFileSync(ps, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\n')
+      .flatMap((l) => {
+        const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
+        return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
+      });
   }
-  return [];
+  throw new Error('ps is not on this host');
+}
+
+/** The same, with [] when ps cannot run: what the view shows. */
+function psList() {
+  try {
+    return readProcesses();
+  } catch {
+    return [];
+  }
 }
 
 /** The repository and team a process is the Lead of, or null: a `claude` command with `--name <repo>-<team>` (packs/pstack/bin/lead),
@@ -226,7 +232,7 @@ const LEAD_STATES = {
  * has run none of its hooks waits at the login or the folder trust. That is an inference: whether SessionStart fires only after the
  * trust dialog has not been seen yet; it is seen at zalo-gateway's first Lead start. A Lead started before the hook existed never
  * gets this line. */
-function leadStateOf({ event, command, ageMs, now }) {
+export function leadStateOf({ event, command, ageMs, now }) {
   const at = event ? Date.parse(event.at) : NaN;
   if (Number.isFinite(at) && (ageMs == null || at >= now - ageMs)) {
     const state = LEAD_STATES[event.type ? `${event.event}:${event.type}` : event.event];
@@ -331,6 +337,17 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
   }
   const rank = (s) => ROLE_ORDER.indexOf(s.role) === -1 ? ROLE_ORDER.length : ROLE_ORDER.indexOf(s.role);
   return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { numeric: true }));
+}
+
+/** The conditions of #309 that began and still hold and that this view does not list itself (a check that never started, an issue
+ * labelled needs-human, a refused gh), as the sweep keeps them in events-active.json (bin/lib/events.mjs, which writes it). */
+export function eventsOf(state) {
+  try {
+    const a = JSON.parse(readText(join(state, 'events-active.json')));
+    return Object.values(a.conditions ?? {}).filter((c) => c.started && c.top).map((c) => ({ kind: c.kind, text: String(c.text), url: c.url ?? null }));
+  } catch {
+    return [];
+  }
 }
 
 /** The queue's and the alerts' state: the time in the newest `queue-*.ok`, the `queue-*.failed` files, every `*.failed` file. */
@@ -484,7 +501,7 @@ export async function snapshot(opts = {}) {
   const agentProfiles = opts.agentProfiles ?? process.env.AGENT_PROFILES ?? join(home, '.agent-profiles');
   const accounts = accountRows({ state, runs, agentProfiles, root });
   return {
-    now, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), accounts,
+    now, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), events: eventsOf(state), accounts,
     seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: readSessions(state), accounts, seatRows: seatAccounts(state) }),
   };
 }
@@ -763,6 +780,8 @@ export function tabsOf(snap) {
   ];
 }
 
+const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer', 'gh-refused': 'alert' };
+
 /** A string from a log, a folder or GitHub, less its control characters, so none can reach the terminal as an escape sequence. */
 const clean = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
 const cleanDeep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(cleanDeep) : v && Object.getPrototypeOf(v) === Object.prototype ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanDeep(x)])) : v);
@@ -772,7 +791,7 @@ const cleanDeep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? 
 export function render(input, { width = 120, tab = 0, rows = null, full = false, color = false, keys = false } = {}) {
   const paint = (code, text) => (color && code && text ? `\x1b[${code}m${text}\x1b[0m` : text);
   const tint = (code) => (code ? (text) => paint(code, text) : undefined);
-  const snap = { ...input, sessions: cleanDeep(input.sessions), repos: cleanDeep(input.repos), accounts: cleanDeep(input.accounts), queue: cleanDeep(input.queue), github: { ...input.github, error: clean(input.github.error ?? '') } };
+  const snap = { ...input, sessions: cleanDeep(input.sessions), repos: cleanDeep(input.repos), accounts: cleanDeep(input.accounts), queue: cleanDeep(input.queue), events: cleanDeep(input.events ?? []), github: { ...input.github, error: clean(input.github.error ?? '') } };
   const { sessions, queue, github, now } = snap;
   const day = startOfDay(now);
   const count = (st) => sessions.filter((s) => s.state === st).length;
@@ -797,6 +816,7 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
   const waits = [
     ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => item('approve', `${r.repo}#${g.pr.number} ${g.pr.title}`, `https://github.com/${r.repo}/pull/${g.pr.number}`))),
     ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => item('answer', `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`)),
+    ...(snap.events ?? []).map((c) => item(EVENT_VERBS[c.kind] ?? 'look', c.text, c.url ?? '')),
     ...queue.failed.map((f) => item('alert', `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`)),
   ];
   lines.push(...(waits.length ? [paint(YELLOW, 'Waiting on you'), ...waits] : ['Nothing waits on you']));
