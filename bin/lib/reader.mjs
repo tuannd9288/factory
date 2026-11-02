@@ -254,8 +254,15 @@ function runModel({ command, args, stdin, cwd, env, timeoutMs }) {
     let out = '';
     let err = '';
     let timedOut = false;
+    let exited = false;
     const timer = setTimeout(() => {
       timedOut = true;
+      if (exited) {
+        // The child is gone, so there is no group to kill (its pid may be someone else's now); only a grandchild holds the pipes.
+        child.stdout.destroy();
+        child.stderr.destroy();
+        return resolve({ ok: false, detail: `${command} did not answer within ${Math.round(timeoutMs / 1000)} s` });
+      }
       try {
         process.kill(-child.pid, 'SIGKILL');
       } catch {
@@ -264,6 +271,7 @@ function runModel({ command, args, stdin, cwd, env, timeoutMs }) {
     }, timeoutMs);
     // `close` waits for every process that still holds a pipe; once the timer has fired, the child's exit is enough.
     child.on('exit', () => {
+      exited = true;
       if (!timedOut) return;
       clearTimeout(timer);
       child.stdout.destroy();

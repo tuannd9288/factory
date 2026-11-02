@@ -52,6 +52,11 @@ if (fs.existsSync(Q + '/tree')) {
   fs.writeFileSync(Q + '/grandchild', String(g.pid));
   setInterval(() => {}, 1000);
 }
+else if (fs.existsSync(Q + '/orphan')) {
+  // Exits at once; a grandchild in a session of its own keeps our stdout open, out of reach of a kill of our group.
+  const g = require('child_process').spawn('sleep', ['60'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
+  fs.writeFileSync(Q + '/grandchild', String(g.pid));
+}
 else if (fs.existsSync(Q + '/hang')) setInterval(() => {}, 1000);
 else if (fs.existsSync(Q + '/answer-' + n + '.txt')) process.stdout.write(fs.readFileSync(Q + '/answer-' + n + '.txt', 'utf8'));
 else if (fs.existsSync(Q + '/fail')) { process.stderr.write('boom ghp_abcdefghijklmnopqrstuvwxyz0123456789\\n'); process.exit(1); }
@@ -421,7 +426,7 @@ test('a call that outlasts the timeout ends the pass even when a grandchild hold
     w.flag('tree');
     const t = Date.now();
     try {
-      const r = await w.pass({ now: T0 + 15 * MIN, timeoutMs: 400 });
+      const r = await w.pass({ now: T0 + 15 * MIN, timeoutMs: 2500 });
       assert.ok(Date.now() - t < 20_000, 'the pass ended well within the grandchild\'s 60 s sleep');
       assert.deepEqual(r.failed, ['command']);
       assert.deepEqual(w.shape(), ['start reader-failed command']);
@@ -439,6 +444,30 @@ test('a call that outlasts the timeout ends the pass even when a grandchild hold
       assert.ok(!alive, 'the whole process group was killed');
     } finally {
       // Whatever happened, no sleep outlives the test.
+      try {
+        process.kill(Number(readFileSync(join(w.q, 'grandchild'), 'utf8')), 'SIGKILL');
+      } catch {
+        // gone already
+      }
+    }
+  });
+});
+
+test('a timer that fires after the child exited, with a grandchild in another session holding the pipes, still ends the pass', async () => {
+  await withDir(async (dir) => {
+    const w = world(dir);
+    w.put(w.seatFile(), '');
+    await w.pass({ now: T0 });
+    appendFileSync(w.seatFile(), say('some words'));
+    w.flag('orphan');
+    const t = Date.now();
+    try {
+      const r = await w.pass({ now: T0 + 15 * MIN, timeoutMs: 1500 });
+      assert.ok(Date.now() - t < 20_000, 'the pass ended well within the grandchild\'s 60 s sleep');
+      assert.deepEqual(r.failed, ['command']);
+      assert.deepEqual(w.shape(), ['start reader-failed command']);
+      assert.ok(!existsSync(join(w.state, 'reader.lock')));
+    } finally {
       try {
         process.kill(Number(readFileSync(join(w.q, 'grandchild'), 'utf8')), 'SIGKILL');
       } catch {
