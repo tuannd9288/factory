@@ -5,7 +5,8 @@
 //   .gate/bin/claim --release <n> <team|--human>      the holder (or the Human, with admin rights) lets it go
 //   .gate/bin/claim --handoff <n> <from|--human> <to> the holder (or the Human) gives it to another team
 //   .gate/bin/claim --list [--all]                    the held claims; --all adds the released ones
-// A success prints `Claim: <sha>`, the line for the pull request. After a release or handoff it disarms the auto-merge of each
+// `tier` refuses a pull request on a claimed issue whose Team: line is not the team that holds the claim, the one a handoff
+// names after it. A success prints `Claim: <sha>`, the line for the pull request. After a release or handoff it disarms the auto-merge of each
 // open pull request that names the issue and re-runs its `tier` check, which then reads the moved ref (a warning, never a
 // failure, when that cannot be done). GitHub keeps the ref created once, never rewritten, never deleted (the rulesets
 // factory-branches and factory-claims); it does not know who pushed, so who may release is this command's rule and the
@@ -16,7 +17,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { claim as claimLine, isTeam, issue as issueLine } from './prbody.mjs';
+import { claim as claimLine, isTeam, issue as issueLine, team } from './prbody.mjs';
 
 class Stop extends Error {
   constructor(message, code = 1) {
@@ -217,8 +218,8 @@ function list(all) {
 // The git options of the trusted jobs, whose checkout keeps no credential (the helper of gate-trusted.yml's fetch steps).
 const JOB_NET = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 
-/** The tier job's check of one pull request: the issue its Issue: line names is open, and its Claim: line is the tip of
- * claim/<n>, both read now. A claim can outlive its issue (a handoff after another team's pull request closed it), so the
+/** The tier job's check of one pull request: the issue its Issue: line names is open, its Claim: line is the tip of
+ * claim/<n> and its Team: line is the team that holds it (after a handoff, the team it names), all read now. A claim can outlive its issue (a handoff after another team's pull request closed it), so the
  * issue's state is read here, not trusted to the ref. */
 export function check(repo, pr) {
   const view = ghJson('pr', 'view', pr, '--repo', repo, '--json', 'closingIssuesReferences,body');
@@ -245,6 +246,9 @@ export function check(repo, pr) {
   if (tip.sha !== line.sha) throw red(`Claim: ${short(line.sha)} is not the claim on #${n}: ${refOf(n)} is at ${short(tip.sha)}, "${oneLine(tip.subject)}"`);
   if (tip.state === 'invalid') throw red(`${refOf(n)} holds a commit no form of claim wrote ("${oneLine(tip.subject)}"), so there is no claim on #${n}; the Human decides`);
   if (tip.state !== 'claimed' && tip.state !== 'handed-off') throw red(`the claim on #${n} was released ("${oneLine(tip.subject)}")`);
+  const said = team(view.body);
+  if (!said.ok) throw red(`the body needs one line "Team: ${tip.team}", the team that holds claim/${n}`);
+  if (said.value !== tip.team) throw red(`Team: ${oneLine(said.value)} does not hold the claim on #${n}: ${tip.team} does`);
   console.log(`tier: claim: #${n} is held by ${tip.team} at ${short(tip.sha)}`);
 }
 
