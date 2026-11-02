@@ -2,9 +2,9 @@
 # scripts checked out from the pull request's base. It runs on pull_request, not pull_request_target: it writes only
 # the pull request's own Actions cache, never one main's or a deploy's jobs restore, and it holds no secret and a
 # read-only token. GitHub runs the candidate's copy of this file, so a change to it is a .gate/protected path: tier 3,
-# the Human's approval. The runner is the repository variable GATE_PR_RUNNER (a JSON label list, as main.yml's
-# GATE_RUNNER), GitHub-hosted Ubuntu when unset; never a runner that holds a secret or runs main's or a deploy's jobs, and
-# a self-hosted one only when it is ephemeral and the two-job canary proved it clean (.gate/enforced-rules.md). The verify
+# the Human's approval. The runner is the repository's own setting, which bin/onboard fills in (#335; GitHub-hosted Ubuntu
+# in the kit); never a runner that holds a secret or runs main's or a deploy's jobs, and a self-hosted one only when it is
+# ephemeral and the two-job canary proved it clean (.gate/enforced-rules.md). The verify
 # step's timeout is GATE_VERIFY_TIMEOUT in main's .gate/config.sh, read by the step before it. Node and pnpm are the ones
 # the candidate names (.node-version, else 24; package.json's packageManager), since its code runs on them anyway (#155).
 name: gate
@@ -23,7 +23,7 @@ concurrency:
 jobs:
   verify:
     name: verify
-    runs-on: ${{ fromJSON(vars.GATE_PR_RUNNER || '"ubuntu-latest"') }}
+    runs-on: ["ubuntu-latest"]
     # The ceiling: the largest GATE_VERIFY_TIMEOUT (.gate/bin/verify-timeout --max) and the checkouts and setup. The verify
     # step below is bound by the repository's own value.
     timeout-minutes: 90

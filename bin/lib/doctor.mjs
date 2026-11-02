@@ -5,8 +5,10 @@
 //     `gh pr list` and `gh pr checks`, and any -X, --method, -f, -F, --field, --raw-field or --input; a query is in the path;
 //   - it runs only from a commit on the first-parent line of origin/main, with no uncommitted, untracked or ignored
 //     file under bin/ or kit/, as bin/onboard asks of its clone;
-//   - it prints no token, secret or variable value: the four variables the kit reads (#210) are read, GATE_REVIEWER to
-//     choose the gate's ruleset as onboard-owner does, and their values are used and never shown;
+//   - it prints no token, secret or variable value. The gate's settings are read from main's workflows (#335), the reviewer
+//     to choose the gate's ruleset as onboard-owner does. The repository variables that held them before #335 are listed
+//     to name each one still set, and on a main whose gate-trusted.yml predates #335 GATE_REVIEWER's value chooses the
+//     ruleset; a variable's value is used and never shown;
 //   - each line names what it read, and the end lists every gh call that ran.
 // The repository's files come from git objects of a bare clone in the system's temporary folder, removed at the end:
 // nothing the repository holds runs. DOCTOR_CLONE_URL (an absolute local folder, for tests) replaces the clone's URL.
@@ -17,7 +19,8 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_BYTES, MAX_LINES, carrierProblems, countLines, entryIn, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
-import { current, gateState, gh, identify, left, variableProblems, wanted } from './owner.mjs';
+import { SETTINGS, TRUSTED, runnerProblems } from './gate-settings.mjs';
+import { current, gateState, gh, identify, left, wanted } from './owner.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WIDTH = 120;
@@ -101,13 +104,29 @@ function format(ok, label, result, reads) {
   return [head + first + tail, ...lines.slice(1).map((l) => ' '.repeat(head.length) + l)].join('\n');
 }
 
+/** What the doctor says of the gate's settings on main (#335): each in the kit's form in its workflow, a reviewer named, the
+ * runner rule, and no repository variable left from before #335, which nothing reads and which changes without a pull
+ * request. */
+function settingProblems({ slug, files, settings, old, variables }) {
+  if (old) return [`${TRUSTED} on main reads the repository variables, as the kit did before #335, and those change without a pull request; bin/kit-update with the four settings brings them into the workflows`];
+  const problems = [];
+  for (const s of SETTINGS) {
+    if (files[s.file] === undefined) problems.push(`${s.file} is not on main as a regular file`);
+    else if (settings[s.key] === undefined) problems.push(`${s.words} is not in ${s.file} in the kit's form`);
+  }
+  if (settings.reviewer === '') problems.push(`no reviewer: GATE_REVIEWER is empty in ${TRUSTED}, so review and verdict fail closed`);
+  problems.push(...runnerProblems(settings));
+  for (const name of Object.keys(variables)) problems.push(`the repository variable ${name} is still set, and nothing reads it since #335: gh variable delete ${name} --repo ${slug}`);
+  return [...new Set(problems)];
+}
+
 function checkSettings(ctx) {
-  const reads = 'repo rulesets env collab invites kit vars';
-  const { slug, agent, branch, kitLanded, reviewer, isPrivate } = ctx;
+  const reads = 'repo rulesets env collab invites kit vars workflows';
+  const { slug, agent, branch, kitLanded, reviewer } = ctx;
   const want = wanted({ kitLanded: true, branch, reviewer });
   const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
   const have = current(slug, agent, names, get);
-  const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...left(slug, agent, have, want), ...variableProblems(have.variables, { isPrivate })];
+  const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...left(slug, agent, have, want), ...(kitLanded ? settingProblems(ctx) : [])];
   return { ok: !problems.length, result: problems.length ? problems : 'all as the kit\'s gate wants', reads };
 }
 
@@ -231,12 +250,14 @@ function main(argv) {
     const tip = git(['-C', clone, 'rev-parse', '--verify', rev]);
     if (tip.status !== 0) throw new Refusal(`the clone has no ${branch}, the default branch`);
     const head = tip.stdout.trim();
-    const state = gateState(slug, branch, get);
+    // The workflows from the clone, which holds main already; the contents API would be a call more for each.
+    const state = gateState(slug, branch, get, (path) => {
+      const entry = entryOf(clone, rev, path);
+      return entry?.mode === '100644' ? entry.bytes.toString('utf8') : null;
+    });
     let merged;
     const ctx = {
       slug, id, agent, branch, clone, rev, head, ...state,
-      // A repository GitHub does not call public is taken as private.
-      isPrivate: repo.private !== false,
       mergedPrs: () => (merged ??= get(['pr', 'list', '--repo', slug, '--state', 'merged', '--base', branch, '--limit', '200', '--json', 'number,headRefName,mergeCommit,mergedAt']) ?? []),
     };
     console.log(`onboard-doctor: ${slug} (id ${repo.id}), ${branch} at ${head.slice(0, 7)}, read as ${login}, from factory ${git(['-C', factory, 'rev-parse', '--short', 'HEAD']).stdout.trim()}`);

@@ -2,7 +2,8 @@
 # Takes a repository into the factory: clones it under the factory root, creates its Claude Code profile (only now)
 # with a settings.json that keeps out what the logged-in claude.ai account would load, writes its .envrc, and opens the kit pull request in it once the full verify passes. Logging into the profile stays
 # the Human's.
-#   bin/onboard <repo-url> [--no-pr] [--own <file>] [--module <name>]...
+#   bin/onboard <repo-url> [--no-pr] [--own <file>] [--module <name>]... [--reviewer <name>] [--runner <json>]
+#     [--pr-runner <json>] [--trusted-runner <json>]
 # The team that claimed the issue runs it; a repository that already has the kit is brought up to date with
 # bin/kit-update. bin/onboard-owner runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
@@ -23,6 +24,12 @@
 # --module <name> (repeatable) turns on a module (modules/<name>/, bin/lib/module.mjs): its files are copied into the
 # repository, and only into one that turns it on; the choice is written to .gate/modules, the default being the
 # repository's own .gate/modules, else none. A file the repository already has at a module's path is a conflict.
+# --reviewer (stub, claude or entire), --runner, --pr-runner and --trusted-runner (JSON: "ubuntu-latest" or
+# ["self-hosted","macOS"]) are the gate's settings (#335, bin/lib/gate-settings.mjs): which reviewer the gate runs, and the
+# runners of main's jobs, the candidate's verify and the trusted jobs. They are filled into the three workflows as
+# CODEOWNERS gets its owner, so they are on main once the kit lands, and a pull request changes them at tier 3. One left out
+# is the kit's: GitHub-hosted Ubuntu, and no reviewer, so review and verdict fail closed. Runners that break the runner rule
+# (kit/.gate/enforced-rules.md) are refused before anything is cloned, unless the reviewer is entire (#155).
 # In order, it:
 #   1. clones the repository into <root>/<repo>;
 #   2. creates its profile ~/.agent-profiles/<owner>/<repo>/claude, only now, and writes there a settings.json that turns off
@@ -35,7 +42,8 @@
 #      .git/info/exclude: Claude Code's worktrees go there, inside the repository, so they find its .envrc, and git add -A
 #      never stages one under the tier-3 .claude/;
 #   4. lays the kit over it: .gate/ (the commands in .gate/bin/, the hooks in .gate/hooks/, the Gate block gate-section.md,
-#      and kit-commit, the factory commit it came from), the gate workflows, the PR template, CODEOWNERS and the deny rules.
+#      and kit-commit, the factory commit it came from), the gate workflows with the gate's settings filled in, the PR
+#      template, CODEOWNERS and the deny rules.
 #      The repository's own scripts/, helpers and hooks stay byte for byte. With a .claude/settings.json of its own the
 #      deny lines go in as text and nothing else changes; where there is none, the kit's file is laid with no pin: the Human's
 #      rule that the pstack pin stays in the repository, one for each repository, keeps a pin that exists byte for byte, and
@@ -60,16 +68,20 @@ root=${FACTORY_ROOT:-$factory}
 profiles=${AGENT_PROFILES:-$HOME/.agent-profiles}
 human=${FACTORY_HUMAN:-tuannd9288}
 agent=${FACTORY_AGENT:-tuan9288-agent}
-url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>] [--module <name>]...}
+url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>] [--module <name>]... [--reviewer <name>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]}
 shift
 open_pr=1
 own=""
 modules=()
+settings=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --no-pr) open_pr=0; shift ;;
     --own) own=${2:?onboard: --own needs a file}; shift 2 ;;
     --module) modules+=("${2:?onboard: --module needs a name}"); shift 2 ;;
+    --reviewer | --runner | --pr-runner | --trusted-runner)
+      [ "$#" -ge 2 ] || { echo "onboard: $1 needs a value; nothing done"; exit 2; }
+      settings+=("$1" "$2"); shift 2 ;;
     *) echo "onboard: unknown argument $1; nothing done"; exit 2 ;;
   esac
 done
@@ -80,6 +92,8 @@ owner=$(basename "$(dirname "$path")")
 owner=${owner##*:}
 dest=$root/$name
 [ -e "$dest" ] && { echo "onboard: $dest exists; nothing done"; exit 1; }
+# The gate's settings: a value of the wrong form, or runners that break the runner rule, are refused before anything is cloned.
+why=$(node "$factory/bin/lib/gate-settings.mjs" check ${settings[@]+"${settings[@]}"}) || { echo "onboard: $why; nothing done"; exit 2; }
 # A module the factory lacks, or one that lays a kit file, is refused before anything is cloned.
 if [ "${#modules[@]}" -gt 0 ]; then
   why=$(node "$factory/bin/lib/module.mjs" check "$factory" "${modules[@]}" 2>&1) || { echo "onboard: $why; nothing done"; exit 2; }
@@ -240,8 +254,10 @@ while IFS= read -r path; do
   fi
   mkdir -p "$(dirname "$path")"
   cp -p "$factory/kit/$path" "$path"
+  # CODEOWNERS gets its owner, and the three workflows the gate's settings (bin/lib/gate-settings.mjs).
   case "$path" in
-    .github/CODEOWNERS) sed -i.bak "s/@OWNER/@$human/" "$path" && rm -f "$path.bak" ;;
+    .github/CODEOWNERS | .github/workflows/main.yml | .github/workflows/gate.yml | .github/workflows/gate-trusted.yml)
+      node "$factory/bin/lib/gate-settings.mjs" render "$path" --human "$human" ${settings[@]+"${settings[@]}"} ;;
   esac
 done <"$lists/kit"
 # The instruction files: AGENTS.md is the composed text (the repository's own, or --own, with the block in it) written over
@@ -335,21 +351,20 @@ Note: the \`verify\` check of this PR is red (\`.gate/bin/verify-trusted: No suc
 
 ## After the merge
 1. Colly runs \`bin/onboard-owner $slug --id $id --apply\` again, on the Human's login; his approval of this pull
-   request covers it. It replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\` and reads back what
-   it set.
+   request covers it. It replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\`, for the reviewer
+   \`main\`'s \`gate-trusted.yml\` now holds, and reads back what it set.
 2. Where the repository uses the kit's Claude reviewer, the Human pastes the reviewer's secret into the environment
    \`reviewer\` (branch \`main\` only; set no repository-level secret: the \`pull_request\` jobs of every branch can
    read it). Entire needs none (#155).
 3. Log into the profile: open a new pane in the repository, check \`echo \$CLAUDE_CONFIG_DIR\`, run \`claude\`.
 
-Colly set the repository variables in step 2 of taking the repository in, under the Human's approval. An empty value
-means GitHub's runner.
-- \`GATE_RUNNER\`: the runner of \`main\`'s jobs.
-- \`GATE_PR_RUNNER\`: the runner of the candidate's \`verify\`.
-- \`GATE_TRUSTED_RUNNER\`: the runner of the jobs that hold the reviewer's credential. It is never a runner that a
-  candidate's, \`main\`'s or a deploy's job uses.
-- \`GATE_REVIEWER\`: which reviewer the gate runs. While it is unset, \`review\` and \`verdict\` are red and nothing
-  merges itself.
+The gate's settings are filled into the workflows by this pull request; the evidence's \`settings\` lines name them, and
+its \`rendered\` lines show each filled line (#335). No repository variable holds them, and changing one later is a pull
+request at tier 3.
+- The reviewer, \`GATE_REVIEWER\` in \`gate-trusted.yml\`: while it is empty, \`review\` and \`verdict\` are red and
+  nothing merges itself.
+- The \`runs-on:\` of \`main.yml\` (\`main\`'s jobs), \`gate.yml\` (the candidate's \`verify\`) and \`gate-trusted.yml\`
+  (the jobs that hold the reviewer's credential, never on a runner that a candidate's, \`main\`'s or a deploy's job uses).
 
 Issue: none
 Team: factory/onboard

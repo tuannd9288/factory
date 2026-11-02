@@ -47,12 +47,10 @@ process.exit(1);
 `;
 
 const FAKE_TOKEN = 'ghp_FAKEtoken0123456789';
-const REVIEWER_VALUE = 'zz-reviewer-value-not-entire';
 const OTHER_VALUE = 'zz-other-variable-value';
-const RUNNERS = { GATE_RUNNER: '["self-hosted","zz-main-label"]', GATE_PR_RUNNER: '["self-hosted","zz-pr-label"]', GATE_TRUSTED_RUNNER: '["self-hosted","zz-trusted-label"]' };
-/** The four variables the kit reads, as the factory wants them, with `over` laid over them (null: unset). */
-const gateVariables = (over = {}) =>
-  Object.entries({ ...RUNNERS, GATE_REVIEWER: REVIEWER_VALUE, ...over }).filter(([, value]) => value !== null).map(([name, value]) => ({ name, value }));
+const OLD_VALUE = 'zz-old-gate-variable-value';
+/** The gate's settings the target is onboarded with (#335): three self-hosted runners that share no machine. */
+const SETTINGS = ['--reviewer', 'claude', '--runner', '["self-hosted","zz-main-label"]', '--pr-runner', '["self-hosted","zz-pr-label"]', '--trusted-runner', '["self-hosted","zz-trusted-label"]'];
 const LABELS = ['settings', 'gate-block', 'verify', 'claude-md', 'size', 'kit-evidence'];
 const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
 
@@ -86,7 +84,7 @@ before(() => {
   commit(seed, APP, 'start');
   git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
   mkdirSync(join(dir, 'root'));
-  const onboard = run(dir, join(fac, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr'], {
+  const onboard = run(dir, join(fac, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr', ...SETTINGS], {
     ...quiet,
     FACTORY_ROOT: join(dir, 'root'),
     AGENT_PROFILES: join(dir, 'profiles'),
@@ -134,7 +132,7 @@ function state(head, over = {}) {
     invitations: [],
     rulesets: want.rulesets.map((r, i) => ({ ...r, id: 100 + i })),
     environment: { name: 'reviewer', deployment_branch_policy: BRANCH_POLICY, policies: [{ name: 'main', type: 'branch' }] },
-    variables: [...gateVariables(), { name: 'OTHER', value: OTHER_VALUE }],
+    variables: [{ name: 'OTHER', value: OTHER_VALUE }],
     prs: [
       { number: 5, headRefName: 'factory/kit', mergeCommit: { oid: kitMerge }, mergedAt: '2026-10-01T00:00:00Z' },
       { number: 7, headRefName: 'topic', mergeCommit: { oid: head }, mergedAt: '2026-10-02T00:00:00Z' },
@@ -179,8 +177,8 @@ test('settings: red names each call left, and when the kit is not on the default
   let r = doctor({ held: state(kitMerge, { environment: null, collaborator: 'none' }) });
   assert.equal(r.code, 1, r.out);
   assert.deepEqual(marks(r), { ...green, settings: 'RED' }, r.out);
-  assert.match(r.lines.settings, /environment reviewer/);
-  assert.match(r.lines.settings, /collaborator tuan9288-agent/);
+  assert.match(flat(r), /environment reviewer/);
+  assert.match(flat(r), /collaborator tuan9288-agent/);
   r = doctor({ held: state(kitMerge, { kitLanded: false }) });
   assert.equal(r.code, 1, r.out);
   assert.equal(mark(r.lines.settings), 'RED');
@@ -188,53 +186,64 @@ test('settings: red names each call left, and when the kit is not on the default
   r = doctor({ held: state(kitMerge, { environment: extra }) });
   assert.equal(r.code, 1, r.out);
   assert.equal(mark(r.lines.settings), 'RED');
-  assert.match(r.lines.settings, /dev/);
+  assert.match(flat(r), /RED settings .*dev/);
 });
 
-test('settings: red names each gate variable that is unset, not a runs-on value, or breaks the runner rule; no value is printed (#210)', () => {
+/** A gate workflow as the target's main holds it. */
+const onMain = (path) => git(target, 'show', `main:${path}`);
+const flat = (r) => r.out.replace(/\n\s+/g, ' ');
+
+test('settings: red names a reviewer left empty, a runner not in the kit\'s form, and runners that break the rule; green as onboarded (#335)', () => {
+  const TRUSTED = '.github/workflows/gate-trusted.yml';
+  const MAIN = '.github/workflows/main.yml';
+  const trusted = onMain(TRUSTED);
+  const main = onMain(MAIN);
+  assert.match(trusted, /GATE_REVIEWER: 'claude'/);
   const cases = [
-    [{ GATE_RUNNER: null }, /GATE_RUNNER is not set/],
-    [{ GATE_PR_RUNNER: null }, /GATE_PR_RUNNER is not set/],
-    [{ GATE_TRUSTED_RUNNER: null }, /GATE_TRUSTED_RUNNER is not set/],
-    [{ GATE_REVIEWER: null }, /GATE_REVIEWER is not set/],
-    [{ GATE_RUNNER: 'zz-bare-label' }, /GATE_RUNNER is not a JSON runs-on value/],
-    [{ GATE_TRUSTED_RUNNER: RUNNERS.GATE_RUNNER }, /GATE_TRUSTED_RUNNER is self-hosted and shares a runner with GATE_RUNNER/],
-    [{ GATE_TRUSTED_RUNNER: '["self-hosted","zz-pr-label","x"]' }, /GATE_TRUSTED_RUNNER is self-hosted and shares a runner with GATE_PR_RUNNER/],
+    ['empty', { [TRUSTED]: trusted.replace("GATE_REVIEWER: 'claude'", "GATE_REVIEWER: ''") }, /no reviewer: GATE_REVIEWER is empty in \.github\/workflows\/gate-trusted\.yml/],
+    ['two-runners', { [MAIN]: `${main}  other:\n    runs-on: ["ubuntu-latest"]\n    steps:\n      - run: true\n` }, /main's runner is not in \.github\/workflows\/main\.yml in the kit's form/],
+    ['shared', { [TRUSTED]: trusted.replaceAll('zz-trusted-label', 'zz-main-label') }, /the trusted runner is self-hosted and shares a machine with main's runner/],
   ];
-  for (const [over, reason] of cases) {
-    const r = doctor({ held: state(kitMerge, { variables: [...gateVariables(over), { name: 'OTHER', value: OTHER_VALUE }] }) });
+  for (const [name, files, reason] of cases) {
+    const v = variant(`settings-${name}`, files);
+    const r = doctor({ held: state(v.head), url: v.url });
     assert.equal(r.code, 1, r.out);
-    assert.deepEqual(marks(r), { ...green, settings: 'RED' }, r.out);
-    assert.match(r.out.replace(/\n\s+/g, ' '), reason);
-    for (const secret of [REVIEWER_VALUE, OTHER_VALUE, 'zz-bare-label', 'zz-main-label', 'zz-pr-label', 'zz-trusted-label']) assert.ok(!r.out.includes(secret), `${secret} printed:\n${r.out}`);
+    assert.equal(mark(r.lines.settings), 'RED', r.out);
+    assert.match(flat(r), reason);
   }
+  const v = variant('settings-as-onboarded', {});
+  assert.equal(mark(doctor({ held: state(v.head), url: v.url }).lines.settings), 'ok');
 });
 
-test('settings: shared runners under entire are green, the #155 exception; the same runners under claude are red (#210)', () => {
-  const shared = '["self-hosted","zz-shared-label"]';
-  const runners = { GATE_RUNNER: shared, GATE_PR_RUNNER: shared, GATE_TRUSTED_RUNNER: shared };
+test('settings: shared runners under entire are green, the #155 exception; the same runners under claude are red (#210, #335)', () => {
+  const TRUSTED = '.github/workflows/gate-trusted.yml';
+  const shared = (text) => text.replace(/runs-on: \[.*\]/g, 'runs-on: ["self-hosted","zz-shared-label"]');
+  const files = Object.fromEntries(['.github/workflows/main.yml', '.github/workflows/gate.yml', TRUSTED].map((p) => [p, shared(onMain(p))]));
   const entire = wanted({ kitLanded: true, branch: 'main', reviewer: 'entire' }).rulesets.map((r, i) => ({ ...r, id: 100 + i }));
-  let r = doctor({ held: state(kitMerge, { rulesets: entire, variables: gateVariables({ ...runners, GATE_REVIEWER: 'entire' }) }) });
-  assert.equal(r.code, 0, r.out);
+  let v = variant('entire-shared', { ...files, [TRUSTED]: files[TRUSTED].replace("GATE_REVIEWER: 'claude'", "GATE_REVIEWER: 'entire'") });
+  let r = doctor({ held: state(v.head, { rulesets: entire }), url: v.url });
   assert.equal(mark(r.lines.settings), 'ok', r.out);
-  r = doctor({ held: state(kitMerge, { variables: gateVariables({ ...runners, GATE_REVIEWER: 'claude' }) }) });
+  v = variant('claude-shared', files);
+  r = doctor({ held: state(v.head), url: v.url });
   assert.equal(mark(r.lines.settings), 'RED', r.out);
-  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_TRUSTED_RUNNER is self-hosted and shares a runner with GATE_RUNNER/);
-  assert.ok(!r.out.includes('zz-shared-label'), r.out);
+  assert.match(flat(r), /the trusted runner is self-hosted and shares a machine with main's runner/);
 });
 
-test('settings: unset runners are red on a private repository only; an unset GATE_REVIEWER is red on both (#210)', () => {
-  const repo = (isPrivate) => ({ id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true, private: isPrivate });
-  const unset = { GATE_RUNNER: null, GATE_PR_RUNNER: null, GATE_TRUSTED_RUNNER: null };
-  let r = doctor({ held: state(kitMerge, { repo: repo(false), variables: gateVariables(unset) }) });
-  assert.equal(r.code, 0, r.out);
-  r = doctor({ held: state(kitMerge, { repo: repo(true), variables: gateVariables(unset) }) });
+test('settings: a main on the kit before #335 is red; a gate variable left set is red with its delete command, and its value is not printed (#335)', () => {
+  const TRUSTED = '.github/workflows/gate-trusted.yml';
+  const old = "jobs:\n  review:\n    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '\"ubuntu-latest\"') }}\n    steps:\n      - run: .gate/bin/review review\n        env:\n          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}\n";
+  const v = variant('old-kit', { [TRUSTED]: old });
+  let r = doctor({ held: state(v.head, { variables: [{ name: 'GATE_REVIEWER', value: 'claude' }] }), url: v.url });
   assert.equal(mark(r.lines.settings), 'RED', r.out);
-  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_RUNNER is not set/);
-  r = doctor({ held: state(kitMerge, { repo: repo(false), variables: gateVariables({ ...unset, GATE_REVIEWER: null }) }) });
-  assert.equal(mark(r.lines.settings), 'RED', r.out);
-  assert.match(r.out.replace(/\n\s+/g, ' '), /GATE_REVIEWER is not set/);
-  assert.doesNotMatch(r.out.replace(/\n\s+/g, ' '), /GATE_RUNNER is not set/);
+  assert.match(flat(r), /gate-trusted\.yml on main reads the repository variables, as the kit did before #335/);
+  const left = [{ name: 'GATE_RUNNER', value: OLD_VALUE }, { name: 'GATE_REVIEWER', value: OLD_VALUE }, { name: 'OTHER', value: OTHER_VALUE }];
+  r = doctor({ held: state(kitMerge, { variables: left }) });
+  assert.equal(r.code, 1, r.out);
+  assert.deepEqual(marks(r), { ...green, settings: 'RED' }, r.out);
+  assert.match(flat(r), /the repository variable GATE_RUNNER is still set, and nothing reads it since #335: gh variable delete GATE_RUNNER --repo tuannd9288\/app/);
+  assert.match(flat(r), /gh variable delete GATE_REVIEWER --repo tuannd9288\/app/);
+  assert.doesNotMatch(flat(r), /variable OTHER/);
+  for (const secret of [OLD_VALUE, OTHER_VALUE]) assert.ok(!r.out.includes(secret), `${secret} printed:\n${r.out}`);
 });
 
 test('gate-block: red when the block is not .gate/gate-section.md byte for byte, or is gone', () => {
@@ -306,7 +315,7 @@ test('no variable value and no token reaches the output, green or red', () => {
   for (const [held, code] of [[state(kitMerge), 0], [state(kitMerge, { environment: null, kitLanded: false, prs: [] }), 1]]) {
     const r = doctor({ held });
     assert.equal(r.code, code, r.out);
-    for (const secret of [FAKE_TOKEN, REVIEWER_VALUE, OTHER_VALUE, 'zz-main-label', 'zz-pr-label', 'zz-trusted-label']) assert.ok(!r.out.includes(secret), `${secret} printed:\n${r.out}`);
+    for (const secret of [FAKE_TOKEN, OTHER_VALUE]) assert.ok(!r.out.includes(secret), `${secret} printed:\n${r.out}`);
   }
 });
 
@@ -392,7 +401,7 @@ test('a green settings line is one line, and its tag names every read it makes',
   const lines = r.out.split('\n');
   const at = lines.findIndex((l) => /^ok\s+settings\s/.test(l));
   assert.ok(lines[at].length <= 120 && /^ok\s/.test(lines[at + 1]), r.out);
-  for (const read of ['rulesets', 'env', 'collab', 'invites', 'kit', 'vars']) assert.ok(lines[at].includes(read), `${read}: ${lines[at]}`);
+  for (const read of ['rulesets', 'env', 'collab', 'invites', 'kit', 'vars', 'workflows']) assert.ok(lines[at].includes(read), `${read}: ${lines[at]}`);
 });
 
 test('kit-evidence is called with --human, as bin/onboard and bin/kit-update call it', () => {

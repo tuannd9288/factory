@@ -138,10 +138,16 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **Scope freeze, 2026-10-28.** "Duyệt, đóng băng như đề xuất": until #131 closes, only its path is worked, and the
   issues it lists wait in Triage. An issue leaves the freeze only on his later words on it: #203 (its cleanup, approved
   "theo đề xuất" on 2026-10-30; and on 2026-11-02, "#203 sao không triển khai luôn?", relayed by Colly), #271 (his
-  words of 2026-10-31 in its body) and #286 (his words of 2026-11-01 in its body). Sources:
+  words of 2026-10-31 in its body), #286 (his words of 2026-11-01 in its body), and on 2026-11-02, relayed by the
+  factory-repo session, #256 and #330 ("#256 lệnh kiểm (Recommended), #330 test chập chờn (Recommended)"), #333
+  ("Làm ngay trong release 1") and #335 ("Vá ngay, trước công tắc (Recommended)"). Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
-  https://github.com/tuannd9288/factory/issues/271 and https://github.com/tuannd9288/factory/issues/286.
+  https://github.com/tuannd9288/factory/issues/271, https://github.com/tuannd9288/factory/issues/286,
+  https://github.com/tuannd9288/factory/issues/256#issuecomment-6567815272,
+  https://github.com/tuannd9288/factory/issues/330#issuecomment-6567816736,
+  https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 and
+  https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675.
 - **No `gh api` without his approval.** His standing rule, undated; source: the map's "Đã quyết" block.
 
 ## Tiers
@@ -157,8 +163,8 @@ The change sets the tier, by the paths it touches (`.gate/bin/tier`), never the 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
 removed.
 
-Where a repository picks Entire as its reviewer (`GATE_REVIEWER=entire`, #155), the required checks are `verify`,
-`tier` and `Entire Gates`, set by `bin/onboard-owner`; `review` and `verdict` are not among them.
+Where a repository picks Entire as its reviewer (`GATE_REVIEWER: 'entire'` in `gate-trusted.yml`, #155), the required
+checks are `verify`, `tier` and `Entire Gates`, set by `bin/onboard-owner`; `review` and `verdict` are not among them.
 
 Agents open pull requests under their own GitHub account, never the Human's. GitHub refuses an author's approval of
 his own pull request, and its code-owner rule asks nothing of an author who owns the code: on the scratch repository
@@ -314,14 +320,14 @@ Six steps, run by Colly and a team:
 2. Colly runs `bin/onboard-owner` without `--apply`, from the factory's clone on the MacBook, on the Human's `gh`
    login, and sends him the changes it prints. He approves once; Colly runs it with `--apply`. For a private
    repository, Colly also takes the runner's registration token (the Human's standing exception, 2026-10-29), never
-   printed. The agents' account accepts the invitation itself. `bin/onboard-owner` sets the four repository
-   variables the kit reads (`GATE_RUNNER`, `GATE_PR_RUNNER`, `GATE_TRUSTED_RUNNER`, `GATE_REVIEWER`), one option
-   each, before the gate's ruleset, which follows `GATE_REVIEWER`; the changes he approves name their values, and
-   Colly sets none by hand (#210).
-3. A team claims the issue and runs `bin/onboard <repo-url>`. The kit pull request carries its evidence
-   (`bin/kit-evidence`). Until `main` holds the kit, its `verify` is red (code 127), and the bootstrap rule requires
-   no check (`bin/onboard`'s own note in the kit pull request body). He approves it as tier 3 from its "Summary for
-   the Human" (`kit/.github/pull_request_template.md`).
+   printed. The agents' account accepts the invitation itself. The gate's settings (the reviewer and three runners)
+   are no repository variables, which change without a pull request: `bin/onboard` fills them into the kit's
+   workflows in step 3, from the options the issue names, and a later change is a pull request (#335).
+3. A team claims the issue and runs `bin/onboard <repo-url>` with the settings the issue names (`--reviewer`, and
+   `--runner`, `--pr-runner`, `--trusted-runner` off GitHub-hosted Ubuntu). The kit pull request carries its evidence
+   (`bin/kit-evidence`), whose `settings` lines name all four. Until `main` holds the kit, its `verify` is red (code
+   127), and the bootstrap rule requires no check (`bin/onboard`'s own note in the kit pull request body). He
+   approves it as tier 3 from its "Summary for the Human" (`kit/.github/pull_request_template.md`).
 4. When it merges, Colly runs `--apply` the second time (`factory-gate` in, `factory-bootstrap` out). The Human's
    approval of the kit pull request covers it. The merge queue then sweeps the repository with nothing more from
    him, and no `sudo` install for each new repository (#211). The queue job's one install is his, together with the
