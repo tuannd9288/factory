@@ -481,12 +481,10 @@ function ghRefusal(args) {
   return null;
 }
 
-/** The folder gh runs in on the Mac mini, under the host user's home: empty, so that a relative path in an argument names nothing. */
-const GH_WORKDIR = '$HOME/.local/state/factory/factory-gh/empty';
-
 /** `factory gh <args>` (#349): on the MacBook, `gh <args>` on the factory host, in the host user's login shell over ssh, under the
- * agents' login; stdin passes through, the exit code is gh's. The command first makes (mode 700) and enters an empty folder on the
- * host, and exits 2 with a message if that folder holds anything. Each argument is quoted for `zsh -lc`, and the whole line once
+ * agents' login; stdin passes through, the exit code is gh's. The command first makes a new temporary folder on the host with
+ * `mktemp -d` and enters it, so that a relative path in an argument names nothing, and removes it after gh, keeping gh's exit
+ * code. Each argument is quoted for `zsh -lc`, and the whole line once
  * more for the remote login shell. On the factory host it runs gh itself. */
 function ghCmd(args, env) {
   if (placeOf(env) === 'factory') {
@@ -503,7 +501,7 @@ function ghCmd(args, env) {
     return 2;
   }
   const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
-  const script = `d="${GH_WORKDIR}"; mkdir -p -m 700 "$d" && cd "$d" || exit 2; if [ -n "$(ls -A)" ]; then echo "bin/factory: gh: $d is not empty; nothing was run" >&2; exit 2; fi; exec ${['gh', ...args.map(word)].join(' ')}`;
+  const script = `d=$(mktemp -d) && cd "$d" || exit 2; ${['gh', ...args.map(word)].join(' ')}; c=$?; cd /; rm -rf "$d"; exit $c`;
   const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { stdio: 'inherit', env });
   if (r.error) {
     console.error(`bin/factory: gh: ssh did not run (${r.error.code ?? 'error'})`);

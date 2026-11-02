@@ -12,8 +12,8 @@
 #                                  the Lead of <repo>, with an empty GH_CONFIG_DIR, empty GH_TOKEN and GITHUB_TOKEN, the agents' git identity
 #                                  (read from the Mac mini's git settings), no git credential helper, a push to GitHub over HTTPS that
 #                                  fails and git over ssh off, set through --settings; what follows -- goes to claude
-#   factory gh <gh arguments>      on the MacBook: gh on the Mac mini by ssh under the agents' login, in an empty folder there, stdin and exit
-#                                  code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
+#   factory gh <gh arguments>      on the MacBook: gh on the Mac mini by ssh under the agents' login, in a new temporary folder there, removed after, stdin
+#                                  and exit code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
 #                                  --body-file, --notes-file, --env-file, --input, --field or -F (pass it on stdin: --body-file -, -F name=@-,
 #                                  --input -); on the Mac mini it runs gh itself (#349)
 #   factory logout <account>       on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it

@@ -3,7 +3,7 @@
 // Nothing live runs, and every name below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -28,6 +28,7 @@ if [ -f "$f" ]; then cat "$f"; else exit 1; fi
 `,
   gh: `#!/bin/sh
 pwd > "$FAKE/gh.cwd"
+[ -f "$FAKE/gh.leave" ] && : > left-behind
 : > "$FAKE/gh.args"
 for a; do printf '%s\\0' "$a" >> "$FAKE/gh.args"; done
 cat > "$FAKE/gh.stdin"
@@ -418,19 +419,20 @@ test('gh quotes an argument that starts with =', () => {
   }
 });
 
-test('gh runs the remote gh in an empty folder under the host user\'s home, and refuses when that folder holds anything', () => {
+test('gh runs the remote gh in a new temporary folder each call, removes it with what gh wrote there, and keeps gh\'s exit code', () => {
   const s = world();
   try {
-    const dir = join(s.home, '.local/state/factory/factory-gh/empty');
-    assert.equal(s.fac(['gh', 'issue', 'list']).code, 0);
-    assert.equal(realpathSync(s.read('gh.cwd').trim()), realpathSync(dir));
-    assert.equal(statSync(dir).mode & 0o777, 0o700);
-    rmSync(join(s.fake, 'gh.cwd'));
-    writeFileSync(join(dir, 'notes.md'), 'x');
-    const r = s.fac(['gh', 'issue', 'list']);
-    assert.equal(r.code, 2, r.out);
-    assert.ok(r.out.includes(dir), r.out);
-    assert.equal(s.read('gh.cwd'), '', 'gh never ran');
+    s.w('gh.exit', '3');
+    s.w('gh.leave', '');
+    const seen = [];
+    for (let i = 0; i < 2; i++) {
+      const r = s.fac(['gh', 'run', 'download', '1']);
+      assert.equal(r.code, 3, r.out);
+      seen.push(s.read('gh.cwd').trim());
+      assert.ok(seen[i].startsWith('/'), seen[i]);
+      assert.ok(!existsSync(seen[i]), `${seen[i]} is still there`);
+    }
+    assert.notEqual(seen[0], seen[1]);
   } finally {
     s.done();
   }
