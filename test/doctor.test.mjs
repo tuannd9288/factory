@@ -29,7 +29,7 @@ if (args[0] === 'pr' && args[1] === 'checks') {
   process.exit(checks.every((c) => c.state === 'SUCCESS') ? 0 : 1);
 }
 if (args[0] !== 'api') process.exit(1);
-const path = args[1].replace(/^\//, '');
+const path = args.at(-1).replace(/^\//, '');
 const repo = 'repos/' + state.repo.full_name;
 if (path === 'user') out({ login: state.login });
 if (path === repo) out(state.repo);
@@ -39,6 +39,14 @@ if (path === repo + '/invitations') out(state.invitations ?? []);
 if (path.startsWith(repo + '/rulesets') && !/rulesets\/\d+/.test(path)) out(state.rulesets.map(({ id, name }) => ({ id, name })));
 const one = /rulesets\/(\d+)$/.exec(path);
 if (one) { const r = state.rulesets.find((x) => x.id === Number(one[1])); r ? out(r) : missing(); }
+// #333: the rules in force on main, as bin/onboard-owner's fake gives them; a state may name them itself.
+// A call that does not ask for every page fails, so a doctor that drops --paginate or --slurp turns a test red. With
+// --slurp, as gh gives it, the list is a page of a list of pages.
+if (path === repo + '/rules/branches/main') {
+  if (!args.includes('--paginate') || !args.includes('--slurp')) { process.stderr.write('fake gh: the rules are asked without --paginate --slurp\n'); process.exit(1); }
+  const list = state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules);
+  out(state.rulesInForce !== undefined ? state.rulesInForce : [list]);
+}
 const env = repo + '/environments/reviewer';
 if (path === env) state.environment ? out(state.environment) : missing();
 if (path === env + '/deployment-branch-policies') state.environment ? out({ branch_policies: state.environment.policies ?? [] }) : missing();
@@ -51,7 +59,7 @@ const OTHER_VALUE = 'zz-other-variable-value';
 const OLD_VALUE = 'zz-old-gate-variable-value';
 /** The gate's settings the target is onboarded with (#335): three self-hosted runners that share no machine. */
 const SETTINGS = ['--reviewer', 'claude', '--runner', '["self-hosted","zz-main-label"]', '--pr-runner', '["self-hosted","zz-pr-label"]', '--trusted-runner', '["self-hosted","zz-trusted-label"]'];
-const LABELS = ['settings', 'gate-block', 'verify', 'claude-md', 'size', 'kit-evidence'];
+const LABELS = ['settings', 'merge', 'gate-block', 'verify', 'claude-md', 'size', 'kit-evidence'];
 const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
 
 let dir;
@@ -171,6 +179,32 @@ test('a repository as the factory wants it: every line ok, exit 0, one line a ch
   assert.deepEqual(marks(r), green, r.out);
   for (const line of Object.values(r.lines)) assert.ok(line.length <= 120, line);
   assert.deepEqual(r.left, [], 'the bare clone is removed');
+});
+
+/** The held state with the gate's review parameters as the Human left them. */
+const reviewed = (head, count, owner) => {
+  const held = state(head);
+  return { ...held, rulesets: held.rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_approving_review_count: count, require_code_owner_review: owner } } : x)) })) };
+};
+
+test('merge: names the position of the merge switch, and keeps the review parameters the Human set (#333)', () => {
+  for (const [position, count, owner] of [['1-2', 0, true], ['all', 0, false], ['none', 1, true]]) {
+    const r = doctor({ held: reviewed(kitMerge, count, owner) });
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(marks(r), green, r.out);
+    assert.match(r.lines.merge, new RegExp(`^ok\\s+merge\\s+the merge switch is at ${position}\\b`));
+    assert.ok(r.lines.merge.length <= 120, r.lines.merge);
+    assert.ok(r.calls.every((c) => c[0] === 'api' || c[0] === 'pr' || c[0] === 'variable'), 'only reads');
+  }
+});
+
+test('merge: red only when the rules in force cannot be read as a position (#333)', () => {
+  for (const rulesInForce of [[{ type: 'pull_request', parameters: {} }], 'not a list']) {
+    const r = doctor({ held: { ...state(kitMerge), rulesInForce } });
+    assert.equal(r.code, 1, r.out);
+    assert.deepEqual(marks(r), { ...green, merge: 'RED' }, r.out);
+    assert.match(flat(r), /RED merge .*could not be read/);
+  }
 });
 
 test('settings: red names each call left, and when the kit is not on the default branch', () => {
@@ -306,7 +340,8 @@ test('every gh call is a read: a GET with its query in the path, or a list or a 
   assert.ok(r.calls.length > 8);
   for (const args of r.calls) {
     assert.ok(!args.some((a) => /^(-X|--method|-f|-F|--field|--raw-field|--input)/.test(a)), JSON.stringify(args));
-    if (args[0] === 'api') assert.deepEqual(args.filter((a) => a.startsWith('-')), [], JSON.stringify(args));
+    // The one flags of a read: the rules in force are read in full, page by page.
+    if (args[0] === 'api') assert.deepEqual(args.filter((a) => a.startsWith('-') && a !== '--paginate' && a !== '--slurp'), [], JSON.stringify(args));
     else assert.ok(['variable list', 'pr list', 'pr checks'].includes(`${args[0]} ${args[1]}`), JSON.stringify(args));
   }
 });

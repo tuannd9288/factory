@@ -286,7 +286,8 @@ test('condition 2 comes from the sweep\'s one query: the calls of a sweep are th
     assert.equal(r.status, 0, r.stdout + r.stderr);
     const calls = w.calls();
     assert.equal(calls.length, 3, calls.join('\n'));
-    assert.deepEqual(calls.map((c) => c.split(' ').slice(0, 2).join(' ')), ['api user', 'api repos/o/app/rules/branches/main', 'api graphql']);
+    // The rules are read in full (#333: --paginate --slurp); it is the same one call.
+    assert.deepEqual(calls.map((c) => c.replace(' --paginate --slurp', '').split(' ').slice(0, 2).join(' ')), ['api user', 'api repos/o/app/rules/branches/main', 'api graphql']);
     assert.match(calls[2], /issues\(states:OPEN,labels:\["needs-human"\]/);
     assert.deepEqual(shape(w.state), ['start waiting-on-human o/app#40']);
   });

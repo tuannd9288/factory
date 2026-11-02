@@ -512,14 +512,16 @@ describe('review, verdict, tier and rounds', () => {
         // tier's claim check reads the named issue's state (#133): open unless the test leaves state-<n>.json.
         '  "issue view "*" --repo o/app --json state") cat "$FAKE/state-$3.json" 2>/dev/null || echo \'{"state":"OPEN"}\' ;;',
         // A test that moves something while a job waits leaves $FAKE/mover.sh, which runs once at the first listing.
-        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
-        '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; cat "$FAKE/annotations.json" ;;',
+        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; echo jobs >>"$FAKE/order"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
+        '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; echo annotations >>"$FAKE/order"; cat "$FAKE/annotations.json" ;;',
         '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
         '  *check-runs/777/annotations*) cat "$FAKE/ann777.json" 2>/dev/null || echo "[]" ;;',
         '  *actions/runs/98/jobs?filter=all*) cat "$FAKE/jobs98.json" ;;',
         '  *actions/workflows/gate-trusted.yml/runs?head_sha=*) echo runs >>"$FAKE/calls"; cat "$FAKE/runs.json" ;;',
         // #155: the rules in force on main and the "Entire Gates" check runs, for GATE_REVIEWER=entire; the app_id is asked for.
-        '  *rules/branches/main) echo rules >>"$FAKE/calls"; cat "$FAKE/rules.json" ;;',
+        // #333: the merge switch asks for every page, and a call that does not fails. Entire's own read of the rules (#155) is
+        // not the switch's, and is let through while a test sets $FAKE/entire-rules.
+        '  *rules/branches/main) echo rules >>"$FAKE/rules-calls"; echo rules >>"$FAKE/order"; case "$*" in *"--paginate --slurp"*) ;; *) [ -e "$FAKE/entire-rules" ] || { echo "fake gh: the rules are asked without --paginate --slurp" >&2; exit 1; } ;; esac; cat "$FAKE/rules.json" ;;',
         '  *"check-runs?check_name=Entire%20Gates&app_id="*) echo entire >>"$FAKE/calls"; cat "$FAKE/entire.json" ;;',
         '  *check-runs*) cat "$FAKE/verify.json" ;;',
         // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
@@ -572,7 +574,14 @@ describe('review, verdict, tier and rounds', () => {
       GATE_RESULT_POLL: '0',
       ...env,
     });
-    return { ...out, head, edits: readFileSync(join(fake, 'edits'), 'utf8'), calls: readFileSync(join(fake, 'calls'), 'utf8') };
+    // `out` is the log without the ::stop-commands:: markers that hold the pull request's text (tier prints them, #333); `raw` is whole.
+    const marks = new Set();
+    for (const l of out.out.split('\n')) {
+      const m = /^::stop-commands::([0-9a-f]{16,})$/.exec(l);
+      if (m) marks.add(`::${m[1]}::`);
+    }
+    const plain = out.out.split('\n').filter((l) => !/^::stop-commands::[0-9a-f]{16,}$/.test(l) && !marks.has(l)).join('\n');
+    return { ...out, raw: out.out, out: plain, head, edits: readFileSync(join(fake, 'edits'), 'utf8'), calls: readFileSync(join(fake, 'calls'), 'utf8') };
   };
   /** Commits files on a candidate branch, fetches it into the trusted checkout, and runs one job there. */
   const job = (kind, files, env = {}) => {
@@ -591,9 +600,13 @@ describe('review, verdict, tier and rounds', () => {
     annotations();
     labels();
     reviews([]);
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': null, 'entire.json': null });
+    // The rules in force on main are the kit's gate: the merge switch at 1-2 (#333).
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null, 'entire-rules': null });
   });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
+  /** The rules in force on main with one pull_request rule: the merge switch's two parameters (#333). */
+  const switchRules = (count, owner) => [{ type: 'pull_request', parameters: { required_approving_review_count: count, require_code_owner_review: owner } }];
+  const rulesAre = (rules) => write(fake, { 'rules.json': typeof rules === 'string' ? rules : JSON.stringify(rules) });
 
   test('review fails closed with no reviewer configured, and reads the candidate with no work tree', () => {
     assert.ok(!existsSync(join(trusted, 'src/auth')));
@@ -858,8 +871,10 @@ describe('review, verdict, tier and rounds', () => {
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /tuannd9288 approved/);
     assert.doesNotMatch(out.out, /reviewer is configured/);
-    // The labels already give tier 3: nothing the review said could add to that, so its jobs were not even listed.
-    assert.equal(out.calls, '');
+    // The labels already give tier 3: nothing the review said could add to that. tier 3 reads the review of its run all the same
+    // (#333), so the switch is read once it is in; the raise changes no label and prints nothing.
+    assert.match(out.calls, /jobs/);
+    assert.doesNotMatch(out.out, /raised by the reviewer/);
     assert.doesNotMatch(out.edits, /raised/);
   });
   test('the review of the latest attempt is the one read', () => {
@@ -878,14 +893,189 @@ describe('review, verdict, tier and rounds', () => {
     const out = job('tier', { 'src/math.js': MUL }, pr);
     assert.match(out.out, /raised by the reviewer: why/, out.out);
   });
-  test('when paths and labels already give tier 3, tier does not wait for the review', () => {
+  // #333: tier 3 waits for the review of its run too, and reads the merge switch only then, when the gate's run is nearly over.
+  test('at tier 3, tier waits for the review and reads the rules only after its result is in', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    write(fake, { order: null });
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    const order = readFileSync(join(fake, 'order'), 'utf8').split('\n').filter(Boolean);
+    assert.ok(order.includes('jobs') && order.includes('annotations') && order.includes('rules'), order.join(','));
+    assert.ok(order.indexOf('rules') > order.lastIndexOf('annotations'), `rules read before the review's result: ${order.join(',')}`);
+  });
+  test('at tier 3, a review that has not ended fails tier on timeout and reads no rules', () => {
     labels();
     reviews([]);
     reviewJob('in_progress');
+    write(fake, { order: null });
     const out = job('tier', { 'AGENTS.md': '# app\n' }, { ...pr, GATE_WAIT: '0' });
     assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
-    assert.equal(out.calls, '');
+    assert.match(out.out, /tier: review did not finish in time/);
+    assert.ok(!(existsSync(join(fake, 'order')) && /rules/.test(readFileSync(join(fake, 'order'), 'utf8'))), 'the rules were read');
+  });
+  test('at tier 3, a reviewer unavailable fails tier closed and reads no rules', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, false));
+    write(fake, { 'annotations.json': JSON.stringify([result('unavailable: timeout')]), order: null });
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    annotations();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier: reviewer unavailable \(timeout\)/);
+    assert.doesNotMatch(out.out, /title=merge switch/);
+    assert.ok(!/rules/.test(readFileSync(join(fake, 'order'), 'utf8')), 'the rules were read');
+  });
+  test('at tier 3 by paths, a reviewer\'s raise sets nothing: the Human\'s approval given before the re-run counts, and the re-run passes', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    annotations('deletes a sign-in var in wrangler.jsonc');
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(first.code, 1, first.out);
+    assert.match(first.out, /tier 3 waits for @tuannd9288 to approve/);
+    assert.doesNotMatch(first.out, /raised by the reviewer/);
+    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T10:00:00Z')]);
+    const out = again('tier', first.head, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /tuannd9288 approved/);
+    assert.doesNotMatch(out.edits, /raised/, 'the raise labels nothing at tier 3');
+    assert.doesNotMatch(out.out, /raised by the reviewer/);
+  });
+  test('at tier 3, a run with no review job, or no run id, fails tier closed and reads no rules', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, false));
+    write(fake, { 'jobs.json': JSON.stringify({ jobs: [{ id: 502, name: 'tier', run_attempt: 1, status: 'completed', conclusion: 'success' }], total_count: 1 }), order: null });
+    let out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /run 99 has no review job/);
+    reviewJob('success');
+    write(fake, { order: null });
+    out = again('tier', out.head, { ...pr, GITHUB_RUN_ID: '' });
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /GITHUB_RUN_ID is unset/);
+    assert.ok(!(existsSync(join(fake, 'order')) && /rules/.test(readFileSync(join(fake, 'order'), 'utf8'))), 'the rules were read');
+    assert.doesNotMatch(out.out, /title=merge switch/);
+  });
+  test('at tier 3, tier reads the label events once for the tier and once for the approval time, no more', () => {
+    labels('tier-3');
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    write(fake, { 'labels.n': null });
+    job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(readFileSync(join(fake, 'labels.n'), 'utf8').trim(), '2', 'one read for the tier, one for raised-at');
+  });
+  test('at tier 3, a red review fails tier and reads no rules', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, false));
+    reviewJob('failure');
+    write(fake, { order: null });
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    reviewJob('success');
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /review is red; tier follows it/);
+    assert.ok(!/rules/.test(readFileSync(join(fake, 'order'), 'utf8')), 'the rules were read');
+  });
+  // #333: the merge switch is the two review parameters of the rules in force on main. At all, the Human's approval of a
+  // tier 3 change is not asked; the other checks, and the claim, still are.
+  test('on tier 3, tier passes with no approval at all, and says the switch is at all', () => {
+    rulesAre(switchRules(0, false));
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^tier 3\n/);
+    assert.match(out.out, /tier: the merge switch of this repository is at all, so the Human's approval of tier 3 is not asked/);
+    assert.doesNotMatch(out.out, /waits for @tuannd9288/);
+  });
+  test('tier reads the rules in full: as the pages gh api --paginate --slurp gives, a second pull_request rule on a later page counts', () => {
+    rulesAre([switchRules(0, false), [{ type: 'deletion' }]]);
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(first.code, 0, first.out);
+    assert.match(first.out, /is at all/);
+    rulesAre([switchRules(0, false), switchRules(0, true)]);
+    const out = again('tier', first.head, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /waits for @tuannd9288 to approve/);
+  });
+  test('at all, a needs-human pull request needs no approval either, as the rest of tier 3', () => {
+    rulesAre(switchRules(0, false));
+    labels('needs-human');
+    const out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^tier 3\n/);
+    assert.match(out.out, /is at all/);
+  });
+  test('on tier 3, tier needs the approval at 1-2 and at none, as it did before the switch', () => {
+    for (const [rules, name] of [[switchRules(0, true), '1-2'], [switchRules(1, true), 'none'], [switchRules(1, false), 'none'], [[], '1-2 (no pull_request rule)']]) {
+      rulesAre(rules);
+      reviews([]);
+      const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+      assert.equal(first.code, 1, `${name}: ${first.out}`);
+      assert.match(first.out, /tier 3 waits for @tuannd9288 to approve/);
+      assert.doesNotMatch(first.out, /the merge switch of this repository/);
+      reviews([review('tuannd9288', 'APPROVED', first.head)]);
+      assert.equal(again('tier', first.head, pr).code, 0, name);
+    }
+  });
+  test('on tier 3, tier is red when the rules in force cannot be read, whatever they might say', () => {
+    for (const rules of ['not json', '{}', JSON.stringify([{ type: 'pull_request', parameters: {} }]), '']) {
+      rulesAre(rules);
+      reviews([review('tuannd9288', 'APPROVED', 'x'.repeat(40))]);
+      const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+      assert.equal(out.code, 1, `${JSON.stringify(rules)}: ${out.out}`);
+      assert.match(out.out, /tier: the merge switch could not be read/);
+      assert.match(out.out, /fails closed/);
+    }
+    write(fake, { 'rules.json': null });
+    assert.equal(job('tier', { 'AGENTS.md': '# app\n' }, pr).code, 1, 'no answer at all');
+  });
+  test('tier 1 and 2 read no switch, at any position', () => {
+    for (const rules of [switchRules(0, false), switchRules(1, true), 'not json']) {
+      rulesAre(rules);
+      assert.equal(job('tier', { 'src/math.js': MUL }, pr).code, 0);
+    }
+  });
+  // The queue follows the switch by state: tier 3 records the position it read on its own check run, as a workflow notice.
+  test('tier 3 records the position it ran at as the notice "merge switch", once, before the all exit', () => {
+    for (const [rules, position] of [[switchRules(0, false), 'all'], [switchRules(0, true), '1-2'], [switchRules(1, true), 'none']]) {
+      rulesAre(rules);
+      reviews([review('tuannd9288', 'APPROVED', 'x'.repeat(40))]);
+      const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+      const lines = out.out.split('\n');
+      assert.equal(lines.filter((l) => l.startsWith('::notice title=merge switch::')).length, 1, `${position}: ${out.out}`);
+      assert.ok(lines.includes(`::notice title=merge switch::${position}`), `${position}: ${out.out}`);
+      if (position === 'all') assert.ok(lines.indexOf('::notice title=merge switch::all') < lines.findIndex((l) => /is at all/.test(l)), 'recorded before the exit');
+    }
+  });
+  test('tier 1 and 2 record nothing and make no read of the rules', () => {
+    rulesAre(switchRules(0, true));
+    for (const files of [{ 'src/auth/t.js': 'export const t = 1;\n' }, { 'src/math.js': MUL }]) {
+      write(fake, { 'rules-calls': null });
+      const out = job('tier', files, pr);
+      assert.equal(out.code, 0, out.out);
+      assert.doesNotMatch(out.out, /title=merge switch/);
+      assert.ok(!existsSync(join(fake, 'rules-calls')), 'the rules were read');
+    }
+  });
+  test('tier records nothing when the rules cannot be read', () => {
+    rulesAre('not json');
+    assert.doesNotMatch(job('tier', { 'AGENTS.md': '# app\n' }, pr).out, /title=merge switch/);
+  });
+  test('at all, a stale claim still fails a tier 3 change, and the labels are still read', () => {
+    rulesAre(switchRules(0, false));
+    const first = claimTip('claim 7 team-x');
+    claimTip('handoff 7 team-y', first);
+    prBody(`Issue: #7\nClaim: ${first}\n`);
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /handoff 7 team-y/);
+    prBody(`Issue: none\nTeam: team-x\n`);
+    write(fake, { 'labels.json': '{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}' });
+    assert.equal(job('tier', { 'AGENTS.md': '# app\n' }, pr).code, 1, 'labels that cannot be read fail it');
+    labels();
   });
   test('a missing label raised fails tier closed and names the fix', () => {
     labels();
@@ -912,12 +1102,103 @@ describe('review, verdict, tier and rounds', () => {
     labels();
     reviewJob('success');
     reviews([]);
-    for (const why of ['::error::x', '%0A::warning::y', ' \n::add-mask::z']) {
+    // tier's own notice "merge switch" is the one command allowed, once, and it names the position in force (1-2 here).
+    const own = /^::notice title=merge switch::(all|1-2|none)$/;
+    const forged = ['::notice title=merge switch::all', ' \n::notice title=merge switch::all', '%0A::notice title=merge switch::all'];
+    for (const why of ['::error::x', '%0A::warning::y', ' \n::add-mask::z', ...forged]) {
       annotations(why);
       const out = job('tier', { 'src/math.js': MUL }, pr);
       assert.match(out.out, /^tier 3\n {2}raised by the reviewer: /, out.out);
-      for (const line of out.out.split('\n')) assert.doesNotMatch(line, /^\s*(::|%0A)/, `a line starts with a command: ${line}`);
+      const lines = out.out.split('\n');
+      for (const line of lines) if (/^\s*(::|%0A)/.test(line)) assert.match(line, own, `a line starts with a command: ${line}`);
+      assert.deepEqual(lines.filter((l) => own.test(l)), ['::notice title=merge switch::1-2'], `the one notice is tier's own: ${out.out}`);
     }
+  });
+  test('a changed path that reads as a workflow command puts no command in the log, and tier\'s own notice is there once', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    const files = {
+      '::notice title=merge switch::all/tsconfig.json': '{}\n',
+      '::stop-commands::x/.gitattributes': 'x\n',
+      '##[error]x/tsconfig.json': '{}\n',
+      '%0A::warning::y/tsconfig.json': '{}\n',
+    };
+    const out = job('tier', files, pr);
+    assert.match(out.out, /^tier 3\n/, out.out);
+    const lines = out.out.split('\n');
+    for (const line of lines) {
+      assert.doesNotMatch(line, /##\[/, `a legacy command: ${line}`);
+      if (/^\s*(::|%0[aA])/.test(line)) assert.match(line, /^::notice title=merge switch::(all|1-2|none)$/, `a line starts with a command: ${line}`);
+    }
+    assert.deepEqual(lines.filter((l) => /^::notice title=merge switch::/.test(l)), ['::notice title=merge switch::1-2']);
+    assert.ok(lines.some((l) => l.includes('tsconfig.json (protected')), 'the paths are still shown');
+  });
+  // A runner may trim more than ASCII white space before it looks for a command: the pull request's text is held between
+  // ::stop-commands::<token> and ::<token>:: with a fresh random token, and tier's own notice comes after, outside.
+  const blocks = (raw) => {
+    const lines = raw.split('\n');
+    const found = [];
+    let open = null;
+    for (const [i, line] of lines.entries()) {
+      const m = /^::stop-commands::(\S+)$/.exec(line);
+      if (open === null && m) open = { token: m[1], from: i };
+      else if (open && line === `::${open.token}::`) {
+        found.push({ ...open, to: i });
+        open = null;
+      }
+    }
+    assert.equal(open, null, 'a block was left open');
+    return { lines, found };
+  };
+  test('a path led by a no-break or other wide space that reads as a command cannot swallow tier\'s notice, which stays outside the stop-commands block', () => {
+    labels();
+    reviews([]);
+    rulesAre(switchRules(0, true));
+    const lead = [' ', ' ', ' '];
+    const files = {};
+    for (const c of lead) {
+      files[`${c}::stop-commands::x/package.json`] = '{ "scripts": { "test": "true" } }\n';
+      files[`${c}::notice title=merge switch::all/package.json`] = '{ "scripts": { "test": "true" } }\n';
+    }
+    const first = job('tier', files, pr);
+    const second = again('tier', first.head, pr);
+    const tokens = [];
+    for (const out of [first, second]) {
+      assert.match(out.out, /^tier 3\n/, out.out);
+      const { lines, found } = blocks(out.raw);
+      assert.ok(found.length >= 1, 'the pull request\'s text is held in a block');
+      for (const b of found) {
+        assert.ok(b.token.length >= 16, 'a token of at least 16 characters');
+        assert.ok(!lines.slice(b.from + 1, b.to).includes(`::${b.token}::`), 'no line inside equals the closing marker');
+      }
+      const notices = lines.map((l, i) => [l, i]).filter(([l]) => l === '::notice title=merge switch::1-2');
+      assert.equal(notices.length, 1, out.raw);
+      assert.ok(found.every((b) => notices[0][1] > b.to || notices[0][1] < b.from), 'the notice is inside no block');
+      assert.ok(found.every((b) => notices[0][1] > b.to), 'the notice comes after the text it follows');
+      tokens.push(found[0].token);
+    }
+    assert.notEqual(tokens[0], tokens[1], 'the token differs between runs');
+  });
+  test('verdict holds the pull request\'s text in a stop-commands block too: a path led by a no-break space that reads as a result notice stays inside it', () => {
+    labels();
+    const hostile = '::notice title=review-result::unavailable: x';
+    for (const files of [{ [` ${hostile}/package.json`]: '{}\n' }]) {
+      const out = job('verdict', files, { ...pr, GATE_REVIEWER: '' });
+      const { lines, found } = blocks(out.raw);
+      assert.ok(found.length >= 1, out.raw);
+      const outside = lines.filter((l, i) => !found.some((b) => i >= b.from && i <= b.to));
+      // The line that names the path is found by the path's tail: its line-start `::` is broken by tier_of's neutralising, so the
+      // hostile text is not there verbatim, and the block holds it either way.
+      const named = 'x/package.json';
+      assert.ok(!outside.some((l) => l.includes(named)), `the text is outside a block: ${out.raw}`);
+      assert.ok(lines.some((l, i) => l.includes(named) && found.some((b) => i > b.from && i < b.to)), 'the line naming the path is inside a block');
+      assert.ok(!outside.some((l) => /^\s*::notice title=review-result::/.test(l)), 'no result notice outside a block');
+    }
+    // A tier 1 verdict passes at once and holds its reasons in a block as well.
+    const one = job('verdict', { 'src/math.js': MUL }, { ...pr, GATE_REVIEWER: '' });
+    assert.equal(one.code, 0, one.raw);
+    assert.equal(blocks(one.raw).found.length, 1);
   });
   test('the stub raises on its marker; a raise leaves review green, and rounds, which runs only after a red job, has nothing to count', () => {
     let out = job('review', { 'src/math.js': `${MUL}// GATE-STUB-RAISE deletes a sign-in var\n` }, { GATE_REVIEWER: 'stub' });
@@ -1261,7 +1542,7 @@ describe('review, verdict, tier and rounds', () => {
     let out = again('tier', first.head, pr);
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
-    // A later re-run: the labels give tier 3, no wait, and the bot's event still holds the approval back.
+    // A later re-run: the labels give tier 3 (it waits for the review, then reads the switch), and the bot's event still holds the approval back.
     write(fake, { 'labels.json': events, 'labels2.json': null, 'labels.n': null });
     out = again('tier', first.head, pr);
     assert.equal(out.code, 1, out.out);
@@ -1695,8 +1976,9 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
    * the run's place in the list unless given. */
   const entire = (runs, pinned = [ENTIRE_APP]) =>
     write(fake, {
+      'entire-rules': '',
       'rules.json': JSON.stringify([
-        { type: 'pull_request', parameters: {} },
+        ...switchRules(0, true),
         ...pinned.map((id) => ({ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'verify', integration_id: 15368 }, { context: 'tier', integration_id: 15368 }, { context: 'Entire Gates', ...(id === null ? {} : { integration_id: id }) }] } })),
       ]),
       'entire.json': JSON.stringify({

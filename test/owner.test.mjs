@@ -69,7 +69,7 @@ const one = /rulesets\/(\d+)$/.exec(path);
 if (one) {
   const i = state.rulesets.findIndex((r) => r.id === Number(one[1]));
   if (i < 0) missing();
-  if (method === 'PUT') { if (kept('rulesets')) state.rulesets[i] = { ...state.rulesets[i], ...body }; done(state.rulesets[i]); }
+  if (method === 'PUT') { (state.puts ??= []).push(body); if (kept('rulesets')) state.rulesets[i] = { ...state.rulesets[i], ...body }; done(state.rulesets[i]); }
   if (method === 'DELETE') { state.rulesets.splice(i, 1); done(); }
   // GitHub answers with defaults the request did not set; a read-back compares only what was asked for.
   const r = state.rulesets[i];
@@ -77,6 +77,14 @@ if (one) {
   // So does the tag ruleset: a bypass actor with a field of its own, a parameter on the update rule, a top-level field.
   if (r.target === 'tag') done({ ...read, current_user_can_bypass: 'never', bypass_actors: read.bypass_actors.map((b) => ({ ...b, actor_name: 'admin' })), rules: read.rules.map((x) => (x.type === 'update' ? { ...x, parameters: { update_allows_fetch_and_merge: false } } : x)) });
   done(read);
+}
+// #333: the rules in force on the default branch, which the merge switch is read from: every rule of every active branch ruleset.
+// With --slurp, as gh gives it, the list is a page of a list of pages.
+// A call that does not ask for every page fails, so a command that drops --paginate or --slurp turns a test red.
+if (path === repo + '/rules/branches/main') {
+  if (!args.includes('--paginate') || !args.includes('--slurp')) { process.stderr.write('fake gh: the rules are asked without --paginate --slurp\n'); process.exit(1); }
+  const list = state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules.map((x) => ({ ...x, ruleset_id: r.id })));
+  done([list]);
 }
 const env = repo + '/environments/reviewer';
 if (path === env) {
@@ -200,7 +208,7 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
   const w = world();
   try {
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
-    w.set({ kitLanded: true, collaborator: 'write', invitations: [] });
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
     w.clear();
     const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 0, out.out);
@@ -433,7 +441,7 @@ test('the owner script sets factory-claims before the kit lands and keeps it aft
     assert.match(dry.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-claims","target":"branch".*"refs\/heads\/claim\/\*\*".*"deletion"/);
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
     assert.ok(w.state().rulesets.some((r) => r.name === 'factory-claims'));
-    w.set({ kitLanded: true, collaborator: 'write', invitations: [] });
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
     w.clear();
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
     assert.ok(w.state().rulesets.some((r) => r.name === 'factory-claims'));
@@ -441,6 +449,266 @@ test('the owner script sets factory-claims before the kit lands and keeps it aft
     const again = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(again.code, 0, again.out);
     assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+// #333: the merge switch is the two review parameters of the factory-gate ruleset; only the owner's login moves it.
+const ME = ['tuannd9288/app', '--id', '1234'];
+const inForce = (over = {}) => world({ kitLanded: true, collaborator: 'write', files: onMain({ reviewer: 'claude' }), ...over });
+const gateOf = (w) => w.state().rulesets.find((r) => r.name === 'factory-gate');
+const reviewOf = (w) => {
+  const p = gateOf(w).rules.find((r) => r.type === 'pull_request').parameters;
+  return [p.required_approving_review_count, p.require_code_owner_review];
+};
+/** The gate with its review parameters set, as the Human's own click in Settings would leave it. */
+const setReview = (w, count, owner) =>
+  w.set({ rulesets: w.state().rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_approving_review_count: count, require_code_owner_review: owner } } : x)) })) });
+const POSITIONS = [['all', 0, false], ['1-2', 0, true], ['none', 1, true]];
+
+test('a gate put in new starts at 1-2, and the run names the position it reads, the bootstrap ruleset\'s being none (#333)', () => {
+  const w = inForce();
+  try {
+    const out = w.owner([...ME, '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /the merge switch on main is 1-2/);
+    assert.deepEqual(reviewOf(w), [0, true]);
+  } finally {
+    w.cleanup();
+  }
+  const before = world();
+  try {
+    assert.equal(before.owner([...ME, '--apply']).code, 0);
+    before.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
+    const out = before.owner(ME);
+    assert.match(out.out, /the merge switch on main is none/);
+  } finally {
+    before.cleanup();
+  }
+});
+
+test('a changed factory-gate is put back with the review parameters it holds, not the kit\'s (#333)', () => {
+  for (const [position, count, owner] of POSITIONS) {
+    const w = inForce();
+    try {
+      assert.equal(w.owner([...ME, '--apply']).code, 0);
+      setReview(w, count, owner);
+      // Another change to the ruleset: a required check taken out.
+      w.set({ rulesets: w.state().rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.map((x) => (x.type === 'required_status_checks' ? { ...x, parameters: { ...x.parameters, required_status_checks: x.parameters.required_status_checks.filter((c) => c.context !== 'verdict') } } : x)) })) });
+      w.clear();
+      const out = w.owner([...ME, '--apply']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, new RegExp(`the merge switch on main is ${position}`));
+      const writes = w.writes();
+      assert.equal(writes.length, 1, writes.join('\n'));
+      assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${gateOf(w).id} `));
+      assert.deepEqual(reviewOf(w), [count, owner], position);
+      const checks = gateOf(w).rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
+      assert.ok(checks.includes('verdict'), 'the rest of the ruleset is the kit\'s again');
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
+test('--merge sets the two parameters and nothing else: a dry run without --apply, read back with it, and a second run changes nothing (#333)', () => {
+  const w = inForce();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    const masked = () => JSON.stringify(gateOf(w).rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_reviewers: undefined, required_approving_review_count: 0, require_code_owner_review: 0 } } : x)));
+    const rest = masked();
+    for (const [position, count, owner] of [POSITIONS[0], POSITIONS[2], POSITIONS[1]]) {
+      const was = reviewOf(w);
+      w.clear();
+      let out = w.owner([...ME, '--merge', position]);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, new RegExp(`change  ruleset factory-gate: PUT repos/tuannd9288/app/rulesets/\\d+: required_approving_review_count ${was[0]} -> ${count}, require_code_owner_review ${was[1]} -> ${owner}; the rest of the ruleset is left as it is`));
+      assert.match(out.out, /dry run: nothing changed; rerun with --apply/);
+      assert.deepEqual(w.writes(), []);
+      assert.deepEqual(reviewOf(w), was, 'a dry run moved the switch');
+      w.clear();
+      out = w.owner([...ME, '--merge', position, '--apply']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, new RegExp(`read back: the merge switch is ${position}`));
+      assert.equal(w.writes().length, 1, w.writes().join('\n'));
+      assert.deepEqual(reviewOf(w), [count, owner]);
+      assert.equal(masked(), rest, 'only the two review parameters moved');
+      w.clear();
+      out = w.owner([...ME, '--merge', position, '--apply']);
+      assert.equal(out.code, 0, out.out);
+      assert.deepEqual(w.writes(), []);
+    }
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge reads back the position from the rules in force, and a write that did not take leaves the run incomplete (#333)', () => {
+  const w = inForce();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    w.set({ ignore: 'rulesets' });
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /incomplete: the merge switch reads 1-2, not all/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge on a repository that has drifted from the kit changes the two parameters and nothing else (#333)', () => {
+  const w = inForce();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    // Auto-merge off, as zalo-gateway has it, a ruleset gone, and the environment's branch policy gone.
+    w.set({ repo: { ...w.state().repo, allow_auto_merge: false }, rulesets: w.state().rulesets.filter((r) => r.name !== 'factory-claims'), environment: { ...w.state().environment, policies: [] } });
+    w.clear();
+    const dry = w.owner([...ME, '--merge', 'all']);
+    assert.equal(dry.code, 0, dry.out);
+    assert.match(dry.out, /change  ruleset factory-gate: PUT/);
+    assert.match(dry.out, /not changed  allow auto-merge: .*--merge moves the merge switch only/);
+    assert.match(dry.out, /not changed  ruleset factory-claims:/);
+    assert.match(dry.out, /not changed  environment reviewer deploys from main:/);
+    assert.deepEqual(w.writes(), []);
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const writes = w.writes();
+    assert.equal(writes.length, 1, writes.join('\n'));
+    assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${gateOf(w).id} `));
+    assert.deepEqual(reviewOf(w), [0, false]);
+    assert.equal(w.state().repo.allow_auto_merge, false, 'allow auto-merge stays off');
+    assert.ok(!w.state().rulesets.some((r) => r.name === 'factory-claims'));
+    assert.match(out.out, /read back: the merge switch is all/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge writes the live gate ruleset back with the two parameters changed, and whatever else differs from the kit stays (#333)', () => {
+  const w = inForce();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    // Drift inside the ruleset: a required check taken out and one added, and fields GitHub reads back but does not take.
+    const drifted = w.state().rulesets.map((r) =>
+      r.name !== 'factory-gate'
+        ? r
+        : {
+            ...r,
+            source_type: 'Repository',
+            created_at: '2026-11-01T00:00:00Z',
+            _links: { self: { href: 'x' } },
+            current_user_can_bypass: 'never',
+            rules: r.rules.map((x) => (x.type === 'required_status_checks' ? { ...x, parameters: { ...x.parameters, required_status_checks: [...x.parameters.required_status_checks.filter((c) => c.context !== 'verdict'), { context: 'extra', integration_id: 15368 }] } } : x)),
+          },
+    );
+    w.set({ rulesets: drifted });
+    const live = JSON.parse(JSON.stringify(gateOf(w)));
+    w.clear();
+    const dry = w.owner([...ME, '--merge', 'none']);
+    assert.equal(dry.code, 0, dry.out);
+    assert.match(dry.out, /change  ruleset factory-gate: PUT repos\/tuannd9288\/app\/rulesets\/\d+: required_approving_review_count 0 -> 1, require_code_owner_review true -> true; the rest of the ruleset is left as it is/);
+    assert.deepEqual(w.writes(), []);
+    const out = w.owner([...ME, '--merge', 'none', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const body = w.state().puts.at(-1);
+    assert.deepEqual(Object.keys(body).sort(), ['bypass_actors', 'conditions', 'enforcement', 'name', 'rules', 'target'], 'only what GitHub takes back');
+    const checks = body.rules.find((x) => x.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
+    assert.ok(checks.includes('extra') && !checks.includes('verdict'), `the live difference stayed: ${checks}`);
+    // (The fake's read adds required_reviewers: [], as GitHub does; it is not a difference.)
+    const mask = (rules) => JSON.stringify(rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_reviewers: undefined, required_approving_review_count: 0, require_code_owner_review: 0 } } : x)));
+    assert.equal(mask(body.rules), mask(live.rules), 'only the two parameters changed');
+    for (const key of ['name', 'target', 'enforcement', 'bypass_actors', 'conditions']) assert.deepEqual(body[key], live[key], key);
+    assert.deepEqual(reviewOf(w), [1, true]);
+    assert.match(out.out, /read back: the merge switch is none/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge is refused with one line when the live gate ruleset has no pull_request rule (#333)', () => {
+  const w = inForce();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    w.set({ rulesets: w.state().rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.filter((x) => x.type !== 'pull_request') })) });
+    w.clear();
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /--merge: the factory-gate ruleset has no pull_request rule with both review parameters, so there is no switch to move/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge is refused while the gate ruleset is not in force, and the bootstrap ruleset is left (#333)', () => {
+  const w = world();
+  try {
+    assert.equal(w.owner([...ME, '--apply']).code, 0);
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
+    w.clear();
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /--merge moves the switch of the factory-gate ruleset, which is not in force on main yet/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('--merge is refused with a value that is no position, without a value, before the kit is on main, and under the agents\' login (#333)', () => {
+  for (const extra of [['--merge', 'sideways'], ['--merge'], ['--merge', 'ALL']]) {
+    const w = inForce();
+    try {
+      const out = w.owner([...ME, ...extra, '--apply']);
+      assert.equal(out.code, 2, `${extra.join(' ')}\n${out.out}`);
+      assert.match(out.out, /usage: bin\/onboard-owner <owner\/name> --id <repository id> \[--apply\] \[--merge all\|1-2\|none\]/);
+      assert.equal(readFileSync(join(w.dir, 'calls'), 'utf8'), '', 'it reached GitHub');
+    } finally {
+      w.cleanup();
+    }
+  }
+  let w = world();
+  try {
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /--merge .*the kit is not on main/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+  w = inForce({ login: 'tuan9288-agent' });
+  try {
+    const out = w.owner([...ME, '--merge', 'all', '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /runs as the Human, the repository's owner, not as the agents' account/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('on a main where the kit has landed, a gate-trusted.yml that cannot be read stops the run, rather than reading as no reviewer (#333)', () => {
+  const noReviewer = { ...onMain({ reviewer: 'claude' }), [TRUSTED]: 'name: gate-trusted\njobs: {}\n' };
+  for (const files of [{}, { ...onMain({}), [TRUSTED]: undefined }, noReviewer]) {
+    const w = world({ kitLanded: true, collaborator: 'write', files });
+    try {
+      const out = w.owner([...ME, '--apply']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /gate-trusted\.yml on main cannot be read/);
+      assert.deepEqual(w.writes(), []);
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
+test('a gate-trusted.yml with the reviewer empty is a reading, not a failure to read (#333)', () => {
+  const w = world({ kitLanded: true, collaborator: 'write', files: onMain({}) });
+  try {
+    const out = w.owner([...ME, '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /the reviewer on main is none/);
   } finally {
     w.cleanup();
   }

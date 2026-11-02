@@ -15,7 +15,8 @@ Every pull request needs four checks green on its head commit:
 - `verify` (`gate.yml`): `main`'s verify, rules and red-check, run on your code.
 - `review` and `verdict` (`gate-trusted.yml`): the reviewer reads your change as data once `verify` passed. `verdict` passes
   at once on tier 1.
-- `tier`: below tier 3 it waits for `review` to end; on tier 3 it waits for the Human's approval of your change.
+- `tier`: it waits for `review` to end; on tier 3 it then waits for the Human's approval of your change, unless the
+  repository's merge switch is at `all`.
 
 The reviewer may raise a change to tier 3 (label `raised`), never lower one. A label never lowers a tier. The Human's
 approval holds while the patch is unchanged, as when the queue merges `main` in; a new patch needs a new one.
