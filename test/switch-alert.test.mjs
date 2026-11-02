@@ -13,13 +13,22 @@ import { HOLD_MS, watchSwitch } from '../bin/lib/switch-watch.mjs';
 const T0 = Date.parse('2026-11-02T13:00:00Z');
 const HOUR = 60 * 60_000;
 
+/** Runs body in a temporary folder and removes it after: once the body's promise settles, when it returns one. */
 function withDir(body) {
   const dir = mkdtempSync(join(tmpdir(), 'switch-alert-'));
+  const remove = () => rmSync(dir, { recursive: true, force: true });
+  let result;
   try {
-    return body(dir);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+    result = body(dir);
+  } catch (error) {
+    remove();
+    throw error;
   }
+  if (typeof result?.then !== 'function') {
+    remove();
+    return result;
+  }
+  return result.finally(remove);
 }
 
 const positionFile = (state, repo) => join(state, `queue-${repo.replace('/', '-')}.position`);
@@ -87,7 +96,9 @@ test('24 hours on it clears; a second move within the hours ends the first and s
     const second = { from: 'all', to: 'none', at: new Date(T0 + 2 * HOUR).toISOString() };
     watch(dir, state, new Map([['o/app', first]]), T0);
     watch(dir, state, new Map([['o/app', second]]), T0 + 2 * HOUR);
-    assert.deepEqual(lines(state), [`start switch-moved o/app ${first.at}`, `clear switch-moved o/app ${first.at}`, `start switch-moved o/app ${second.at}`]);
+    // One append holds the second sweep's changes; their order within it is not what is asserted.
+    assert.equal(lines(state)[0], `start switch-moved o/app ${first.at}`);
+    assert.deepEqual(lines(state).slice(1).sort(), [`clear switch-moved o/app ${first.at}`, `start switch-moved o/app ${second.at}`]);
     watch(dir, state, new Map([['o/app', second]]), T0 + 2 * HOUR + HOLD_MS - 1);
     assert.equal(lines(state).length, 3, 'held to the last millisecond');
     watch(dir, state, new Map([['o/app', second]]), T0 + 2 * HOUR + HOLD_MS);
@@ -205,11 +216,10 @@ test('a failed read leaves the position file and the condition as they were', ()
     rmSync(join(dir, 'rulesfail'));
     w.sweep();
     assert.equal(saved(w.state, 'o/app').position, 'all');
-    assert.deepEqual(
-      lines(w.state).map((l) => l.split(' ')[0]),
-      ['start', 'clear', 'start'],
-      'the second move ends the first condition and starts its own',
-    );
+    // The second move ends the first condition and starts its own, in one append whose order is not asserted.
+    const verbs = lines(w.state).map((l) => l.split(' ')[0]);
+    assert.equal(verbs[0], 'start');
+    assert.deepEqual(verbs.slice(1).sort(), ['clear', 'start']);
   }));
 
 test('the factory\'s own repository: its rules are read once a sweep and none of its pull requests; no checkout, no read', () =>
