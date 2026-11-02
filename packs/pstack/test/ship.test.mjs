@@ -335,7 +335,7 @@ describe('the steps after it opened', () => {
     let out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
     assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
     w.pr({ statusCheckRollup: [{ name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     out = w.ship();
@@ -398,11 +398,11 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
     let out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
     assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
     out = w.ship();
     assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
     assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 1);
   });
 
@@ -467,10 +467,10 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     let out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
     out = w.ship();
     assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
     assert.doesNotMatch(out.out, /nothing to do/);
   });
 
@@ -478,7 +478,7 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     const w = opened(3);
     const out = w.ship();
     assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval$/m);
+    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
   });
 
   test('below tier 3 a red tier check is no wait of the Human\'s', () => {

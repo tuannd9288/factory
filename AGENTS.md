@@ -19,7 +19,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   agent-desk issue #269, as the map's "Đã quyết" block records it.
 - **First product repository, 2026-10-20.** It is not docparse or tuanhub-notifier: "đang ổn, không cần". Source:
   the live copy of the page "Môi trường repo cho agent", decision 3, as the map records it.
-- **Merging, 2026-10-21 to 2026-10-30.** A reversible change in tier 1 or 2 merges by rule once the repository's
+- **Merging, 2026-10-21 to 2026-11-02.** A reversible change in tier 1 or 2 merges by rule once the repository's
   gate is green on its head commit; the Human keeps tier 3, a change stuck after three rounds, and every deploy (K1,
   2026-10-21: "Triển khai theo đề xuất đi"). A pull request auto-merges once the four checks are green on its head
   commit, and tier 3 still waits for his approval (#203, which he approved "theo đề xuất" on 2026-10-30). Attack 12
@@ -27,7 +27,20 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   Triage, và theo dõi thực tế factory triển khai có hiệu quả hơn là đi xử lý cái vấn đề có thể không xảy ra không?").
   The pack's Lead arms auto-merge through `scripts/ship` (#163, #304). Sources:
   https://github.com/tuannd9288/factory/issues/203 (area 4) and https://github.com/tuannd9288/factory/issues/153; the
-  bar of 2026-10-21 is `probes/plan.md` at the tag `before-271`.
+  bar of 2026-10-21 is `probes/plan.md` at the tag `before-271`. **The merge switch, 2026-11-02 (#333).** Each repository
+  has a switch with three positions, "toàn bộ" (`all`: every pull request merges by itself once its checks are green,
+  tier 3 included), "1–2" (tier 1 and 2 do, tier 3 waits for him) and "mọi PR chờ" (`none`: every pull request waits for
+  him); a repository taken in starts at "1–2", and zalo-gateway keeps its present setting, GitHub's "Allow auto-merge"
+  off, until he moves it. It is the two review parameters of the `factory-gate` ruleset ("Luật review của GitHub
+  (Recommended)", 12:14:34), so GitHub holds it and a move applies at once to the open pull requests, which the queue
+  follows by re-running a tier-3 `tier` whose recorded position and the one in force differ in a way that changes its
+  verdict. At `all` the code also lets a `needs-human` pull request merge once its checks are green: the Lead's reading,
+  awaiting his choice on the pull request. Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`, which Colly runs.
+  "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
+  (Recommended)" are his answers; the factory's own repository is unchanged. Sources:
+  https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 (09:51 to about 10:00),
+  https://github.com/tuannd9288/factory/issues/333#issuecomment-6568380227 (10:11 and 10:21) and
+  https://github.com/tuannd9288/factory/issues/333#issuecomment-6569698590 (12:14:34).
 - **agent-desk and Claude Code, 2026-10-21 and 2026-10-27.** agent-desk stays parked. Every lead, worker and reviewer
   of the factory's own team runs through Claude Code, apart from pstack's other-family steps, which D2 sends to Codex
   (the live verifier's entry below); another team may bring its own harness (#131). The instruction file is for any
@@ -163,7 +176,7 @@ The change sets the tier, by the paths it touches (`.gate/bin/tier`), never the 
 |---|---|---|---|
 | 1 | no tier-2 or tier-3 path | `verify`, `review`, `verdict`, `tier` green on the head commit; `verdict` passes at once | none |
 | 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
-| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks | approves from the summary |
+| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the summary |
 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
 removed.
@@ -178,7 +191,9 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 
 ## What the Human keeps
 
-- Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy.
+- Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy. Where a repository's merge
+  switch is at `all` (#333), a tier-3 pull request needs no approval of his (a `needs-human` one too, as the code does:
+  the Lead's reading, awaiting his choice); a deploy is still his.
 - His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
   `reviewer` environment, "Allow auto-merge"), which Colly then applies on his login; and the reviewer's secret, where a
   repository uses the kit's Claude reviewer.
@@ -239,7 +254,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   which reads the body; `kit/.github/pull_request_template.md` asks for the rest.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
-  Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:27` (one reviewer call per head).
+  Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:31` (one reviewer call per head).
   Prior art [A8]: "An approval covers one specific commit."
 - **H4**: Knowledge is files in the repository, changed by pull request.
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
