@@ -375,7 +375,8 @@ function movedOld(agentProfiles, state) {
 
 /** `factory top` (#174): the read-only view of every session and repository (bin/lib/top.mjs). On the factory host it runs
  * here; on the MacBook it runs the same command there by ssh, with a terminal (-t) for the live view only. Only `--once` and
- * `--full` (each at most once) and `--width N` (digits) are taken, checked before any ssh. */
+ * `--full` (each at most once) and `--width N` (digits) are taken, checked before any ssh. `--once` prints one frame with no keys
+ * line, and in colour only when its output is a terminal that has colours (NO_COLOR, NODE_DISABLE_COLORS and FORCE_COLOR apply). */
 async function top(args, env) {
   const live = !args.includes('--once');
   const rest = args.filter((a) => a !== '--once' && a !== '--full');

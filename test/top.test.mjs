@@ -903,3 +903,66 @@ test('Today counts the pull requests merged today, the cost of the records that 
   const { snap } = await frame(w);
   assert.deepEqual(snap.today, { merged: 1, cost: [['b', 1.6]], waitedMs: 90 * 60_000 });
 });
+
+test('a snapshot with no sessions and no issues renders at 45 and 120 columns, plain and --full, and every line fits', async () => {
+  const { cells, render } = await top();
+  const empty = (repos) => ({
+    now: NOW, load: [0, 0, 0], cores: 8, sessions: [], repos, github: { ok: true, at: NOW, error: null },
+    queue: { lastSweep: null, queueFailed: 0, failed: [] }, accounts: [], today: { merged: 0, cost: [], waitedMs: 0 },
+  });
+  for (const snap of [empty([]), empty([{ repo: 'o/n', groups: [], other: [], ghStatus: null }])]) {
+    for (const width of [45, 120]) {
+      for (const full of [false, true]) {
+        const lines = render(snap, { width, full, color: true, keys: true }).split('\n');
+        assert.ok(lines.length > 3);
+        for (const l of lines) assert.ok(cells(l) <= width, `${width}: ${l}`);
+      }
+    }
+  }
+});
+
+test('at 45 columns a row\'s name keeps 8 cells: a long note is cut or dropped first', async () => {
+  const w = world();
+  writeFileSync(join(w.opts.runs, 'issue-174/run-reviewer.name'), 'hippopotamus\n');
+  const { snap } = await leadOf(w, { pid: 1, command: HOOKED, ageMs: 120_000 }, null);
+  assert.equal(snap.sessions.find((s) => s.role === 'lead').waitNote, 'login or folder trust?');
+  const { cells, render } = await top();
+  const lines = render(snap, { width: 45 }).split('\n');
+  for (const l of lines) assert.ok(cells(l) <= 45, l);
+  assert.match(lines.find((l) => /^ {6}hippo/.test(l)), /^ {6}hippopo… +✓ done/, 'eight cells of the name, ellipsis included');
+  assert.match(lines.find((l) => /^ {2}aardvark/.test(l)), /^ {2}aardvark +! waiting/);
+});
+
+test('a folded repository line is whole items, wrapped onto an indented line, never cut inside an item', async () => {
+  const w = world();
+  const { snap } = await frame(w);
+  const { cells, render } = await top();
+  const base = snap.sessions.find((s) => s.name === 'beaver');
+  const repo = 'tuannd9288/factory-pack-scratch';
+  const old = { ...base, name: 'moth', repo, issue: null, folder: null, live: false, state: 'done', lastAt: NOW - 3 * 86400_000 };
+  const quiet = { ...snap, sessions: [...snap.sessions, old], repos: [...snap.repos, { repo, groups: [{ ...snap.repos[0].groups[0], number: 9, done: false, active: false, recent: false, sessions: [] }], other: [old], ghStatus: null }] };
+  const wide = render(quiet, { width: 200 }).split('\n');
+  assert.equal(wide.filter((l) => l.startsWith(repo)).length, 1);
+  assert.match(wide.find((l) => l.startsWith(repo)), /\b1\b.*\b1\b/, 'one line when it fits');
+  const lines = render(quiet, { width: 45 }).split('\n');
+  const at = lines.findIndex((l) => l.startsWith(repo));
+  assert.ok(at > 0);
+  for (const l of lines) assert.ok(cells(l) <= 45, l);
+  assert.ok(!lines.slice(at, at + 2).some((l) => l.includes('…')), 'nothing is cut');
+  assert.equal(lines[at], repo, 'the name alone on its line');
+  assert.match(lines[at + 1], /^ {2}1 .*, 1 \S+$/, 'both counts, whole, on an indented line');
+});
+
+test('an issue whose pull request merged, with nothing waiting on the Human, is ✓ merged, dim; it is not idle', async () => {
+  const w = world();
+  const prs = JSON.parse(readFileSync(join(w.fx, 'prs.json'), 'utf8'));
+  prs[0] = { ...prs[0], state: 'MERGED', mergedAt: '2026-10-31T10:00:00Z' };
+  writeFileSync(join(w.fx, 'prs.json'), JSON.stringify(prs));
+  const { snap } = await frame(w);
+  const { render } = await top();
+  const row = (text) => text.split('\n').find((l) => / #174 /.test(l));
+  assert.match(row(render(snap, { width: 200 })), /^ {4}✓ merged +#174 /);
+  assert.ok(row(render(snap, { width: 200, color: true })).includes('\x1b[2m✓ merged\x1b[0m'));
+  const closed = { ...snap, repos: snap.repos.map((r) => ({ ...r, groups: r.groups.map((g) => (g.number === 170 ? { ...g, step: 'closed', done: false } : g)) })) };
+  assert.match(render(closed, { width: 200 }).split('\n').find((l) => / #170 /.test(l)), /^ {4}✓ closed +#170 /);
+});

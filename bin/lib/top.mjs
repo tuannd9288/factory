@@ -622,7 +622,10 @@ const stateOfRow = (s) => SESSION_STATES[s.state] ?? { mark: '○', word: String
 // engineering columns, come with `c` or --full. When a row does not fit, columns go whole in the order of S_STEPS.
 const S_BASE = [['name', 'NAME', 18], ['role', 'ROLE', 10], ['state', 'STATE', 14], ['for', 'FOR', 17], ['cost', 'COST', 8], ['note', 'NOTE', 40]];
 const S_FULL = [['harness', 'HARNESS', 9], ['model', 'MODEL', 18], ['seat', 'SEAT', 5], ['ctx', 'CTX', 8], ['turns', 'TURNS', 6], ['tokens', 'TOKENS ↓/↑', 14], ['cwd', 'CWD', 24], ['branch', 'BRANCH', 40]];
-const S_STEPS = ['branch', 'cwd', 'tokens', 'turns', 'ctx', 'seat', 'model', 'harness', 'cost', 'role', 'for', ['name', 8], ['name', 4]];
+// NAME shrinks only to 8 cells of the name itself: its cell holds the indent too (at most NAME_INDENT), so the column goes to 8 + that.
+// What is still too wide then is NOTE's to give up: it is cut, or dropped.
+const NAME_INDENT = 6;
+const S_STEPS = ['branch', 'cwd', 'tokens', 'turns', 'ctx', 'seat', 'model', 'harness', 'cost', 'role', 'for', ['name', 8 + NAME_INDENT]];
 // The columns of an issue row, and what goes first: the title is the free-text cell and is cut; the state and #n stay.
 const I_COLS = [['state', '', 13], ['num', '', 6], ['team', '', 12], ['step', '', 9], ['pr', '', 9], ['checks', '', 34], ['title', '', 80]];
 const I_STEPS = ['team', 'step', 'checks', 'pr'];
@@ -635,6 +638,7 @@ const tail = (cwd) => (cwd ? cwd.split(sep).filter(Boolean).slice(-2).join('/') 
  * min(its width, MIN_FREE); the `keep` columns are never dropped. */
 function planCols(cols, natural, steps, room, keep) {
   let kept = cols.filter(([key]) => natural[key] > 0).map(([key, head]) => ({ key, head, w: natural[key] }));
+  if (!kept.length) return kept;
   const used = () => kept.slice(0, -1).reduce((n, c) => n + c.w + GAP, 0);
   for (const step of steps) {
     if (room - used() >= Math.min(kept.at(-1).w, MIN_FREE)) break;
@@ -703,6 +707,7 @@ const byState = (a, b) => stateOfRow(a).rank - stateOfRow(b).rank || roleRank(a)
 function issueState(g, all) {
   if (g.done) return { mark: '✓', word: g.step === 'merged' ? 'merged' : 'closed', code: DIM, rank: 4 };
   if (g.waiting === 'the Human') return { mark: '!', word: 'on you', code: YELLOW, rank: 0 };
+  if (g.step === 'merged' || g.step === 'closed') return { mark: '✓', word: g.step, code: DIM, rank: 4 };
   const newest = all.filter((v) => v.state !== 'gone').sort((a, b) => b.lastAt - a.lastAt)[0];
   if (!g.pr && newest && !all.some((v) => v.live) && (newest.state === 'failed' || newest.state === 'stopped')) return { mark: '×', word: 'stuck', code: RED, rank: 1 };
   if (g.waiting === 'the reviewer') return { mark: '●', word: 'on reviewer', code: GREEN, rank: 2 };
@@ -804,12 +809,10 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
   const iKept = planCols(I_COLS, naturalOf(I_COLS, allGroups.map((g) => issueCells(g, issueState(g, mergeRounds(g.sessions)))), false), I_STEPS, width - 4, ['state', 'num']);
   const sLine = (v, indent) => rowOf(sKept, sessionCells(v, now, indent), { state: tint(stateOfRow(v).code) });
   const iLine = (g, st, indent) => rowOf(iKept, issueCells(g, st), { state: tint(st.code) }, indent);
-  if (full) lines.push(rowOf(sKept, Object.fromEntries(sKept.map((c) => [c.key, c.head]))));
+  if (full && sKept.length) lines.push(rowOf(sKept, Object.fromEntries(sKept.map((c) => [c.key, c.head]))));
   const top = lines.length;
-  const head = (repo, rest = '') => {
-    const text = clip(rest ? `${repo}  ${rest}` : repo, width);
-    return text.startsWith(repo) ? paint(BOLD, repo) + text.slice(repo.length) : paint(BOLD, text);
-  };
+  // A repository's line: its name in bold, then what follows it, as whole items that wrap onto an indented line, never cut inside one.
+  const head = (repo, ...parts) => wrapped([{ text: repo, code: BOLD }, ...parts.filter(Boolean).map((text, i) => ({ text, lead: i ? ', ' : '  ' }))], { next: '  ' });
   const foldedLines = (folded, older) => [...(folded ? [`  ${folded} ended before today`] : []), ...(older ? [`  ${older} older`] : [])];
   const quiet = [];
   for (const r of snap.repos) {
@@ -827,7 +830,7 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
       const closed = r.groups.filter((g) => g.done).sort((a, b) => b.number - a.number);
       const shownGroups = closed.slice(0, DONE_MAX);
       if (!closed.length) continue;
-      lines.push(head(r.repo, status));
+      lines.push(...head(r.repo, status));
       for (const g of shownGroups) {
         const all = mergeRounds(g.sessions);
         lines.push(iLine(g, issueState(g, all), 2));
@@ -847,10 +850,10 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
     const leads = mergeRounds(r.other.filter((s) => s.role === 'lead')).sort(byState);
     const strays = listedNow(mergeRounds(r.other.filter((s) => s.role !== 'lead')));
     if (!leads.length && !entries.length && !strays.length && !st) {
-      if (folded || older) quiet.push(head(r.repo, [folded ? `${folded} ended before today` : '', older ? `${older} older` : ''].filter(Boolean).join(', ')));
+      if (folded || older) quiet.push(...head(r.repo, folded ? `${folded} ended before today` : '', older ? `${older} older` : ''));
       continue;
     }
-    lines.push(head(r.repo, status));
+    lines.push(...head(r.repo, status));
     // One block per team: its Lead row, then its issues, each with its sessions. An issue with no claim goes under the team of its
     // sessions' record, else under "no team".
     const byRank = (a, b) => a.st.rank - b.st.rank || a.g.number - b.g.number;
