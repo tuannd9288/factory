@@ -14,14 +14,25 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    each run on its own after a separate `cd <worktree>`, with no `env` prefix, pipe or `;`: the tests of the part
    changed as `.gate/bin/verify --tests <files>`, which runs them inside the script (`npm`, `npx` and `env` are denied),
    and `.gate/bin/verify --fast` on the staged files before each commit. Never write "check it against" a script: the
-   session then builds its own command, a deny rule refuses it, and it stops with no test run (#256).
+   session then builds its own command, a deny rule refuses it, and it stops with no test run (#256). Tell the worker to
+   list in `foundOutside` each bug or improvement it finds outside the issue, with where, and to fix none of them on the
+   branch. Work the issue needs is not a finding; the worker does it.
 4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
    `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
    the background, and has ended only when `~/.local/state/factory/sessions.jsonl` holds its record, a line that
    matches `"tag":"worker".*"run":"/Users/factory/factory-runs/<repo>-<n>"` (other fields sit between the two); a
    `"type":"result"` line in its log is not the end. Check with Grep, once at a time, not in a shell loop. The record's
    `structured` is its final message, and `session` and `seat` are what a fix round resumes. Then read its whole diff,
-   from the worktree: `cd <worktree>`, then `git diff origin/main...HEAD`. How many workers run at once is your call:
+   from the worktree: `cd <worktree>`, then `git diff origin/main...HEAD`. Then sort what the worker found (#338):
+   - Work the issue needs is done in the issue; nothing more to do.
+   - A bug or improvement outside it, listed in `foundOutside`: open an issue of this repository with `gh issue create`,
+     titled for the finding, whose body says "Found while working on #<n>" and gives the worker's line. Give it no `task`
+     label, so no team can claim it: it waits in Triage. Then go on with issue <n>; the fix is never on its branch.
+   - The issue's premise proved wrong, or the work would change its goal or cost: write it on issue <n> with
+     `gh issue comment`, with your recommendation, and stop work on <n> at that question, which shows under "Waiting on you" in
+     `factory top` for Colly.
+
+   How many workers run at once is your call:
    when the load is above the cores (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Your `bin/seat` calls inherit
    `FACTORY_TEAM`, which names your team's account; never set or change it in a command.
 5. Check it in the worktree yourself as the Gate block says: `.gate/bin/verify --fast`, the tests of the part changed
@@ -47,8 +58,8 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
 9. When it has landed, check that the issue closed. The queue's sweep removes the worktree.
 
 ## What you ask the Human
-Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login or
-a cost. Number each question and give your recommended answer.
+Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login, a
+cost, a premise of the issue that proved wrong, or a change of its goal or cost (step 4). Number each question and give your recommended answer.
 Decide and report everything else.
 
 ## Never
