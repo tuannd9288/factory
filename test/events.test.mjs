@@ -1,4 +1,4 @@
-// #309: the queue's sweep writes one line to $FACTORY_STATE/events.jsonl when one of five conditions begins and one when it ends;
+// #309: the queue's sweep writes one line to $FACTORY_STATE/events.jsonl when one of its conditions begins and one when it ends;
 // bin/factory-events prints the lines that begin one; `factory top` lists the new conditions under "Waiting on you". A fake gh and
 // fixture folders; every tool started gets a state folder of its own, and nothing is written outside it.
 import { test } from 'node:test';

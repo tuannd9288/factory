@@ -135,7 +135,7 @@ export function accountsOut({ runs, state, agentProfiles, now }) {
 }
 
 /** How long a move of the merge switch stays reported, from the time the sweep saw it. */
-export const SWITCH_HOLD_MS =24 * 60 * 60_000;
+export const SWITCH_HOLD_MS = 24 * 60 * 60_000;
 const pad = (n) => String(n).padStart(2, '0');
 const localStamp = (ms) => {
   const d = new Date(ms);
