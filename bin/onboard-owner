@@ -12,6 +12,14 @@
 #   changes. It reads the reviewer from main's gate-trusted.yml; a main whose gate-trusted.yml still reads the repository
 #   variable, as the kit did before #335, has it from GATE_REVIEWER until its kit update lands. The four old options are
 #   refused, with nothing done.
+#   bin/onboard-owner <owner/name> --id <repository id> --merge all|1-2|none [--apply]
+#        moves the repository's merge switch (#333): the two review parameters of the kit's gate ruleset, the only thing the
+#        run changes with --merge; without --apply it shows the change and makes none; with it, it reads the position back
+#        from the rules in force. all: every pull request merges by itself once its checks are green, tier 3 included; 1-2:
+#        tier 1 and 2 do, and tier 3 waits for the Human's approval (the default of a new gate); none: every pull request
+#        waits for an approval. It runs under the Human's login only and is asked before each move. Without --merge a run
+#        never changes the two parameters: a changed gate ruleset is put back with the ones it holds. Every run names the
+#        position it reads once the kit is on the branch, and GitHub applies a move at once to the open pull requests.
 # The id is the repository's own (gh api repos/<owner>/<name> --jq .id), so a typo or a renamed repository is refused.
 # Colly runs it with --apply again once the kit pull request has merged, to put the kit's gate in; his approval of
 # the kit pull request covers that. It never runs git or anything the repository holds. FACTORY_AGENT (default:

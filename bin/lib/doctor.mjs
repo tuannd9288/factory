@@ -9,6 +9,8 @@
 //     to choose the gate's ruleset as onboard-owner does. The repository variables that held them before #335 are listed
 //     to name each one still set, and on a main whose gate-trusted.yml predates #335 GATE_REVIEWER's value chooses the
 //     ruleset; a variable's value is used and never shown;
+//   - the merge switch (#333) is named from the rules in force on the default branch, and is red only when they cannot be read
+//     as a position; the gate ruleset's two review parameters are whatever the Human set, never a difference from the kit's;
 //   - each line names what it read, and the end lists every gh call that ran.
 // The repository's files come from git objects of a bare clone in the system's temporary folder, removed at the end:
 // nothing the repository holds runs. DOCTOR_CLONE_URL (an absolute local folder, for tests) replaces the clone's URL.
@@ -20,7 +22,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_BYTES, MAX_LINES, carrierProblems, countLines, entryIn, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { SETTINGS, TRUSTED, runnerProblems } from './gate-settings.mjs';
-import { current, gateState, gh, identify, left, wanted } from './owner.mjs';
+import { current, gateState, gh, identify, left, reviewOf, switchNow, wanted, withReview } from './owner.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WIDTH = 120;
@@ -123,11 +125,24 @@ function settingProblems({ slug, files, settings, old, variables }) {
 function checkSettings(ctx) {
   const reads = 'repo rulesets env collab invites kit vars workflows';
   const { slug, agent, branch, kitLanded, reviewer } = ctx;
-  const want = wanted({ kitLanded: true, branch, reviewer });
-  const names = new Set([...want.rulesets.map((r) => r.name), ...want.drop]);
+  const kit = wanted({ kitLanded: true, branch, reviewer });
+  const names = new Set([...kit.rulesets.map((r) => r.name), ...kit.drop]);
   const have = current(slug, agent, names, get);
+  // The gate's two review parameters are the merge switch (#333), the Human's to move: whatever they hold is as wanted.
+  const live = reviewOf(have.rulesets.find((r) => r.name === 'factory-gate'));
+  const want = live ? withReview(kit, live) : kit;
   const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...left(slug, agent, have, want), ...(kitLanded ? settingProblems(ctx) : [])];
   return { ok: !problems.length, result: problems.length ? problems : 'all as the kit\'s gate wants', reads };
+}
+
+const MEANING = { all: 'every pull request merges by itself, tier 3 included', '1-2': 'tier 3 waits for the Human', none: 'every pull request waits for an approval' };
+
+/** The merge switch (#333): its position from the rules in force on the default branch. Red only when they cannot be read as one. */
+function checkMerge(ctx) {
+  const reads = 'rules in force';
+  const { position, problem } = switchNow(ctx.slug, ctx.branch, get);
+  if (!position) return { ok: false, result: `the merge switch could not be read (${problem})`, reads };
+  return { ok: true, result: `the merge switch is at ${position} (${MEANING[position]})`, reads };
 }
 
 function checkGateBlock(ctx) {
@@ -209,6 +224,7 @@ function checkEvidence(ctx) {
 
 const CHECKS = [
   ['settings', checkSettings],
+  ['merge', checkMerge],
   ['gate-block', checkGateBlock],
   ['verify', checkVerify],
   ['claude-md', checkClaude],

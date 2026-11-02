@@ -27,7 +27,18 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   Triage, và theo dõi thực tế factory triển khai có hiệu quả hơn là đi xử lý cái vấn đề có thể không xảy ra không?").
   The pack's Lead arms auto-merge through `scripts/ship` (#163, #304). Sources:
   https://github.com/tuannd9288/factory/issues/203 (area 4) and https://github.com/tuannd9288/factory/issues/153; the
-  bar of 2026-10-21 is `probes/plan.md` at the tag `before-271`.
+  bar of 2026-10-21 is `probes/plan.md` at the tag `before-271`. **The merge switch, 2026-11-02 (#333).** Each repository
+  has a switch with three positions, "toàn bộ" (`all`: every pull request merges by itself once its checks are green,
+  tier 3 included), "1–2" (tier 1 and 2 do, tier 3 waits for him) and "mọi PR chờ" (`none`: every pull request waits for
+  him); a repository taken in starts at "1–2", and zalo-gateway keeps its present setting, GitHub's "Allow auto-merge"
+  off, until he moves it. It is the two review parameters of the `factory-gate` ruleset ("Luật review của GitHub
+  (Recommended)", 12:14:34), so GitHub holds it and a move applies at once to the open pull requests, which the queue
+  follows by re-running `tier`. Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`,
+  which Colly runs. "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
+  (Recommended)" are his answers; the factory's own repository is unchanged. Sources:
+  https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 (09:51 to about 10:00),
+  https://github.com/tuannd9288/factory/issues/333#issuecomment-6568380227 (10:11 and 10:21) and
+  https://github.com/tuannd9288/factory/issues/333#issuecomment-6569698590 (12:14:34).
 - **agent-desk and Claude Code, 2026-10-21 and 2026-10-27.** agent-desk stays parked. Every lead, worker and reviewer
   of the factory's own team runs through Claude Code, apart from pstack's other-family steps, which D2 sends to Codex
   (the live verifier's entry below); another team may bring its own harness (#131). The instruction file is for any
@@ -234,7 +245,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   which reads the body; `kit/.github/pull_request_template.md` asks for the rest.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
-  Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:27` (one reviewer call per head).
+  Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:31` (one reviewer call per head).
   Prior art [A8]: "An approval covers one specific commit."
 - **H4**: Knowledge is files in the repository, changed by pull request.
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
