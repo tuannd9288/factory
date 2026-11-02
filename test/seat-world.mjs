@@ -163,17 +163,30 @@ export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
     return await body(w);
   } finally {
     // No test leaves a process behind: the supervisors and the sessions are killed by the pids they recorded.
-    for (const n of existsSync(w.run) ? readdirSync(w.run) : []) {
-      if (!/^run-.*\.(pid|child)$/.test(n) || n.startsWith('run-fill')) continue;
-      const pid = Number(readFileSync(join(w.run, n), 'utf8'));
-      for (const target of [pid, -pid]) {
-        try {
-          if (pid > 1) process.kill(target, 'SIGKILL');
-        } catch {
-          // Already gone.
-        }
+    killRecorded(w.run);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/** Kills each supervisor and session whose pid a run folder records, in its run-*.pid and run-*.child files (#330). `read` is
+ * the seam a test uses to act between the listing and a read. A file gone by then was removed by its supervisor, whose session
+ * has ended: it is skipped. */
+export function killRecorded(run, read = (file) => readFileSync(file, 'utf8')) {
+  for (const n of existsSync(run) ? readdirSync(run) : []) {
+    if (!/^run-.*\.(pid|child)$/.test(n) || n.startsWith('run-fill')) continue;
+    let pid;
+    try {
+      pid = Number(read(join(run, n)));
+    } catch (e) {
+      if (e.code === 'ENOENT') continue;
+      throw e;
+    }
+    for (const target of [pid, -pid]) {
+      try {
+        if (pid > 1) process.kill(target, 'SIGKILL');
+      } catch {
+        // Already gone.
       }
     }
-    rmSync(root, { recursive: true, force: true });
   }
 }
