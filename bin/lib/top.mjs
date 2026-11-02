@@ -780,7 +780,7 @@ export function tabsOf(snap) {
   ];
 }
 
-const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer', 'gh-refused': 'alert' };
+const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer', 'gh-refused': 'alert', 'switch-moved': 'alert' };
 
 /** A string from a log, a folder or GitHub, less its control characters, so none can reach the terminal as an escape sequence. */
 const clean = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
