@@ -19,4 +19,9 @@
 # ledger reads that are missing, or stale (absent from the newest session file or the newest 10 entries); it prints no
 # value, counts the entries of the extra folders that record no cwd, and exits 1 on a missing or stale field.
 # Without --repo it reads every repository under FACTORY_ROOT (default: this clone) that has joined.
+# It charges a task from the records bin/seat appends to sessions.jsonl (each names its repository and branch; an older record,
+# or one with neither, is counted in the digest as charged to no task) and from cwd under <root>/<repo> in --profile-dir
+# folders, and reads no repository profile.
+# `plist --daemon --repo <owner/repo>...` prints the digest's LaunchDaemon, io.github.tuannd9288.factory.digest, every Monday
+# at 09:00, loaded like the queue's (bin/factory-queue).
 exec node "$(dirname "$0")/lib/ledger.mjs" "$@"

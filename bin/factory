@@ -19,6 +19,33 @@
 # A call that takes longer than FACTORY_TIMEOUT_MS (default 15000) is shown as timed out.
 # Tokens are stored at ~/.agent-profiles/tokens/<account> (mode 600, in a folder of mode 700); only the Human runs login (bin/install-factory
 # puts this command on his PATH, as a symlink, which is followed here).
+# On the Mac mini the table is the numbered rows (one for each team $FACTORY_STATE/accounts names, factory/<repo>-<team> of an
+# onboarded repository or of `factory`, sorted; no seat row; the verifier) and the lettered accounts (every account the file
+# names and every file of ~/.agent-profiles/tokens/, read by name and by mode and date only), each with its 5h, 7d, reset, the
+# rows that share it, and `?` where no run of the account reported; a row whose account has no token file is red with the line to
+# run. $FACTORY_STATE/accounts (<profile>=<account> a line, mode 600, written through a temporary file and a rename) is the one
+# source of a row's account (#178). `factory use <row> <letter>` rewrites it (from the MacBook, `use` and `logout` run on the Mac
+# mini over ssh, their arguments checked first, `ssh -t` when `use` lacks one; with an argument missing: on a terminal the list
+# and a question, else the list and exit 2); the verifier's row is refused; `<repo>-<team>` in a row's place names a team of an
+# onboarded repository, or of `factory`, and makes its row when there is none (`use lead-<repo>` is gone); only that team's Lead,
+# if it runs (a `claude` process with `--name <repo>-<team>`, the rule `factory top` uses), is restarted, once Herdr reports it
+# idle or done (its pane is in <repo>-<team>/pane): `/exit`, then `packs/pstack/bin/lead <repo> [--team <team>]` again in the same
+# pane, which resumes the conversation (#179, #196, #311), and the other teams are not touched; a Lead that does not run takes the
+# account at its next start, exit 0; a busy or blocked Lead, or one with no pane, keeps running and `use` says so, exit 1, and so
+# does one that Claude Code's exit dialog for background work holds after `/exit` (Herdr reports it `blocked`): `use` sends Esc,
+# starts nothing, and says the Lead keeps running on its old account until its next start while its new workers start on the new
+# one (#315); the team's next seat session takes the new account.
+# `factory logout <account>` moves tokens/<account> to ~/.agent-profiles/archive/tokens/<UTC stamp>-<account> (folder 700, by
+# rename, never deleting it); its rows then start nothing. Seat 1's old seats/1/oauth-token moves to archive/seat-1/ at the next
+# `login` or `use` once seat 1's account has a token.
+# `factory login <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into
+# (--no-setup skips setup-token) and stores it at ~/.agent-profiles/tokens/<account> (mode 600, folder 700): on the Mac mini
+# directly, from the MacBook over ssh's stdin to `factory store <account>`, never in an argument. Only the Human runs `login`,
+# `store`, `use` and `logout`: every bin/seat role and the pstack Lead deny them (#177, #178).
+# `factory lead`: the team is a letter then at most 31 lowercase letters and digits, `lead` by default, and is the team of its
+# claims and pull requests; on the Mac mini it runs packs/pstack/bin/lead, on the MacBook it runs that by ssh (the start is
+# described in that file's header).
+# `factory top`: see bin/lib/top.mjs.
 src=${BASH_SOURCE[0]}
 while [ -L "$src" ]; do
   dir=$(cd -P "$(dirname "$src")" && pwd)

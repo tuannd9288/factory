@@ -8,18 +8,49 @@
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
 # The repository keeps its own AGENTS.md and CLAUDE.md. The kit puts one marked Gate block at the start of AGENTS.md, after
 # an optional title line (kit/.gate/bin/lib/instructions.mjs compose), and writes the one-line import where there is no
-# CLAUDE.md. A composed file over 150 lines or 32 KiB, a Gate marker that is malformed, CRLF, or a CLAUDE.md that does not
-# reach AGENTS.md is refused: the clone is removed and nothing is cut or rewritten. --own <file> is a complete AGENTS.md the
+# CLAUDE.md. A composed file over 150 lines or 32 KiB, a Gate marker that is malformed, CRLF or a byte-order mark, or a CLAUDE.md
+# that neither starts with @AGENTS.md nor links to AGENTS.md is refused: the clone is removed and nothing is cut or rewritten.
+# --own <file> is a complete AGENTS.md the
 # repository prepared, used in place of the clone's. Every other file the repository already has is kept, byte for byte:
 # the kit ships no scripts/ file of a repository's and no .githooks/, so its own scripts/verify, helpers and hooks stay.
 # A repository with its own scripts/verify gets the adapter lines at the end of the .gate/config.sh the kit lays
-# (bin/lib/adapter.mjs): GATE_NATIVE names the verify, and gate_fast calls its .githooks/pre-commit. A .claude/settings.json
+# (bin/lib/adapter.mjs): GATE_NATIVE=scripts/verify, GATE_CHECKS="${GATE_CHECKS:+$GATE_CHECKS }native" (it adds to the checks
+# named above it), and gate_fast() { .githooks/pre-commit; } only when that hook exists and does not call .gate/bin/verify. A
+# .claude/settings.json
 # it has gets the kit's deny lines it lacks inserted as text (bin/lib/settings.mjs), every other byte kept; a shape that
 # cannot take them is refused before anything is written and the clone removed. With none, the kit's own file is laid as it
 # is: deny lines only, and no way of working's pin (a team brings that in its own pull request).
 # --module <name> (repeatable) turns on a module (modules/<name>/, bin/lib/module.mjs): its files are copied into the
 # repository, and only into one that turns it on; the choice is written to .gate/modules, the default being the
 # repository's own .gate/modules, else none. A file the repository already has at a module's path is a conflict.
+# In order, it:
+#   1. clones the repository into <root>/<repo>;
+#   2. creates its profile ~/.agent-profiles/<owner>/<repo>/claude, only now, and writes there a settings.json that turns off
+#      claude.ai's connectors and synced skills and plugins (a repository's settings cannot turn the syncs off), stays on the
+#      stable update channel and runs bin/factory-alerts at session start; a profile that exists is kept, and onboard prints
+#      every key for the Human to add. Nothing else edits the profile, which beyond that holds Claude Code's state only (a
+#      Codex profile joins when Codex does);
+#   3. writes .envrc (CLAUDE_CONFIG_DIR pointing at the profile), adds it to .git/info/exclude and runs direnv allow; an .envrc
+#      the repository has is kept, and onboard prints the line to add to it. Either way .claude/worktrees/ joins
+#      .git/info/exclude: Claude Code's worktrees go there, inside the repository, so they find its .envrc, and git add -A
+#      never stages one under the tier-3 .claude/;
+#   4. lays the kit over it: .gate/ (the commands in .gate/bin/, the hooks in .gate/hooks/, the Gate block gate-section.md,
+#      and kit-commit, the factory commit it came from), the gate workflows, the PR template, CODEOWNERS and the deny rules.
+#      The repository's own scripts/, helpers and hooks stay byte for byte. With a .claude/settings.json of its own the
+#      deny lines go in as text and nothing else changes; where there is none, the kit's file is laid with no pin: the Human's
+#      rule that the pstack pin stays in the repository, one for each repository, keeps a pin that exists byte for byte, and
+#      a repository with none is not made to take one (a team brings it in its own pull request). A .gate/config.sh the
+#      repository has is kept. The kept and untouched lists go in the pull request, kept ones for its session to merge by hand;
+#   5. runs the full .gate/bin/verify, which runs the repository's own verify as the native check, and only when it passes
+#      commits the kit and opens its pull request, authored by the agents' account. When it fails the kit stays staged on
+#      factory/kit for the repository's session to finish. The pull request carries bin/kit-evidence's result: every managed
+#      file against the kit at the factory commit (contents, modes, symlinks), CODEOWNERS line by line, AGENTS.md as the
+#      repository's own text with the block inserted (an --own file's text in full) and CLAUDE.md as the repository's own,
+#      .gate/kit-commit as the factory commit, the files the repository kept, .claude/settings.json as merged (its bytes plus
+#      the kit's deny lines), .gate/config.sh as the kit's text plus the adapter block, the repository's own scripts/ and
+#      .githooks/ files as untouched, and nothing else changed, bound to that commit, the kit's tree, the repository's id,
+#      base and head. Onboard opens it only from a factory commit on origin/main whose kit/ has no uncommitted, untracked or
+#      ignored file, since it lays the kit from the working tree.
 # FACTORY_ROOT (default: this clone) is where repositories live; AGENT_PROFILES (default: ~/.agent-profiles) where
 # profiles live, as <owner>/<repo>/claude so two owners' repositories of one name never share one; FACTORY_HUMAN
 # (default: tuannd9288) is the code owner of tier 3; FACTORY_AGENT (default: tuan9288-agent) the agents' account.

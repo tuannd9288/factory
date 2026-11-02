@@ -7,4 +7,32 @@
 # Nobody logs in (#179): it needs the row factory/<repo>-<team> in the accounts file (#311) and, with none, exits 2 naming `factory use
 # <repo>-<team> <letter>`; it gives the row's token and FACTORY_TEAM=<repo>-<team> to claude's environment alone. --dry-run prints the folder, the plugin plan, the
 # command, the session choice, a `team:` line and an `account:` line, and runs nothing. Exits 2 on a refusal. See lead.mjs.
+# The Human starts a repository's pstack Lead, an interactive session, with `factory lead <repo>` (#163, #166), which runs this
+# file of the factory clone on the Mac mini. Every day he attaches from the MacBook with `herdr --remote factory@tuans-mac-mini`
+# (through Rex or any terminal) and runs `factory lead <repo>` in a pane there; from any MacBook terminal without Herdr,
+# `factory lead <repo>` does the same over ssh. `factory` is on the PATH of each machine by bin/install-factory, which he runs
+# once on the MacBook and `factory` runs once on the Mac mini (#177). `factory lead [--team <name>]` starts the Lead of one team
+# (#196), named `<repo>-<team>` with its folder ~/factory-runs/<repo>-<team>/; the team is the claim's team (lead.md takes it
+# from the launcher), `lead` when none is given, and each team has its own account row, factory/<repo>-<team> (#311).
+# A new session gets the role text as its system prompt, with its own id from --session-id (the role.sha record is in lead.mjs).
+# `factory lead` resumes the team's newest earlier session and starts a new one when there is none; --new starts a new one
+# anyway. The only record it reads is the newest plain-session-id copy in ~/factory-runs/<repo>-<team>/transcripts/ (never a
+# profile); a session killed before any Stop hook ran leaves no copy, so the next `factory lead` starts a new one.
+# --dry-run prints the folder, the team, the plugin plan, the plugin root, the transcript hook, the command, which of the two
+# sessions it would start, and why, and a `role:` line saying whether the first message gives the role text; it installs and
+# starts nothing; it runs `direnv exec . printenv CLAUDE_CONFIG_DIR` to name the root, and exits 1 when that gives no path
+# (#185). It runs the repository's .gate/bin/setup first, installs the plugins the repository's own settings enable with
+# `--scope local`, so the committed pin stays byte for byte, and never adds a pin; its role text is the pack's lead.md.
+# Nobody logs in (#179): the Lead is refused (exit 2) with no row, naming `factory use <repo>-<team> <letter>`, or with a token
+# file that is missing or malformed. It reads that token once, before setup, and gives it to claude's environment alone, as
+# CLAUDE_CODE_OAUTH_TOKEN, with FACTORY_TEAM=<repo>-<team> beside it for every bin/seat the Lead runs, with no scrub and in auto
+# mode (the Human, 2026-11-01); it also sets hasCompletedOnboarding in the profile's .claude.json, so on a fresh profile the
+# first start shows the folder-trust prompt, which the Human answers, and then the session opens (2.1.308, probe 2026-11-01).
+# `factory lead` checks the name and the flags (--new, --dry-run, each once) before anything runs, and on the MacBook makes one
+# ssh call to the same command on the Mac mini.
+# Herdr: answer No when `herdr --remote` asks "restart the remote server now?", since Yes stops every pane. After a reboot
+# nothing restarts the server; the first attach starts it (no launchd job, Herdr issue 4205) and `factory lead <repo>` resumes
+# the Lead. Herdr's Claude integration is never installed on `factory`, so a restore does not bring the Lead back as a bare
+# `claude --resume` without the launcher's deny rules (Herdr issue 5130). Under Rex, the MacBook's Herdr shows notifications
+# only with `[ui.toast] delivery = "herdr"` or `"system"`, the Human's own setting.
 exec node "$(dirname "$0")/lead.mjs" "$@"
