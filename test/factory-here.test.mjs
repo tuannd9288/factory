@@ -85,6 +85,7 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_AUTHOR_NAME: 'Agent Ánh', GIT_AUTHOR_EMAIL: 'agent.anh@example.invalid',
       GIT_COMMITTER_NAME: 'Agent Ánh', GIT_COMMITTER_EMAIL: 'agent.anh@example.invalid',
       GIT_TERMINAL_PROMPT: '0',
+      GIT_SSH_COMMAND: "sh -c 'echo git over ssh is off for a MacBook Lead, pushes go from the Mac mini >&2; exit 1'",
       GIT_CONFIG_COUNT: '4',
       GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
       GIT_CONFIG_KEY_1: push, GIT_CONFIG_VALUE_1: 'https://github.com/',
@@ -164,6 +165,25 @@ test('lead --here: a remote of each GitHub form pushes to the unreachable URL an
       assert.equal(git(['remote', 'get-url', '--push', name]).stdout.trim(), `${base}${rest}`, url);
       assert.equal(git(['remote', 'get-url', name]).stdout.trim(), url, url);
     }
+  } finally {
+    s.done();
+  }
+});
+
+test('lead --here: git over ssh fails before any connection and says why', () => {
+  const s = world();
+  try {
+    s.identity();
+    assert.equal(s.fac(['lead', 'alpha', '--here']).code, 0);
+    const { env: hereEnv } = settingsOf(s.nuls('claude.args'));
+    const { git, base } = realGit(s, hereEnv);
+    writeFileSync(join(base, 'system.conf'), '');
+    writeFileSync(join(base, 'global.conf'), '');
+    assert.equal(git(['init', '-q']).status, 0);
+    assert.equal(git(['remote', 'add', 'origin', 'git@github.com:x/y.git']).status, 0);
+    const r = git(['ls-remote', 'origin']);
+    assert.notEqual(r.status, 0, r.stderr);
+    assert.match(r.stderr, /git over ssh is off for a MacBook Lead, pushes go from the Mac mini/);
   } finally {
     s.done();
   }

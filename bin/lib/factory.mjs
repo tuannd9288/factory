@@ -390,6 +390,8 @@ function hostIdentity(env) {
 // A push to GitHub from the MacBook fails at once, by any transport, with this unreachable URL and its reason in the message; a
 // fetch is not rewritten, so reads stay on the MacBook. The credential.helper entry empties every helper git has been given.
 const PUSH_BASE = 'file:///nonexistent/factory-lead-pushes-from-the-mac-mini/';
+// Git runs this in place of ssh, so no ssh connection or key is used: it says why on stderr and exits 1.
+const GIT_SSH_COMMAND = "sh -c 'echo git over ssh is off for a MacBook Lead, pushes go from the Mac mini >&2; exit 1'";
 const GIT_CONFIG = [
   ['credential.helper', ''],
   ...['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].map((from) => [`url.${PUSH_BASE}.pushInsteadOf`, from]),
@@ -430,7 +432,7 @@ function leadHere(repo, team, passed, env) {
     env: {
       GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
-      GIT_TERMINAL_PROMPT: '0',
+      GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND,
       GIT_CONFIG_COUNT: String(GIT_CONFIG.length),
       ...Object.fromEntries(GIT_CONFIG.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
     },
