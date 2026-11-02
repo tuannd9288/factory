@@ -141,18 +141,18 @@ describe('leadArgs', () => {
     for (const bad of ['Bash(gh:*)', 'Bash(git:*)']) assert.ok(!list('--allowedTools').includes(bad));
   });
 
-  test('the command the Lead ran at 22:05 (gh issue create) is allowed, and gh api is still denied (#277)', () => {
+  test('the command the Lead ran at 22:05 (gh issue create) is allowed, and gh api is neither denied nor allowed (#277, #343)', () => {
     const create = 'gh issue create --label task --title "scripts/ship: the exit-code line says a stop exits 1, but a BLOCKED stop exits 2" --body-file /private/tmp/x/issue.md';
     assert.ok(rulesAfter(argv, '--allowedTools').some((r) => matches(r, create)));
     assert.ok(rulesAfter(argv, '--allowedTools').some((r) => matches(r, 'gh issue comment 12 --body-file /private/tmp/x/c.md')));
-    assert.ok(rulesAfter(argv, '--disallowedTools').some((r) => matches(r, 'gh api repos/x/y')));
+    assert.ok(!rulesAfter(argv, '--disallowedTools').some((r) => matches(r, 'gh api repos/x/y')));
     assert.ok(!rulesAfter(argv, '--allowedTools').some((r) => matches(r, 'gh api repos/x/y')));
   });
 
-  test('the deny list holds gh api, claude, codex, herdr and the secrets', () => {
+  test('the deny list holds claude, codex, herdr and the secrets', () => {
     const deny = list('--disallowedTools');
     assert.ok(secretsRead.length > 0);
-    for (const d of ['Bash(gh api:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
+    for (const d of ['Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
   });
 
   test('the deny list refuses reading the environment, the tokens folder and the archive folder (#178)', () => {

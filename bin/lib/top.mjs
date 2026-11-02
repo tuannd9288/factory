@@ -4,7 +4,9 @@
 // and gh porcelain (never `gh api`). A field the data does not give is shown as `?`.
 // #286: what waits on the Human first, one block per repository (the Lead of each team in it), the accounts (factory.mjs's list, each account's quota) and Today.
 // It runs as `factory top [--once] [--width N] [--full]` (bin/lib/factory.mjs); `node bin/lib/top.mjs --once` prints one frame as well.
-// `c` (or --full) adds #174's engineering columns.
+// `c` (or --full) adds #174's engineering columns. Layout (#174): what waits on the Human first, then each repository by team (the Lead's
+// row, its issues, the sessions under each), then the accounts and Today; a state is a mark and a word, with basic SGR colour on a
+// terminal that has it (`render`'s `color` option; `main` reads it from the terminal once); a row too wide drops whole columns (S_STEPS).
 // What waits on the Human comes first (pull requests to approve, a Lead at a prompt or a login, alerts), then one block per
 // repository with the Lead of each team, issues and workers, the accounts with local reset times, and Today; it is live on a
 // terminal; on the MacBook it runs on the Mac mini by ssh. Every session has an animal name from Ubuntu's release code names (bin/lib/names.mjs): bin/seat writes
@@ -20,7 +22,7 @@ import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
 import { REQUIRED, clonesUnder, costOf, lastRecords as lastOfSession, readSessions } from './ledger.mjs';
 import { quotaRows, windowsOf } from './quota.mjs';
 import { PRESETS, SEATS, liveCount, resetPassed, runLive } from './seat.mjs';
-import { TEAM } from './names.mjs';
+import { TEAM, parseTeam } from './names.mjs';
 import { accountList, seatAccounts } from './token.mjs';
 import { teamRows } from './teams.mjs';
 
@@ -242,7 +244,7 @@ export function leadStateOf({ event, command, ageMs, now }) {
 function shape(p, { record, role, name, issue, folder, seat, live, mtime, start, cwd, repo, branch, harness, now, override = null, pane = null, team = null }) {
   const ageMs = now - mtime;
   return {
-    name, role, team, issue, folder, repo, seat, harness, live, pane,
+    name, role, team, recordTeam: record?.team ?? null, issue, folder, repo, seat, harness, live, pane,
     ...(override ?? stateOf(p, { live, ageMs, record, now })),
     model: p.model ?? record?.model?.split(',')[0] ?? null,
     effort: PRESETS[role]?.effort ?? (role === 'lead' ? 'high' : null),
@@ -567,39 +569,210 @@ export const age = (ms) => {
   return h < 48 ? `${h}h${String(m % 60).padStart(2, '0')}` : `${Math.floor(h / 24)}d`;
 };
 const kilo = (n) => (n === null || n === undefined ? '?' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
-const clip = (s, n) => (s.length > n ? `${s.slice(0, Math.max(0, n - 1))}…` : s);
-const pad = (s, n) => clip(String(s), n).padEnd(n);
+
+// Widths are counted in terminal cells (#174): a wide character is two, a combining or zero-width one none, an SGR sequence none.
+// Text is walked by code point, so a surrogate pair is never cut.
+const WIDE = [[0x1100, 0x115f], [0x2e80, 0x303e], [0x3041, 0x33ff], [0x3400, 0x4dbf], [0x4e00, 0xa4cf], [0xac00, 0xd7a3], [0xf900, 0xfaff], [0xfe10, 0xfe19], [0xfe30, 0xfe6f], [0xff01, 0xff60], [0xffe0, 0xffe6], [0x1f300, 0x1f64f], [0x1f680, 0x1f6ff], [0x1f900, 0x1f9ff], [0x20000, 0x3fffd]];
+const NONE = [[0, 0x1f], [0x7f, 0x9f], [0x300, 0x36f], [0x200b, 0x200f], [0x2060, 0x2064], [0x20d0, 0x20ff], [0xfe00, 0xfe0f], [0x1f3fb, 0x1f3ff], [0xe0100, 0xe01ef]];
+const within = (ranges, c) => ranges.some(([a, b]) => c >= a && c <= b);
+const cellW = (c) => (within(NONE, c) ? 0 : within(WIDE, c) ? 2 : 1);
+const SGR = /\x1b\[[0-9;]*m/g;
+
+/** The width of a string in terminal cells. */
+export function cells(s) {
+  let n = 0;
+  for (const ch of String(s).replace(SGR, '')) n += cellW(ch.codePointAt(0));
+  return n;
+}
+
+/** Plain text cut to n cells, with … where it was cut. It is given data, never a finished line with colour in it. */
+export function clip(s, n) {
+  const text = String(s);
+  if (cells(text) <= n) return text;
+  if (n < 1) return '';
+  let out = '';
+  let w = 0;
+  for (const ch of text) {
+    const c = cellW(ch.codePointAt(0));
+    if (w + c > n - 1) break;
+    out += ch;
+    w += c;
+  }
+  return `${out}…`;
+}
+
+/** Plain text cut to n cells at a word boundary, when what is kept holds one. */
+export function cutWord(s, n) {
+  const text = String(s);
+  if (cells(text) <= n) return text;
+  if (n < 1) return '';
+  const body = clip(text, n).slice(0, -1);
+  const kept = text[body.length] === ' ' || !body.includes(' ') ? body : body.slice(0, body.lastIndexOf(' '));
+  return `${kept.trimEnd()}…`;
+}
+
+const pad = (s, n) => s + ' '.repeat(Math.max(0, n - cells(s)));
+
+// Colour is basic SGR only, so the terminal's theme picks the hues (#174): yellow means only "waits on you".
+const BOLD = '1';
+const YELLOW = '1;33';
+const GREEN = '32';
+const RED = '31';
+const DIM = '2';
+
+// A session's state is a mark and a word, so the word carries it without colour; `rank` orders a block: waiting on the Human,
+// stuck, working, idle, done.
+const SESSION_STATES = {
+  waiting: { mark: '!', word: 'waiting', code: YELLOW, rank: 0 },
+  failed: { mark: '×', word: 'failed', code: RED, rank: 1 },
+  stopped: { mark: '×', word: 'out of quota', code: RED, rank: 1 },
+  working: { mark: '●', word: 'working', code: GREEN, rank: 2 },
+  idle: { mark: '○', word: 'idle', code: null, rank: 3 },
+  done: { mark: '✓', word: 'done', code: DIM, rank: 4 },
+  gone: { mark: '✓', word: 'gone', code: DIM, rank: 4 },
+};
+const stateOfRow = (s) => SESSION_STATES[s.state] ?? { mark: '○', word: String(s.state), code: null, rank: 3 };
 
 // COST is the session's total across resumes (the last result's total_cost_usd), while TOKENS and TURNS count this log's
 // rounds only, so a resumed session's row mixes two spans; a live `~$` estimate counts this log alone.
-// The columns of a session row. The first five are always shown; the others, #174's engineering columns, with `c` or --full.
-const COLS = [['NAME', 16], ['ROLE', 10], ['STATE', 40], ['FOR', 12], ['COST', 8]];
-const FULL_COLS = [['HARNESS', 9], ['MODEL', 18], ['SEAT', 5], ['CTX', 8], ['TURNS', 6], ['TOKENS ↓/↑', 14]];
+// The columns of a session row: key, header, widest. NOTE is the free-text cell that ends the row; the others, #174's
+// engineering columns, come with `c` or --full. When a row does not fit, columns go whole in the order of S_STEPS.
+const S_BASE = [['name', 'NAME', 18], ['role', 'ROLE', 10], ['state', 'STATE', 14], ['for', 'FOR', 17], ['cost', 'COST', 8], ['note', 'NOTE', 40]];
+const S_FULL = [['harness', 'HARNESS', 9], ['model', 'MODEL', 18], ['seat', 'SEAT', 5], ['ctx', 'CTX', 8], ['turns', 'TURNS', 6], ['tokens', 'TOKENS ↓/↑', 14], ['cwd', 'CWD', 24], ['branch', 'BRANCH', 40]];
+// NAME shrinks only to 8 cells of the name itself: its cell holds the indent too (at most NAME_INDENT), so the column goes to 8 + that.
+// What is still too wide then is NOTE's to give up: it is cut, or dropped.
+const NAME_INDENT = 6;
+const S_STEPS = ['branch', 'cwd', 'tokens', 'turns', 'ctx', 'seat', 'model', 'harness', 'cost', 'role', 'for', ['name', 8 + NAME_INDENT]];
+// The columns of an issue row, and what goes first: the title is the free-text cell and is cut; the state and #n stay.
+const I_COLS = [['state', '', 13], ['num', '', 6], ['team', '', 12], ['step', '', 9], ['pr', '', 9], ['checks', '', 34], ['title', '', 80]];
+const I_STEPS = ['team', 'step', 'checks', 'pr'];
+const GAP = 1;
+const MIN_FREE = 12;
 const tail = (cwd) => (cwd ? cwd.split(sep).filter(Boolean).slice(-2).join('/') : '?');
-const header = (full) => [...COLS, ...(full ? FULL_COLS : [])].map(([h, w]) => h.padEnd(w)).join(' ') + (full ? ' CWD BRANCH' : '');
 
-/** A session's state in plain words. */
-const stateText = (s, now) => (s.state === 'waiting' ? `waiting for you${s.waitNote ? `: ${s.waitNote}` : ''}` : s.state === 'stopped' ? `out of quota until ${local(s.until, now)}` : s.state);
+/** The columns a row set keeps in `room` cells. `natural` is each column's widest cell (0: nothing to show). Columns go whole in the
+ * order of `steps` (a [key, n] step shrinks one to n cells) until the last column, which takes what is left and is cut, has
+ * min(its width, MIN_FREE); the `keep` columns are never dropped. */
+function planCols(cols, natural, steps, room, keep) {
+  let kept = cols.filter(([key]) => natural[key] > 0).map(([key, head]) => ({ key, head, w: natural[key] }));
+  if (!kept.length) return kept;
+  const used = () => kept.slice(0, -1).reduce((n, c) => n + c.w + GAP, 0);
+  for (const step of steps) {
+    if (room - used() >= Math.min(kept.at(-1).w, MIN_FREE)) break;
+    if (typeof step === 'string') kept = kept.filter((c) => c.key !== step);
+    else for (const c of kept) if (c.key === step[0]) c.w = Math.min(c.w, step[1]);
+  }
+  for (let i = kept.findLastIndex((c) => !keep.includes(c.key)); room - used() < 2 && i > 0; i = kept.findLastIndex((c) => !keep.includes(c.key))) kept.splice(i, 1);
+  const last = kept.at(-1);
+  last.w = Math.max(0, Math.min(last.w, room - used()));
+  return kept;
+}
 
-function sessionRow(s, now, indent, width, full) {
+const naturalOf = (cols, all, heads) => Object.fromEntries(cols.map(([key, head, cap]) => [key, Math.min(cap, Math.max(heads ? cells(head) : 0, ...all.map((c) => cells(c[key] ?? ''))))]));
+
+/** One row: the kept columns padded to their widths, the last one cut at a word boundary; `style` colours a cell by its key. */
+function rowOf(kept, cell, style = {}, indent = 0) {
+  const parts = kept.map((c, i) => {
+    const last = i === kept.length - 1;
+    const text = last ? cutWord(cell[c.key] ?? '', c.w) : clip(cell[c.key] ?? '', c.w);
+    const painted = style[c.key] && text ? style[c.key](text) : text;
+    return last ? painted : pad(painted, c.w);
+  });
+  return ' '.repeat(indent) + parts.join(' '.repeat(GAP)).trimEnd();
+}
+
+/** The cells of a session row, as plain text. The name cell holds the row's indent, so that a header sits over every level. */
+function sessionCells(s, now, indent) {
   const model = s.model ? `${s.model.replace(/^claude-/, '')} ${s.effort ?? '?'}` : '?';
   const cost = s.cost !== null ? `$${s.cost.toFixed(2)}` : s.estCost !== null && s.estCost !== undefined ? `~$${s.estCost.toFixed(2)}` : '?';
   // A Lead is shown since its newest hook event; any other session by how long it has run (or ran).
   const span = s.role === 'lead' ? (s.stateAt ? `since ${local(s.stateAt, now)}` : '?') : s.startedAt ? age((s.live ? now : s.lastAt) - s.startedAt) : '?';
-  const cells = [`${' '.repeat(indent)}${s.name}`, s.role === 'lead' ? `Lead ${s.team}` : s.role, stateText(s, now), span, cost];
-  const more = full ? [s.harness, model, s.seat ?? '?', kilo(s.ctx), s.turns ?? '?', s.tokensIn === null ? '?' : `${kilo(s.tokensIn)}/${kilo(s.tokensOut)}`] : [];
-  const cols = [...COLS, ...(full ? FULL_COLS : [])];
-  return clip([...cells, ...more].map((c, i) => pad(c, cols[i][1])).join(' ').trimEnd() + (full ? ` ${tail(s.cwd)} ${s.branch ?? '?'}` : ''), width);
+  const st = stateOfRow(s);
+  return {
+    name: `${' '.repeat(indent)}${s.name}`, role: s.role === 'lead' ? `Lead ${s.team}` : s.role, state: `${st.mark} ${st.word}`, for: span, cost,
+    note: [s.state === 'stopped' ? `until ${local(s.until, now)}` : null, s.waitNote, s.rounds > 1 ? `${s.rounds} rounds` : null].filter(Boolean).join(', '),
+    harness: s.harness, model, seat: s.seat ?? '?', ctx: kilo(s.ctx), turns: String(s.turns ?? '?'),
+    tokens: s.tokensIn === null ? '?' : `${kilo(s.tokensIn)}/${kilo(s.tokensOut)}`, cwd: tail(s.cwd), branch: s.branch ?? '?',
+  };
 }
 
-function groupRow(g, width) {
-  const pr = g.pr ? `PR #${g.pr.number} ${Object.entries(g.pr.checks).map(([k, v]) => `${k}${v}`).join(' ')}` : g.unknown ? 'PR ?' : 'no PR';
-  return clip(`  #${g.number} ${clip(g.title, 40)}  team ${g.unknown ? '?' : (g.team ?? '–')}  step ${g.step}  ${pr}  waiting on ${g.waiting}`, width);
+/** The sessions of one run folder as the rows they show: a worker's fix rounds resume one session, so the worker rounds of one
+ * name in one folder are one row, counted in `rounds`, with the newest round's state (a live one first) and the first start. */
+function mergeRounds(list) {
+  const out = [];
+  const seen = new Map();
+  for (const s of list) {
+    const prior = s.role === 'worker' ? seen.get(`${s.folder}\0${s.name}`) : null;
+    if (!prior) {
+      const row = { ...s, rounds: 1 };
+      out.push(row);
+      if (s.role === 'worker') seen.set(`${s.folder}\0${s.name}`, row);
+      continue;
+    }
+    const newer = s.live !== prior.live ? s.live : s.lastAt >= prior.lastAt;
+    const starts = [prior.startedAt, s.startedAt].filter(Number.isFinite);
+    Object.assign(prior, newer ? s : {}, { rounds: prior.rounds + 1, startedAt: starts.length ? Math.min(...starts) : null });
+  }
+  return out;
+}
+
+const roleRank = (s) => (ROLE_ORDER.includes(s.role) ? ROLE_ORDER.indexOf(s.role) : ROLE_ORDER.length);
+/** A block's order: waiting on the Human, stuck, working, idle, done; then by role and name. */
+const byState = (a, b) => stateOfRow(a).rank - stateOfRow(b).rank || roleRank(a) - roleRank(b) || a.name.localeCompare(b.name, 'en', { numeric: true });
+
+/** An issue's state, with its mark and word: who it waits on, or that it is stuck, or done. `all` is its session rows. */
+function issueState(g, all) {
+  if (g.done) return { mark: '✓', word: g.step === 'merged' ? 'merged' : 'closed', code: DIM, rank: 4 };
+  if (g.waiting === 'the Human') return { mark: '!', word: 'on you', code: YELLOW, rank: 0 };
+  const newest = all.filter((v) => v.state !== 'gone').sort((a, b) => b.lastAt - a.lastAt)[0];
+  if ((!g.pr || g.step === 'merged') && newest && !all.some((v) => v.live) && (newest.state === 'failed' || newest.state === 'stopped')) return { mark: '×', word: 'stuck', code: RED, rank: 1 };
+  if (g.waiting === 'the reviewer') return { mark: '●', word: 'on reviewer', code: GREEN, rank: 2 };
+  if (g.waiting === 'the team') return { mark: '●', word: 'on team', code: GREEN, rank: 2 };
+  if (g.waiting === '?') return { mark: '○', word: '?', code: null, rank: 3 };
+  // An open issue whose pull request merged, with nothing live or failed on it, is done for now: this replaces only "idle".
+  if (g.step === 'merged') return { mark: '✓', word: 'merged', code: DIM, rank: 4 };
+  return { mark: '○', word: 'idle', code: null, rank: 3 };
+}
+
+/** The cells of an issue row: its state first, then #n, team, step, the pull request with its checks, and the title last. */
+function issueCells(g, st) {
+  return {
+    state: `${st.mark} ${st.word}`, num: `#${g.number}`, team: g.unknown ? '?' : (g.team ?? '–'), step: g.step,
+    pr: g.pr ? `PR #${g.pr.number}` : g.unknown ? 'PR ?' : 'no PR',
+    checks: g.pr ? Object.entries(g.pr.checks).map(([k, v]) => `${k}${v}`).join(' ') : '',
+    title: g.title,
+  };
+}
+
+/** Items packed into lines of at most `width` cells, never broken inside an item: an item that does not fit starts the next line, behind
+ * `next`. An item is its text, or { text, lead, code }: `lead` joins it to the one before (` · ` unless said). An item alone wider
+ * than the line is cut. */
+function wrapItems(items, width, { first = '', next = first, lead: sep = ' · ', paint = (_, t) => t } = {}) {
+  const lines = [];
+  let line = first;
+  let plain = first;
+  let fresh = true;
+  for (const it of items) {
+    const { text, lead = sep, code = null } = typeof it === 'string' ? { text: it } : it;
+    if (!fresh && cells(plain) + cells(lead) + cells(text) > width) {
+      lines.push(line);
+      line = next;
+      plain = next;
+      fresh = true;
+    }
+    const piece = (fresh ? '' : lead) + text;
+    const shown = cells(plain) + cells(piece) > width ? cutWord(piece, Math.max(0, width - cells(plain))) : piece;
+    line += code ? paint(code, shown) : shown;
+    plain += shown;
+    fresh = false;
+  }
+  lines.push(line);
+  return lines;
 }
 
 /** The tabs: All, one for each repository (name and the sessions it shows), Done (the issues). */
 export function tabsOf(snap) {
-  const shown = (r) => r.groups.filter((g) => !g.done).flatMap((g) => g.sessions).concat(r.other).filter((s) => s.state !== 'gone');
+  const shown = (r) => mergeRounds(r.groups.filter((g) => !g.done).flatMap((g) => g.sessions).concat(r.other)).filter((s) => s.state !== 'gone');
   return [
     { label: 'All', kind: 'all' },
     ...snap.repos.map((r) => ({ label: `${r.repo.split('/').pop()} ${shown(r).length}`, kind: 'repo', repo: r.repo })),
@@ -609,56 +782,129 @@ export function tabsOf(snap) {
 
 const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer', 'gh-refused': 'alert' };
 
-/** One frame as text, no colour, each line at most width characters. tab indexes tabsOf(snap). */
-export function render(snap, { width = 120, tab = 0, rows = null, full = false } = {}) {
+/** A string from a log, a folder or GitHub, less its control characters, so none can reach the terminal as an escape sequence. */
+const clean = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+const cleanDeep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(cleanDeep) : v && Object.getPrototypeOf(v) === Object.prototype ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanDeep(x)])) : v);
+
+/** One frame as text, each line at most `width` cells. tab indexes tabsOf(snap). It is a pure function: `color` (basic SGR) and `keys`
+ * (the keys line, which `--once` leaves out) are options, and every data field is cleaned of control characters before it is styled. */
+export function render(input, { width = 120, tab = 0, rows = null, full = false, color = false, keys = false } = {}) {
+  const paint = (code, text) => (color && code && text ? `\x1b[${code}m${text}\x1b[0m` : text);
+  const tint = (code) => (code ? (text) => paint(code, text) : undefined);
+  const snap = { ...input, sessions: cleanDeep(input.sessions), repos: cleanDeep(input.repos), accounts: cleanDeep(input.accounts), queue: cleanDeep(input.queue), events: cleanDeep(input.events ?? []), github: { ...input.github, error: clean(input.github.error ?? '') } };
   const { sessions, queue, github, now } = snap;
   const day = startOfDay(now);
   const count = (st) => sessions.filter((s) => s.state === st).length;
   const q = queue.lastSweep ? `queue ${queue.queueFailed ? 'failed, last ok' : 'ok'} ${local(Date.parse(queue.lastSweep), now)}` : 'queue ?';
   const ghText = github.ok ? `gh ok ${age(now - github.at)} ago` : `gh failed (${github.error})`;
   const tabs = tabsOf(snap);
+  const t = tabs[tab] ?? tabs[0];
+  const wrapped = (items, opts) => wrapItems(items, width, { paint, ...opts });
   const lines = [
-    clip(`Mac mini  load ${snap.load[0].toFixed(1)} of ${snap.cores} cores  ·  ${count('working')} working · ${count('idle')} idle · ${count('waiting')} agent${count('waiting') === 1 ? '' : 's'} waiting  ·  ${hm(now)}  ·  ${q}  ·  alerts ${queue.failed.length}  ·  ${ghText}`, width),
-    clip(tabs.map((t, i) => `${i === tab ? '▸' : ''}[${i + 1} ${t.label}]`).join(' '), width),
+    ...wrapped([
+      `Mac mini  load ${snap.load[0].toFixed(1)} of ${snap.cores} cores`, { text: `${count('working')} working`, lead: '  ·  ' }, { text: `${count('idle')} idle`, lead: ' · ' },
+      { text: `${count('waiting')} agent${count('waiting') === 1 ? '' : 's'} waiting`, lead: ' · ' }, hm(now), q, `alerts ${queue.failed.length}`, ghText,
+    ], { lead: '  ·  ' }),
+    ...wrapped(tabs.map((x, i) => `${i === tab ? '▸' : ''}[${i + 1} ${x.label}]`), { lead: ' ' }),
   ];
-  // What waits on the Human, one line each: what he does, and where.
-  const item = (verb, text) => clip(`  ${verb.padEnd(7)}  ${text}`, width);
+  // What waits on the Human, one line each: what he does, and where. A line too wide loses its tail (the URL) first, then its text is cut.
+  const item = (verb, text, url = '') => {
+    const lead = `  ${verb.padEnd(7)}  `;
+    const whole = `${lead}${text}${url ? `  ${url}` : ''}`;
+    return paint(YELLOW, cells(whole) <= width ? whole : `${lead}${cutWord(text, Math.max(0, width - cells(lead)))}`);
+  };
   const waits = [
-    ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => item('approve', `${r.repo}#${g.pr.number} ${g.pr.title}  https://github.com/${r.repo}/pull/${g.pr.number}`))),
+    ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => item('approve', `${r.repo}#${g.pr.number} ${g.pr.title}`, `https://github.com/${r.repo}/pull/${g.pr.number}`))),
     ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => item('answer', `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`)),
-    ...(snap.events ?? []).map((c) => item(EVENT_VERBS[c.kind] ?? 'look', `${c.text}${c.url ? `  ${c.url}` : ''}`)),
+    ...(snap.events ?? []).map((c) => item(EVENT_VERBS[c.kind] ?? 'look', c.text, c.url ?? '')),
     ...queue.failed.map((f) => item('alert', `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`)),
   ];
-  lines.push(...(waits.length ? ['Waiting on you', ...waits] : ['Nothing waits on you']));
+  lines.push(...(waits.length ? [paint(YELLOW, 'Waiting on you'), ...waits] : ['Nothing waits on you']));
+
+  // The columns are planned once for the frame, over every row that could print (the folded ones too), so they do not jump between
+  // frames or tabs. A session row's name cell holds its indent: a Lead 2, a session under an issue 6, one under no issue 4.
+  const everyone = mergeRounds(sessions);
+  const sNatural = naturalOf([...S_BASE, ...(full ? S_FULL : [])], everyone.map((v) => sessionCells(v, now, v.role === 'lead' ? 2 : v.issue === null ? 4 : 6)), full);
+  const sKept = planCols([...S_BASE, ...(full ? S_FULL : [])], sNatural, S_STEPS, width, ['name', 'state']);
+  const allGroups = snap.repos.flatMap((r) => r.groups);
+  const iKept = planCols(I_COLS, naturalOf(I_COLS, allGroups.map((g) => issueCells(g, issueState(g, mergeRounds(g.sessions)))), false), I_STEPS, width - 4, ['state', 'num']);
+  const sLine = (v, indent) => rowOf(sKept, sessionCells(v, now, indent), { state: tint(stateOfRow(v).code) });
+  const iLine = (g, st, indent) => rowOf(iKept, issueCells(g, st), { state: tint(st.code) }, indent);
+  if (full && sKept.length) lines.push(rowOf(sKept, Object.fromEntries(sKept.map((c) => [c.key, c.head]))));
   const top = lines.length;
-  if (full) lines.push(clip(header(true), width));
-  const t = tabs[tab] ?? tabs[0];
+  // A repository's line: its name in bold, then what follows it, as whole items that wrap onto an indented line, never cut inside one.
+  const head = (repo, ...parts) => wrapped([{ text: repo, code: BOLD }, ...parts.filter(Boolean).map((text, i) => ({ text, lead: i ? ', ' : '  ' }))], { next: '  ' });
+  const foldedLines = (folded, older) => [...(folded ? [`  ${folded} ended before today`] : []), ...(older ? [`  ${older} older`] : [])];
+  const quiet = [];
   for (const r of snap.repos) {
     if (t.kind === 'repo' && r.repo !== t.repo) continue;
-    const done = t.kind === 'done';
-    // The newest DONE_MAX closed issues; the rest, and on the other tabs the issues with nothing going on, fold into "N older".
-    const shown = t.kind === 'repo' ? 'recent' : 'active';
-    const listed = done ? r.groups.filter((g) => g.done).sort((a, b) => b.number - a.number) : r.groups.filter((g) => !g.done && g[shown]);
-    const groups = listed.slice(0, done ? DONE_MAX : listed.length);
-    const older = done ? listed.length - groups.length : r.groups.filter((g) => !g.done && !g[shown]).length;
-    const own = done ? [] : r.other;
-    if (!groups.length && !own.length && !older) continue;
     const st = r.ghStatus;
-    lines.push(clip(st ? `${r.repo}  gh failed ${local(st.failedAt, now)}, ${st.goodAt ? `showing ${local(st.goodAt, now)}` : 'nothing read yet'}` : r.repo, width));
+    const status = st ? `gh failed ${local(st.failedAt, now)}, ${st.goodAt ? `showing ${local(st.goodAt, now)}` : 'nothing read yet'}` : '';
     // A session that is live or last wrote today is listed; the others of the whole block fold into one line at its end.
     let folded = 0;
     const listedNow = (all) => {
       folded += all.filter((x) => !isListed(x, day)).length;
-      return all.filter((x) => isListed(x, day));
+      return all.filter((x) => isListed(x, day)).sort(byState);
     };
-    for (const s of listedNow(own)) lines.push(sessionRow(s, now, 2, width, full));
-    for (const g of groups) {
-      lines.push(groupRow(g, width));
-      for (const s of listedNow(g.sessions)) lines.push(sessionRow(s, now, 4, width, full));
+    if (t.kind === 'done') {
+      // The newest DONE_MAX closed issues; the rest fold into "N older".
+      const closed = r.groups.filter((g) => g.done).sort((a, b) => b.number - a.number);
+      const shownGroups = closed.slice(0, DONE_MAX);
+      if (!closed.length) continue;
+      lines.push(...head(r.repo, status));
+      for (const g of shownGroups) {
+        const all = mergeRounds(g.sessions);
+        lines.push(iLine(g, issueState(g, all), 2));
+        for (const v of listedNow(all)) lines.push(sLine(v, 4));
+      }
+      lines.push(...foldedLines(folded, closed.length - shownGroups.length));
+      continue;
     }
-    if (folded) lines.push(`  ${folded} ended before today`);
-    if (older) lines.push(`  ${older} older`);
+    // On the other tabs the issues with nothing going on fold into "N older".
+    const shown = t.kind === 'repo' ? 'recent' : 'active';
+    const older = r.groups.filter((g) => !g.done && !g[shown]).length;
+    const entries = r.groups.filter((g) => !g.done && g[shown]).map((g) => {
+      const all = mergeRounds(g.sessions);
+      const teams = all.map((v) => parseTeam(v.recordTeam)?.team).filter(Boolean);
+      return { g, st: issueState(g, all), rows: listedNow(all), team: g.team ?? teams[0] ?? null };
+    });
+    const leads = mergeRounds(r.other.filter((s) => s.role === 'lead')).sort(byState);
+    const strays = listedNow(mergeRounds(r.other.filter((s) => s.role !== 'lead')));
+    if (!leads.length && !entries.length && !strays.length && !st) {
+      if (folded || older) quiet.push(...head(r.repo, folded ? `${folded} ended before today` : '', older ? `${older} older` : ''));
+      continue;
+    }
+    lines.push(...head(r.repo, status));
+    // One block per team: its Lead row, then its issues, each with its sessions. An issue with no claim goes under the team of its
+    // sessions' record, else under "no team".
+    const byRank = (a, b) => a.st.rank - b.st.rank || a.g.number - b.g.number;
+    const blocks = [...new Set([...leads.map((l) => l.team), ...entries.map((e) => e.team).filter(Boolean)])].map((team) => {
+      const lead = leads.find((l) => l.team === team) ?? null;
+      const mine = entries.filter((e) => e.team === team).sort(byRank);
+      return { team, lead, mine, rank: Math.min(lead ? stateOfRow(lead).rank : 9, ...mine.map((e) => e.st.rank)) };
+    }).sort((a, b) => a.rank - b.rank || a.team.localeCompare(b.team));
+    const issues = (list) => {
+      for (const e of list) {
+        lines.push(iLine(e.g, e.st, 4));
+        for (const v of e.rows) lines.push(sLine(v, 6));
+      }
+    };
+    for (const b of blocks) {
+      lines.push(b.lead ? sLine(b.lead, 2) : `  team ${b.team}`);
+      issues(b.mine);
+    }
+    const unteamed = entries.filter((e) => !e.team).sort(byRank);
+    if (unteamed.length) {
+      lines.push('  no team');
+      issues(unteamed);
+    }
+    if (strays.length) {
+      lines.push('  no issue');
+      for (const v of strays) lines.push(sLine(v, 4));
+    }
+    lines.push(...foldedLines(folded, older));
   }
+  lines.push(...quiet);
   // A session no repository could be found for is no block and no tab: All counts it in one line.
   const unplaced = t.kind === 'all' ? sessions.filter((s) => !s.repo && s.state !== 'gone').length : 0;
   if (unplaced) lines.push(`  ${unplaced} ${unplaced === 1 ? 'session' : 'sessions'} with no repository`);
@@ -667,21 +913,23 @@ export function render(snap, { width = 120, tab = 0, rows = null, full = false }
   const nameW = Math.max(0, ...snap.accounts.map((a) => a.name.length));
   const { merged, cost, waitedMs } = snap.today;
   const bottom = [
-    ...(snap.accounts.length ? ['Accounts', ...snap.accounts.map((a) => clip(`  ${a.letter}  ${a.name.padEnd(nameW)}  ${win('5h', a.five_hour)} · ${win('7d', a.seven_day)} · ${a.users.join(', ') || 'no row'}`, width))] : []),
-    clip(`Today  ${merged} pull request${merged === 1 ? '' : 's'} merged · workers and reviewers cost ${cost.length ? cost.map(([letter, usd]) => `$${usd.toFixed(2)} on account ${letter}`).join(', ') : 'nothing yet'} · waited on you ${age(waitedMs)}`, width),
-    'keys: 1-9 or Tab switch tabs, c full columns, q quits',
+    ...(snap.accounts.length ? ['Accounts', ...snap.accounts.flatMap((a) => wrapped([win('5h', a.five_hour), win('7d', a.seven_day), a.users.join(', ') || 'no row'], { first: `  ${a.letter}  ${a.name.padEnd(nameW)}  `, next: '     ' }))] : []),
+    ...wrapped([
+      `${merged} pull request${merged === 1 ? '' : 's'} merged`,
+      'workers and reviewers cost',
+      ...(cost.length ? cost.map(([letter, usd], i) => ({ text: `$${usd.toFixed(2)} on account ${letter}`, lead: i ? ', ' : ' ' })) : [{ text: 'nothing yet', lead: ' ' }]),
+      `waited on you ${age(waitedMs)}`,
+    ], { first: 'Today  ', next: '  ' }),
+    ...(keys ? wrapped(['keys:', '1-9 or Tab switch tabs,', 'c full columns,', 'q quits'], { lead: ' ' }) : []),
   ];
   // With the terminal's rows, everything but the team blocks stays and the blocks are cut to fit, a row saying how much was left
   // out; without them (--once) the whole frame is printed.
   const room = rows ? rows - lines.length - bottom.length - 1 : tree.length;
   if (rows && tree.length > room) {
-    return [...lines, ...tree.slice(0, Math.max(0, room)), clip(`… ${tree.length - Math.max(0, room)} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, c full columns, q quits`, width), ...bottom].map(clean).join('\n');
+    return [...lines, ...tree.slice(0, Math.max(0, room)), cutWord(`… ${tree.length - Math.max(0, room)} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, c full columns, q quits`, width), ...bottom].join('\n');
   }
-  return [...lines, ...tree, ...bottom].map(clean).join('\n');
+  return [...lines, ...tree, ...bottom].join('\n');
 }
-
-/** A string from a log, a folder or GitHub, less its control characters, so none can reach the terminal as an escape sequence. */
-const clean = (s) => s.replace(/[\x00-\x1f\x7f]/g, '');
 
 async function loop(opts) {
   const out = process.stdout;
@@ -692,7 +940,7 @@ async function loop(opts) {
   let busy = false;
   const draw = () => {
     if (!snap) return;
-    const text = render(snap, { width: out.columns ?? 120, tab, rows: out.rows ?? null, full }).split('\n').map((l) => `${l}\x1b[K`).join('\n');
+    const text = render(snap, { width: out.columns ?? 120, tab, rows: out.rows ?? null, full, color: opts.color, keys: true }).split('\n').map((l) => `${l}\x1b[K`).join('\n');
     out.write(`\x1b[H${text}\x1b[J`);
   };
   const tick = async () => {
@@ -733,15 +981,19 @@ async function loop(opts) {
   await tick();
 }
 
+/** Colour is decided once: on a terminal that has colours, which hasColors reads from NO_COLOR, NODE_DISABLE_COLORS and FORCE_COLOR. */
+const colorOf = () => Boolean(process.stdout.isTTY && typeof process.stdout.hasColors === 'function' && process.stdout.hasColors());
+
 export async function main(argv) {
   const width = argv.includes('--width') ? Number(argv[argv.indexOf('--width') + 1]) : null;
+  const color = colorOf();
   if (argv.includes('--once')) {
     const snap = await snapshot({});
-    process.stdout.write(`${render(snap, { width: width ?? process.stdout.columns ?? 200, full: argv.includes('--full') })}\n`);
+    process.stdout.write(`${render(snap, { width: width ?? process.stdout.columns ?? 200, full: argv.includes('--full'), color })}\n`);
     return;
   }
   if (!process.stdin.isTTY) throw new Error('needs a terminal; use --once for one frame');
-  await loop({ full: argv.includes('--full') });
+  await loop({ full: argv.includes('--full'), color });
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
