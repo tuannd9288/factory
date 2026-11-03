@@ -761,6 +761,9 @@ function issueState(g, all) {
   return { mark: '○', word: 'idle', code: null, rank: 3 };
 }
 
+/** An issue's state as the rows of its own sessions give it (the page's use of issueState). */
+export const issueStateOf = (g) => issueState(g, mergeRounds(g.sessions));
+
 /** The cells of an issue row: its state first, then #n, team, step, the pull request with its checks, and the title last. */
 function issueCells(g, st) {
   return {
