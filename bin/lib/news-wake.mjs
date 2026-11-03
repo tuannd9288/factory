@@ -17,6 +17,10 @@
 // Which Lead: a seat's record names its team (`<repo>-<team>`); a pull request's is the team that holds its issue's claim (the claim refs
 // QUERY reads, the first CLAIMS: a holder past them is not looked up), else the body's `Team:` line, else none, said in the line. A team
 // with no socket file on this machine is not woken, and the line says so.
+// The delivery is also data on the line (#370, slice 2), for the MacBook's relay (bin/factory-relay), which never parses `text`: `lead`
+// (`<folder>-<team>`, or null when none was found), `woke` (whether this host's post went) and, when it did not, `why`, post's reason code
+// ('no file', 'refused', 'timed out', 'not ours'...); `what` and `where` are the two parts newsLine is made of. The factory's own
+// repository is read for these wakes alone (queue.mjs, leadOnly): its Lead is `factory-<team>`, found by the body's `Team:` line.
 // The state is $state/queue-<owner>-<name>.news, { sent: [keys] } of the events that hold at the repository's last sweep, { reds: { key: { check:
 // the run that failed } } } and { merged: { key: mergedAt } }, and $state/queue-seats.news, { count, gone: { key: ms first seen gone }, told:
 // [keys] }. The first sweep that meets a repository or the seats records what is there and wakes nothing. The state is written, through a
@@ -28,7 +32,7 @@ import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'no
 import { basename, join, resolve } from 'node:path';
 import { failedCheck } from './checks.mjs';
 import { holders } from './comment-wake.mjs';
-import { appendStart } from './events.mjs';
+import { appendStart, oneLine } from './events.mjs';
 import { readSessions } from './records.mjs';
 import { runFiles, runLive } from './seat.mjs';
 import { newsLine, postSync, recordedPath } from './wake.mjs';
@@ -119,8 +123,15 @@ const said = (r) => (r.posted ? 'woken' : r.why === 'no file' ? 'not woken (no s
  * Returns the seq. A failure to write the line is thrown. */
 function tell({ state, runs, post, kind, key, what, where, dir }) {
   let how = 'no Lead found for it (no claim holder, no Team: line)';
-  if (dir) how = `Lead ~/factory-runs/${dir}: ${said(deliver(post, runs, dir, newsLine(kind, what, where)))}`;
-  return appendStart({ state, kind, key, text: `${what}; ${how}` });
+  // The delivery as data (#370): the MacBook's relay reads these and never the text.
+  const extra = { what: oneLine(what), where: oneLine(where), lead: dir ?? null, woke: false };
+  if (dir) {
+    const r = deliver(post, runs, dir, newsLine(kind, what, where));
+    how = `Lead ~/factory-runs/${dir}: ${said(r)}`;
+    extra.woke = r.posted;
+    if (!r.posted) extra.why = r.why;
+  }
+  return appendStart({ state, kind, key, text: `${what}; ${how}`, extra });
 }
 
 const logFailure = (what, error) => console.log(`queue: the wake for ${what} failed: ${String(error.message).split('\n')[0]}`);

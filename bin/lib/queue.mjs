@@ -26,6 +26,10 @@
 // after the loop, a seat that ended or a run whose process is gone with no record. One `start` line each, one line into the Lead's
 // socket, no gh call; the start of a check-not-started condition wakes that pull request's Lead too. The merged ones are the 10 most
 // recently updated of the merged pull requests, the query having no order by merge time.
+// The news wake also reads every repository that has a team row (teamRows, bin/lib/teams.mjs) and is not taken in, the factory's own
+// among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and nothing else: no branch
+// update, no tier re-run, no comment wake (no claim is held there), no #309 condition, no switch watch beyond watchOwn's. Not with --repo.
+// A pull request of the factory's own repository finds its Lead by its `Team:` line (`Team: lead` is `factory-lead`).
 // After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
@@ -45,6 +49,7 @@ import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
 import { watchSwitch } from './switch-watch.mjs';
+import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 
 const CALL_MS = 60_000;
@@ -353,6 +358,35 @@ function sweep(repo, reads, state, switches, { self, folder, runs }) {
   if (!pr) return;
   gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
   console.log(`queue: updated ${repo}#${pr.number} to its base`);
+}
+
+/** The repositories with a team row (teamRows) that are not taken in, for the news wake alone (#370): { repo (owner/name), folder }, the
+ * factory's own among them (its folder is FACTORY_REPO and its clone is `root`). `taken` is the set of clone folders the sweep reads in
+ * full and `swept` the owner/name list it reads; `origin` names a clone's repository and is passed in for tests. A clone whose origin
+ * cannot be read is left out. */
+export function leadOnly({ state, root, taken, swept = [], origin = ownRepo }) {
+  const out = [];
+  for (const folder of new Set(teamRows(state, root).map((t) => t.repo))) {
+    if (taken.has(folder)) continue;
+    let repo;
+    try {
+      repo = origin(folder === FACTORY_REPO ? root : join(root, folder));
+    } catch {
+      continue;
+    }
+    if (repo && /^[\w.-]+\/[\w.-]+$/.test(repo) && !swept.includes(repo)) out.push({ repo, folder });
+  }
+  return out;
+}
+
+/** The sweep of a repository that is not taken in, for the news wake alone (#370): the rules' required checks and the same one query, then
+ * wakeOnNews. No branch update, no tier re-run, no comment wake, no condition for the events and no switch watch. Returns the claim
+ * holders it read, for a seat's run that names no team. */
+function sweepNews(repo, folder, state, runs) {
+  const required = requiredIn(pagesOf(rulesIn(repo)));
+  const { prs, merged, comments } = openPulls(repo);
+  wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });
+  return holders(comments.claims?.nodes);
 }
 
 /** A process's start time as ps prints it, or null: with the pid it names one process, so a reused pid differs. */
@@ -768,9 +802,22 @@ function main(argv) {
         failed += 1;
       }
     }
+    // A repository with a team row that is not taken in, the factory's own among them, is read for the news wake alone (#370); not with
+    // an explicit --repo list.
+    const heldBy = new Map([...reads.values()].map((d) => [d.folder, holders(d.claims)]));
+    if (!repos.length) {
+      const root = process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+      for (const { repo, folder } of leadOnly({ state, root, taken: new Set([...clones.values()].map((d) => basename(d))) })) {
+        try {
+          heldBy.set(folder, sweepNews(repo, folder, state, runs));
+        } catch (error) {
+          console.log(`queue: the news of ${repo} was not read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
+        }
+      }
+    }
     // The seats' news (#370) is the host's, not a repository's: once, after the loop, with the claim holders the loop read.
     try {
-      wakeOnSeats({ state, runs, heldBy: new Map([...reads.values()].map((d) => [d.folder, holders(d.claims)])) });
+      wakeOnSeats({ state, runs, heldBy });
     } catch (error) {
       console.log(`queue: the seats' news was not handled: ${String(error.message).split('\n')[0]}`);
     }

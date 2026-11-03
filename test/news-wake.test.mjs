@@ -201,6 +201,35 @@ test('a post that fails is said in the line and not tried again', () => {
   });
 });
 
+test('each line names its Lead and the delivery as data: woke, and the reason code when it did not; none for no Lead', () => {
+  const run = (w, post, body) => {
+    const call = (mergeable) => wakeOnNews({ repo: REPO, folder: 'app', state: w.state, runs: w.runs, post, data: { prs: [pr(1, { mergeable, body })], merged: [], required: REQUIRED, claims: [] } });
+    call('MERGEABLE');
+    call('CONFLICTING');
+    return start(w)[0];
+  };
+  world((w) => {
+    const e = run(w, w.post, 'Issue: #1\nTeam: pstack\n');
+    assert.deepEqual([e.lead, e.woke, 'why' in e], ['app-pstack', true, false]);
+    assert.equal(e.where, 'https://github.com/o/app/pull/1');
+  });
+  world((w) => {
+    const e = run(w, () => ({ posted: false, why: 'timed out' }), 'Issue: #1\nTeam: pstack\n');
+    assert.deepEqual([e.lead, e.woke, e.why], ['app-pstack', false, 'timed out']);
+  });
+  world((w) => {
+    const e = run(w, w.post, 'Issue: none\n');
+    assert.deepEqual([e.lead, e.woke, 'why' in e], [null, false, false]);
+  });
+  world(
+    (w) => {
+      const e = run(w, w.post, 'Issue: #1\nTeam: pstack\n');
+      assert.deepEqual([e.lead, e.woke, e.why], ['app-pstack', false, 'no file']);
+    },
+    { socket: false },
+  );
+});
+
 test("check-not-started's start wakes the pull request's Lead, once", () => {
   world((w) => {
     const prs = [pr(5, { autoMerge: true, checks: {} })];

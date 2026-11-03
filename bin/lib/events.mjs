@@ -223,12 +223,14 @@ export function record(args) {
   return withEventsLock(args.state, () => recordLocked(args));
 }
 
-/** One line that is no condition: a `start` that nothing clears (the reader's findings, #339). Returns its seq. */
-export function appendStart({ state, kind, key, text, now = Date.now() }) {
+/** One line that is no condition: a `start` that nothing clears (the reader's findings, #339). Returns its seq. `extra` is more fields
+ * of the line, as data for a reader that must not parse `text` (the news lines' `lead`, `woke`, `why`, `what` and `where`, #370); it
+ * cannot replace a field the line has. */
+export function appendStart({ state, kind, key, text, extra = {}, now = Date.now() }) {
   return withEventsLock(state, () => {
     const active = readActive(state);
     const seq = Math.max(active.seq, ...readLines(state).map((e) => e.seq)) + 1;
-    appendFileSync(join(state, 'events.jsonl'), `${JSON.stringify({ seq, at: new Date(now).toISOString(), type: 'start', kind, key, text: oneLine(text) })}\n`);
+    appendFileSync(join(state, 'events.jsonl'), `${JSON.stringify({ ...extra, seq, at: new Date(now).toISOString(), type: 'start', kind, key, text: oneLine(text) })}\n`);
     writeAtomic(join(state, 'events-active.json'), `${JSON.stringify({ seq, conditions: active.conditions })}\n`);
     return seq;
   });
