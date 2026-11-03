@@ -15,9 +15,11 @@
 // of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its
 // origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
 // The last step, under the lock, writes the events of #309 (bin/lib/events.mjs): one line to $FACTORY_STATE/events.jsonl when a condition
-// begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call.
+// begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call. A sixth (#333) tells each move of a
+// repository's merge switch, from the position file queue-<owner>-<name>.position (bin/lib/switch-watch.mjs); the factory's own
+// repository is read for it too, by its rules alone (one call), where there is a checkout.
 // Right after each repository's read it wakes the Lead that holds the issue of a new comment (#351, bin/lib/comment-wake.mjs), from fields
-// of the same query: a `comment` start line in the events and one line into the Lead's inbox socket; it adds no gh call.
+// of the same query: a `comment` start line in the events and one line into the Lead's inbox socket. It adds no gh call.
 // After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
@@ -34,6 +36,7 @@ import { noteGh, observe, resetNotes } from './events.mjs';
 import { clonesUnder } from './ledger.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
+import { watchSwitch } from './switch-watch.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
@@ -304,7 +307,7 @@ function rerun(repo, number, jobId, why, quiet = false) {
  * read a failed one; a repository whose read failed is not in `reads`, and its conditions stay as they were (#309). The switch is
  * followed after that (#333): its record query and re-runs are not reads of the events, and the pull requests it judges are
  * copies, so what `reads` holds is what the first two reads gave. */
-function sweep(repo, reads, state, { self, folder, runs }) {
+function sweep(repo, reads, state, switches, { self, folder, runs }) {
   const rules = pagesOf(rulesIn(repo));
   const required = requiredIn(rules);
   const asked = new Date().toISOString();
@@ -317,6 +320,7 @@ function sweep(repo, reads, state, { self, folder, runs }) {
     console.log(`queue: the comments of ${repo} were not handled: ${String(error.message).split('\n')[0]}`);
   }
   const { ran, position } = followSwitch(repo, state, rules, prs);
+  if (position) switches.set(repo, watchSwitch({ state, repo, position }));
   for (const { number, jobId } of pickReruns(prs).filter((p) => !ran.has(p.number))) rerun(repo, number, jobId, "after its approval or Entire's check");
   const pr = pickUpdate(prs, required, position);
   if (!pr) return;
@@ -471,6 +475,29 @@ function followCheckout(state) {
   }
 }
 
+/** The factory's own repository, named by the origin of the checkout at `root`, or undefined. */
+function ownRepo(root) {
+  const origin = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  return /github\.com[:/](.+?)(?:\.git)?\/?$/.exec(origin)?.[1];
+}
+
+/** The merge switch of the factory's own repository (#333), which the sweep does not otherwise read: its rules in force on main, one
+ * call, and none of its pull requests. Not read where there is no checkout, or when `swept` holds it already. A failure is told in a
+ * line and leaves the switch's condition as it was. */
+function watchOwn(state, swept, switches) {
+  const root = checkoutRoot();
+  if (!root) return;
+  let own;
+  try {
+    own = ownRepo(root);
+    if (!own || swept.includes(own)) return;
+    const position = positionOf(pagesOf(rulesIn(own)));
+    switches.set(own, watchSwitch({ state, repo: own, position }));
+  } catch (error) {
+    console.log(`queue: the merge switch of ${own ?? 'the factory'} could not be read (${String(error.stderr || error.message).trim().split('\n')[0]})`);
+  }
+}
+
 /** The step after it (#279): the worktrees of landed work go, in the checkout and in each clone under it. Where followCheckout does
  * not run, this does not. A failure is told in queue-worktrees.failed and never stops the sweep. */
 function sweepLanded(state) {
@@ -482,8 +509,7 @@ function sweepLanded(state) {
     const runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs');
     // A worktree is held when a live run's folder is its parent: the run files of that folder alone are listed.
     const live = (path) => liveRuns(runs, (dir, ext) => runFiles(dir, ext).filter((f) => path.startsWith(`${dirname(f)}/`)));
-    const origin = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const own = /github\.com[:/](.+?)(?:\.git)?\/?$/.exec(origin)?.[1];
+    const own = ownRepo(root);
     const clones = [...(own ? [{ repo: own, dir: root }] : []), ...[...clonesUnder(root)].map(([repo, dir]) => ({ repo, dir }))];
     const r = sweepWorktrees({ clones, state, live, merged });
     if (r.removed || r.kept.length) console.log(`queue: worktrees removed ${r.removed}, kept ${r.kept.length}${r.kept.length ? ' (queue-worktrees.failed names them)' : ''}`);
@@ -494,13 +520,13 @@ function sweepLanded(state) {
   }
 }
 
-/** The last step of a sweep (#309), under its lock: the five conditions written to the events file from what the sweep read and from the
+/** The last step of a sweep (#309), under its lock: the conditions written to the events file from what the sweep read and from the
  * Leads and the accounts on this host (bin/lib/events.mjs). A failure is told in queue-events.failed and never changes the sweep's result. */
-function recordEvents(state, reads) {
+function recordEvents(state, reads, switches) {
   const failure = join(state, 'queue-events.failed');
   try {
     const home = process.env.HOME;
-    observe({ state, reads, runs: process.env.FACTORY_RUNS ?? join(home, 'factory-runs'), agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles') });
+    observe({ state, reads, switches, runs: process.env.FACTORY_RUNS ?? join(home, 'factory-runs'), agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles') });
     rmSync(failure, { force: true });
   } catch (error) {
     mkdirSync(state, { recursive: true });
@@ -685,6 +711,7 @@ function main(argv) {
     return console.log(`queue: another sweep is running${other ? ` (pid ${other.pid}, started ${other.start})` : ''}; nothing done`);
   }
   const reads = new Map();
+  const switches = new Map();
   resetNotes();
   try {
     followCheckout(state);
@@ -702,7 +729,7 @@ function main(argv) {
     for (const repo of swept) {
       const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
-        sweep(repo, reads, state, { self: who.login, folder: clones.has(repo) ? basename(clones.get(repo)) : repo.split('/')[1], runs });
+        sweep(repo, reads, state, switches, { self: who.login, folder: clones.has(repo) ? basename(clones.get(repo)) : repo.split('/')[1], runs });
         rmSync(report, { force: true });
         writeFileSync(join(state, `queue-${repo.replace('/', '-')}.ok`), `${new Date().toISOString()}\n`);
       } catch (error) {
@@ -712,9 +739,10 @@ function main(argv) {
         failed += 1;
       }
     }
+    watchOwn(state, swept, switches);
     return failed ? 1 : 0;
   } finally {
-    recordEvents(state, reads);
+    recordEvents(state, reads, switches);
     startReaderPass(state);
     releaseLock(held, mine.token);
   }
