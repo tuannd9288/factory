@@ -1081,6 +1081,7 @@ describe('review, verdict, tier and rounds', () => {
     reviews([]);
     const out = again('tier', first.head, { ...pr, GATE_PR_AUTHOR: 'TuanND9288' });
     assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /approval: tier 3 waits for a code owner who is not the author, and the only code owner \(@tuannd9288\) wrote this pull request/);
     assert.equal(out.requests, '');
   });
   test('a team owner is named and not requested', () => {
