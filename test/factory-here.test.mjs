@@ -3,7 +3,8 @@
 // Nothing live runs, and every name below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -52,7 +53,7 @@ function world() {
     writeFileSync(join(bin, name), text);
     chmodSync(join(bin, name), 0o755);
   }
-  const env = { FAKE: fake, HOME: home, PATH: `${bin}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_ROOT: join(home, 'WORKSPACES'), FACTORY_HOST_USER: 'nobody-here' };
+  const env = { FAKE: fake, HOME: home, PATH: `${bin}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_RUNS: join(home, 'factory-runs'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_ROOT: join(home, 'WORKSPACES'), FACTORY_HOST_USER: 'nobody-here' };
   const w = (name, text) => writeFileSync(join(fake, name), text);
   const read = (name) => (existsSync(join(fake, name)) ? readFileSync(join(fake, name), 'utf8') : '');
   const nuls = (name) => read(name).split('\0').slice(0, -1);
@@ -433,6 +434,150 @@ test('gh runs the remote gh in a new temporary folder each call, removes it with
       assert.ok(!existsSync(seen[i]), `${seen[i]} is still there`);
     }
     assert.notEqual(seen[0], seen[1]);
+  } finally {
+    s.done();
+  }
+});
+
+test('lead --here has a hook on SessionStart and SessionEnd that records and removes its inbox socket, and no other hook (#351)', () => {
+  const s = world();
+  try {
+    s.identity();
+    assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here']).code, 0);
+    const { hooks } = settingsOf(s.nuls('claude.args'));
+    assert.deepEqual(Object.keys(hooks).sort(), ['SessionEnd', 'SessionStart']);
+    const [{ hooks: [{ type, command }] }] = hooks.SessionStart;
+    assert.equal(type, 'command');
+    assert.deepEqual(hooks.SessionEnd, hooks.SessionStart);
+    const file = join(s.state, 'lead-here/alpha-beta.socket');
+    const run = (event, extra) => spawnSync('sh', ['-c', command], { input: JSON.stringify({ hook_event_name: event }), encoding: 'utf8', env: { PATH: process.env.PATH, ...extra } });
+    const env = { CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/cc-socks-1/42.sock', CLAUDE_CODE_MESSAGING_TOKEN: 'secret-token-value' };
+    const started = run('SessionStart', env);
+    assert.equal(started.status, 0);
+    assert.equal(started.stderr, '');
+    assert.equal(readFileSync(file, 'utf8'), '/tmp/cc-socks-1/42.sock\n');
+    assert.deepEqual(readdirSync(join(s.state, 'lead-here')).sort(), ['alpha-beta.socket', 'gh-empty'], 'nothing else is written');
+    run('SessionStart', { CLAUDE_CODE_MESSAGING_SOCKET: 'uds:/tmp/cc-socks-1/43.sock' });
+    assert.equal(readFileSync(file, 'utf8'), '/tmp/cc-socks-1/43.sock\n');
+    assert.equal(run('SessionEnd', env).status, 0);
+    assert.ok(!existsSync(file));
+    run('SessionStart', env);
+    run('SessionStart', {});
+    assert.ok(!existsSync(file), 'a start with no variable removes it');
+  } finally {
+    s.done();
+  }
+});
+
+/** A real socket in the world's temporary folder, and what it was sent. */
+async function listener(s, name = 's') {
+  const path = join(s.dir, name);
+  const got = [];
+  const server = createServer((c) => {
+    let text = '';
+    c.on('data', (d) => (text += d));
+    c.on('end', () => got.push(text));
+  });
+  await new Promise((done) => server.listen(path, done));
+  return { path, got, server };
+}
+const arrived = async (got, n) => {
+  for (const start = Date.now(); got.length < n && Date.now() - start < 3000; ) await new Promise((r) => setTimeout(r, 10));
+};
+const CONTENT = (repo, n) => new RegExp(`^\\[factory\\] wake #\\d+-\\d+: new comment on ${repo}#${n}; re-read the issue\\.$`);
+
+test('wake on the MacBook posts to the socket its own Lead recorded, with no ssh (#351)', async () => {
+  const s = world();
+  const l = await listener(s);
+  try {
+    mkdirSync(join(s.state, 'lead-here'), { recursive: true });
+    writeFileSync(join(s.state, 'lead-here/factory-lead.socket'), `${l.path}\n`);
+    const r = s.fac(['wake', 'factory', '--issue', '7']);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.out.trim().split('\n').length, 1);
+    await arrived(l.got, 1);
+    assert.equal(l.got.length, 1);
+    const o = JSON.parse(l.got[0]);
+    assert.deepEqual(o, { type: 'user', message: { content: o.message.content } });
+    assert.match(o.message.content, CONTENT('factory', 7));
+    assert.equal(s.calls(), '', 'no ssh call');
+    // A socket nothing serves any more: exit 1, the reason, and that the comment waits.
+    l.server.close();
+    const gone = s.fac(['wake', 'factory', '--issue', '7']);
+    assert.equal(gone.code, 1, gone.out);
+    assert.match(gone.out, /no file|refused/);
+    assert.match(gone.out, /waits on GitHub/);
+    assert.equal(s.calls(), '', 'a recorded socket is not retried over ssh');
+  } finally {
+    l.server.close();
+    s.done();
+  }
+});
+
+/** A fake ssh that runs the remote command as the factory host: here, with this account as the host's user. */
+function hostSsh(s) {
+  const bin = join(s.home, 'WORKSPACES/bin');
+  mkdirSync(bin, { recursive: true });
+  symlinkSync(join(factory, 'bin/factory'), join(bin, 'factory'));
+  writeFileSync(join(s.dir, 'bin/ssh'), `#!/bin/sh\necho "ssh $*" >> "$FAKE/calls.log"\nfor last; do :; done\nif [ -f "$FAKE/ssh-down" ]; then echo 'ssh: Could not resolve hostname' >&2; exit 255; fi\nFACTORY_HOST_USER=${userInfo().username} exec sh -c "$last"\n`);
+  chmodSync(join(s.dir, 'bin/ssh'), 0o755);
+}
+
+test('wake on the MacBook with no local socket runs the same command on the Mac mini by ssh, which posts there (#351)', async () => {
+  const s = world();
+  const l = await listener(s);
+  try {
+    hostSsh(s);
+    mkdirSync(join(s.home, 'factory-runs/alpha-beta'), { recursive: true });
+    writeFileSync(join(s.home, 'factory-runs/alpha-beta/socket'), `${l.path}\n`);
+    const r = s.fac(['wake', 'alpha', '--team', 'beta', '--issue', '12']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(s.calls(), /ssh -o BatchMode=yes .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory wake alpha --team beta --issue 12'/);
+    await arrived(l.got, 1);
+    assert.match(JSON.parse(l.got[0]).message.content, CONTENT('alpha', 12));
+    // The Lead of another team has no socket there: the host says so, and the exit code is 1.
+    const none = s.fac(['wake', 'alpha', '--issue', '12']);
+    assert.equal(none.code, 1, none.out);
+    assert.match(none.out, /no file/);
+    assert.match(none.out, /waits on GitHub/);
+    s.w('ssh-down', '');
+    const down = s.fac(['wake', 'alpha', '--team', 'beta', '--issue', '12']);
+    assert.equal(down.code, 1, down.out);
+    assert.match(down.out, /the Mac mini did not answer; the comment on #12 waits on GitHub/);
+  } finally {
+    l.server.close();
+    s.done();
+  }
+});
+
+test('wake on the Mac mini posts to <runs>/<repo>-<team>/socket, the default team being lead, with no ssh (#351)', async () => {
+  const s = world();
+  const l = await listener(s);
+  try {
+    s.onHost();
+    mkdirSync(join(s.home, 'factory-runs/alpha-lead'), { recursive: true });
+    writeFileSync(join(s.home, 'factory-runs/alpha-lead/socket'), `${l.path}\n`);
+    const r = s.fac(['wake', 'alpha', '--issue', '3']);
+    assert.equal(r.code, 0, r.out);
+    await arrived(l.got, 1);
+    assert.match(JSON.parse(l.got[0]).message.content, CONTENT('alpha', 3));
+    assert.equal(s.fac(['wake', 'alpha', '--team', 'beta', '--issue', '3']).code, 1);
+    assert.equal(s.calls(), '', 'no ssh call');
+  } finally {
+    l.server.close();
+    s.done();
+  }
+});
+
+test('wake refuses a bad repository, issue or team, a flag twice and any other word, with exit 2 and before any ssh (#351)', () => {
+  const s = world();
+  try {
+    for (const args of [[], ['alpha'], ['alpha', '--issue'], ['alpha', '--issue', 'x'], ['alpha', '--issue', '0'], ['alpha', '--issue', '7', '--issue', '8'], ['alpha', '--issue', '7', '--team', 'Bad'], ['alpha', '--issue', '7', '--team', 'a', '--team', 'b'], ['alpha', '--issue', '7', 'extra'], ['--issue', '7'], ['a b', '--issue', '7'], ["a'b", '--issue', '7']]) {
+      const r = s.fac(['wake', ...args]);
+      assert.equal(r.code, 2, `${args.join(' ')}: ${r.out}`);
+      assert.match(r.out, /usage: bin\/factory/);
+    }
+    assert.equal(s.calls(), '', 'no ssh call');
   } finally {
     s.done();
   }

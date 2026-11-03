@@ -153,14 +153,16 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   "theo đề xuất" on 2026-10-30; and on 2026-11-02, "#203 sao không triển khai luôn?", relayed by Colly), #271 (his
   words of 2026-10-31 in its body), #286 (his words of 2026-11-01 in its body), and on 2026-11-02, relayed by the
   factory-repo session, #256 and #330 ("#256 lệnh kiểm (Recommended), #330 test chập chờn (Recommended)"), #333
-  ("Làm ngay trong release 1") and #335 ("Vá ngay, trước công tắc (Recommended)"). Sources:
+  ("Làm ngay trong release 1") and #335 ("Vá ngay, trước công tắc (Recommended)"); and on 2026-11-03, relayed by the
+  factory-repo session, #351 ("A trước đã"). Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
   https://github.com/tuannd9288/factory/issues/271, https://github.com/tuannd9288/factory/issues/286,
   https://github.com/tuannd9288/factory/issues/256#issuecomment-6567815272,
   https://github.com/tuannd9288/factory/issues/330#issuecomment-6567816736,
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 and
-  https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675.
+  https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675 and
+  https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569.
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and
@@ -331,6 +333,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` on the Mac mini under the agents' login, by ssh; on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH: `~/.local/bin/factory` becomes a symlink to this clone's `bin/factory`; he runs it on the MacBook and as `factory` on the Mac mini; it can be run again and replaces nothing that is not already that symlink |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
+| `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
+| `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
 | `bin/factory-events` | What the sweep tells Colly (#309): the `start` lines of `$FACTORY_STATE/events.jsonl` after its cursor; `--follow` moves the cursor and follows the file; the header has the ssh command |
 | `bin/factory-reader` | The stream reader's pass (#339): `bin/factory-reader` reads what the Leads and the seats wrote since the last pass and tells Colly, through the events file, what code cannot see; `--try <file> [--side pi\|codex]` sends one stream file once and prints the answer and the quote check, writing nothing; the sweep starts a pass every 15 minutes |
 | `bin/lib/reader.mjs` | The reader's code: the reduction to the assistant's text and the tool names, the two commands, the cursors, the quote check; the header has the rest |
@@ -396,7 +400,14 @@ that never started, something that waits on the Human, a Lead at a dialog, an ac
 a repository's merge switch moved)
 and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
-starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out.
+starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out. The sweep also writes
+a one-time `comment` start line, like the reader's and no condition, when it wakes a Lead (#351).
+
+A message for a Lead is a comment on its issue, then `factory wake <repo> --team <team> --issue <n>`: one line into the Lead's Claude
+Code inbox socket, which says to re-read the issue and carries nothing else. Nobody types into a pane (H9 rule 4). The Lead's hook records
+the socket's path at every start (`packs/pstack/bin/transcript-copy.mjs`; `bin/lib/socket-hook.mjs` for `factory lead factory --here`),
+never the token. The sweep does the same for a new comment, by a login other than its own, on an issue whose claim is held
+(`bin/lib/comment-wake.mjs`, with no `gh` call of its own unless the claim refs it reads, the first 100, miss the holder). Known limit: `tuannd9288/factory` is not swept, so only `factory wake` reaches its own Lead.
 
 The live verifier's Codex profile and its login are in `packs/pstack/INSTALL.md`, "The live verifier's login". What unattended runs
 need, and how `bin/seat` picks the team, the account and the seat, sets the permission mode and the grants, and handles the

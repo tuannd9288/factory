@@ -16,6 +16,10 @@
 #                                  and exit code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
 #                                  --body-file, --notes-file, --env-file, --input, --field or -F (pass it on stdin: --body-file -, -F name=@-,
 #                                  --input -); on the Mac mini it runs gh itself (#349)
+#   factory wake <repo> --issue <n> [--team <name>]  wakes the Lead of a team (#351): one line into its Claude Code inbox socket, which says to re-read
+#                                  the issue (the message itself is a comment there) and types nothing into its pane; on the Mac mini it posts to the socket
+#                                  its hook recorded in ~/factory-runs/<repo>-<team>/socket; on the MacBook to the socket `lead --here` recorded when that
+#                                  team's Lead runs there, else the same command runs on the Mac mini by ssh; exit 0 posted, 1 not posted (with the reason), 2 usage
 #   factory logout <account>       on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
 # it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes each account's quota from the run logs of its sessions. On the
