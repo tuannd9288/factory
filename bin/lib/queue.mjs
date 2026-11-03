@@ -29,6 +29,7 @@
 // The news wake also reads every repository that has a team row (teamRows, bin/lib/teams.mjs) and is not taken in, the factory's own
 // among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and nothing else: no branch
 // update, no tier re-run, no comment wake (no claim is held there), no #309 condition, no switch watch beyond watchOwn's. Not with --repo.
+// The rules it read for the factory's own repository are handed to watchOwn, so they are read once in a sweep.
 // A pull request of the factory's own repository finds its Lead by its `Team:` line (`Team: lead` is `factory-lead`).
 // After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
@@ -367,9 +368,12 @@ export function leadOnly({ state, root, taken, swept = [], origin = ownRepo }) {
 
 /** The sweep of a repository that is not taken in, for the news wake alone (#370): the rules' required checks and the same one query, then
  * wakeOnNews. No branch update, no tier re-run, no comment wake, no condition for the events and no switch watch. Returns the claim
- * holders it read, for a seat's run that names no team. */
-function sweepNews(repo, folder, state, runs) {
-  const required = requiredIn(pagesOf(rulesIn(repo)));
+ * holders it read, for a seat's run that names no team. The rules it read are put in `rulesRead` (repo -> pages), for watchOwn, so the
+ * factory's own rules are read once in a sweep. */
+function sweepNews(repo, folder, state, runs, rulesRead) {
+  const rules = pagesOf(rulesIn(repo));
+  rulesRead.set(repo, rules);
+  const required = requiredIn(rules);
   const { prs, merged, comments } = openPulls(repo);
   wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });
   return holders(comments.claims?.nodes);
@@ -530,15 +534,16 @@ function ownRepo(root) {
 
 /** The merge switch of the factory's own repository (#333), which the sweep does not otherwise read: its rules in force on main, one
  * call, and none of its pull requests. Not read where there is no checkout, or when `swept` holds it already. A failure is told in a
- * line and leaves the switch's condition as it was. */
-function watchOwn(state, swept, switches) {
+ * line and leaves the switch's condition as it was. `rulesRead` holds the rules the news read already took this sweep (repo -> pages):
+ * they are used in place of a second read. */
+function watchOwn(state, swept, switches, rulesRead = new Map()) {
   const root = checkoutRoot();
   if (!root) return;
   let own;
   try {
     own = ownRepo(root);
     if (!own || swept.includes(own)) return;
-    const position = positionOf(pagesOf(rulesIn(own)));
+    const position = positionOf(rulesRead.get(own) ?? pagesOf(rulesIn(own)));
     switches.set(own, watchSwitch({ state, repo: own, position }));
   } catch (error) {
     console.log(`queue: the merge switch of ${own ?? 'the factory'} could not be read (${String(error.stderr || error.message).trim().split('\n')[0]})`);
@@ -791,11 +796,12 @@ function main(argv) {
     // A repository with a team row that is not taken in, the factory's own among them, is read for the news wake alone (#370); not with
     // an explicit --repo list.
     const heldBy = new Map([...reads.values()].map((d) => [d.folder, holders(d.claims)]));
+    const rulesRead = new Map();
     if (!repos.length) {
       const root = process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..');
       for (const { repo, folder } of leadOnly({ state, root, taken: new Set([...clones.values()].map((d) => basename(d))) })) {
         try {
-          heldBy.set(folder, sweepNews(repo, folder, state, runs));
+          heldBy.set(folder, sweepNews(repo, folder, state, runs, rulesRead));
         } catch (error) {
           console.log(`queue: the news of ${repo} was not read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
         }
@@ -807,7 +813,7 @@ function main(argv) {
     } catch (error) {
       console.log(`queue: the seats' news was not handled: ${String(error.message).split('\n')[0]}`);
     }
-    watchOwn(state, swept, switches);
+    watchOwn(state, swept, switches, rulesRead);
     return failed ? 1 : 0;
   } finally {
     recordEvents(state, reads, switches);

@@ -12,12 +12,16 @@ import { leadOnly } from '../bin/lib/queue.mjs';
 import { wakeOnNews } from '../bin/lib/news-wake.mjs';
 
 const rules = [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'verify' }, { context: 'tier' }] } }];
-const run = (name, conclusion) => ({ id: `CR_${name}`, databaseId: 1, name, status: 'COMPLETED', conclusion, startedAt: 't', completedAt: 't', detailsUrl: '', checkSuite: { app: { slug: 'github-actions' } } });
-/** An open pull request as the one query returns it, `Team: lead`, with `verify` failed. */
+const STARTED = '2026-11-03T00:00:00Z';
+const run = (name, conclusion, job = '') => ({ id: `CR_${name}`, databaseId: 1, name, status: 'COMPLETED', conclusion, startedAt: STARTED, completedAt: STARTED, detailsUrl: job ? `https://github.com/o/factory/actions/runs/1/job/${job}` : '', checkSuite: { app: { slug: 'github-actions' } } });
+/** An open pull request as the one query returns it, `Team: lead`, that a full sweep would act on twice: `verify` green, behind its base with
+ * auto-merge armed (so its branch would be updated), and a finished red `tier` with a job, approved by someone else on its head after the
+ * tier check started (so the tier job would be re-run). */
 const pull = (number, over = {}) => ({
   number, isDraft: false, body: `Issue: none\nTeam: lead\n`, mergeable: 'MERGEABLE', createdAt: '2026-11-03T00:00:00Z', mergeStateStatus: 'BEHIND', baseRefName: 'main',
-  autoMergeRequest: { enabledAt: 't' }, author: { login: 'agent-bot' }, headRefOid: `h${number}`, labels: { nodes: [] }, reviews: { nodes: [] },
-  commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [run('verify', 'FAILURE')] } } } }] }, ...over,
+  autoMergeRequest: { enabledAt: 't' }, author: { login: 'agent-bot' }, headRefOid: `h${number}`, labels: { nodes: [] },
+  reviews: { nodes: [{ author: { login: 'someone' }, commit: { oid: `h${number}` }, submittedAt: '2026-11-03T01:00:00Z' }] },
+  commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [run('verify', 'SUCCESS'), run('tier', 'FAILURE', '99')] } } } }] }, ...over,
 });
 
 function world() {
@@ -34,9 +38,9 @@ function world() {
   const put = (nodes) => writeFileSync(join(dir, 'prs.json'), JSON.stringify({ data: { repository: { pullRequests: { nodes } } } }));
   return {
     dir, root, state, put,
-    sweep: () => {
+    sweep: (args = ['sweep']) => {
       writeFileSync(join(dir, 'calls'), '');
-      const out = spawnSync(join(factory, 'bin/factory-queue'), ['sweep'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, FACTORY_RUNS: runs, FACTORY_ROOT: root, FACTORY_CHECKOUT: '' } });
+      const out = spawnSync(join(factory, 'bin/factory-queue'), args, { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, FACTORY_RUNS: runs, FACTORY_ROOT: root, FACTORY_CHECKOUT: '' } });
       return { out: out.stdout + out.stderr, calls: readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean) };
     },
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
@@ -62,7 +66,7 @@ test('such a repository gets news wakes and nothing else from the sweep', () => 
     w.put([pull(7, { mergeable: 'MERGEABLE' })]);
     const first = w.sweep();
     assert.equal(readLines(w.state).filter((e) => e.type === 'start').length, 0, first.out);
-    w.put([pull(7, { mergeable: 'CONFLICTING', labels: { nodes: [{ name: 'tier-3' }] } })]);
+    w.put([pull(7, { mergeable: 'CONFLICTING' })]);
     const second = w.sweep();
     const news = readLines(w.state).filter((e) => e.kind === 'conflict');
     assert.equal(news.length, 1, second.out);
@@ -72,6 +76,18 @@ test('such a repository gets news wakes and nothing else from the sweep', () => 
     assert.ok(second.calls.some((c) => c.includes('graphql')));
     assert.ok(!second.calls.some((c) => c.startsWith('pr update-branch') || c.startsWith('run rerun')));
     assert.deepEqual(readLines(w.state).filter((e) => !['conflict', 'checks-red'].includes(e.kind)), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the fixture is one a full sweep acts on: it updates the branch and re-runs the tier job', () => {
+  const w = world();
+  try {
+    w.put([pull(7)]);
+    const { calls } = w.sweep(['sweep', '--repo', 'o/factory']);
+    assert.ok(calls.some((c) => c.startsWith('pr update-branch 7')));
+    assert.ok(calls.some((c) => c.startsWith('run rerun --job 99')));
   } finally {
     w.cleanup();
   }
