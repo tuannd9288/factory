@@ -13,7 +13,9 @@
 // The sweep writes them (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
 // of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
 // which are no condition and are never cleared; the sweep writes one too, a `comment` line when it wakes a Lead for a new comment (#351,
-// bin/lib/comment-wake.mjs). The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
+// bin/lib/comment-wake.mjs), and one line of its own for each piece of news of a Lead's seats, checks and pull request (#370,
+// bin/lib/news-wake.mjs: seat-ended, seat-no-result, checks-red, checks-green, conflict, merged). `observe` also hands each started
+// check-not-started condition to its `onStart`, which wakes that pull request's Lead. The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
 // of that write alone, and `seq` stays unique and increasing across both.
 // Only record and appendStart write: $FACTORY_STATE/events-active.json remembers which conditions hold and since when,
 // and a repository the sweep could not read keeps its conditions, since only a read that succeeded can end one. `factory top` and
@@ -230,7 +232,7 @@ export function appendStart({ state, kind, key, text, now = Date.now() }) {
   });
 }
 
-function recordLocked({ state, found, read, now = Date.now() }) {
+function recordLocked({ state, found, read, now = Date.now(), started }) {
   const active = readActive(state);
   const next = {};
   const changes = [];
@@ -241,6 +243,7 @@ function recordLocked({ state, found, read, now = Date.now() }) {
     if (!c.started && now - c.since >= (f.afterMs ?? 0)) {
       c.started = true;
       changes.push(['start', c]);
+      started?.push(c);
     }
     next[f.key] = c;
   }
@@ -264,7 +267,7 @@ function recordLocked({ state, found, read, now = Date.now() }) {
 /** The step after a sweep's repository loop: every condition from what the sweep read. `reads` is { repo -> { required, prs, issues } }
  * for the repositories it read. The local readers (the Leads, the accounts) start nothing and call no gh; one that fails leaves its
  * conditions as they were. gh-refused ends only on a sweep whose gh calls all succeeded (`notes`). */
-export function observe({ state, reads, runs, agentProfiles, now = Date.now(), processes, switches = new Map() }) {
+export function observe({ state, reads, runs, agentProfiles, now = Date.now(), processes, switches = new Map(), onStart }) {
   const found = [];
   const read = new Set();
   // `switches` is { repo -> last move or null } for the repositories whose merge switch the sweep read.
@@ -292,7 +295,18 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
     found.push({ key: 'gh-refused', scope: 'gh', top: true, text: notes.refused });
     read.add('gh');
   } else if (!notes.failed) read.add('gh');
-  return record({ state, found, read, now });
+  const started = [];
+  const changed = record({ state, found, read, now, started });
+  // #370: the start of a check-not-started condition is told to the pull request's Lead as well, after its line is written and the
+  // events lock is let go; `onStart` gets each condition that started and its failure never changes the result.
+  for (const c of started.filter((s) => s.kind === 'check-not-started')) {
+    try {
+      onStart?.(c);
+    } catch (error) {
+      console.log(`queue: the wake for ${c.key} failed: ${String(error.message).split('\n')[0]}`);
+    }
+  }
+  return changed;
 }
 
 /** `factory-events [--follow] [--after <seq>]`: the start lines after the cursor (or after <seq>, which the reader says it got as far
