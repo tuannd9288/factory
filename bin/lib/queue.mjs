@@ -18,6 +18,9 @@
 // begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call. A sixth (#333) tells each move of a
 // repository's merge switch, from the position file queue-<owner>-<name>.position (bin/lib/switch-watch.mjs); the factory's own
 // repository is read for it too, by its rules alone (one call), where there is a checkout.
+// Right after each repository's read it wakes the Lead that holds the issue of a new comment (#351, bin/lib/comment-wake.mjs), from fields
+// of the same query: a `comment` start line in the events and one line into the Lead's inbox socket. It adds a gh call only when the claim
+// refs read do not name the holder of a fresh comment's issue and there are more of them (claimLookup).
 // After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
@@ -25,10 +28,11 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, checkPlists, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
+import { FIELDS, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { noteGh, observe, resetNotes } from './events.mjs';
 import { clonesUnder } from './ledger.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
@@ -82,7 +86,7 @@ export function pickReruns(prs) {
     .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId }));
 }
 
-const QUERY = `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} pullRequests(states:OPEN,first:100){nodes{
+const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} pullRequests(states:OPEN,first:100){nodes{
 number isDraft createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{id databaseId name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
@@ -105,10 +109,11 @@ const gh = (args) => {
 /** A check run's state as the queue reads it: its conclusion once completed, PENDING before. */
 const stateOf = (run) => (run.status === 'COMPLETED' ? run.conclusion : 'PENDING');
 
-/** The open pull requests and, from the same query, the open issues labelled needs-human (#309). */
-function openPulls(repo) {
+/** The open pull requests and, from the same query, the open issues labelled needs-human (#309), and the claim refs and the issues updated
+ * since the comment cursor (`since`, none for all) with their last comments (#351, bin/lib/comment-wake.mjs). */
+function openPulls(repo, since) {
   const [owner, name] = repo.split('/');
-  const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`]));
+  const data = JSON.parse(gh(['api', 'graphql', '-f', `query=${QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, ...(since ? ['-F', `since=${since}`] : [])]));
   const issues = (data.data.repository.issues?.nodes ?? []).map((i) => ({ number: i.number, title: i.title }));
   const prs = data.data.repository.pullRequests.nodes.map((p) => {
     const all = (p.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).filter((c) => c.name);
@@ -135,7 +140,18 @@ function openPulls(repo) {
       apps,
     };
   });
-  return { prs, issues };
+  return { prs, issues, comments: { claims: data.data.repository.claims, recent: data.data.repository.recent } };
+}
+
+/** The claim refs of exactly these issues, by name, in one query (#351): for the holders QUERY's first 100 refs did not reach, since GitHub
+ * never deletes a claim ref and lists them by name. Returns nodes as QUERY's `claims` has them; a failed call throws. */
+function claimLookup(repo, numbers) {
+  const [owner, name] = repo.split('/');
+  const ok = numbers.filter((n) => Number.isInteger(n) && n > 0);
+  const fields = ok.map((n) => `c${n}:ref(qualifiedName:"refs/heads/claim/${n}"){target{... on Commit{messageHeadline}}}`).join(' ');
+  const data = JSON.parse(gh(['api', 'graphql', '-f', `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`, '-F', `owner=${owner}`, '-F', `name=${name}`]));
+  const found = data.data.repository;
+  return ok.map((n) => ({ name: String(n), target: found[`c${n}`]?.target }));
 }
 
 /** The rules in force on main now: one call, which gives the required checks and the merge switch. */
@@ -303,11 +319,18 @@ function rerun(repo, number, jobId, why, quiet = false) {
  * read a failed one; a repository whose read failed is not in `reads`, and its conditions stay as they were (#309). The switch is
  * followed after that (#333): its record query and re-runs are not reads of the events, and the pull requests it judges are
  * copies, so what `reads` holds is what the first two reads gave. */
-function sweep(repo, reads, state, switches) {
+function sweep(repo, reads, state, switches, { self, folder, runs }) {
   const rules = pagesOf(rulesIn(repo));
   const required = requiredIn(rules);
-  const { prs, issues } = openPulls(repo);
+  const asked = new Date().toISOString();
+  const { prs, issues, comments } = openPulls(repo, readCursor(state, repo)?.at);
   reads.set(repo, { required, prs, issues });
+  // The wake on comments (#351) follows the read, and a failure of it never stops the sweep.
+  try {
+    wakeOnComments({ repo, folder, state, runs, data: comments, self, asked, lookup: (numbers) => claimLookup(repo, numbers) });
+  } catch (error) {
+    console.log(`queue: the comments of ${repo} were not handled: ${String(error.message).split('\n')[0]}`);
+  }
   const { ran, position } = followSwitch(repo, state, rules, prs);
   if (position) switches.set(repo, watchSwitch({ state, repo, position }));
   for (const { number, jobId } of pickReruns(prs).filter((p) => !ran.has(p.number))) rerun(repo, number, jobId, "after its approval or Entire's check");
@@ -411,12 +434,13 @@ export function releaseLock(path, token) {
 
 /** The checks before the repository loop. Their failure leaves $state/queue-run.failed (a name no repository's
  * `queue-<owner>-<name>.failed` can take) with the time and the cause, so the digest shows it; a run that gets past
- * them removes it. Returns the exit code on failure, null to go on. */
-function preflight(state, human) {
+ * them removes it. Returns the exit code on failure, null to go on; `who.login` is the sweep's own login once it is read. */
+function preflight(state, human, who) {
   const report = join(state, 'queue-run.failed');
   let why;
   try {
     const login = gh(['api', 'user', '--jq', '.login']).trim();
+    who.login = login;
     if (login.toLowerCase() !== human.toLowerCase()) {
       rmSync(report, { force: true });
       return null;
@@ -704,17 +728,20 @@ function main(argv) {
   try {
     followCheckout(state);
     sweepLanded(state);
-    const refused = preflight(state, human);
+    const who = { login: '' };
+    const refused = preflight(state, human, who);
     if (refused) return refused;
     // No --repo: the repositories taken in, found as the ledger finds them (#211).
     const skip = (folder, why) => console.log(`queue: skipped ${folder}: ${why}`);
-    const swept = repos.length ? repos : [...clonesUnder(process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'), skip).keys()];
+    const clones = clonesUnder(process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'), skip);
+    const swept = repos.length ? repos : [...clones.keys()];
+    const runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs');
     if (!swept.length) console.log('queue: no repository taken in under the factory root; nothing swept');
     let failed = 0;
     for (const repo of swept) {
       const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
-        sweep(repo, reads, state, switches);
+        sweep(repo, reads, state, switches, { self: who.login, folder: clones.has(repo) ? basename(clones.get(repo)) : repo.split('/')[1], runs });
         rmSync(report, { force: true });
         writeFileSync(join(state, `queue-${repo.replace('/', '-')}.ok`), `${new Date().toISOString()}\n`);
       } catch (error) {
