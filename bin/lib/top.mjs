@@ -254,14 +254,40 @@ function shape(p, { record, role, name, issue, folder, seat, live, mtime, start,
   };
 }
 
-/** Every session: the run folders' logs, and each Lead's process with its transcript copies. */
-export function gatherSessions({ runs, state, now, root = null, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn, origins = new Map() }) {
+/** parseLog of a log, reused while its size and modification time are those of the last read. `st` is its stat, taken before the
+ * read, so a log that grew meanwhile reads again next time. `seen` collects the entries this pass used; the caller keeps only those. */
+function parsedLog(file, st, old, seen) {
+  const was = old?.get(file);
+  const entry = was && was.size === st.size && was.mtimeMs === st.mtimeMs ? was : { size: st.size, mtimeMs: st.mtimeMs, parsed: parseLog(readText(file)) };
+  seen?.set(file, entry);
+  return entry.parsed;
+}
+
+/** sessions.jsonl's records; with a cache, the last read while the file's size and modification time are unchanged. */
+export function sessionRecords(state, cache = null) {
+  if (!cache) return readSessions(state);
+  let st;
+  try {
+    st = statSync(join(state, 'sessions.jsonl'));
+  } catch {
+    cache.records = null;
+    return [];
+  }
+  if (!cache.records || cache.records.size !== st.size || cache.records.mtimeMs !== st.mtimeMs) cache.records = { size: st.size, mtimeMs: st.mtimeMs, list: readSessions(state) };
+  return cache.records.list;
+}
+
+/** Every session: the run folders' logs, and each Lead's process with its transcript copies. `cache` (snapshot's) keeps each log's
+ * parse and the records between calls; a log that is gone is dropped from it at the end of the pass. */
+export function gatherSessions({ runs, state, now, root = null, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn, origins = new Map(), cache = null }) {
+  const oldLogs = cache?.logs ?? null;
+  const seenLogs = cache ? new Map() : null;
   // A work folder's origin, asked of git once for as long as `origins` lives (the caller clears it at each GitHub refresh).
   const originCached = (cwd) => {
     if (!origins.has(cwd)) origins.set(cwd, originOf(cwd));
     return origins.get(cwd);
   };
-  const records = lastRecords(readSessions(state));
+  const records = lastRecords(sessionRecords(state, cache));
   const out = [];
   for (const folder of existsSync(runs) ? readdirSync(runs).sort() : []) {
     const dir = join(runs, folder);
@@ -283,7 +309,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
         continue;
       }
       const record = records.get(`${dir}#${tag}`) ?? null;
-      const p = parseLog(readText(file));
+      const p = parsedLog(file, st, oldLogs, seenLogs);
       const role = roleOf(tag, record);
       const issue = /^issue-(\d+)/.exec(folder)?.[1] ?? null;
       const seat = readText(join(dir, `run-${tag}.seat`)).trim() || (record?.seat != null ? String(record.seat) : null);
@@ -305,7 +331,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     let newest = null;
     for (const n of existsSync(dir) ? readdirSync(dir).filter((x) => x.endsWith('.jsonl')) : []) {
       const s = statSync(join(dir, n));
-      if (!newest || s.mtimeMs > newest.mtimeMs) newest = { file: join(dir, n), mtimeMs: s.mtimeMs };
+      if (!newest || s.mtimeMs > newest.mtimeMs) newest = { file: join(dir, n), mtimeMs: s.mtimeMs, st: s };
     }
     const repo = [...clones.keys()].find((r) => r.split('/')[1] === repoName) ?? null;
     const cwd = repo ? clones.get(repo) : null;
@@ -315,7 +341,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     } catch {
       // no state yet: the log gives the state
     }
-    out.push(shape(newest ? parseLog(readText(newest.file)) : parseLog(''), {
+    out.push(shape(newest ? parsedLog(newest.file, newest.st, oldLogs, seenLogs) : parseLog(''), {
       record: null, role: 'lead', name: readText(join(leadDir, 'name')).trim() || `${repoName}-${team}`, team, issue: null, folder: null, seat: null, live: true,
       mtime: newest?.mtimeMs ?? now, start: null, cwd, repo, branch: branchOf(cwd), harness: 'claude', now,
       override: leadStateOf({ event, command: proc.command, ageMs: proc.ageMs, now }), pane: readText(join(leadDir, 'pane')).trim() || null,
@@ -335,6 +361,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     const m = /^(.+)-\d+$/.exec(s.folder);
     s.repo = m?.[1] === 'issue' ? (root ? originCached(root) : null) : ([...names].find((r) => r.split('/')[1] === m?.[1]) ?? null);
   }
+  if (cache) cache.logs = seenLogs;
   const rank = (s) => ROLE_ORDER.indexOf(s.role) === -1 ? ROLE_ORDER.length : ROLE_ORDER.indexOf(s.role);
   return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'en', { numeric: true }));
 }
@@ -487,7 +514,7 @@ export async function snapshot(opts = {}) {
   const clones = opts.clones ?? clonesUnder(root);
   const cache = opts.cache ?? {};
   if (!cache.origins || now - cache.origins.at >= GH_MS) cache.origins = { at: now, map: new Map() };
-  const sessions = gatherSessions({ runs, state, now, root, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map });
+  const sessions = gatherSessions({ runs, state, now, root, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map, cache: opts.cache ? cache : null });
   // Every repository a session names has its issues read too, not only the clones.
   const repos = [...new Set([...(opts.repos ?? clones.keys()), ...sessions.map((s) => s.repo).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r ?? ''))])];
   const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache });
@@ -502,7 +529,7 @@ export async function snapshot(opts = {}) {
   const accounts = accountRows({ state, runs, agentProfiles, root });
   return {
     now, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), events: eventsOf(state), accounts,
-    seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: readSessions(state), accounts, seatRows: seatAccounts(state) }),
+    seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: sessionRecords(state, opts.cache ? cache : null), accounts, seatRows: seatAccounts(state) }),
   };
 }
 

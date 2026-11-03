@@ -159,9 +159,16 @@ function processInfo(pid) {
 }
 
 /** Whether pid is a live session that wrote a file at fileMs: a process of this user (never pid 1, nor another user's), that
- * started no later than the file was written, give or take a second; a later start is a pid the system gave again. */
-const alive = (pid, fileMs) => {
-  const p = processInfo(pid);
+ * started no later than the file was written, give or take a second; a later start is a pid the system gave again. A pid no process
+ * has (kill 0 says ESRCH) is not live and costs no ps; any other answer, EPERM included, goes on to ps. info and kill are the seams
+ * a test counts the calls through. */
+export const alive = (pid, fileMs, info = processInfo, kill = (p, s) => process.kill(p, s)) => {
+  try {
+    kill(pid, 0);
+  } catch (e) {
+    if (e.code === 'ESRCH') return false;
+  }
+  const p = info(pid);
   return p !== null && p.uid === process.getuid() && p.started <= fileMs + 1000;
 };
 

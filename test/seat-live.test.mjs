@@ -28,6 +28,24 @@ test('a pid file holding pid 1, a process of another user, is not a live session
   });
 });
 
+test('a pid no process has is not live and ps is not asked; any other answer of kill goes on to ps (#340)', async () => {
+  const { alive } = await lib();
+  let asked = 0;
+  const info = () => {
+    asked += 1;
+    return { uid: process.getuid(), started: 0 };
+  };
+  const err = (code) => () => {
+    throw Object.assign(new Error(code), { code });
+  };
+  assert.equal(alive(4242, Date.now(), info, err('ESRCH')), false);
+  assert.equal(asked, 0, 'ESRCH: no ps');
+  assert.equal(alive(4242, Date.now(), info, err('EPERM')), true);
+  assert.equal(alive(4242, Date.now(), info, () => true), true);
+  assert.equal(asked, 2, 'EPERM and success: ps');
+  assert.equal(alive(4242, -5000, info, () => true), false, 'started after the file was written');
+});
+
 test('a pid file written before its process started is a reused pid, not a live session; one written after counts', async () => {
   const { liveCount } = await lib();
   runs((root, put) => {
