@@ -1,5 +1,5 @@
 // The overview page (#369): what `factory top` knows, as one read-only HTML page. Two pure functions, which know nothing of HTTP, a port or
-// the host that serves them (bin/factory-page does): viewOf(snapshot) is the view model, and pageOf(view) is the HTML.
+// any host: viewOf(snapshot) is the view model, and pageOf(view) is the HTML.
 // The view model is all that leaves the machine, so it holds only what the page shows: no process command line, pid, environment, token
 // path or home path, and an account by its letter alone. Every string is stripped of control characters, and a home path in one is
 // cut to `~`; pageOf escapes every string as HTML.

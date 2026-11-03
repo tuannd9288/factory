@@ -1,10 +1,7 @@
-// The overview page (#369): its view model and HTML (bin/lib/page.mjs), its handler and cache (bin/lib/page-server.mjs) and its job, all on
-// a hand-built snapshot and an injected clock. Nothing here listens on a port, runs ps or reaches GitHub.
+// The overview page (#369): its view model and HTML (bin/lib/page.mjs) and the command that prints them (bin/lib/page-cli.mjs), all on
+// a hand-built snapshot. Nothing here listens on a port, runs ps or reaches GitHub.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 process.env.TZ = 'UTC';
 
@@ -39,7 +36,7 @@ const snap = (o = {}) => ({
 });
 
 const { viewOf, pageOf } = await import('../bin/lib/page.mjs');
-const { handlerOf, pagePlist } = await import('../bin/lib/page-server.mjs');
+const { main } = await import('../bin/lib/page-cli.mjs');
 const { waitsOf, render } = await import('../bin/lib/top.mjs');
 
 test('viewOf puts what waits on the Human first, and holds no command line, pid, home path or account name', () => {
@@ -73,73 +70,31 @@ test('pageOf escapes a title with a script in it, and links only to GitHub', () 
   assert.ok(!/<script|src=|@import|https?:\/\/(?!github\.com)/.test(html), 'nothing from elsewhere');
 });
 
-/** A fake response that records what the handler wrote. */
-function ask(handler, method, url) {
-  const out = { status: null, headers: null, body: null };
-  const res = { writeHead: (status, headers) => Object.assign(out, { status, headers }), end: (body) => (out.body = body ?? '') };
-  return Promise.resolve(handler({ method, url }, res)).then(() => out);
+/** Runs the command with an injected snapshot and collects what it wrote and what it said on failure. */
+async function run(argv) {
+  const out = { code: null, stdout: '', stderr: '' };
+  out.code = await main(argv, { snapshot: async () => snap(), write: (t) => (out.stdout += t), fail: (t) => (out.stderr += `${t}\n`) });
+  return out;
 }
 
-test('the handler answers / with the page, /view.json with the view, HEAD without a body, 404 for another path and 405 for POST', async () => {
-  const handler = handlerOf({ snapshot: async () => snap(), now: () => NOW });
-  const page = await ask(handler, 'GET', '/');
-  assert.equal(page.status, 200);
-  assert.match(page.headers['content-type'], /^text\/html/);
-  assert.match(page.body, /^<!doctype html>/);
-  const json = await ask(handler, 'GET', '/view.json?x=1');
-  assert.equal(json.status, 200);
-  assert.deepEqual(JSON.parse(json.body), viewOf(snap()));
-  const head = await ask(handler, 'HEAD', '/');
-  assert.equal(head.status, 200);
-  assert.equal(head.body, '');
-  assert.equal(Number(head.headers['content-length']), Buffer.byteLength(page.body));
-  assert.equal((await ask(handler, 'GET', '/snapshot.json')).status, 404);
-  const post = await ask(handler, 'POST', '/');
-  assert.equal(post.status, 405);
-  assert.equal(post.headers.allow, 'GET, HEAD');
+test('view prints the view model of the snapshot as JSON', async () => {
+  const r = await run(['view']);
+  assert.equal(r.code, 0);
+  assert.deepEqual(JSON.parse(r.stdout), viewOf(snap()));
 });
 
-test('the snapshot is read once within a minute, again after it, and once for requests that arrive during a read', async () => {
-  let t = NOW;
-  let calls = 0;
-  let release;
-  const gate = new Promise((r) => (release = r));
-  const handler = handlerOf({ snapshot: async () => { calls += 1; await gate; return snap(); }, now: () => t });
-  const first = [ask(handler, 'GET', '/'), ask(handler, 'GET', '/view.json')];
-  release();
-  await Promise.all(first);
-  assert.equal(calls, 1, 'two requests during one read share it');
-  t = NOW + 59_000;
-  await ask(handler, 'GET', '/');
-  assert.equal(calls, 1, 'within a minute the last read is shared');
-  t = NOW + 60_000;
-  await ask(handler, 'GET', '/');
-  assert.equal(calls, 2, 'after a minute it is read again');
+test('html prints the page of the snapshot', async () => {
+  const r = await run(['html']);
+  assert.equal(r.code, 0);
+  assert.equal(r.stdout, pageOf(viewOf(snap())));
 });
 
-test('a snapshot that fails gives 503 and is tried again at the next request', async () => {
-  let calls = 0;
-  const handler = handlerOf({ snapshot: async () => { calls += 1; if (calls === 1) throw new Error('boom\nsecret detail'); return snap(); }, now: () => NOW });
-  const bad = await ask(handler, 'GET', '/');
-  assert.equal(bad.status, 503);
-  assert.ok(!bad.body.includes('secret'));
-  assert.equal((await ask(handler, 'GET', '/')).status, 200);
-});
-
-test('plist --daemon names the job, its log and serve, and keeps it alive with no interval', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'page-plist-'));
-  try {
-    mkdirSync(join(dir, 'bin'));
-    writeFileSync(join(dir, 'bin/gh'), '#!/bin/sh\nexit 1\n');
-    chmodSync(join(dir, 'bin/gh'), 0o755);
-    const text = pagePlist({ env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: dir }, daemon: true });
-    assert.match(text, /<string>io\.github\.tuannd9288\.factory\.page<\/string>/);
-    assert.match(text, /<string>serve<\/string>/);
-    assert.ok(text.includes(`<string>${join(dir, 'Library/Logs/factory/page.log')}</string>`));
-    assert.match(text, /<key>KeepAlive<\/key>\s*<true\/>/);
-    assert.ok(!text.includes('StartInterval'));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+test('an unknown verb, no verb or an extra argument exits non-zero with the usage line and prints nothing else', async () => {
+  for (const argv of [['serve'], [], ['view', 'x']]) {
+    const r = await run(argv);
+    assert.notEqual(r.code, 0, argv.join(' '));
+    assert.match(r.stderr, /^usage: factory-page /);
+    assert.equal(r.stdout, '');
   }
 });
 
