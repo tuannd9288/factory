@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { factory } from './helpers.mjs';
 
 const TOKEN = 'fake-token-0123456789-do-not-leak';
@@ -101,7 +101,18 @@ test('the session gets its preset, the brief on stdin, the work folder as cwd, a
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => existsSync(w.out()) && w.records().length === 1, 'the session');
   const saw = w.saw();
-  assert.deepEqual(saw.argv, buildArgs({ role: 'worker', run: w.run, home: w.home, work: w.work, skills: ['deletion-proof'], allow: [`Bash(${w.run}/other)`], seat: 2, profiles: w.profiles }));
+  const want = buildArgs({ role: 'worker', run: w.run, home: w.home, work: w.work, skills: ['deletion-proof'], allow: [`Bash(${w.run}/other)`], seat: 2, profiles: w.profiles });
+  // The sandbox's last write folder (#183) is the temporary folder of the process that ran bin/seat, which this world gives a TMPDIR
+  // other than the test runner's: it is checked as a real path of its own, and the rest of argv exactly.
+  const settingsAt = (argv) => JSON.parse(argv[argv.indexOf('--settings') + 1]);
+  const tmp = settingsAt(saw.argv).sandbox.filesystem.allowWrite.pop();
+  assert.ok(isAbsolute(tmp) && readlinkReal(tmp) === tmp && ![w.work, w.run].includes(tmp), `the temporary folder ${tmp}`);
+  const without = (argv) => {
+    const s = settingsAt(argv);
+    s.sandbox.filesystem.allowWrite.pop();
+    return argv.with(argv.indexOf('--settings') + 1, JSON.stringify(s));
+  };
+  assert.deepEqual(without(saw.argv), without(want));
   assert.equal(saw.stdin, 'the brief\n');
   assert.equal(saw.cwd, readlinkReal(w.work));
   assert.equal(saw.env.gh, join(w.run, '.gh-empty'));
