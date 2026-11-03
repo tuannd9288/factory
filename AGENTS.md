@@ -160,7 +160,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/271, https://github.com/tuannd9288/factory/issues/286,
   https://github.com/tuannd9288/factory/issues/256#issuecomment-6567815272,
   https://github.com/tuannd9288/factory/issues/330#issuecomment-6567816736,
-  https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 and
+  https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635,
   https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675 and
   https://github.com/tuannd9288/factory/issues/361#issuecomment-6594924583.
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
