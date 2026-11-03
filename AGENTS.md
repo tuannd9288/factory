@@ -189,7 +189,8 @@ checks are `verify`, `tier` and `Entire Gates`, set by `bin/onboard-owner`; `rev
 Agents open pull requests under their own GitHub account, never the Human's. GitHub refuses an author's approval of
 his own pull request, and its code-owner rule asks nothing of an author who owns the code: on the scratch repository
 a tier-3 pull request opened from the Human's account merged with no approval (2026-10-21). So the `tier` check
-itself requires, on tier 3, an approval of the head commit by a code owner who is not the author.
+itself requires, on tier 3, an approval of the head commit by a code owner who is not the author, and while it waits for that approval it requests the
+code owners' review on GitHub, so the pull request shows in their review queue (#374).
 
 ## What the Human keeps
 
