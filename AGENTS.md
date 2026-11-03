@@ -407,7 +407,7 @@ A message for a Lead is a comment on its issue, then `factory wake <repo> --team
 Code inbox socket, which says to re-read the issue and carries nothing else. Nobody types into a pane (H9 rule 4). The Lead's hook records
 the socket's path at every start (`packs/pstack/bin/transcript-copy.mjs`; `bin/lib/socket-hook.mjs` for `factory lead factory --here`),
 never the token. The sweep does the same for a new comment, by a login other than its own, on an issue whose claim is held
-(`bin/lib/comment-wake.mjs`, with no `gh` call of its own). Known limit: `tuannd9288/factory` is not swept, so only `factory wake` reaches its own Lead.
+(`bin/lib/comment-wake.mjs`, with no `gh` call of its own unless the claim refs it reads, the first 100, miss the holder). Known limit: `tuannd9288/factory` is not swept, so only `factory wake` reaches its own Lead.
 
 The live verifier's Codex profile and its login are in `packs/pstack/INSTALL.md`, "The live verifier's login". What unattended runs
 need, and how `bin/seat` picks the team, the account and the seat, sets the permission mode and the grants, and handles the
