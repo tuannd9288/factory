@@ -1,0 +1,29 @@
+# Review categories for Linear's diff view, which groups a pull request's files
+# by them (https://linear.app/docs/diffs, "Organize files with .gitattributes").
+# Review attributes only; a later line wins. Unmarked files are implementation.
+
+# What agents read as rules or roles.
+AGENTS.md review-agent-guidance
+bin/brief-template.md review-agent-guidance
+packs/*/*.md review-agent-guidance
+packs/*/skills/** review-agent-guidance
+**/.claude/** review-agent-guidance
+kit/.gate/gate-section.md review-agent-guidance
+kit/.gate/enforced-rules.md review-agent-guidance
+kit/.gate/bin/lib/reviewer-prompt.md review-agent-guidance
+**/.claude/**/scripts/** -review-agent-guidance
+
+# Tests and fixtures.
+test/** review-test
+packs/*/test/** review-test
+modules/*/test/** review-test
+
+# Documentation.
+NOTICE review-documentation
+packs/*/NOTICE review-documentation
+.github/ISSUE_TEMPLATE/** review-documentation
+kit/.github/pull_request_template.md review-documentation
+packs/*/INSTALL.md -review-agent-guidance review-documentation
+
+# Written by a tool, not a person.
+kit/.gate/bin/reviewer/package-lock.json review-generated
