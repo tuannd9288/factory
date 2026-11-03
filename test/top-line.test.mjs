@@ -41,7 +41,7 @@ function world({ waits = true } = {}) {
     branchOf: () => null, originOf: () => null, load: [0, 0, 0], cores: 4, agentProfiles: join(root, 'profiles'), shared: true,
     claims: async () => new Map([[7, { state: 'claimed', team: 'alpha' }], [8, { state: 'claimed', team: 'beta' }]]),
   };
-  return { state, opts, calls: () => { try { return readFileSync(log, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } }, breakGh: () => gh('echo "HTTP 403 rate limit" >&2; exit 1') };
+  return { state, opts, calls: () => { try { return readFileSync(log, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } }, breakGh: () => gh('echo "HTTP 403 rate limit" >&2; exit 1'), slowGh: (secs) => gh(`sleep ${secs}; ${good}`) };
 }
 
 /** One snapshot as a fresh process takes it: no memory cache, with PATH holding the fake gh. */
@@ -120,6 +120,53 @@ test('--brief with no events file ends with seq 0, and a long block ends with a 
   const lines = (await briefOf(await take(w))).split('\n');
   assert.equal(lines.filter((l) => l.startsWith('  alert')).length, 8);
   assert.ok(lines.some((l) => /^ {2}… \d+ more waiting$/.test(l)));
+});
+
+test('--brief cuts a long events block, says how many come after, and its seq is the last event printed so the Monitor delivers the rest', async () => {
+  const { briefOf } = await top();
+  const w = world({ waits: false });
+  const ev = (seq) => `${JSON.stringify({ seq, at: '2026-10-31T11:00:00Z', type: 'start', kind: 'waiting-on-human', key: `k${seq}`, text: `event ${seq}` })}\n`;
+  writeFileSync(join(w.state, 'events.jsonl'), Array.from({ length: 12 }, (_, i) => ev(i + 1)).join(''));
+  const lines = (await briefOf(await take(w), { after: 0 })).split('\n');
+  const printed = lines.filter((l) => /^ {2}#\d+ /.test(l)).map((l) => Number(/#(\d+)/.exec(l)[1]));
+  assert.deepEqual(printed, [1, 2, 3, 4, 5, 6], 'in seq order, oldest first');
+  assert.ok(lines.includes('  … 6 more start events after seq 6'));
+  assert.equal(lines.at(-1), 'seq 6');
+  // Not cut: seven events fit, and seq is the highest.
+  writeFileSync(join(w.state, 'events.jsonl'), Array.from({ length: 7 }, (_, i) => ev(i + 1)).join(''));
+  const whole = (await briefOf(await take(w), { after: 0 })).split('\n');
+  assert.equal(whole.filter((l) => /^ {2}#\d+ /.test(l)).length, 7);
+  assert.ok(!whole.some((l) => l.includes('more start events')));
+  assert.equal(whole.at(-1), 'seq 7');
+});
+
+test('past its deadline a mode prints from the shared cache, or ? with none, and a slow gh never delays it (#365)', async () => {
+  const { textOf } = await top();
+  const slow = (w) => w.slowGh(3);
+  const run = async (w, extra) => {
+    const before = process.env.PATH;
+    process.env.PATH = `${join(w.state, '..', 'bin')}:${before}`;
+    try {
+      const t0 = Date.now();
+      const r = await textOf('line', { width: 200, deadlineMs: 300, opts: { ...w.opts, ...extra } });
+      return { ...r, ms: Date.now() - t0 };
+    } finally {
+      process.env.PATH = before;
+    }
+  };
+  const bare = world();
+  slow(bare);
+  const none = await run(bare);
+  assert.equal(none.late, true);
+  assert.ok(none.ms < 2500, `took ${none.ms} ms`);
+  assert.match(none.text, /^\? to approve/);
+  const cached = world();
+  await take(cached);
+  slow(cached);
+  const old = await run(cached, { now: NOW + 600_000 });
+  assert.equal(old.late, true);
+  assert.ok(old.ms < 2500, `took ${old.ms} ms`);
+  assert.equal(old.text.split(' · ')[0], '1 to approve', 'a cache older than the minute stands in');
 });
 
 test('two runs within a minute read GitHub once, a run after the minute reads it again, and a failed read keeps the last good one', async () => {

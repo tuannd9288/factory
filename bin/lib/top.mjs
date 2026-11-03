@@ -9,7 +9,10 @@
 // working; whole parts drop from the right to fit), and `--brief [--after <seq>]` is the text of Colly's start hook (what waits, each
 // team with its issues, the `start` events after <seq> or the newest few, then `seq <n>`, the highest seq in events.jsonl). Neither moves
 // #309's cursor. GitHub's last read is kept in $FACTORY_STATE/top-github.json (a temporary file, then a rename) and reused for a minute by
-// every process, the live view included, so a line run each minute calls GitHub once a minute at most.
+// every process, the live view included, so a line run each minute calls GitHub once a minute at most. Each mode has one deadline
+// (LINE_MS, BRIEF_MS); when it passes the text is made from the file's last read, whatever its age (`?` where there is none) and the
+// process ends. `--brief` cuts its events block when long; its `seq` is then the last event printed, so the Monitor started with
+// `--after <seq>` delivers the rest, and otherwise the highest seq.
 // `c` (or --full) adds #174's engineering columns. Layout (#174): what waits on the Human first, then each repository by team (the Lead's
 // row, its issues, the sessions under each), then the accounts and Today; a state is a mark and a word, with basic SGR colour on a
 // terminal that has it (`render`'s `color` option; `main` reads it from the terminal once); a row too wide drops whole columns (S_STEPS).
@@ -460,7 +463,14 @@ function writeSharedGithub(state, data, good) {
 /** Issues, pull requests and claims of the repositories, at most once a minute (cache holds the last read). A call that
  * fails gives its first line and the rest still shows. With `shared`, the last read is also kept in the state folder, so that
  * another process within the minute reuses it, and a failed read there keeps the last good one too. */
-export async function gatherGithub({ repos, clones, state, claims = readClaims, now, cache = {}, shared = false }) {
+export async function gatherGithub({ repos, clones, state, claims = readClaims, now, cache = {}, shared = false, offline = false }) {
+  if (offline) {
+    // The deadline passed (#365): no GitHub call; the shared file's last read whatever its age, and ? for a repository it lacks.
+    const file = readSharedGithub(state);
+    const data = file?.data ?? { ok: false, error: 'GitHub was not read in time', at: now, repos: {} };
+    for (const repo of repos) data.repos[repo] ??= { unknown: true, issues: [], prs: [], claims: new Map(), claimsOk: false, required: ['verify'], failedAt: now, goodAt: null };
+    return data;
+  }
   if (cache.data && now - cache.at < GH_MS) return cache.data;
   if (shared) {
     const file = readSharedGithub(state);
@@ -564,7 +574,7 @@ export async function snapshot(opts = {}) {
   const sessions = gatherSessions({ runs, state, now, root, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map, cache: opts.cache ? cache : null });
   // Every repository a session names has its issues read too, not only the clones.
   const repos = [...new Set([...(opts.repos ?? clones.keys()), ...sessions.map((s) => s.repo).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r ?? ''))])];
-  const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache, shared: Boolean(opts.shared) });
+  const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache, shared: Boolean(opts.shared), offline: Boolean(opts.offline) });
   const byRepo = [...new Set([...repos, ...sessions.map((s) => s.repo).filter(Boolean)])].map((repo) => {
     const mine = sessions.filter((s) => s.repo === repo);
     const gh = github.repos[repo];
@@ -1083,16 +1093,46 @@ export async function briefOf(input, { after = null } = {}) {
   const snap = cleanSnap(input);
   const all = readLines(input.state);
   const starts = all.filter((e) => e.type === 'start' && (after === null ? true : e.seq > after));
-  const shown = after === null ? starts.slice(-BRIEF_EVENTS) : starts;
-  const eventLines = shown.map((e) => `  #${e.seq} ${local(Date.parse(e.at), snap.now)} ${e.kind}  ${clean(String(e.text))}`);
+  let shown = after === null ? starts.slice(-BRIEF_EVENTS) : starts;
+  // Events stay in seq order, oldest first. A block too long ends with how many come after, and `seq` is then the last one printed, so
+  // that the Monitor Colly starts with `--after <seq>` delivers the rest; with none cut it is the highest.
+  const fits = BRIEF_MAX.events - 1;
+  const cut = shown.length > fits ? shown.length - (fits - 1) : 0;
+  if (cut) shown = shown.slice(0, fits - 1);
+  const seq = cut ? shown.at(-1).seq : Math.max(0, ...all.map((e) => e.seq));
+  const eventLines = [...shown.map((e) => `  #${e.seq} ${local(Date.parse(e.at), snap.now)} ${e.kind}  ${clean(String(e.text))}`), ...(cut ? [`  … ${cut} more start events after seq ${seq}`] : [])];
   const waits = waitsOf(snap).map((w) => `  ${w.verb.padEnd(7)}  ${w.text}${w.url ? `  ${w.url}` : ''}`);
   const teams = teamLines(snap);
   return [
     ...(waits.length ? capped(['Waiting on you', ...waits], BRIEF_MAX.waits, 'waiting') : ['Nothing waits on you']),
     ...(teams.length ? capped(['Teams', ...teams], BRIEF_MAX.teams, 'teams') : ['No team at work']),
-    ...(eventLines.length ? capped([after === null ? 'Newest events' : `Events after seq ${after}`, ...eventLines], BRIEF_MAX.events, 'events') : [after === null ? 'No events yet' : `No events after seq ${after}`]),
-    `seq ${Math.max(0, ...all.map((e) => e.seq))}`,
+    ...(eventLines.length ? [after === null ? 'Newest events' : `Events after seq ${after}`, ...eventLines] : [after === null ? 'No events yet' : `No events after seq ${after}`]),
+    `seq ${seq}`,
   ].join('\n');
+}
+
+// The overall deadlines of the two text modes (#365), in milliseconds; the frame's calls each keep CALL_MS.
+export const LINE_MS = 10_000;
+export const BRIEF_MS = 20_000;
+
+/** The text of `--line` or `--brief` within a deadline. When the snapshot is not ready by then, the text is made from a second one that
+ * calls no GitHub: the shared file's last read, or `?` where GitHub must give a count; `late` says so. The first read goes on and may
+ * still write the file, but never delays the text. `opts` goes to snapshot (tests). */
+export async function textOf(mode, { width = 80, after = null, deadlineMs = mode === 'line' ? LINE_MS : BRIEF_MS, opts = {} } = {}) {
+  const make = (snap) => (mode === 'line' ? lineOf(snap, { width }) : briefOf(snap, { after }));
+  let timer;
+  const expired = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), deadlineMs);
+  });
+  const reading = snapshot({ shared: true, ...opts });
+  reading.catch(() => {});
+  try {
+    const snap = await Promise.race([reading, expired]);
+    if (snap) return { text: await make(snap), late: false };
+  } finally {
+    clearTimeout(timer);
+  }
+  return { text: await make(await snapshot({ shared: true, ...opts, offline: true })), late: true };
 }
 
 async function loop(opts) {
@@ -1151,15 +1191,12 @@ const colorOf = () => Boolean(process.stdout.isTTY && typeof process.stdout.hasC
 export async function main(argv) {
   const width = argv.includes('--width') ? Number(argv[argv.indexOf('--width') + 1]) : null;
   const color = colorOf();
-  if (argv.includes('--line')) {
-    const snap = await snapshot({ shared: true });
-    process.stdout.write(`${lineOf(snap, { width: width ?? (Number(process.env.COLUMNS) || 80) })}\n`);
-    return;
-  }
-  if (argv.includes('--brief')) {
+  if (argv.includes('--line') || argv.includes('--brief')) {
     const i = argv.indexOf('--after');
-    const snap = await snapshot({ shared: true });
-    process.stdout.write(`${await briefOf(snap, { after: i === -1 ? null : Number(argv[i + 1]) })}\n`);
+    const mode = argv.includes('--line') ? 'line' : 'brief';
+    const { text, late } = await textOf(mode, { width: width ?? (Number(process.env.COLUMNS) || 80), after: i === -1 ? null : Number(argv[i + 1]) });
+    // A GitHub read still running would hold the process open: the text is out, so end it (a read that finishes first has written the cache).
+    process.stdout.write(`${text}\n`, () => late && process.exit(0));
     return;
   }
   if (argv.includes('--once')) {
