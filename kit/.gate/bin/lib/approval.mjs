@@ -7,7 +7,8 @@
 // `git patch-id --verbatim` of the change from its merge-base with the base, as after the queue merged main into the
 // branch. Any change to the patch needs a new approval. GitHub's own code-owner rule is not enough: it asks nothing of
 // an author who owns the code. With --after, an approval counts only when submitted after that time: the Human reads the
-// reviewer's reason when the pull request is raised, so an approval given before the raise does not stand for it. Teams (@org/team) are not read. Exit 0 approved, 1 not approved, 2 could not judge.
+// reviewer's reason when the pull request is raised, so an approval given before the raise does not stand for it. Teams (@org/team) are not read. With --list and no stdin it prints the owners to request
+// a review from (#374), `user <login>` less the author and `team @org/team`, and exits 0. Exit 0 approved, 1 not approved, 2 could not judge.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -19,16 +20,21 @@ const opt = (name) => {
 const head = opt('--head') ?? '';
 const author = (opt('--author') ?? '').toLowerCase();
 let owners;
+let teams;
 let reviews;
 try {
-  owners = new Set(
-    readFileSync(opt('--owners'), 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*(#|$)/.test(line))
-      .flatMap((line) => line.trim().split(/\s+/).slice(1))
-      .filter((o) => /^@[\w-]+$/.test(o))
-      .map((o) => o.slice(1).toLowerCase()),
-  );
+  const tokens = readFileSync(opt('--owners'), 'utf8')
+    .split('\n')
+    .filter((line) => !/^\s*(#|$)/.test(line))
+    .flatMap((line) => line.trim().split(/\s+/).slice(1));
+  owners = new Set(tokens.filter((o) => /^@[\w-]+$/.test(o)).map((o) => o.slice(1).toLowerCase()));
+  teams = new Set(tokens.filter((o) => /^@[\w-]+\/[\w.-]+$/.test(o)).map((o) => o.toLowerCase()));
+  // --list: the owners to request a review from, one line each: `user <login>` (not the author) or `team @org/team`.
+  if (args.includes('--list')) {
+    for (const o of owners) if (o !== author) console.log(`user ${o}`);
+    for (const t of teams) console.log(`team ${t}`);
+    process.exit(0);
+  }
   reviews = JSON.parse(readFileSync(0, 'utf8')).flat();
 } catch (error) {
   console.log(`approval: could not read the code owners or the reviews: ${error.message}`);
