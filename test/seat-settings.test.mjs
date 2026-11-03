@@ -13,6 +13,7 @@ for (const role of ['worker', 'reviewer', 'researcher']) {
       const settings = JSON.parse(args[args.indexOf('--settings') + 1] ?? 'null');
       const command = join(factory, 'bin/factory-alerts');
       assert.ok(isAbsolute(command));
+      delete settings.sandbox; // the worker's and the reviewer's sandbox (#183) is pinned in test/seat-sandbox.test.mjs
       assert.deepEqual(settings, { hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command, timeout: 10 }] }] } });
     });
   }
