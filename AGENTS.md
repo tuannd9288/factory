@@ -168,7 +168,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675 and
   https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569 and
   https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300 and
-  https://github.com/tuannd9288/factory/issues/370 (its body and comments).
+  https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A").
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and

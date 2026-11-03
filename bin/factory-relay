@@ -6,7 +6,8 @@
 #                             sudo, never KeepAlive, logging to ~/Library/Logs/factory/relay.log
 #   bin/factory-relay check   one pass in that job's environment: makes the log's folder and says whether ssh to the Mac mini works with
 #                             no prompt and the job is ready
-# bin/lib/relay.mjs has the rules. It calls no gh and reads no token; it refuses to run as the factory host's user, where the sweep delivers.
+# `plist` and `check` run from the clone itself: they refuse a linked worktree (exit 2) and note a branch other than main. `check` relays
+# nothing; it sets the cursor to the newest seq only when there is none. bin/lib/relay.mjs has the rules. It calls no gh and reads no token; it refuses to run as the factory host's user, where the sweep delivers.
 # The Human installs the job with `cp <plist> ~/Library/LaunchAgents/io.github.tuannd9288.factory.relay.plist`, loads it with
 # `launchctl bootstrap gui/$(id -u) <that path>` and stops it with `launchctl bootout gui/$(id -u)/io.github.tuannd9288.factory.relay`.
 PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
