@@ -72,7 +72,7 @@ function world() {
       writeFileSync(join(dir, 'calls'), '');
       const out = spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], {
         encoding: 'utf8',
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, HOME: join(dir, 'home'), FACTORY_ROOT: join(dir, 'root'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs') },
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, HOME: join(dir, 'home'), FACTORY_ROOT: join(dir, 'root'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), AGENT_PROFILES: join(dir, 'profiles'), XDG_DATA_HOME: join(dir, 'data') },
       });
       const calls = readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean);
       return { code: out.status, out: out.stdout + out.stderr, calls };

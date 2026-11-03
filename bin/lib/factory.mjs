@@ -416,7 +416,10 @@ async function wake(args, env) {
   const seen = new Set();
   for (let i = 0; i < more.length && ok; i++) {
     const flag = more[i];
-    if (seen.has(flag)) ok = false;
+    if (seen.has(flag)) {
+      ok = false;
+      break;
+    }
     seen.add(flag);
     if (flag === '--issue') {
       issue = more[++i] ?? '';
