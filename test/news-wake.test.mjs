@@ -45,7 +45,7 @@ test('each kind writes one line and posts one wake, and a second sweep with the 
     sweep(w, [pr(1), pr(2), pr(3)]);
     assert.deepEqual([start(w).length, w.posts.length], [0, 0]);
     const prs = [pr(1, { checks: { verify: ok('FAILURE'), tier: ok('PENDING') } }), pr(2, { checks: { verify: ok(), tier: ok() } }), pr(3, { mergeable: 'CONFLICTING' })];
-    const merged = [{ number: 9, head: 'abc', body: 'Issue: #9\nTeam: pstack\n' }];
+    const merged = [{ number: 9, head: 'abc', body: 'Issue: #9\nTeam: pstack\n', mergedAt: new Date().toISOString() }];
     assert.equal(sweep(w, prs, { merged }).length, 4);
     assert.deepEqual(start(w).map((e) => e.kind).sort(), ['checks-green', 'checks-red', 'conflict', 'merged']);
     assert.equal(w.posts.length, 4);
@@ -59,10 +59,11 @@ test('each kind writes one line and posts one wake, and a second sweep with the 
 test('the first sweep of a repository records what is there and wakes nothing', () => {
   world((w) => {
     const prs = [pr(1, { checks: { verify: ok('FAILURE'), tier: ok() } }), pr(2, { mergeable: 'CONFLICTING' })];
-    assert.deepEqual(sweep(w, prs, { merged: [{ number: 9, body: '' }] }), []);
+    const merged = [{ number: 9, body: '', mergedAt: new Date().toISOString() }];
+    assert.deepEqual(sweep(w, prs, { merged }), []);
     assert.deepEqual([start(w).length, w.posts.length], [0, 0]);
     assert.ok(existsSync(join(w.state, 'queue-o-app.news')));
-    assert.deepEqual(sweep(w, prs, { merged: [{ number: 9, body: '' }] }), []);
+    assert.deepEqual(sweep(w, prs, { merged }), []);
   });
 });
 
@@ -80,6 +81,16 @@ test('a required check that fails wakes at once, though another is still running
   assert.deepEqual(kinds({ verify: ok(), tier: ok('FAILURE') }, ['needs-human']), []);
   assert.deepEqual(kinds({ verify: ok(), tier: ok() }), ['checks-green']);
   assert.deepEqual(kinds({ verify: ok() }), []);
+});
+
+test('a red `tier` is no failure while another required check has not concluded (Entire Gates pending), and is once all have', () => {
+  const required = ['verify', 'tier', 'Entire Gates'];
+  const found = (apps) => detect({ repo: REPO, prs: [pr(1, { checks: { verify: ok(), tier: ok('FAILURE') }, apps })], required }).map((e) => e.kind);
+  assert.deepEqual(found({ 'Entire Gates': ok('PENDING') }), []);
+  assert.deepEqual(found({}), [], 'a missing required check has not concluded either');
+  assert.deepEqual(found({ 'Entire Gates': ok() }), ['checks-red']);
+  const pending = detect({ repo: REPO, prs: [pr(1, { checks: { verify: ok('PENDING'), tier: ok('FAILURE') } })], required: REQUIRED });
+  assert.deepEqual(pending, []);
 });
 
 test('a red `tier` of a pull request that waits on no one is red: a Lead has a claim or a Team: line to fix', () => {
@@ -128,7 +139,7 @@ test('a red check wakes again when it fails in another run of the same head, eve
   });
 });
 
-test('a merged pull request that leaves the list and comes back wakes once; the key is kept for 14 days', () => {
+test('a merged pull request that leaves the list and comes back wakes once, and one merged over 14 days ago never wakes', () => {
   world((w) => {
     const m = (at) => ({ number: 9, head: 'abc', body: 'Issue: #9\nTeam: pstack\n', mergedAt: at });
     const other = (n, at) => ({ number: n, head: 'x', body: '', mergedAt: at });
@@ -144,7 +155,7 @@ test('a merged pull request that leaves the list and comes back wakes once; the 
     assert.equal(w.posts.length, 1, 'back in the list, it is not news (the others name no Lead, so they post nothing)');
     go([other(10, at(2))], 20);
     go([m(at(1))], 21);
-    assert.equal(w.posts.length, 2, 'after 14 days the key is gone and the pull request wakes again');
+    assert.equal(w.posts.length, 1, 'after 14 days the pull request is out of the window and does not wake');
   });
 });
 
