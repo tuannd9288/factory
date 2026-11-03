@@ -19,7 +19,8 @@
 // repository's merge switch, from the position file queue-<owner>-<name>.position (bin/lib/switch-watch.mjs); the factory's own
 // repository is read for it too, by its rules alone (one call), where there is a checkout.
 // Right after each repository's read it wakes the Lead that holds the issue of a new comment (#351, bin/lib/comment-wake.mjs), from fields
-// of the same query: a `comment` start line in the events and one line into the Lead's inbox socket. It adds no gh call.
+// of the same query: a `comment` start line in the events and one line into the Lead's inbox socket. It adds a gh call only when the claim
+// refs read do not name the holder of a fresh comment's issue and there are more of them (claimLookup).
 // After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
@@ -140,6 +141,17 @@ function openPulls(repo, since) {
     };
   });
   return { prs, issues, comments: { claims: data.data.repository.claims, recent: data.data.repository.recent } };
+}
+
+/** The claim refs of exactly these issues, by name, in one query (#351): for the holders QUERY's first 100 refs did not reach, since GitHub
+ * never deletes a claim ref and lists them by name. Returns nodes as QUERY's `claims` has them; a failed call throws. */
+function claimLookup(repo, numbers) {
+  const [owner, name] = repo.split('/');
+  const ok = numbers.filter((n) => Number.isInteger(n) && n > 0);
+  const fields = ok.map((n) => `c${n}:ref(qualifiedName:"refs/heads/claim/${n}"){target{... on Commit{messageHeadline}}}`).join(' ');
+  const data = JSON.parse(gh(['api', 'graphql', '-f', `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`, '-F', `owner=${owner}`, '-F', `name=${name}`]));
+  const found = data.data.repository;
+  return ok.map((n) => ({ name: String(n), target: found[`c${n}`]?.target }));
 }
 
 /** The rules in force on main now: one call, which gives the required checks and the merge switch. */
@@ -315,7 +327,7 @@ function sweep(repo, reads, state, switches, { self, folder, runs }) {
   reads.set(repo, { required, prs, issues });
   // The wake on comments (#351) follows the read, and a failure of it never stops the sweep.
   try {
-    wakeOnComments({ repo, folder, state, runs, data: comments, self, asked });
+    wakeOnComments({ repo, folder, state, runs, data: comments, self, asked, lookup: (numbers) => claimLookup(repo, numbers) });
   } catch (error) {
     console.log(`queue: the comments of ${repo} were not handled: ${String(error.message).split('\n')[0]}`);
   }

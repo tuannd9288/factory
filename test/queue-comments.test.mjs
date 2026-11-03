@@ -22,6 +22,8 @@ function world() {
       'case "$*" in',
       '  "api user"*) echo agent-bot ;;',
       '  *rules/branches*) echo "[]" ;;',
+      // The claim refs of named issues, asked apart from the query (#351); $Q/lookup.json is its answer.
+      '  *qualifiedName*) if [ -e "$Q/lookupfail" ]; then echo "HTTP 502" >&2; exit 1; fi; cat "$Q/lookup.json" ;;',
       '  *graphql*) if [ -e "$Q/fail" ]; then echo "HTTP 502" >&2; exit 1; fi; cat "$Q/graphql.json" ;;',
       '  *) exit 1 ;;',
       'esac',
@@ -37,20 +39,23 @@ function world() {
     state,
     sockets,
     /** The query's answer: claims as [issue, subject], issues as [number, [[comment id, time, author]...]]. */
-    answer: ({ claims = [], issues = [] }) =>
+    answer: ({ claims = [], issues = [], more = false }) =>
       writeFileSync(
         join(dir, 'graphql.json'),
         JSON.stringify({
           data: {
             repository: {
               issues: { nodes: [] },
-              claims: { pageInfo: { hasNextPage: false }, nodes: claims.map(([n, subject]) => ({ name: String(n), target: { messageHeadline: subject } })) },
+              claims: { pageInfo: { hasNextPage: more }, nodes: claims.map(([n, subject]) => ({ name: String(n), target: { messageHeadline: subject } })) },
               recent: { nodes: issues.map(([number, list]) => ({ number, comments: { nodes: list.map(([id, at, author]) => ({ databaseId: id, createdAt: at, author: author === null ? null : { login: author } })) } })) },
               pullRequests: { nodes: [] },
             },
           },
         }),
       ),
+    /** The answer of the claim lookup: the subject of each named issue's claim ref, [issue, subject]. */
+    lookup: (claims) =>
+      writeFileSync(join(dir, 'lookup.json'), JSON.stringify({ data: { repository: Object.fromEntries(claims.map(([n, subject]) => [`c${n}`, { target: { messageHeadline: subject } }])) } })),
     /** A Lead of team `team` listening, its socket recorded in its run folder; what it received is in .got. */
     lead: async (team, { recorded = true } = {}) => {
       const path = join(dir, `${team}.sock`);
@@ -232,6 +237,77 @@ test('several new comments are woken oldest first, and one that is not newer tha
     await arrived(alpha.got, 2);
     assert.equal(alpha.got.length, 2);
     assert.deepEqual(w.cursor(), { at: T(3), id: 103 });
+  } finally {
+    w.done();
+  }
+});
+
+// More claim refs than the query reads: 100 other issues' claims fill the first page, and the holder of issue 7 is outside them.
+const OTHERS = Array.from({ length: 100 }, (_, i) => [200 + i, `claim ${200 + i} gamma`]);
+const lookups = (r) => r.calls.filter((c) => c.includes('qualifiedName'));
+
+test('a holder outside the first 100 claim refs is found by name, in one more query, and woken', async () => {
+  const w = world();
+  try {
+    const alpha = await w.lead('alpha');
+    w.answer({ claims: OTHERS, more: true, issues: [[7, [[100, T(1), 'tuannd9288']]]] });
+    assert.equal(w.sweep().code, 0);
+    w.answer({ claims: OTHERS, more: true, issues: [[7, [[100, T(1), 'tuannd9288'], [101, T(2), 'tuannd9288']]], [8, [[102, T(2), 'tuannd9288']]]] });
+    w.lookup([[7, 'claim 7 alpha']]);
+    const r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.equal(lookups(r).length, 1, 'one query for the issues without a holder');
+    assert.match(lookups(r)[0], /c7:ref\(qualifiedName:"refs\/heads\/claim\/7"\)/);
+    assert.match(lookups(r)[0], /c8:ref\(qualifiedName:"refs\/heads\/claim\/8"\)/);
+    // Issue 8 has no claim ref: the lookup gives it none, and it wakes nothing.
+    assert.deepEqual(comments(w).map((e) => e.key), ['comment o/app#7 101']);
+    await arrived(alpha.got, 1);
+    assert.equal(alpha.got.length, 1);
+    assert.deepEqual(w.cursor(), { at: T(2), id: 102 });
+  } finally {
+    w.done();
+  }
+});
+
+test('a lookup that fails leaves the cursor where it was, writes and posts nothing, and the next sweep wakes', async () => {
+  const w = world();
+  try {
+    const alpha = await w.lead('alpha');
+    w.answer({ claims: OTHERS, more: true, issues: [[7, [[100, T(1), 'tuannd9288']]]] });
+    assert.equal(w.sweep().code, 0);
+    w.answer({ claims: OTHERS, more: true, issues: [[7, [[100, T(1), 'tuannd9288'], [101, T(2), 'tuannd9288']]]] });
+    w.lookup([[7, 'claim 7 alpha']]);
+    writeFileSync(join(w.dir, 'lookupfail'), '');
+    const failed = w.sweep();
+    assert.equal(lookups(failed).length, 1);
+    assert.deepEqual(w.cursor(), { at: T(1), id: 100 });
+    assert.deepEqual(comments(w), []);
+    await arrived(alpha.got, 0);
+    assert.deepEqual(alpha.got, []);
+    rmSync(join(w.dir, 'lookupfail'));
+    assert.equal(w.sweep().code, 0);
+    assert.equal(comments(w).length, 1);
+    await arrived(alpha.got, 1);
+    assert.equal(alpha.got.length, 1);
+    assert.deepEqual(w.cursor(), { at: T(2), id: 101 });
+  } finally {
+    w.done();
+  }
+});
+
+test('no lookup is made when the holder is among the refs read, when all refs were read, or when the comment is the agents\' own', async () => {
+  const w = world();
+  try {
+    await w.lead('alpha');
+    w.answer({ claims: [...OTHERS, [7, 'claim 7 alpha']], more: true, issues: [[7, [[100, T(1), 'tuannd9288']]]] });
+    assert.equal(w.sweep().code, 0);
+    w.answer({ claims: [...OTHERS, [7, 'claim 7 alpha']], more: true, issues: [[7, [[100, T(1), 'tuannd9288'], [101, T(2), 'tuannd9288']]]] });
+    assert.equal(lookups(w.sweep()).length, 0, 'the holder was read');
+    w.answer({ claims: HELD, issues: [[8, [[102, T(3), 'tuannd9288']]]] });
+    assert.equal(lookups(w.sweep()).length, 0, 'every ref was read');
+    w.answer({ claims: OTHERS, more: true, issues: [[8, [[103, T(4), 'agent-bot']]]] });
+    assert.equal(lookups(w.sweep()).length, 0, 'the agents\' own comment needs no holder');
+    assert.equal(comments(w).length, 1);
   } finally {
     w.done();
   }
