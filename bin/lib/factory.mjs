@@ -14,6 +14,7 @@ import { createInterface } from 'node:readline/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quotaRows } from './quota.mjs';
+import { post, wakeLine } from './wake.mjs';
 import { liveOfAccount } from './seat.mjs';
 import { quote } from '../../packs/pstack/bin/lead.mjs';
 import { DEFAULT_TEAM, TEAM, parseTeam } from './names.mjs';
@@ -329,7 +330,8 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory top [--once] [--width N] [--full]
        bin/factory lead <repo> [--team <name>] [--new] [--dry-run]
        bin/factory lead <repo> [--team <name>] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
-       bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)`;
+       bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)
+       bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
  * -t asks for a terminal of its own. The exit code is the remote command's. */
@@ -398,6 +400,54 @@ const GIT_CONFIG = [
   ...['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].map((from) => [`url.${PUSH_BASE}.pushInsteadOf`, from]),
 ];
 
+/** Where the socket of the MacBook Lead of a repository's team is recorded (#351), beside `lead-here`'s other files. */
+const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}-${team}.socket`);
+
+/** `factory wake <repo> --issue <n> [--team <name>]` (#351): posts one line into the Lead's Claude Code inbox socket, which says to re-read
+ * the issue and carries nothing else (bin/lib/wake.mjs); the message itself is a comment on the issue. On the factory host the socket is the
+ * one `<runs>/<repo>-<team>/socket` records; on the MacBook it is the one `factory lead --here` recorded when the Lead of that team runs there,
+ * and otherwise the same command runs on the factory host by ssh. One line is printed. Exit 0 posted, 1 not posted (the reason; the comment
+ * waits on GitHub), 2 usage. */
+async function wake(args, env) {
+  const [repo, ...more] = args;
+  let issue = null;
+  let team = DEFAULT_TEAM;
+  let ok = /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '');
+  const seen = new Set();
+  for (let i = 0; i < more.length && ok; i++) {
+    const flag = more[i];
+    if (seen.has(flag)) ok = false;
+    seen.add(flag);
+    if (flag === '--issue') {
+      issue = more[++i] ?? '';
+      ok = /^[1-9][0-9]{0,8}$/.test(issue);
+    } else if (flag === '--team') {
+      team = more[++i] ?? '';
+      ok = TEAM.test(team);
+    } else ok = false;
+  }
+  if (!ok || issue === null) {
+    console.error(USAGE);
+    return 2;
+  }
+  const { state, runs } = contextOf(env);
+  const onHost = placeOf(env) === 'factory';
+  const file = onHost ? join(runs, `${repo}-${team}`, 'socket') : wakeFile(state, repo, team);
+  if (!onHost && !existsSync(file)) {
+    const code = remote('wake', args, env);
+    // The host's own answer is 0 or 1 and says why; anything else (ssh's 255, a timeout) is a host that did not answer.
+    if (code > 1 || code === null) console.log(`did not wake the Lead of ${repo} (team ${team}): the Mac mini did not answer; the comment on #${issue} waits on GitHub`);
+    return code === 0 ? 0 : 1;
+  }
+  const r = await post(file, wakeLine(repo, issue));
+  if (r.posted) {
+    console.log(`woke the Lead of ${repo} (team ${team}) for #${issue}`);
+    return 0;
+  }
+  console.log(`did not wake the Lead of ${repo} (team ${team}): ${r.why}; the comment on #${issue} waits on GitHub`);
+  return 1;
+}
+
 /** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
  * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
  * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
@@ -429,7 +479,10 @@ function leadHere(repo, team, passed, env) {
     console.error(`bin/factory: lead --here: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
     return 1;
   }
+  // Two hooks record this Lead's inbox socket for `factory wake` (#351), and do nothing else.
+  const record = [{ hooks: [{ type: 'command', command: [process.execPath, resolve(fileURLToPath(import.meta.url), '../socket-hook.mjs'), wakeFile(state, repo, team)].map(quote).join(' ') }] }];
   const settings = {
+    hooks: { SessionStart: record, SessionEnd: record },
     env: {
       GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
@@ -644,7 +697,9 @@ export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
  * a letter is a to z, an account matches the account pattern), then the host runs the command in a login shell over ssh, on the
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
 function remote(cmd, args, env) {
-  const bad = cmd === 'use'
+  const bad = cmd === 'wake'
+    ? null // checked by wake() before it comes here
+    : cmd === 'use'
     ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) && !parseTeam(args[0]) ? 'the row is a number or <repo>-<team>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
     : (args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account');
   if (bad) {
@@ -861,6 +916,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'top') return top(rest, env);
   if (cmd === 'lead') return lead(rest, env);
   if (cmd === 'gh') return ghCmd(rest, env);
+  if (cmd === 'wake') return wake(rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);
     return 2;

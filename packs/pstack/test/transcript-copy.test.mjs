@@ -19,8 +19,8 @@ function fixture(body) {
   mkdirSync(folder, { recursive: true });
   const source = join(folder, 'abc.jsonl');
   writeFileSync(source, '{"line":1}\n');
-  const hook = (input, { configDir = config } = {}) => {
-    const r = spawnSync(process.execPath, [SCRIPT, dest], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: configDir } });
+  const hook = (input, { configDir = config, env = {} } = {}) => {
+    const r = spawnSync(process.execPath, [SCRIPT, dest], { input: typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: configDir, ...env } });
     return { code: r.status, err: r.stderr };
   };
   try {
@@ -125,6 +125,38 @@ describe('transcript-copy', () => {
       rmSync(dest, { recursive: true, force: true });
       hook({ hook_event_name, transcript_path: source });
       assert.deepEqual(readdirSync(dest), ['abc.jsonl'], hook_event_name);
+    }
+  }));
+
+  test('SessionStart records the inbox socket path beside the transcripts folder by rename, without a leading uds:, and never the token (#351)', () => fixture(({ dest, hook }) => {
+    const socket = join(dest, '../socket');
+    const env = { CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/cc-socks-1/42.sock', CLAUDE_CODE_MESSAGING_TOKEN: 'secret-token-value' };
+    const r = hook({ hook_event_name: 'SessionStart' }, { env });
+    assert.equal(r.err, '');
+    assert.equal(readFileSync(socket, 'utf8'), '/tmp/cc-socks-1/42.sock\n');
+    assert.equal(statSync(socket).mode & 0o777, 0o600);
+    // A restart changes the path: the new one replaces the old, with a leading uds: dropped.
+    hook({ hook_event_name: 'SessionStart' }, { env: { ...env, CLAUDE_CODE_MESSAGING_SOCKET: 'uds:/tmp/cc-socks-1/43.sock' } });
+    assert.equal(readFileSync(socket, 'utf8'), '/tmp/cc-socks-1/43.sock\n');
+    assert.deepEqual(readdirSync(join(dest, '..')).sort(), ['socket', 'state.json'], 'no temporary name is left');
+    for (const name of ['socket', 'state.json']) assert.ok(!readFileSync(join(dest, '..', name), 'utf8').includes('secret-token-value'), name);
+  }));
+
+  test('SessionEnd removes the recorded socket; so does a SessionStart with the variable unset or empty; other events leave it (#351)', () => fixture(({ dest, source, hook }) => {
+    const socket = join(dest, '../socket');
+    const env = { CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/cc-socks-1/42.sock' };
+    hook({ hook_event_name: 'SessionStart' }, { env });
+    for (const hook_event_name of ['UserPromptSubmit', 'Notification', 'Stop']) {
+      hook({ hook_event_name, transcript_path: source }, { env });
+      assert.ok(existsSync(socket), hook_event_name);
+    }
+    assert.equal(hook({ hook_event_name: 'SessionEnd', transcript_path: source }, { env }).err, '');
+    assert.ok(!existsSync(socket), 'SessionEnd');
+    for (const unset of [{}, { CLAUDE_CODE_MESSAGING_SOCKET: '' }, { CLAUDE_CODE_MESSAGING_SOCKET: 'uds:' }]) {
+      hook({ hook_event_name: 'SessionStart' }, { env });
+      assert.ok(existsSync(socket));
+      assert.equal(hook({ hook_event_name: 'SessionStart' }, { env: unset }).err, '');
+      assert.ok(!existsSync(socket), JSON.stringify(unset));
     }
   }));
 
