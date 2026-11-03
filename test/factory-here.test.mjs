@@ -53,7 +53,7 @@ function world() {
     writeFileSync(join(bin, name), text);
     chmodSync(join(bin, name), 0o755);
   }
-  const env = { FAKE: fake, HOME: home, PATH: `${bin}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_ROOT: join(home, 'WORKSPACES'), FACTORY_HOST_USER: 'nobody-here' };
+  const env = { FAKE: fake, HOME: home, PATH: `${bin}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_RUNS: join(home, 'factory-runs'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_ROOT: join(home, 'WORKSPACES'), FACTORY_HOST_USER: 'nobody-here' };
   const w = (name, text) => writeFileSync(join(fake, name), text);
   const read = (name) => (existsSync(join(fake, name)) ? readFileSync(join(fake, name), 'utf8') : '');
   const nuls = (name) => read(name).split('\0').slice(0, -1);
