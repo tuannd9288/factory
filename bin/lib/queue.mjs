@@ -21,6 +21,10 @@
 // Right after each repository's read it wakes the Lead that holds the issue of a new comment (#351, bin/lib/comment-wake.mjs), from fields
 // of the same query: a `comment` start line in the events and one line into the Lead's inbox socket. It adds a gh call only when the claim
 // refs read do not name the holder of a fresh comment's issue and there are more of them (claimLookup).
+// Beside it, from the same query (which also asks for each open pull request's body and `mergeable` and the 10 most recently merged),
+// it wakes the Lead on its news (#370, bin/lib/news-wake.mjs): a pull request's checks red or all green, a conflict, a merge, and, once
+// after the loop, a seat that ended or a run whose process is gone with no record. One `start` line each, one line into the Lead's
+// socket, no gh call; the start of a check-not-started condition wakes that pull request's Lead too.
 // After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
@@ -32,9 +36,10 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, checkPlists, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
-import { FIELDS, readCursor, wakeOnComments } from './comment-wake.mjs';
+import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { noteGh, observe, resetNotes } from './events.mjs';
 import { clonesUnder } from './ledger.mjs';
+import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
 import { watchSwitch } from './switch-watch.mjs';
@@ -86,8 +91,8 @@ export function pickReruns(prs) {
     .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId }));
 }
 
-const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} pullRequests(states:OPEN,first:100){nodes{
-number isDraft createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
+export const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} ${MERGED_FIELDS} pullRequests(states:OPEN,first:100){nodes{
+number isDraft body mergeable createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{id databaseId name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
 
@@ -128,6 +133,8 @@ function openPulls(repo, since) {
     return {
       number: p.number,
       isDraft: p.isDraft,
+      body: p.body ?? '',
+      mergeable: p.mergeable,
       createdAt: p.createdAt,
       mergeStateStatus: p.mergeStateStatus,
       base: p.baseRefName,
@@ -140,7 +147,8 @@ function openPulls(repo, since) {
       apps,
     };
   });
-  return { prs, issues, comments: { claims: data.data.repository.claims, recent: data.data.repository.recent } };
+  const merged = (data.data.repository.merged?.nodes ?? []).map((p) => ({ number: p.number, head: p.headRefOid, body: p.body ?? '', mergedAt: p.mergedAt }));
+  return { prs, issues, merged, comments: { claims: data.data.repository.claims, recent: data.data.repository.recent } };
 }
 
 /** The claim refs of exactly these issues, by name, in one query (#351): for the holders QUERY's first 100 refs did not reach, since GitHub
@@ -323,13 +331,19 @@ function sweep(repo, reads, state, switches, { self, folder, runs }) {
   const rules = pagesOf(rulesIn(repo));
   const required = requiredIn(rules);
   const asked = new Date().toISOString();
-  const { prs, issues, comments } = openPulls(repo, readCursor(state, repo)?.at);
-  reads.set(repo, { required, prs, issues });
+  const { prs, issues, merged, comments } = openPulls(repo, readCursor(state, repo)?.at);
+  reads.set(repo, { required, prs, issues, claims: comments.claims?.nodes, folder });
   // The wake on comments (#351) follows the read, and a failure of it never stops the sweep.
   try {
     wakeOnComments({ repo, folder, state, runs, data: comments, self, asked, lookup: (numbers) => claimLookup(repo, numbers) });
   } catch (error) {
     console.log(`queue: the comments of ${repo} were not handled: ${String(error.message).split('\n')[0]}`);
+  }
+  // So is the wake on the Lead's news (#370), beside it.
+  try {
+    wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });
+  } catch (error) {
+    console.log(`queue: the news of ${repo} was not handled: ${String(error.message).split('\n')[0]}`);
   }
   const { ran, position } = followSwitch(repo, state, rules, prs);
   if (position) switches.set(repo, watchSwitch({ state, repo, position }));
@@ -538,7 +552,8 @@ function recordEvents(state, reads, switches) {
   const failure = join(state, 'queue-events.failed');
   try {
     const home = process.env.HOME;
-    observe({ state, reads, switches, runs: process.env.FACTORY_RUNS ?? join(home, 'factory-runs'), agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles') });
+    const runs = process.env.FACTORY_RUNS ?? join(home, 'factory-runs');
+    observe({ state, reads, switches, runs, agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles'), onStart: (condition) => wakeStarted({ condition, reads, runs }) });
     rmSync(failure, { force: true });
   } catch (error) {
     mkdirSync(state, { recursive: true });
@@ -750,6 +765,12 @@ function main(argv) {
         console.error(`queue: ${repo}: ${why}`);
         failed += 1;
       }
+    }
+    // The seats' news (#370) is the host's, not a repository's: once, after the loop, with the claim holders the loop read.
+    try {
+      wakeOnSeats({ state, runs, heldBy: new Map([...reads.values()].map((d) => [d.folder, holders(d.claims)])) });
+    } catch (error) {
+      console.log(`queue: the seats' news was not handled: ${String(error.message).split('\n')[0]}`);
     }
     watchOwn(state, swept, switches);
     return failed ? 1 : 0;

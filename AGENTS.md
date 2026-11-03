@@ -416,7 +416,9 @@ a repository's merge switch moved)
 and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
 starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out. The sweep also writes
-a one-time `comment` start line, like the reader's and no condition, when it wakes a Lead (#351).
+a one-time `comment` start line, like the reader's and no condition, when it wakes a Lead (#351); six more kinds of the same sort tell a
+Lead's news (#370, `bin/lib/news-wake.mjs`): `seat-ended`, `seat-no-result`, `checks-red`, `checks-green`, `conflict` and `merged`, each
+waking the Lead of its seat or pull request on this host, and a `check-not-started` start wakes that pull request's Lead as well.
 
 A message for a Lead is a comment on its issue, then `factory wake <repo> --team <team> --issue <n>`: one line into the Lead's Claude
 Code inbox socket, which says to re-read the issue and carries nothing else. Nobody types into a pane (H9 rule 4). The Lead's hook records
