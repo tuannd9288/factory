@@ -21,10 +21,11 @@
 // Right after each repository's read it wakes the Lead that holds the issue of a new comment (#351, bin/lib/comment-wake.mjs), from fields
 // of the same query: a `comment` start line in the events and one line into the Lead's inbox socket. It adds a gh call only when the claim
 // refs read do not name the holder of a fresh comment's issue and there are more of them (claimLookup).
-// Beside it, from the same query (which also asks for each open pull request's body and `mergeable` and the 10 most recently merged),
+// Beside it, from the same query (which also asks for each open pull request's body and `mergeable` and 10 merged ones),
 // it wakes the Lead on its news (#370, bin/lib/news-wake.mjs): a pull request's checks red or all green, a conflict, a merge, and, once
 // after the loop, a seat that ended or a run whose process is gone with no record. One `start` line each, one line into the Lead's
-// socket, no gh call; the start of a check-not-started condition wakes that pull request's Lead too.
+// socket, no gh call; the start of a check-not-started condition wakes that pull request's Lead too. The merged ones are the 10 most
+// recently updated of the merged pull requests, the query having no order by merge time.
 // After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
@@ -36,6 +37,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, checkPlists, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
+import { RED, failedCheck } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { noteGh, observe, resetNotes } from './events.mjs';
 import { clonesUnder } from './ledger.mjs';
@@ -45,7 +47,6 @@ import { listStreams } from './streams.mjs';
 import { watchSwitch } from './switch-watch.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 
-const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
 const CALL_MS = 60_000;
 const ENTIRE = 'Entire Gates';
 
@@ -63,8 +64,7 @@ export function pickUpdate(prs, required, position) {
   const waiting = prs.filter((p) => p.autoMerge && !p.isDraft);
   const check = (p, name) => p.checks[name] ?? p.apps?.[name];
   const judging = (p) => required.some((name) => !check(p, name) || check(p, name).state === 'PENDING');
-  const failed = (p) =>
-    required.some((name) => name !== 'tier' && (p.checks[name] ? RED.has(p.checks[name].state) : Boolean(p.apps?.[name]) && !['SUCCESS', 'PENDING'].includes(p.apps[name].state)));
+  const failed = (p) => required.some((name) => name !== 'tier' && failedCheck(p, name));
   const unapproved = (p) =>
     (p.labels.some((l) => l === 'tier-3' || l === 'needs-human') && p.checks.tier?.state !== 'SUCCESS') ||
     (position === 'none' && !p.approvals.some((a) => a.login !== p.author));
@@ -104,7 +104,8 @@ const recordsQuery = (ids) => `query{nodes(ids:${JSON.stringify(ids)}){... on Ch
 // A failed call is noted for the events (#309: gh-refused) and thrown as before.
 const gh = (args) => {
   try {
-    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS });
+    // The query's answer carries the body of up to 110 pull requests (#370), which can pass execFileSync's 1 MiB default.
+    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS, maxBuffer: 64 * 1024 * 1024 });
   } catch (error) {
     noteGh(args, error);
     throw error;
@@ -553,7 +554,8 @@ function recordEvents(state, reads, switches) {
   try {
     const home = process.env.HOME;
     const runs = process.env.FACTORY_RUNS ?? join(home, 'factory-runs');
-    observe({ state, reads, switches, runs, agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles'), onStart: (condition) => wakeStarted({ condition, reads, runs }) });
+    const seen = new Set();
+    observe({ state, reads, switches, runs, agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles'), onStart: (condition) => wakeStarted({ condition, reads, runs, seen }) });
     rmSync(failure, { force: true });
   } catch (error) {
     mkdirSync(state, { recursive: true });
