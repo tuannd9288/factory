@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 
 const lib = () => import('../bin/lib/seat.mjs');
 
@@ -46,7 +47,7 @@ test('a pid no process has is not live and ps is not asked; any other answer of 
   assert.equal(alive(4242, -5000, info, () => true), false, 'started after the file was written');
 });
 
-test('a pid file written before its process started is a reused pid, not a live session; one written after counts', async () => {
+test('a pid file written before its process started is a reused pid, not a live session; one written after counts', { skip: skipPs }, async () => {
   const { liveCount } = await lib();
   runs((root, put) => {
     const file = join(root, 'issue-1', 'run-old.pid');
