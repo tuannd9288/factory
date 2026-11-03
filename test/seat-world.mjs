@@ -38,7 +38,7 @@ process.stdin.on('end', () => {
   const e = process.env;
   let parent = '';
   try {
-    parent = fs.existsSync('/proc/' + process.ppid + '/environ') ? fs.readFileSync('/proc/' + process.ppid + '/environ', 'latin1') : spawnSync('/bin/ps', ['eww', '-p', String(process.ppid)], { encoding: 'latin1' }).stdout;
+    parent = fs.existsSync('/proc/' + process.ppid + '/environ') ? fs.readFileSync('/proc/' + process.ppid + '/environ', 'latin1') : spawnSync('/bin/ps', ['eww', '-p', String(process.ppid)], { encoding: 'latin1' }).stdout ?? '';
   } catch {}
   fs.writeFileSync(e.FAKE_OUT, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), cwd: process.cwd(), stdin: Buffer.concat(chunks).toString(),
     parentHasToken: parent.includes('CLAUDE_CODE_OAUTH_TOKEN'), parentSeen: parent.includes('PATH='),

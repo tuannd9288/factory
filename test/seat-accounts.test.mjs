@@ -25,7 +25,7 @@ function split(w) {
   writeFileSync(join(w.profiles, 'seats/1/oauth-token'), `${OLD}\n`);
 }
 
-test('a session runs on its team\'s row: that account\'s token, run-<tag>.account, and a record that names the team and the account (#311)', { skip: skipPs }, () => world(async (w) => {
+test('a session runs on its team\'s row: that account\'s token, run-<tag>.account, and a record that names the team and the account (#311)', () => world(async (w) => {
   split(w);
   const r = w.start('worker', ['--tag', 'x'], { FACTORY_TEAM: 'probe-alpha' });
   assert.equal(r.code, 0, r.out + r.err);
@@ -38,19 +38,21 @@ test('a session runs on its team\'s row: that account\'s token, run-<tag>.accoun
   assert.equal(w.records()[0].account, 'acct-two');
 }));
 
-test('the token is in no argument, log, record, pid file or output (#311)', { skip: skipPs }, () => world(async (w) => {
+test('the token is in no argument, log, record, pid file or output (#311)', () => world(async (w) => {
   split(w);
   const r = w.start('worker', ['--tag', 'x'], { FACTORY_TEAM: 'probe-alpha' });
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
   const saw = w.saw();
   assert.ok(!saw.argv.some((a) => a.includes(TWO)));
+  // The fake reads its parent with ps, which the sandbox refuses (#183): there the parent is empty, and only there may it be unread.
+  assert.ok(saw.parentSeen || skipPs, 'the fake could read its parent\'s environment');
   assert.equal(saw.parentHasToken, false, 'the supervisor\'s environment holds no token');
   for (const [file, body] of [...filesUnder(w.run), ...filesUnder(w.state)]) assert.ok(!body.includes(TWO), `${file} holds the token`);
   assert.ok(!(r.out + r.err).includes(TWO));
 }));
 
-test('two teams on two accounts at once: each session has its own team\'s token and account (#311)', { skip: skipPs }, () => world(async (w) => {
+test('two teams on two accounts at once: each session has its own team\'s token and account (#311)', () => world(async (w) => {
   split(w);
   const first = w.start('worker', ['--tag', 'a'], { FACTORY_TEAM: 'factory-lead', FAKE_OUT: w.out('a') });
   const second = w.start('worker', ['--tag', 'b'], { FACTORY_TEAM: 'probe-alpha', FAKE_OUT: w.out('b') });
@@ -153,7 +155,7 @@ test('after the account\'s token file is moved away (logout) every team naming i
   assert.deepEqual(started(w), []);
 }));
 
-test('a new session takes the first seat of its role\'s list; the researcher\'s only seat is 2, on its team\'s account (#311)', { skip: skipPs }, () => world(async (w) => {
+test('a new session takes the first seat of its role\'s list; the researcher\'s only seat is 2, on its team\'s account (#311)', () => world(async (w) => {
   split(w);
   const worker = w.start('worker', ['--tag', 'w'], { FACTORY_TEAM: 'probe-alpha' });
   assert.match(worker.out, /on seat 2/);
@@ -164,7 +166,7 @@ test('a new session takes the first seat of its role\'s list; the researcher\'s 
   assert.equal(w.saw('res').env.token, TWO);
 }));
 
-test('a resume keeps its seat, and runs on its team\'s account whatever the seat\'s old row says (#311)', { skip: skipPs }, () => world(async (w) => {
+test('a resume keeps its seat, and runs on its team\'s account whatever the seat\'s old row says (#311)', () => world(async (w) => {
   split(w);
   const r = w.start('worker', ['--resume', 'sid-1', '--seat', '1', '--tag', 'one'], { FACTORY_TEAM: 'probe-alpha' });
   assert.equal(r.code, 0, r.out + r.err);
@@ -176,7 +178,7 @@ test('a resume keeps its seat, and runs on its team\'s account whatever the seat
   assert.equal(w.saw().env.config, join(w.profiles, 'seats/1/claude'));
 }));
 
-test('a rejection on account A refuses team A, naming the account and the reset, while team B on account B starts (#311)', { skip: skipPs }, () => world(async (w) => {
+test('a rejection on account A refuses team A, naming the account and the reset, while team B on account B starts (#311)', () => world(async (w) => {
   split(w);
   rejectedOn(w, 'acct-one', 'old1', 3600);
   const r = w.start('worker', ['--tag', 'x'], { FACTORY_TEAM: 'factory-lead' });

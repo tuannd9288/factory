@@ -1,18 +1,15 @@
 // bin/seat (#91): which environment holds what. Seat 1's token is in `claude`'s environment only: not in bin/seat's, and not in
 // the supervisor's that waits for the session (review of #91, #5). The caller's GitHub and API credentials are not passed on,
 // as the gate's reviewer does not (#10).
-import { test as nodeTest } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { skipPs } from './ps-skip.mjs';
 import { until, world } from './seat-world.mjs';
 
-// Every test here starts a session, which the seat finds live through ps, which the factory's sandbox refuses (#183).
-const test = (name, fn) => nodeTest(name, { skip: skipPs }, fn);
-
 const creds = { GH_TOKEN: 'gh-fake', GITHUB_TOKEN: 'ghub-fake', ANTHROPIC_API_KEY: 'key-fake' };
 
-test('seat 1: only claude\'s environment holds the token; the supervisor\'s, which claude can see as its parent, does not', () => world(async (w) => {
+test('seat 1: only claude\'s environment holds the token; the supervisor\'s, which claude can see as its parent, does not', { skip: skipPs }, () => world(async (w) => {
   const r = w.start('worker', ['--resume', 'sid-1', '--seat', '1', '--tag', 'one']);
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');

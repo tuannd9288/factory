@@ -4,7 +4,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { skipPs } from './ps-skip.mjs';
 import { until, world } from './seat-world.mjs';
 
 const lib = () => import('../bin/lib/seat.mjs');
@@ -33,7 +32,7 @@ test('--deny is repeatable, and a value that starts with a dash is refused like 
   assert.throws(() => parseArgs(['researcher', 'b.md', '--run', dir, '--work', dir, '--deny']), /--deny needs a value/);
 });
 
-test('bin/seat passes --deny on to claude', { skip: skipPs }, () => world(async (w) => {
+test('bin/seat passes --deny on to claude', () => world(async (w) => {
   const r = w.start('researcher', ['--deny', 'Agent', '--deny', 'Task']);
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
