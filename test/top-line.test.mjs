@@ -2,7 +2,7 @@
 // fake gh logs each call, so the tests count how often GitHub is read across separate snapshots (each stands for one process).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -167,6 +167,56 @@ test('past its deadline a mode prints from the shared cache, or ? with none, and
   assert.equal(old.late, true);
   assert.ok(old.ms < 2500, `took ${old.ms} ms`);
   assert.equal(old.text.split(' · ')[0], '1 to approve', 'a cache older than the minute stands in');
+});
+
+test('--line counts only Leads at a prompt as Leads waiting: a started needs-human condition is an alert (#365)', async () => {
+  const { lineOf } = await top();
+  const w = world({ waits: false });
+  const c = { kind: 'waiting-on-human', key: 'k', text: `${REPO}#9 needs the Human`, started: true, top: true, url: `https://github.com/${REPO}/issues/9` };
+  writeFileSync(join(w.state, 'events-active.json'), JSON.stringify({ seq: 1, conditions: { k: c } }));
+  assert.equal(lineOf(await take(w), { width: 200 }), '1 alert');
+});
+
+test('two snapshots started together make one read of GitHub; a live claim means no read, and a stale one is taken over (#365)', async () => {
+  const w = world();
+  w.slowGh(1);
+  const lock = join(w.state, 'top-github.lock');
+  const snaps = await Promise.all([take(w), take(w)]);
+  assert.equal(w.calls(), 2, 'one issue list and one pr list');
+  assert.equal(snaps.filter((s) => Object.values(s.github.repos).some((r) => r.unknown)).length, 1, 'the other shows ?');
+  assert.ok(!existsSync(lock), 'the claim is released');
+  const again = world();
+  mkdirSync(again.state, { recursive: true });
+  mkdirSync(lock.replace(w.state, again.state));
+  await take(again);
+  assert.equal(again.calls(), 0, 'a live claim: no read');
+  const old = (Date.now() - 120_000) / 1000;
+  utimesSync(lock.replace(w.state, again.state), old, old);
+  await take(again);
+  assert.equal(again.calls(), 2, 'a claim older than 2 x CALL_MS is taken over');
+});
+
+test('the shared file holds only the Issue: and Team: lines of a pull request body, is private, and a newer good read is not replaced by an older one (#365)', async () => {
+  const { gatherGithub } = await top();
+  const w = world();
+  writeFileSync(join(w.state, '..', 'fx/prs.json'), JSON.stringify([{ number: 20, title: 't', state: 'OPEN', headRefName: 'h', body: 'Issue: #7\nTeam: alpha\nsecret@example.com\nClaim: x', labels: [], mergedAt: null, statusCheckRollup: [] }]));
+  await take(w);
+  const file = join(w.state, 'top-github.json');
+  const text = readFileSync(file, 'utf8');
+  assert.ok(!text.includes('secret@example.com') && !text.includes('Claim: x'));
+  assert.ok(text.includes('Team: alpha'));
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  w.breakGh();
+  const older = { [REPO]: { entry: { issues: [], prs: [], claims: new Map(), claimsOk: true, required: ['verify'] }, at: NOW - 5000 } };
+  const before = process.env.PATH;
+  process.env.PATH = `${join(w.state, '..', 'bin')}:${before}`;
+  try {
+    const data = await gatherGithub({ repos: [REPO], clones: w.opts.clones, state: w.state, claims: w.opts.claims, now: NOW + 120_000, cache: { good: older }, shared: true });
+    assert.equal(data.repos[REPO].goodAt, NOW, 'the later good read stands in');
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).good[REPO].at, NOW);
+  } finally {
+    process.env.PATH = before;
+  }
 });
 
 test('two runs within a minute read GitHub once, a run after the minute reads it again, and a failed read keeps the last good one', async () => {

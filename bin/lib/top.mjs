@@ -22,7 +22,7 @@
 // run-<tag>.name, a Lead keeps ~/factory-runs/<repo>-<team>/name and its Herdr pane carries it. A Lead's state is its newest hook
 // event in <repo>-<team>/state.json (packs/pstack/bin/transcript-copy.mjs).
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { cpus, homedir, loadavg } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -453,36 +453,92 @@ function writeSharedGithub(state, data, good) {
     mkdirSync(state, { recursive: true });
     const file = join(state, GH_FILE);
     const tmp = `${file}.tmp-${process.pid}`;
-    writeFileSync(tmp, JSON.stringify({ data, good }, mapOut));
+    writeFileSync(tmp, JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
     renameSync(tmp, file);
   } catch {
     // a view that cannot write the file reads GitHub again next time
   }
 }
 
+/** The in-flight claim of one GitHub read: a folder `top-github.lock` made with mkdir (one process wins), as events.mjs's lock is. A read
+ * ends within a few CALL_MS, so a claim older than 2 × CALL_MS is a dead reader's and is taken over. Returns its release, or null while
+ * another process holds it. */
+function takeRead(state) {
+  try {
+    mkdirSync(state, { recursive: true });
+    const lock = join(state, 'top-github.lock');
+    for (let tries = 0; tries < 2; tries += 1) {
+      try {
+        mkdirSync(lock);
+        return () => rmSync(lock, { recursive: true, force: true });
+      } catch (error) {
+        if (error.code !== 'EEXIST') return () => {};
+      }
+      try {
+        if (Date.now() - statSync(lock).mtimeMs <= 2 * CALL_MS) return null;
+        rmSync(lock, { recursive: true, force: true });
+      } catch {
+        // the holder just finished: try the claim again
+      }
+    }
+  } catch {
+    return () => {};
+  }
+  return null;
+}
+
+/** The shared file's last read, whatever its age, with `?` for a repository it lacks: what a process shows that must not call GitHub. */
+function lastRead(state, repos, now) {
+  const data = readSharedGithub(state)?.data ?? { ok: false, error: 'GitHub was not read in time', at: now, repos: {} };
+  for (const repo of repos) data.repos[repo] ??= { unknown: true, issues: [], prs: [], claims: new Map(), claimsOk: false, required: ['verify'], failedAt: now, goodAt: null };
+  return data;
+}
+
+/** A pull request's body kept to the lines this view reads (`Issue:` and `Team:`), so that the shared file holds no more. */
+const keptBody = (body) => String(body ?? '').split('\n').filter((l) => /^(Issue|Team): /.test(l)).join('\n');
+
+/** Per repository, the last good read that is newer. */
+const newerGood = (a = {}, b = {}) => Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].map((r) => [r, (a[r]?.at ?? -1) >= (b[r]?.at ?? -1) ? a[r] : b[r]]));
+
 /** Issues, pull requests and claims of the repositories, at most once a minute (cache holds the last read). A call that
  * fails gives its first line and the rest still shows. With `shared`, the last read is also kept in the state folder, so that
  * another process within the minute reuses it, and a failed read there keeps the last good one too. */
 export async function gatherGithub({ repos, clones, state, claims = readClaims, now, cache = {}, shared = false, offline = false }) {
-  if (offline) {
-    // The deadline passed (#365): no GitHub call; the shared file's last read whatever its age, and ? for a repository it lacks.
-    const file = readSharedGithub(state);
-    const data = file?.data ?? { ok: false, error: 'GitHub was not read in time', at: now, repos: {} };
-    for (const repo of repos) data.repos[repo] ??= { unknown: true, issues: [], prs: [], claims: new Map(), claimsOk: false, required: ['verify'], failedAt: now, goodAt: null };
-    return data;
-  }
+  // The deadline passed (#365): no GitHub call.
+  if (offline) return lastRead(state, repos, now);
   if (cache.data && now - cache.at < GH_MS) return cache.data;
+  let release = null;
   if (shared) {
-    const file = readSharedGithub(state);
-    if (file) {
-      cache.good = { ...file.good, ...cache.good };
+    const adopt = () => {
+      const file = readSharedGithub(state);
+      if (!file) return null;
+      cache.good = newerGood(file.good, cache.good);
       if (now >= file.data.at && now - file.data.at < GH_MS && repos.every((r) => file.data.repos[r])) {
         cache.data = file.data;
         cache.at = file.data.at;
         return file.data;
       }
+      return null;
+    };
+    const fresh = adopt();
+    if (fresh) return fresh;
+    // One read in flight for all processes: while another holds the claim, show the last read and call nothing.
+    release = takeRead(state);
+    if (!release) return lastRead(state, repos, now);
+    const meanwhile = adopt();
+    if (meanwhile) {
+      release();
+      return meanwhile;
     }
   }
+  try {
+    return await readGithub({ repos, clones, state, claims, now, cache, shared });
+  } finally {
+    release?.();
+  }
+}
+
+async function readGithub({ repos, clones, state, claims, now, cache, shared }) {
   const data = { ok: true, error: null, at: now, repos: {} };
   const good = (cache.good ??= {});
   await Promise.all(repos.map(async (repo) => {
@@ -500,7 +556,7 @@ export async function gatherGithub({ repos, clones, state, claims = readClaims, 
       }
       // The checks `main` requires: the kit's for a repository whose clone holds the kit, `verify` alone for any other.
       const required = clones.get(repo) && existsSync(join(clones.get(repo), '.gate/bin')) ? REQUIRED : ['verify'];
-      const entry = { issues, prs, claims: held, claimsOk, required };
+      const entry = { issues, prs: prs.map((p) => ({ ...p, body: keptBody(p.body) })), claims: held, claimsOk, required };
       good[repo] = { entry, at: now };
       data.repos[repo] = entry;
     } catch (error) {
@@ -875,10 +931,10 @@ const cleanDeep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? 
 function waitsOf(snap) {
   const { sessions, queue, now } = snap;
   return [
-    ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => ({ verb: 'approve', text: `${r.repo}#${g.pr.number} ${g.pr.title}`, url: `https://github.com/${r.repo}/pull/${g.pr.number}` }))),
-    ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => ({ verb: 'answer', text: `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`, url: '' })),
-    ...(snap.events ?? []).map((c) => ({ verb: EVENT_VERBS[c.kind] ?? 'look', text: c.text, url: c.url ?? '' })),
-    ...queue.failed.map((f) => ({ verb: 'alert', text: `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`, url: '' })),
+    ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => ({ kind: 'pr', verb: 'approve', text: `${r.repo}#${g.pr.number} ${g.pr.title}`, url: `https://github.com/${r.repo}/pull/${g.pr.number}` }))),
+    ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => ({ kind: 'lead', verb: 'answer', text: `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`, url: '' })),
+    ...(snap.events ?? []).map((c) => ({ kind: 'condition', verb: EVENT_VERBS[c.kind] ?? 'look', text: c.text, url: c.url ?? '' })),
+    ...queue.failed.map((f) => ({ kind: 'failed', verb: 'alert', text: `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`, url: '' })),
   ];
 }
 
@@ -1044,10 +1100,11 @@ function teamsWorking(snap) {
 export function lineOf(input, { width = 80 } = {}) {
   const snap = cleanSnap(input);
   const waits = waitsOf(snap);
-  const count = (verb) => waits.filter((w) => w.verb === verb).length;
-  const approve = Object.values(snap.github.repos).some((r) => r.unknown) ? '?' : count('approve');
-  const prompts = count('answer');
-  const alerts = waits.length - count('approve') - prompts;
+  // Counted by where a wait comes from, not by the frame's verb: a #309 condition (an issue labelled needs-human is `answer` there) is an alert.
+  const count = (kind) => waits.filter((w) => w.kind === kind).length;
+  const approve = Object.values(snap.github.repos).some((r) => r.unknown) ? '?' : count('pr');
+  const prompts = count('lead');
+  const alerts = waits.length - count('pr') - prompts;
   const teams = teamsWorking(snap).size;
   const parts = [
     approve === 0 && !prompts && !alerts ? 'Nothing waits on you' : null,
@@ -1086,8 +1143,9 @@ function teamLines(snap) {
 
 /** `factory top --brief` (#365): the text of Colly's start hook. What waits on the Human (the frame's first block), the teams of each
  * repository with the issues they hold, and the `start` events after `after` (the newest few with none), read as bin/factory-events does
- * without --follow and never touching its cursor. The last line is `seq <n>`, the highest seq in the events file (0 with none), which the
- * hook keeps so that Colly's Monitor starts with `--after <n>`. */
+ * without --follow and never touching its cursor. The last line is `seq <n>`, which the hook keeps so that Colly's
+ * Monitor starts with `--after <n>`: the highest seq in the events file (0 with none), or, when the events block is cut, the seq of the
+ * last event printed, so that the Monitor delivers the events left out. */
 export async function briefOf(input, { after = null } = {}) {
   const { readLines } = await import('./events.mjs');
   const snap = cleanSnap(input);
