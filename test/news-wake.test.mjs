@@ -13,7 +13,7 @@ import { newsLine } from '../bin/lib/wake.mjs';
 const REPO = 'o/app';
 const REQUIRED = ['verify', 'tier'];
 const ok = (state = 'SUCCESS') => ({ state, status: state === 'PENDING' ? 'IN_PROGRESS' : 'COMPLETED', startedAt: 't', completedAt: 't' });
-const pr = (number, over = {}) => ({ number, head: `${String(number).repeat(8)}`, body: `Issue: #${number}\nTeam: pstack\n`, mergeable: 'MERGEABLE', isDraft: false, labels: [], autoMerge: false, mergeStateStatus: 'CLEAN', checks: { verify: ok('PENDING'), tier: ok('PENDING') }, apps: {}, ...over });
+const pr = (number, over = {}) => ({ number, head: `${String(number).repeat(8)}`, body: `Issue: #${number}\nTeam: pstack\n`, mergeable: 'MERGEABLE', isDraft: false, labels: [], approvals: [], autoMerge: false, mergeStateStatus: 'CLEAN', checks: { verify: ok('PENDING'), tier: ok('PENDING') }, apps: {}, ...over });
 const claim = (n, team) => ({ name: String(n), target: { messageHeadline: `claim ${n} ${team}` } });
 
 /** A world: a state folder, a runs folder where the Lead app-pstack has a socket file, and a post that keeps what it was given. */
@@ -91,6 +91,15 @@ test('a red `tier` is no failure while another required check has not concluded 
   assert.deepEqual(found({ 'Entire Gates': ok() }), ['checks-red']);
   const pending = detect({ repo: REPO, prs: [pr(1, { checks: { verify: ok('PENDING'), tier: ok('FAILURE') } })], required: REQUIRED });
   assert.deepEqual(pending, []);
+});
+
+test('a red `tier` that the queue re-runs in this sweep (Entire concluded after it started) is no news; one that failed after it is', () => {
+  const required = ['verify', 'tier', 'Entire Gates'];
+  const T = '2026-11-03T10:00:00Z';
+  const kinds = (concluded) =>
+    detect({ repo: REPO, prs: [pr(1, { checks: { verify: ok(), tier: { ...ok('FAILURE'), startedAt: T, jobId: '42' } }, apps: { 'Entire Gates': { ...ok(), completedAt: concluded } } })], required }).map((e) => e.kind);
+  assert.deepEqual(kinds('2026-11-03T10:01:00Z'), []);
+  assert.deepEqual(kinds('2026-11-03T09:59:00Z'), ['checks-red']);
 });
 
 test('a red `tier` of a pull request that waits on no one is red: a Lead has a claim or a Team: line to fix', () => {

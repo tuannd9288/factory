@@ -8,7 +8,8 @@
 //                   gone, with no record for it, for SEAT_GRACE_MS (runLive decides)
 //   checks-red      the first required check of an open pull request's head to fail  pull request and head
 //                   (`tier` is left out while the pull request carries tier-3 or needs-human, when it waits on the Human, and while
-//                   another required check has not concluded: under Entire it is red until Entire Gates concludes)
+//                   another required check has not concluded: under Entire it is red until Entire Gates concludes; and while the queue
+//                   re-runs it in this sweep, as pickReruns says: an approval, or Entire's conclusion, after it started)
 //   checks-green    every required check of the head succeeded                       pull request and head
 //   conflict        `mergeable` is CONFLICTING (UNKNOWN, which GitHub says for a while after a push, is none)   pull request and head
 //   merged          the pull request merged                                          pull request
@@ -27,7 +28,7 @@
 // though no sweep saw it not red); the old failed run still counts while a re-run is queued, and a second check failing is no news.
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { failedCheck } from './checks.mjs';
+import { failedCheck, pickReruns } from './checks.mjs';
 import { holders } from './comment-wake.mjs';
 import { appendStart } from './events.mjs';
 import { readSessions } from './records.mjs';
@@ -88,10 +89,11 @@ export function detect({ repo, prs, merged = [], required, now = Date.now() }) {
   for (const p of prs) {
     const at = `${repo}#${p.number} head ${String(p.head).slice(0, 7)}`;
     const base = { body: p.body ?? '', pr: p.number, where: url(p.number) };
-    // `tier` is red until another required check concludes where Entire reviews (the queue re-runs it), so it is no failure while any
-    // other required check has not concluded (pending, queued, in progress or missing), nor while the pull request waits on the Human.
+    // `tier` is red until another required check concludes where Entire reviews, so it is no failure while any other required check has
+    // not concluded (pending, queued, in progress or missing), nor while the pull request waits on the Human.
     const unsettled = required.some((name) => name !== 'tier' && (checkOf(p, name)?.state ?? 'PENDING') === 'PENDING');
-    const tierWaits = unsettled || (p.labels ?? []).some((l) => HUMAN.has(l));
+    // Nor is it one the queue re-runs in this sweep (pickReruns: an approval, or Entire's conclusion, after it started): that run decides.
+    const tierWaits = unsettled || (p.labels ?? []).some((l) => HUMAN.has(l)) || pickReruns([p]).length > 0;
     const red = required.filter((name) => !(name === 'tier' && tierWaits) && failedCheck(p, name));
     if (red.length)
       found.push({ ...base, kind: 'checks-red', key: `checks-red ${repo}#${p.number} ${p.head}`, what: `${at}: required check ${red.join(', ')} failed`, runs: Object.fromEntries(red.map((name) => [name, runOf(checkOf(p, name))])) });
