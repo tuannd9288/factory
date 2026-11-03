@@ -34,8 +34,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   off, until he moves it. It is the two review parameters of the `factory-gate` ruleset ("Luật review của GitHub
   (Recommended)", 12:14:34), so GitHub holds it and a move applies at once to the open pull requests, which the queue
   follows by re-running a tier-3 `tier` whose recorded position and the one in force differ in a way that changes its
-  verdict. At `all` the code also lets a `needs-human` pull request merge once its checks are green: the Lead's reading,
-  awaiting his choice on the pull request. Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`, which Colly runs.
+  verdict. At `all` the code also lets a `needs-human` pull request merge once its checks are green: his choice on #354
+  (2026-11-02 20:16:33 +07, review 5737110797). Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`, which Colly runs; each move shows in `factory top` and wakes Colly.
   "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
   (Recommended)" are his answers; the factory's own repository is unchanged. Sources:
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 (09:51 to about 10:00),
@@ -193,7 +193,7 @@ itself requires, on tier 3, an approval of the head commit by a code owner who i
 
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy. Where a repository's merge
   switch is at `all` (#333), a tier-3 pull request needs no approval of his (a `needs-human` one too, as the code does:
-  the Lead's reading, awaiting his choice); a deploy is still his.
+  his choice on #354, 2026-11-02 20:16:33 +07, review 5737110797); a deploy is still his.
 - His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
   `reviewer` environment, "Allow auto-merge"), which Colly then applies on his login; and the reviewer's secret, where a
   repository uses the kit's Claude reviewer.
@@ -391,8 +391,9 @@ Claude Code updates itself on the stable channel; nothing in the factory pins th
 (`kit/.gate/bin/reviewer/package.json`, `kit/.gate/bin/lib/reviewer.json`). The digest's job is in `bin/factory-ledger`'s header,
 and the alerts hook's in `bin/factory-alerts`'s.
 
-The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of five conditions begins (a required check
-that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, the sweep's own `gh` refused)
+The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of six conditions begins (a required check
+that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, the sweep's own `gh` refused,
+a repository's merge switch moved)
 and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
 starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out.

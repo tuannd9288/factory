@@ -1,13 +1,15 @@
-// The factory's events (#309): the queue's sweep writes one line to $FACTORY_STATE/events.jsonl when one of five conditions
+// The factory's events (#309): the queue's sweep writes one line to $FACTORY_STATE/events.jsonl when one of its conditions
 // begins (`start`) and one when it ends (`clear`); a condition that holds writes nothing more. A line is one JSON object:
 // { seq, at, type, kind, key, text }. `seq` counts up from 1 across the file and is what a reader's cursor holds; `key` names the
-// condition (it begins with the kind), so a clear matches its start. The five kinds:
+// condition (it begins with the kind), so a clear matches its start. The first five kinds:
 //   check-not-started  a check `main` requires is missing from the head commit of a pull request waiting on auto-merge, or is there
 //                      and has not started, for NOT_STARTED_MS from the first sweep that saw it (a dead runner leaves it so)
 //   waiting-on-human   a tier-3 or needs-human pull request whose tier check did not succeed, or an open issue labelled needs-human
 //   lead-at-dialog     a Lead whose newest hook event is a permission prompt or an elicitation dialog
 //   out-of-quota       an account Claude Code has rejected until a reset that has not come
 //   gh-refused         the sweep's own gh refused for a rate limit or a login
+// and a sixth (#333):
+//   switch-moved       a repository's merge switch moved since the sweep before; held 24 hours from the sweep that saw it
 // The sweep writes them (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
 // of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
 // which are no condition and are never cleared. The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
@@ -132,6 +134,22 @@ export function accountsOut({ runs, state, agentProfiles, now }) {
   });
 }
 
+/** How long a move of the merge switch stays reported, from the time the sweep saw it. */
+export const SWITCH_HOLD_MS = 24 * 60 * 60_000;
+const pad = (n) => String(n).padStart(2, '0');
+const localStamp = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/** Condition 6 (#333), for one repository whose merge switch the sweep read: its last move ({ from, to, at }, from
+ * bin/lib/switch-watch.mjs), for 24 hours from the time the sweep saw it. A second move has its own key, so it ends the first. */
+export function switchMoves({ repo, move, now }) {
+  const seen = Date.parse(move?.at);
+  if (!move || !(now - seen < SWITCH_HOLD_MS)) return [];
+  return [{ key: `switch-moved ${repo} ${move.at}`, scope: `switch ${repo}`, top: true, url: `https://github.com/${repo}/rules`, text: `${repo} merge switch moved from ${move.from} to ${move.to}, seen by the sweep at ${localStamp(seen)}` }];
+}
+
 const emptyActive = () => ({ seq: 0, conditions: {} });
 
 /** The conditions that hold, as events-active.json keeps them: { seq, conditions: { key: { kind, key, scope, text, since, started, top, url } } }. */
@@ -156,7 +174,7 @@ export function readLines(state) {
   });
 }
 
-function writeAtomic(file, text) {
+export function writeAtomic(file, text) {
   const tmp = `${file}.tmp-${process.pid}`;
   writeFileSync(tmp, text);
   renameSync(tmp, file);
@@ -245,9 +263,14 @@ function recordLocked({ state, found, read, now = Date.now() }) {
 /** The step after a sweep's repository loop: every condition from what the sweep read. `reads` is { repo -> { required, prs, issues } }
  * for the repositories it read. The local readers (the Leads, the accounts) start nothing and call no gh; one that fails leaves its
  * conditions as they were. gh-refused ends only on a sweep whose gh calls all succeeded (`notes`). */
-export function observe({ state, reads, runs, agentProfiles, now = Date.now(), processes }) {
+export function observe({ state, reads, runs, agentProfiles, now = Date.now(), processes, switches = new Map() }) {
   const found = [];
   const read = new Set();
+  // `switches` is { repo -> last move or null } for the repositories whose merge switch the sweep read.
+  for (const [repo, move] of switches) {
+    read.add(`switch ${repo}`);
+    found.push(...switchMoves({ repo, move, now }));
+  }
   for (const [repo, d] of reads) {
     read.add(repo);
     found.push(...checksNotStarted({ repo, prs: d.prs, required: d.required }), ...humanWaits({ repo, prs: d.prs, issues: d.issues }));
