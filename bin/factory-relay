@@ -4,10 +4,10 @@
 #                             (no Lead runs there) into the socket file of the Lead that runs on this Mac
 #   bin/factory-relay plist   print the LaunchAgent io.github.tuannd9288.factory.relay for ~/Library/LaunchAgents: `run` every 60 s, no
 #                             sudo, never KeepAlive, logging to ~/Library/Logs/factory/relay.log
-#   bin/factory-relay check   one pass in that job's environment: makes the log's folder and says whether ssh to the Mac mini works with
-#                             no prompt and the job is ready
-# `plist` and `check` run from the clone itself: they refuse a linked worktree (exit 2) and note a branch other than main. `check` relays
-# nothing; it sets the cursor to the newest seq only when there is none. bin/lib/relay.mjs has the rules. It calls no gh and reads no token; it refuses to run as the factory host's user, where the sweep delivers.
+#   bin/factory-relay check   in that job's environment: makes the log's folder and says whether ssh to the Mac mini and the read of its
+#                             news work with no prompt, so whether the job is ready; it sets the first cursor and relays nothing
+# `plist` and `check` run from the clone itself: they refuse a linked worktree (exit 2) and note a branch other than main.
+# bin/lib/relay.mjs has the rules. It calls no gh and reads no token; it refuses to run as the factory host's user, where the sweep delivers.
 # The Human installs the job with `cp <plist> ~/Library/LaunchAgents/io.github.tuannd9288.factory.relay.plist`, loads it with
 # `launchctl bootstrap gui/$(id -u) <that path>` and stops it with `launchctl bootout gui/$(id -u)/io.github.tuannd9288.factory.relay`.
 PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"

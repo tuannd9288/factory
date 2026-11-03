@@ -92,6 +92,8 @@ function decide(e, state) {
   if (recordedPath(file) === null) return { skip: 'no socket file here' };
   if (typeof e.what !== 'string' || typeof e.where !== 'string') return { skip: 'the line has no what and where' };
   if (e.what.length > FIELD_MAX || e.where.length > FIELD_MAX) return { skip: `what or where is over ${FIELD_MAX} characters` };
+  // The sweep writes both through oneLine (bin/lib/events.mjs): a line it would have changed (a newline, a control character, a secret) did not come from it.
+  if (oneLine(e.what) !== e.what || oneLine(e.where) !== e.where) return { skip: 'what or where is not as the Mac mini writes it' };
   // `where` is a pull request's URL or a path on the Mac mini; a path is posted with the host, so a Lead here knows where it is.
   const url = /^https:\/\/github\.com\//.test(e.where);
   if (!url && !e.where.startsWith('/')) return { skip: 'where is neither a GitHub URL nor an absolute path' };

@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
-import { HOST, check, guard, job, main, pass } from '../bin/lib/relay.mjs';
+import { HOST, check, guard, job, main, pass, readNewest, readNews } from '../bin/lib/relay.mjs';
 import { plist } from '../bin/lib/queue.mjs';
 
 /** A news line as the Mac mini's sweep writes it. */
@@ -100,17 +100,30 @@ test('a line is relayed only with a what and where of at most 300 characters and
       news(3, { where: 'http://example.com/pull/1' }),
       news(4, { where: 'relative/path' }),
       news(5, { where: 7 }),
-      news(6, { what: 'y'.repeat(300), where: path }),
+      news(6, { what: 'word '.repeat(40).trim(), where: path }),
       news(7, { where: 'https://github.com/o/app/pull/7' }),
+      news(8, { what: 'first line\nsecond line' }),
+      news(9, { where: 'https://github.com/o/app/pull/9\u0007' }),
     ]);
     await w.pass();
     assert.equal(w.posts.length, 2);
     assert.ok(w.posts[0].content.includes(`${HOST}:${path}`));
     assert.ok(w.posts[1].content.includes('https://github.com/o/app/pull/7') && !w.posts[1].content.includes(`${HOST}:`));
-    assert.equal(w.cursor(), '7');
+    assert.equal(w.cursor(), '9');
   } finally {
     w.cleanup();
   }
+});
+
+test('the ssh read is made with a 64 MiB buffer, BatchMode and the cursor; the newest read asks for --newest alone', () => {
+  const calls = [];
+  const run = (cmd, args, options) => (calls.push({ cmd, args, options }), { status: 0, stdout: '', stderr: '' });
+  readNews(7, { run });
+  readNewest({ run });
+  assert.deepEqual(calls.map((c) => c.options.maxBuffer), [64 * 1024 * 1024, 64 * 1024 * 1024]);
+  assert.ok(calls.every((c) => c.cmd === 'ssh' && c.args.includes('BatchMode=yes') && c.args.includes('--news')));
+  assert.deepEqual(calls[0].args.slice(-2), ['--after', '7']);
+  assert.equal(calls[1].args.at(-1), '--newest');
 });
 
 test('a post that fails is not tried again', async () => {
@@ -154,8 +167,10 @@ test('a cursor above the Mac mini newest starts afresh from the newest seq, rela
     await w.pass();
     // The Mac mini's file was made anew: it prints from its first line and says so on stderr.
     w.serve([news(1), news(2)]);
-    await w.pass({ fetch: () => ({ status: 0, stdout: `${JSON.stringify(news(1))}\n${JSON.stringify(news(2))}\n`, stderr: 'factory-events: --after 1 is above the highest seq in events.jsonl (2); starting from its first line' }) });
-    assert.deepEqual([w.posts.length, w.cursor()], [0, '2']);
+    let newests = 0;
+    const newest = () => (newests += 1, { status: 0, stdout: '2\n', stderr: '' });
+    await w.pass({ newest, fetch: () => ({ status: 0, stdout: `${JSON.stringify(news(1))}\n${JSON.stringify(news(2))}\n`, stderr: 'factory-events: --after 1 is above the highest seq in events.jsonl (2); starting from its first line' }) });
+    assert.deepEqual([w.posts.length, w.cursor(), newests], [0, '2', 1]);
   } finally {
     w.cleanup();
   }
@@ -205,6 +220,7 @@ function repos() {
 
 test('a linked worktree is refused by plist and check with a rejection; a clone on another branch is only noted; main is neither', async () => {
   const r = repos();
+  const bin = stubs();
   try {
     assert.deepEqual(guard(r.clone), { refuse: null, note: null });
     assert.equal(typeof guard(r.tree).refuse, 'string');
@@ -212,10 +228,12 @@ test('a linked worktree is refused by plist and check with a rejection; a clone 
     const g = guard(r.clone);
     assert.equal(g.refuse, null);
     assert.equal(typeof g.note, 'string');
-    const env = { HOME: r.dir, PATH: process.env.PATH, FACTORY_HOST_USER: 'nobody-here' };
+    // The stub ssh is first on PATH: were the guard not to refuse, `check` would call it and never a real ssh.
+    const env = { HOME: r.dir, PATH: `${bin}:${process.env.PATH}`, FACTORY_HOST_USER: 'nobody-here' };
     await assert.rejects(main(['plist'], env, r.tree));
     await assert.rejects(main(['check'], env, r.tree));
   } finally {
+    rmSync(bin, { recursive: true, force: true });
     rmSync(r.dir, { recursive: true, force: true });
   }
 });
