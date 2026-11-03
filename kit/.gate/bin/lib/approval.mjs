@@ -7,8 +7,9 @@
 // `git patch-id --verbatim` of the change from its merge-base with the base, as after the queue merged main into the
 // branch. Any change to the patch needs a new approval. GitHub's own code-owner rule is not enough: it asks nothing of
 // an author who owns the code. With --after, an approval counts only when submitted after that time: the Human reads the
-// reviewer's reason when the pull request is raised, so an approval given before the raise does not stand for it. Teams (@org/team) are not read. With --list and no stdin it prints the owners to request
-// a review from (#374), `user <login>` less the author and `team @org/team`, and exits 0. Exit 0 approved, 1 not approved, 2 could not judge.
+// reviewer's reason when the pull request is raised, so an approval given before the raise does not stand for it. Teams are not counted as approvers. With --list and no stdin it
+// prints the owners to request a review from (#374), `user <login>` less the author and `team @org/team`, and exits 0.
+// Exit 0 approved, 1 not approved, 2 could not judge.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 

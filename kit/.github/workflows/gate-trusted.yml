@@ -37,7 +37,9 @@
 # The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json); with GATE_REVIEWER=entire,
 # verify, tier and Entire Gates (bin/onboard-owner writes that ruleset from GATE_REVIEWER as main holds it). No required job
 # here has `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
-# review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
+# review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red; it then
+# also requests the code owners' review (#374), unless the merge switch is at all or cannot be read, so its step carries
+# GATE_PR_AUTHOR and GATE_BASE_REF for that.
 # GATE_REVIEWER below and every job's runs-on are the repository's own settings, which bin/onboard fills in and a pull
 # request changes, at tier 3 (#335): no repository variable holds them, since one changes without a pull request. The
 # runner is GitHub-hosted Ubuntu in the kit, and never a runner a candidate's, main's or a deploy's job uses, nor one
