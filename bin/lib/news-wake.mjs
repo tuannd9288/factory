@@ -1,5 +1,5 @@
 // The sweep's wake of a Lead on its news (#370), with no gh call of its own: the queue's one GraphQL query (QUERY in bin/lib/queue.mjs) also
-// returns each open pull request's body and `mergeable` and the few pull requests merged most recently (MERGED_FIELDS). One-time `start`
+// returns each open pull request's body and `mergeable` and a few merged pull requests, the most recently updated (MERGED_FIELDS). One-time `start`
 // lines to the events (#309, appendStart, as the comment wake writes its `comment` line: no condition, never cleared) and one line into the
 // Lead's inbox socket (bin/lib/wake.mjs, newsLine), whose path the Lead's hook recorded in <runs>/<folder>-<team>/socket. The kinds, each
 // with its key:
@@ -7,29 +7,41 @@
 //   seat-no-result  a record ended with none, or a run-<tag>.pid whose process is    run and tag
 //                   gone, with no record for it, for SEAT_GRACE_MS (runLive decides)
 //   checks-red      the first required check of an open pull request's head to fail  pull request and head
-//                   (`tier` is left out, as pickUpdate leaves it: it waits on the Human)
+//                   (`tier` is left out only while the pull request carries tier-3 or needs-human, when it waits on the Human)
 //   checks-green    every required check of the head succeeded                       pull request and head
 //   conflict        `mergeable` is CONFLICTING (UNKNOWN, which GitHub says for a while after a push, is none)   pull request and head
 //   merged          the pull request merged                                          pull request
-// A check-not-started condition's start (events.mjs) wakes the same pull request's Lead too (wakeStarted); there is no second detector.
+// The six lines are the Lead's, not Colly's: bin/factory-events leaves them out (NEWS_KINDS) and `--news` prints only them.
+// A check-not-started condition's start (events.mjs) wakes the same pull request's Lead too (wakeStarted), once for a pull request in a sweep;
+// there is no second detector.
 // Which Lead: a seat's record names its team (`<repo>-<team>`); a pull request's is the team that holds its issue's claim (the claim refs
 // QUERY reads, the first CLAIMS: a holder past them is not looked up), else the body's `Team:` line, else none, said in the line. A team
 // with no socket file on this machine is not woken, and the line says so.
-// The state is $state/queue-<owner>-<name>.news, { sent: [keys] } of the events of the repository's last sweep, and $state/queue-seats.news,
-// { count, gone: { key: ms first seen gone }, told: [keys] }. The first sweep that meets a repository or the seats records what is there and
-// wakes nothing. The state is written, through a temporary file and a rename, before any wake, so an event never wakes twice; a post that
-// fails is told in the event's line and not tried again. A key leaves `sent` when its event no longer holds, so a check that fails again
-// after a re-run wakes again.
+// The state is $state/queue-<owner>-<name>.news, { sent: [keys] } of the events that hold at the repository's last sweep, { reds: { key: { check:
+// the run that failed } } } and { merged: { key: mergedAt } }, and $state/queue-seats.news, { count, gone: { key: ms first seen gone }, told:
+// [keys] }. The first sweep that meets a repository or the seats records what is there and wakes nothing. The state is written, through a
+// temporary file and a rename, before any wake, so an event never wakes twice; a post that fails is told in the event's line and not tried
+// again. A key leaves `sent` when its event no longer holds, except a conflict while the same head reads UNKNOWN, and a merged one for 14
+// days. A red event wakes again on the same head when a check told before fails in a run other than the one told (a re-run that failed again,
+// though no sweep saw it not red); the old failed run still counts while a re-run is queued, and a second check failing is no news.
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
+import { failedCheck } from './checks.mjs';
 import { holders } from './comment-wake.mjs';
 import { appendStart } from './events.mjs';
 import { readSessions } from './records.mjs';
 import { runFiles, runLive } from './seat.mjs';
 import { newsLine, postSync, recordedPath } from './wake.mjs';
 
-/** How many of the most recently merged pull requests QUERY asks for: enough for a sweep a minute that is missed for a while. */
+/** The kinds of line this module writes. They are for the Lead, so Colly's Monitor (bin/factory-events) leaves them out and `--news` prints
+ * only them (the MacBook's relay reads them so). check-not-started and comment are Colly's and are not here. */
+export const NEWS_KINDS = new Set(['seat-ended', 'seat-no-result', 'checks-red', 'checks-green', 'conflict', 'merged']);
+
+/** How many merged pull requests QUERY asks for, the most recently updated: enough for a sweep a minute that is missed for a while. */
 export const MERGED = 10;
+
+/** How long a merged pull request's key is kept after the merge, so that it does not wake again if it comes back into the list. */
+export const MERGED_KEEP_MS = 14 * 24 * 60 * 60_000;
 
 /** The GraphQL field the sweep adds for the merged pull requests (an alias, since `pullRequests` is asked once already, for the open ones). */
 export const MERGED_FIELDS = `merged: pullRequests(states:MERGED,first:${MERGED},orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number headRefOid body mergedAt}}`;
@@ -54,41 +66,45 @@ function writeJson(file, value) {
   renameSync(tmp, file);
 }
 
+const plain = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const strings = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 
 /** The check named `name` of a pull request, an Actions check or another App's. */
 const checkOf = (p, name) => p.checks[name] ?? p.apps?.[name];
 
-// A required check that failed: an Actions check by its conclusion, another App's (Entire) by anything but success while it is done.
-const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
-const failedCheck = (p, name) => {
-  if (p.checks[name]) return RED.has(p.checks[name].state);
-  return Boolean(p.apps?.[name]) && !['SUCCESS', 'PENDING'].includes(p.apps[name].state);
-};
+// What names one run of a check: its id and when it started, as the queue's keyOf does, so a re-run that kept the id is still told apart.
+const runOf = (c) => `${c.id ?? ''}:${c.startedAt ?? ''}`;
 
-/** The events of a repository from what the sweep read: [{ kind, key, what, where, body, issueOf }] for each open pull request (red,
- * green, conflict) and each recently merged one. `required` is the checks main requires. */
+const HUMAN = new Set(['tier-3', 'needs-human']);
+
+/** The events of a repository from what the sweep read: [{ kind, key, what, where, body, pr, runs?, mergedAt? }] for each open pull
+ * request (red, green, conflict) and each merged one the query listed. `required` is the checks main requires. A red event holds `runs`,
+ * { check name: the run that failed }, which wakeOnNews compares with the sweep before. A red `tier` is left out only while the pull
+ * request waits on the Human (the label tier-3 or needs-human, as pickUpdate and humanWaits decide): otherwise it is a failure the Lead fixes. */
 export function detect({ repo, prs, merged = [], required }) {
   const found = [];
   const url = (n) => `https://github.com/${repo}/pull/${n}`;
   for (const p of prs) {
     const at = `${repo}#${p.number} head ${String(p.head).slice(0, 7)}`;
     const base = { body: p.body ?? '', pr: p.number, where: url(p.number) };
-    const red = required.filter((name) => name !== 'tier' && failedCheck(p, name));
-    if (red.length) found.push({ ...base, kind: 'checks-red', key: `checks-red ${repo}#${p.number} ${p.head}`, what: `${at}: required check ${red.join(', ')} failed` });
+    const waits = (p.labels ?? []).some((l) => HUMAN.has(l));
+    const red = required.filter((name) => !(name === 'tier' && waits) && failedCheck(p, name));
+    if (red.length)
+      found.push({ ...base, kind: 'checks-red', key: `checks-red ${repo}#${p.number} ${p.head}`, what: `${at}: required check ${red.join(', ')} failed`, runs: Object.fromEntries(red.map((name) => [name, runOf(checkOf(p, name))])) });
     if (required.length && required.every((name) => checkOf(p, name)?.state === 'SUCCESS'))
       found.push({ ...base, kind: 'checks-green', key: `checks-green ${repo}#${p.number} ${p.head}`, what: `${at}: every required check succeeded` });
     if (p.mergeable === 'CONFLICTING') found.push({ ...base, kind: 'conflict', key: `conflict ${repo}#${p.number} ${p.head}`, what: `${at} conflicts with its base` });
   }
   for (const p of merged)
-    found.push({ kind: 'merged', key: `merged ${repo}#${p.number}`, pr: p.number, body: p.body ?? '', where: url(p.number), what: `${repo}#${p.number} merged` });
+    found.push({ kind: 'merged', key: `merged ${repo}#${p.number}`, pr: p.number, body: p.body ?? '', where: url(p.number), what: `${repo}#${p.number} merged`, mergedAt: p.mergedAt });
   return found;
 }
 
-/** The team a pull request's Lead is: the holder of the claim on the issue its `Issue: #<n>` line names, else its `Team:` line, else null. */
+/** The team a pull request's Lead is: the holder of the claim on the issue its `Issue: #<n>` line names, else its `Team:` line when that is
+ * a team's name (a letter, then letters and digits, as holders() and FACTORY_TEAM have it), else null. */
 export function teamOfBody(body, held) {
   const issue = /^Issue: #(\d+)\b/m.exec(body ?? '')?.[1];
-  return (issue && held.get(Number(issue))) || /^Team: (\S+)/m.exec(body ?? '')?.[1] || null;
+  return (issue && held.get(Number(issue))) || /^Team: ([a-z][a-z0-9]*)[ \t]*$/m.exec(body ?? '')?.[1] || null;
 }
 
 /** Posts `line` to the socket file of `dir` under `runs`; a team with no socket file costs no process. */
@@ -113,17 +129,40 @@ const logFailure = (what, error) => console.log(`queue: the wake for ${what} fai
  * `data` is { prs (with body, mergeable), merged, required, claims (QUERY's claim ref nodes) }; `folder` the clone's folder under the
  * factory root; `post` is passed in for tests. Returns the seqs of the lines it wrote. It throws for a state it cannot write; an event or a
  * post that fails is told on the console. */
-export function wakeOnNews({ repo, folder, state, runs, data, post = postSync }) {
+export function wakeOnNews({ repo, folder, state, runs, data, post = postSync, now = Date.now() }) {
   const found = detect({ repo, prs: data.prs, merged: data.merged ?? [], required: data.required });
   const file = join(state, `queue-${repo.replace('/', '-')}.news`);
   const kept = readJson(file);
   const sent = new Set(strings(kept?.sent));
-  const keys = found.map((e) => e.key);
-  writeJson(file, { sent: keys });
+  const keys = new Set(found.map((e) => e.key));
+  // A conflict stays told while the same head reads UNKNOWN, which GitHub says for a while after the base moves.
+  for (const p of data.prs)
+    if (p.mergeable === 'UNKNOWN' && sent.has(`conflict ${repo}#${p.number} ${p.head}`)) keys.add(`conflict ${repo}#${p.number} ${p.head}`);
+  // A merged pull request stays told while its mergedAt is newer than the oldest of the list, or for MERGED_KEEP_MS, so one that comes
+  // back into the list on a comment does not wake again.
+  const oldest = Math.min(Infinity, ...(data.merged ?? []).map((p) => Date.parse(p.mergedAt)).filter(Number.isFinite));
+  const merged = Object.fromEntries(found.filter((e) => e.kind === 'merged' && e.mergedAt).map((e) => [e.key, e.mergedAt]));
+  for (const [key, at] of Object.entries(plain(kept?.merged))) {
+    const t = Date.parse(at);
+    if (!(key in merged) && (t > oldest || now - t < MERGED_KEEP_MS)) {
+      merged[key] = at;
+      keys.add(key);
+    }
+  }
+  // A red check run that is not the one told before, of a check told before, is a re-run that failed again: news on the same head.
+  const before = plain(kept?.reds);
+  const reds = {};
+  const again = new Set();
+  for (const e of found.filter((f) => f.runs)) {
+    const was = plain(before[e.key]);
+    reds[e.key] = { ...was, ...e.runs };
+    if (Object.entries(e.runs).some(([name, run]) => name in was && was[name] !== run)) again.add(e.key);
+  }
+  writeJson(file, { sent: [...keys], reds, merged });
   if (!kept) return [];
   const held = holders(data.claims);
   const lines = [];
-  for (const e of found.filter((f) => !sent.has(f.key))) {
+  for (const e of found.filter((f) => !sent.has(f.key) || again.has(f.key))) {
     try {
       const team = teamOfBody(e.body, held);
       lines.push(tell({ state, runs, post, kind: e.kind, key: e.key, what: e.what, where: e.where, dir: team ? `${folder}-${team}` : null }));
@@ -137,9 +176,12 @@ export function wakeOnNews({ repo, folder, state, runs, data, post = postSync })
 /** What wakes the Lead of a check-not-started condition (events.mjs) whose start was just written: `condition` is its record, `reads` is
  * { repo -> { prs, claims, folder } } as the sweep read them. Nothing is written to the events, the condition's own line being there; a
  * wake that did not go is told on the console. Returns the result of the post, or null when no Lead could be named. */
-export function wakeStarted({ condition, reads, runs, post = postSync }) {
+export function wakeStarted({ condition, reads, runs, post = postSync, seen = new Set() }) {
   const m = /^check-not-started (\S+)#(\d+) /.exec(condition.key);
-  const d = m && reads.get(m[1]);
+  // One wake for each pull request in a sweep, though two of its checks started the condition: `seen` is the sweep's.
+  if (!m || seen.has(`${m[1]}#${m[2]}`)) return null;
+  seen.add(`${m[1]}#${m[2]}`);
+  const d = reads.get(m[1]);
   const p = d?.prs.find((x) => x.number === Number(m[2]));
   const team = p && teamOfBody(p.body, holders(d.claims));
   if (!team) return null;
@@ -165,7 +207,7 @@ export function wakeOnSeats({ state, runs, heldBy = new Map(), post = postSync, 
   const kept = readJson(file);
   const records = readSessions(state);
   const pids = runFiles(runs, '.pid').filter((f) => !/\.claim\.pid$/.test(f));
-  const ended = (run, tag, since) => records.some((r) => r.tag === tag && r.run && resolve(r.run) === run && Date.parse(r.end) >= since - 1000);
+  const ended = (run, tag, since) => records.some((r) => r.tag === tag && r.run && resolve(r.run) === resolve(run) && Date.parse(r.end) >= since - 1000);
   const gone = {};
   const current = [];
   const due = [];
@@ -179,7 +221,8 @@ export function wakeOnSeats({ state, runs, heldBy = new Map(), post = postSync, 
       continue;
     }
     const key = `${dir} ${tag} ${since}`;
-    if (live(f) || ended(dir, tag, since)) continue;
+    // The record is read first: liveness costs a ps for each pid that is not known gone, and every run ever made keeps its pid file.
+    if (ended(dir, tag, since) || live(f)) continue;
     current.push(key);
     gone[key] = kept?.gone?.[key] ?? now;
     if (kept && !strings(kept.told).includes(key) && now - gone[key] >= SEAT_GRACE_MS) due.push({ dir, tag, key });

@@ -12,6 +12,9 @@
 #   ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 factory@tuans-mac-mini /Users/factory/WORKSPACES/bin/factory-events --follow
 # When the Monitor ends, start it again with `--after <the last seq Colly saw>` added; in a new session, which knows no seq, leave
 # `--after` out.
+# The six lines of a Lead's news (#370: seat-ended, seat-no-result, checks-red, checks-green, conflict, merged) are the Lead's, so every run
+# above leaves them out. `--news` prints only them (with `--follow`, and `--after`, as above) and keeps its own cursor,
+# $FACTORY_STATE/events.news.cursor, never Colly's; it is what the MacBook's relay reads (slice 2 of #370).
 # A non-login ssh command has PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no node, so the places Homebrew puts it are added here.
 PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 export PATH

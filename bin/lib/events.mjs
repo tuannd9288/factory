@@ -14,7 +14,8 @@
 // of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
 // which are no condition and are never cleared; the sweep writes one too, a `comment` line when it wakes a Lead for a new comment (#351,
 // bin/lib/comment-wake.mjs), and one line of its own for each piece of news of a Lead's seats, checks and pull request (#370,
-// bin/lib/news-wake.mjs: seat-ended, seat-no-result, checks-red, checks-green, conflict, merged). `observe` also hands each started
+// bin/lib/news-wake.mjs: seat-ended, seat-no-result, checks-red, checks-green, conflict, merged: NEWS_KINDS, the Lead's, which
+// `bin/factory-events` leaves out and `--news` alone prints, after a cursor of its own, $FACTORY_STATE/events.news.cursor). `observe` also hands each started
 // check-not-started condition to its `onStart`, which wakes that pull request's Lead. The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
 // of that write alone, and `seq` stays unique and increasing across both.
 // Only record and appendStart write: $FACTORY_STATE/events-active.json remembers which conditions hold and since when,
@@ -24,6 +25,7 @@
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountOut } from './seat.mjs';
 import { accountList, seatAccounts } from './token.mjs';
@@ -315,10 +317,12 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
  * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. */
 function main(argv) {
   let follow = false;
+  let news = false;
   let after = null;
-  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>]');
+  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>] [--news]');
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--follow') follow = true;
+    else if (argv[i] === '--news') news = true;
     else if (argv[i] === '--after') {
       const v = argv[++i] ?? '';
       if (!/^\d+$/.test(v) || !Number.isSafeInteger(Number(v))) throw usage();
@@ -327,7 +331,8 @@ function main(argv) {
   }
   const state = stateDir();
   const file = join(state, 'events.jsonl');
-  const cursorFile = join(state, 'events.cursor');
+  // --news has a cursor of its own: Colly's never moves for it.
+  const cursorFile = join(state, news ? 'events.news.cursor' : 'events.cursor');
   let cursor = Number(readText(cursorFile).trim()) || 0;
   const highest = Math.max(0, ...readLines(state).map((e) => e.seq));
   let queued = after ?? cursor;
@@ -388,7 +393,7 @@ function main(argv) {
       } catch {
         continue;
       }
-      if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= queued) continue;
+      if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= queued || NEWS_KINDS.has(e.kind) !== news) continue;
       queued = e.seq;
       pending.push({ seq: e.seq, line: l });
     }
