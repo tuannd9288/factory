@@ -210,8 +210,9 @@ function attributes({ out, at, repo, factory, kit, text }) {
   const block = text(factory, blockEntry.oid);
   const had = at.get(ATTRIBUTES);
   if (!had) {
-    // An untracked file at the path, ignored or not, is the repository's own: writing the block would overwrite it.
-    if (lstatSync(join(repo, ATTRIBUTES), { throwIfNoEntry: false })) {
+    // A file at the path that the clone's HEAD does not track, ignored or not, is the repository's own: writing the block would
+    // overwrite it. A clone left on an unmerged kit branch tracks the block there, so that is not a stop.
+    if (lstatSync(join(repo, ATTRIBUTES), { throwIfNoEntry: false }) && !git(repo, ['ls-files', '--', ATTRIBUTES]).trim()) {
       out.conflicts.push(`${ATTRIBUTES}: the base has none, but the clone holds an untracked file there (ignored by .gitignore, or not); merge it by hand`);
       return;
     }

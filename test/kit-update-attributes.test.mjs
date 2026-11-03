@@ -113,6 +113,24 @@ describe('bin/kit-update replaces only the review-categories block', () => {
     }
   });
 
+  test('a clone left on a kit branch that tracks .gitattributes updates a base with none', () => {
+    const w = world();
+    try {
+      const tracking = git(w.repo, 'rev-parse', 'HEAD');
+      w.repoCommit({ '.gitattributes': null });
+      git(w.repo, 'switch', '-q', '-c', 'factory/kit-unmerged', tracking);
+      assert.equal(git(w.repo, 'ls-files', '--', '.gitattributes'), '.gitattributes');
+      w.facCommit({ 'kit/.gate/old-new.txt': 'a kit file\n' });
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /^kit-evidence: PASS$/m);
+      const branch = git(w.repo, 'rev-parse', '--abbrev-ref', 'HEAD');
+      assert.equal(exact(w, branch, '.gitattributes'), kitFile(w));
+    } finally {
+      w.cleanup();
+    }
+  });
+
   test('a .gitignore that ignores .gitattributes does not keep the file out of the update', () => {
     const w = world();
     try {

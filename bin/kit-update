@@ -13,7 +13,7 @@
 #     repository variables (the kit before #335) holds none, so its update must name each from its variable's value;
 #   - the kit's review-categories block of .gitattributes (kit/.gate/review-categories, #380) is replaced and nothing else of it,
 #     as the Gate block is; a .gitattributes with no block gets it at its start, none gets a file of the block alone; malformed
-#     markers, CRLF or a link stop it, to merge by hand. A .gitignore that ignores an untracked .gitattributes does not keep
+#     markers, CRLF, a link, or an untracked file there when the base has none, stop it, to merge by hand. A .gitignore that ignores an untracked .gitattributes does not keep
 #     it out: that one path is added with git add -f;
 #   - a .claude/settings.json the repository has gets the kit's deny lines it lacks inserted as text, as onboard does;
 #   - a kit file the repository lacks is added; one it holds as an older kit had it is replaced by the kit's;
