@@ -37,7 +37,7 @@ function world(body, { socket = true } = {}) {
   }
 }
 
-const sweep = (w, prs, over = {}) => wakeOnNews({ repo: REPO, folder: 'app', state: w.state, runs: w.runs, post: w.post, data: { prs, merged: [], required: REQUIRED, claims: [], ...over } });
+const sweep = (w, prs, { now, ...over } = {}) => wakeOnNews({ repo: REPO, folder: 'app', state: w.state, runs: w.runs, post: w.post, now, data: { prs, merged: [], required: REQUIRED, claims: [], ...over } });
 const start = (w) => readLines(w.state).filter((e) => e.type === 'start');
 
 test('each kind writes one line and posts one wake, and a second sweep with the same state writes and posts nothing', () => {
@@ -73,12 +73,85 @@ test('UNKNOWN is no conflict, and CONFLICTING is, once the head is the same', ()
   assert.equal(found('CONFLICTING').length, 1);
 });
 
-test('a required check that fails wakes at once, though another is still running; `tier` red does not', () => {
-  const kinds = (checks) => detect({ repo: REPO, prs: [pr(1, { checks })], required: REQUIRED }).map((e) => e.kind);
+test('a required check that fails wakes at once, though another is still running; `tier` red does not while the pull request waits on the Human', () => {
+  const kinds = (checks, labels = []) => detect({ repo: REPO, prs: [pr(1, { checks, labels })], required: REQUIRED }).map((e) => e.kind);
   assert.deepEqual(kinds({ verify: ok('FAILURE'), tier: ok('PENDING') }), ['checks-red']);
-  assert.deepEqual(kinds({ verify: ok(), tier: ok('FAILURE') }), []);
+  assert.deepEqual(kinds({ verify: ok(), tier: ok('FAILURE') }, ['tier-3']), []);
+  assert.deepEqual(kinds({ verify: ok(), tier: ok('FAILURE') }, ['needs-human']), []);
   assert.deepEqual(kinds({ verify: ok(), tier: ok() }), ['checks-green']);
   assert.deepEqual(kinds({ verify: ok() }), []);
+});
+
+test('a red `tier` of a pull request that waits on no one is red: a Lead has a claim or a Team: line to fix', () => {
+  assert.deepEqual(detect({ repo: REPO, prs: [pr(1, { checks: { verify: ok(), tier: ok('FAILURE') } })], required: REQUIRED }).map((e) => e.kind), ['checks-red']);
+  world((w) => {
+    sweep(w, [pr(1)]);
+    sweep(w, [pr(1, { checks: { verify: ok(), tier: ok('FAILURE') } })]);
+    assert.deepEqual(start(w).map((e) => e.kind), ['checks-red']);
+  });
+});
+
+test('a conflict wakes once per head, though GitHub reads UNKNOWN in between', () => {
+  world((w) => {
+    sweep(w, [pr(1)]);
+    sweep(w, [pr(1, { mergeable: 'CONFLICTING' })]);
+    sweep(w, [pr(1, { mergeable: 'UNKNOWN' })]);
+    sweep(w, [pr(1, { mergeable: 'CONFLICTING' })]);
+    assert.equal(w.posts.length, 1);
+    assert.equal(start(w).length, 1);
+    // Another head is another conflict.
+    sweep(w, [pr(1, { mergeable: 'CONFLICTING', head: 'f'.repeat(8) })]);
+    assert.equal(w.posts.length, 2);
+  });
+});
+
+test('a red check wakes again when it fails in another run of the same head, even if no sweep saw it not red; a second check failing is no news', () => {
+  const red = (id, extra = {}) => pr(1, { checks: { verify: { ...ok('FAILURE'), id, startedAt: `t${id}` }, tier: ok('PENDING'), ...extra } });
+  world((w) => {
+    sweep(w, [pr(1)]);
+    sweep(w, [red(1)]);
+    assert.equal(w.posts.length, 1);
+    sweep(w, [red(1)]);
+    assert.equal(w.posts.length, 1, 'a queued re-run leaves the old failed run in the rollup: the same run');
+    sweep(w, [red(2)]);
+    assert.equal(w.posts.length, 2, 'the re-run failed in a new run');
+    sweep(w, [red(2)]);
+    assert.equal(w.posts.length, 2);
+  });
+  world((w) => {
+    const two = (id) => pr(1, { checks: { verify: { ...ok('FAILURE'), id: 1, startedAt: 't1' }, extra: { ...ok('FAILURE'), id, startedAt: `t${id}` } } });
+    sweep(w, [pr(1)], { required: ['verify', 'extra'] });
+    sweep(w, [pr(1, { checks: { verify: { ...ok('FAILURE'), id: 1, startedAt: 't1' }, extra: ok('PENDING') } })], { required: ['verify', 'extra'] });
+    assert.equal(w.posts.length, 1);
+    sweep(w, [two(5)], { required: ['verify', 'extra'] });
+    assert.equal(w.posts.length, 1, 'the second check failing is not the first one failing again');
+  });
+});
+
+test('a merged pull request that leaves the list and comes back wakes once; the key is kept for 14 days', () => {
+  world((w) => {
+    const m = (at) => ({ number: 9, head: 'abc', body: 'Issue: #9\nTeam: pstack\n', mergedAt: at });
+    const other = (n, at) => ({ number: n, head: 'x', body: '', mergedAt: at });
+    const day = 24 * 60 * 60_000;
+    const t0 = Date.parse('2026-11-03T00:00:00Z');
+    const at = (d) => new Date(t0 + d * day).toISOString();
+    const go = (merged, d) => sweep(w, [], { merged, now: t0 + d * day });
+    go([], 0);
+    go([m(at(1))], 1);
+    assert.equal(w.posts.length, 1);
+    go([other(10, at(2)), other(11, at(2))], 2);
+    go([m(at(1)), other(10, at(2))], 3);
+    assert.equal(w.posts.length, 1, 'back in the list, it is not news (the others name no Lead, so they post nothing)');
+    go([other(10, at(2))], 20);
+    go([m(at(1))], 21);
+    assert.equal(w.posts.length, 2, 'after 14 days the key is gone and the pull request wakes again');
+  });
+});
+
+test('a Team: line counts only when it is a team name', () => {
+  assert.equal(teamOfBody('Team: ../../x\n', new Map()), null);
+  assert.equal(teamOfBody('Team: Pstack\n', new Map()), null);
+  assert.equal(teamOfBody('Team: pstack\n', new Map()), 'pstack');
 });
 
 test('a team with no socket file is not woken: the line says so and nothing is posted', () => {
@@ -140,6 +213,21 @@ test("check-not-started's start wakes the pull request's Lead, once", () => {
     assert.match(w.posts[0].content, /check-not-started/);
     assert.equal(start(w).filter((e) => e.kind === 'check-not-started').length, 1);
     observe({ ...args, now: 1_000_000 + NOT_STARTED_MS + 60_000 });
+    assert.equal(w.posts.length, 1);
+  });
+});
+
+test('a pull request with two unstarted checks wakes its Lead once in a sweep', () => {
+  world((w) => {
+    const prs = [pr(5, { autoMerge: true, checks: {} })];
+    const reads = new Map([[REPO, { required: REQUIRED, prs, issues: [], claims: [claim(5, 'pstack')], folder: 'app' }]]);
+    const args = () => {
+      const seen = new Set();
+      return { state: w.state, reads, runs: w.runs, agentProfiles: join(w.dir, 'profiles'), processes: () => [], onStart: (condition) => wakeStarted({ condition, reads, runs: w.runs, post: w.post, seen }) };
+    };
+    observe({ ...args(), now: 1_000_000 });
+    observe({ ...args(), now: 1_000_000 + NOT_STARTED_MS + 1 });
+    assert.equal(start(w).filter((e) => e.kind === 'check-not-started').length, 2);
     assert.equal(w.posts.length, 1);
   });
 });
