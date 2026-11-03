@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# The overview page (#369, sublayer 1e): one read-only web page of what `factory top` knows, for the Human's phone or MacBook:
+#   bin/factory-page serve [--port N]   serve it on 127.0.0.1 only (default port 9437)
+#   bin/factory-page plist [--daemon]   print the launchd job io.github.tuannd9288.factory.page, for the Human to load
+# GET / is the page: what waits on the Human first, then each repository's issues (team, step, pull request with its checks, who it waits
+# on), each account's five-hour and weekly use with its teams, and today with the load, each row linking to GitHub, with the age of the
+# reading. GET /view.json is the view model that page is built from; HEAD works too; any other path is 404 and any other method 405.
+# Read-only: it writes nothing, starts nothing and reads no credential beyond the gh login that `factory top` already uses. The factory
+# runs the same with it stopped. Only /view.json's fields leave the host (bin/lib/page.mjs, viewOf): no process command line, environment,
+# pid, token path or home path, and an account by its letter alone; the raw snapshot never does. The tailnet can reach whatever the
+# page shows unless he adds a Tailscale grant.
+# The snapshot is read on a request, at most once a minute (bin/lib/page-server.mjs, CACHE_MS); requests within that minute share the last
+# read, and nothing polls in the background. Pull-to-refresh on the phone is the refresh.
+# Rendering is apart from serving: bin/lib/page.mjs knows no port and no host, so the page can be served from another one later.
+# It runs under the Mac mini's `factory` user and reads only under that home (~/factory-runs, ~/.local/state/factory, the clones), so the
+# macOS privacy controls (TCC) that AGENTS.md names for ~/Desktop do not apply.
+# The Human's steps (nothing here installs or loads anything):
+#   1. install and load the job, as the queue's:
+#        bin/factory-page plist --daemon > <plist>
+#        sudo install -o root -g wheel -m 644 <plist> /Library/LaunchDaemons/io.github.tuannd9288.factory.page.plist
+#        sudo launchctl bootstrap system /Library/LaunchDaemons/io.github.tuannd9288.factory.page.plist
+#      stop it with `sudo launchctl bootout system/io.github.tuannd9288.factory.page`. The job logs to ~/Library/Logs/factory/page.log,
+#      whose folder `bin/factory-queue check` makes.
+#   2. remove the two stale Tailscale Serve entries himself, then once:
+#        tailscale serve --bg --https=9437 http://127.0.0.1:9437
+#      Serve is machine-wide, so that line is his. A port given with --port changes both numbers in it.
+#   3. open the address on the iPhone with Tailscale on, and add it to the Home Screen; the title "Factory" names the icon.
+exec node "$(dirname "$0")/lib/page-server.mjs" "$@"
