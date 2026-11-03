@@ -44,8 +44,9 @@ export const ALERTS_SETTINGS = JSON.stringify({
  * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
  * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. Only ~/.config/gh is denied of ~/.config, so
  * git keeps the settings it finds there. profiles, when given, is denied whole: it holds the tokens, the archive and the seats.
- * Writes go to the work folder, the run folder and the temporary folder (by its real path) that the tests use. No domain is
- * allowed and no local binding: the strict allowlist is empty, so there is no network. */
+ * Writes are allowed to the work folder, the run folder and the temporary folder (by its real path) that the tests use, and, by
+ * Claude Code's defaults, to each --add-dir and to its own session temporary folder. No domain is allowed and no local binding:
+ * the strict allowlist is empty, so there is no network. */
 export function sandboxSettings({ home, run, work, profiles = null }) {
   let tmp = tmpdir();
   try {

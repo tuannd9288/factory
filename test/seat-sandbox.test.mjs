@@ -45,6 +45,20 @@ for (const role of ['worker', 'reviewer']) {
     assert.deepEqual(sandbox.network.allowedDomains, []);
     assert.equal(sandbox.network.allowLocalBinding, false);
   });
+
+  test(`${role}: the whole sandbox object is pinned, so a key that widens reach fails here`, () => {
+    assert.deepEqual(settingsOf(build(role, { profiles: PROFILES })).sandbox, {
+      enabled: true,
+      failIfUnavailable: true,
+      autoAllowBashIfSandboxed: false,
+      allowUnsandboxedCommands: false,
+      filesystem: {
+        denyRead: ['/h/.agent-profiles', '/h/.claude', '/h/.claude*', '/h/.codex', '/h/.codex*', '/h/.config/gh', '/h/.ssh', '/h/.local/share/claude', PROFILES],
+        allowWrite: [WORK, RUN, realpathSync(tmpdir())],
+      },
+      network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
+    });
+  });
 }
 
 test('the researcher has the alerts hook alone, byte for byte, and no sandbox key', () => {
