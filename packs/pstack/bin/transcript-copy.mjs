@@ -2,7 +2,7 @@
 // On Stop and SessionEnd it reads the hook's JSON on stdin and copies the transcript_path it names, and nothing else, to <dest>/<basename>, so the Lead
 // reads its own earlier transcripts from a folder outside every profile (the deny list hides ~/.agent-profiles). The source must
 // be an absolute path to a regular file, not a symlink, under $CLAUDE_CONFIG_DIR/projects/. It always exits 0: a Stop hook that
-// exits 2 makes the session go on.
+// exits 2 makes the session go on. Beside that it records the Lead's inbox socket for `factory wake` (#351, below).
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 
@@ -24,11 +24,32 @@ function note(dest, input) {
   }
 }
 
+// The hook also records where the Lead can be woken (#351): on SessionStart the path of its Claude Code inbox socket
+// (CLAUDE_CODE_MESSAGING_SOCKET, a leading `uds:` dropped) goes to <dest>/../socket by rename, since it changes on every start; SessionEnd, or
+// the variable unset or empty, removes that file. CLAUDE_CODE_MESSAGING_TOKEN is never read.
+function socket(dest, input) {
+  const event = input?.hook_event_name;
+  if (event !== 'SessionStart' && event !== 'SessionEnd') return;
+  const file = join(dirname(dest), 'socket');
+  const path = (process.env.CLAUDE_CODE_MESSAGING_SOCKET ?? '').replace(/^uds:/, '');
+  if (event === 'SessionEnd' || !path) return rmSync(file, { force: true });
+  mkdirSync(dirname(dest), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmp, `${path}\n`, { mode: 0o600 });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
 function copy(dest) {
   if (!dest) throw new Error('usage: transcript-copy.mjs <dest>');
   const config = process.env.CLAUDE_CONFIG_DIR;
   if (!config || !isAbsolute(config)) throw new Error('CLAUDE_CONFIG_DIR is not an absolute path');
   const input = JSON.parse(readFileSync(0, 'utf8'));
+  socket(dest, input);
   note(dest, input);
   if (STATE_ONLY.has(input?.hook_event_name)) return;
   const source = input.transcript_path;
