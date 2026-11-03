@@ -154,7 +154,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   words of 2026-10-31 in its body), #286 (his words of 2026-11-01 in its body), and on 2026-11-02, relayed by the
   factory-repo session, #256 and #330 ("#256 lệnh kiểm (Recommended), #330 test chập chờn (Recommended)"), #333
   ("Làm ngay trong release 1") and #335 ("Vá ngay, trước công tắc (Recommended)"); and on 2026-11-03, relayed by the
-  factory-repo session, #351 ("A trước đã"). Sources:
+  factory-repo session, #351 ("A trước đã"); and on 2026-11-03, relayed by Colly and the factory-repo session, #373, #374
+  and #352 ("Đồng thời cho xử lý luôn phần dùng Linear đi"). Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
   https://github.com/tuannd9288/factory/issues/271, https://github.com/tuannd9288/factory/issues/286,
@@ -162,13 +163,22 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/330#issuecomment-6567816736,
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 and
   https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675 and
-  https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569.
+  https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569 and
+  https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300.
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and
   `-F` turn a call into a POST; a write is a REST POST, PUT, PATCH or DELETE, or a GraphQL mutation. A seat stays denied
   every `gh` (`Bash(gh:*)` in `bin/lib/seat.mjs`), which is #343's open question 1. His words: "Nới: đọc tự do
   (Recommended)". Source: his answer 2026-11-02 15:09:43, relayed by the factory-repo session (#343).
+- **Linear, 2026-11-03.** Linear is his own surface: he decides, takes notes and asks questions there. GitHub stays the
+  record (1b), and his answers reach it as a comment on the issue that names the relay (#352). Colly sets up Linear and
+  its own Linear access; nothing in the factory reads Linear. H9 holds for Linear (its entry below). The per-repository
+  tracker switch his second quote asks for is #375, and nothing about it is decided. His words: "Ok. Dùng Linear" (about
+  20:20 +07) and "Thay vì bỏ github hiện tại tại sao không thiết kế để có thể on/off Linear hoặc Github, kiểu nếu dùng
+  github không dùng Linear cũng được, mà dùng Linear thì không cần Github. Đồng thời cho xử lý luôn phần dùng Linear đi."
+  (about 21:45 +07). Source: https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300, relayed by
+  Colly and the factory-repo session.
 
 ## Tiers
 
@@ -232,7 +242,8 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, `bin/factory top`, the ledger's canary.
 - **1e Surfaces** [GH2, #68]: the Human's own screens: Ghostty with the Herdr TUI or app until the factory is finished, then
   Rex on the MacBook (K1 = C, pending his check) and Paseo's app (Control surfaces, in Decisions), and Remote Control (T3,
-  pending). Herdr's server and Paseo's daemon stay in 0d.
+  pending); and, now, Linear, where he decides, takes notes and asks (Linear, in Decisions; #373). Herdr's server and
+  Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
@@ -281,8 +292,12 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   prompt, so agents do not type into another pane: the seats and the Lead are denied all of `herdr`, its
   `agent send-keys` and `pane send-keys` with it (`bin/lib/seat.mjs`, `packs/pstack/bin/lead.mjs`); the kit's deny
   rules bind Claude Code only and hold no such rule (#76, closed 2026-10-30); `rex` is denied nowhere yet (#267); (5)
-  with every surface stopped, the
-  factory still runs. Checked by: none yet. The check will be a test that stops every surface process and shows that a
+  with every surface stopped, the factory still runs. It holds for Linear, his surface for deciding, notes and questions
+  (#373): Linear starts none of the factory's sessions, and its coding sessions, Loops and "open in coding tool" stay
+  off (1); it keeps no sole copy, and a decision of his counts once it is relayed to the GitHub issue (2); the factory's
+  own code in this sublayer reads no Linear credential, whether a tracker may read Linear is #375's to settle, and
+  Colly's own Linear access is Colly's, outside the factory's code (3).
+  Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
 
