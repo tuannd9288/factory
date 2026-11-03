@@ -3,6 +3,7 @@
 // its team's account, only while Claude Code has rejected it, until the reset it gave, as the newest rate_limit_event of that
 // account's runs says (#194); the session is then refused, and never moves to another seat or account.
 import { test } from 'node:test';
+import { skipPs } from './ps-skip.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
@@ -67,7 +68,7 @@ test('an account with ten live sessions is still chosen: no number of sessions p
   });
 });
 
-test('liveCount: a session whose process is gone does not count, a pid file with no seat file counts for seat 2, and the run folders are all counted', async () => {
+test('liveCount: a session whose process is gone does not count, a pid file with no seat file counts for seat 2, and the run folders are all counted', { skip: skipPs }, async () => {
   const { liveCount } = await lib();
   world((runs, add) => {
     for (let i = 0; i < 4; i += 1) add(2, { live: false });
@@ -151,7 +152,7 @@ test('a resume keeps its seat: it is refused only while its account is rejected,
   });
 });
 
-test('liveOfAccount counts the live runs of an account, an old run through its seat\'s row, and not a run whose process is gone (#311)', async () => {
+test('liveOfAccount counts the live runs of an account, an old run through its seat\'s row, and not a run whose process is gone (#311)', { skip: skipPs }, async () => {
   const { liveOfAccount } = await lib();
   world((runs, add) => {
     add(2, { account: A });

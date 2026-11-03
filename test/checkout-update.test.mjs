@@ -7,6 +7,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rea
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory, git } from './helpers.mjs';
+import { skipPs } from './ps-skip.mjs';
 
 const lib = () => import('../bin/lib/checkout.mjs');
 const seatLib = () => import('../bin/lib/seat.mjs');
@@ -126,7 +127,7 @@ test('a deferral past two hours leaves queue-checkout.failed that names the comm
   assert.match(w.failed(), /2 commits behind for 2 h: runs are live/);
 }));
 
-test('a start that registered first is counted, so the update defers; a start holding the lock makes it wait', () => world(async (w) => {
+test('a start that registered first is counted, so the update defers; a start holding the lock makes it wait', { skip: skipPs }, () => world(async (w) => {
   const { liveRuns } = await seatLib();
   const { withStartLock } = await lib();
   const before = w.head();
@@ -194,7 +195,7 @@ test('moves an ignored file in the way into the archive and deletes nothing', ()
   assert.equal(readFileSync(join(w.state, 'archive', folder, 'gen.txt'), 'utf8'), 'mine, ignored\n');
 }));
 
-test('liveRuns counts a live session of either seat and not a dead pid', async () => {
+test('liveRuns counts a live session of either seat and not a dead pid', { skip: skipPs }, async () => {
   const { liveRuns } = await seatLib();
   const runs = mkdtempSync(join(tmpdir(), 'checkout-runs-'));
   try {

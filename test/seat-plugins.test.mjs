@@ -4,9 +4,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 import { PSTACK_SETTINGS, until, world } from './seat-world.mjs';
 
-test('the plugins install before the session, and the session gets the root as its cache', () => world(async (w) => {
+test('the plugins install before the session, and the session gets the root as its cache', { skip: skipPs }, () => world(async (w) => {
   w.settings(PSTACK_SETTINGS);
   const r = w.start('worker', [], { CLAUDE_CODE_PLUGIN_CACHE_DIR: '/elsewhere' });
   assert.equal(r.code, 0, r.out + r.err);
@@ -20,7 +21,7 @@ test('the plugins install before the session, and the session gets the root as i
   assert.ok(!existsSync(join(w.profiles, 'seats/2')), 'nothing was made under the profile');
 }));
 
-test('a work folder with no plugin skips the install, and the root is still the cache', () => world(async (w) => {
+test('a work folder with no plugin skips the install, and the root is still the cache', { skip: skipPs }, () => world(async (w) => {
   const r = w.start('worker');
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');

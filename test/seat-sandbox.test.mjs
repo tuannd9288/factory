@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as seat from '../bin/lib/seat.mjs';
+import { skipPs } from './ps-skip.mjs';
 import { until, world } from './seat-world.mjs';
 
 const RUN = '/r/issue-1';
@@ -57,7 +58,7 @@ test('of the roles, only the worker and the reviewer get a sandbox', () => {
   for (const role of seat.ROLES) assert.equal(Object.hasOwn(settingsOf(build(role)), 'sandbox'), role === 'worker' || role === 'reviewer', role);
 });
 
-test('the session of the worker and the reviewer gets FACTORY_SANDBOX=1, the researcher\'s none, whatever the caller had', async () => {
+test('the session of the worker and the reviewer gets FACTORY_SANDBOX=1, the researcher\'s none, whatever the caller had', { skip: skipPs }, async () => {
   const seen = {};
   for (const role of ['worker', 'reviewer', 'researcher']) {
     await world(async (w) => {

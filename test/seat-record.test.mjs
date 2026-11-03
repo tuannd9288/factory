@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { until, world } from './seat-world.mjs';
 import { quiet } from './helpers.mjs';
+import { skipPs } from './ps-skip.mjs';
 import * as seat from '../bin/lib/seat.mjs';
 
 const git = (cwd, ...args) => assert.equal(spawnSync('git', ['-C', cwd, ...args], { env: { ...process.env, ...quiet }, encoding: 'utf8' }).status, 0, args.join(' '));
@@ -54,7 +55,7 @@ test('a folder that is not a clone, a clone with no origin and a detached HEAD g
   }
 });
 
-test('two result events: turns and duration summed, cost and subtype from the last, the report from the last that has one', () => world(async (w) => {
+test('two result events: turns and duration summed, cost and subtype from the last, the report from the last that has one', { skip: skipPs }, () => world(async (w) => {
   const r = w.start('worker', ['--tag', 'two'], { FAKE_MODE: 'two' });
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
@@ -66,7 +67,7 @@ test('two result events: turns and duration summed, cost and subtype from the la
   assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [], foundOutside: [] });
 }));
 
-test('a report that lists work found outside the task leaves it in the record as given (#338)', () => world(async (w) => {
+test('a report that lists work found outside the task leaves it in the record as given (#338)', { skip: skipPs }, () => world(async (w) => {
   const found = 'bin/x.mjs:3 reads a stale path; outside the task, which is about y';
   const r = w.start('worker', ['--tag', 'found'], { FAKE_FOUND: found });
   assert.equal(r.code, 0, r.out + r.err);

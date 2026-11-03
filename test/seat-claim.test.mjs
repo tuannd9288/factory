@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 import { SEAT_JS, until, world } from './seat-world.mjs';
 
 const alive = (pid) => {
@@ -22,7 +23,7 @@ const exits = (w, argvs, env) => Promise.all(argvs.map((argv) => new Promise((re
   p.on('close', resolve);
 })));
 
-test('three concurrent starts with one tag give one session; the others exit 2; a finished run\'s tag can be used again', () => world(async (w) => {
+test('three concurrent starts with one tag give one session; the others exit 2; a finished run\'s tag can be used again', { skip: skipPs }, () => world(async (w) => {
   const hold = { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release') };
   const codes = await exits(w, [1, 2, 3].map(() => w.args('worker', ['--tag', 'same'])), hold);
   assert.deepEqual(codes.sort(), [0, 2, 2]);
@@ -39,7 +40,7 @@ const listings = (...lists) => {
   return () => lists[Math.min(i++, lists.length - 1)];
 };
 
-test('a count that lists the folder just before a start hands off its claim to its run counts that run', async () => {
+test('a count that lists the folder just before a start hands off its claim to its run counts that run', { skip: skipPs }, async () => {
   const { liveCount } = await import('../bin/lib/seat.mjs');
   await world(async (w) => {
     const run = join(w.root, 'handoff');
@@ -93,7 +94,7 @@ test('a start that fails after it chose a seat leaves no claim behind', () => wo
   assert.deepEqual(readdirSync(w.run).filter((n) => n.startsWith('run-worker')), []);
 }));
 
-test('a supervisor killed with SIGKILL leaves a claude that is still counted live and keeps its tag until it ends', () => world(async (w) => {
+test('a supervisor killed with SIGKILL leaves a claude that is still counted live and keeps its tag until it ends', { skip: skipPs }, () => world(async (w) => {
   const { liveCount } = await import('../bin/lib/seat.mjs');
   const hold = { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release'), FAKE_SID: 'orphan', FAKE_COST: '9.99', FAKE_TURNS: '99' };
   assert.equal(w.start('worker', ['--tag', 'same'], hold).code, 0);

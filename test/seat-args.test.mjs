@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 import { rejected, until, world } from './seat-world.mjs';
 
 const started = (w) => readdirSync(w.run).filter((n) => n !== 'BRIEF.md' && n !== '.gh-empty');
@@ -62,7 +63,7 @@ test('a pid file that is empty or not a number is not a live session: it does no
   await until(() => w.records().length === 1, 'the record');
 }));
 
-test('a relative FACTORY_STATE, AGENT_PROFILES and FACTORY_RUNS are resolved against the caller\'s folder, not the work folder', () => world(async (w) => {
+test('a relative FACTORY_STATE, AGENT_PROFILES and FACTORY_RUNS are resolved against the caller\'s folder, not the work folder', { skip: skipPs }, () => world(async (w) => {
   const r = w.start('worker', ['--resume', 'sid-1', '--seat', '1', '--tag', 'rel'], { FACTORY_STATE: 'state', AGENT_PROFILES: 'profiles', FACTORY_RUNS: 'runs' });
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record in the state folder');

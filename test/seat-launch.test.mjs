@@ -7,6 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { factory } from './helpers.mjs';
+import { skipPs } from './ps-skip.mjs';
 
 const TOKEN = 'fake-token-0123456789-do-not-leak';
 const SEAT_JS = join(factory, 'bin/lib/seat.mjs');
@@ -194,7 +195,7 @@ test('a resume needs --seat, passes the session id and stays on that seat; its t
   assert.equal(w.records()[0].tag, 'BRIEF-fix');
 }));
 
-test('a tag that is already running is refused', () => world((w) => {
+test('a tag that is already running is refused', { skip: skipPs }, () => world((w) => {
   writeFileSync(join(w.run, 'run-worker.pid'), `${process.pid}\n`);
   const r = w.start('worker');
   assert.equal(r.code, 2);

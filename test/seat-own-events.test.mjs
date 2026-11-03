@@ -4,9 +4,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 import { until, world } from './seat-world.mjs';
 
-test('a result line another process appends to the log while the session runs is not in the record', () => world(async (w) => {
+test('a result line another process appends to the log while the session runs is not in the record', { skip: skipPs }, () => world(async (w) => {
   const hold = { FAKE_MODE: 'holdafter', FAKE_RELEASE: join(w.fake, 'release') };
   assert.equal(w.start('worker', ['--tag', 'own'], hold).code, 0);
   const log = join(w.run, 'run-own.jsonl');

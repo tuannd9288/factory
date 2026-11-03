@@ -4,9 +4,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 import { until, world } from './seat-world.mjs';
 
-test('the plugin cache a seat session uses is outside every folder the deny list refuses', () => world(async (w) => {
+test('the plugin cache a seat session uses is outside every folder the deny list refuses', { skip: skipPs }, () => world(async (w) => {
   const { secretsRead } = await import('../bin/lib/seat.mjs');
   // The profiles at their real place under HOME, which is where the deny rules point.
   mkdirSync(join(w.home, '.agent-profiles/tokens'), { recursive: true });
