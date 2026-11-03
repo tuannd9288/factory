@@ -153,14 +153,16 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   "theo đề xuất" on 2026-10-30; and on 2026-11-02, "#203 sao không triển khai luôn?", relayed by Colly), #271 (his
   words of 2026-10-31 in its body), #286 (his words of 2026-11-01 in its body), and on 2026-11-02, relayed by the
   factory-repo session, #256 and #330 ("#256 lệnh kiểm (Recommended), #330 test chập chờn (Recommended)"), #333
-  ("Làm ngay trong release 1") and #335 ("Vá ngay, trước công tắc (Recommended)"). Sources:
+  ("Làm ngay trong release 1"), #335 ("Vá ngay, trước công tắc (Recommended)") and, on 2026-11-03, #361 ("Có").
+  Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
   https://github.com/tuannd9288/factory/issues/271, https://github.com/tuannd9288/factory/issues/286,
   https://github.com/tuannd9288/factory/issues/256#issuecomment-6567815272,
   https://github.com/tuannd9288/factory/issues/330#issuecomment-6567816736,
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 and
-  https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675.
+  https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675 and
+  https://github.com/tuannd9288/factory/issues/361#issuecomment-6594924583.
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and

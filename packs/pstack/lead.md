@@ -96,4 +96,8 @@ on disk, never only in your context (#185).
   copy): `factory lead <repo> --team {{TEAM}} --new`. A new session first looks for the newest `resume-*.md` in its run
   folder; when it has no `Picked up:` line, it runs pstack's Session pickup on it and on the copies in
   `~/factory-runs/<repo>-{{TEAM}}/transcripts/`, then adds the line `Picked up: <date and time>` to it.
-- **After a compaction or a restart,** read the issue, its pull request, the claim and git before you go on.
+- **Your watchers.** Each one you start in the background (a Monitor or a `run_in_background` wait on a run, a check or
+  a pull request) is one line in `~/factory-runs/<repo>-{{TEAM}}/watches.md`: what it watches, and the exact command.
+  When a watcher ends, remove its line (#361; Parcha's agentrun picks up again the runs its record says are running).
+- **After a compaction or a restart,** start every line of `watches.md` again before anything else, then read the issue,
+  its pull request, the claim and git before you go on.
