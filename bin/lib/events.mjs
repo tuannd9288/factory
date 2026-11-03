@@ -10,7 +10,8 @@
 //   gh-refused         the sweep's own gh refused for a rate limit or a login
 // The sweep writes them (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
 // of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
-// which are no condition and are never cleared. The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
+// which are no condition and are never cleared; the sweep writes one too, a `comment` line when it wakes a Lead for a new comment (#351,
+// bin/lib/comment-wake.mjs). The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
 // of that write alone, and `seq` stays unique and increasing across both.
 // Only record and appendStart write: $FACTORY_STATE/events-active.json remembers which conditions hold and since when,
 // and a repository the sweep could not read keeps its conditions, since only a read that succeeded can end one. `factory top` and
