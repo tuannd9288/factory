@@ -21,14 +21,15 @@
 // conflict, and nothing is cut. CLAUDE.md is added as the one-line import where missing, and otherwise left as it is (a
 // conflict when it does not reach AGENTS.md). .gitattributes is the repository's own too, and gets the same treatment for the
 // kit's review-categories block (bin/lib/attributes.mjs): the block replaced, head and tail as they are; a text without one gets
-// it at its start, none gets a file of the block alone; malformed markers, CRLF or a link are conflicts.
+// it at its start, none gets a file of the block alone, unless the clone holds an untracked file there (a conflict, so a local
+// ignored file is never overwritten); malformed markers, CRLF or a link are conflicts.
 // .gate/kit-commit records the factory commit; the old .gate/pack is removed.
 // A module's files (bin/lib/module.mjs) are laid with the kit's, from the modules --modules names, and are stricter:
 // added, left alone or updated from a past module blob; the repository's own file at a module path is a conflict, never
 // kept. The files of a module the base had on and --modules leaves out are removed, or a conflict when the repository
 // changed one. A path of the base's .gate/kit-files that kit/ no longer has is removed when its blob is one the kit once held, and
 // otherwise kept (dropped-kept). Exit 0, or 1 with the conflicts when the repository's own must be merged by hand.
-import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -209,6 +210,11 @@ function attributes({ out, at, repo, factory, kit, text }) {
   const block = text(factory, blockEntry.oid);
   const had = at.get(ATTRIBUTES);
   if (!had) {
+    // An untracked file at the path, ignored or not, is the repository's own: writing the block would overwrite it.
+    if (lstatSync(join(repo, ATTRIBUTES), { throwIfNoEntry: false })) {
+      out.conflicts.push(`${ATTRIBUTES}: the base has none, but the clone holds an untracked file there (ignored by .gitignore, or not); merge it by hand`);
+      return;
+    }
     out.add.push(ATTRIBUTES);
     out.writes.push({ path: ATTRIBUTES, mode: '100644', text: block });
     return;

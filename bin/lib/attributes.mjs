@@ -41,14 +41,6 @@ export function splitBlock(text) {
   return { ok: true, head, block, tail };
 }
 
-/** The problems with the kit's file at a factory commit: one well-formed block and nothing else. */
-export function blockProblems(text) {
-  const found = splitBlock(text);
-  if (!found.ok) return [`the block is ${found.problem}`];
-  if (found.head !== '' || found.tail !== '') return ['the file holds text outside the block'];
-  return [];
-}
-
 /** The text with the kit's block at its start, a blank line between it and the repository's own lines. A text that already
  * holds exactly this block comes back unchanged. Throws, with .problem, on CRLF, a byte-order mark, a block that is not this
  * one and any other marker line. */
@@ -64,8 +56,10 @@ export function insertBlock(text, block) {
   return text === '' ? block : `${block}\n${text}`;
 }
 
-/** The text with its block replaced by `block`; the head and the tail are not touched. */
+/** The text with its block replaced by `block`; the head and the tail are not touched. Throws, with .problem, on CRLF, as
+ * insertBlock does, and on a block that is missing, duplicate, malformed or not at the start. */
 export function replaceBlock(text, block) {
+  if (text.includes('\r')) throw fail('crlf', 'the file has CRLF line ends; the block would mix them (convert them first)');
   const found = splitBlock(text);
   if (!found.ok) throw fail(found.problem, `the file's review-categories block is ${found.problem}`);
   return found.head + block + found.tail;

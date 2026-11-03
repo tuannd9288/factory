@@ -2,7 +2,7 @@
 // repository's head and tail stay byte for byte, and what it cannot merge it stops on. No test uses the network.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { git, quiet, run } from './helpers.mjs';
 import { world } from './world.mjs';
@@ -62,7 +62,7 @@ describe('bin/kit-update replaces only the review-categories block', () => {
     try {
       const good = exact(w, 'HEAD', '.gitattributes');
       w.facCommit({ 'kit/.gate/review-categories': more(kitFile(w)) });
-      for (const text of [good.replace(/^# factory:review-categories:end.*\n/m, ''), `${good}\n${good}`, `${own}${good}`, '*.png binary\r\n']) {
+      for (const text of [good.replace(/^# factory:review-categories:end.*\n/m, ''), `${good}\n${good}`, `${own}${good}`, '*.png binary\r\n', good.replace(/\n/g, '\r\n')]) {
         w.repoCommit({ '.gitattributes': text });
         const before = w.state();
         const out = w.update(['app', '--no-pr']);
@@ -73,6 +73,43 @@ describe('bin/kit-update replaces only the review-categories block', () => {
       }
     } finally {
       w.cleanup();
+    }
+  });
+
+  test('stops on a .gitattributes that is a link, with nothing done', () => {
+    const w = world();
+    try {
+      rmSync(join(w.repo, '.gitattributes'));
+      symlinkSync('AGENTS.md', join(w.repo, '.gitattributes'));
+      git(w.repo, 'add', '-A');
+      git(w.repo, 'commit', '-qm', 'link .gitattributes');
+      git(w.repo, 'push', '-q', 'origin', 'main');
+      w.facCommit({ 'kit/.gate/old-new.txt': 'a kit file\n' });
+      const before = w.state();
+      const out = w.update(['app', '--no-pr']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /\.gitattributes/);
+      assert.deepEqual(w.state(), before);
+    } finally {
+      w.cleanup();
+    }
+  });
+
+  test('never overwrites an untracked .gitattributes the clone holds, ignored or not', () => {
+    for (const ignore of [true, false]) {
+      const w = world();
+      try {
+        w.repoCommit({ ...(ignore ? { '.gitignore': '.gitattributes\n' } : {}), '.gitattributes': null });
+        writeFileSync(join(w.repo, '.gitattributes'), '*.png binary\n');
+        w.facCommit({ 'kit/.gate/old-new.txt': 'a kit file\n' });
+        const before = w.state();
+        const out = w.update(['app', '--no-pr']);
+        assert.equal(out.code, 2, out.out);
+        assert.deepEqual(w.state(), before);
+        assert.equal(readFileSync(join(w.repo, '.gitattributes'), 'utf8'), '*.png binary\n');
+      } finally {
+        w.cleanup();
+      }
     }
   });
 

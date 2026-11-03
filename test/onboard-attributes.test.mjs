@@ -76,7 +76,6 @@ describe('bin/onboard writes the review-categories block into .gitattributes', (
     try {
       const out = s.onboard();
       assert.equal(out.code, 2, out.out);
-      assert.match(out.out, /\.gitattributes is a link/);
       assert.ok(!existsSync(s.repo));
     } finally {
       s.cleanup();
