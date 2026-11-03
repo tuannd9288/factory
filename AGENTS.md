@@ -241,8 +241,8 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, `bin/factory top`, the ledger's canary.
 - **1e Surfaces** [GH2, #68]: the Human's own screens: Ghostty with the Herdr TUI or app until the factory is finished, then
   Rex on the MacBook (K1 = C, pending his check) and Paseo's app (Control surfaces, in Decisions), and Remote Control (T3,
-  pending), and Linear, where he decides, takes notes and asks (Linear, in Decisions; #373). Herdr's server and Paseo's
-  daemon stay in 0d.
+  pending); and, now, Linear, where he decides, takes notes and asks (Linear, in Decisions; #373). Herdr's server and
+  Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
@@ -291,11 +291,12 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   prompt, so agents do not type into another pane: the seats and the Lead are denied all of `herdr`, its
   `agent send-keys` and `pane send-keys` with it (`bin/lib/seat.mjs`, `packs/pstack/bin/lead.mjs`); the kit's deny
   rules bind Claude Code only and hold no such rule (#76, closed 2026-10-30); `rex` is denied nowhere yet (#267); (5)
-  with every surface stopped, the
-  factory still runs. It holds for Linear, his surface for deciding, notes and questions (#373): Linear starts
-  none of the factory's sessions, and its coding sessions, Loops and "open in coding tool" stay off (1); it keeps no
-  sole copy, and a decision of his counts once it is relayed to the GitHub issue (2); the factory's code reads no Linear
-  credential, and Colly's own Linear access is Colly's, outside the factory's code (3). Checked by: none yet. The check will be a test that stops every surface process and shows that a
+  with every surface stopped, the factory still runs. It holds for Linear, his surface for deciding, notes and questions
+  (#373): Linear starts none of the factory's sessions, and its coding sessions, Loops and "open in coding tool" stay
+  off (1); it keeps no sole copy, and a decision of his counts once it is relayed to the GitHub issue (2); the factory's
+  own code in this sublayer reads no Linear credential, whether a tracker may read Linear is #375's to settle, and
+  Colly's own Linear access is Colly's, outside the factory's code (3).
+  Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
 
