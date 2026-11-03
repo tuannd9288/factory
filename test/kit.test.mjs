@@ -528,8 +528,8 @@ describe('review, verdict, tier and rounds', () => {
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
         '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
         '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
-        // #374: the review request is logged; it fails while norequest exists.
-        '  *requested_reviewers*) echo "$*" >>"$FAKE/requests"; [ -e "$FAKE/norequest" ] && { echo boom >&2; exit 1; }; echo "{}" ;;',
+        // #374: each review request is logged; the one for the login in norequest, when that exists, fails.
+        '  *requested_reviewers*) echo "$*" >>"$FAKE/requests"; if [ -e "$FAKE/norequest" ]; then case "$*" in *"=$(cat "$FAKE/norequest")") echo boom >&2; exit 1 ;; esac; fi; echo "{}" ;;',
         '  *reviews*) cat "$FAKE/reviews.json" ;;',
         '  "pr edit"*raised*) [ -e "$FAKE/nolabel" ] && { echo "Could not resolve to a Label with the name raised" >&2; exit 1; }; echo "$*" >>"$FAKE/edits" ;;',
         '  "pr edit"*) echo "$*" >>"$FAKE/edits" ;;',
@@ -1051,11 +1051,37 @@ describe('review, verdict, tier and rounds', () => {
   });
   test('a failed request changes nothing in tier\'s result but one line', () => {
     const plain = job('tier', { 'AGENTS.md': '# app\n' }, pr);
-    write(fake, { norequest: '1' });
+    write(fake, { norequest: 'tuannd9288' });
     const out = again('tier', plain.head, pr);
     assert.equal(out.code, plain.code, out.out);
     assert.match(out.out, /tier: could not request the review of tuannd9288/);
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+  });
+  test('one owner refused by GitHub does not stop the request of the others', () => {
+    const file = join(trusted, '.github/CODEOWNERS');
+    const kept = readFileSync(file, 'utf8');
+    try {
+      write(trusted, { '.github/CODEOWNERS': `docs/ @tuannd9288 @second-owner\n${kept}` });
+      write(fake, { norequest: 'tuannd9288' });
+      const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.requests, /reviewers\[\]=second-owner\n/);
+      assert.match(out.out, /tier: requested the review of second-owner\n/);
+      assert.match(out.out, /tier: could not request the review of tuannd9288\n/);
+    } finally {
+      write(trusted, { '.github/CODEOWNERS': kept });
+    }
+  });
+  test('no request when approval could not judge, and the author is left out whatever its case', () => {
+    write(fake, { 'reviews.json': 'not json' });
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(first.code, 1, first.out);
+    assert.match(first.out, /approval: could not read/);
+    assert.equal(first.requests, '');
+    reviews([]);
+    const out = again('tier', first.head, { ...pr, GATE_PR_AUTHOR: 'TuanND9288' });
+    assert.equal(out.code, 1, out.out);
+    assert.equal(out.requests, '');
   });
   test('a team owner is named and not requested', () => {
     const file = join(trusted, '.github/CODEOWNERS');
