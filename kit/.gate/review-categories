@@ -1,0 +1,14 @@
+# factory:review-categories:begin (the kit's lines: bin/kit-update rewrites everything down to the end line)
+# Review categories for Linear's diff view (https://linear.app/docs/diffs), for the files the kit lays. Review attributes
+# only: no diff, merge or filter. Put the repository's own lines after the end line; a later line wins.
+AGENTS.md review-agent-guidance
+CLAUDE.md review-agent-guidance
+.gate/gate-section.md review-agent-guidance
+.gate/enforced-rules.md review-agent-guidance
+.gate/bin/lib/reviewer-prompt.md review-agent-guidance
+.claude/skills/** review-agent-guidance
+.claude/skills/**/scripts/** -review-agent-guidance
+.gate/proofs/** review-test
+.github/pull_request_template.md review-documentation
+.gate/bin/reviewer/package-lock.json review-generated
+# factory:review-categories:end (your own lines go after this one)
