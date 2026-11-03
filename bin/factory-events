@@ -17,7 +17,9 @@
 # $FACTORY_STATE/events.news.cursor, never Colly's; it is what the MacBook's relay (bin/factory-relay, slice 2 of #370) reads by ssh,
 # without --follow and with its own `--after`, so this cursor stays where it is. Each of the six lines carries the delivery as data, which
 # the relay reads and never the text: `lead` (`<folder>-<team>`, or null), `woke` and, when the Mac mini did not wake it, `why`, plus
-# `what` and `where`.
+# `what` and `where`. `--news --newest` (alone: no `--follow`, no `--after`) prints the highest seq of a news line, or 0, and nothing
+# else, and moves no cursor; it is how the relay's first pass, and its reset when its cursor is above the file's, learn where to start
+# without reading the lines.
 # A non-login ssh command has PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no node, so the places Homebrew puts it are added here.
 PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 export PATH

@@ -320,19 +320,24 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
 function main(argv) {
   let follow = false;
   let news = false;
+  let newest = false;
   let after = null;
-  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>] [--news]');
+  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>] [--news [--newest]]');
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--follow') follow = true;
     else if (argv[i] === '--news') news = true;
+    else if (argv[i] === '--newest') newest = true;
     else if (argv[i] === '--after') {
       const v = argv[++i] ?? '';
       if (!/^\d+$/.test(v) || !Number.isSafeInteger(Number(v))) throw usage();
       after = Number(v);
     } else throw usage();
   }
+  if (newest && (!news || follow || after !== null)) throw usage();
   const state = stateDir();
   const file = join(state, 'events.jsonl');
+  // `--news --newest` prints the highest seq of a news line, or 0, and nothing else; it moves no cursor. The relay's first pass reads only this.
+  if (newest) return void console.log(Math.max(0, ...readLines(state).filter((e) => e.type === 'start' && NEWS_KINDS.has(e.kind)).map((e) => e.seq)));
   // --news has a cursor of its own: Colly's never moves for it.
   const cursorFile = join(state, news ? 'events.news.cursor' : 'events.cursor');
   let cursor = Number(readText(cursorFile).trim()) || 0;

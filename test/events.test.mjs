@@ -363,6 +363,20 @@ test('factory-events leaves out the six news kinds of #370 and --news prints onl
   );
 });
 
+test('--news --newest prints the highest news seq alone, 0 with none, moves no cursor, and takes no other flag', async () => {
+  await withDir((dir) => {
+    const state = join(dir, 'state');
+    const run = (args) => spawnSync(join(factory, 'bin/factory-events'), args, { encoding: 'utf8', env: eventsEnv(state) });
+    seed(state, [['start', 'gh-refused']]);
+    assert.equal(run(['--news', '--newest']).stdout, '0\n');
+    append(state, 2, 'start', 'merged o/app#2');
+    append(state, 3, 'start', 'out-of-quota a');
+    assert.equal(run(['--news', '--newest']).stdout, '2\n');
+    assert.ok(!existsSync(join(state, 'events.news.cursor')));
+    for (const args of [['--newest'], ['--news', '--newest', '--follow'], ['--news', '--newest', '--after', '1']]) assert.equal(run(args).status, 2);
+  });
+});
+
 /** factory-events --follow (with these args), with what it has printed so far. */
 function follow(state, args = []) {
   const child = spawn(join(factory, 'bin/factory-events'), ['--follow', ...args], { env: eventsEnv(state), stdio: ['ignore', 'pipe', 'pipe'] });
