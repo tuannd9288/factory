@@ -528,6 +528,8 @@ describe('review, verdict, tier and rounds', () => {
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
         '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
         '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
+        // #374: the review request is logged; it fails while norequest exists.
+        '  *requested_reviewers*) echo "$*" >>"$FAKE/requests"; [ -e "$FAKE/norequest" ] && { echo boom >&2; exit 1; }; echo "{}" ;;',
         '  *reviews*) cat "$FAKE/reviews.json" ;;',
         '  "pr edit"*raised*) [ -e "$FAKE/nolabel" ] && { echo "Could not resolve to a Label with the name raised" >&2; exit 1; }; echo "$*" >>"$FAKE/edits" ;;',
         '  "pr edit"*) echo "$*" >>"$FAKE/edits" ;;',
@@ -563,7 +565,7 @@ describe('review, verdict, tier and rounds', () => {
   const reviews = (list) => write(fake, { 'reviews.json': JSON.stringify([list]) });
   /** Runs one job in the trusted checkout on a head already fetched there, as a re-run does. */
   const again = (kind, head, env = {}) => {
-    write(fake, { edits: '', calls: '' });
+    write(fake, { edits: '', calls: '', requests: '' });
     write(fake, { head });
     const out = run(trusted, join(trusted, '.gate/bin/review'), [kind, '--base', git(trusted, 'rev-parse', 'origin/main'), '--head', head], {
       PATH: `${join(fake, 'bin')}:${process.env.PATH}`,
@@ -581,7 +583,7 @@ describe('review, verdict, tier and rounds', () => {
       if (m) marks.add(`::${m[1]}::`);
     }
     const plain = out.out.split('\n').filter((l) => !/^::stop-commands::[0-9a-f]{16,}$/.test(l) && !marks.has(l)).join('\n');
-    return { ...out, raw: out.out, out: plain, head, edits: readFileSync(join(fake, 'edits'), 'utf8'), calls: readFileSync(join(fake, 'calls'), 'utf8') };
+    return { ...out, raw: out.out, out: plain, head, edits: readFileSync(join(fake, 'edits'), 'utf8'), calls: readFileSync(join(fake, 'calls'), 'utf8'), requests: readFileSync(join(fake, 'requests'), 'utf8') };
   };
   /** Commits files on a candidate branch, fetches it into the trusted checkout, and runs one job there. */
   const job = (kind, files, env = {}) => {
@@ -601,7 +603,7 @@ describe('review, verdict, tier and rounds', () => {
     labels();
     reviews([]);
     // The rules in force on main are the kit's gate: the merge switch at 1-2 (#333).
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null, 'entire-rules': null });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null, 'entire-rules': null, norequest: null });
   });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
   /** The rules in force on main with one pull_request rule: the merge switch's two parameters (#333). */
@@ -1018,6 +1020,69 @@ describe('review, verdict, tier and rounds', () => {
       assert.doesNotMatch(first.out, /the merge switch of this repository/);
       reviews([review('tuannd9288', 'APPROVED', first.head)]);
       assert.equal(again('tier', first.head, pr).code, 0, name);
+    }
+  });
+  // #374: while tier 3 waits for the Human's approval, tier requests the code owners' review, so the pull request is in their queue.
+  const ask = /^api -X POST repos\/o\/app\/pulls\/7\/requested_reviewers -f reviewers\[\]=tuannd9288\n$/;
+  test('tier 3 with no approval requests the code owners less the author, and fails as before', () => {
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+    assert.match(out.requests, ask);
+    // The only code owner is the author: nobody is left to request.
+    const self = again('tier', out.head, { ...pr, GATE_PR_AUTHOR: 'tuannd9288' });
+    assert.equal(self.code, 1, self.out);
+    assert.equal(self.requests, '');
+  });
+  test('tier 3 with an approval of the head, tier 2, and tier 3 at all request nothing', () => {
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    reviews([review('tuannd9288', 'APPROVED', first.head)]);
+    let out = again('tier', first.head, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.equal(out.requests, '');
+    reviews([]);
+    out = job('tier', { 'src/auth/t.js': 'export const t = 1;\n' }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.equal(out.requests, '');
+    rulesAre(switchRules(0, false));
+    out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.equal(out.requests, '');
+  });
+  test('a failed request changes nothing in tier\'s result but one line', () => {
+    const plain = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    write(fake, { norequest: '1' });
+    const out = again('tier', plain.head, pr);
+    assert.equal(out.code, plain.code, out.out);
+    assert.match(out.out, /tier: could not request the review of tuannd9288/);
+    assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
+  });
+  test('a team owner is named and not requested', () => {
+    const file = join(trusted, '.github/CODEOWNERS');
+    const kept = readFileSync(file, 'utf8');
+    try {
+      write(trusted, { '.github/CODEOWNERS': `docs/ @tuannd9288 @org/docs-team\n${kept}` });
+      const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.requests, ask);
+      assert.match(out.out, /the code owner @org\/docs-team is a team, which is not requested/);
+    } finally {
+      write(trusted, { '.github/CODEOWNERS': kept });
+    }
+  });
+  test('rounds requests the code owners with needs-human at the third red head, unless the switch is at all or unreadable', () => {
+    const red = (oid, name = 'verify', conclusion = 'FAILURE') => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion }] } }] } } });
+    write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes: [red('a'), red('b', 'review'), red('c', 'verdict', 'TIMED_OUT')] } } } } }) });
+    let out = job('rounds', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.edits, /--add-label needs-human/);
+    assert.match(out.requests, ask);
+    for (const rules of [switchRules(0, false), 'not json']) {
+      rulesAre(rules);
+      out = job('rounds', { 'src/math.js': MUL }, pr);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.edits, /--add-label needs-human/);
+      assert.equal(out.requests, '');
     }
   });
   test('on tier 3, tier is red when the rules in force cannot be read, whatever they might say', () => {
