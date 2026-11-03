@@ -26,13 +26,18 @@ const RESEARCHER_ALLOW = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash
 const EDITS = ['Edit(//r/issue-1/**)', 'Edit(//r/w/**)'];
 
 const ALERTS = JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: join(factory, 'bin/factory-alerts'), timeout: 10 }] }] } });
+// The worker's and the reviewer's settings add the sandbox (#183), whose content test/seat-sandbox.test.mjs pins.
+const sandboxed = async () => {
+  const { sandboxSettings } = await lib();
+  return JSON.stringify({ ...JSON.parse(ALERTS), sandbox: sandboxSettings({ home: HOME, run: RUN, work: WORK }) });
+};
 const tail = ['--output-format', 'stream-json', '--verbose', '--json-schema', SCHEMA];
 
 test('worker: sonnet, medium effort, 400 turns, auto mode, no role allow list and the common deny list (#307)', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'worker', run: RUN, home: HOME, work: WORK }), [
     '-p', '--model', 'sonnet', '--effort', 'medium', '--max-turns', '400', '--permission-mode', 'auto',
-    '--settings', ALERTS,
+    '--settings', await sandboxed(),
     '--add-dir', RUN,
     '--allowedTools', 'StructuredOutput',
     '--disallowedTools', ...DENY,
@@ -44,7 +49,7 @@ test('reviewer: opus, high effort, 300 turns, auto mode, no role allow list and 
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'reviewer', run: RUN, home: HOME, work: WORK }), [
     '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'auto',
-    '--settings', ALERTS,
+    '--settings', await sandboxed(),
     '--add-dir', RUN,
     '--allowedTools', 'StructuredOutput',
     '--disallowedTools', ...DENY,

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 import { until, world } from './seat-world.mjs';
 
 const nameOf = (w, tag) => readFileSync(join(w.run, `run-${tag}.name`), 'utf8').trim();
@@ -15,7 +16,7 @@ test('a new start writes run-<tag>.name, and the record carries the name', () =>
   assert.equal(w.records()[0].name, 'aardvark');
 }));
 
-test('a live run holds its name, so the next start takes the next one', () => world(async (w) => {
+test('a live run holds its name, so the next start takes the next one', { skip: skipPs }, () => world(async (w) => {
   const release = join(w.root, 'release');
   assert.equal(w.start('worker', ['--tag', 'a'], { FAKE_MODE: 'hang', FAKE_RELEASE: release }).code, 0);
   assert.equal(w.start('reviewer', ['--tag', 'b'], { FAKE_MODE: 'hang', FAKE_RELEASE: release }).code, 0);
@@ -42,7 +43,7 @@ test('a Lead holds its name for as long as its name file exists', () => world(as
   assert.equal(nameOf(w, 'one'), 'badger');
 }));
 
-test('a resume never takes a name a live run holds: uniqueness wins over keeping its own', () => world(async (w) => {
+test('a resume never takes a name a live run holds: uniqueness wins over keeping its own', { skip: skipPs }, () => world(async (w) => {
   const old = `${JSON.stringify({ session: 's-named', role: 'worker', seat: 1, tag: 't', run: w.run, start: '2020-01-01T00:00:00Z', end: '2020-01-01T00:01:00Z', name: 'aardvark' })}\n`;
   writeFileSync(join(w.state, 'sessions.jsonl'), old);
   assert.equal(w.start('worker', ['--tag', 'live'], { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.root, 'release') }).code, 0);

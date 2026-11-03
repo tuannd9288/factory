@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 import { filesUnder, rejected, rejectedOn, until, world } from './seat-world.mjs';
 
 const TWO = 'fake-token-two-9876543210-do-not-leak';
@@ -44,6 +45,8 @@ test('the token is in no argument, log, record, pid file or output (#311)', () =
   await until(() => w.records().length === 1, 'the record');
   const saw = w.saw();
   assert.ok(!saw.argv.some((a) => a.includes(TWO)));
+  // The fake reads its parent with ps, which the sandbox refuses (#183): there the parent is empty, and only there may it be unread.
+  assert.ok(saw.parentSeen || skipPs, 'the fake could read its parent\'s environment');
   assert.equal(saw.parentHasToken, false, 'the supervisor\'s environment holds no token');
   for (const [file, body] of [...filesUnder(w.run), ...filesUnder(w.state)]) assert.ok(!body.includes(TWO), `${file} holds the token`);
   assert.ok(!(r.out + r.err).includes(TWO));

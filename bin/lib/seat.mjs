@@ -4,6 +4,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
@@ -38,6 +39,34 @@ export const ALERTS_SETTINGS = JSON.stringify({
   hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: fileURLToPath(new URL('../factory-alerts', import.meta.url)), timeout: 10 }] }] },
 });
 
+/** The sandbox of the worker's and the reviewer's Bash (#183), in the one --settings value with the alerts hook. It covers Bash
+ * only: the Read tool, the hooks and the MCP servers run outside it, so the Read denies stay permission rules. Paths are absolute
+ * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
+ * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. Only ~/.config/gh is denied of ~/.config, so
+ * git keeps the settings it finds there. profiles, when given, is denied whole: it holds the tokens, the archive and the seats.
+ * Writes are allowed to the work folder, the run folder and the temporary folder (by its real path) that the tests use, and, by
+ * Claude Code's defaults, to each --add-dir and to its own session temporary folder. No domain is allowed and no local binding:
+ * the strict allowlist is empty, so there is no network. */
+export function sandboxSettings({ home, run, work, profiles = null }) {
+  let tmp = tmpdir();
+  try {
+    tmp = realpathSync(tmp);
+  } catch {
+    // The folder as named.
+  }
+  return {
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: false,
+    allowUnsandboxedCommands: false,
+    filesystem: {
+      denyRead: [...new Set([...['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'].map((d) => `${home}/${d}`), ...(profiles ? [profiles] : [])])],
+      allowWrite: [...new Set([work, run, tmp].filter(Boolean))],
+    },
+    network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
+  };
+}
+
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
 export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
@@ -66,8 +95,8 @@ const denyOf = (home, web) => [
  * no scrub, holding the team's key, and keeps every deny rule (the Human, 2026-11-01, #307). hideKey: true is the researcher's
  * switch alone (below); only a pull request the Human approves changes it. */
 export const PRESETS = {
-  worker: { model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, web: false },
-  reviewer: { model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, web: false },
+  worker: { model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, web: false, sandbox: true },
+  reviewer: { model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, web: false, sandbox: true },
   researcher: {
     // hideKey: true is today's setup: the scrub, the default mode, the short allow list below and seat 2. false makes it run like
     // the rest of the team (the Human, 2026-11-01: "Làm, mặc định giấu"). Flipping it is a pull request the Human approves,
@@ -103,7 +132,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
     '--permission-mode', p.hideKey ? 'default' : 'auto',
-    '--settings', ALERTS_SETTINGS,
+    '--settings', p.sandbox ? JSON.stringify({ ...JSON.parse(ALERTS_SETTINGS), sandbox: sandboxSettings({ home, run, work, profiles }) }) : ALERTS_SETTINGS,
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
     '--allowedTools', ...(p.hideKey ? p.allow(run) : []), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
@@ -490,6 +519,9 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const child = { ...env, GH_CONFIG_DIR: join(run, '.gh-empty'), CLAUDE_CONFIG_DIR: join(profiles, 'seats', String(seat), 'claude') };
   if (PRESETS[o.role].hideKey) child.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   else delete child.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB;
+  // The marker the tests read to know their Bash runs in the sandbox (#183): set for a sandboxed preset, and only then.
+  if (PRESETS[o.role].sandbox) child.FACTORY_SANDBOX = '1';
+  else delete child.FACTORY_SANDBOX;
   for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete child[name];
   // The researcher's git clones under its run folder, and only there (bin/research-git).
   if (o.role === 'researcher') child.FACTORY_RESEARCH_CLONES = join(run, 'clones');

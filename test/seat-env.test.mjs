@@ -4,11 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { skipPs } from './ps-skip.mjs';
 import { until, world } from './seat-world.mjs';
 
 const creds = { GH_TOKEN: 'gh-fake', GITHUB_TOKEN: 'ghub-fake', ANTHROPIC_API_KEY: 'key-fake' };
 
-test('seat 1: only claude\'s environment holds the token; the supervisor\'s, which claude can see as its parent, does not', () => world(async (w) => {
+test('seat 1: only claude\'s environment holds the token; the supervisor\'s, which claude can see as its parent, does not', { skip: skipPs }, () => world(async (w) => {
   const r = w.start('worker', ['--resume', 'sid-1', '--seat', '1', '--tag', 'one']);
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');

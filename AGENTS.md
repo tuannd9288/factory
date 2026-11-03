@@ -411,7 +411,9 @@ never the token. The sweep does the same for a new comment, by a login other tha
 
 The live verifier's Codex profile and its login are in `packs/pstack/INSTALL.md`, "The live verifier's login". What unattended runs
 need, and how `bin/seat` picks the team, the account and the seat, sets the permission mode and the grants, and handles the
-researcher and its known limits, are in the header of `bin/seat`.
+researcher and its known limits, are in the header of `bin/seat`. The worker's and the reviewer's Bash runs in Claude Code's
+sandbox, which denies reading the credential folders, allows no network and allows writes to the work folder, the run folder,
+the temporary folder, each `--add-dir` and Claude Code's own session temporary folder (#183).
 
 What a session may read under a profile is nothing: the deny list holds `Read(~/.agent-profiles/**)` whole (#185). Claude
 Code caches a plugin under the profile's `CLAUDE_CONFIG_DIR`, so the cache is moved out: each profile has its own plugin

@@ -1,5 +1,5 @@
 // #27: the queue's lock records its holder, is taken over only from a dead one, and is removed only by its maker.
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
@@ -7,6 +7,10 @@ import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as queue from '../bin/lib/queue.mjs';
+import { skipPs } from './ps-skip.mjs';
+
+// Every test here reads a process's start time from the real ps, which the factory's sandbox refuses (#183).
+const test = (name, fn) => nodeTest(name, { skip: skipPs }, fn);
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
 const startOf = (pid) => execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } }).trim();
