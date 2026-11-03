@@ -4,6 +4,12 @@
 // and gh porcelain (never `gh api`). A field the data does not give is shown as `?`.
 // #286: what waits on the Human first, one block per repository (the Lead of each team in it), the accounts (factory.mjs's list, each account's quota) and Today.
 // It runs as `factory top [--once] [--width N] [--full]` (bin/lib/factory.mjs); `node bin/lib/top.mjs --once` prints one frame as well.
+// #365: two more modes print plain text from the same snapshot and the same list of what waits on the Human, and exit 0:
+// `--line [--width N]` (else COLUMNS, else 80) is the status line under Colly's prompt (pull requests to approve, Leads waiting, alerts, teams
+// working; whole parts drop from the right to fit), and `--brief [--after <seq>]` is the text of Colly's start hook (what waits, each
+// team with its issues, the `start` events after <seq> or the newest few, then `seq <n>`, the highest seq in events.jsonl). Neither moves
+// #309's cursor. GitHub's last read is kept in $FACTORY_STATE/top-github.json (a temporary file, then a rename) and reused for a minute by
+// every process, the live view included, so a line run each minute calls GitHub once a minute at most.
 // `c` (or --full) adds #174's engineering columns. Layout (#174): what waits on the Human first, then each repository by team (the Lead's
 // row, its issues, the sessions under each), then the accounts and Today; a state is a mark and a word, with basic SGR colour on a
 // terminal that has it (`render`'s `color` option; `main` reads it from the terminal once); a row too wide drops whole columns (S_STEPS).
@@ -13,7 +19,7 @@
 // run-<tag>.name, a Lead keeps ~/factory-runs/<repo>-<team>/name and its Herdr pane carries it. A Lead's state is its newest hook
 // event in <repo>-<team>/state.json (packs/pstack/bin/transcript-copy.mjs).
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { cpus, homedir, loadavg } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -423,10 +429,50 @@ export async function readClaims(repo, state, { url = `https://github.com/${repo
   return claims;
 }
 
+// GitHub's last read, shared by every process that runs a view (#365): `--line` is a new process each minute, and two views open at
+// once would each call GitHub. It is one JSON file in the state folder, written through a temporary file and a rename; a Map (the
+// claims) is kept as { $map: [[k, v]...] }.
+const GH_FILE = 'top-github.json';
+const mapOut = (_, v) => (v instanceof Map ? { $map: [...v] } : v);
+const mapIn = (_, v) => (v && typeof v === 'object' && Array.isArray(v.$map) ? new Map(v.$map) : v);
+
+function readSharedGithub(state) {
+  try {
+    const f = JSON.parse(readText(join(state, GH_FILE)), mapIn);
+    return f?.data && Number.isFinite(f.data.at) && f.data.repos ? { data: f.data, good: f.good ?? {} } : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSharedGithub(state, data, good) {
+  try {
+    mkdirSync(state, { recursive: true });
+    const file = join(state, GH_FILE);
+    const tmp = `${file}.tmp-${process.pid}`;
+    writeFileSync(tmp, JSON.stringify({ data, good }, mapOut));
+    renameSync(tmp, file);
+  } catch {
+    // a view that cannot write the file reads GitHub again next time
+  }
+}
+
 /** Issues, pull requests and claims of the repositories, at most once a minute (cache holds the last read). A call that
- * fails gives its first line and the rest still shows. */
-export async function gatherGithub({ repos, clones, state, claims = readClaims, now, cache = {} }) {
+ * fails gives its first line and the rest still shows. With `shared`, the last read is also kept in the state folder, so that
+ * another process within the minute reuses it, and a failed read there keeps the last good one too. */
+export async function gatherGithub({ repos, clones, state, claims = readClaims, now, cache = {}, shared = false }) {
   if (cache.data && now - cache.at < GH_MS) return cache.data;
+  if (shared) {
+    const file = readSharedGithub(state);
+    if (file) {
+      cache.good = { ...file.good, ...cache.good };
+      if (now >= file.data.at && now - file.data.at < GH_MS && repos.every((r) => file.data.repos[r])) {
+        cache.data = file.data;
+        cache.at = file.data.at;
+        return file.data;
+      }
+    }
+  }
   const data = { ok: true, error: null, at: now, repos: {} };
   const good = (cache.good ??= {});
   await Promise.all(repos.map(async (repo) => {
@@ -458,6 +504,7 @@ export async function gatherGithub({ repos, clones, state, claims = readClaims, 
   }));
   cache.data = data;
   cache.at = now;
+  if (shared) writeSharedGithub(state, data, good);
   return data;
 }
 
@@ -517,7 +564,7 @@ export async function snapshot(opts = {}) {
   const sessions = gatherSessions({ runs, state, now, root, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map, cache: opts.cache ? cache : null });
   // Every repository a session names has its issues read too, not only the clones.
   const repos = [...new Set([...(opts.repos ?? clones.keys()), ...sessions.map((s) => s.repo).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r ?? ''))])];
-  const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache });
+  const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache, shared: Boolean(opts.shared) });
   const byRepo = [...new Set([...repos, ...sessions.map((s) => s.repo).filter(Boolean)])].map((repo) => {
     const mine = sessions.filter((s) => s.repo === repo);
     const gh = github.repos[repo];
@@ -528,7 +575,7 @@ export async function snapshot(opts = {}) {
   const agentProfiles = opts.agentProfiles ?? process.env.AGENT_PROFILES ?? join(home, '.agent-profiles');
   const accounts = accountRows({ state, runs, agentProfiles, root });
   return {
-    now, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), events: eventsOf(state), accounts,
+    now, state, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), events: eventsOf(state), accounts,
     seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: sessionRecords(state, opts.cache ? cache : null), accounts, seatRows: seatAccounts(state) }),
   };
 }
@@ -813,12 +860,27 @@ const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer'
 const clean = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
 const cleanDeep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(cleanDeep) : v && Object.getPrototypeOf(v) === Object.prototype ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanDeep(x)])) : v);
 
+/** What waits on the Human, as { verb, text, url } in the frame's order: pull requests to approve, Leads at a prompt or a login, the
+ * sweep's conditions, the `*.failed` files. The frame, `--line` and `--brief` all read it, so they never disagree. `snap` is clean. */
+function waitsOf(snap) {
+  const { sessions, queue, now } = snap;
+  return [
+    ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => ({ verb: 'approve', text: `${r.repo}#${g.pr.number} ${g.pr.title}`, url: `https://github.com/${r.repo}/pull/${g.pr.number}` }))),
+    ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => ({ verb: 'answer', text: `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`, url: '' })),
+    ...(snap.events ?? []).map((c) => ({ verb: EVENT_VERBS[c.kind] ?? 'look', text: c.text, url: c.url ?? '' })),
+    ...queue.failed.map((f) => ({ verb: 'alert', text: `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`, url: '' })),
+  ];
+}
+
+/** `snap` with every data field cleaned of control characters. */
+const cleanSnap = (input) => ({ ...input, sessions: cleanDeep(input.sessions), repos: cleanDeep(input.repos), accounts: cleanDeep(input.accounts), queue: cleanDeep(input.queue), events: cleanDeep(input.events ?? []), github: { ...input.github, error: clean(input.github.error ?? '') } });
+
 /** One frame as text, each line at most `width` cells. tab indexes tabsOf(snap). It is a pure function: `color` (basic SGR) and `keys`
  * (the keys line, which `--once` leaves out) are options, and every data field is cleaned of control characters before it is styled. */
 export function render(input, { width = 120, tab = 0, rows = null, full = false, color = false, keys = false } = {}) {
   const paint = (code, text) => (color && code && text ? `\x1b[${code}m${text}\x1b[0m` : text);
   const tint = (code) => (code ? (text) => paint(code, text) : undefined);
-  const snap = { ...input, sessions: cleanDeep(input.sessions), repos: cleanDeep(input.repos), accounts: cleanDeep(input.accounts), queue: cleanDeep(input.queue), events: cleanDeep(input.events ?? []), github: { ...input.github, error: clean(input.github.error ?? '') } };
+  const snap = cleanSnap(input);
   const { sessions, queue, github, now } = snap;
   const day = startOfDay(now);
   const count = (st) => sessions.filter((s) => s.state === st).length;
@@ -840,12 +902,7 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
     const whole = `${lead}${text}${url ? `  ${url}` : ''}`;
     return paint(YELLOW, cells(whole) <= width ? whole : `${lead}${cutWord(text, Math.max(0, width - cells(lead)))}`);
   };
-  const waits = [
-    ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => item('approve', `${r.repo}#${g.pr.number} ${g.pr.title}`, `https://github.com/${r.repo}/pull/${g.pr.number}`))),
-    ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => item('answer', `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`)),
-    ...(snap.events ?? []).map((c) => item(EVENT_VERBS[c.kind] ?? 'look', c.text, c.url ?? '')),
-    ...queue.failed.map((f) => item('alert', `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`)),
-  ];
+  const waits = waitsOf(snap).map((w) => item(w.verb, w.text, w.url));
   lines.push(...(waits.length ? [paint(YELLOW, 'Waiting on you'), ...waits] : ['Nothing waits on you']));
 
   // The columns are planned once for the frame, over every row that could print (the folded ones too), so they do not jump between
@@ -958,6 +1015,86 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
   return [...lines, ...tree, ...bottom].join('\n');
 }
 
+/** The teams that work now, as a set of `<repo>/<team>`: a Lead that runs, and a live session of a seat, under the team its record or
+ * its issue's claim names (else its issue). */
+function teamsWorking(snap) {
+  const keys = new Set();
+  const claimed = (repo, n) => snap.repos.find((r) => r.repo === repo)?.groups.find((g) => g.number === n)?.team ?? null;
+  for (const s of snap.sessions) {
+    if (!s.live) continue;
+    if (s.role === 'lead') keys.add(`${s.repo ?? '?'}/${s.team}`);
+    else keys.add(`${s.repo ?? '?'}/${parseTeam(s.recordTeam)?.team ?? claimed(s.repo, s.issue) ?? `#${s.issue ?? s.name}`}`);
+  }
+  return keys;
+}
+
+/** `factory top --line` (#365): the one line under Colly's prompt, in at most `width` cells, plain text. Counts of what waits on the
+ * Human (pull requests to approve, Leads at a prompt or a login, alerts) and of the teams at work; a part that is zero is left out, and
+ * with GitHub unread and nothing cached the pull requests are `?`. A line too wide loses whole parts from the right. */
+export function lineOf(input, { width = 80 } = {}) {
+  const snap = cleanSnap(input);
+  const waits = waitsOf(snap);
+  const count = (verb) => waits.filter((w) => w.verb === verb).length;
+  const approve = Object.values(snap.github.repos).some((r) => r.unknown) ? '?' : count('approve');
+  const prompts = count('answer');
+  const alerts = waits.length - count('approve') - prompts;
+  const teams = teamsWorking(snap).size;
+  const parts = [
+    approve === 0 && !prompts && !alerts ? 'Nothing waits on you' : null,
+    approve ? `${approve} to approve` : null,
+    prompts ? `${prompts} Lead${prompts === 1 ? '' : 's'} waiting` : null,
+    alerts ? `${alerts} alert${alerts === 1 ? '' : 's'}` : null,
+    teams ? `${teams} team${teams === 1 ? '' : 's'} working` : null,
+  ].filter(Boolean);
+  while (parts.length > 1 && cells(parts.join(' · ')) > width) parts.pop();
+  return cutWord(parts.join(' · '), width);
+}
+
+// The most `--brief` prints for each block, its header and its "more" line included, so the whole text stays near 30 lines.
+const BRIEF_MAX = { waits: 10, teams: 11, events: 8 };
+const BRIEF_EVENTS = 5;
+
+/** A block of lines cut to `max`, the last one saying how many were left out. */
+const capped = (lines, max, what) => (lines.length <= max ? lines : [...lines.slice(0, max - 1), `  … ${lines.length - (max - 1)} more ${what}`]);
+
+/** The teams of each repository for the brief: the Lead of each team with its state, and the issues the team holds (a claim, or an open
+ * pull request that names it), one line each. */
+function teamLines(snap) {
+  const lines = [];
+  for (const r of [...snap.repos].sort((a, b) => a.repo.localeCompare(b.repo))) {
+    const leads = r.other.filter((s) => s.role === 'lead');
+    const held = r.groups.filter((g) => !g.done && g.team && (g.step === 'claimed' || g.step === 'PR open'));
+    for (const team of [...new Set([...leads.map((l) => l.team), ...held.map((g) => g.team)])].sort()) {
+      const lead = leads.find((l) => l.team === team);
+      const mine = held.filter((g) => g.team === team).sort((a, b) => a.number - b.number);
+      const issues = mine.slice(0, 4).map((g) => `#${g.number} ${clip(g.title, 40)}`).join(', ') + (mine.length > 4 ? `, +${mine.length - 4}` : '');
+      lines.push(`  ${r.repo.split('/')[1]} ${team}: ${lead ? `Lead ${stateOfRow(lead).word}` : 'no Lead running'}${issues ? `; ${issues}` : '; no issue held'}`);
+    }
+  }
+  return lines;
+}
+
+/** `factory top --brief` (#365): the text of Colly's start hook. What waits on the Human (the frame's first block), the teams of each
+ * repository with the issues they hold, and the `start` events after `after` (the newest few with none), read as bin/factory-events does
+ * without --follow and never touching its cursor. The last line is `seq <n>`, the highest seq in the events file (0 with none), which the
+ * hook keeps so that Colly's Monitor starts with `--after <n>`. */
+export async function briefOf(input, { after = null } = {}) {
+  const { readLines } = await import('./events.mjs');
+  const snap = cleanSnap(input);
+  const all = readLines(input.state);
+  const starts = all.filter((e) => e.type === 'start' && (after === null ? true : e.seq > after));
+  const shown = after === null ? starts.slice(-BRIEF_EVENTS) : starts;
+  const eventLines = shown.map((e) => `  #${e.seq} ${local(Date.parse(e.at), snap.now)} ${e.kind}  ${clean(String(e.text))}`);
+  const waits = waitsOf(snap).map((w) => `  ${w.verb.padEnd(7)}  ${w.text}${w.url ? `  ${w.url}` : ''}`);
+  const teams = teamLines(snap);
+  return [
+    ...(waits.length ? capped(['Waiting on you', ...waits], BRIEF_MAX.waits, 'waiting') : ['Nothing waits on you']),
+    ...(teams.length ? capped(['Teams', ...teams], BRIEF_MAX.teams, 'teams') : ['No team at work']),
+    ...(eventLines.length ? capped([after === null ? 'Newest events' : `Events after seq ${after}`, ...eventLines], BRIEF_MAX.events, 'events') : [after === null ? 'No events yet' : `No events after seq ${after}`]),
+    `seq ${Math.max(0, ...all.map((e) => e.seq))}`,
+  ].join('\n');
+}
+
 async function loop(opts) {
   const out = process.stdout;
   const cache = {};
@@ -974,7 +1111,7 @@ async function loop(opts) {
     if (busy) return;
     busy = true;
     try {
-      snap = await snapshot({ ...opts, cache, now: Date.now() });
+      snap = await snapshot({ ...opts, cache, now: Date.now(), shared: true });
     } catch (error) {
       out.write(`\x1b[Hfactory top: ${firstLine(error)}\x1b[K`);
     } finally {
@@ -1014,6 +1151,17 @@ const colorOf = () => Boolean(process.stdout.isTTY && typeof process.stdout.hasC
 export async function main(argv) {
   const width = argv.includes('--width') ? Number(argv[argv.indexOf('--width') + 1]) : null;
   const color = colorOf();
+  if (argv.includes('--line')) {
+    const snap = await snapshot({ shared: true });
+    process.stdout.write(`${lineOf(snap, { width: width ?? (Number(process.env.COLUMNS) || 80) })}\n`);
+    return;
+  }
+  if (argv.includes('--brief')) {
+    const i = argv.indexOf('--after');
+    const snap = await snapshot({ shared: true });
+    process.stdout.write(`${await briefOf(snap, { after: i === -1 ? null : Number(argv[i + 1]) })}\n`);
+    return;
+  }
   if (argv.includes('--once')) {
     const snap = await snapshot({});
     process.stdout.write(`${render(snap, { width: width ?? process.stdout.columns ?? 200, full: argv.includes('--full'), color })}\n`);

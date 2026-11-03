@@ -57,7 +57,8 @@
 # `factory lead`: the team is a letter then at most 31 lowercase letters and digits, `lead` by default, and is the team of its
 # claims and pull requests; on the Mac mini it runs packs/pstack/bin/lead, on the MacBook it runs that by ssh (the start is
 # described in that file's header).
-# `factory top`: see bin/lib/top.mjs.
+# `factory top`: see bin/lib/top.mjs. `factory top --line [--width N]` prints one status line and `factory top --brief [--after <seq>]`
+# prints the text of Colly's start hook (#365); both exit 0 and, from the MacBook, run on the Mac mini by ssh.
 src=${BASH_SOURCE[0]}
 while [ -L "$src" ]; do
   dir=$(cd -P "$(dirname "$src")" && pwd)

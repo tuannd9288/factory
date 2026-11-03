@@ -62,6 +62,36 @@ test('top takes --once and --width N (digits) and nothing else: the usage, exit 
   }
 });
 
+test('--line and --brief run on the host over ssh with no -t, with their own option passed through (#365)', () => {
+  const s = sandbox();
+  try {
+    s.w('ssh-factory.json', '[]');
+    s.fac('top', '--line');
+    s.fac('top', '--line', '--width', '60');
+    s.fac('top', '--brief', '--after', '12');
+    assert.deepEqual(SSH(s), [
+      "ssh -o ConnectTimeout=10 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory top --line'",
+      "ssh -o ConnectTimeout=10 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory top --line --width 60'",
+      "ssh -o ConnectTimeout=10 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory top --brief --after 12'",
+    ]);
+  } finally {
+    s.done();
+  }
+});
+
+test('--line and --brief take only their own option (digits): the usage, exit 2, and no ssh call (#365)', () => {
+  const s = sandbox();
+  try {
+    for (const args of [['--line', '--after', '1'], ['--brief', '--width', '9'], ['--line', '--once'], ['--brief', '--after', '1x'], ['--line', '--width'], ['--line', '--line'], ['--line', '--brief'], ['--brief', '--after', '1;id']]) {
+      const r = s.fac('top', ...args);
+      assert.equal(r.code, 2, args.join(' '));
+    }
+    assert.deepEqual(SSH(s), []);
+  } finally {
+    s.done();
+  }
+});
+
 test('--full goes through ssh to the host, and on the host it prints the full columns header', () => {
   const s = sandbox();
   try {
