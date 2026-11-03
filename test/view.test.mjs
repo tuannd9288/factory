@@ -1,4 +1,4 @@
-// The overview page (#369): its view model and HTML (bin/lib/page.mjs) and the command that prints them (bin/lib/page-cli.mjs), all on
+// The overview data (#369): its view model (bin/lib/view.mjs) and the command that prints it (bin/lib/view-cli.mjs), all on
 // a hand-built snapshot. Nothing here listens on a port, runs ps or reaches GitHub.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,8 +35,8 @@ const snap = (o = {}) => ({
   ...o,
 });
 
-const { viewOf, pageOf } = await import('../bin/lib/page.mjs');
-const { main } = await import('../bin/lib/page-cli.mjs');
+const { viewOf } = await import('../bin/lib/view.mjs');
+const { main } = await import('../bin/lib/view-cli.mjs');
 const { waitsOf, render } = await import('../bin/lib/top.mjs');
 
 test('viewOf puts what waits on the Human first, and holds no command line, pid, home path or account name', () => {
@@ -59,15 +59,13 @@ test('viewOf keeps a home path out of a string a log or a folder gave', () => {
   assert.ok(!/\/Users\/|\x1b/.test(alert.text), alert.text);
 });
 
-test('pageOf escapes a title with a script in it, and links only to GitHub', () => {
-  const view = viewOf(snap({ repos: [{ repo: 'o/app', other: [], ghStatus: null, groups: [group(1, { title: '<script>alert(1)</script>' })] }], events: [{ kind: 'x', text: 'see', url: 'javascript:alert(1)' }] }));
-  const html = pageOf(view);
-  assert.ok(!html.includes('<script>'));
-  assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
-  assert.ok(!html.includes('javascript:'));
-  assert.match(html, /<title>[^<]+<\/title>/);
-  assert.match(html, /<meta name="apple-mobile-web-app-title" content="[^"]+">/);
-  assert.ok(!/<script|src=|@import|https?:\/\/(?!github\.com)/.test(html), 'nothing from elsewhere');
+test('viewOf keeps a URL only if it points to GitHub', () => {
+  const view = viewOf(snap({ events: [{ kind: 'x', text: 'see', url: 'javascript:alert(1)' }, { kind: 'x', text: 'there', url: 'https://example.com/x' }, { kind: 'x', text: 'ok', url: 'https://github.com/o/app/pull/9' }] }));
+  const urls = [...view.waits.map((w) => w.url), ...view.repos.flatMap((r) => [r.url, ...r.issues.flatMap((i) => [i.url, i.pr?.url])])].filter((u) => u !== undefined);
+  assert.ok(urls.includes('https://github.com/o/app/pull/9'));
+  for (const url of urls) assert.ok(url === '' || /^https:\/\/github\.com\//.test(url), url);
+  assert.equal(view.waits.find((w) => w.text === 'see').url, '');
+  assert.equal(view.waits.find((w) => w.text === 'there').url, '');
 });
 
 /** Runs the command with an injected snapshot and collects what it wrote and what it said on failure. */
@@ -77,23 +75,17 @@ async function run(argv) {
   return out;
 }
 
-test('view prints the view model of the snapshot as JSON', async () => {
-  const r = await run(['view']);
+test('with no argument the command prints the view model of the snapshot as JSON', async () => {
+  const r = await run([]);
   assert.equal(r.code, 0);
   assert.deepEqual(JSON.parse(r.stdout), viewOf(snap()));
 });
 
-test('html prints the page of the snapshot', async () => {
-  const r = await run(['html']);
-  assert.equal(r.code, 0);
-  assert.equal(r.stdout, pageOf(viewOf(snap())));
-});
-
-test('an unknown verb, no verb or an extra argument exits non-zero with the usage line and prints nothing else', async () => {
-  for (const argv of [['serve'], [], ['view', 'x']]) {
+test('any argument exits 2 with the usage line and prints nothing else', async () => {
+  for (const argv of [['view'], ['html'], ['--x', 'y']]) {
     const r = await run(argv);
-    assert.notEqual(r.code, 0, argv.join(' '));
-    assert.match(r.stderr, /^usage: factory-page /);
+    assert.equal(r.code, 2, argv.join(' '));
+    assert.match(r.stderr, /^usage: factory-view/);
     assert.equal(r.stdout, '');
   }
 });

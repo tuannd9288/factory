@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# The overview data (#369, sublayer 1e): bin/factory-view prints the data of `factory top`'s state, as the view model of one fresh
+# snapshot, JSON on stdout. A page will read it once the Human picks where his one page lives.
+# The view model holds, in this order: what waits on the Human, each repository's issues (team, step, pull request with its checks, who it
+# waits on), each account's five-hour and weekly use with its teams, and today with the load, each row with its GitHub link and the age of
+# the reading.
+# Read-only: it writes nothing, starts nothing and reads no credential beyond the gh login that `factory top` already uses. Only the view
+# model's fields are in its output (bin/lib/view.mjs, viewOf): no process command line, environment, pid, token path or home path, and an
+# account by its letter alone; the raw snapshot never is. Any argument exits 2 with the usage line.
+# The page and its hosting wait for the Human's choice (https://github.com/tuannd9288/factory/issues/369#issuecomment-6598838712).
+# Run under the Mac mini's `factory` user, it reads only under that home (~/factory-runs, ~/.local/state/factory, the clones), so the macOS
+# privacy controls (TCC) that AGENTS.md names for ~/Desktop do not apply.
+exec node "$(dirname "$0")/lib/view-cli.mjs" "$@"
