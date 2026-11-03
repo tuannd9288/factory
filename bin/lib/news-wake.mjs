@@ -7,7 +7,9 @@
 //   seat-no-result  a record ended with none, or a run-<tag>.pid whose process is    run and tag
 //                   gone, with no record for it, for SEAT_GRACE_MS (runLive decides)
 //   checks-red      the first required check of an open pull request's head to fail  pull request and head
-//                   (`tier` is left out only while the pull request carries tier-3 or needs-human, when it waits on the Human)
+//                   (`tier` is left out while the pull request carries tier-3 or needs-human, when it waits on the Human, and while
+//                   another required check has not concluded: under Entire it is red until Entire Gates concludes; and while the queue
+//                   re-runs it in this sweep, as pickReruns says: an approval, or Entire's conclusion, after it started)
 //   checks-green    every required check of the head succeeded                       pull request and head
 //   conflict        `mergeable` is CONFLICTING (UNKNOWN, which GitHub says for a while after a push, is none)   pull request and head
 //   merged          the pull request merged                                          pull request
@@ -26,11 +28,11 @@
 // [keys] }. The first sweep that meets a repository or the seats records what is there and wakes nothing. The state is written, through a
 // temporary file and a rename, before any wake, so an event never wakes twice; a post that fails is told in the event's line and not tried
 // again. A key leaves `sent` when its event no longer holds, except a conflict while the same head reads UNKNOWN, and a merged one for 14
-// days. A red event wakes again on the same head when a check told before fails in a run other than the one told (a re-run that failed again,
+// days. A red event wakes again on the same head when a check recorded before fails in a run other than the one recorded (a re-run that failed again,
 // though no sweep saw it not red); the old failed run still counts while a re-run is queued, and a second check failing is no news.
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { failedCheck } from './checks.mjs';
+import { failedCheck, pickReruns } from './checks.mjs';
 import { holders } from './comment-wake.mjs';
 import { appendStart, oneLine } from './events.mjs';
 import { readSessions } from './records.mjs';
@@ -85,21 +87,26 @@ const HUMAN = new Set(['tier-3', 'needs-human']);
  * request (red, green, conflict) and each merged one the query listed. `required` is the checks main requires. A red event holds `runs`,
  * { check name: the run that failed }, which wakeOnNews compares with the sweep before. A red `tier` is left out only while the pull
  * request waits on the Human (the label tier-3 or needs-human, as pickUpdate and humanWaits decide): otherwise it is a failure the Lead fixes. */
-export function detect({ repo, prs, merged = [], required }) {
+export function detect({ repo, prs, merged = [], required, now = Date.now() }) {
   const found = [];
   const url = (n) => `https://github.com/${repo}/pull/${n}`;
   for (const p of prs) {
     const at = `${repo}#${p.number} head ${String(p.head).slice(0, 7)}`;
     const base = { body: p.body ?? '', pr: p.number, where: url(p.number) };
-    const waits = (p.labels ?? []).some((l) => HUMAN.has(l));
-    const red = required.filter((name) => !(name === 'tier' && waits) && failedCheck(p, name));
+    // `tier` is red until another required check concludes where Entire reviews, so it is no failure while any other required check has
+    // not concluded (pending, queued, in progress or missing), nor while the pull request waits on the Human.
+    const unsettled = required.some((name) => name !== 'tier' && (checkOf(p, name)?.state ?? 'PENDING') === 'PENDING');
+    // Nor is it one the queue re-runs in this sweep (pickReruns: an approval, or Entire's conclusion, after it started): that run decides.
+    const tierWaits = unsettled || (p.labels ?? []).some((l) => HUMAN.has(l)) || pickReruns([p]).length > 0;
+    const red = required.filter((name) => !(name === 'tier' && tierWaits) && failedCheck(p, name));
     if (red.length)
       found.push({ ...base, kind: 'checks-red', key: `checks-red ${repo}#${p.number} ${p.head}`, what: `${at}: required check ${red.join(', ')} failed`, runs: Object.fromEntries(red.map((name) => [name, runOf(checkOf(p, name))])) });
     if (required.length && required.every((name) => checkOf(p, name)?.state === 'SUCCESS'))
       found.push({ ...base, kind: 'checks-green', key: `checks-green ${repo}#${p.number} ${p.head}`, what: `${at}: every required check succeeded` });
     if (p.mergeable === 'CONFLICTING') found.push({ ...base, kind: 'conflict', key: `conflict ${repo}#${p.number} ${p.head}`, what: `${at} conflicts with its base` });
   }
-  for (const p of merged)
+  // A merged pull request counts only within the keep window: the list is by update, so an old one that comes back on a comment is no news.
+  for (const p of merged.filter((m) => now - Date.parse(m.mergedAt) < MERGED_KEEP_MS))
     found.push({ kind: 'merged', key: `merged ${repo}#${p.number}`, pr: p.number, body: p.body ?? '', where: url(p.number), what: `${repo}#${p.number} merged`, mergedAt: p.mergedAt });
   return found;
 }
@@ -141,7 +148,7 @@ const logFailure = (what, error) => console.log(`queue: the wake for ${what} fai
  * factory root; `post` is passed in for tests. Returns the seqs of the lines it wrote. It throws for a state it cannot write; an event or a
  * post that fails is told on the console. */
 export function wakeOnNews({ repo, folder, state, runs, data, post = postSync, now = Date.now() }) {
-  const found = detect({ repo, prs: data.prs, merged: data.merged ?? [], required: data.required });
+  const found = detect({ repo, prs: data.prs, merged: data.merged ?? [], required: data.required, now });
   const file = join(state, `queue-${repo.replace('/', '-')}.news`);
   const kept = readJson(file);
   const sent = new Set(strings(kept?.sent));

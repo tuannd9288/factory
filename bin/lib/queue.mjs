@@ -41,7 +41,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, checkPlists, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
-import { RED, failedCheck } from './checks.mjs';
+import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { noteGh, observe, resetNotes } from './events.mjs';
 import { clonesUnder } from './ledger.mjs';
@@ -53,7 +53,6 @@ import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 
 const CALL_MS = 60_000;
-const ENTIRE = 'Entire Gates';
 
 /** The pull request to update now, or null: the oldest one waiting on auto-merge behind its base whose required
  * checks did not fail (a failing one needs a new commit, which the gate judges anyway; a red tier check only waits on
@@ -80,21 +79,8 @@ export function pickUpdate(prs, required, position) {
   return behind[0] ?? null;
 }
 
-/** The tier jobs to re-run, alone, so no reviewer runs again for a click: a failed tier check on a pull request that
- * someone other than its author approved on the head commit after that check started, so an approval landing while
- * the job ran is not lost, or (#155) whose Entire Gates check, of an App other than Actions, concluded after it
- * started. The tier check itself decides whether the approver may approve, and what Entire's conclusion means; it
- * pins Entire's App, so a copy of that name only costs one re-run. */
-export function pickReruns(prs) {
-  return prs
-    .filter((p) => RED.has(p.checks.tier?.state) && p.checks.tier.jobId)
-    .filter(
-      (p) =>
-        p.approvals.some((a) => a.login !== p.author && a.oid === p.head && a.at > p.checks.tier.startedAt) ||
-        (Boolean(p.apps?.[ENTIRE]?.completedAt) && p.apps[ENTIRE].completedAt > p.checks.tier.startedAt),
-    )
-    .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId }));
-}
+// pickReruns is in bin/lib/checks.mjs, where the wake on a Lead's news reads it too (#370); tests and callers still take it from here.
+export { pickReruns };
 
 export const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} ${MERGED_FIELDS} pullRequests(states:OPEN,first:100){nodes{
 number isDraft body mergeable createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
