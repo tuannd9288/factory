@@ -19,7 +19,10 @@
 // AGENTS.md and CLAUDE.md are the repository's own. AGENTS.md has only its Gate block replaced, head and tail as they
 // are; any text without a block, a block with malformed markers, or a result over 150 lines or 32 KiB is a
 // conflict, and nothing is cut. CLAUDE.md is added as the one-line import where missing, and otherwise left as it is (a
-// conflict when it does not reach AGENTS.md). .gate/kit-commit records the factory commit; the old .gate/pack is removed.
+// conflict when it does not reach AGENTS.md). .gitattributes is the repository's own too, and gets the same treatment for the
+// kit's review-categories block (bin/lib/attributes.mjs): the block replaced, head and tail as they are; a text without one gets
+// it at its start, none gets a file of the block alone; malformed markers, CRLF or a link are conflicts.
+// .gate/kit-commit records the factory commit; the old .gate/pack is removed.
 // A module's files (bin/lib/module.mjs) are laid with the kit's, from the modules --modules names, and are stricter:
 // added, left alone or updated from a past module blob; the repository's own file at a module path is a conflict, never
 // kept. The files of a module the base had on and --modules leaves out are removed, or a conflict when the repository
@@ -30,7 +33,8 @@ import { dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { carrierProblems, replaceGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
-import { CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, KIT_COMMIT, SECTION, SETTINGS, blockFor, denyOf, git, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
+import { replaceBlock, insertBlock, splitBlock } from './attributes.mjs';
+import { ATTRIBUTES, BLOCK_FILE, CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, KIT_COMMIT, SECTION, SETTINGS, blockFor, denyOf, git, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
 import { SETTINGS as GATE_SETTINGS, WORKFLOWS, describe, parseOptions, runnerProblems, valuesIn } from './gate-settings.mjs';
 import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { addDeny } from './settings.mjs';
@@ -177,6 +181,7 @@ function instructions({ out, at, repo, factory, fac, name, kit, text }) {
     const bytes = ['100644', '100755', '120000'].includes(hadC.mode) ? git(repo, ['cat-file', 'blob', hadC.oid], 'buffer') : Buffer.alloc(0);
     for (const problem of carrierProblems({ mode: hadC.mode, bytes })) out.conflicts.push(`CLAUDE.md: ${problem}`);
   }
+  attributes({ out, at, repo, factory, kit, text });
   const hadK = at.get(KIT_COMMIT);
   const commitText = `${fac}\n`;
   if (!hadK) {
@@ -192,6 +197,44 @@ function instructions({ out, at, repo, factory, fac, name, kit, text }) {
       out.remove.push('.gate/pack');
       out.removes.push('.gate/pack');
     } else out.droppedKept.push('.gate/pack');
+  }
+}
+
+/** The repository's own .gitattributes: the kit's review-categories block replaced, the head and the tail kept; a text with no
+ * block gets the block at its start (a repository onboarded before the block existed); none gets a file of the block alone. */
+function attributes({ out, at, repo, factory, kit, text }) {
+  const blockEntry = kit.get(BLOCK_FILE);
+  // A factory commit from before the block has no lines for .gitattributes: it is left as it is.
+  if (!blockEntry) return;
+  const block = text(factory, blockEntry.oid);
+  const had = at.get(ATTRIBUTES);
+  if (!had) {
+    out.add.push(ATTRIBUTES);
+    out.writes.push({ path: ATTRIBUTES, mode: '100644', text: block });
+    return;
+  }
+  if (!['100644', '100755'].includes(had.mode)) {
+    out.conflicts.push(`${ATTRIBUTES}: it is not a regular file (mode ${had.mode}); merge it by hand`);
+    return;
+  }
+  const baseText = text(repo, had.oid);
+  const found = splitBlock(baseText);
+  let to;
+  try {
+    if (found.ok) to = replaceBlock(baseText, block);
+    else if (found.problem === 'missing') to = insertBlock(baseText, block);
+    else {
+      out.conflicts.push(`${ATTRIBUTES}: its review-categories markers are ${found.problem}; merge it by hand (one begin line and one end line, the block first)`);
+      return;
+    }
+  } catch (error) {
+    out.conflicts.push(`${ATTRIBUTES}: ${error.message}; merge it by hand`);
+    return;
+  }
+  if (to === baseText) out.same.push(ATTRIBUTES);
+  else {
+    out.update.push(ATTRIBUTES);
+    out.writes.push({ path: ATTRIBUTES, mode: had.mode, text: to });
   }
 }
 
