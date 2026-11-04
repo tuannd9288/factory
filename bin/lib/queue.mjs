@@ -40,7 +40,7 @@ import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync,
 import { hostname, userInfo } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOT, checkPlists, followMain } from './checkout.mjs';
+import { checkPlists, checkoutRoot, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
 import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
@@ -491,19 +491,6 @@ function preflight(state, human, who) {
   writeFileSync(report, `${new Date().toISOString()} ${why}\n`);
   console.error(`factory-queue: ${why}`);
   return 2;
-}
-
-/** The checkout the daemons and bin/seat run from: $FACTORY_CHECKOUT, else this clone when it is ~/WORKSPACES, so a clone anywhere
- * else (a developer's, a test's) is never touched; null otherwise. */
-function checkoutRoot() {
-  const home = process.env.HOME;
-  if (process.env.FACTORY_CHECKOUT) return process.env.FACTORY_CHECKOUT;
-  try {
-    if (home && realpathSync(join(home, 'WORKSPACES')) === realpathSync(ROOT)) return ROOT;
-  } catch {
-    // no ~/WORKSPACES
-  }
-  return null;
 }
 
 /** The first step of a sweep (#257): the checkout the daemons and bin/seat run from follows main, and the installed plists are

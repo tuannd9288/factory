@@ -6,7 +6,7 @@
 // and queue-checkout.failed says why. checkPlists tells the Human when the code now renders a LaunchDaemon plist that differs
 // from the installed one, which only his sudo can replace.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +23,18 @@ const readOr = (path) => {
 };
 const first = (text) => String(text ?? '').trim().split('\n')[0].slice(0, 200);
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** The checkout the daemons and bin/seat run from: $FACTORY_CHECKOUT, else this clone when it is ~/WORKSPACES, so a clone anywhere
+ * else (a developer's, a test's) is never touched; null otherwise. */
+export function checkoutRoot(env = process.env) {
+  if (env.FACTORY_CHECKOUT) return env.FACTORY_CHECKOUT;
+  try {
+    if (env.HOME && realpathSync(join(env.HOME, 'WORKSPACES')) === realpathSync(ROOT)) return ROOT;
+  } catch {
+    // no ~/WORKSPACES
+  }
+  return null;
+}
 
 /** The commit a checkout is at, read from its .git files (no process): null where they cannot tell. */
 export function headOf(root) {
