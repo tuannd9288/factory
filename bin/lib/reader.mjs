@@ -114,6 +114,10 @@ export function commandOf({ side, model, effort }, { input, inputFile, schemaFil
 
 // ---- the reduction --------------------------------------------------------------------------------------------------------
 
+/** A value with every string in it redacted, before it is written as JSON: the escaping (`\"`, `\n`) hides a quoted secret value and a
+ * token after a line break from `redact`, which sees only the escaped text if it runs after. */
+const redactDeep = (v) => (typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(redactDeep) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x)])) : v);
+
 /** What one stream line says, reduced: the assistant's text (redacted) and the names of the tools it called, as `[tool <name>]`. The one
  * input kept is that of `StructuredOutput`, which follows its line as compact JSON (redacted): every seat reports through that call, so
  * the report, with its refusals, lapses and work found outside the issue, is in no text item. A line of any other type, a subagent's (a
@@ -134,7 +138,7 @@ function reduceLine(line) {
       if (i?.type !== 'tool_use' || typeof i.name !== 'string') return [];
       const head = `[tool ${redact(i.name)}]`;
       if (i.name !== 'StructuredOutput' || i.input === undefined) return [head];
-      return [head, redact(typeof i.input === 'string' ? i.input : JSON.stringify(i.input))];
+      return [head, redact(typeof i.input === 'string' ? i.input : JSON.stringify(redactDeep(i.input)))];
     })
     .join('\n');
 }

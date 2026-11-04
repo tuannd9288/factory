@@ -127,6 +127,15 @@ test('the reduction keeps the input of a StructuredOutput call, redacted, and no
   assert.equal(reduce(`${other}\n${sub}\n`), '[tool StructuredOutputX]');
 });
 
+test('a secret in a report string reaches the reduction redacted even when JSON escaping would hide it', async () => {
+  const { reduce } = await reader();
+  const out = reduce(fixture('seat-report.jsonl'));
+  assert.ok(!out.includes('Ab12cd34'), 'a quoted value after a secret name');
+  assert.ok(!out.includes('AKIAABCDEFGHIJKLMNOP'), 'a token after a line break');
+  assert.match(out, /the log said secret: \*\*\* near the top/);
+  assert.match(out, /the log said\\n\*\*\* and went on/);
+});
+
 test('the reduction of a Lead copy drops the lines that are not the assistant\'s own, a subagent\'s included', async () => {
   const { reduce } = await reader();
   const out = reduce(fixture('lead-copy.jsonl'));
