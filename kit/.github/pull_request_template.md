@@ -1,8 +1,13 @@
 **Tóm tắt cho anh**
-<!-- Tier 3 only: delete these lines on tier 1 and 2. This is the repository's only Vietnamese (AGENTS.md, its Language line): plain words, with the terms in English (PR, main, revert, Approve), no commit ids and no file paths. A decision for the Human goes in Đề xuất, numbered, each with your recommendation. A push that makes these lines untrue rewrites them in the same push. The title carries no issue number; the issue is in `Issue:`. -->
-- **Thay đổi:** (anh sẽ thấy gì khác, và PR này làm gì)
-- **Rủi ro:** (có thể hỏng gì; muốn bỏ thì revert PR này)
+<!-- Tier 3 only: delete the two blocks (this one and **TL;DR**) on tier 1 and 2. The Vietnamese block is the repository's only Vietnamese (AGENTS.md, its Language line): plain words, with the terms in English (PR, main, revert, Approve). Each line is one sentence of about 15 words, with no commit id and no file path. A decision for the Human goes in Đề xuất, numbered, each with your recommendation. Add a fourth line, `- **Nếu không trả lời:**` and `- **If no answer:**`, only when silence has a consequence; on a pull request it almost never does. A push that makes these lines untrue rewrites both blocks in the same push. The title carries no issue number; the issue is in `Issue:`. -->
+- **Anh quyết:** (duyệt PR này, và anh sẽ thấy gì khác)
 - **Đề xuất:** (Approve; hoặc điều anh cần quyết trước, đánh số, mỗi điều kèm đề xuất)
+- **Rủi ro:** (có thể hỏng gì; muốn bỏ thì revert PR này)
+
+**TL;DR**
+- **You decide:** (approve this PR, and what you will see change)
+- **Recommendation:** (Approve; or what you must decide first, numbered, each with your recommendation)
+- **Risk:** (what could break; to undo, revert this PR)
 
 <details>
 <summary>The change in detail</summary>
