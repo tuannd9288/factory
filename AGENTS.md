@@ -91,6 +91,14 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   open task, computed in the sweep. T2 off: HumanLayer's phone plugin is not taken. Sources: the bodies of
   https://github.com/tuannd9288/factory/issues/62, /63 (K2), /64 (T1) and /68 (T2); his words:
   https://github.com/tuannd9288/factory/issues/63#issuecomment-6401665776.
+- **Language, 2026-10-25 and 2026-11-04.** The workspace's text is English: codebase, docs and UI text alike. His words,
+  from the chat he relayed on #98: "Không dùng tiếng việt ở workspaces, chỉ giải thích tau bằng tiếng việt, thuật ngữ,
+  code,status ... tiếng anh. Các repo trong workspace thì codebase này kia cũng tiếng anh theo chuẩn quốc tế, UI Text,...
+  thì tuỳ vào dự án." A quote keeps his words. The one exception, from 2026-11-04: a tier-3 pull request's body opens with
+  a short Vietnamese summary for him, `**Tóm tắt cho anh**` and its three lines, which is the repository's only
+  Vietnamese. His "1. ok theo đề xuất." (about 12:05 +07, relayed by Colly) answers Colly's question: "(a) Tiếng Việt, 3
+  dòng như mẫu trên, thay khung tiếng Anh. Đây là ngoại lệ duy nhất của luật 'repo chỉ tiếng Anh', vì khung này chỉ để
+  mày đọc." Sources: https://github.com/tuannd9288/factory/issues/98 and https://github.com/tuannd9288/factory/issues/386.
 - **Control surfaces (#68), 2026-10-25 to 2026-10-31.** The factory runs on Ghostty and Herdr until it is finished,
   and Rex and Paseo are rolled out after that. His words to Colly in chat, relayed by Colly: "trước mắt cứ chạy với
   ghostty + herdr cho hoàn thành cái factory rồi triển khai rex và paseo" (2026-10-29), and "nếu đang bị mở rộng ra thì
@@ -192,7 +200,7 @@ The change sets the tier, by the paths it touches (`.gate/bin/tier`), never the 
 |---|---|---|---|
 | 1 | no tier-2 or tier-3 path | `verify`, `review`, `verdict`, `tier` green on the head commit; `verdict` passes at once | none |
 | 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
-| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the TL;DR |
+| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the Vietnamese summary |
 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
 removed.
@@ -335,8 +343,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
 - Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `## TL;DR for the Human`, in plain English, his only section; the agents' detail is collapsed
-  below it (#386). Its title carries no issue number, which stays in the body.
+  with the kit template's `**Tóm tắt cho anh**` and its three lines, in Vietnamese (Language, in Decisions), his only
+  section; the agents' detail is collapsed below it (#386). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|
@@ -386,7 +394,7 @@ Six steps, run by Colly and a team:
    `--runner`, `--pr-runner`, `--trusted-runner` off GitHub-hosted Ubuntu). The kit pull request carries its evidence
    (`bin/kit-evidence`), whose `settings` lines name all four. Until `main` holds the kit, its `verify` is red (code
    127), and the bootstrap rule requires no check (`bin/onboard`'s own note in the kit pull request body). He
-   approves it as tier 3 from its "TL;DR for the Human" (`kit/.github/pull_request_template.md`).
+   approves it as tier 3 from its "Tóm tắt cho anh" (`kit/.github/pull_request_template.md`).
 4. When it merges, Colly runs `--apply` the second time (`factory-gate` in, `factory-bootstrap` out). The Human's
    approval of the kit pull request covers it. The merge queue then sweeps the repository with nothing more from
    him, and no `sudo` install for each new repository (#211). The queue job's one install is his, together with the
