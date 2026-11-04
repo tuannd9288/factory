@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Rewrites a pull request's body from a file, so a summary that a later push made untrue is fixed in the same turn (#386).
+#   scripts/pr-body <n> <file>
+# Runs only `gh pr edit <n> --body-file <file>` for the current repository: no label, base or reviewer changes. <n> is
+# digits and <file> an existing regular file; any other arguments are refused.
+# Exit 0 the body was set, 1 refused, or gh's own code.
+set -uo pipefail
+if [ "$#" -ne 2 ] || [[ ! "$1" =~ ^[0-9]+$ ]] || [ ! -f "$2" ]; then
+  echo 'usage: scripts/pr-body <number> <file>   (the number in digits, the file an existing regular file)' >&2
+  exit 1
+fi
+exec gh pr edit "$1" --body-file "$2"

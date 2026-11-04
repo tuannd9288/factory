@@ -134,11 +134,17 @@ describe('leadArgs', () => {
       'Bash(cd:*)', 'Bash(ls:*)', 'Bash(mkdir:*)',
       'Bash(.gate/bin/claim:*)', 'Bash(.gate/bin/tier:*)', 'Bash(.gate/bin/verify:*)', 'Bash(.gate/bin/red-check:*)',
       'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
-      'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)',
+      'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
       'Bash(' + root + '/bin/seat:*)',
       'Bash(' + root + '/bin/brief-check:*)',
     ]);
     for (const bad of ['Bash(gh:*)', 'Bash(git:*)']) assert.ok(!list('--allowedTools').includes(bad));
+  });
+
+  test('the Lead edits a pull request\'s body through scripts/pr-body, never gh pr edit (#386)', () => {
+    const allowed = list('--allowedTools');
+    assert.ok(allowed.includes('Bash(scripts/pr-body:*)'));
+    assert.ok(!allowed.some((r) => r.includes('gh pr edit')));
   });
 
   test('the command the Lead ran at 22:05 (gh issue create) is allowed, and gh api is neither denied nor allowed (#277, #343)', () => {
