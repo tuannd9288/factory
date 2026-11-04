@@ -168,6 +168,7 @@ test('the redaction is one function: events.mjs uses it and keeps every pattern 
   assert.equal(redact('ghp_abcdefghijklmnopqrstuvwxyz0123456789 and github_pat_11ABCDEFG0abcdefghij_klmnopqrstuvwxyz'), '[redacted] and [redacted]');
   assert.equal(redact('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123456789'), '[redacted]');
   assert.equal(redact('plain words'), 'plain words');
+  assert.equal(redact('see lin_oauth_abcdefghijklmnop12 and lin_api_ABCDEFGHIJKLMNOP34'), 'see *** and ***');
 });
 
 // ---- the setting ----------------------------------------------------------------------------------------------------------

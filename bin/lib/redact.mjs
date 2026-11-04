@@ -17,6 +17,7 @@ const TOKENS = new RegExp(
     String.raw`\bya29\.[A-Za-z0-9_-]{20,}`,
     String.raw`\bA(?:KIA|SIA)[0-9A-Z]{16}`,
     String.raw`\bnpm_[A-Za-z0-9]{30,}`,
+    String.raw`\blin_(?:oauth|api)_[A-Za-z0-9]{16,}`,
     String.raw`\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}`,
     String.raw`\b(?:hf|gsk|xai)_[A-Za-z0-9]{24,}`,
     String.raw`\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`,
