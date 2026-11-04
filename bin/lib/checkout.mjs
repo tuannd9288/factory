@@ -262,7 +262,7 @@ export function checkPlists({ root, state, plistDir, render = (label, installed)
     renameSync(tmp, file);
   }
   const parts = [
-    ...(differ.length ? [`${differ.join(' ')}: the installed plist differs from what the code renders; the wanted one is in ${wantedDir}; the Human reinstalls it with sudo: bootout the job, SIGTERM the pid in daemon.lock, install, bootstrap`] : []),
+    ...(differ.length ? [`${differ.join(' ')}: the installed plist differs from what the code renders; the wanted one is in ${wantedDir}; the Human reinstalls it with sudo: bootout the job, check that the pid in daemon.lock is a factory-daemon process (ps -p <pid> -o command=) and SIGTERM it, install, bootstrap`] : []),
     ...unrendered,
   ];
   if (parts.length) writeFileSync(report, `${new Date(now).toISOString()} ${parts.join('; ')}\n`);

@@ -3,6 +3,6 @@
 # $FACTORY_STATE/daemon.sock. Only the 60 s job starts it: `bin/factory-queue sweep` starts this detached when nobody answers `ping`, with the
 # job's environment and its output in ~/Library/Logs/factory/daemon.log. Nobody runs it by hand except to see it work; a second one finds the
 # lock (daemon.lock) held and exits. It exits by itself after a pass that moved the checkout (the job's next run starts the new code), when its
-# log passes 10 MiB, and on SIGTERM. The design, the verbs, the store and the difference from piggery are in the header of bin/lib/daemon.mjs;
+# log passes 10 MiB, when no ping has come for 180 s, and on SIGTERM. The design, the verbs, the store and the difference from piggery are in the header of bin/lib/daemon.mjs;
 # the store is $FACTORY_STATE/factory.db (bin/lib/store.mjs).
 exec node "$(dirname "$0")/lib/daemon.mjs" "$@"

@@ -42,7 +42,7 @@ import { chmodSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { LOADED, checkoutRoot, headOf } from './checkout.mjs';
+import { LOADED, ROOT, headOf } from './checkout.mjs';
 import { MAX_LINE, fits, socketPath } from './daemon-proto.mjs';
 // queue.mjs before news-wake.mjs: the modules import each other in a ring, and the queue's constants are built from the comment wake's, so the ring
 // must be entered at the queue, as bin/factory-queue enters it.
@@ -214,10 +214,7 @@ function releaseQueueLock(state) {
 
 /** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow` and `onStart` (told
  * { stop, d } once it listens) are passed in for tests. */
-export async function run({ state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'), human = process.env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = process.env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(process.env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => {
-  const root = checkoutRoot();
-  return root ? headOf(root) : null;
-}, onStart } = {}) {
+export async function run({ state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'), human = process.env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = process.env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(process.env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), onStart } = {}) {
   const sock = socketPath(state);
   if (!fits(sock)) throw new Error(`the socket path ${sock} is longer than 103 bytes`);
   mkdirSync(state, { recursive: true });
