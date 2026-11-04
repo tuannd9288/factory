@@ -4,12 +4,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { factory } from './helpers.mjs';
-import { HOST, check, guard, job, main, pass, readNewest, readNews } from '../bin/lib/relay.mjs';
+import { factory, git } from './helpers.mjs';
+import { HOST, check, follow, job, pass, readNewest, readNews } from '../bin/lib/relay.mjs';
+import { installedRoot } from '../bin/lib/factory.mjs';
 import { plist } from '../bin/lib/queue.mjs';
+
+/** The environment of a MacBook user: nobody here is the factory host's user. */
+const MAC = { FACTORY_HOST_USER: 'nobody-here' };
 
 /** A news line as the Mac mini's sweep writes it. */
 const news = (seq, over = {}) => ({ seq, at: 't', type: 'start', kind: 'checks-red', key: `checks-red o/app#${seq} h`, text: 'ignored', what: `o/app#${seq} head h: a check failed`, where: `https://github.com/o/app/pull/${seq}`, lead: 'app-pstack', woke: false, why: 'no file', ...over });
@@ -190,7 +194,7 @@ test('plist renders a LaunchAgent that runs the relay every 60 s with no user ke
   const home = mkdtempSync(join(tmpdir(), 'relay-home-'));
   const bin = stubs();
   try {
-    const j = job({ HOME: home, PATH: bin });
+    const j = job({ HOME: home, PATH: bin, ...MAC });
     assert.deepEqual(j.env.PATH.split(':'), [bin, '/usr/bin', '/bin', '/usr/sbin', '/sbin']);
     const text = plist(j);
     assert.match(text, /<string>io\.github\.tuannd9288\.factory\.relay<\/string>/);
@@ -205,36 +209,112 @@ test('plist renders a LaunchAgent that runs the relay every 60 s with no user ke
   }
 });
 
-/** A repository on main with one commit, and a linked worktree of it on another branch. */
-function repos() {
-  const dir = mkdtempSync(join(tmpdir(), 'relay-git-'));
-  const git = (cwd, ...args) => spawnSync('git', ['-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
-  const clone = join(dir, 'clone');
-  mkdirSync(clone);
-  git(clone, 'init', '-q', '-b', 'main');
-  git(clone, 'commit', '-q', '--allow-empty', '-m', 'x');
-  const tree = join(dir, 'tree');
-  git(clone, 'worktree', 'add', '-q', tree, '-b', 'side');
-  return { dir, clone, tree, git };
-}
+test('installedRoot: FACTORY_CHECKOUT first, ~/WORKSPACES on the factory host, XDG_DATA_HOME or ~/.local/share on the MacBook', () => {
+  const home = '/home/someone';
+  const host = { HOME: home, FACTORY_HOST_USER: userInfo().username };
+  assert.equal(installedRoot({ ...host, FACTORY_CHECKOUT: '/x/checkout' }), '/x/checkout');
+  assert.equal(installedRoot({ ...MAC, HOME: home, FACTORY_CHECKOUT: '/x/checkout' }), '/x/checkout');
+  assert.equal(installedRoot(host), join(home, 'WORKSPACES'));
+  assert.equal(installedRoot({ ...MAC, HOME: home }), join(home, '.local/share/factory/checkout'));
+  assert.equal(installedRoot({ ...MAC, HOME: home, XDG_DATA_HOME: '/data' }), '/data/factory/checkout');
+  assert.equal(installedRoot({ ...MAC, HOME: home, XDG_DATA_HOME: '' }), join(home, '.local/share/factory/checkout'));
+});
 
-test('a linked worktree is refused by plist and check with a rejection; a clone on another branch is only noted; main is neither', async () => {
-  const r = repos();
+test('the job runs the installed copy, not the clone the code sits in, and keeps the settings that move it', () => {
+  const home = '/home/someone';
   const bin = stubs();
   try {
-    assert.deepEqual(guard(r.clone), { refuse: null, note: null });
-    assert.equal(typeof guard(r.tree).refuse, 'string');
-    r.git(r.clone, 'checkout', '-q', '-b', 'other');
-    const g = guard(r.clone);
-    assert.equal(g.refuse, null);
-    assert.equal(typeof g.note, 'string');
-    // The stub ssh is first on PATH: were the guard not to refuse, `check` would call it and never a real ssh.
-    const env = { HOME: r.dir, PATH: `${bin}:${process.env.PATH}`, FACTORY_HOST_USER: 'nobody-here' };
-    await assert.rejects(main(['plist'], env, r.tree));
-    await assert.rejects(main(['check'], env, r.tree));
+    const j = job({ HOME: home, PATH: bin, ...MAC });
+    const root = join(home, '.local/share/factory/checkout');
+    assert.deepEqual([j.program, j.cwd], [[join(root, 'bin/factory-relay'), 'run'], root]);
+    const named = job({ HOME: home, PATH: bin, ...MAC, FACTORY_CHECKOUT: '/opt/fc', XDG_DATA_HOME: '/data' });
+    assert.deepEqual([named.program[0], named.cwd], ['/opt/fc/bin/factory-relay', '/opt/fc']);
+    assert.deepEqual([named.env.FACTORY_CHECKOUT, named.env.XDG_DATA_HOME], ['/opt/fc', '/data']);
+    assert.ok(![j.program[0], j.cwd].some((p) => p.startsWith(factory)));
   } finally {
     rmSync(bin, { recursive: true, force: true });
-    rmSync(r.dir, { recursive: true, force: true });
+  }
+});
+
+/** An origin (a bare repository) with one commit on main, and the installed copy cloned from it at HOME/.local/share/factory/checkout. */
+function installedWorld() {
+  const dir = mkdtempSync(join(tmpdir(), 'relay-installed-'));
+  const seed = join(dir, 'seed');
+  mkdirSync(seed);
+  git(seed, 'init', '-q', '-b', 'main');
+  const push = (text) => {
+    writeFileSync(join(seed, 'file'), text);
+    git(seed, 'add', '-A');
+    git(seed, 'commit', '-qm', text);
+    git(seed, 'push', '-q', join(dir, 'origin.git'), 'main');
+    return git(seed, 'rev-parse', 'HEAD');
+  };
+  git(seed, 'commit', '-qm', 'first', '--allow-empty');
+  git(dir, 'clone', '-q', '--bare', seed, join(dir, 'origin.git'));
+  const home = join(dir, 'home');
+  const root = join(home, '.local/share/factory/checkout');
+  mkdirSync(join(home, '.local/share/factory'), { recursive: true });
+  git(dir, 'clone', '-q', '--branch', 'main', join(dir, 'origin.git'), root);
+  return { dir, home, root, state: join(dir, 'state'), runs: join(dir, 'runs'), push, head: () => git(root, 'rev-parse', 'HEAD'), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('a pass brings the installed copy to origin/main before it reads the news, and a later commit reaches it with no step by hand', async () => {
+  const w = installedWorld();
+  try {
+    const order = [];
+    const logs = [];
+    const run = () =>
+      pass({
+        state: w.state, root: w.root, runs: w.runs, env: { ...process.env, ...MAC, HOME: w.home }, log: (l) => logs.push(l),
+        newest: () => (order.push(order.includes('follow') ? 'newest' : 'newest-first'), { status: 0, stdout: '1\n', stderr: '' }),
+        follower: (a) => (order.push('follow'), follow(a)),
+      });
+    const tip = w.push('second');
+    assert.notEqual(w.head(), tip);
+    assert.equal(await run(), 0);
+    assert.equal(w.head(), tip);
+    assert.deepEqual(order, ['follow', 'newest']);
+    const next = w.push('third');
+    await run();
+    assert.equal(w.head(), next);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the follow step counts no run live when the run folders hold none, and logs its status only when it differs from the last pass\'s', () => {
+  const w = installedWorld();
+  try {
+    const logs = [];
+    let live;
+    const statuses = [{ status: 'current' }, { status: 'current' }, { status: 'refused', why: 'offline' }, { status: 'refused', why: 'offline' }, { status: 'current' }];
+    const counts = statuses.map((s) => {
+      follow({ root: w.root, state: w.state, runs: w.runs, log: (l) => logs.push(l), move: (a) => ((live = a.live()), s) });
+      return logs.length;
+    });
+    assert.equal(live, 0);
+    assert.deepEqual(counts, [1, 1, 2, 2, 3]);
+    // A raise is told like a refusal, once, and stops nothing.
+    follow({ root: w.root, state: w.state, runs: w.runs, log: (l) => logs.push(l), move: () => { throw new Error('boom'); } });
+    assert.equal(logs.length, 4);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a copy that cannot follow stays where it was, and the refusal is in queue-checkout.failed', async () => {
+  const w = installedWorld();
+  try {
+    const before = w.head();
+    w.push('second');
+    writeFileSync(join(w.root, 'file'), 'a local change');
+    const logs = [];
+    await pass({ state: w.state, root: w.root, runs: w.runs, env: { ...process.env, ...MAC, HOME: w.home }, log: (l) => logs.push(l), newest: () => ({ status: 0, stdout: '1\n', stderr: '' }) });
+    assert.equal(w.head(), before);
+    assert.ok(existsSync(join(w.state, 'queue-checkout.failed')));
+    assert.ok(existsSync(join(w.state, 'relay.cursor')), 'the pass relayed all the same');
+  } finally {
+    w.cleanup();
   }
 });
 
@@ -250,21 +330,42 @@ function command(args, { code = 0, out = '', hostUser = 'nobody-here' } = {}) {
   return { dir, code: r.status, out: r.stdout + r.stderr, calls, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** `check` in this process, with a fake ssh: it answers `--newest` with 4 and logs its calls under HOME. */
-function checkWith({ code = 0, cursor = null, sock = '/agent.sock' } = {}) {
+/** `check` in this process, with a fake ssh: it answers `--newest` with 4 and logs its calls under HOME. A fake launchctl answers `getenv` with
+ * `sock` (the job's SSH_AUTH_SOCK) and `print` with `printed` (null: the job is not loaded). The installed copy is a folder with an executable
+ * bin/factory-relay at the default place under HOME, or, with `copyAt`, a symlink from there to that path under HOME, or, with `copy` false,
+ * none. `state` is a path under HOME; `installed` is the text of an installed plist, `$HOME` standing for HOME. */
+function checkWith({ code = 0, cursor = null, sock = '/agent.sock', printed = null, copyAt = null, copy = true, state: stateAt = 'state', installed = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'relay-check-'));
   writeFileSync(join(dir, 'ssh'), ['#!/bin/sh', 'printf \'%s sock=%s\\n\' "$*" "$SSH_AUTH_SOCK" >>"$HOME/calls"', 'case "$*" in *--newest*) echo 4 ;; esac', `exit ${code}`, ''].join('\n'));
+  writeFileSync(join(dir, 'launchctl'), ['#!/bin/sh', 'case "$1" in', `getenv) printf '%s' '${sock}' ;;`, printed === null ? 'print) exit 113 ;;' : `print) printf '%s\\n' '${printed}' ;;`, 'esac', ''].join('\n'));
   chmodSync(join(dir, 'ssh'), 0o755);
-  const state = join(dir, 'state');
+  chmodSync(join(dir, 'launchctl'), 0o755);
+  const root = join(dir, '.local/share/factory/checkout');
+  const program = (at) => {
+    mkdirSync(join(at, 'bin'), { recursive: true });
+    writeFileSync(join(at, 'bin/factory-relay'), '#!/bin/sh\n');
+    chmodSync(join(at, 'bin/factory-relay'), 0o755);
+  };
+  if (copyAt) {
+    program(join(dir, copyAt));
+    mkdirSync(join(dir, '.local/share/factory'), { recursive: true });
+    symlinkSync(join(dir, copyAt), root);
+  } else if (copy) program(root);
+  if (installed) {
+    mkdirSync(join(dir, 'Library/LaunchAgents'), { recursive: true });
+    writeFileSync(join(dir, 'Library/LaunchAgents/io.github.tuannd9288.factory.relay.plist'), installed.replaceAll('$HOME', dir));
+  }
+  const state = join(dir, stateAt);
   if (cursor !== null) {
-    mkdirSync(state);
+    mkdirSync(state, { recursive: true });
     writeFileSync(join(state, 'relay.cursor'), `${cursor}\n`);
   }
   const was = console.log;
   console.log = () => {};
   let exit;
   try {
-    exit = check({ HOME: dir, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, SSH_AUTH_SOCK: sock });
+    // The test's own SSH_AUTH_SOCK is in the environment `check` is given; only launchctl's reaches the probe.
+    exit = check({ HOME: dir, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, SSH_AUTH_SOCK: 'the-test-own.sock', ...MAC });
   } finally {
     console.log = was;
   }
@@ -284,7 +385,7 @@ test('check fails on a failing ssh and makes the log folder, and never sets a cu
   }
 });
 
-test('check passes when ssh works: it passes SSH_AUTH_SOCK on, sets the cursor to the newest seq only when there is none, and posts nothing', () => {
+test('check passes when ssh works: it passes launchd\'s SSH_AUTH_SOCK on, sets the cursor to the newest seq only when there is none, and posts nothing', () => {
   const none = checkWith();
   const kept = checkWith({ cursor: 9 });
   try {
@@ -295,6 +396,65 @@ test('check passes when ssh works: it passes SSH_AUTH_SOCK on, sets the cursor t
   } finally {
     none.cleanup();
     kept.cleanup();
+  }
+});
+
+test('the ssh probe gets the SSH_AUTH_SOCK launchctl getenv prints, none when that is empty, and never the test\'s own', () => {
+  const none = checkWith({ sock: '' });
+  try {
+    assert.equal(none.exit, 0);
+    assert.ok(none.calls.length > 0 && none.calls.every((c) => c.endsWith('sock=')));
+  } finally {
+    none.cleanup();
+  }
+});
+
+test('check fails, and probes no ssh, when the installed copy, the log or the state folder sits under Desktop, through a symlink too', () => {
+  const state = checkWith({ state: 'Desktop/state' });
+  const clone = checkWith({ copyAt: 'Desktop/clone' });
+  const docs = checkWith({ copyAt: 'Documents/clone' });
+  try {
+    for (const r of [state, clone, docs]) {
+      assert.equal(r.exit, 1);
+      assert.deepEqual(r.calls, []);
+    }
+  } finally {
+    state.cleanup();
+    clone.cleanup();
+    docs.cleanup();
+  }
+});
+
+test('check fails when an installed plist names a path under Desktop, and passes when it names the installed copy', () => {
+  const bad = checkWith({ installed: '<plist><dict><key>ProgramArguments</key><array><string>$HOME/Desktop/x/bin/factory-relay</string><string>run</string></array></dict></plist>' });
+  const good = checkWith({ installed: '<plist><dict><string>$HOME/.local/share/factory/checkout/bin/factory-relay</string><string>run</string></dict></plist>' });
+  try {
+    assert.deepEqual([bad.exit, bad.calls], [1, []]);
+    assert.equal(good.exit, 0);
+  } finally {
+    bad.cleanup();
+    good.cleanup();
+  }
+});
+
+test('check fails when the loaded job last exited with 126 or any code but 0, and passes at 0 or when the job is not loaded', () => {
+  const r126 = checkWith({ printed: '\tlast exit code = 126' });
+  const r0 = checkWith({ printed: '\tlast exit code = 0' });
+  try {
+    assert.deepEqual([r126.exit, r126.calls], [1, []]);
+    assert.equal(r0.exit, 0);
+  } finally {
+    r126.cleanup();
+    r0.cleanup();
+  }
+});
+
+test('check fails when the installed copy is not there', () => {
+  const r = checkWith({ copy: false });
+  try {
+    assert.deepEqual([r.exit, r.calls], [1, []]);
+  } finally {
+    r.cleanup();
   }
 });
 
