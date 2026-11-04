@@ -874,6 +874,9 @@ function issueState(g, all) {
   return { mark: '○', word: 'idle', code: null, rank: 3 };
 }
 
+/** An issue's state as the rows of its own sessions give it (the page's use of issueState). */
+export const issueStateOf = (g) => issueState(g, mergeRounds(g.sessions));
+
 /** The cells of an issue row: its state first, then #n, team, step, the pull request with its checks, and the title last. */
 function issueCells(g, st) {
   return {
@@ -926,9 +929,10 @@ const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer'
 const clean = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
 const cleanDeep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(cleanDeep) : v && Object.getPrototypeOf(v) === Object.prototype ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanDeep(x)])) : v);
 
-/** What waits on the Human, as { verb, text, url } in the frame's order: pull requests to approve, Leads at a prompt or a login, the
- * sweep's conditions, the `*.failed` files. The frame, `--line` and `--brief` all read it, so they never disagree. `snap` is clean. */
-function waitsOf(snap) {
+/** What waits on the Human, as { kind, verb, text, url } in the frame's order: pull requests to approve, Leads at a prompt or a login,
+ * the sweep's conditions, the `*.failed` files. The frame, `--line`, `--brief` and the page's view model all read it, so they never
+ * disagree. `snap` is clean (render's), or its strings are escaped by the caller (the page's). */
+export function waitsOf(snap) {
   const { sessions, queue, now } = snap;
   return [
     ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => ({ kind: 'pr', verb: 'approve', text: `${r.repo}#${g.pr.number} ${g.pr.title}`, url: `https://github.com/${r.repo}/pull/${g.pr.number}` }))),
