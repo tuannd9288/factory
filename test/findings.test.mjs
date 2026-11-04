@@ -95,7 +95,16 @@ test('a repository that cannot be read gets one line, and the others are listed 
   const text = digest([], { since: 'a', until: 'b', findings: list });
   assert.match(text, /\n- o\/a: could not be read \(HTTP 404: Not Found\)\n- o\/b `k-two`: #3, #4 — no enforcer issue yet\n/);
   const none = repeatedKinds(two, { mergedOf: () => { throw new Error('gh refused'); }, enforcerOf });
-  assert.match(digest([], { since: 'a', until: 'b', findings: none }), /## Findings seen on two merged pull requests\n\n- The findings could not be read for any repository \(gh refused\)\.\n/);
+  assert.match(digest([], { since: 'a', until: 'b', findings: none }), /## Findings seen on two merged pull requests\n\n- o\/a: could not be read \(gh refused\)\n- o\/b: could not be read \(gh refused\)\n\n/);
+});
+
+test('a repository that fails beside one with nothing to list is not reported as every repository failing (#408)', () => {
+  const two = [rec('o/a', 'a1', ['k-one']), rec('o/a', 'a2', ['k-one']), rec('o/b', 'b1', ['k-two']), rec('o/b', 'b2', ['k-three'])];
+  const list = repeatedKinds(two, { mergedOf: () => { throw new Error('gh refused'); }, enforcerOf });
+  assert.deepEqual(list, [{ repo: 'o/a', error: 'gh refused' }]);
+  const text = digest([], { since: 'a', until: 'b', findings: list });
+  assert.match(text, /## Findings seen on two merged pull requests\n\n- o\/a: could not be read \(gh refused\)\n\n/);
+  assert.doesNotMatch(text, /o\/b|read for any repository|every repository/);
 });
 
 test('a resumed reviewer counts the findings of each round (#408)', () => {

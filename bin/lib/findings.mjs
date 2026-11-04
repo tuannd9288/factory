@@ -88,6 +88,5 @@ export function findingsSection(findings) {
   const head = ['## Findings seen on two merged pull requests', ''];
   if (findings.error) return [...head, `- ${findings.error}`];
   if (!findings.length) return [...head, '- None.'];
-  if (findings.every((f) => f.error)) return [...head, `- The findings could not be read for any repository (${findings[0].error}).`];
   return [...head, ...findings.map((f) => f.error ? `- ${f.repo}: could not be read (${f.error})` : `- ${f.repo} \`${f.kind}\`: ${f.prs.map((n) => `#${n}`).join(', ')} — ${f.enforcer ? `enforcer #${f.enforcer.number} (${f.enforcer.state})` : 'no enforcer issue yet'}`)];
 }
