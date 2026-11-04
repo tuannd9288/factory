@@ -11,9 +11,9 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
 1. <!--github-->Take an issue labelled `task`: read it with `gh issue view <n>`, then claim it with `.gate/bin/claim <n> {{TEAM}}`. A
    refused claim belongs to another team; take another issue.<!--/github--><!--linear-->List your team's work with
    `factory linear list --team-key {{TEAMKEY}} --status unstarted`, and clear its Triage the same way with `--status triage`; take an issue
-   that has no delegate. Read it with `factory linear read <KEY>`, claim it with `.gate/bin/claim <KEY> {{TEAM}}` (the claim is a
-   GitHub ref, named by the key), then run `factory linear take <KEY> --team {{TEAM}}`: it makes the Factory app the issue's delegate and moves
-   it to In Progress, and assigns no person. A refused claim belongs to another team; take another issue.<!--/linear-->
+   that has no delegate. Read it with `factory linear read <KEY>`, then run `factory linear take <KEY> --team {{TEAM}}`: it makes the Factory
+   app the issue's delegate, moves it to In Progress, assigns no person and comments which team took it. That is the lock: until the gate reads
+   Linear (#407) a repository on Linear has no claim. A refused `take` means another Lead holds the issue; take another issue.<!--/linear-->
 2. Make its run folder and worktree from `main`: `mkdir -p ~/factory-runs/<repo>-<n>`, `git fetch origin`, then
    `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w origin/main`.
 3. Save the issue in the run folder: <!--github-->read it with `gh issue view <n> --json body,comments` and write that output to
@@ -81,7 +81,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    below them, in the template's `<details>` block. When a later push makes the summary untrue, rewrite it in the same
    turn with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was
    opened (the reviewer's raise, a `needs-human` label). The body also carries <!--github-->`Closes #<n>`, so GitHub closes the issue on merge,
-   `Issue: #<n>`,<!--/github--><!--linear-->`Fixes <KEY>`, so Linear closes the issue on merge, `Issue: <KEY>`,<!--/linear--> `Claim: <sha>` and `Team: {{TEAM}}`, outside that block. The title carries no issue number (`ship`
+   `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`,<!--/github--><!--linear-->`Fixes <KEY>`, so Linear closes the issue on merge, `Issue: <KEY>`
+   and `Team: {{TEAM}}` (no `Claim:`: a repository on Linear has no claim),<!--/linear--> outside that block. The title carries no issue number (`ship`
    drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a
@@ -153,4 +154,4 @@ on disk, never only in your context (#185).
   copy): `factory lead <repo> --team {{TEAM}} --new`. A new session first looks for the newest `resume-*.md` in its run
   folder; when it has no `Picked up:` line, it runs pstack's Session pickup on it and on the copies in
   `~/factory-runs/<repo>-{{TEAM}}/transcripts/`, then adds the line `Picked up: <date and time>` to it.
-- **After a compaction or a restart,** read the issue, its pull request, the claim and git before you go on.
+- **After a compaction or a restart,** read the issue, its pull request, <!--github-->the claim<!--/github--><!--linear-->the issue's delegate<!--/linear--> and git before you go on.

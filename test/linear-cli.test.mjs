@@ -82,8 +82,23 @@ test('take sets the app as delegate and the first started status, and names no a
   assert.equal(m.variables.id, 'issue-uuid-1');
   assert.equal(inputOf(m).delegateId, 'app-user-1');
   assert.equal(inputOf(m).stateId, 's-prog', 'Needs Human, also of type started, is not the first started status');
-  assert.equal('assigneeId' in inputOf(m), false);
-  assert.equal(linear.mutations().length, 1);
+  assert.equal(inputOf(m).assigneeId, null, 'no person stays assigned');
+  const ms = linear.mutations();
+  assert.equal(ms.length, 2);
+  assert.equal(inputOf(ms[1]).issueId, 'issue-uuid-1');
+  assert.match(inputOf(ms[1]).body, /factory-otter/);
+  assert.equal(inputOf(ms[1]).createAsUser, 'factory-otter');
+});
+
+test('take is the lock: it refuses an issue whose delegate is already the app, and writes nothing', async () => {
+  const { run, linear } = setup();
+  linear.issue.delegate = { id: 'app-user-1' };
+  const r = await run(['take', 'FAC-12', '--team', 'factory-otter']);
+  assert.equal(r.code, 1);
+  assert.match(r.out.error, /held/);
+  assert.equal(linear.mutations().length, 0);
+  linear.issue.delegate = { id: 'someone-else' };
+  assert.equal((await run(['take', 'FAC-12', '--team', 'factory-otter'])).code, 0, 'a delegate that is not the app does not hold it');
 });
 
 test('read gives the issue and every comment with its author, across pages', async () => {

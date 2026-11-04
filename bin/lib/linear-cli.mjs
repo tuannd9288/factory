@@ -1,7 +1,8 @@
 // `factory linear <verb>` (#404, sublayer 1b): the steps a Lead needs on a repository on Linear, and the one step that puts a repository there.
 // It runs on the factory host and calls Linear itself through createLinear (bin/lib/linear.mjs, #403), which reads the app's token in this
 // process; on the MacBook bin/lib/factory.mjs runs the same command on the host by ssh. No free-form GraphQL is offered.
-//   take <KEY> --team <team>                    the app becomes the delegate; the issue moves to its team's first `started` status; no assignee
+//   take <KEY> --team <team>                    the app becomes the delegate, no person is assigned, the issue moves to its team's first `started`
+//                                               status, and one comment names the team; refused when the app is already the delegate (the lock)
 //   read <KEY>                                  title, description, status, delegate, assignee and every comment, as JSON
 //   comment <KEY> --team <team> --body-file -   one comment, shown as "<team> (via Factory)"
 //   ask <KEY> --team <team> --body-file -       status Needs Human, the Human assigned, one comment (the question and its tick boxes)
@@ -82,7 +83,7 @@ export function createCli({ api, state, readStdin }) {
   const q = (query, vars) => api.request(query, vars);
 
   async function issueTeam(key) {
-    const issue = (await q(`query($id: String!) { issue(id: $id) { id identifier team { id key ${STATES} } } }`, { id: key }))?.issue;
+    const issue = (await q(`query($id: String!) { issue(id: $id) { id identifier delegate { id } team { id key ${STATES} } } }`, { id: key }))?.issue;
     if (!issue) throw new Refused(`Linear has no issue ${key}`);
     return issue;
   }
@@ -109,12 +110,15 @@ export function createCli({ api, state, readStdin }) {
     return nodes[0].id;
   }
 
+  /** The lock of a repository with no gate to claim in (#407 makes the gate read Linear): an issue whose delegate is already the app is held. */
   async function take({ args: [key], flags }) {
     const issue = await issueTeam(key);
     const to = started(issue);
     const delegateId = await api.appUserId();
-    done(await update(issue.id, { delegateId, stateId: to.id }), 'issueUpdate');
-    return { ok: true, key, status: to.name, delegate: 'app', assignee: null, team: flags['--team'] };
+    if (issue.delegate?.id === delegateId) throw new Refused(`${key} is held: the Factory app is already its delegate; another Lead has it, take another issue`);
+    done(await update(issue.id, { delegateId, assigneeId: null, stateId: to.id }), 'issueUpdate');
+    const c = done(await api.commentCreate({ issueId: issue.id, body: `Taken by team ${flags['--team']}.`, team: flags['--team'] }), 'commentCreate');
+    return { ok: true, key, status: to.name, delegate: 'app', assignee: null, team: flags['--team'], commentId: c.comment?.id ?? null };
   }
 
   async function read({ args: [key] }) {
