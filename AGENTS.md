@@ -91,7 +91,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   open task, computed in the sweep. T2 off: HumanLayer's phone plugin is not taken. Sources: the bodies of
   https://github.com/tuannd9288/factory/issues/62, /63 (K2), /64 (T1) and /68 (T2); his words:
   https://github.com/tuannd9288/factory/issues/63#issuecomment-6401665776.
-- **Language, 2026-10-25 and 2026-11-04.** The workspace's text is English: codebase, docs and UI text alike. His words,
+- **Language, 2026-10-25 and 2026-11-04.** The workspace's code and docs are English; UI text depends on the project. His words,
   from the chat he relayed on #98: "Không dùng tiếng việt ở workspaces, chỉ giải thích tau bằng tiếng việt, thuật ngữ,
   code,status ... tiếng anh. Các repo trong workspace thì codebase này kia cũng tiếng anh theo chuẩn quốc tế, UI Text,...
   thì tuỳ vào dự án." A quote keeps his words. The one exception, from 2026-11-04: a tier-3 pull request's body opens with

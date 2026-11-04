@@ -57,7 +57,8 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    with no commit ids and no file paths; it is the repository's only Vietnamese. Any decision for the Human is numbered in
    Đề xuất, each with your recommendation; on tier 1 and 2 leave the lines out. Your detail goes below them, in the
    template's `<details>` block. When a later push makes the summary untrue, rewrite it in the same turn with
-   `scripts/pr-body <n> <file>`. The body also carries `Closes #<n>`, so GitHub closes the issue on merge,
+   `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was opened (the
+   reviewer's raise, a `needs-human` label). The body also carries `Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`, outside that block. The title carries no issue number (`ship`
    drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
    the pull request.

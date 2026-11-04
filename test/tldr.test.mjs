@@ -127,6 +127,23 @@ describe('the summary of a kit pull request', () => {
     assert.equal(bullet(onboardTldr('app', STAY), 'Rủi ro'), bullet(onboardTldr('app', block(...rowsOf(NONE))), 'Rủi ro'));
   });
 
+  test('Rủi ro follows the reviewer of the base, which is the one that runs the review', () => {
+    const risk = (...rows) => bullet(kitUpdateTldr('app', COUNTS, block(...rows)), 'Rủi ro');
+    const plain = (reviewer) => risk(...rowsOf(reviewer));
+    assert.equal(risk(...rowsOf(`${NONE}, CHANGED from claude`)), plain('claude'));
+    assert.equal(risk(...rowsOf(`claude, CHANGED from ${NONE}`)), plain(NONE));
+    const unseen = risk(...rowsOf(`claude${UNSEEN}`));
+    assert.notEqual(unseen, plain('claude'));
+    assert.notEqual(unseen, plain(NONE));
+    assert.equal(unseen, plain('claude').replace(' Review AI chạy trên PR này.', ''));
+  });
+
+  test('Thay đổi counts the changed settings and the unseen ones apart', () => {
+    const mixed = bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Thay đổi');
+    assert.match(mixed, /\b2 cài đặt của gate đổi\b/);
+    assert.match(mixed, /\b1 cài đặt chuyển vào file của gate\b/);
+  });
+
   test('the command reads the evidence on stdin, and a call it does not know prints no summary', () => {
     const file = join(factory, 'bin/lib/tldr.mjs');
     const call = (...args) => spawnSync(process.execPath, [file, ...args], { input: STAY, encoding: 'utf8' });

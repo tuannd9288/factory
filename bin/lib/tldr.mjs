@@ -38,8 +38,9 @@ function plain(words, value) {
   }
 }
 
-/** The gate's settings as the evidence lists them: [{ name, value, raw, changed, from }] in words, or [] if none. `raw` is the
- * value as printed; `from` is what a changed setting was, or '' when the base held it in a form the kit does not use. */
+/** The gate's settings as the evidence lists them: [{ name, value, raw, changed, from, fromRaw }] in words, or [] if none. `raw` is
+ * the value as printed; `from` is what a changed setting was, in words, and `fromRaw` as printed; both are '' when the base held
+ * it in a form the kit does not use. */
 export function settingsOf(evidence) {
   const lines = evidence.split('\n');
   const at = lines.findIndex((l) => l.startsWith('settings ('));
@@ -51,14 +52,15 @@ export function settingsOf(evidence) {
     const v = m?.[2].match(VALUE);
     const words = m?.[1];
     if (!v) {
-      rows.push({ name: NAMES[words] ?? l.trim(), value: '', raw: '', changed: false, from: '' });
+      rows.push({ name: NAMES[words] ?? l.trim(), value: '', raw: '', changed: false, from: '', fromRaw: '' });
       continue;
     }
-    const row = { name: NAMES[words] ?? words, value: plain(words, v[1]), raw: v[1], changed: false, from: '' };
+    const row = { name: NAMES[words] ?? words, value: plain(words, v[1]), raw: v[1], changed: false, from: '', fromRaw: '' };
     if (v[2]?.startsWith('CHANGED')) {
       row.changed = true;
       const was = v[2].match(/^CHANGED from (.*)$/)?.[1].match(VALUE);
       row.from = was ? plain(words, was[1]) : '';
+      row.fromRaw = was ? was[1] : '';
     }
     rows.push(row);
   }
@@ -85,9 +87,11 @@ function settingDecisions(changed) {
   return parts.join(' ');
 }
 
-/** The review clause follows the head's reviewer: none, a test stand-in, or a real review. */
+/** The review clause follows the reviewer that runs on this pull request: main's copy of gate-trusted.yml, so the base's value
+ * for a changed row (none when the factory cannot see it), else the row's own. */
 function reviewClause(rows) {
-  const reviewer = rows.find((r) => r.name === NAMES['the reviewer'])?.raw;
+  const row = rows.find((r) => r.name === NAMES['the reviewer']);
+  const reviewer = row?.changed ? row.fromRaw : row?.raw;
   if (reviewer === undefined || reviewer === '') return '';
   if (reviewer === NO_REVIEWER) return ' Chưa có reviewer nên không có review AI nào chạy.';
   if (reviewer === 'stub') return ' Chỉ reviewer giả để test chạy, không phải review thật.';
@@ -107,12 +111,15 @@ export function kitUpdateTldr(name, { added, updated, removed, kept }, evidence)
   const rows = settingsOf(evidence);
   const changed = rows.filter((r) => r.changed);
   const moves = changed.filter((r) => r.from);
+  const unseen = changed.length - moves.length;
   const touches = updated + removed;
   const settings = !changed.length
     ? ' Cài đặt của gate giữ nguyên.'
-    : moves.length
-      ? ` ${changed.length} cài đặt của gate đổi, xem Đề xuất.`
-      : ` ${changed.length} cài đặt của gate chuyển vào file của gate, xem Đề xuất.`;
+    : !unseen
+      ? ` ${moves.length} cài đặt của gate đổi, xem Đề xuất.`
+      : !moves.length
+        ? ` ${unseen} cài đặt của gate chuyển vào file của gate, xem Đề xuất.`
+        : ` ${moves.length} cài đặt của gate đổi, ${unseen} cài đặt chuyển vào file của gate, xem Đề xuất.`;
   return section({
     'Thay đổi': `kit trong ${name} lên bản factory mới: thêm ${added} file, cập nhật ${updated}, bỏ ${removed}; ${kept} file riêng của repo giữ nguyên.${settings}`,
     'Rủi ro': `${touches ? `Sửa ${touches} file repo đã có.` : 'Không sửa file nào repo đã có.'}${reviewClause(rows)} ${REVERT}`,
