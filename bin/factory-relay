@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # The MacBook's relay of a Lead's news (#370, slice 2), run by launchd under the Human's own user:
-#   bin/factory-relay run     one pass, then exit: read the Mac mini's news lines by ssh and post each one the Mac mini could not deliver
+#   bin/factory-relay run     one pass, then exit: bring the installed copy of the factory to origin/main (by followMain, never under a
+#                             live run), then read the Mac mini's news lines by ssh and post each one the Mac mini could not deliver
 #                             (no Lead runs there) into the socket file of the Lead that runs on this Mac
-#   bin/factory-relay plist   print the LaunchAgent io.github.tuannd9288.factory.relay for ~/Library/LaunchAgents: `run` every 60 s, no
-#                             sudo, never KeepAlive, logging to ~/Library/Logs/factory/relay.log
-#   bin/factory-relay check   in that job's environment: makes the log's folder and says whether ssh to the Mac mini and the read of its
-#                             news work with no prompt, so whether the job is ready; it sets the first cursor and relays nothing
-# `plist` and `check` run from the clone itself: they refuse a linked worktree (exit 2) and note a branch other than main.
+#   bin/factory-relay plist   print the LaunchAgent io.github.tuannd9288.factory.relay for ~/Library/LaunchAgents: `run` every 60 s from the
+#                             installed copy, no sudo, never KeepAlive, logging to ~/Library/Logs/factory/relay.log
+#   bin/factory-relay check   in that job's environment: makes the log's folder, fails when a path of the job or of the installed plist sits
+#                             under ~/Desktop, ~/Documents, ~/Downloads or ~/Library/Mobile Documents (macOS refuses a launchd job those) or
+#                             when the loaded job's last exit code is not 0, and says whether ssh to the Mac mini (with launchd's
+#                             SSH_AUTH_SOCK) and the read of its news work with no prompt; it sets the first cursor and relays nothing
+# The installed copy is $FACTORY_CHECKOUT, else ${XDG_DATA_HOME:-~/.local/share}/factory/checkout (installedRoot, bin/lib/factory.mjs): any
+# clone may run `plist` and `check`, and none changes what the job runs (#390).
 # bin/lib/relay.mjs has the rules. It calls no gh and reads no token; it refuses to run as the factory host's user, where the sweep delivers.
-# The Human installs the job with `cp <plist> ~/Library/LaunchAgents/io.github.tuannd9288.factory.relay.plist`, loads it with
-# `launchctl bootstrap gui/$(id -u) <that path>` and stops it with `launchctl bootout gui/$(id -u)/io.github.tuannd9288.factory.relay`.
+# The Human installs and loads the job with bin/install-factory, which writes the plist, unloads the old job, loads the new one and runs `check`;
+# he stops the job with `launchctl bootout gui/$(id -u)/io.github.tuannd9288.factory.relay`.
 PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 export PATH
 command -v node >/dev/null 2>&1 || { echo "factory-relay: node is not on PATH ($PATH)" >&2; exit 127; }

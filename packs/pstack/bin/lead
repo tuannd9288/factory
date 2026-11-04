@@ -10,8 +10,8 @@
 # The Human starts a repository's pstack Lead, an interactive session, with `factory lead <repo>` (#163, #166), which runs this
 # file of the factory clone on the Mac mini. Every day he attaches from the MacBook with `herdr --remote factory@tuans-mac-mini`
 # (through Rex or any terminal) and runs `factory lead <repo>` in a pane there; from any MacBook terminal without Herdr,
-# `factory lead <repo>` does the same over ssh. `factory` is on the PATH of each machine by bin/install-factory, which he runs
-# once on the MacBook and `factory` runs once on the Mac mini (#177). `factory lead [--team <name>]` starts the Lead of one team
+# `factory lead <repo>` does the same over ssh. `factory` is on the PATH of each machine by bin/install-factory, as a link into the
+# machine's installed copy of the factory (#390); he runs it once on the MacBook and `factory` runs once on the Mac mini (#177). `factory lead [--team <name>]` starts the Lead of one team
 # (#196), named `<repo>-<team>` with its folder ~/factory-runs/<repo>-<team>/; the team is the claim's team (lead.md takes it
 # from the launcher), `lead` when none is given, and each team has its own account row, factory/<repo>-<team> (#311).
 # A new session gets the role text as its system prompt, with its own id from --session-id (the role.sha record is in lead.mjs).
