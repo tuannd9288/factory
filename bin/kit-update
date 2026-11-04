@@ -11,6 +11,10 @@
 #   - the gate's settings (#335), which the three workflows hold, are carried from the base; --reviewer, --runner,
 #     --pr-runner and --trusted-runner change one, in the form bin/onboard takes. A base whose workflows still read the
 #     repository variables (the kit before #335) holds none, so its update must name each from its variable's value;
+#   - the kit's review-categories block of .gitattributes (kit/.gate/review-categories, #380) is replaced and nothing else of it,
+#     as the Gate block is; a .gitattributes with no block gets it at its start, none gets a file of the block alone; malformed
+#     markers, CRLF, a link, or an untracked file there when the base has none, stop it, to merge by hand. A .gitignore that ignores an untracked .gitattributes does not keep
+#     it out: that one path is added with git add -f;
 #   - a .claude/settings.json the repository has gets the kit's deny lines it lacks inserted as text, as onboard does;
 #   - a kit file the repository lacks is added; one it holds as an older kit had it is replaced by the kit's;
 #   - a kit file the repository changed is kept and named; the repository's own scripts/ and .githooks/ are not the kit's
@@ -33,7 +37,7 @@
 # verify and evidence. A CODEOWNERS the repository changed is kept (named in the pull request), so the kit's newer lines do not
 # reach it. The old layout, where the kit shipped its commands in scripts/ and replaced the repository's hooks, is refused with
 # the Human told to onboard it afresh. The evidence names each updated file with the blob it had, and fails a pull request that
-# changes the repository's head or tail of AGENTS.md.
+# changes the repository's head or tail of AGENTS.md or of .gitattributes.
 # The gate judges the block of such a pull request too: .gate/bin/verify-trusted reads the candidate's git objects before it
 # lays main's protected files over them, and a block, .gate/gate-section.md or .gate/kit-commit that differs from the base's
 # passes only when the commit .gate/kit-commit names is on the first-parent line of the main of tuannd9288/factory (public: it
@@ -155,7 +159,12 @@ rm -f .gate/kit-files .gate/modules
   [ -z "$modules" ] || echo .gate/modules
 } | LC_ALL=C sort -u >.gate/kit-files
 .gate/bin/setup
+# A repository whose own .gitignore ignores .gitattributes and does not track it (a root allowlist) still gets it: the
+# kit's block is the one path added with -f.
+ignored=0
+git check-ignore -q .gitattributes && ignored=1
 git add -A
+[ "$ignored" -eq 0 ] || git add -f -- .gitattributes
 if git diff --cached --quiet; then
   if [ "$before" = HEAD ]; then git switch --quiet --detach "$before_sha"; else git switch --quiet "$before"; fi
   git branch --quiet -D "$branch"
@@ -196,7 +205,7 @@ grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.g
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
 gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
 **What changed:** Brings the kit of $name up to factory \`$sha7\`: $(n added) $([ "$(n added)" -eq 1 ] && echo file || echo files) added, $(n updated) updated, $(n removed) removed; $(n kept) of the repository's own files kept as they were.
-**Effect:** \`.gate/kit-commit\` names the factory commit; \`.gate/kit-files\` is rewritten for the new kit; kit files the repository changed itself are kept, named below; \`AGENTS.md\` has only its \`## Gate\` block replaced, its head and tail are the repository's, and so is \`CLAUDE.md\`.$note$modnote
+**Effect:** \`.gate/kit-commit\` names the factory commit; \`.gate/kit-files\` is rewritten for the new kit; kit files the repository changed itself are kept, named below; \`AGENTS.md\` has only its \`## Gate\` block replaced, its head and tail are the repository's, and so is \`CLAUDE.md\`. \`.gitattributes\` has only the kit's review-categories block replaced (or put at its start); the repository's own lines come after it and win.$note$modnote
 **Evidence:** \`bin/kit-evidence\` PASS for factory commit \`$sha7\`; the full \`.gate/bin/verify\` was green before the push.
 
 ---

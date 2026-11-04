@@ -17,6 +17,8 @@
 // AGENTS.md and CLAUDE.md are the repository's own and no kit file. AGENTS.md is the base's text with the kit's Gate block
 // put in (a title line and the block where the base had none; with --own, any text the repository prepared, shown in full),
 // or, where the base had a block, the base's head and tail with the block of the kit at this factory commit.
+// .gitattributes is the repository's own too: the base's text with the kit's review-categories block (kit/.gate/review-categories,
+// bin/lib/attributes.mjs) at its start, or only the block where there was none; a base with a block keeps its head and tail.
 // CLAUDE.md is the base's, byte for byte and mode, or the one-line import where there was none. A managed file that is none
 // of these, one missing, or a path the pull request changes outside the inventory fails it. The result names the factory
 // commit, the kit's tree, the repository's id, base and head, so it holds for those and nothing else. See bin/kit-evidence
@@ -27,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { MODULES_FILE, mergedTree, offFiles, parseModules } from './module.mjs';
 import { carrierProblems, insertGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { HOOK, NATIVE, adapterBlock } from './adapter.mjs';
+import { ATTRIBUTES, BLOCK_FILE, insertBlock, splitBlock } from './attributes.mjs';
 import { DEFAULTS, FILLED, SETTINGS as GATE_SETTINGS, WORKFLOWS, describe, render, runnerProblems, shown, valuesIn, valuesOf } from './gate-settings.mjs';
 import { addDeny } from './settings.mjs';
 
@@ -36,6 +39,7 @@ export const CONFIG = '.gate/config.sh';
 export { FILLED, render };
 export const KIT_COMMIT = '.gate/kit-commit';
 export const SECTION = '.gate/gate-section.md';
+export { ATTRIBUTES, BLOCK_FILE };
 // The repository's own, which the kit puts its block in or leaves alone: no kit file, and never in the inventory.
 export const INSTRUCTION_FILES = ['AGENTS.md', 'CLAUDE.md'];
 export const UNTOUCHED = (path) => path.startsWith('scripts/') || path.startsWith('.githooks/');
@@ -147,6 +151,24 @@ function judgeAgents({ text, baseText, section, name, own }) {
     return text === insertGate(baseText, section) ? { fails: [] } : { fails: ["not the repository's own text with the kit's block inserted"] };
   } catch (error) {
     return { fails: [`the base cannot take the block: ${error.message}`] };
+  }
+}
+
+/** The failures of the head's .gitattributes against the base's and the kit's block: the block is the kit's file at the
+ * factory commit, and outside it the text is the base's (the head and the tail as they were), or, where the base had no
+ * block, the base's text with the block inserted; where the base had none, the block alone. */
+function judgeAttributes({ text, baseText, block }) {
+  const found = splitBlock(text);
+  if (!found.ok) return [`the review-categories block is ${found.problem}`];
+  if (found.block !== block) return ["the review-categories block is not the kit's at this factory commit"];
+  if (baseText === null) return text === block ? [] : ['the repository had none: the block, nothing else'];
+  const base = splitBlock(baseText);
+  if (base.ok) return base.head === found.head && base.tail === found.tail ? [] : ["a change of the block leaves the head and the tail as the base has them; they differ (the rest is the repository's)"];
+  if (base.problem !== 'missing') return [`the base's review-categories markers are ${base.problem}`];
+  try {
+    return text === insertBlock(baseText, block) ? [] : ["not the repository's own lines with the kit's block inserted at the start"];
+  } catch (error) {
+    return [`the base cannot take the block: ${error.message}`];
   }
 }
 
@@ -306,6 +328,24 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
     } else if (haveC.mode !== '100644' || blob(repo, haveC.oid) !== '@AGENTS.md\n') fails.push('differs: CLAUDE.md (the repository had none: the one-line import @AGENTS.md)');
     else instructions.push('CLAUDE.md: added, the one-line import');
   }
+  // .gitattributes is the repository's own too: its text with the kit's review-categories block at the start.
+  const categories = [];
+  const blockEntry = kit.get(BLOCK_FILE);
+  const kitBlock = blockEntry ? blob(factory, blockEntry.oid) : null;
+  const haveG = now.get(ATTRIBUTES);
+  const hadG = at.get(ATTRIBUTES);
+  if (kitBlock === null) {
+    // A factory commit from before the block: the kit has no lines for .gitattributes, so the pull request leaves it as it was.
+    if (haveG?.oid !== hadG?.oid || haveG?.mode !== hadG?.mode) fails.push(`extra: ${ATTRIBUTES} (the kit at this factory commit holds no ${BLOCK_FILE}, so it is not the kit's to change)`);
+  } else if (!haveG) fails.push(`missing: ${ATTRIBUTES}`);
+  else if (!['100644', '100755'].includes(haveG.mode) || (hadG && hadG.mode !== haveG.mode)) fails.push(`differs: ${ATTRIBUTES} (mode ${haveG.mode}${hadG ? `, the repository's ${hadG.mode}` : ''}; a regular file, as the repository had it)`);
+  else {
+    const baseText = hadG ? blob(repo, hadG.oid) : null;
+    const text = blob(repo, haveG.oid);
+    const problems = judgeAttributes({ text, baseText, block: kitBlock });
+    for (const f of problems) fails.push(`differs: ${ATTRIBUTES} (${f})`);
+    if (!problems.length) categories.push(`${ATTRIBUTES}: ${baseText === null ? 'the block, nothing else' : "the repository's own lines, with the block at the start, the rest as the base had it"} (${text.split('\n').length - (text.endsWith('\n') ? 1 : 0)} lines)`);
+  }
   const haveK = now.get(KIT_COMMIT);
   if (!haveK) fails.push(`missing: ${KIT_COMMIT}`);
   else if (haveK.mode !== '100644' || blob(repo, haveK.oid) !== `${fac}\n`) fails.push(`differs: ${KIT_COMMIT} (the factory commit ${fac} and a newline)`);
@@ -316,7 +356,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   const listed = new Set(at.get(INVENTORY) ? blob(repo, at.get(INVENTORY).oid).split('\n').filter(Boolean) : []);
   const changed = git(repo, ['diff', '--name-only', '-z', '--no-renames', baseSha, headSha]).split('\0').filter(Boolean);
   for (const path of changed) {
-    if (kit.has(path) || [INVENTORY, KIT_COMMIT, MODULES_FILE, ...INSTRUCTION_FILES].includes(path)) continue;
+    if (kit.has(path) || [INVENTORY, KIT_COMMIT, MODULES_FILE, ATTRIBUTES, ...INSTRUCTION_FILES].includes(path)) continue;
     const had = at.get(path);
     // The pack file of the old kit: the kit lays none now, so an update removes it.
     if (path === '.gate/pack' && had && !now.has(path)) {
@@ -356,6 +396,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   ];
   if (fails.length) lines.push('failures:', ...fails.map((f) => `  ${f}`));
   lines.push("instructions (the repository's own AGENTS.md and CLAUDE.md; the kit's part is the Gate block):", ...(instructions.length ? instructions.map((l) => `  ${l}`) : ['  none']));
+  lines.push("review categories (the repository's own .gitattributes; the kit's part is the block at its start):", ...(categories.length ? categories.map((l) => `  ${l}`) : ['  none']));
   lines.push('rendered (bin/onboard fills these in):', ...(rendered.length ? rendered.map((l) => `  ${l}`) : ['  none']));
   lines.push("settings (the gate's, as the head's workflows hold them; a pull request changes one at tier 3):", ...describe(settings, moved).map((l) => `  ${l}`));
   if (merged.length) lines.push("merged (the repository's own file with the kit's deny lines inserted as text; every other byte is the base's):", ...merged.map((p) => `  ${p}`));
