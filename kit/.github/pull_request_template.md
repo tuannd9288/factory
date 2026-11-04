@@ -1,12 +1,8 @@
-## TL;DR for the Human
-<!-- Tier 3 only: delete this whole section on tier 1 and 2. The title carries no issue number; the issue is in `Issue:`. Plain English for a reader who is not technical; no commit ids, no file paths. Any decision for the Human goes in its last line, numbered, each with your recommendation. -->
-- **What you will see:** (what looks or behaves differently to you, in a sentence or two)
-- **What changes:** (what this pull request does)
-- **What it fixes:** (the problem or the need behind it)
-- **Risk and how to undo:** (what could go wrong; to undo, ...)
-- **Recommendation:** (approve, or what to decide first, and why)
-- **Tier and evidence:** (tier 3, and in plain words what the automatic checks and the independent AI review found)
-- **Decisions for you:** none | 1. <question> Recommendation: <answer>. 2. ...
+**Tóm tắt cho anh**
+<!-- Tier 3 only: delete these lines on tier 1 and 2. This is the repository's only Vietnamese (AGENTS.md, its Language line): plain words, with the terms in English (PR, main, revert, Approve), no commit ids and no file paths. A decision for the Human goes in Đề xuất, numbered, each with your recommendation. A push that makes these lines untrue rewrites them in the same push. The title carries no issue number; the issue is in `Issue:`. -->
+- **Thay đổi:** (anh sẽ thấy gì khác, và PR này làm gì)
+- **Rủi ro:** (có thể hỏng gì; muốn bỏ thì revert PR này)
+- **Đề xuất:** (Approve; hoặc điều anh cần quyết trước, đánh số, mỗi điều kèm đề xuất)
 
 <details>
 <summary>The change in detail</summary>

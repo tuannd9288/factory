@@ -330,7 +330,7 @@ if ! evidence=$("$factory/bin/kit-evidence" --factory "$factory" --commit "$kit_
   exit 1
 fi
 tldr=$(node "$factory/bin/lib/tldr.mjs" onboard "$name" <<<"$evidence") || tldr=""
-[ -n "$tldr" ] || { echo "onboard: the TL;DR for the Human is empty; factory/kit is committed, not pushed, and no pull request is open"; exit 1; }
+[ -n "$tldr" ] || { echo "onboard: the opening summary for the Human is empty; factory/kit is committed, not pushed, and no pull request is open"; exit 1; }
 for label in tier-1 tier-2 tier-3 needs-human raised task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
 git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
