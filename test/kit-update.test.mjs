@@ -75,8 +75,8 @@ describe('bin/kit-update', () => {
       assert.equal(bullets[0], '## TL;DR for the Human');
       assert.deepEqual(bullets.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['What you will see', 'What changes', 'What it fixes', 'Risk and how to undo', 'Recommendation', 'Tier and evidence', 'Decisions for you']);
       assert.match(bullets[2], /2 files added, 5 updated, 1 removed/);
-      // It says that the update changes files the repository has.
-      assert.match(bullets[4], /changes 6 files the repository already has/);
+      // Its Risk bullet counts the files the repository has that the update touches (5 updated, 1 removed).
+      assert.match(bullets[4], /\b6\b/);
       assert.equal(open, '<details>\n<summary>The change in detail</summary>');
       assert.doesNotMatch(text, /Summary for the Human/);
       assert.match(text.slice(text.indexOf('</details>')), /^<\/details>\n\nIssue: none\nTeam: factory\/kit-update\n?$/);

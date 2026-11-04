@@ -103,7 +103,9 @@ export function valuesIn(files) {
 /** Whether a workflow's text reads a gate variable, as the kit did before #335. */
 export const readsVariables = (text) => /\bvars\.GATE_/.test(text);
 
-const selfHosted = (labels) => !(labels.length === 1 && HOSTED.test(labels[0]));
+/** Whether a runner's labels name one GitHub-hosted machine. */
+export const isHosted = (labels) => labels.length === 1 && HOSTED.test(labels[0]);
+const selfHosted = (labels) => !isHosted(labels);
 
 /** Whether a job on runner `a` can land on a machine that serves runner `b`, or the reverse: GitHub gives a job to any
  * runner that carries every label of its runs-on, so one label set inside the other reaches the same machine; so does a

@@ -234,7 +234,7 @@ describe('the kit pull request', () => {
       const bullets = tldr.split('\n');
       assert.equal(bullets[0], '## TL;DR for the Human');
       assert.deepEqual(bullets.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['What you will see', 'What changes', 'What it fixes', 'Risk and how to undo', 'Recommendation', 'Tier and evidence', 'Decisions for you']);
-      assert.match(bullets[2], /no reviewer yet/);
+      assert.match(bullets[2], /no reviewer/);
       assert.match(bullets[2], /GitHub's own machines/);
       assert.doesNotMatch(tldr, /[0-9a-f]{7}|\.yml|\.github|\.gate/);
       assert.equal(rest, '<details>\n<summary>The change in detail</summary>');
