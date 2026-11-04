@@ -1213,9 +1213,11 @@ async function loop(opts) {
   let lastKeyAt = Date.now();
   let paused = false;
   const draw = () => {
-    if (!snap) return;
-    const frame = render(snap, { width: out.columns ?? 120, tab, rows: out.rows ?? null, full, color: opts.color, keys: true });
-    const text = (paused ? `paused: no key for ${IDLE_MS / 60_000} min, nothing is read; any key resumes\n${frame}` : frame).split('\n').map((l) => `${l}\x1b[K`).join('\n');
+    if (!snap && !paused) return;
+    const width = out.columns ?? 120;
+    const note = cutWord(`paused: no key for ${IDLE_MS / 60_000} min, nothing is read; any key resumes`, width);
+    const frame = snap ? render(snap, { width, tab, rows: paused && out.rows ? out.rows - 1 : out.rows ?? null, full, color: opts.color, keys: true }) : null;
+    const text = (paused ? (frame === null ? note : `${note}\n${frame}`) : frame).split('\n').map((l) => `${l}\x1b[K`).join('\n');
     out.write(`\x1b[H${text}\x1b[J`);
   };
   const tick = async () => {
