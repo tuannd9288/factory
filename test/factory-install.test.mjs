@@ -3,6 +3,7 @@
 // it also loads the relay's LaunchAgent. Each test runs it under a temporary HOME, against a local bare repository as the origin and a fake
 // launchctl and ssh first on PATH; nothing here touches the real ~/.local/bin, ~/Library or ~/WORKSPACES, and nothing reaches the network.
 import { test } from 'node:test';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
@@ -28,7 +29,10 @@ function world(f) {
     const fake = join(dir, 'fake');
     mkdirSync(home);
     mkdirSync(fake);
-    writeFileSync(join(fake, 'launchctl'), ['#!/bin/sh', 'echo "$*" >>"$HOME/launchctl.log"', 'case "$1" in', 'print) [ -f "$HOME/loaded" ] ;;', 'bootstrap) : >"$HOME/loaded" ;;', 'bootout) rm -f "$HOME/loaded" ;;', 'esac', ''].join('\n'));
+    writeFileSync(join(fake, 'launchctl'), ['#!/bin/sh', 'echo "$*" >>"$HOME/launchctl.log"', // $HOME/linger counts how many more prints still find the job after a bootout, and a bootstrap in that gap fails (the race).
+      'n=$(cat "$HOME/linger" 2>/dev/null || echo 0)', 'case "$1" in',
+      'print) [ -f "$HOME/loaded" ] && exit 0; [ "$n" -gt 0 ] || exit 1; echo $((n - 1)) >"$HOME/linger" ;;',
+      'bootstrap) [ "$n" -eq 0 ] || exit 5; : >"$HOME/loaded" ;;', 'bootout) rm -f "$HOME/loaded" ;;', 'esac', ''].join('\n'));
     writeFileSync(join(fake, 'ssh'), ['#!/bin/sh', 'case "$*" in *--newest*) echo 4 ;; esac', ''].join('\n'));
     for (const name of ['launchctl', 'ssh']) chmodSync(join(fake, name), 0o755);
     const w = {
@@ -37,8 +41,8 @@ function world(f) {
       link: join(home, '.local/bin/factory'),
       plist: join(home, 'Library/LaunchAgents/io.github.tuannd9288.factory.relay.plist'),
       // The code that runs is the clone's own bin/install-factory, whose HOME and place are the test's.
-      install: (args = [], env = {}) =>
-        run(factory, 'bash', [join(factory, 'bin/install-factory'), ...args], {
+      install: (args = [], env = {}, from = join(factory, 'bin/install-factory')) =>
+        run(factory, 'bash', [from, ...args], {
           HOME: home, PATH: `${fake}:${process.env.PATH}`, FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'),
           FACTORY_INSTALL_ORIGIN: origin, FACTORY_HOST_USER: 'nobody-here', FACTORY_CHECKOUT: '', XDG_DATA_HOME: '', ...env,
         }),
@@ -190,6 +194,66 @@ test('FACTORY_CHECKOUT and XDG_DATA_HOME name where the copy goes', () => world(
   rmSync(w.link);
   assert.equal(w.install([], { FACTORY_CHECKOUT: '', XDG_DATA_HOME: join(w.dir, 'data') }).code, 0);
   assert.equal(readlinkSync(w.link), join(w.dir, 'data/factory/checkout/bin/factory'));
+}));
+
+test('the first clone carries an empty credential.helper and cannot prompt', () => world((w) => {
+  const real = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
+  writeFileSync(join(w.dir, 'fake/git'), ['#!/bin/sh', 'printf \'%s|%s\\n\' "$GIT_TERMINAL_PROMPT" "$*" >>"$HOME/git.log"', `exec ${real} "$@"`, ''].join('\n'));
+  chmodSync(join(w.dir, 'fake/git'), 0o755);
+  assert.equal(w.install().code, 0);
+  const clones = readFileSync(join(w.home, 'git.log'), 'utf8').split('\n').filter((l) => / clone /.test(l));
+  assert.equal(clones.length, 1, clones.join('\n'));
+  assert.match(clones[0], /^0\|-c credential\.helper= clone /);
+}));
+
+test('run from the copy, it follows main first and runs itself once more from the moved copy', () => world((w) => {
+  assert.equal(w.install().code, 0);
+  const script = readFileSync(join(w.seed, 'bin/install-factory'), 'utf8');
+  writeFileSync(join(w.seed, 'bin/install-factory'), script.replace('set -euo pipefail\n', 'set -euo pipefail\necho "newer code ran"\n'));
+  git(w.seed, 'commit', '-qam', 'newer install-factory');
+  git(w.seed, 'push', '-q', w.origin, 'main');
+  const tip = git(w.seed, 'rev-parse', 'HEAD');
+  rmSync(w.link);
+  rmSync(w.plist);
+  const r = w.install([], {}, join(w.root, 'bin/install-factory'));
+  assert.equal(r.code, 0, r.out);
+  assert.equal(git(w.root, 'rev-parse', 'HEAD'), tip);
+  assert.equal(r.out.split('newer code ran').length - 1, 1, r.out);
+  assert.equal(readlinkSync(w.link), join(w.root, 'bin/factory'));
+  assert.ok(existsSync(w.plist));
+}));
+
+test('run from the copy, a refused follow is told and the run goes on with the copy as it is', () => world((w) => {
+  assert.equal(w.install().code, 0);
+  const before = git(w.root, 'rev-parse', 'HEAD');
+  w.push('second');
+  writeFileSync(join(w.root, 'note'), 'an edit');
+  rmSync(w.link);
+  const r = w.install([], {}, join(w.root, 'bin/install-factory'));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /not moved/);
+  assert.equal(git(w.root, 'rev-parse', 'HEAD'), before);
+  assert.equal(readlinkSync(w.link), join(w.root, 'bin/factory'));
+}));
+
+test('after bootout it waits until the job is gone before it loads the new one', () => world((w) => {
+  assert.equal(w.install().code, 0);
+  writeFileSync(join(w.home, 'linger'), '3');
+  const before = w.launchctl().length;
+  const r = w.install();
+  assert.equal(r.code, 0, r.out);
+  const calls = w.launchctl().slice(before);
+  const out = calls.findIndex((c) => c.startsWith('bootout '));
+  const inn = calls.findIndex((c) => c.startsWith('bootstrap '));
+  assert.ok(calls.slice(out + 1, inn).filter((c) => c.startsWith('print ')).length >= 3, calls.join('\n'));
+}));
+
+test('when the job is still there after the wait, bootstrap fails and a line says so and to run it again', () => world((w) => {
+  assert.equal(w.install().code, 0);
+  writeFileSync(join(w.home, 'linger'), '1000');
+  const r = w.install([], { FACTORY_INSTALL_WAIT: '1' });
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /install-factory: launchctl bootstrap of io\.github\.tuannd9288\.factory\.relay failed; run this same line again/);
 }));
 
 test('takes no argument', () => world((w) => {
