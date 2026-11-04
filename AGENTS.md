@@ -166,7 +166,9 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   relayed by Colly and the factory-repo session, #373, #374 and #352 ("Đồng thời cho xử lý luôn phần dùng Linear đi"); and
   on 2026-11-03, relayed by the factory-repo session, #370 ("trả lời i–vi: theo đề xuất", about 14:30 +07, whose (iii) is
   that the sweep wakes a Lead and the Lead keeps no watchers; and "A", about 23:15 +07, relayed by Colly: one sweep on each
-  Mac, the local inbox-socket wake, the cloud station after release 1).
+  Mac, the local inbox-socket wake, the cloud station after release 1); and, relayed by Colly and the factory-repo
+  session, #375 ("đề xuất 1: làm ngay sau #370", on 2026-11-03 about 23:00 +07, and "Chốt giải pháp B Linear, tập trung
+  xử lý các việc để chạy trên Linear.", on 2026-11-04 at 14:16 +07). He parked #369 on 2026-11-04 ("5 ok.", 14:47 +07).
   Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
@@ -178,7 +180,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569 and
   https://github.com/tuannd9288/factory/issues/369 and
   https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300 and
-  https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A").
+  https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A") and
+  https://github.com/tuannd9288/factory/issues/375 (its body and comments).
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and
@@ -186,13 +189,36 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   every `gh` (`Bash(gh:*)` in `bin/lib/seat.mjs`), which is #343's open question 1. His words: "Nới: đọc tự do
   (Recommended)". Source: his answer 2026-11-02 15:09:43, relayed by the factory-repo session (#343).
 - **Linear, 2026-11-03.** Linear is his own surface: he decides, takes notes and asks questions there. GitHub stays the
-  record (1b), and his answers reach it as a comment on the issue that names the relay (#352). Colly sets up Linear and
-  its own Linear access; nothing in the factory reads Linear. H9 holds for Linear (its entry below). The per-repository
-  tracker switch his second quote asks for is #375, and nothing about it is decided. His words: "Ok. Dùng Linear" (about
+  record (1b) until the entry below, and his answers reach it as a comment on the issue that names the relay (#352),
+  for a repository still on GitHub. Colly sets up Linear and its own Linear access; nothing in the factory reads Linear
+  until #404, #405 and #407 land (the entry below). H9 holds for Linear (its entry below). The per-repository tracker
+  switch his second quote asks for is #375, which the entry below decides. His words: "Ok. Dùng Linear" (about
   20:20 +07) and "Thay vì bỏ github hiện tại tại sao không thiết kế để có thể on/off Linear hoặc Github, kiểu nếu dùng
   github không dùng Linear cũng được, mà dùng Linear thì không cần Github. Đồng thời cho xử lý luôn phần dùng Linear đi."
   (about 21:45 +07). Source: https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300, relayed by
   Colly and the factory-repo session.
+- **Linear, 2026-11-04.** He chose B: Linear is the tracker. For a repository on Linear, the issue, its status, its
+  holder, its labels, its comments and his answers live in Linear, and his comment on the issue is the record, with no
+  relay. "GitHub" in his words means GitHub Issues as the tracker only: code, pull requests, checks, the App's statuses,
+  the merge and the claim ref stay on GitHub. The GitHub-Issues path is off by default, nothing new is built for it, and
+  there is no per-repository switch. Once every repository the factory runs is on Linear, the last commit that has the
+  path is tagged (as `before-271` was) and the path is cut in one pull request he approves. The order: the factory
+  repository first, with 7 days of real use, then zalo-gateway, factory-probe and the scratch repositories. Nothing is
+  deleted: open issues move to FAC, each with a "moved to FAC-n" line, and the closed GitHub issues stay as a read-only
+  archive. #369 is parked, since Linear's Project page and Inbox replace it. The Lead's decisions: one Linear team for
+  each repository, the factory's being `FAC` while `INN` stays his team for decisions (the reasons are in #375's body);
+  and, while repositories move, one list names those on Linear, which only grows and which the cut removes. None is on
+  Linear yet; #406 adds the factory. #404 moves the list into the file its code reads and leaves this line pointing
+  there. Nothing in the factory reads Linear until #404, #405 and #407 land. FAC's labels and statuses are researched
+  and proposed in #406, and nothing is created in Linear before his word. Waiting on him: the credential rule for 1b
+  and the Factory app, one or one for each team, with its names (#403), and how Linear's events reach the Macs (#375,
+  decision 7: both research passes are done, and a recommendation goes to him). His words: "B theo đề xuất." (14:13
+  +07); "Chốt giải pháp B Linear, tập trung xử lý các việc để chạy trên Linear. Còn
+  Github thì off mặc định, chỉ khi nào cần thì phát triển tiếp hoặc mày xem đề xuất là tag cái phần github rồi gỡ hẵn
+  chỉ dùng B Linear, khi nào cần xây lại github thì lấy lại nếu cần, để code gọn?" (14:16); "Ok, tag rồi gỡ" (14:28);
+  "OK không xoá issue." (14:43); "5 ok." (14:47). Sources:
+  https://github.com/tuannd9288/factory/issues/375 (its body and comments) and
+  https://github.com/tuannd9288/factory/issues/402, relayed by Colly and the factory-repo session.
 
 ## Tiers
 
@@ -251,13 +277,14 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **0d Harness & session** [A2]: the loop that runs Claude Code: `bin/seat` for every unattended role, and
   `packs/pstack/bin/lead` for a team's Lead.
 - **1a Issues** [GH2]: where work comes in: one issue labelled `task`.
-- **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger.
+- **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger. For a repository on
+  Linear its issues are in Linear (Linear, 2026-11-04, in Decisions).
 - **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
 - **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, `bin/factory top`, the ledger's canary.
 - **1e Surfaces** [GH2, #68]: the Human's own screens: Ghostty with the Herdr TUI or app until the factory is finished, then
   Rex on the MacBook (K1 = C, pending his check) and Paseo's app (Control surfaces, in Decisions), and Remote Control (T3,
-  pending); and, now, Linear, where he decides, takes notes and asks (Linear, in Decisions; #373). Herdr's server and
-  Paseo's daemon stay in 0d.
+  pending); and, now, Linear, where he decides, takes notes and asks (Linear, in Decisions; #373), which for a
+  repository on Linear is also that repository's record, in 1b. Herdr's server and Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
   repository lists in `.gate/modules`, each bringing its own skill.
@@ -274,8 +301,9 @@ A sublayer may change anything inside it while its contracts hold; a change to a
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
 decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organization that does the same.
 
-- **H1**: Work enters through one issue. Checked by: `tier` (`check` in `kit/.gate/bin/lib/claim.mjs`): the body names
-  one open issue and its claim, or says `Issue: none` and closes no issue of the repository.
+- **H1**: Work enters through one issue in the repository's tracker, Linear for a repository on Linear. Checked by:
+  `tier` (`check` in `kit/.gate/bin/lib/claim.mjs`): the body names one open issue and its claim, or says `Issue: none`
+  and closes no issue of the repository. It reads the issue on GitHub today; #407 makes it read Linear.
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
   Checked by: `tier` and `verify-trusted`, which read the body's `Issue:`, `Claim:` and `Team:` lines, and `review`,
@@ -300,17 +328,20 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Checked by: `.github/CODEOWNERS:4`.
   Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
-  factory's unattended sessions; 0d does; (2) the record of a task stays on GitHub (1b) and in 0d's panes, and a surface
-  keeps no sole copy; (3) the factory's own code in this sublayer reads no credential (#58 K2; this binds the factory's
-  code, not the Human's own tools, and K3 keeps Paseo's usage plugin as it is); (4) only a person answers a permission
+  factory's unattended sessions; 0d does; (2) the record of a task is in its repository's tracker (1b) and in 0d's
+  panes, and a surface keeps no sole copy; (3) the factory's own code in this sublayer reads no credential (#58 K2;
+  this binds the factory's code, not the Human's own tools, and K3 keeps Paseo's usage plugin as it is);
+  (4) only a person answers a permission
   prompt, so agents do not type into another pane: the seats and the Lead are denied all of `herdr`, its
   `agent send-keys` and `pane send-keys` with it (`bin/lib/seat.mjs`, `packs/pstack/bin/lead.mjs`); the kit's deny
   rules bind Claude Code only and hold no such rule (#76, closed 2026-10-30); `rex` is denied nowhere yet (#267); (5)
-  with every surface stopped, the factory still runs. It holds for Linear, his surface for deciding, notes and questions
-  (#373): Linear starts none of the factory's sessions, and its coding sessions, Loops and "open in coding tool" stay
-  off (1); it keeps no sole copy, and a decision of his counts once it is relayed to the GitHub issue (2); the factory's
-  own code in this sublayer reads no Linear credential, whether a tracker may read Linear is #375's to settle, and
-  Colly's own Linear access is Colly's, outside the factory's code (3).
+  with every surface stopped, the factory still runs. For a repository on Linear, Linear is its 1b and not only a
+  surface: with Linear down, that repository's issues cannot be read and a gated repository's `tier` cannot pass
+  (#407). As his surface for deciding, notes and questions (#373), Linear starts none of the factory's sessions, and
+  its coding sessions, Loops and "open in coding tool" stay off (1); his comment on a Linear issue is the record, with
+  no relay, and for a repository still on GitHub a decision of his counts once it is relayed to the GitHub issue (2);
+  Colly's own Linear access is Colly's, outside the factory's code, and the credential rule for 1b waits on him: #403
+  proposes that the factory's code reads Linear only through its own app, never under his login (3).
   Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
