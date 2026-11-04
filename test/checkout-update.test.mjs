@@ -278,7 +278,7 @@ function sweepIn(w, extra = {}) {
     FACTORY_CHECKOUT: w.checkout, FACTORY_PLIST_DIR: join(w.dir, 'no-plists'), ...extra,
   };
   mkdirSync(env.FACTORY_ROOT, { recursive: true });
-  return spawnSync(join(factory, 'bin/factory-queue'), ['sweep'], { encoding: 'utf8', env });
+  return spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--once'], { encoding: 'utf8', env });
 }
 
 test('a queue sweep moves a checkout that is behind to main, and a refusal does not fail the sweep', () => world(async (w) => {

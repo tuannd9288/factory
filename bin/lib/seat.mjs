@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
+import { ask, socketPath } from './daemon-proto.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
@@ -637,7 +638,14 @@ function supervise() {
     for (const fd of [stdin, stdout, stderr]) closeSync(fd);
     try {
       mkdirSync(spec.state, { recursive: true });
-      appendFileSync(join(spec.state, 'sessions.jsonl'), `${JSON.stringify(recordOf(spec, events, { code, signal, error }))}\n`);
+      const record = recordOf(spec, events, { code, signal, error });
+      appendFileSync(join(spec.state, 'sessions.jsonl'), `${JSON.stringify(record)}\n`);
+      // The end reaches the daemon at once (#399), so its Lead is woken within seconds. The record is on disk first: a daemon that is down finds
+      // it when it starts. This never starts the daemon (its pass needs the job's environment, not this seat's), and a failed post never changes
+      // the outcome: one line in the error file.
+      ask(socketPath(spec.state), { verb: 'seat-ended', run: record.run, tag: record.tag, session: record.session }, { timeoutMs: 2000 }).then((r) => {
+        if (!r.ok) appendFileSync(spec.err, `bin/seat: could not tell the daemon the seat ended: ${r.why}\n`);
+      }).catch(() => {});
     } catch (e) {
       appendFileSync(spec.err, `bin/seat: could not write the record: ${e.code ?? 'error'}\n`);
     }

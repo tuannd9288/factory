@@ -27,14 +27,16 @@
 // the run that failed } } } and { merged: { key: mergedAt } }, and $state/queue-seats.news, { count, gone: { key: ms first seen gone }, told:
 // [keys] }. The first sweep that meets a repository or the seats records what is there and wakes nothing. The state is written, through a
 // temporary file and a rename, before any wake, so an event never wakes twice; a post that fails is told in the event's line and not tried
-// again. A key leaves `sent` when its event no longer holds, except a conflict while the same head reads UNKNOWN, and a merged one for 14
+// again. A seat's end is also taken at once (#399): bin/seat posts it to the daemon (bin/lib/daemon.mjs), which runs wakeOnSeatEnds, the same step for
+// the records past `count`, under queue-seats.lock with wakeOnSeats: it moves `count` first, then wakes, then writes the line, so a record is
+// woken by one of them and never twice. A key leaves `sent` when its event no longer holds, except a conflict while the same head reads UNKNOWN, and a merged one for 14
 // days. A red event wakes again on the same head when a check recorded before fails in a run other than the one recorded (a re-run that failed again,
 // though no sweep saw it not red); the old failed run still counts while a re-run is queued, and a second check failing is no news.
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { failedCheck, pickReruns } from './checks.mjs';
 import { holders } from './comment-wake.mjs';
-import { appendStart, oneLine } from './events.mjs';
+import { appendStart, oneLine, withEventsLock } from './events.mjs';
 import { readSessions } from './records.mjs';
 import { runFiles, runLive } from './seat.mjs';
 import { newsLine, postSync, recordedPath } from './wake.mjs';
@@ -128,7 +130,7 @@ const said = (r) => (r.posted ? 'woken' : r.why === 'no file' ? 'not woken (no s
 
 /** Writes the line of one event and wakes the Lead `dir` (`<folder>-<team>`, or null: none could be named). `where` is where to read.
  * Returns the seq. A failure to write the line is thrown. */
-function tell({ state, runs, post, kind, key, what, where, dir }) {
+function tell({ state, runs, post, kind, key, what, where, dir, sink }) {
   let how = 'no Lead found for it (no claim holder, no Team: line)';
   // The delivery as data (#370): the MacBook's relay reads these and never the text.
   const extra = { what: oneLine(what), where: oneLine(where), lead: dir ?? null, woke: false };
@@ -138,7 +140,10 @@ function tell({ state, runs, post, kind, key, what, where, dir }) {
     extra.woke = r.posted;
     if (!r.posted) extra.why = r.why;
   }
-  return appendStart({ state, kind, key, text: `${what}; ${how}`, extra });
+  const seq = appendStart({ state, kind, key, text: `${what}; ${how}`, extra });
+  // `sink` is told the delivery too (#399: the daemon's store keeps it): { seq, woke, why }.
+  sink?.({ seq, woke: extra.woke, why: extra.why ?? (dir ? null : 'no Lead found') });
+  return seq;
 }
 
 const logFailure = (what, error) => console.log(`queue: the wake for ${what} failed: ${String(error.message).split('\n')[0]}`);
@@ -222,32 +227,37 @@ function teamOfRun(run, heldBy) {
  * read this sweep, for a record or a run that names no team. `live` (runLive) and `post` are passed in for tests. Returns the seqs. */
 export function wakeOnSeats({ state, runs, heldBy = new Map(), post = postSync, live = runLive, now = Date.now() }) {
   const file = join(state, 'queue-seats.news');
-  const kept = readJson(file);
-  const records = readSessions(state);
-  const pids = runFiles(runs, '.pid').filter((f) => !/\.claim\.pid$/.test(f));
-  const ended = (run, tag, since) => records.some((r) => r.tag === tag && r.run && resolve(r.run) === resolve(run) && Date.parse(r.end) >= since - 1000);
-  const gone = {};
-  const current = [];
-  const due = [];
-  for (const f of pids) {
-    const dir = join(f, '..');
-    const tag = basename(f).slice('run-'.length, -'.pid'.length);
-    let since;
-    try {
-      since = Math.floor(statSync(f).mtimeMs);
-    } catch {
-      continue;
+  // The read and the write of the state are one step under queue-seats.lock (#399): the daemon's seat-ended handler (wakeOnSeatEnds) moves
+  // `count` too, and a record must be taken by one of them alone. The wakes come after, outside the lock.
+  const { fresh, due } = withEventsLock(state, () => {
+    const kept = readJson(file);
+    const records = readSessions(state);
+    const pids = runFiles(runs, '.pid').filter((f) => !/\.claim\.pid$/.test(f));
+    const ended = (run, tag, since) => records.some((r) => r.tag === tag && r.run && resolve(r.run) === resolve(run) && Date.parse(r.end) >= since - 1000);
+    const gone = {};
+    const current = [];
+    const due = [];
+    for (const f of pids) {
+      const dir = join(f, '..');
+      const tag = basename(f).slice('run-'.length, -'.pid'.length);
+      let since;
+      try {
+        since = Math.floor(statSync(f).mtimeMs);
+      } catch {
+        continue;
+      }
+      const key = `${dir} ${tag} ${since}`;
+      // The record is read first: liveness costs a ps for each pid that is not known gone, and every run ever made keeps its pid file.
+      if (ended(dir, tag, since) || live(f)) continue;
+      current.push(key);
+      gone[key] = kept?.gone?.[key] ?? now;
+      if (kept && !strings(kept.told).includes(key) && now - gone[key] >= SEAT_GRACE_MS) due.push({ dir, tag, key });
     }
-    const key = `${dir} ${tag} ${since}`;
-    // The record is read first: liveness costs a ps for each pid that is not known gone, and every run ever made keeps its pid file.
-    if (ended(dir, tag, since) || live(f)) continue;
-    current.push(key);
-    gone[key] = kept?.gone?.[key] ?? now;
-    if (kept && !strings(kept.told).includes(key) && now - gone[key] >= SEAT_GRACE_MS) due.push({ dir, tag, key });
-  }
-  const told = [...strings(kept?.told).filter((k) => current.includes(k)), ...(kept ? due.map((d) => d.key) : current)];
-  const fresh = kept && Number.isInteger(kept.count) && kept.count <= records.length ? records.slice(kept.count) : [];
-  writeJson(file, { count: records.length, gone: Object.fromEntries(Object.entries(gone).filter(([k]) => !told.includes(k))), told });
+    const told = [...strings(kept?.told).filter((k) => current.includes(k)), ...(kept ? due.map((d) => d.key) : current)];
+    const fresh = kept && Number.isInteger(kept.count) && kept.count <= records.length ? records.slice(kept.count) : [];
+    writeJson(file, { count: records.length, gone: Object.fromEntries(Object.entries(gone).filter(([k]) => !told.includes(k))), told });
+    return { fresh, due };
+  }, 'queue-seats.lock');
   const lines = [];
   const seat = (kind, key, what, where, run, team) => {
     try {
@@ -256,10 +266,47 @@ export function wakeOnSeats({ state, runs, heldBy = new Map(), post = postSync, 
       logFailure(`${kind} ${key}`, error);
     }
   };
-  for (const r of fresh) {
-    const done = r.structured !== null && r.structured !== undefined;
-    seat(done ? 'seat-ended' : 'seat-no-result', `${done ? 'seat-ended' : 'seat-no-result'} ${r.run} ${r.tag}`, `${r.role ?? 'seat'} ${r.tag} ended${done ? '' : ' with no structured result'}`, `${r.run}/run-${r.tag}.jsonl`, r.run, r.team);
-  }
+  for (const r of fresh) seatEnd(r, seat);
   for (const d of due) seat('seat-no-result', `seat-no-result ${d.dir} ${d.tag}`, `run ${d.tag} ended with no record: its process is gone`, `${d.dir}/run-${d.tag}.jsonl`, d.dir, null);
   return lines;
+}
+
+/** The line of one sessions.jsonl record, handed to `seat(kind, key, what, where, run, team)`: seat-ended when it ended with a structured result. */
+function seatEnd(r, seat) {
+  const done = r.structured !== null && r.structured !== undefined;
+  const kind = done ? 'seat-ended' : 'seat-no-result';
+  seat(kind, `${kind} ${r.run} ${r.tag}`, `${r.role ?? 'seat'} ${r.tag} ended${done ? '' : ' with no structured result'}`, `${r.run}/run-${r.tag}.jsonl`, r.run, r.team);
+}
+
+/** The records of sessions.jsonl that no sweep has taken yet, woken at once (#399): the daemon's seat-ended verb, and its reconcile when it starts.
+ * It takes the same state as wakeOnSeats, queue-seats.news, under the same lock: it moves `count` past the records it takes, before any wake, and
+ * keeps `gone` and `told` as they are, so a record is woken by this or by the next sweep, never both, and a restart wakes none twice. Without the
+ * state (the first sweep has not run) it takes nothing. A record that names no team needs the claim holders of the last sweep: `heldBy` is that
+ * ({ clone folder -> holders map }), or null before the daemon's first sweep, and then such a record and those after it wait for the sweep, which
+ * finds the holder as it always did. `sink(record, { seq, woke, why })` is told what each wake did. Returns the records it took. */
+export function wakeOnSeatEnds({ state, runs, heldBy = null, post = postSync, sink }) {
+  const file = join(state, 'queue-seats.news');
+  const taken = withEventsLock(state, () => {
+    const kept = readJson(file);
+    if (!kept) return [];
+    const records = readSessions(state);
+    if (!(Number.isInteger(kept.count) && kept.count <= records.length)) return [];
+    let end = kept.count;
+    while (end < records.length && (records[end].team || heldBy)) end += 1;
+    if (end === kept.count) return [];
+    writeJson(file, { ...kept, count: end });
+    return records.slice(kept.count, end);
+  }, 'queue-seats.lock');
+  for (const r of taken) {
+    const seat = (kind, key, what, where, run, team) => {
+      try {
+        tell({ state, runs, post, kind, key, what, where, dir: team ?? teamOfRun(run, heldBy ?? new Map()), sink: (d) => sink?.(r, d) });
+      } catch (error) {
+        logFailure(`${kind} ${key}`, error);
+        sink?.(r, { seq: null, woke: false, why: 'event not written' });
+      }
+    };
+    seatEnd(r, seat);
+  }
+  return taken;
 }

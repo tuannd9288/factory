@@ -6,7 +6,9 @@
 // batched query by node id and kept in the state), and the sweep re-runs, once, the
 // tier job of any open tier-3 pull request, armed or not, whose recorded position and the one in force (read from the rules the sweep
 // fetches already) differ in a way that changes its verdict; what it re-ran is kept in
-// $FACTORY_STATE/queue-<owner>-<name>.switch. It runs once and exits: launchd repeats it. It reads
+// $FACTORY_STATE/queue-<owner>-<name>.switch. A pass (runPass) runs once and ends. Since #399 the job's command (`sweep`, no --repo) only makes sure
+// the daemon runs (ensureDaemon): the daemon runs the pass every 60 s in a worker thread (bin/lib/daemon.mjs), and `sweep --once` or `--repo` runs one
+// by hand, here. A pass that moves the checkout ends the daemon, so the job's next run starts the new code. It reads
 // GitHub afresh each time, holds a lock so two sweeps never overlap, bounds every gh call, refuses the Human's login,
 // and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds; a run that fails
 // before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
@@ -36,7 +38,7 @@
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { accessSync, constants, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants, linkSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +47,7 @@ import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.m
 import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { noteGh, observe, resetNotes } from './events.mjs';
+import { ask, socketPath } from './daemon-proto.mjs';
 import { clonesUnder } from './ledger.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
@@ -389,7 +392,7 @@ const startOf = (pid) => {
 };
 
 /** The holder a lock file records, or null when it is not one (a legacy directory lock, a torn or foreign file). */
-function holderOf(path) {
+export function holderOf(path) {
   try {
     const h = JSON.parse(readFileSync(path, 'utf8'));
     return typeof h?.pid === 'number' && h.token ? h : null;
@@ -412,7 +415,6 @@ function gone(h) {
   const now = startOf(h.pid);
   return Boolean(h.start) && now !== null && now !== h.start;
 }
-
 /** Takes the lock at path and returns what it recorded ({pid, start, host, token}), or null while another sweep holds
  * it. The record is written to a file of its own and link()ed into place: link fails with EEXIST like O_EXCL, and the
  * content is there from the first instant. A holder that is gone is displaced by renaming its lock to a name of ours:
@@ -494,15 +496,19 @@ function preflight(state, human, who) {
 }
 
 /** The first step of a sweep (#257): the checkout the daemons and bin/seat run from follows main, and the installed plists are
- * compared with what the code renders. A refusal or a failure is told in queue-checkout.failed and never stops the sweep. */
+ * compared with what the code renders. A refusal or a failure is told in queue-checkout.failed and never stops the sweep. Returns whether it
+ * moved the checkout (#399: the daemon exits after that pass, so the job's next run starts the new code). */
 function followCheckout(state) {
   const home = process.env.HOME;
   const root = checkoutRoot();
-  if (!root) return;
+  if (!root) return false;
+  let moved = false;
   try {
     const r = followMain({ root, state, live: () => liveRuns(process.env.FACTORY_RUNS ?? join(home, 'factory-runs')) });
-    if (r.status === 'updated') console.log(`queue: checkout ${r.from.slice(0, 7)}..${r.to.slice(0, 7)} (${r.behind} commits)`);
-    else if (r.status === 'refused') console.log(`queue: checkout not moved: ${r.why}`);
+    if (r.status === 'updated') {
+      moved = true;
+      console.log(`queue: checkout ${r.from.slice(0, 7)}..${r.to.slice(0, 7)} (${r.behind} commits)`);
+    } else if (r.status === 'refused') console.log(`queue: checkout not moved: ${r.why}`);
     else if (r.status !== 'current') console.log(`queue: checkout ${r.status}`);
     const differ = checkPlists({ root, state, plistDir: process.env.FACTORY_PLIST_DIR ?? '/Library/LaunchDaemons' }).differ;
     if (differ.length) console.log(`queue: installed plist differs from the code's: ${differ.join(' ')}`);
@@ -511,6 +517,7 @@ function followCheckout(state) {
     writeFileSync(join(state, 'queue-checkout.failed'), `${new Date().toISOString()} the update raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
     console.error(`queue: checkout: ${error.message}`);
   }
+  return moved;
 }
 
 /** The factory's own repository, named by the origin of the checkout at `root`, or undefined. */
@@ -698,7 +705,7 @@ ${j.calendar
 
 /** Runs one sweep as the job would, before the Human loads it: the job's PATH and variables over what launchd gives
  * every job (HOME, USER, TMPDIR), and nothing of this shell's. It makes the log's folder, which launchd needs. */
-function check(repos, human) {
+async function check(repos, human) {
   const j = job(repos);
   const env = { HOME: process.env.HOME, USER: process.env.USER ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', ...j.env };
   const say = (line) => console.log(`check: ${line}`);
@@ -709,10 +716,13 @@ function check(repos, human) {
   say(`node ${spawnSync('node', ['--version'], { env, encoding: 'utf8' }).stdout?.trim() || 'not found'}`);
   say(`state folder ${env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')}`);
   say(`log ${j.log}`);
-  const run = spawnSync(j.program[0], j.program.slice(1), { cwd: j.cwd, env, encoding: 'utf8', timeout: 10 * CALL_MS });
+  // One pass in this process, under the lock (--once): the job's own command would hand it to the daemon (#399).
+  const run = spawnSync(j.program[0], [...j.program.slice(1), '--once'], { cwd: j.cwd, env, encoding: 'utf8', timeout: 10 * CALL_MS });
   const out = `${run.stdout ?? ''}${run.stderr ?? ''}`;
   for (const line of out.trim().split('\n').filter(Boolean).slice(-10)) say(`  ${line}`);
   say(`one sweep exited ${run.status}`);
+  const up = await ask(socketPath(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')), { verb: 'ping' }, { timeoutMs: 1000 });
+  say(up.ok ? `the daemon answers (pid ${up.result?.pid})` : `the daemon does not answer (${up.why}); the job starts it`);
   const why = !login
     ? 'gh is not logged in'
     : login.toLowerCase() === human.toLowerCase()
@@ -726,40 +736,27 @@ function check(repos, human) {
   return why ? 1 : 0;
 }
 
-function main(argv) {
-  const [command, ...rest] = argv;
-  const repos = [];
-  let daemon = false;
-  for (let i = 0; i < rest.length; i += 1) {
-    if (rest[i] === '--daemon') {
-      if (command !== 'plist') throw new Error('--daemon is for plist alone');
-      daemon = true;
-      continue;
-    }
-    if (rest[i] !== '--repo') throw new Error(`unknown argument ${rest[i]}`);
-    if (!/^[\w.-]+\/[\w.-]+$/.test(rest[i + 1] ?? '')) throw new Error(`--repo needs owner/name, not ${JSON.stringify(rest[i + 1] ?? '')}`);
-    repos.push(rest[++i]);
-  }
-  if (!['sweep', 'plist', 'check'].includes(command)) throw new Error('usage: factory-queue sweep|plist|check [--repo owner/name...]');
-  const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
-  if (command === 'plist') return void process.stdout.write(plist(job(repos, process.env, daemon)));
-  if (command === 'check') return check(repos, human);
-  const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+/** One pass of the sweep, under queue.lock, which is what a sweep run by hand (`--once`, `--repo`) and the daemon's pass (bin/lib/daemon.mjs, #399)
+ * both run, so they never overlap. Returns { code, heldBy, moved }: the exit code (0 for a pass another sweep's lock kept from running), the claim
+ * holders it read ({ clone folder -> holders map }, null if it got no further than the checks before the loop), and whether it moved the checkout. */
+export function runPass({ repos = [], human, state }) {
   const held = join(state, 'queue.lock');
   const mine = takeLock(held);
   if (!mine) {
     const other = holderOf(held);
-    return console.log(`queue: another sweep is running${other ? ` (pid ${other.pid}, started ${other.start})` : ''}; nothing done`);
+    console.log(`queue: another sweep is running${other ? ` (pid ${other.pid}, started ${other.start})` : ''}; nothing done`);
+    return { code: 0, heldBy: null, moved: false };
   }
   const reads = new Map();
   const switches = new Map();
+  const out = { code: 0, heldBy: null, moved: false };
   resetNotes();
   try {
-    followCheckout(state);
+    out.moved = followCheckout(state);
     sweepLanded(state);
     const who = { login: '' };
     const refused = preflight(state, human, who);
-    if (refused) return refused;
+    if (refused) return { ...out, code: refused };
     // No --repo: the repositories taken in, found as the ledger finds them (#211).
     const skip = (folder, why) => console.log(`queue: skipped ${folder}: ${why}`);
     const clones = clonesUnder(process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'), skip);
@@ -801,7 +798,7 @@ function main(argv) {
       console.log(`queue: the seats' news was not handled: ${String(error.message).split('\n')[0]}`);
     }
     watchOwn(state, swept, switches, rulesRead);
-    return failed ? 1 : 0;
+    return { ...out, code: failed ? 1 : 0, heldBy };
   } finally {
     recordEvents(state, reads, switches);
     startReaderPass(state);
@@ -809,10 +806,106 @@ function main(argv) {
   }
 }
 
+const DAEMON_LOG_MAX = 5 * 1024 * 1024;
+const FACTORY = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** The job's sweep (#399): if the daemon answers `ping` on daemon.sock there is nothing to do; if not, start bin/factory-daemon detached, in a
+ * session of its own (piggery v0.10.3, internal/cli/daemon_unix.go:11-12), with this process's environment, which is the job's (the pass reads
+ * GitHub with it: only the job starts the daemon, known by XPC_SERVICE_NAME, never a seat or a hook, whose environment holds their account's
+ * token; any other caller is refused with exit 2), and its output to
+ * ~/Library/Logs/factory/daemon.log (moved to daemon.log.1 when over 5 MiB), then wait up to 5 s for it to answer. A daemon that holds daemon.lock
+ * and does not answer is told in queue-run.failed and the exit code, and nothing else is started. `ping` and `spawnFn` are passed in for tests.
+ * Returns the exit code. */
+export async function ensureDaemon(state, { ping = ask, spawnFn = spawn, home = process.env.HOME, waitMs = 5000, env = process.env } = {}) {
+  const sock = socketPath(state);
+  const answers = async (ms) => (await ping(sock, { verb: 'ping' }, { timeoutMs: ms })).ok;
+  if (await answers(1000)) return 0;
+  const fail = (why) => {
+    mkdirSync(state, { recursive: true });
+    writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
+    console.error(`factory-queue: ${why}`);
+    return 1;
+  };
+  const lock = join(state, 'daemon.lock');
+  const holder = holderOf(lock);
+  if (holder && !gone(holder)) {
+    // It may be starting or busy for a moment.
+    for (let i = 0; i < 6; i += 1) {
+      await pause(waitMs / 10);
+      if (await answers(500)) return 0;
+    }
+    return fail(`the daemon (pid ${holder.pid}, started ${holder.start}) holds ${lock} and does not answer on ${sock}`);
+  }
+  // Only the job starts the daemon: it hands the pass its environment, and launchd names the job's label in XPC_SERVICE_NAME. A person or a Lead
+  // who runs a bare `sweep` would give the daemon theirs (tokens among them).
+  if (env.XPC_SERVICE_NAME !== LABEL) {
+    console.error(`factory-queue: no daemon answers, and only the job (${LABEL}) starts one; use \`sweep --once\` to run one pass by hand`);
+    return 2;
+  }
+  const log = join(home, 'Library/Logs/factory/daemon.log');
+  mkdirSync(dirname(log), { recursive: true });
+  try {
+    if (statSync(log).size > DAEMON_LOG_MAX) renameSync(log, `${log}.1`);
+  } catch {
+    // no log yet
+  }
+  const fd = openSync(log, 'a', 0o600);
+  let failure = null;
+  let child;
+  try {
+    child = spawnFn(join(FACTORY, 'bin/factory-daemon'), [], { detached: true, stdio: ['ignore', fd, fd], cwd: FACTORY, env: { ...process.env, FACTORY_DAEMON_LOG: log } });
+    child.on('error', (error) => {
+      failure = error.code ?? error.message;
+    });
+    child.unref();
+  } finally {
+    closeSync(fd);
+  }
+  for (const end = Date.now() + waitMs; Date.now() < end && !failure; ) {
+    await pause(waitMs / 25);
+    if (await answers(500)) {
+      console.log(`queue: started the daemon (pid ${child.pid}); its log is ${log}`);
+      return 0;
+    }
+  }
+  return fail(`the daemon did not answer within ${waitMs / 1000} s of its start${failure ? ` (${failure})` : ''}; see ${log}`);
+}
+
+async function main(argv) {
+  const [command, ...rest] = argv;
+  const repos = [];
+  let daemon = false;
+  let once = false;
+  for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] === '--daemon') {
+      if (command !== 'plist') throw new Error('--daemon is for plist alone');
+      daemon = true;
+      continue;
+    }
+    if (rest[i] === '--once') {
+      if (command !== 'sweep') throw new Error('--once is for sweep alone');
+      once = true;
+      continue;
+    }
+    if (rest[i] !== '--repo') throw new Error(`unknown argument ${rest[i]}`);
+    if (!/^[\w.-]+\/[\w.-]+$/.test(rest[i + 1] ?? '')) throw new Error(`--repo needs owner/name, not ${JSON.stringify(rest[i + 1] ?? '')}`);
+    repos.push(rest[++i]);
+  }
+  if (!['sweep', 'plist', 'check'].includes(command)) throw new Error('usage: factory-queue sweep|plist|check [--repo owner/name...] [--once]');
+  const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
+  if (command === 'plist') return void process.stdout.write(plist(job(repos, process.env, daemon)));
+  if (command === 'check') return check(repos, human);
+  const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+  // The job's command, with no repository named, hosts the pass in the daemon (#399); one named, or --once, runs one pass here.
+  if (!repos.length && !once) return ensureDaemon(state);
+  return runPass({ repos, human, state }).code;
+}
+
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    process.exitCode = main(process.argv.slice(2)) ?? 0;
+    process.exitCode = (await main(process.argv.slice(2))) ?? 0;
   } catch (error) {
     const why = String(error.stderr || error.message).trim();
     console.error(`factory-queue: ${why}`);

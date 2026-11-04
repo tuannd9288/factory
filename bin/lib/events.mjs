@@ -188,10 +188,11 @@ export function writeAtomic(file, text) {
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** Runs fn holding $state/events.lock, a folder made with mkdir (one process wins). A write holds it for milliseconds, so a lock older
- * than 30 s is a dead writer's and is removed; a writer waits up to 10 s for it. */
-function withEventsLock(state, fn) {
+ * than 30 s is a dead writer's and is removed; a writer waits up to 10 s for it. `name` is another lock of the same kind: the seats' state
+ * file has one (queue-seats.lock, #399), since the daemon's pass and its seat-ended handler both read and write it. */
+export function withEventsLock(state, fn, name = 'events.lock') {
   mkdirSync(state, { recursive: true });
-  const lock = join(state, 'events.lock');
+  const lock = join(state, name);
   const until = Date.now() + 10_000;
   for (;;) {
     try {
