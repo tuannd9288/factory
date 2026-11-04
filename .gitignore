@@ -1,5 +1,6 @@
 # This root holds the factory's own files; every repository cloned beside them is ignored.
 /*
+!/.gitattributes
 !/.gitignore
 !/.github/
 !/AGENTS.md

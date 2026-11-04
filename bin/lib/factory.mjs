@@ -328,6 +328,8 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory use [<row|repo-team> [<letter>]]   (the row's account becomes the letter's; <repo>-<team> makes a team's row, and that team's running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
+       bin/factory top --line [--width N]   (one line: what waits on the Human, teams, alerts)
+       bin/factory top --brief [--after <seq>]   (the start hook's text for Colly; ends with the last seq)
        bin/factory lead <repo> [--team <name>] [--new] [--dry-run]
        bin/factory lead <repo> [--team <name>] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
        bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)
@@ -401,7 +403,7 @@ const GIT_CONFIG = [
 ];
 
 /** Where the socket of the MacBook Lead of a repository's team is recorded (#351), beside `lead-here`'s other files. */
-const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}-${team}.socket`);
+export const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}-${team}.socket`);
 
 /** `factory wake <repo> --issue <n> [--team <name>]` (#351): posts one line into the Lead's Claude Code inbox socket, which says to re-read
  * the issue and carries nothing else (bin/lib/wake.mjs); the message itself is a comment on the issue. On the factory host the socket is the
@@ -575,12 +577,16 @@ function movedOld(agentProfiles, state) {
 /** `factory top` (#174): the read-only view of every session and repository (bin/lib/top.mjs). On the factory host it runs
  * here; on the MacBook it runs the same command there by ssh, with a terminal (-t) for the live view only. Only `--once` and
  * `--full` (each at most once) and `--width N` (digits) are taken, checked before any ssh. `--once` prints one frame with no keys
- * line, and in colour only when its output is a terminal that has colours (NO_COLOR, NODE_DISABLE_COLORS and FORCE_COLOR apply). */
+ * line, and in colour only when its output is a terminal that has colours (NO_COLOR, NODE_DISABLE_COLORS and FORCE_COLOR apply).
+ * `--line [--width N]` and `--brief [--after N]` (#365) print the status line and the start hook's text of `factory colly`, and take
+ * nothing else; they never ask for a terminal. */
 async function top(args, env) {
-  const live = !args.includes('--once');
+  const text = args.includes('--line') || args.includes('--brief');
+  const live = !text && !args.includes('--once');
   const rest = args.filter((a) => a !== '--once' && a !== '--full');
   const width = rest.length === 2 && rest[0] === '--width' && /^\d+$/.test(rest[1]);
-  if (['--once', '--full'].some((f) => args.filter((a) => a === f).length > 1) || (rest.length && !width)) {
+  const textOk = (flag, opt) => args.filter((a) => a === flag).length === 1 && (args.length === 1 || (args.length === 3 && args[0] === flag && args[1] === opt && /^\d+$/.test(args[2])));
+  if (text ? !(textOk('--line', '--width') || textOk('--brief', '--after')) : ['--once', '--full'].some((f) => args.filter((a) => a === f).length > 1) || (rest.length && !width)) {
     console.error(USAGE);
     return 2;
   }

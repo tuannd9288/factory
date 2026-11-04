@@ -155,7 +155,10 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   factory-repo session, #256 and #330 ("#256 lệnh kiểm (Recommended), #330 test chập chờn (Recommended)"), #333
   ("Làm ngay trong release 1") and #335 ("Vá ngay, trước công tắc (Recommended)"); and on 2026-11-03, relayed by the
   factory-repo session, #351 ("A trước đã") and #369 ("trả lời i–vi: theo đề xuất", his answer vi); and on 2026-11-03,
-  relayed by Colly and the factory-repo session, #373, #374 and #352 ("Đồng thời cho xử lý luôn phần dùng Linear đi").
+  relayed by Colly and the factory-repo session, #373, #374 and #352 ("Đồng thời cho xử lý luôn phần dùng Linear đi"); and
+  on 2026-11-03, relayed by the factory-repo session, #370 ("trả lời i–vi: theo đề xuất", about 14:30 +07, whose (iii) is
+  that the sweep wakes a Lead and the Lead keeps no watchers; and "A", about 23:15 +07, relayed by Colly: one sweep on each
+  Mac, the local inbox-socket wake, the cloud station after release 1).
   Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
@@ -166,7 +169,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675 and
   https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569 and
   https://github.com/tuannd9288/factory/issues/369 and
-  https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300.
+  https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300 and
+  https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A").
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and
@@ -201,7 +205,8 @@ checks are `verify`, `tier` and `Entire Gates`, set by `bin/onboard-owner`; `rev
 Agents open pull requests under their own GitHub account, never the Human's. GitHub refuses an author's approval of
 his own pull request, and its code-owner rule asks nothing of an author who owns the code: on the scratch repository
 a tier-3 pull request opened from the Human's account merged with no approval (2026-10-21). So the `tier` check
-itself requires, on tier 3, an approval of the head commit by a code owner who is not the author.
+itself requires, on tier 3, an approval of the head commit by a code owner who is not the author, and while it waits for
+that approval it requests the code owners' review on GitHub, so the pull request shows in their review queue (#374).
 
 ## What the Human keeps
 
@@ -354,6 +359,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
 | `bin/factory-events` | What the sweep tells Colly (#309): the `start` lines of `$FACTORY_STATE/events.jsonl` after its cursor; `--follow` moves the cursor and follows the file; the header has the ssh command |
+| `bin/factory-relay` | The MacBook's relay of a Lead's news (#370): `run` is one pass that reads the Mac mini's news lines by ssh and posts those it could not deliver into the socket file of the Lead that runs there; `plist` prints its LaunchAgent (his own user, every 60 s); `check` says, in the job's environment, whether ssh and the read of the news work, sets the first cursor and relays nothing; the header of `bin/lib/relay.mjs` has the rest |
 | `bin/factory-reader` | The stream reader's pass (#339): `bin/factory-reader` reads what the Leads and the seats wrote since the last pass and tells Colly, through the events file, what code cannot see; `--try <file> [--side pi\|codex]` sends one stream file once and prints the answer and the quote check, writing nothing; the sweep starts a pass every 15 minutes |
 | `bin/lib/reader.mjs` | The reader's code: the reduction to the assistant's text and the tool names, the two commands, the cursors, the quote check; the header has the rest |
 | `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, or `codex`) and, for each side, its model and effort |
@@ -419,7 +425,13 @@ a repository's merge switch moved)
 and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
 starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out. The sweep also writes
-a one-time `comment` start line, like the reader's and no condition, when it wakes a Lead (#351).
+a one-time `comment` start line, like the reader's and no condition, when it wakes a Lead (#351); six more kinds of the same sort tell a
+Lead's news (#370, `bin/lib/news-wake.mjs`): `seat-ended`, `seat-no-result`, `checks-red`, `checks-green`, `conflict` and `merged`, each
+waking the Lead of its seat or pull request on this host (Colly's Monitor leaves them out; `bin/factory-events --news` prints only them),
+and a `check-not-started` start wakes that pull request's Lead as well. The sweep reads every repository that has a team row for these
+wakes alone, the factory's own too (its Lead is `factory-<team>`, found by the pull request's `Team:` line). A news line carries its Lead and
+the delivery as data (`lead`, `woke`, `why`); the MacBook's relay (`bin/factory-relay`, a LaunchAgent under his own user) reads them by ssh and
+delivers the news to the Leads that run there, those the Mac mini could not wake for want of a live Lead.
 
 A message for a Lead is a comment on its issue, then `factory wake <repo> --team <team> --issue <n>`: one line into the Lead's Claude
 Code inbox socket, which says to re-read the issue and carries nothing else. Nobody types into a pane (H9 rule 4). The Lead's hook records

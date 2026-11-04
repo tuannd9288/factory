@@ -18,8 +18,9 @@
 #            holds `actions: read` and `checks: read`), so it is never green before the reviewer ended, and it follows
 #            `review`: a red or cancelled one fails it, so "Re-run failed jobs" re-runs both. It reads the review's result
 #            annotation whatever the conclusion; below tier 3 a raise there, or in any review on this head, makes it label
-#            the pull request raised and tier-3 (`pull-requests: write`) and wait for an approval given after the raise; at
-#            tier 3 a raise adds nothing. A result left absent fails it. On tier 3, once the review is in, it reads the merge
+#            the pull request raised and tier-3 (`pull-requests: write`, which also adds its tier label and, while it waits
+#            for the Human's approval, requests the code owners' review, #374) and wait for an approval given after the
+#            raise; at tier 3 a raise adds nothing. A result left absent fails it. On tier 3, once the review is in, it reads the merge
 #            switch (the review parameters of the rules in force), and unless the switch is at all asks the Human's
 #            approval of the head, or of a commit whose patch the head carries unchanged. After his approval the queue
 #            re-runs it alone, as a new attempt of the same run: the labels give tier 3, so no reviewer runs. When it starts and when it ends it is
@@ -36,7 +37,9 @@
 # The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json); with GATE_REVIEWER=entire,
 # verify, tier and Entire Gates (bin/onboard-owner writes that ruleset from GATE_REVIEWER as main holds it). No required job
 # here has `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
-# review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red.
+# review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red; it then
+# also requests the code owners' review (#374), unless the merge switch is at all or cannot be read, so its step carries
+# GATE_PR_AUTHOR and GATE_BASE_REF for that.
 # GATE_REVIEWER below and every job's runs-on are the repository's own settings, which bin/onboard fills in and a pull
 # request changes, at tier 3 (#335): no repository variable holds them, since one changes without a pull request. The
 # runner is GitHub-hosted Ubuntu in the kit, and never a runner a candidate's, main's or a deploy's job uses, nor one
@@ -214,4 +217,6 @@ jobs:
       - run: .gate/bin/review rounds
         working-directory: trusted
         env:
+          GATE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          GATE_BASE_REF: ${{ github.event.pull_request.base.ref }}
           GH_TOKEN: ${{ github.token }}
