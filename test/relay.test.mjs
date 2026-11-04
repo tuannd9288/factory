@@ -4,11 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
-import { HOST, check, guard, job, main, pass, readNewest, readNews } from '../bin/lib/relay.mjs';
+import { HOST, check, guard, install, job, main, pass, readNewest, readNews } from '../bin/lib/relay.mjs';
 import { plist } from '../bin/lib/queue.mjs';
 
 /** A news line as the Mac mini's sweep writes it. */
@@ -250,21 +250,42 @@ function command(args, { code = 0, out = '', hostUser = 'nobody-here' } = {}) {
   return { dir, code: r.status, out: r.stdout + r.stderr, calls, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** `check` in this process, with a fake ssh: it answers `--newest` with 4 and logs its calls under HOME. */
-function checkWith({ code = 0, cursor = null, sock = '/agent.sock' } = {}) {
+/** `check` in this process, with a fake ssh: it answers `--newest` with 4 and logs its calls under HOME. A fake launchctl answers `getenv` with
+ * `sock` (the job's SSH_AUTH_SOCK) and `print` with `printed` (null: the job is not loaded). The copy is a folder with an executable
+ * bin/factory-relay at relay/current, or, with `copyAt`, a symlink from there to that path under HOME. `state` is a path under HOME. */
+function checkWith({ code = 0, cursor = null, sock = '/agent.sock', printed = null, copyAt = null, state: stateAt = 'state', installed = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'relay-check-'));
   writeFileSync(join(dir, 'ssh'), ['#!/bin/sh', 'printf \'%s sock=%s\\n\' "$*" "$SSH_AUTH_SOCK" >>"$HOME/calls"', 'case "$*" in *--newest*) echo 4 ;; esac', `exit ${code}`, ''].join('\n'));
+  writeFileSync(join(dir, 'launchctl'), ['#!/bin/sh', 'case "$1" in', `getenv) printf '%s' '${sock}' ;;`, printed === null ? 'print) exit 113 ;;' : `print) printf '%s\\n' '${printed}' ;;`, 'esac', ''].join('\n'));
   chmodSync(join(dir, 'ssh'), 0o755);
-  const state = join(dir, 'state');
+  chmodSync(join(dir, 'launchctl'), 0o755);
+  const relay = join(dir, '.local/share/factory/relay');
+  const copy = join(relay, 'current');
+  mkdirSync(relay, { recursive: true });
+  if (copyAt) {
+    mkdirSync(join(dir, copyAt, 'bin'), { recursive: true });
+    writeFileSync(join(dir, copyAt, 'bin/factory-relay'), '#!/bin/sh\n');
+    chmodSync(join(dir, copyAt, 'bin/factory-relay'), 0o755);
+    symlinkSync(join(dir, copyAt), copy);
+  } else {
+    mkdirSync(join(copy, 'bin'), { recursive: true });
+    writeFileSync(join(copy, 'bin/factory-relay'), '#!/bin/sh\n');
+    chmodSync(join(copy, 'bin/factory-relay'), 0o755);
+  }
+  if (installed) {
+    mkdirSync(join(dir, 'Library/LaunchAgents'), { recursive: true });
+    writeFileSync(join(dir, 'Library/LaunchAgents/io.github.tuannd9288.factory.relay.plist'), installed.replaceAll('$HOME', dir));
+  }
+  const state = join(dir, stateAt);
   if (cursor !== null) {
-    mkdirSync(state);
+    mkdirSync(state, { recursive: true });
     writeFileSync(join(state, 'relay.cursor'), `${cursor}\n`);
   }
   const was = console.log;
   console.log = () => {};
   let exit;
   try {
-    exit = check({ HOME: dir, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, SSH_AUTH_SOCK: sock });
+    exit = check({ HOME: dir, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, SSH_AUTH_SOCK: 'the-test-own.sock' });
   } finally {
     console.log = was;
   }
@@ -284,7 +305,7 @@ test('check fails on a failing ssh and makes the log folder, and never sets a cu
   }
 });
 
-test('check passes when ssh works: it passes SSH_AUTH_SOCK on, sets the cursor to the newest seq only when there is none, and posts nothing', () => {
+test('check passes when ssh works: it passes launchd\'s SSH_AUTH_SOCK on, sets the cursor to the newest seq only when there is none, and posts nothing', () => {
   const none = checkWith();
   const kept = checkWith({ cursor: 9 });
   try {
@@ -295,6 +316,114 @@ test('check passes when ssh works: it passes SSH_AUTH_SOCK on, sets the cursor t
   } finally {
     none.cleanup();
     kept.cleanup();
+  }
+});
+
+test('the ssh probe gets the SSH_AUTH_SOCK launchctl getenv prints, none when that is empty, and never the test\'s own', () => {
+  const none = checkWith({ sock: '' });
+  try {
+    assert.equal(none.exit, 0);
+    assert.ok(none.calls.length > 0 && none.calls.every((c) => c.endsWith('sock=')));
+  } finally {
+    none.cleanup();
+  }
+});
+
+test('check fails, and probes no ssh, when the copy, the log or the state folder sits under Desktop, through a symlink too', () => {
+  const state = checkWith({ state: 'Desktop/state' });
+  const clone = checkWith({ copyAt: 'Desktop/clone' });
+  try {
+    for (const r of [state, clone]) {
+      assert.equal(r.exit, 1);
+      assert.deepEqual(r.calls, []);
+    }
+  } finally {
+    state.cleanup();
+    clone.cleanup();
+  }
+});
+
+test('check fails when an installed plist names a path under Desktop, and passes when it names the copy', () => {
+  const bad = checkWith({ installed: '<plist><dict><key>ProgramArguments</key><array><string>$HOME/Desktop/x/bin/factory-relay</string><string>run</string></array></dict></plist>' });
+  const good = checkWith({ installed: '<plist><dict><string>$HOME/.local/share/factory/relay/current/bin/factory-relay</string><string>run</string></dict></plist>' });
+  try {
+    assert.deepEqual([bad.exit, bad.calls], [1, []]);
+    assert.equal(good.exit, 0);
+  } finally {
+    bad.cleanup();
+    good.cleanup();
+  }
+});
+
+test('check fails when the loaded job last exited with 126 or any code but 0, and passes at 0 or when the job is not loaded', () => {
+  const r126 = checkWith({ printed: '\tlast exit code = 126' });
+  const r0 = checkWith({ printed: '\tlast exit code = 0' });
+  try {
+    assert.deepEqual([r126.exit, r126.calls], [1, []]);
+    assert.equal(r0.exit, 0);
+  } finally {
+    r126.cleanup();
+    r0.cleanup();
+  }
+});
+
+test('check fails when the copy is not there', () => {
+  const r = checkWith();
+  try {
+    rmSync(join(r.dir, '.local'), { recursive: true });
+    const was = console.log;
+    console.log = () => {};
+    try {
+      assert.equal(check({ HOME: r.dir, PATH: `${r.dir}:${process.env.PATH}`, FACTORY_STATE: join(r.dir, 'state') }), 1);
+    } finally {
+      console.log = was;
+    }
+  } finally {
+    r.cleanup();
+  }
+});
+
+/** A small clone with one commit that holds an executable bin/factory-relay. */
+function smallClone() {
+  const dir = mkdtempSync(join(tmpdir(), 'relay-copy-'));
+  const clone = join(dir, 'clone');
+  mkdirSync(join(clone, 'bin'), { recursive: true });
+  const git = (...args) => spawnSync('git', ['-C', clone, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+  git('init', '-q', '-b', 'main');
+  const commit = (text) => {
+    writeFileSync(join(clone, 'bin/factory-relay'), `#!/bin/sh\n# ${text}\n`);
+    chmodSync(join(clone, 'bin/factory-relay'), 0o755);
+    git('add', '-A');
+    git('commit', '-q', '-m', text);
+    return git('rev-parse', 'HEAD').stdout.trim();
+  };
+  return { dir, clone, commit, git };
+}
+
+test('the job runs from relay/current under HOME; install copies HEAD there, a second commit swaps the link and removes the old copy', () => {
+  const c = smallClone();
+  const home = join(c.dir, 'home');
+  const env = { HOME: home, PATH: process.env.PATH };
+  const relay = join(home, '.local/share/factory/relay');
+  try {
+    const j = job(env);
+    assert.equal(j.program[0], join(relay, 'current/bin/factory-relay'));
+    assert.equal(j.cwd, join(relay, 'current'));
+    const first = c.commit('one');
+    assert.deepEqual(install(c.clone, env), { sha: first, dirty: false });
+    assert.equal(realpathSync(join(relay, 'current')), realpathSync(join(relay, first)));
+    accessSync(j.program[0], constants.X_OK);
+    const second = c.commit('two');
+    writeFileSync(join(c.clone, 'loose'), 'not committed');
+    assert.deepEqual(install(c.clone, env), { sha: second, dirty: true });
+    assert.equal(realpathSync(join(relay, 'current')), realpathSync(join(relay, second)));
+    assert.deepEqual(readdirSync(relay).sort(), ['current', second].sort());
+    assert.ok(readFileSync(j.program[0], 'utf8').includes('two'));
+    assert.ok(!existsSync(join(relay, 'current/loose')));
+    install(c.clone, env);
+    assert.deepEqual(readdirSync(relay).sort(), ['current', second].sort());
+  } finally {
+    rmSync(c.dir, { recursive: true, force: true });
   }
 });
 

@@ -12,13 +12,22 @@
 // and leaves the cursor. A line is relayed only when `what` and `where` are at most 300 characters each and `where` is a https://github.com/
 // URL or an absolute path on the Mac mini, which is posted as `<host>:<path>`. It calls no gh, reads no token, and logs a line's kind and
 // key alone. On the factory host the sweep delivers, so `run` and `check` refuse to run there.
-// `plist` is the LaunchAgent that runs a pass every 60 s under the Human's own user (no sudo): its program and folder are the clone that
-// prints it, so `plist` and `check` refuse a linked worktree (guard) and note a branch other than main; its PATH holds the folder `which`
-// finds node in, ssh's folder and the system folders. `check` probes ssh (with SSH_AUTH_SOCK of its own environment, when set), reads the
-// newest seq, relays nothing, and sets the cursor only when there is none.
+// `plist` is the LaunchAgent that runs a pass every 60 s under the Human's own user (no sudo). macOS's privacy protection refuses a launchd
+// job ~/Desktop, ~/Documents, ~/Downloads and ~/Library/Mobile Documents (the clone on the MacBook sits under ~/Desktop: exit 126, #370),
+// and Full Disk Access is not asked for. So the job runs from a copy outside them: `plist` writes the clone's committed HEAD (`git archive`,
+// the whole tree, since the imports reach bin/, packs/ and kit/) into ~/.local/share/factory/relay/<sha>/, through a temporary folder and a
+// rename, reusing a folder that is there; points the symlink relay/current at it by a rename, which is atomic; removes the other folders in
+// relay/; and prints the job with relay/current as its program and folder. An uncommitted change is not copied, and `plist` says so on
+// stderr. After a pull, `plist` again refreshes the copy, and the loaded job needs no reload. `plist` and `check` refuse a linked worktree
+// (guard) and note a branch other than main; the job's PATH holds the folder `which` finds node in, ssh's folder and the system folders.
+// `check` fails, saying which path, when the program, the folder, the copy (by real path), the log or the state folder sits under a protected
+// folder, when an installed ~/Library/LaunchAgents plist names such a path, when the copy or its bin/factory-relay is not there and
+// executable, and, for a loaded job, when `launchctl print` reports a last exit code other than 0 (no launchctl, or not loaded: skipped).
+// It probes ssh with the SSH_AUTH_SOCK `launchctl getenv` gives, which is what launchd gives the job, and none when that is empty; it reads
+// the newest seq, relays nothing, and sets the cursor only when there is none.
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { oneLine } from './events.mjs';
 import { contextOf, placeOf, wakeFile } from './factory.mjs';
@@ -154,16 +163,84 @@ function which(name, path) {
   return null;
 }
 
-/** The LaunchAgent's job, in the shape queue.mjs's plist renders: `run` every 60 s from this clone, with a PATH that finds node and ssh,
- * logging to ~/Library/Logs/factory/relay.log (launchd does not make the folder; `check` does). No user: it runs under whoever loads it. */
+/** The folders macOS refuses a launchd job, under the home folder. */
+const PROTECTED = ['Desktop', 'Documents', 'Downloads', 'Library/Mobile Documents'];
+
+/** Where the job's copy of the clone lives: <relayDir>/<sha>/, and `current` there is the symlink to the one in use. */
+export const relayDir = (env) => join(env.HOME, '.local/share/factory/relay');
+
+/** The real path of `p` through its symlinks, even when `p` is not there yet: the nearest folder that is, with the rest added. */
+function realish(p) {
+  const rest = [];
+  for (let cur = resolve(p); ; cur = dirname(cur)) {
+    try {
+      return join(realpathSync(cur), ...rest);
+    } catch {
+      if (dirname(cur) === cur) return resolve(p);
+      rest.unshift(basename(cur));
+    }
+  }
+}
+
+/** The protected folder (as `~/Desktop`, say) that `path` really sits under, or null. */
+export function protectedFolder(path, home) {
+  const real = realish(path);
+  for (const f of PROTECTED) {
+    for (const dir of new Set([join(realish(home), f), realish(join(home, f))])) if (real === dir || real.startsWith(`${dir}${sep}`)) return `~/${f}`;
+  }
+  return null;
+}
+
+/** Writes the committed HEAD of the clone at `root` into relay/<sha>/ and points relay/current at it; returns { sha, dirty }, `dirty` being
+ * an uncommitted change that is not copied. A folder for that sha already there is reused; the others in relay/ are removed. */
+export function install(root, env = process.env) {
+  if (!env.HOME?.startsWith('/')) throw new Error('HOME is not an absolute path');
+  const git = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+  const head = git('rev-parse', 'HEAD');
+  const sha = head.stdout.trim();
+  if (head.status !== 0 || !/^[0-9a-f]{40,64}$/.test(sha)) throw new Error(`cannot read HEAD of ${root}`);
+  const base = relayDir(env);
+  const dest = join(base, sha);
+  mkdirSync(base, { recursive: true });
+  if (!existsSync(dest)) {
+    const tmp = mkdtempSync(join(base, '.copy-'));
+    const tar = `${tmp}.tar`;
+    try {
+      const made = git('archive', '--format=tar', '-o', tar, 'HEAD');
+      const out = made.status === 0 ? spawnSync('tar', ['-xf', tar, '-C', tmp], { encoding: 'utf8' }) : made;
+      if (out.status !== 0) throw new Error(`cannot copy HEAD of ${root}: ${oneLine(out.stderr || out.error?.message || `exit ${out.status}`)}`);
+      try {
+        renameSync(tmp, dest);
+      } catch (error) {
+        if (!existsSync(dest)) throw error;
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+      rmSync(tar, { force: true });
+    }
+  }
+  // A symlink made under another name and renamed over `current` is swapped at once; `ln -sfn` removes the old link first.
+  const next = join(base, `.current-${process.pid}`);
+  rmSync(next, { force: true });
+  symlinkSync(sha, next);
+  renameSync(next, join(base, 'current'));
+  for (const name of readdirSync(base)) {
+    const path = join(base, name);
+    if (name !== 'current' && name !== sha && dirname(path) === base) rmSync(path, { recursive: true, force: true });
+  }
+  return { sha, dirty: git('status', '--porcelain').stdout.trim() !== '' };
+}
+
+/** The LaunchAgent's job, in the shape queue.mjs's plist renders: `run` every 60 s from the copy `install` makes, with a PATH that finds node
+ * and ssh, logging to ~/Library/Logs/factory/relay.log (launchd does not make the folder; `check` does). No user: it runs under whoever loads it. */
 export function job(env = process.env) {
   const node = which('node', env.PATH) ?? process.execPath;
   const ssh = which('ssh', env.PATH) ?? '/usr/bin/ssh';
   // The folder `which` finds node in, as the shell has it (Homebrew's link folder, which an upgrade keeps), not the versioned one `process.execPath` names.
   const path = [...new Set([dirname(node), dirname(ssh), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
   const kept = Object.fromEntries(['FACTORY_STATE', 'FACTORY_HOST_USER'].filter((k) => env[k]).map((k) => [k, env[k]]));
-  const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  return { label: LABEL, interval: 60, calendar: null, program: [join(factory, 'bin/factory-relay'), 'run'], cwd: factory, env: { PATH: path, ...kept }, log: join(env.HOME, 'Library/Logs/factory/relay.log'), user: null };
+  const copy = join(relayDir(env), 'current');
+  return { label: LABEL, interval: 60, calendar: null, program: [join(copy, 'bin/factory-relay'), 'run'], cwd: copy, env: { PATH: path, ...kept }, log: join(env.HOME, 'Library/Logs/factory/relay.log'), user: null };
 }
 
 /** What the checkout at `root`, which `plist` and `check` run from and the job would point at, is: { refuse, note }. A linked worktree
@@ -179,12 +256,46 @@ export function guard(root) {
   return { refuse: null, note: branch === 'main' ? null : `${root} is on ${branch ? `branch ${branch}` : 'no branch'}, not main` };
 }
 
-/** Before the Human loads the job: makes the log's folder and says whether ssh to the Mac mini works with no prompt (it passes
- * SSH_AUTH_SOCK on from its own environment when set) and whether the news can be read there. It relays nothing and posts nothing: it sets
- * the cursor to the newest seq only when there is none. Returns the exit code. */
+/** What launchd would meet that a terminal does not: the problems with the job's paths, the installed plist and the loaded job, as lines
+ * (empty when there are none). `launchd(args)` runs launchctl in the job's environment. */
+function preflight(j, state, env, launchd) {
+  const problems = [];
+  const copy = join(relayDir(env), 'current');
+  const paths = [['program', j.program[0]], ['working folder', j.cwd], ['copy', copy], ['log', j.log], ['state folder', state]];
+  for (const [what, path] of paths) {
+    const folder = protectedFolder(path, env.HOME);
+    if (folder) problems.push(`the ${what} ${path} (really ${realish(path)}) sits under ${folder}, which macOS refuses a launchd job`);
+  }
+  try {
+    accessSync(j.program[0], constants.X_OK);
+  } catch {
+    problems.push(`the copy is not there or ${j.program[0]} is not executable; run \`bin/factory-relay plist\` from the clone`);
+  }
+  const installed = join(env.HOME, 'Library/LaunchAgents', `${LABEL}.plist`);
+  if (existsSync(installed)) {
+    const names = [...readFileSync(installed, 'utf8').matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]).filter((s) => s.startsWith('/'));
+    for (const path of names) {
+      const folder = protectedFolder(path, env.HOME);
+      if (folder) problems.push(`the installed ${installed} names ${path}, under ${folder}, which macOS refuses a launchd job; write it again from \`bin/factory-relay plist\`, then \`launchctl bootout\` and \`launchctl bootstrap\` the job`);
+    }
+  }
+  // Not loaded, or no launchctl: nothing to read, which is not a failure.
+  const printed = launchd(['print', `gui/${process.getuid?.()}/${LABEL}`]);
+  const last = printed.status === 0 ? /last exit code = (\d+)/.exec(printed.stdout ?? '') : null;
+  if (last && last[1] !== '0') problems.push(`the loaded job's last exit code is ${last[1]}; reload it: \`launchctl bootout gui/$(id -u)/${LABEL}\`, then \`launchctl bootstrap gui/$(id -u) ${installed}\``);
+  return problems;
+}
+
+/** Before the Human loads the job: makes the log's folder, fails on what launchd would refuse the job (see preflight), and says whether ssh
+ * to the Mac mini works with no prompt (with the SSH_AUTH_SOCK `launchctl getenv` gives, which is the job's, and none when that is empty)
+ * and whether the news can be read there. It relays nothing and posts nothing: it sets the cursor to the newest seq only when there is none.
+ * Returns the exit code. */
 export function check(env = process.env, note = null) {
   const j = job(env);
-  const jobEnv = { HOME: env.HOME, USER: env.USER ?? '', TMPDIR: env.TMPDIR ?? '/tmp', ...(env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: env.SSH_AUTH_SOCK } : {}), ...j.env };
+  const base = { HOME: env.HOME, USER: env.USER ?? '', TMPDIR: env.TMPDIR ?? '/tmp', ...j.env };
+  const launchd = (args) => spawnSync('launchctl', args, { env: base, encoding: 'utf8' });
+  const sock = launchd(['getenv', 'SSH_AUTH_SOCK']);
+  const jobEnv = { ...base, ...(sock.status === 0 && sock.stdout?.trim() ? { SSH_AUTH_SOCK: sock.stdout.trim() } : {}) };
   const say = (line) => console.log(`check: ${line}`);
   if (note) say(note);
   mkdirSync(dirname(j.log), { recursive: true });
@@ -192,6 +303,12 @@ export function check(env = process.env, note = null) {
   const state = contextOf(jobEnv).state;
   say(`state folder ${state}`);
   say(`log ${j.log}`);
+  say(`copy ${realish(join(relayDir(env), 'current'))}`);
+  const problems = preflight(j, state, env, launchd);
+  if (problems.length) {
+    for (const p of problems) say(`not ready: ${p}`);
+    return 1;
+  }
   const probe = spawnSync('ssh', [...SSH_OPTIONS, HOST, 'true'], { env: jobEnv, encoding: 'utf8', timeout: SSH_MS });
   let why = null;
   if (probe.status !== 0) why = `ssh to the Mac mini does not work with no prompt: ${oneLine(probe.stderr || probe.error?.message || `exit ${probe.status}`)}`;
@@ -215,6 +332,8 @@ export async function main(argv, env = process.env, root = join(dirname(fileURLT
   if (g.refuse) throw new Error(g.refuse);
   if (command === 'check') return check(env, g.note);
   if (g.note) console.error(`factory-relay: note: ${g.note}`);
+  const copied = install(root, env);
+  console.error(`factory-relay: the job runs from the copy of ${copied.sha}${copied.dirty ? '; an uncommitted change in the clone is not in it' : ''}`);
   return void process.stdout.write(plist(job(env)));
 }
 
