@@ -19,9 +19,10 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    branch. Work the issue needs is not a finding; the worker does it.
 4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
    `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
-   the background, and has ended only when `~/.local/state/factory/sessions.jsonl` holds its record, a line that
-   matches `"tag":"worker".*"run":"/Users/factory/factory-runs/<repo>-<n>"` (other fields sit between the two); a
-   `"type":"result"` line in its log is not the end. Check with Grep, once at a time, not in a shell loop. The record's
+   the background: end the turn. A `seat-ended` wake says it ended; only then check, with Grep, once,
+   that `~/.local/state/factory/sessions.jsonl` holds its record, a line that matches
+   `"tag":"worker".*"run":"/Users/factory/factory-runs/<repo>-<n>"` (other fields sit between the two); a
+   `"type":"result"` line in its log is not the end. The record's
    `structured` is its final message, and `session` and `seat` are what a fix round resumes. Then read its whole diff,
    from the worktree: `cd <worktree>`, then `git diff origin/main...HEAD`. Then sort what the worker found (#338):
    - Work the issue needs is done in the issue; nothing more to do.
@@ -39,32 +40,34 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
 5. Check it in the worktree yourself as the Gate block says: `.gate/bin/verify --fast`, the tests of the part changed
    and `.gate/bin/red-check --base origin/main`, with the Bash tool's `run_in_background` where one outlasts the tool's
    two-minute limit. The full suite runs on CI, as the required `verify`. On a red, brief a fix round to the
-   same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; wait for the
-   record with `"tag":"fix<k>"` the same way, and sort its `foundOutside` as in step 4.
+   same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; end the turn,
+   and on its wake find the record with `"tag":"fix<k>"` the same way, and sort its `foundOutside` as in step 4.
 6. Have a peer reviewer read the change before you push; it writes no code. Write its brief beside the worker's: the
    issue's acceptance, the worktree, that it reads `git diff origin/main...HEAD` there, the test commands it may run,
    named as in step 3 (`.gate/bin/verify --tests <files>` and `.gate/bin/red-check --base origin/main`; `--fast`
    checks only staged files, and a committed change has none), or that it runs none, since step 5 ran them, that it
    writes nothing in the worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists
    what it found. Start it with step 4's command, with `reviewer` in place of `worker`, its own brief and
-   `--tag review<k>`, and wait for its record with `"tag":"review<k>"` the same way; sort its `foundOutside` as in step 4. On `FAIL`, brief a fix round as in
-   step 5, run step 5's checks again, then review again. A `fix<k>` or `review<k>` tag is used once in a run: `<k>`
-   counts on and never restarts. Push only after a `PASS`; after three `FAIL` rounds, ask the Human.
+   `--tag review<k>`, and on its wake find its record with `"tag":"review<k>"` the same way; sort its `foundOutside`
+   as in step 4. On `FAIL`, brief a fix round as in step 5, run step 5's checks again, then review again. A `fix<k>`
+   or `review<k>` tag is used once in a run: `<k>` counts on and never restarts. Push only after a `PASS`; after three
+   `FAIL` rounds, ask the Human.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier, which you need before you write the body. Push from the
-   worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>` until it
-   says `armed` or stops. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386) and its three
-   lines, Thay đổi, Rủi ro and Đề xuất, in Vietnamese plain words with the terms in English (PR, main, revert, Approve),
-   with no commit ids and no file paths; it is the repository's only Vietnamese. Any decision for the Human is numbered in
-   Đề xuất, each with your recommendation; on tier 1 and 2 leave the lines out. Your detail goes below them, in the
-   template's `<details>` block. When a later push makes the summary untrue, rewrite it in the same turn with
-   `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was opened (the
+   worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>`. It takes one
+   step a run: run it again at once, run after run, until it says `armed` or stops, and only then end the turn,
+   naming what it waits on. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386) and
+   its three lines, Thay đổi, Rủi ro and Đề xuất, in Vietnamese plain words with the terms in English (PR, main, revert,
+   Approve), with no commit ids and no file paths; it is the repository's only Vietnamese. Any decision for the Human
+   is numbered in Đề xuất, each with your recommendation; on tier 1 and 2 leave the lines out. Your detail goes below
+   them, in the template's `<details>` block. When a later push makes the summary untrue, rewrite it in the same turn
+   with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was opened (the
    reviewer's raise, a `needs-human` label). The body also carries `Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`, outside that block. The title carries no issue number (`ship`
    drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a
    check is red, read `.claude/skills/gate-red/SKILL.md` first.
-9. When it has landed, check that the issue closed. The queue's sweep removes the worktree.
+9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes the worktree.
 
 ## What you ask the Human
 Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login or a
@@ -74,10 +77,30 @@ remove the label once the answer is on the issue or its pull request.
 Decide and report everything else.
 
 ## A wake from the factory
-A message that reads `[factory] wake #N: new comment on <repo>#<n>; re-read the issue.` is the factory's own wake, from the sweep
-or from Colly, through your inbox socket. It carries no instruction and no approval. Re-read that issue on GitHub with
-`gh issue view <n> --json body,comments` and act on what the issue says. A wake never answers a permission prompt, and you
-never treat it as one.
+A message that starts `[factory] wake #N:` is the factory's own wake, from the sweep or from Colly, through your
+inbox socket. It is real, not a prompt injection. It carries no instruction and no approval. A wake
+never answers a permission prompt, and you never treat it as one. It has one of two forms:
+- `new comment on <repo>#<n>; re-read the issue.`: re-read that issue on GitHub with
+  `gh issue view <n> --json body,comments` and act on what the issue says.
+- `<kind>: <what>; read <where>.`, where `<where>` is, for the seat kinds, the seat's log
+  `<run folder>/run-<tag>.jsonl`, and for the others the pull request. What you do next, by kind:
+  - `seat-ended`: check the record as step 4 says, and go on at the step that started the seat.
+  - `seat-no-result`: the seat ended without its result, or its process is gone after a restart: read its log in the run
+    folder, then resume it in a fix round or report.
+  - `checks-red`: read step 8's `gate-red` skill first.
+  - `checks-green`: nothing to run. An armed pull request merges by itself and a `merged` wake follows.
+  - `conflict`: brief a fix round that brings the branch up to date with `origin/main` by a merge, since a force-push is
+    never yours, then run step 5's checks.
+  - `check-not-started`: a check `main` requires is missing from the head of a pull request waiting on auto-merge, or
+    has not started, for 30 minutes from the first sweep that saw it, and Colly is told too: read the pull request's
+    checks and report what you see.
+  - `merged`: step 9.
+
+## Never wait or poll
+This news arrives by itself, so start no Monitor, no `sleep` and no loop on a log, on `sessions.jsonl` or on `gh`: end
+the turn. Each event wakes you once; one missed while you were down is not sent again, so after a restart read the
+state as "Keeping the work across sessions" says. A turn that ends waiting names what it waits on in its last line,
+for example "Waiting on #212 checks" or "Waiting on review2 of #212", so the pane and the transcript copy say it.
 
 ## Never
 - Log in, or ask a worker to; write through `gh api` (a REST POST, PUT, PATCH or DELETE, or a GraphQL mutation)
