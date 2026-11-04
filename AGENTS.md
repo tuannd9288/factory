@@ -216,32 +216,48 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   Github thì off mặc định, chỉ khi nào cần thì phát triển tiếp hoặc mày xem đề xuất là tag cái phần github rồi gỡ hẵn
   chỉ dùng B Linear, khi nào cần xây lại github thì lấy lại nếu cần, để code gọn?" (14:16); "Ok, tag rồi gỡ" (14:28);
   "OK không xoá issue." (14:43); "5 ok." (14:47); "Rà lại phần Labels trên Linear tau thấy có Decision, Approval
-  OptionA,... là gì? Đừng có đặt tuỳ tiện. Mục đích rõ ràng" (14:54). Sources:
+  OptionA,... là gì? Đừng có đặt tuỳ tiện. Mục đích rõ ràng" (14:54); and, on Linear's default labels, "Vì sao không dùng chuẩn chung?
+  Factory dùng nhãn gì?" (14:59). Sources:
   https://github.com/tuannd9288/factory/issues/375 (its body and comments) and
   https://github.com/tuannd9288/factory/issues/402, relayed by Colly and the factory-repo session.
 
 ## FAC's labels and statuses (proposal)
 
+The factory uses Linear's standard type labels (Bug, Feature, Improvement), one single-select Sublayer group, and one
+label of its own, `needs-human`, because no standard field marks that an issue waits for his answer.
+
 His to approve with the pull request that holds this section (Linear, 2026-11-04, in Decisions); nothing is created in
 Linear before, and #406 creates them. Linear's team `FAC` gets no label without a purpose written here: what it marks,
-who sets it, who reads it, and the GitHub label it replaces or why it is new. Colly cleans up INN's labels separately.
+who sets it, who reads it, and the GitHub label it replaces or why it is new. A label that departs from Linear's
+standard says why. Colly cleans up INN's labels separately.
 
-| Label | What it marks | Set by | Read by | Replaces |
+| Label | What it marks | Set by | Read by | Replaces, or why |
 |---|---|---|---|---|
-| `task` | An issue a team may claim | Colly or the Human, to release it | The claim check, the Lead, the ledger (#405, #407) | `task` |
-| `needs-human` | The issue waits on a decision of his | The Lead, who removes it once answered | The Human and Colly, the sweep's wait on him | `needs-human` on an issue |
-| `sublayer/<id>`, 17, one for each sublayer in this file | The sublayer the issue belongs to | Whoever files the issue | The Human and Colly, to group work | `sublayer-0a` to `sublayer-4b`, one to one |
+| Bug (standard) | Something that works wrongly | Whoever files the issue | The Human and Colly | `bug` |
+| Feature (standard) | A new capability | Whoever files the issue | The Human and Colly | `enhancement`, "New feature" |
+| Improvement (standard) | A change to what exists | Whoever files the issue | The Human and Colly | `enhancement`, the rest |
+| Sublayer, a single-select group, 17 children `0a` to `4b` | The sublayer the issue belongs to | Whoever files | The Human and Colly | `sublayer-0a` to `sublayer-4b` |
+| `needs-human` | The issue waits on a decision of his | The Lead, who removes it once answered | The sweep, `factory top`, the Human | `needs-human` on an issue |
 
-The tier labels and `raised` mark pull requests, which stay on GitHub, and so does `needs-human` on a pull request.
-Left out, since no one sets or reads them on an issue: `bug` (1 issue, none open), the nine other GitHub defaults
-(`accessibility`, `documentation`, `duplicate`, `enhancement`, `good first issue`, `help wanted`, `invalid`,
-`question`, `wontfix`; none on any issue), and `digest`, which marks an issue in another repository; it is added if
-#405 moves the digest to Linear.
+- **Sublayer** departs from the standard because this file requires every issue to name its sublayer, and a group lets
+  an issue carry only one.
+- **`needs-human`** departs because no standard field does its job. Assigning the issue to him does not mark it: the
+  Factory app is the issue's delegate and a person stays its assignee (Linear's agent model), so the assignee does not
+  change when the Lead waits on him. The sweep and `factory top` raise the wait from this label today
+  (`bin/lib/events.mjs`, `bin/lib/top.mjs`), and #405 reads Linear's. The label on a pull request stays on GitHub.
+- **`task` is dropped** for a repository on Linear. Its job is done by the status: Triage is an issue no team may claim,
+  Todo is one a team may, and Colly or the Human moves it there to release it. The claim check reads the status type
+  (unstarted or started) in place of the label (`kit/.gate/bin/lib/claim.mjs:132` today), and the ledger counts a task
+  from its move to Todo. #404, #405 and #407 do this, and 1a's words "labelled `task`" follow them.
+- The tier labels and `raised` mark pull requests, which stay on GitHub.
+- Left out, since no one sets or reads them: the eight other GitHub defaults (`accessibility`, `documentation`,
+  `duplicate`, `good first issue`, `help wanted`, `invalid`, `question`, `wontfix`; none on any issue), and `digest`,
+  which marks an issue in another repository; it is added if #405 moves the digest to Linear.
 
 Statuses are Linear's defaults, with Triage on, and no status beyond them:
-- **Triage** is the board's Triage: an issue without `task`, such as a finding outside a task, waits there.
-- **Todo** is the board's Todo: labelled `task`, to be claimed. **In Progress** and **Done** are the board's, and
-  Linear's pull-request automation moves them.
+- **Triage** is the board's Triage: an issue no team may claim yet, such as a finding outside a task.
+- **Todo** is the board's Todo: released, to be claimed. **In Progress** and **Done** are the board's, and Linear's
+  pull-request automation moves them.
 - **Backlog** and **Canceled** are Linear's. No rule here uses Backlog; Canceled replaces a GitHub issue closed as not
   planned.
 - Who a task waits on is derived from `needs-human` and the checks, not stored as a status.
@@ -356,7 +372,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
   factory's unattended sessions; 0d does; (2) the record of a task is in its repository's tracker (1b) and in 0d's
   panes, and a surface keeps no sole copy; (3) the factory's own code in this sublayer reads no credential (#58 K2;
-  this binds the factory's code, not the Human's own tools, and K3 keeps Paseo's usage plugin as it is); (4) only a person answers a permission
+  this binds the factory's code, not the Human's own tools, and K3 keeps Paseo's usage plugin as it is);
+  (4) only a person answers a permission
   prompt, so agents do not type into another pane: the seats and the Lead are denied all of `herdr`, its
   `agent send-keys` and `pane send-keys` with it (`bin/lib/seat.mjs`, `packs/pstack/bin/lead.mjs`); the kit's deny
   rules bind Claude Code only and hold no such rule (#76, closed 2026-10-30); `rex` is denied nowhere yet (#267); (5)
