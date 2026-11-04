@@ -929,23 +929,10 @@ const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer'
 const clean = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
 const cleanDeep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(cleanDeep) : v && Object.getPrototypeOf(v) === Object.prototype ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanDeep(x)])) : v);
 
-<<<<<<< HEAD
-/** What waits on the Human, as { verb, text, url } rows: the pull requests to approve, the Leads at a prompt, the events, the queue's
- * alerts. `snap` is a snapshot whose strings are already cleaned (render's) or are escaped by the caller (the page's). */
+/** What waits on the Human, as { kind, verb, text, url } in the frame's order: pull requests to approve, Leads at a prompt or a login,
+ * the sweep's conditions, the `*.failed` files. The frame, `--line`, `--brief` and the page's view model all read it, so they never
+ * disagree. `snap` is clean (render's), or its strings are escaped by the caller (the page's). */
 export function waitsOf(snap) {
-  const { sessions, queue, now } = snap;
-  return [
-    ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => ({ verb: 'approve', text: `${r.repo}#${g.pr.number} ${g.pr.title}`, url: `https://github.com/${r.repo}/pull/${g.pr.number}` }))),
-    ...sessions.filter((s) => s.role === 'lead' && s.state === 'waiting').map((s) => ({ verb: 'answer', text: `${s.name} (${s.repo?.split('/')[1] ?? '?'} Lead, team ${s.team})  pane ${s.pane ?? s.name}${s.waitNote ? `  ${s.waitNote}` : ''}`, url: '' })),
-    ...(snap.events ?? []).map((c) => ({ verb: EVENT_VERBS[c.kind] ?? 'look', text: c.text, url: c.url ?? '' })),
-    ...queue.failed.map((f) => ({ verb: 'alert', text: `${f.file}  ${f.text.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z/, (iso) => local(Date.parse(iso), now))}`, url: '' })),
-  ];
-}
-
-=======
-/** What waits on the Human, as { verb, text, url } in the frame's order: pull requests to approve, Leads at a prompt or a login, the
- * sweep's conditions, the `*.failed` files. The frame, `--line` and `--brief` all read it, so they never disagree. `snap` is clean. */
-function waitsOf(snap) {
   const { sessions, queue, now } = snap;
   return [
     ...snap.repos.flatMap((r) => r.groups.filter((g) => !g.done && g.pr && g.waiting === 'the Human').map((g) => ({ kind: 'pr', verb: 'approve', text: `${r.repo}#${g.pr.number} ${g.pr.title}`, url: `https://github.com/${r.repo}/pull/${g.pr.number}` }))),
@@ -958,7 +945,6 @@ function waitsOf(snap) {
 /** `snap` with every data field cleaned of control characters. */
 const cleanSnap = (input) => ({ ...input, sessions: cleanDeep(input.sessions), repos: cleanDeep(input.repos), accounts: cleanDeep(input.accounts), queue: cleanDeep(input.queue), events: cleanDeep(input.events ?? []), github: { ...input.github, error: clean(input.github.error ?? '') } });
 
->>>>>>> origin/main
 /** One frame as text, each line at most `width` cells. tab indexes tabsOf(snap). It is a pure function: `color` (basic SGR) and `keys`
  * (the keys line, which `--once` leaves out) are options, and every data field is cleaned of control characters before it is styled. */
 export function render(input, { width = 120, tab = 0, rows = null, full = false, color = false, keys = false } = {}) {
