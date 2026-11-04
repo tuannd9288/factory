@@ -73,7 +73,8 @@ export const kindsOf = (body) => String(body ?? '').split(/\r?\n/).flatMap((line
 /** kind -> { number, state } over issues { number, state, body }: an open issue before a closed one, then the lower number. */
 export function enforcerIndex(issues) {
   const index = new Map();
-  const better = (a, b) => (a.state === 'open') !== (b.state === 'open') ? a.state === 'open' : a.number < b.number;
+  const seq = (n) => Number(String(n).replace(/^.*-/, '')); // a Linear key (#406) by its number
+  const better = (a, b) => (a.state === 'open') !== (b.state === 'open') ? a.state === 'open' : seq(a.number) < seq(b.number);
   for (const i of issues) {
     for (const kind of kindsOf(i.body)) {
       const mine = { number: i.number, state: i.state };
@@ -88,5 +89,5 @@ export function findingsSection(findings) {
   const head = ['## Findings seen on two merged pull requests', ''];
   if (findings.error) return [...head, `- ${findings.error}`];
   if (!findings.length) return [...head, '- None.'];
-  return [...head, ...findings.map((f) => f.error ? `- ${f.repo}: could not be read (${f.error})` : `- ${f.repo} \`${f.kind}\`: ${f.prs.map((n) => `#${n}`).join(', ')} — ${f.enforcer ? `enforcer #${f.enforcer.number} (${f.enforcer.state})` : 'no enforcer issue yet'}`)];
+  return [...head, ...findings.map((f) => f.error ? `- ${f.repo}: could not be read (${f.error})` : `- ${f.repo} \`${f.kind}\`: ${f.prs.map((n) => `#${n}`).join(', ')} — ${f.enforcer ? `enforcer ${typeof f.enforcer.number === 'string' ? f.enforcer.number : `#${f.enforcer.number}`} (${f.enforcer.state})` : 'no enforcer issue yet'}`)];
 }
