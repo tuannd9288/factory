@@ -27,18 +27,30 @@ const MOVED = block(
 );
 const ALL_UNSEEN = block(...rowsOf().map((r) => `${r}${UNSEEN}`));
 
-const ORDER = ['Thay đổi', 'Rủi ro', 'Đề xuất'];
-const heads = (text) => text.split('\n').slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]);
+const ORDER = ['Anh quyết', 'Đề xuất', 'Rủi ro'];
+const ORDER_EN = ['You decide', 'Recommendation', 'Risk'];
+const heads = (block) => block.split('\n').slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]);
+// The Vietnamese block alone: the settings' names and the numbers are counted in it.
+const vi = (text) => text.split('\n\n')[0];
 const bullet = (text, key) => text.split('\n').find((l) => l.startsWith(`- **${key}:**`));
-const decisions = (text) => [...bullet(text, 'Đề xuất').matchAll(/(?:^|\s)\d+\. /g)].length;
+const decisions = (text, key = 'Đề xuất') => [...bullet(text, key).matchAll(/(?:^|\s)\d+\. /g)].length;
 const without = (text, key) => text.split('\n').filter((l) => !l.startsWith(`- **${key}:**`)).join('\n');
 const times = (text, pattern) => [...text.matchAll(pattern)].length;
 const COUNTS = { added: 1, updated: 0, removed: 0, kept: 3 };
 // The four settings' names in the summary; the reviewer's is a word of other names too, so it is told apart by its colon.
 const NAMES = [/máy chạy việc của main/g, /máy kiểm từng thay đổi/g, /máy giữ key của reviewer/g, /(?<!của )reviewer:/g];
+// The same four in the English block.
+const NAMES_EN = [/the machine that runs main/g, /the machine that checks each change/g, /the machine that holds the reviewer's key/g, /reviewer:/g];
+const en = (text) => text.split('\n\n')[1];
 const structure = (text) => {
-  assert.equal(text.split('\n')[0], '**Tóm tắt cho anh**');
-  assert.deepEqual(heads(text), ORDER);
+  const blocks = text.split('\n\n');
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].split('\n')[0], '**Tóm tắt cho anh**');
+  assert.deepEqual(heads(blocks[0]), ORDER);
+  assert.equal(blocks[1].split('\n')[0], '**TL;DR**');
+  assert.deepEqual(heads(blocks[1]), ORDER_EN);
+  // The English block numbers the same decisions as the Vietnamese one.
+  assert.equal(decisions(blocks[1], 'Recommendation'), decisions(blocks[0], 'Đề xuất'));
   assert.doesNotMatch(text, /TL;DR for the Human|Summary for the Human|^## /m);
 };
 
@@ -51,19 +63,32 @@ describe('the summary of a kit pull request', () => {
     assert.equal(settingsOf(STAY).length, 4);
   });
 
-  test('onboard\'s has the three bullets in order and names each setting once, with no file or path', () => {
-    const text = onboardTldr('app', STAY);
-    structure(text);
+  test('onboard\'s has the two blocks in order and names each setting once, with no file or path', () => {
+    const full = onboardTldr('app', STAY);
+    structure(full);
+    const text = vi(full);
     for (const name of NAMES) assert.equal(times(text, name), 1, String(name));
-    assert.doesNotMatch(text, /ubuntu-latest|\.yml|\.github|\.gate/);
+    for (const name of NAMES_EN) assert.equal(times(en(full), name), 1, String(name));
+    assert.doesNotMatch(full, /ubuntu-latest|\.yml|\.github|\.gate/);
     assert.equal(decisions(text), 0);
   });
 
+  test('a fourth line for silence is written only when the caller passes one', () => {
+    const silence = { vi: 'x', en: 'y' };
+    for (const make of [(s) => onboardTldr('app', STAY, s), (s) => kitUpdateTldr('app', COUNTS, STAY, s)]) {
+      assert.equal(bullet(make(), 'Nếu không trả lời'), undefined);
+      assert.equal(bullet(make(), 'If no answer'), undefined);
+      const text = make(silence);
+      assert.deepEqual(heads(text.split('\n\n')[0]), [...ORDER, 'Nếu không trả lời']);
+      assert.deepEqual(heads(text.split('\n\n')[1]), [...ORDER_EN, 'If no answer']);
+    }
+  });
+
   test('a reviewer, and a GitHub-hosted runner whatever its label, are told apart from the repository\'s own', () => {
-    const said = (reviewer) => bullet(onboardTldr('app', block(`the reviewer (.github/workflows/gate-trusted.yml): ${reviewer}`)), 'Thay đổi');
+    const said = (reviewer) => bullet(onboardTldr('app', block(`the reviewer (.github/workflows/gate-trusted.yml): ${reviewer}`)), 'Anh quyết');
     const all = [NONE, 'claude', 'entire', 'stub'].map(said);
     assert.equal(new Set(all).size, 4);
-    const runner = (labels) => bullet(onboardTldr('app', block(`the candidate's runner (.github/workflows/gate.yml): ${labels}`)), 'Thay đổi');
+    const runner = (labels) => bullet(onboardTldr('app', block(`the candidate's runner (.github/workflows/gate.yml): ${labels}`)), 'Anh quyết');
     assert.notEqual(runner('["macos-15"]'), runner('["ubuntu-latest"]'));
     assert.match(runner('["macos-15"]'), /macos-15/);
     assert.match(runner('["ubuntu-24.04"]'), /ubuntu-24\.04/);
@@ -72,23 +97,25 @@ describe('the summary of a kit pull request', () => {
     assert.doesNotMatch(runner('["ubuntu-latest"]'), /ubuntu/);
   });
 
-  test('kit-update\'s Rủi ro follows the files it touches, and its Thay đổi the settings it keeps', () => {
+  test('kit-update\'s Rủi ro follows the files it touches, and its Anh quyết the settings it keeps', () => {
     const none = kitUpdateTldr('app', COUNTS, STAY);
     structure(none);
     assert.equal(bullet(none, 'Đề xuất'), '- **Đề xuất:** Approve.');
-    for (const name of NAMES) assert.equal(times(none, name), 0, String(name));
+    for (const name of NAMES) assert.equal(times(vi(none), name), 0, String(name));
+    for (const name of NAMES_EN) assert.equal(times(en(none), name), 0, String(name));
     const touched = kitUpdateTldr('app', { ...COUNTS, updated: 2, removed: 1 }, STAY);
     assert.notEqual(bullet(touched, 'Rủi ro'), bullet(none, 'Rủi ro'));
     assert.match(bullet(touched, 'Rủi ro'), /\b3\b/);
     assert.doesNotMatch(bullet(none, 'Rủi ro'), /\b[1-9]\b/);
     const counts = kitUpdateTldr('app', { added: 4, updated: 5, removed: 6, kept: 7 }, STAY);
-    assert.match(bullet(counts, 'Thay đổi'), /\b4\b.*\b5\b.*\b6\b.*\b7\b/);
-    assert.notEqual(bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Thay đổi'), bullet(none, 'Thay đổi'));
+    assert.match(bullet(counts, 'Anh quyết'), /\b4\b.*\b5\b.*\b6\b.*\b7\b/);
+    assert.notEqual(bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Anh quyết'), bullet(none, 'Anh quyết'));
   });
 
   test('kit-update\'s names each changed setting once, in Đề xuất, and numbers a decision for each', () => {
-    const text = kitUpdateTldr('app', COUNTS, MOVED);
-    structure(text);
+    const full = kitUpdateTldr('app', COUNTS, MOVED);
+    structure(full);
+    const text = vi(full);
     assert.equal(decisions(text), 3);
     const outside = without(text, 'Đề xuất');
     // MOVED changes the reviewer, the candidate's runner and the trusted runner, not main's.
@@ -96,22 +123,33 @@ describe('the summary of a kit pull request', () => {
       assert.equal(times(bullet(text, 'Đề xuất'), name), i === 0 ? 0 : 1, String(name));
       assert.equal(times(outside, name), 0, String(name));
     }
-    assert.doesNotMatch(text, /#335|before #|variable|\.yml/);
+    // The English block names the same settings once each, in Recommendation.
+    const outsideEn = without(en(full), 'Recommendation');
+    for (const [i, name] of NAMES_EN.entries()) {
+      assert.equal(times(bullet(en(full), 'Recommendation'), name), i === 0 ? 0 : 1, String(name));
+      assert.equal(times(outsideEn, name), 0, String(name));
+    }
+    assert.doesNotMatch(full, /#335|before #|variable|\.yml/);
     assert.notEqual(bullet(text, 'Đề xuất'), bullet(kitUpdateTldr('app', COUNTS, STAY), 'Đề xuất'));
   });
 
   test('a setting the base held outside the kit\'s form is one decision for each, and the gate is not said to differ', () => {
-    const text = kitUpdateTldr('app', COUNTS, ALL_UNSEEN);
-    structure(text);
+    const full = kitUpdateTldr('app', COUNTS, ALL_UNSEEN);
+    structure(full);
+    const text = vi(full);
     assert.equal(decisions(text), 4);
     const outside = without(text, 'Đề xuất');
     for (const name of NAMES) {
       assert.equal(times(bullet(text, 'Đề xuất'), name), 1, String(name));
       assert.equal(times(outside, name), 0, String(name));
     }
-    assert.notEqual(bullet(text, 'Thay đổi'), bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Thay đổi'));
-    assert.notEqual(bullet(text, 'Thay đổi'), bullet(kitUpdateTldr('app', COUNTS, STAY), 'Thay đổi'));
-    assert.doesNotMatch(text, /#335|before #|variable|\.yml/);
+    for (const name of NAMES_EN) {
+      assert.equal(times(bullet(en(full), 'Recommendation'), name), 1, String(name));
+      assert.equal(times(without(en(full), 'Recommendation'), name), 0, String(name));
+    }
+    assert.notEqual(bullet(text, 'Anh quyết'), bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Anh quyết'));
+    assert.notEqual(bullet(text, 'Anh quyết'), bullet(kitUpdateTldr('app', COUNTS, STAY), 'Anh quyết'));
+    assert.doesNotMatch(full, /#335|before #|variable|\.yml/);
   });
 
   test('Rủi ro follows what runs: onboard has no review, and kit-update\'s follows the reviewer', () => {
@@ -135,11 +173,11 @@ describe('the summary of a kit pull request', () => {
     const unseen = risk(...rowsOf(`claude${UNSEEN}`));
     assert.notEqual(unseen, plain('claude'));
     assert.notEqual(unseen, plain(NONE));
-    assert.equal(unseen, plain('claude').replace(' Review AI chạy trên PR này.', ''));
+    assert.equal(unseen, plain('claude').replace(', review AI chạy trên PR này', ''));
   });
 
-  test('Thay đổi counts the changed settings and the unseen ones apart', () => {
-    const mixed = bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Thay đổi');
+  test('Anh quyết counts the changed settings and the unseen ones apart', () => {
+    const mixed = bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Anh quyết');
     assert.match(mixed, /\b2 cài đặt của gate đổi\b/);
     assert.match(mixed, /\b1 cài đặt chuyển vào file của gate\b/);
   });

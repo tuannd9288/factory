@@ -70,7 +70,7 @@ if (verdict === 'PASS' || verdict === 'PASS+NOTES') {
 process.exit(verdict === 'FAIL' ? 1 : 2);
 `;
 
-const BODY = '**Tóm tắt cho anh**\n- **Thay đổi:** x\n- **Rủi ro:** y\n- **Đề xuất:** Approve.\n\n<details>\n<summary>The change in detail</summary>\n\n- Purpose: names the operation\n\n</details>\n\nCloses #3\n';
+const BODY = '**Tóm tắt cho anh**\n- **Anh quyết:** x\n- **Đề xuất:** Approve.\n- **Rủi ro:** y\n\n**TL;DR**\n- **You decide:** x\n- **Recommendation:** Approve.\n- **Risk:** y\n\n<details>\n<summary>The change in detail</summary>\n\n- Purpose: names the operation\n\n</details>\n\nCloses #3\n';
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
 function world({ driver = true, liveVerify = true } = {}) {

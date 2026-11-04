@@ -228,13 +228,16 @@ describe('the kit pull request', () => {
       // The Human's next step, ready to copy: the repository's own id, not a placeholder.
       assert.match(text, /`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/);
       assert.match(text, new RegExp(`bin/kit-evidence --factory <factory> --commit ${ahead} --repo <clone> --base [0-9a-f]{40} --head ${head} --slug tuannd9288/app --id 1234`));
-      // The body opens with the Human's summary (#386), three bullets in order, with no commit id or file path; the agents'
-      // detail follows in one <details> block, and the header lines come after it.
-      const [tldr, rest] = text.split('\n\n');
+      // The body opens with the Human's summary (#386, #411), a Vietnamese block and an English one, each with three bullets in
+      // order and no commit id or file path; the agents' detail follows in one <details> block, and the header lines come after it.
+      const [tldr, tldrEn, rest] = text.split('\n\n');
       const bullets = tldr.split('\n');
       assert.equal(bullets[0], '**Tóm tắt cho anh**');
-      assert.deepEqual(bullets.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['Thay đổi', 'Rủi ro', 'Đề xuất']);
-      assert.doesNotMatch(tldr, /[0-9a-f]{7}|\.yml|\.github|\.gate|ubuntu-latest/);
+      assert.deepEqual(bullets.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['Anh quyết', 'Đề xuất', 'Rủi ro']);
+      const english = tldrEn.split('\n');
+      assert.equal(english[0], '**TL;DR**');
+      assert.deepEqual(english.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['You decide', 'Recommendation', 'Risk']);
+      assert.doesNotMatch(`${tldr}\n${tldrEn}`, /[0-9a-f]{7}|\.yml|\.github|\.gate|ubuntu-latest/);
       assert.equal(rest, '<details>\n<summary>The change in detail</summary>');
       const close = text.indexOf('</details>');
       assert.ok(close > text.indexOf('<details>'));
