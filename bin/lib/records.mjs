@@ -3,6 +3,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+/** One record for each session, its last, in the order the sessions started. */
+export function lastRecords(records) {
+  const last = new Map();
+  for (const r of [...records].sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(r.session ?? `${r.run}#${r.tag}`, r);
+  return [...last.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+}
+
 /** The records, none when the file is absent; a damaged line is skipped. */
 export function readSessions(dir) {
   const file = join(dir, 'sessions.jsonl');
