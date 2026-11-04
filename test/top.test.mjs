@@ -1035,3 +1035,13 @@ test('at 45 columns each cost of Today is whole on its line, with its account, a
   for (const piece of ['$3.57 on account a', '$30.01 on account b']) assert.equal(today.filter((l) => l.includes(piece)).length, 1, piece);
   assert.equal(render({ ...snap, today: { ...snap.today, cost } }, { width: 200 }).split('\n').at(-1), 'Today  1 pull request merged · workers and reviewers cost $3.57 on account a, $30.01 on account b · waited on you 1h30');
 });
+
+test('the live loop reads until ten minutes pass without a key (#396)', async () => {
+  const { readDue } = await top();
+  const lastKeyAt = 1_000_000;
+  const min = 60_000;
+  assert.equal(readDue({ lastKeyAt, now: lastKeyAt + 9 * min }), true);
+  assert.equal(readDue({ lastKeyAt, now: lastKeyAt + 10 * min }), false);
+  assert.equal(readDue({ lastKeyAt, now: lastKeyAt + 30 * min }), false);
+  assert.equal(readDue({ lastKeyAt: lastKeyAt + 30 * min, now: lastKeyAt + 30 * min }), true);
+});
