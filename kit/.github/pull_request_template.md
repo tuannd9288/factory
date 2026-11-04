@@ -1,3 +1,11 @@
+## TL;DR for the Human
+<!-- Tier 3 only: delete this whole section on tier 1 and 2. Plain English for a reader who is not technical; no commit ids, no file paths. -->
+- **What you will see:** (what looks or behaves differently to you, in a sentence or two)
+- **What changes:** (what this pull request does)
+- **What it fixes:** (the problem or the need behind it)
+- **Risk:** (what could go wrong, and how to undo it)
+- **Recommendation:** (approve, or what to decide first, and why)
+
 Closes #<issue labelled task>
 Issue: #<issue labelled task>
 Claim: <sha printed by .gate/bin/claim>

@@ -329,6 +329,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   (on the Mac mini, under the agents' login), and pushes from the factory host; its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
+- Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
+  with the kit template's `## TL;DR for the Human`, in plain English (#386).
 
 | Path | What it is |
 |---|---|
