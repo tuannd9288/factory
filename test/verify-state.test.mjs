@@ -44,8 +44,8 @@ function verify(tests, setup = null) {
     mkdirSync(join(copy, 'kit/.gate/bin/lib'), { recursive: true });
     copyFileSync(join(factory, 'kit/.gate/bin/lib/instructions.mjs'), join(copy, 'kit/.gate/bin/lib/instructions.mjs'));
     mkdirSync(join(copy, 'bin/lib'), { recursive: true });
-    // The modules check (bin/lib/module.mjs) runs once a modules/ folder exists, and reads the kit tree through evidence.mjs, which imports adapter.mjs, settings.mjs and gate-settings.mjs.
-    for (const lib of ['module.mjs', 'evidence.mjs', 'adapter.mjs', 'settings.mjs', 'gate-settings.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
+    // The modules check (bin/lib/module.mjs) runs once a modules/ folder exists, and reads the kit tree through evidence.mjs, which imports adapter.mjs, attributes.mjs, settings.mjs and gate-settings.mjs.
+    for (const lib of ['module.mjs', 'evidence.mjs', 'adapter.mjs', 'attributes.mjs', 'settings.mjs', 'gate-settings.mjs']) copyFileSync(join(factory, 'bin/lib', lib), join(copy, 'bin/lib', lib));
     const caller = Object.fromEntries(FOLDERS.map((name) => [name, join(dir, 'caller', name)]));
     for (const path of Object.values(caller)) mkdirSync(path, { recursive: true });
     const { NODE_TEST_CONTEXT, GATE_BASE, GITHUB_EVENT_NAME, ...outer } = process.env;

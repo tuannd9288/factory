@@ -7,6 +7,10 @@
 # The team that claimed the issue runs it; a repository that already has the kit is brought up to date with
 # bin/kit-update. bin/onboard-owner runs first; without --no-pr, onboard refuses until
 # main carries its pull request rule, and refuses any gh login but the agents' account, which authors the kit PR.
+# The repository keeps its own .gitattributes lines too (#380): the kit puts one marked review-categories block at its start
+# (kit/.gate/review-categories, bin/lib/attributes.mjs), so the repository's own lines come after it and win, and writes a file of
+# the block alone where there is none. A link or folder there, CRLF, a byte-order mark or malformed markers are refused with the
+# clone removed. A .gitignore that ignores an untracked .gitattributes does not keep it out: that one path is added with git add -f.
 # The repository keeps its own AGENTS.md and CLAUDE.md. The kit puts one marked Gate block at the start of AGENTS.md, after
 # an optional title line (kit/.gate/bin/lib/instructions.mjs compose), and writes the one-line import where there is no
 # CLAUDE.md. A composed file over 150 lines or 32 KiB, a Gate marker that is malformed, CRLF or a byte-order mark, or a CLAUDE.md
@@ -145,7 +149,8 @@ if [ "${#modules[@]}" -eq 0 ] && [ -f "$dest/.gate/modules" ]; then
   while IFS= read -r m; do [ -z "$m" ] || modules+=("$m"); done <<<"$why"
 fi
 module_files=$(mktemp)
-trap 'rm -f "$composed" "$module_files"' EXIT
+attrs=$(mktemp)
+trap 'rm -f "$composed" "$module_files" "$attrs"' EXIT
 if [ "${#modules[@]}" -gt 0 ]; then
   why=$(node "$factory/bin/lib/module.mjs" files "$factory" "${modules[@]}" 2>&1 >"$module_files") || { rm -rf "$dest"; echo "onboard: .gate/modules: $why; the clone is removed and nothing else was done"; exit 2; }
   while IFS=$'\t' read -r path m; do
@@ -174,6 +179,16 @@ fi
 if [ -e "$dest/CLAUDE.md" ] || [ -L "$dest/CLAUDE.md" ]; then
   why=$(node "$instructions" carrier "$dest/CLAUDE.md" 2>&1) || { rm -rf "$dest"; echo "onboard: $why; the clone is removed and nothing else was done"; exit 2; }
 fi
+# The .gitattributes it gets is its own text with the kit's review-categories block at the start (bin/lib/attributes.mjs), or a
+# file of the block alone. A link or a folder there, CRLF, a byte-order mark or malformed markers are refused like AGENTS.md's.
+if { [ -e "$dest/.gitattributes" ] || [ -L "$dest/.gitattributes" ]; } && { [ -L "$dest/.gitattributes" ] || [ ! -f "$dest/.gitattributes" ]; }; then
+  rm -rf "$dest"
+  echo "onboard: .gitattributes is a link or not a regular file, which the kit will not write through or replace; merge the kit's review categories by hand (kit/.gate/review-categories); the clone is removed and nothing else was done"
+  exit 2
+fi
+attr_args=(compose --block "$factory/kit/.gate/review-categories")
+[ -e "$dest/.gitattributes" ] && attr_args+=(--attributes "$dest/.gitattributes")
+why=$(node "$factory/bin/lib/attributes.mjs" "${attr_args[@]}" 2>&1 >"$attrs") || { rm -rf "$dest"; echo "onboard: .gitattributes: $why; merge the kit's review categories by hand (kit/.gate/review-categories); the clone is removed and nothing else was done"; exit 2; }
 kit_commit=$(git -C "$factory" rev-parse HEAD)
 # The repository's own .claude/settings.json gets the kit's deny lines as text (bin/lib/settings.mjs); a shape the lines
 # cannot be added to without touching other bytes is told now, before anything is written.
@@ -230,7 +245,7 @@ cd "$dest"
 base=$(git rev-parse HEAD)
 git switch --quiet -c factory/kit
 lists=$(mktemp -d)
-trap 'rm -rf "$lists"; rm -f "$composed" "$module_files"' EXIT
+trap 'rm -rf "$lists"; rm -f "$composed" "$module_files" "$attrs"' EXIT
 (cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
 : >"$lists/kept"
 : >"$lists/replaced"
@@ -265,6 +280,11 @@ done <"$lists/kit"
 [ ! -e AGENTS.md ] || echo AGENTS.md >>"$lists/merged"
 cat "$composed" >AGENTS.md
 [ -e CLAUDE.md ] || [ -L CLAUDE.md ] || printf '@AGENTS.md\n' >CLAUDE.md
+# .gitattributes: the composed text, written in place so its mode stays. A repository whose .gitignore ignores it (a root
+# allowlist) and does not track it still gets it: it is the one path added with git add -f, below.
+[ ! -e .gitattributes ] || echo .gitattributes >>"$lists/merged"
+git check-ignore -q .gitattributes && attrs_ignored=1 || attrs_ignored=0
+cat "$attrs" >.gitattributes
 # A repository with its own scripts/verify gets the adapter lines (bin/lib/adapter.mjs), but only in a .gate/config.sh the
 # kit has just laid: one the repository had is its own.
 [ "$had_config" -eq 1 ] || node "$factory/bin/lib/adapter.mjs" "$dest" >>.gate/config.sh
@@ -285,6 +305,7 @@ printf '%s\n' "$kit_commit" >.gate/kit-commit
 { cat "$lists/kit"; cut -f1 "$module_files"; echo .gate/kit-files; echo .gate/kit-commit; [ ! -f .gate/modules ] || echo .gate/modules; } | LC_ALL=C sort -u >.gate/kit-files
 .gate/bin/setup
 git add -A
+[ "$attrs_ignored" -eq 0 ] || git add -f -- .gitattributes
 # The kit lands only on a repository where the whole gate passes: a commit nobody verified is not a kit pull request.
 if ! GATE_BASE=HEAD .gate/bin/verify; then
   echo "onboard: the kit is staged on factory/kit, not committed: .gate/bin/verify fails. Fill .gate/config.sh (test"
@@ -313,6 +334,8 @@ git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
 moved=""
 moved='The repository'"'"'s own `AGENTS.md` has the kit'"'"'s marked `## Gate` block inserted at its start, after the title line; every other byte of it is the repository'"'"'s, and so is its `CLAUDE.md` (the import is written only where there was none).'
+moved="$moved"' Its `.gitattributes` has the kit'"'"'s marked review-categories block at the start (a file of the block alone where there was none), so the repository'"'"'s own lines come after it and win; every other byte is the repository'"'"'s.'
+[ "$attrs_ignored" -eq 0 ] || moved="$moved"' The repository'"'"'s `.gitignore` ignores `.gitattributes`; the file is added with `git add -f`, that one path only.'
 [ -z "$own" ] || moved="$moved"' The `AGENTS.md` came in through `--own`: the evidence below prints its text in full.'
 # The repository's own scripts/ and hooks, which the kit does not ship and leaves byte for byte (the evidence checks it).
 untouched=$(git ls-tree -r --name-only "$base" -- scripts .githooks | grep -vxFf "$lists/kit" || true)
@@ -327,9 +350,9 @@ fi
 gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, hooks, hand-in rules and templates" --body "$(cat <<EOF
 ## Summary for the Human
 - Purpose: bring $name into the factory with the kit of tuannd9288/factory.
-- Change: \`.gate/bin/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review, setup), \`.gate/hooks/\`, \`.gate/\` (with \`protected\`: the tier-3 paths), three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`.gate/kit-commit\` (the factory commit), the \`## Gate\` block in \`AGENTS.md\` and, where there was none, \`CLAUDE.md\`.
+- Change: \`.gate/bin/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review, setup), \`.gate/hooks/\`, \`.gate/\` (with \`protected\`: the tier-3 paths), three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`.gate/kit-commit\` (the factory commit), the \`## Gate\` block in \`AGENTS.md\`, the review-categories block in \`.gitattributes\` and, where there was none, \`CLAUDE.md\`.
 - Evidence: the full \`.gate/bin/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
-- Tier: 3 (touches \`.github/\`, \`.gate/\`, \`.claude/\` and \`AGENTS.md\`).
+- Tier: 3 (touches \`.github/\`, \`.gate/\`, \`.claude/\`, \`AGENTS.md\` and \`.gitattributes\`).
 - Rollback: revert this PR.
 - Needs the Human: yes — confirm \`.gate/load-bearing\` (tier 2) and \`.gate/protected\` (tier 3); recommendation: approve once the repository's session has filled both lists.
 

@@ -39,7 +39,7 @@ function world() {
     state,
     sockets,
     /** The query's answer: claims as [issue, subject], issues as [number, [[comment id, time, author]...]]. */
-    answer: ({ claims = [], issues = [], more = false }) =>
+    answer: ({ claims = [], issues = [], more = false, prs = [], merged = [] }) =>
       writeFileSync(
         join(dir, 'graphql.json'),
         JSON.stringify({
@@ -48,7 +48,11 @@ function world() {
               issues: { nodes: [] },
               claims: { pageInfo: { hasNextPage: more }, nodes: claims.map(([n, subject]) => ({ name: String(n), target: { messageHeadline: subject } })) },
               recent: { nodes: issues.map(([number, list]) => ({ number, comments: { nodes: list.map(([id, at, author]) => ({ databaseId: id, createdAt: at, author: author === null ? null : { login: author } })) } })) },
-              pullRequests: { nodes: [] },
+              // The news of #370: open pull requests as [number, body, mergeable] and merged ones as [number, body, mergedAt].
+              pullRequests: {
+                nodes: prs.map(([number, body, mergeable]) => ({ number, isDraft: false, body, mergeable, createdAt: T(0), mergeStateStatus: 'CLEAN', baseRefName: 'main', autoMergeRequest: null, author: { login: 'agent-bot' }, headRefOid: `${number}`.repeat(8), labels: { nodes: [] }, reviews: { nodes: [] }, commits: { nodes: [] } })),
+              },
+              merged: { nodes: merged.map(([number, body, mergedAt]) => ({ number, headRefOid: 'abc', body, mergedAt })) },
             },
           },
         }),
@@ -136,6 +140,39 @@ test('the first sweep of a repository writes the cursor and wakes nothing; a lat
     assert.equal(comments(w).length, 1);
     await arrived(alpha.got, 1);
     assert.equal(alpha.got.length, 1);
+  } finally {
+    w.done();
+  }
+});
+
+const news = (w) => w.events().filter((e) => ['conflict', 'merged', 'checks-red', 'checks-green', 'seat-ended', 'seat-no-result'].includes(e.kind));
+
+test("#370: the sweep wakes the holder's Lead for a conflict and a merge, one line and one post each, through the one query", async () => {
+  const w = world();
+  try {
+    const alpha = await w.lead('alpha');
+    const body = 'Issue: #7\nTeam: alpha\n';
+    w.answer({ claims: HELD, prs: [[3, body, 'MERGEABLE']] });
+    let r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(news(w), [], 'the first sweep wakes nothing');
+    assert.ok(existsSync(join(w.state, 'queue-o-app.news')));
+
+    w.answer({ claims: HELD, prs: [[3, body, 'CONFLICTING']], merged: [[9, body, T(5)]] });
+    r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.calls.filter((c) => c.includes('graphql')).length, 1, 'the news adds no gh call');
+    assert.deepEqual(news(w).map((e) => [e.type, e.kind, e.key]).sort(), [['start', 'conflict', `conflict o/app#3 ${'3'.repeat(8)}`], ['start', 'merged', 'merged o/app#9']]);
+    assert.ok(news(w).every((e) => /factory-runs\/app-alpha/.test(e.text) && /woken/.test(e.text) && !/not woken/.test(e.text)), JSON.stringify(news(w)));
+    await arrived(alpha.got, 2);
+    assert.equal(alpha.got.length, 2);
+    assert.deepEqual(alpha.got.map((g) => /^\[factory\] wake #\d+-\d+: (conflict|merged): /.exec(JSON.parse(g).message.content)?.[1]).sort(), ['conflict', 'merged']);
+
+    r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.equal(news(w).length, 2);
+    await arrived(alpha.got, 2);
+    assert.equal(alpha.got.length, 2);
   } finally {
     w.done();
   }
