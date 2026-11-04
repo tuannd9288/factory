@@ -5,7 +5,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { handleLine, reconcile } from '../bin/lib/daemon.mjs';
+import { codeMoved, handleLine, leaseExpired, reconcile } from '../bin/lib/daemon.mjs';
 import { readLines } from '../bin/lib/events.mjs';
 import { wakeOnSeatEnds, wakeOnSeats } from '../bin/lib/news-wake.mjs';
 import { ensureDaemon } from '../bin/lib/queue.mjs';
@@ -134,6 +134,24 @@ test('an unknown verb, a bad line and a bad seat-ended get an error answer and c
     assert.equal(handleLine(d, JSON.stringify({ id: 'p', verb: 'ping' })).response.result.pid, process.pid);
   }));
 
+test('the lease runs out after the time with no ping, not before, and the code has moved only when both heads are known and differ', () => {
+  assert.equal(leaseExpired(1000, 1000 + 179_999, 180_000), false);
+  assert.equal(leaseExpired(1000, 1000 + 180_000, 180_000), true);
+  assert.equal(codeMoved('a'.repeat(40), 'b'.repeat(40)), true);
+  assert.equal(codeMoved('a'.repeat(40), 'a'.repeat(40)), false);
+  assert.equal(codeMoved(null, 'b'.repeat(40)), false);
+  assert.equal(codeMoved('a'.repeat(40), null), false);
+});
+
+test('a store that fails to write a row does not stop the records after it from being woken', () =>
+  world(({ posts, d, store, seats, baseline }) => {
+    baseline();
+    seats(record('w1'), record('w2'));
+    d.store = { ...store, post: store.post, settle: () => { throw new Error('disk full'); } };
+    handleLine(d, ended('/runs/app-7', 'w1')).after();
+    assert.equal(posts.length, 2);
+  }));
+
 test('the job starts the daemon when nobody answers, and does nothing when it answers or when a live daemon holds the lock', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dc-'));
   try {
@@ -154,7 +172,11 @@ test('the job starts the daemon when nobody answers, and does nothing when it an
     writeFileSync(join(state, 'daemon.lock'), JSON.stringify({ pid: 2 ** 22 + 12345, start: null, token: 'y' }));
     let answered = false;
     const ping = async () => ({ ok: answered });
-    const code = await ensureDaemon(state, { ping, spawnFn: (...a) => ((answered = true), spawnFn(...a)), home: dir, waitMs: 100 });
+    // Not the job (no XPC_SERVICE_NAME of its label): refused, nothing started, nothing written.
+    assert.equal(await ensureDaemon(state, { ping, spawnFn, home: dir, waitMs: 100, env: {} }), 2);
+    assert.equal(spawned.length, 0);
+    const env = { XPC_SERVICE_NAME: 'io.github.tuannd9288.factory.queue' };
+    const code = await ensureDaemon(state, { ping, spawnFn: (...a) => ((answered = true), spawnFn(...a)), home: dir, waitMs: 100, env });
     assert.equal(code, 0);
     assert.equal(spawned.length, 1);
     assert.match(spawned[0].file, /bin\/factory-daemon$/);

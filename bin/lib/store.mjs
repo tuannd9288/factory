@@ -97,7 +97,8 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
   closeSync(openSync(file, 'a', 0o600));
   const db = new DatabaseSync(file);
   try {
-    db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
+    // busy_timeout first: switching to WAL needs a lock, and a database another opener holds should be waited for, not refused at once.
+    db.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     migrate(db, { migrations, backupDir: join(dirname(file), 'backups'), now: now() });
   } catch (error) {
     db.close();

@@ -415,10 +415,6 @@ function gone(h) {
   const now = startOf(h.pid);
   return Boolean(h.start) && now !== null && now !== h.start;
 }
-
-/** Whether the holder a lock file recorded is gone (see `gone`): the daemon's lock (bin/lib/daemon.mjs) is judged by it too. */
-export const holderGone = gone;
-
 /** Takes the lock at path and returns what it recorded ({pid, start, host, token}), or null while another sweep holds
  * it. The record is written to a file of its own and link()ed into place: link fails with EEXIST like O_EXCL, and the
  * content is there from the first instant. A holder that is gone is displaced by renaming its lock to a name of ours:
@@ -816,11 +812,12 @@ const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 
 /** The job's sweep (#399): if the daemon answers `ping` on daemon.sock there is nothing to do; if not, start bin/factory-daemon detached, in a
  * session of its own (piggery v0.10.3, internal/cli/daemon_unix.go:11-12), with this process's environment, which is the job's (the pass reads
- * GitHub with it: only the job starts the daemon, never a seat or a hook, whose environment holds their account's token), and its output to
+ * GitHub with it: only the job starts the daemon, known by XPC_SERVICE_NAME, never a seat or a hook, whose environment holds their account's
+ * token; any other caller is refused with exit 2), and its output to
  * ~/Library/Logs/factory/daemon.log (moved to daemon.log.1 when over 5 MiB), then wait up to 5 s for it to answer. A daemon that holds daemon.lock
  * and does not answer is told in queue-run.failed and the exit code, and nothing else is started. `ping` and `spawnFn` are passed in for tests.
  * Returns the exit code. */
-export async function ensureDaemon(state, { ping = ask, spawnFn = spawn, home = process.env.HOME, waitMs = 5000 } = {}) {
+export async function ensureDaemon(state, { ping = ask, spawnFn = spawn, home = process.env.HOME, waitMs = 5000, env = process.env } = {}) {
   const sock = socketPath(state);
   const answers = async (ms) => (await ping(sock, { verb: 'ping' }, { timeoutMs: ms })).ok;
   if (await answers(1000)) return 0;
@@ -839,6 +836,12 @@ export async function ensureDaemon(state, { ping = ask, spawnFn = spawn, home = 
       if (await answers(500)) return 0;
     }
     return fail(`the daemon (pid ${holder.pid}, started ${holder.start}) holds ${lock} and does not answer on ${sock}`);
+  }
+  // Only the job starts the daemon: it hands the pass its environment, and launchd names the job's label in XPC_SERVICE_NAME. A person or a Lead
+  // who runs a bare `sweep` would give the daemon theirs (tokens among them).
+  if (env.XPC_SERVICE_NAME !== LABEL) {
+    console.error(`factory-queue: no daemon answers, and only the job (${LABEL}) starts one; use \`sweep --once\` to run one pass by hand`);
+    return 2;
   }
   const log = join(home, 'Library/Logs/factory/daemon.log');
   mkdirSync(dirname(log), { recursive: true });

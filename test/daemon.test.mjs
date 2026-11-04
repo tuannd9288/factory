@@ -149,6 +149,34 @@ test('the first pass hands its claim holders to the daemon, which then wakes a r
     assert.match(posts[0], /w2 ended/);
   }));
 
+test('a daemon that no one pings stops by itself when its lease runs out, and one that is pinged stays', async () => {
+  await world(async ({ state, sock, start }) => {
+    const idle = await start({ leaseMs: 300 });
+    assert.equal(await idle.finished, 0);
+    assert.equal(existsSync(sock), false);
+    assert.equal(existsSync(join(state, 'daemon.lock')), false);
+    assert.equal(existsSync(join(state, 'queue.lock')), false);
+  });
+  await world(async ({ start, sock }) => {
+    const { api, finished } = await start({ leaseMs: 400 });
+    let over = false;
+    finished.then(() => (over = true));
+    for (let i = 0; i < 12; i += 1) {
+      assert.equal((await ask(sock, { verb: 'ping' })).ok, true);
+      await new Promise((done) => setTimeout(done, 100));
+    }
+    assert.equal(over, false, 'a pinged daemon stopped');
+    api.stop('test');
+  });
+});
+
+test('a daemon whose checkout moved under it, with no message from its pass, stops after that pass', () =>
+  world(async ({ start, sock }) => {
+    const { finished } = await start({ headNow: () => 'f'.repeat(40) });
+    assert.equal(await finished, 0);
+    assert.equal(existsSync(sock), false);
+  }));
+
 test('a socket path of 104 bytes or more is refused before anything is made', async () => {
   const state = join(tmpdir(), 'x'.repeat(100));
   await assert.rejects(run({ state, signals: false }), /longer than 103 bytes/);
@@ -164,7 +192,7 @@ test('bin/factory-queue sweep starts the daemon detached when nobody answers, an
     writeFileSync(join(bin, 'gh'), '#!/bin/sh\nexit 1\n');
     chmodSync(join(bin, 'gh'), 0o755);
     mkdirSync(join(dir, 'root'));
-    const env = { PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: join(dir, 'home'), FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'), FACTORY_ROOT: join(dir, 'root'), FACTORY_CHECKOUT: '' };
+    const env = { XPC_SERVICE_NAME: 'io.github.tuannd9288.factory.queue', PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: join(dir, 'home'), FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'), FACTORY_ROOT: join(dir, 'root'), FACTORY_CHECKOUT: '' };
     mkdirSync(env.HOME);
     const sweep = () => spawnSync(join(factory, 'bin/factory-queue'), ['sweep'], { encoding: 'utf8', env });
     const first = sweep();
