@@ -2,7 +2,7 @@
 // enforcer issue if one exists (#408).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { digest } from '../bin/lib/ledger.mjs';
+import { digest, enforcerLookup, mergedPullLookup } from '../bin/lib/ledger.mjs';
 import { enforcerIndex, kindsOf, knownKinds, repeatedKinds, reviewerFindings, rolePrompt, validKind } from '../bin/lib/findings.mjs';
 import { SCHEMA, buildArgs } from '../bin/lib/seat.mjs';
 
@@ -85,6 +85,53 @@ test('a reviewer is told the kinds its repository already uses, the most used fi
   const args = buildArgs({ role: 'reviewer', run: '/r', home: '/h', work: '/w', rolePrompt: 'the prompt' });
   assert.equal(args[args.indexOf('--append-system-prompt') + 1], 'the prompt');
   assert.ok(!buildArgs({ role: 'reviewer', run: '/r', home: '/h', work: '/w' }).includes('--append-system-prompt'));
+});
+
+test('a repository that cannot be read gets one line, and the others are listed as usual (#408)', () => {
+  const two = [rec('o/a', 'a1', ['k-one']), rec('o/a', 'a2', ['k-one']), rec('o/b', 'b1', ['k-two']), rec('o/b', 'b2', ['k-two'])];
+  const merged = (repo, branch) => ({ a1: 1, a2: 2, b1: 3, b2: 4 })[branch];
+  const list = repeatedKinds(two, { mergedOf: merged, enforcerOf: (repo) => { if (repo === 'o/a') throw new Error('HTTP 404: Not Found\nmore'); return null; } });
+  assert.deepEqual(list, [{ repo: 'o/a', error: 'HTTP 404: Not Found' }, { repo: 'o/b', kind: 'k-two', prs: [3, 4], enforcer: null }]);
+  const text = digest([], { since: 'a', until: 'b', findings: list });
+  assert.match(text, /\n- o\/a: could not be read \(HTTP 404: Not Found\)\n- o\/b `k-two`: #3, #4 — no enforcer issue yet\n/);
+  const none = repeatedKinds(two, { mergedOf: () => { throw new Error('gh refused'); }, enforcerOf });
+  assert.match(digest([], { since: 'a', until: 'b', findings: none }), /## Findings seen on two merged pull requests\n\n- The findings could not be read for any repository \(gh refused\)\.\n/);
+});
+
+test('a resumed reviewer counts the findings of each round (#408)', () => {
+  const round1 = rec('o/app', 'b1', ['a-kind'], { session: 'resumed', end: '2026-11-01T00:10:00Z' });
+  const round2 = rec('o/app', 'b1', [], { session: 'resumed', end: '2026-11-01T01:10:00Z' });
+  assert.deepEqual(reviewerFindings([round1, round2]), [{ repo: 'o/app', branch: 'b1', kind: 'a-kind' }]);
+});
+
+test('a Kind: line is found with a bold label or a kind in backticks (#408)', () => {
+  assert.deepEqual(kindsOf('**Kind:** `edit-through-heredoc`'), ['edit-through-heredoc']);
+  assert.deepEqual(kindsOf('Kind: edit-through-heredoc\r\nnext'), ['edit-through-heredoc']);
+  assert.deepEqual(kindsOf('**Kind: a-b**\nKinds: c\nKind: two words'), ['a-b']);
+});
+
+test('the merged-pull lookup asks for the branch under the owner and returns only a merged number (#408)', () => {
+  const asked = [];
+  const lookup = mergedPullLookup((args) => (asked.push(args), JSON.stringify([{ number: 7, merged_at: null }, { number: 8, merged_at: '2026-11-01T00:00:00Z' }])));
+  assert.equal(lookup('own/app', 'issue-1/x'), 8);
+  assert.equal(lookup('own/app', 'issue-1/x'), 8);
+  assert.equal(asked.length, 1, 'asked once');
+  assert.equal(asked[0][0], 'api');
+  assert.match(asked[0][1], /^repos\/own\/app\/pulls\?.*state=all/);
+  assert.ok(asked[0][1].includes('head=own:issue-1%2Fx'));
+  assert.equal(mergedPullLookup(() => '[{"number":9,"merged_at":null}]')('o/r', 'b'), null);
+  assert.equal(mergedPullLookup(() => '[]')('o/r', 'b'), null);
+});
+
+test('the enforcer lookup reads every page, drops pull requests and reads a repository once (#408)', () => {
+  const asked = [];
+  const pages = [[{ number: 1, state: 'closed', body: 'Kind: k-one' }, { number: 2, state: 'open', body: 'Kind: k-two', pull_request: {} }], [{ number: 3, state: 'open', body: '**Kind:** `k-one`' }]];
+  const lookup = enforcerLookup((args) => (asked.push(args), JSON.stringify(pages)));
+  assert.deepEqual(lookup('o/r', 'k-one'), { number: 3, state: 'open' });
+  assert.equal(lookup('o/r', 'k-two'), null);
+  assert.equal(asked.length, 1);
+  assert.ok(asked[0].includes('--paginate') && asked[0].includes('--slurp'));
+  assert.match(asked[0].at(-1), /^repos\/o\/r\/issues\?.*state=all/);
 });
 
 test('the report schema asks for findings with a kebab-case kind (#408)', () => {

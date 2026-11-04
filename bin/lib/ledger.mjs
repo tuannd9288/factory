@@ -571,13 +571,13 @@ function gh(args) {
 }
 
 /** The number of the merged pull request from a branch of a repository, or null: the one read of "which pull request is this
- * reviewer record's" (#408), by the record's repository and branch. Each answer is asked of GitHub once. */
-function mergedPullLookup() {
+ * reviewer record's" (#408), by the record's repository and branch. Each answer is asked of GitHub once; run is the `gh` runner. */
+export function mergedPullLookup(run = gh) {
   const seen = new Map();
   return (repo, branch) => {
     const key = `${repo}\n${branch}`;
     if (!seen.has(key)) {
-      const pulls = JSON.parse(gh(['api', `repos/${repo}/pulls?state=all&per_page=100&head=${repo.split('/')[0]}:${encodeURIComponent(branch)}`]));
+      const pulls = JSON.parse(run(['api', `repos/${repo}/pulls?state=all&per_page=100&head=${repo.split('/')[0]}:${encodeURIComponent(branch)}`]));
       seen.set(key, pulls.find((p) => p.merged_at)?.number ?? null);
     }
     return seen.get(key);
@@ -585,12 +585,13 @@ function mergedPullLookup() {
 }
 
 /** The issue of a repository whose body has the line `Kind: <kind>`, open or closed, as { number, state }, or null: the one read
- * of enforcer issues (#408), which the move to Linear points at Linear (#405). A repository's issues are read once. */
-function enforcerLookup() {
+ * of enforcer issues (#408), which the move to Linear points at Linear (#405). A repository's issues are read once; run is the
+ * `gh` runner. */
+export function enforcerLookup(run = gh) {
   const byRepo = new Map();
   return (repo, kind) => {
     if (!byRepo.has(repo)) {
-      const all = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/issues?state=all&per_page=100`])).flat();
+      const all = JSON.parse(run(['api', '--paginate', '--slurp', `repos/${repo}/issues?state=all&per_page=100`])).flat();
       byRepo.set(repo, enforcerIndex(all.filter((i) => !i.pull_request)));
     }
     return byRepo.get(repo).get(kind) ?? null;
