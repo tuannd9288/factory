@@ -8,7 +8,7 @@
 // The one tool input it keeps is a `StructuredOutput` call's: a seat ends by reporting through that call (bin/seat, --json-schema), so the
 // report is the session's own account of what it refused, skipped and found outside its issue, and it is in no text item.
 // The model's answer is data. Its events must name a session of the input and quote at least 8 characters that are verbatim in that
-// session's part; any other is dropped and starts `reader-failed answer`, which stops a made-up quote and a CLI that has a tool reading
+// session's part, or whose JSON-escaped form is (a report is sent as JSON); any other is dropped and starts `reader-failed answer`, which stops a made-up quote and a CLI that has a tool reading
 // files from sending a file's text out through `quote`. Both sides run in $FACTORY_STATE/reader/empty, a folder this keeps empty.
 // State, all under $FACTORY_STATE: reader/cursors.json (a byte offset for each stream, relative to the runs folder), reader/started (when
 // the last pass began, in ms), reader/last.json (the last pass's result: time, status, calls, events, failed causes, characters sent),
@@ -138,7 +138,13 @@ function reduceLine(line) {
       if (i?.type !== 'tool_use' || typeof i.name !== 'string') return [];
       const head = `[tool ${redact(i.name)}]`;
       if (i.name !== 'StructuredOutput' || i.input === undefined) return [head];
-      return [head, redact(typeof i.input === 'string' ? i.input : JSON.stringify(redactDeep(i.input)))];
+      try {
+        return [head, redact(typeof i.input === 'string' ? i.input : JSON.stringify(redactDeep(i.input)))];
+      } catch {
+        // An input nested too deep to walk (a RangeError) gives the tool line alone: one line must never crash the pass, whose cursor
+        // would then never move past it.
+        return [head];
+      }
     })
     .join('\n');
 }

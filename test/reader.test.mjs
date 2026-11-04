@@ -136,6 +136,14 @@ test('a secret in a report string reaches the reduction redacted even when JSON 
   assert.match(out, /the log said\\n\*\*\* and went on/);
 });
 
+test('a report nested too deep to walk reduces to its tool line, and the other lines reduce as before', async () => {
+  const { reduce } = await reader();
+  const depth = 5_000;
+  const nested = `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput","input":${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}}]},"parent_tool_use_id":null}`;
+  assert.equal(reduce(`${nested}\n`), '[tool StructuredOutput]');
+  assert.equal(reduce(`${say('before it')}${nested}\n${say('after it')}`), 'before it\n[tool StructuredOutput]\nafter it');
+});
+
 test('the reduction of a Lead copy drops the lines that are not the assistant\'s own, a subagent\'s included', async () => {
   const { reduce } = await reader();
   const out = reduce(fixture('lead-copy.jsonl'));
