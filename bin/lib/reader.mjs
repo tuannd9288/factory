@@ -5,11 +5,14 @@
 //   a seat's stream      $FACTORY_RUNS/<run>/run-<tag>.jsonl                      Claude Code stream-json (bin/lib/seat.mjs)
 //   a Lead's copy        $FACTORY_RUNS/<repo>-<team>/transcripts/<session>.jsonl  Claude Code session JSONL, copied on Stop and SessionEnd
 // It only writes event lines: it never cancels, types into or messages a session.
+// The one tool input it keeps is a `StructuredOutput` call's: a seat ends by reporting through that call (bin/seat, --json-schema), so the
+// report is the session's own account of what it refused, skipped and found outside its issue, and it is in no text item.
 // The model's answer is data. Its events must name a session of the input and quote at least 8 characters that are verbatim in that
-// session's part; any other is dropped and starts `reader-failed answer`, which stops a made-up quote and a CLI that has a tool reading
+// session's part, or whose JSON-escaped form is (a report is sent as JSON); any other is dropped and starts `reader-failed answer`, which stops a made-up quote and a CLI that has a tool reading
 // files from sending a file's text out through `quote`. Both sides run in $FACTORY_STATE/reader/empty, a folder this keeps empty.
 // State, all under $FACTORY_STATE: reader/cursors.json (a byte offset for each stream, relative to the runs folder), reader/started (when
-// the last pass began, in ms), reader.lock (the pass; a lock whose pid is gone is stale), reader.failed (the last crash).
+// the last pass began, in ms), reader/last.json (the last pass's result: time, status, calls, events, failed causes, characters sent),
+// reader.lock (the pass; a lock whose pid is gone is stale), reader.failed (the last crash).
 //   node bin/lib/reader.mjs                                   one pass (bin/factory-reader)
 //   node bin/lib/reader.mjs --try <file> [--side pi|codex]    reduce one stream file, send it once, print the answer and the quote check;
 //                                                             no cursor, event, lock or file of the state folder is touched
@@ -111,8 +114,14 @@ export function commandOf({ side, model, effort }, { input, inputFile, schemaFil
 
 // ---- the reduction --------------------------------------------------------------------------------------------------------
 
-/** What one stream line says, reduced: the assistant's text (redacted) and the names of the tools it called, as `[tool <name>]`. A line of any
- * other type, a subagent's (a sidechain, or a message with a parent tool use), a thinking item and a tool's input are left out. */
+/** A value with every string in it redacted, before it is written as JSON: the escaping (`\"`, `\n`) hides a quoted secret value and a
+ * token after a line break from `redact`, which sees only the escaped text if it runs after. */
+const redactDeep = (v) => (typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(redactDeep) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x)])) : v);
+
+/** What one stream line says, reduced: the assistant's text (redacted) and the names of the tools it called, as `[tool <name>]`. The one
+ * input kept is that of `StructuredOutput`, which follows its line as compact JSON (redacted): every seat reports through that call, so
+ * the report, with its refusals, lapses and work found outside the issue, is in no text item. A line of any other type, a subagent's (a
+ * sidechain, or a message with a parent tool use), a thinking item and any other tool's input are left out. */
 function reduceLine(line) {
   let o;
   try {
@@ -124,7 +133,19 @@ function reduceLine(line) {
   const content = o.message?.content;
   const items = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [];
   return items
-    .flatMap((i) => (i?.type === 'text' && typeof i.text === 'string' ? [redact(i.text)] : i?.type === 'tool_use' && typeof i.name === 'string' ? [`[tool ${redact(i.name)}]`] : []))
+    .flatMap((i) => {
+      if (i?.type === 'text' && typeof i.text === 'string') return [redact(i.text)];
+      if (i?.type !== 'tool_use' || typeof i.name !== 'string') return [];
+      const head = `[tool ${redact(i.name)}]`;
+      if (i.name !== 'StructuredOutput' || i.input === undefined) return [head];
+      try {
+        return [head, redact(typeof i.input === 'string' ? i.input : JSON.stringify(redactDeep(i.input)))];
+      } catch {
+        // An input nested too deep to walk (a RangeError) gives the tool line alone: one line must never crash the pass, whose cursor
+        // would then never move past it.
+        return [head];
+      }
+    })
     .join('\n');
 }
 
@@ -229,11 +250,13 @@ export function parseAnswer(text) {
 }
 
 /** The quote check: an event is kept when its session is one of the headers sent (`parts`: header -> the text sent for it) and its quote, of
- * at least 8 characters, is verbatim in that session's part; every other is dropped. */
+ * at least 8 characters, is verbatim in that session's part, or its JSON-escaped form is: a `StructuredOutput` report is sent as JSON, so a
+ * `"` or a line break in it is sent as `\"` or `\n`, and a model may quote either the plain text or what it saw. Every other is dropped. */
 export function judge(answer, parts) {
   const kept = [];
   const dropped = [];
-  for (const e of answer.events) (parts.has(e.session) && e.quote.length >= MIN_QUOTE && parts.get(e.session).includes(e.quote) ? kept : dropped).push(e);
+  const inPart = (part, quote) => part.includes(quote) || part.includes(JSON.stringify(quote).slice(1, -1));
+  for (const e of answer.events) (parts.has(e.session) && e.quote.length >= MIN_QUOTE && inPart(parts.get(e.session), e.quote) ? kept : dropped).push(e);
   return { kept, dropped };
 }
 
@@ -309,14 +332,16 @@ const eventText = (e) => `${flat(e.session)} ${e.kind}: "${flat(e.quote)}" (${fl
 
 // ---- a pass ---------------------------------------------------------------------------------------------------------------
 
-/** One pass. Returns { status: 'ok' | 'running' | 'crashed', calls, events, failed } (`failed`: the causes of reader-failed this pass had). */
+/** One pass. Returns { status: 'ok' | 'running' | 'crashed', calls, events, failed, chars } (`failed`: the causes of reader-failed this pass had;
+ * `chars`: the characters sent to the model). Every pass but a 'running' one writes the same fields, with the time, to reader/last.json. */
 export async function runPass({ state, runs, settingFile = SETTING_FILE, home = process.env.HOME, env = process.env, timeoutMs = TIMEOUT_MS, now = Date.now() }) {
   const dir = join(state, 'reader');
   mkdirSync(dir, { recursive: true });
   const lock = takeLock(join(state, 'reader.lock'));
-  if (!lock) return { status: 'running', calls: 0, events: 0, failed: [] };
-  const result = { status: 'ok', calls: 0, events: 0, failed: [] };
+  if (!lock) return { status: 'running', calls: 0, events: 0, failed: [], chars: 0 };
+  const result = { status: 'ok', calls: 0, events: 0, failed: [], chars: 0 };
   const causes = new Map();
+  let final = result;
   try {
     writeFileSync(join(dir, 'started'), `${now}\n`);
     let setting = null;
@@ -333,11 +358,18 @@ export async function runPass({ state, runs, settingFile = SETTING_FILE, home = 
     rmSync(join(state, 'reader.failed'), { force: true });
   } catch (error) {
     writeFileSync(join(state, 'reader.failed'), `${new Date().toISOString()} the pass raised ${error.name}: ${firstLine(error.message).slice(0, 200)}\n`);
-    return { ...result, status: 'crashed', error: error.message };
+    final = { ...result, status: 'crashed', failed: [...causes.keys()], error: error.message };
   } finally {
+    // The record of this pass, crashed or not; a pass that found the lock taken wrote nothing. Its own failure must not hide the pass's.
+    try {
+      const { status, calls, events, failed, chars } = final;
+      writeAtomic(join(dir, 'last.json'), `${JSON.stringify({ at: new Date(now).toISOString(), status, calls, events, failed, chars })}\n`);
+    } catch {
+      // the next pass writes it again
+    }
     releaseLock(join(state, 'reader.lock'), lock.token);
   }
-  return result;
+  return final;
 }
 
 async function readAndSend({ state, dir, runs, setting, home, env, timeoutMs, now, causes, result }) {
@@ -379,6 +411,7 @@ async function readAndSend({ state, dir, runs, setting, home, env, timeoutMs, no
     const ran = await runModel({ command, args, stdin, cwd: empty, env, timeoutMs });
     rmSync(inputFile, { force: true });
     result.calls += 1;
+    result.chars += input.length;
     if (!ran.ok) {
       causes.set('command', ran.detail);
       aborted = true;
