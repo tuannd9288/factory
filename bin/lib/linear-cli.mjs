@@ -12,9 +12,9 @@
 // The Human is found, never stored: the one workspace owner who is not an app; any other count refuses.
 // The registry, $FACTORY_STATE/linear/repos.json { "<repo>": { key, teamId } }, is written only by `onboard`, atomically; a repository
 // not in it is on GitHub. `onLinear(repo)` reads it.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLinear } from './linear.mjs';
+import { onLinear, readRegistry, registryFile, writeRegistry } from './linear-repos.mjs';
 
 export const NEEDS_HUMAN = 'Needs Human';
 const FIRST_TEAM = 'FAC';
@@ -24,32 +24,7 @@ const TEAM_KEY = /^[A-Z][A-Z0-9]{1,9}$/;
 const WORD = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_BODY = 60_000;
 
-export const registryFile = (state) => join(state, 'linear', 'repos.json');
-
-/** The registry as { repo: { key, teamId } }; an absent or unreadable file is no repository on Linear. */
-export function readRegistry(state) {
-  try {
-    const r = JSON.parse(readFileSync(registryFile(state), 'utf8'));
-    return r && typeof r === 'object' && !Array.isArray(r) ? r : {};
-  } catch {
-    return {};
-  }
-}
-
-/** The repository's registry entry ({ key, teamId }), or null when it is on GitHub. */
-export function onLinear(repo, state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory')) {
-  const registry = readRegistry(state);
-  const e = Object.hasOwn(registry, repo) ? registry[repo] : null;
-  return e && typeof e.key === 'string' && typeof e.teamId === 'string' ? e : null;
-}
-
-function writeRegistry(state, registry) {
-  const file = registryFile(state);
-  mkdirSync(join(state, 'linear'), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmp, file);
-}
+export { onLinear, readRegistry, registryFile };
 
 class Usage extends Error {}
 class Refused extends Error {}
