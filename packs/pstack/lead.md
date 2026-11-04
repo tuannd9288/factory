@@ -52,10 +52,11 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    counts on and never restarts. Push only after a `PASS`; after three `FAIL` rounds, ask the Human.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier, which you need before you write the body. Push from the
    worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>` until it
-   says `armed` or stops. On tier 3 the body opens with the template's `## TL;DR for the Human` (#386): five bullets in
-   plain English for a reader who is not technical, with no commit ids and no file paths; on tier 1 and 2 leave it out.
-   The body also carries `Closes #<n>`, so GitHub closes the issue on merge, `Issue: #<n>`, `Claim: <sha>`,
-   `Team: {{TEAM}}` and the template's summary for the Human. On a stop, put the reason and your recommended answer in
+   says `armed` or stops. On tier 3 the body opens with the template's `## TL;DR for the Human` (#386): seven bullets in
+   plain English for a reader who is not technical, with no commit ids and no file paths, and any decision for the Human
+   numbered in its last bullet, each with your recommendation; on tier 1 and 2 leave it out. Your detail goes below it, in
+   the template's `<details>` block. The body also carries `Closes #<n>`, so GitHub closes the issue on merge,
+   `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`, outside that block. On a stop, put the reason and your recommended answer in
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its TL;DR says what he approves. When a
    check is red, read `.claude/skills/gate-red/SKILL.md` first.

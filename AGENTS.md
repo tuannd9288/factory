@@ -335,7 +335,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
 - Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `## TL;DR for the Human`, in plain English (#386).
+  with the kit template's `## TL;DR for the Human`, in plain English, his only section; the agents' detail is collapsed
+  below it (#386).
 
 | Path | What it is |
 |---|---|
@@ -385,7 +386,7 @@ Six steps, run by Colly and a team:
    `--runner`, `--pr-runner`, `--trusted-runner` off GitHub-hosted Ubuntu). The kit pull request carries its evidence
    (`bin/kit-evidence`), whose `settings` lines name all four. Until `main` holds the kit, its `verify` is red (code
    127), and the bootstrap rule requires no check (`bin/onboard`'s own note in the kit pull request body). He
-   approves it as tier 3 from its "Summary for the Human" (`kit/.github/pull_request_template.md`).
+   approves it as tier 3 from its "TL;DR for the Human" (`kit/.github/pull_request_template.md`).
 4. When it merges, Colly runs `--apply` the second time (`factory-gate` in, `factory-bootstrap` out). The Human's
    approval of the kit pull request covers it. The merge queue then sweeps the repository with nothing more from
    him, and no `sudo` install for each new repository (#211). The queue job's one install is his, together with the
