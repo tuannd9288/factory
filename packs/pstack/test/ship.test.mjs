@@ -70,7 +70,7 @@ if (verdict === 'PASS' || verdict === 'PASS+NOTES') {
 process.exit(verdict === 'FAIL' ? 1 : 2);
 `;
 
-const BODY = 'Closes #3\n\n## Summary for the Human\n- Purpose: names the operation\n';
+const BODY = 'Closes #3\n\n- Purpose: names the operation\n';
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
 function world({ driver = true, liveVerify = true } = {}) {

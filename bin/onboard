@@ -329,6 +329,8 @@ if ! evidence=$("$factory/bin/kit-evidence" --factory "$factory" --commit "$kit_
   echo "onboard: the kit evidence fails; factory/kit is committed, not pushed, and no pull request is open"
   exit 1
 fi
+tldr=$(node "$factory/bin/lib/tldr.mjs" onboard "$name" <<<"$evidence") || tldr=""
+[ -n "$tldr" ] || { echo "onboard: the TL;DR for the Human is empty; factory/kit is committed, not pushed, and no pull request is open"; exit 1; }
 for label in tier-1 tier-2 tier-3 needs-human raised task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
 git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
@@ -347,17 +349,17 @@ if [ "$had_config" -eq 0 ] && [ -f scripts/verify ]; then
   moved="${moved:+$moved }$adapter_note."
 fi
 [ -z "$untouched" ] || moved="${moved:+$moved }The repository's own hooks stay in \`.githooks/\` and run only in a clone that ran the repository's own setup; the kit's \`.gate/hooks/\` serve a repository with none."
-tldr=$(node "$factory/bin/lib/tldr.mjs" onboard "$name" <<<"$evidence")
 gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, hooks, hand-in rules and templates" --body "$(cat <<EOF
 $tldr
 
-## Summary for the Human
+<details>
+<summary>The change in detail</summary>
+
 - Purpose: bring $name into the factory with the kit of tuannd9288/factory.
 - Change: \`.gate/bin/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review, setup), \`.gate/hooks/\`, \`.gate/\` (with \`protected\`: the tier-3 paths), three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`.gate/kit-commit\` (the factory commit), the \`## Gate\` block in \`AGENTS.md\`, the review-categories block in \`.gitattributes\` and, where there was none, \`CLAUDE.md\`.
 - Evidence: the full \`.gate/bin/verify\` was green before the commit; the kit's files match factory commit \`${kit_commit:0:7}\` (below).
 - Tier: 3 (touches \`.github/\`, \`.gate/\`, \`.claude/\`, \`AGENTS.md\` and \`.gitattributes\`).
 - Rollback: revert this PR.
-- Needs the Human: yes — confirm \`.gate/load-bearing\` (tier 2) and \`.gate/protected\` (tier 3); recommendation: approve once the repository's session has filled both lists.
 
 ## Files the repository already had, kept by the kit (the repository's session merges them by hand)
 ${kept:-  - none}
@@ -391,6 +393,8 @@ request at tier 3.
   nothing merges itself.
 - The \`runs-on:\` of \`main.yml\` (\`main\`'s jobs), \`gate.yml\` (the candidate's \`verify\`) and \`gate-trusted.yml\`
   (the jobs that hold the reviewer's credential, never on a runner that a candidate's, \`main\`'s or a deploy's job uses).
+
+</details>
 
 Issue: none
 Team: factory/onboard

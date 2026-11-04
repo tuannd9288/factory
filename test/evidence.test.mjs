@@ -228,15 +228,21 @@ describe('the kit pull request', () => {
       // The Human's next step, ready to copy: the repository's own id, not a placeholder.
       assert.match(text, /`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/);
       assert.match(text, new RegExp(`bin/kit-evidence --factory <factory> --commit ${ahead} --repo <clone> --base [0-9a-f]{40} --head ${head} --slug tuannd9288/app --id 1234`));
-      assert.match(text, /^## Summary for the Human\n- Purpose: bring app into the factory with the kit of tuannd9288\/factory\.$/m);
-      // The body opens with the TL;DR for the Human (#386), five bullets in order, with no commit id or file path; the summary follows.
+      // The body opens with the TL;DR for the Human (#386), seven bullets in order, with no commit id or file path; the agents'
+      // detail follows in one <details> block, and the header lines come after it.
       const [tldr, rest] = text.split('\n\n');
       const bullets = tldr.split('\n');
       assert.equal(bullets[0], '## TL;DR for the Human');
-      assert.deepEqual(bullets.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['What you will see', 'What changes', 'What it fixes', 'Risk', 'Recommendation']);
-      assert.match(bullets[2], /The gate's settings: the reviewer: none.*main's runner: \["ubuntu-latest"\]/);
+      assert.deepEqual(bullets.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['What you will see', 'What changes', 'What it fixes', 'Risk and how to undo', 'Recommendation', 'Tier and evidence', 'Decisions for you']);
+      assert.match(bullets[2], /no reviewer yet/);
+      assert.match(bullets[2], /GitHub's own machines/);
       assert.doesNotMatch(tldr, /[0-9a-f]{7}|\.yml|\.github|\.gate/);
-      assert.match(rest, /^## Summary for the Human\n- Purpose:/);
+      assert.equal(rest, '<details>\n<summary>The change in detail</summary>');
+      const close = text.indexOf('</details>');
+      assert.ok(close > text.indexOf('<details>'));
+      assert.match(text.slice(close), /^<\/details>\n\nIssue: none\nTeam: factory\/onboard\n?$/);
+      assert.ok(text.indexOf('kit-evidence: PASS') < close && text.indexOf('## After the merge') < close);
+      assert.doesNotMatch(text, /Summary for the Human|Needs the Human/);
       assert.match(text, /^## After the merge\n1\. .*`bin\/onboard-owner tuannd9288\/app --id 1234 --apply`/m);
       // The gate reads two lines of this body (#133): the team that wrote it and that it answers no issue.
       const lines = run(dir, process.execPath, [join(factory, 'kit/.gate/bin/lib/prbody.mjs'), '--team', body]);
