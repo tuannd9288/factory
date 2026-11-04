@@ -30,7 +30,7 @@
 # "<profile>=<name>" a line, local to the machine, mode 600: on the Mac mini the one source of a row's account (only `use` changes it).
 # A call that takes longer than FACTORY_TIMEOUT_MS (default 15000) is shown as timed out.
 # Tokens are stored at ~/.agent-profiles/tokens/<account> (mode 600, in a folder of mode 700); only the Human runs login (bin/install-factory
-# puts this command on his PATH, as a symlink, which is followed here).
+# puts this command on his PATH, as a symlink into the machine's installed copy of the factory, which follows main and is followed here, #390).
 # On the Mac mini the table is the numbered rows (one for each team $FACTORY_STATE/accounts names, factory/<repo>-<team> of an
 # onboarded repository or of `factory`, sorted; no seat row; the verifier) and the lettered accounts (every account the file
 # names and every file of ~/.agent-profiles/tokens/, read by name and by mode and date only), each with its 5h, 7d, reset, the

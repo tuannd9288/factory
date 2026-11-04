@@ -8,11 +8,13 @@
 // The committed profile list below holds no account name: the factory repository is public, and an account is an email local
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkoutRoot } from './checkout.mjs';
 import { quotaRows } from './quota.mjs';
 import { post, wakeLine } from './wake.mjs';
 import { liveOfAccount } from './seat.mjs';
@@ -152,6 +154,15 @@ export function contextOf(env = process.env) {
 
 /** The factory host is where the command runs as the host's user: FACTORY_HOST_USER, `factory` unless the setting names another. */
 export const placeOf = (env = process.env) => (userInfo().username === (env.FACTORY_HOST_USER || 'factory') ? 'factory' : 'macbook');
+
+/** Where this machine's installed copy of the factory is (#390): $FACTORY_CHECKOUT; on the factory host ~/WORKSPACES, as the queue's
+ * checkoutRoot has it; on the MacBook ${XDG_DATA_HOME:-~/.local/share}/factory/checkout, outside the folders macOS refuses a launchd job.
+ * Everything that runs on a schedule, and `factory` on the PATH, takes its root from here and never from where the running file sits. */
+export function installedRoot(env = process.env) {
+  if (env.FACTORY_CHECKOUT) return env.FACTORY_CHECKOUT;
+  if (placeOf(env) === 'factory') return checkoutRoot(env) ?? join(env.HOME, 'WORKSPACES');
+  return join(env.XDG_DATA_HOME || join(env.HOME, '.local/share'), 'factory/checkout');
+}
 
 const win = (w) => (w ? { use: w.use, resetsAt: w.resetsAt } : null);
 
@@ -453,6 +464,21 @@ async function wake(args, env) {
   return 1;
 }
 
+/** Copies socket-hook.mjs to <state>/hooks/socket-hook-<sha7 of its bytes>.mjs unless a copy is there (reused, never written again), and
+ * returns the path. A changed script has another name, so an earlier copy stays for the Leads that run it; it imports only node: modules. */
+function copySocketHook(state) {
+  const from = resolve(fileURLToPath(import.meta.url), '../socket-hook.mjs');
+  const bytes = readFileSync(from);
+  const to = join(state, 'hooks', `socket-hook-${createHash('sha256').update(bytes).digest('hex').slice(0, 7)}.mjs`);
+  if (!existsSync(to)) {
+    mkdirSync(dirname(to), { recursive: true });
+    const tmp = `${to}.${process.pid}.tmp`;
+    writeFileSync(tmp, bytes);
+    renameSync(tmp, to);
+  }
+  return to;
+}
+
 /** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
  * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
  * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
@@ -484,8 +510,16 @@ function leadHere(repo, team, passed, env) {
     console.error(`bin/factory: lead --here: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
     return 1;
   }
-  // Two hooks record this Lead's inbox socket for `factory wake` (#351), and do nothing else.
-  const record = [{ hooks: [{ type: 'command', command: [process.execPath, resolve(fileURLToPath(import.meta.url), '../socket-hook.mjs'), wakeFile(state, repo, team)].map(quote).join(' ') }] }];
+  // Two hooks record this Lead's inbox socket for `factory wake` (#351), and do nothing else. They run a copy of the script named by its
+  // hash, so a pull that changes the installed one leaves a live Lead's hook as it was (#257, #390).
+  let hook;
+  try {
+    hook = copySocketHook(state);
+  } catch (e) {
+    console.error(`bin/factory: lead --here: ${e.message}`);
+    return 1;
+  }
+  const record = [{ hooks: [{ type: 'command', command: [process.execPath, hook, wakeFile(state, repo, team)].map(quote).join(' ') }] }];
   const settings = {
     hooks: { SessionStart: record, SessionEnd: record },
     env: {

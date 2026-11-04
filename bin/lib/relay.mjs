@@ -12,19 +12,30 @@
 // and leaves the cursor. A line is relayed only when `what` and `where` are at most 300 characters each and `where` is a https://github.com/
 // URL or an absolute path on the Mac mini, which is posted as `<host>:<path>`. It calls no gh, reads no token, and logs a line's kind and
 // key alone. On the factory host the sweep delivers, so `run` and `check` refuse to run there.
-// `plist` is the LaunchAgent that runs a pass every 60 s under the Human's own user (no sudo): its program and folder are the clone that
-// prints it, so `plist` and `check` refuse a linked worktree (guard) and note a branch other than main; its PATH holds the folder `which`
-// finds node in, ssh's folder and the system folders. `check` probes ssh (with SSH_AUTH_SOCK of its own environment, when set), reads the
-// newest seq, relays nothing, and sets the cursor only when there is none.
+// The relay runs from the installed copy of the factory (#390; installedRoot, bin/lib/factory.mjs), never from the clone a developer works
+// in: macOS's privacy protection refuses a launchd job ~/Desktop, ~/Documents, ~/Downloads and ~/Library/Mobile Documents (exit 126, #370),
+// and the copy sits outside them. Each `run` pass first brings that copy to origin/main by followMain (bin/lib/checkout.mjs), as the Mac
+// mini's sweep does for ~/WORKSPACES, with `live` from liveRuns of the run folders and no Lead counted; a refusal is in
+// $FACTORY_STATE/queue-checkout.failed, and the status goes to the log only when it differs from the last pass's (relay.checkout in the
+// state folder), since a laptop is often offline. The pass then relays; a failed follow never stops it.
+// `plist` is the LaunchAgent that runs a pass every 60 s under the Human's own user (no sudo): its program and folder are the installed
+// copy; its PATH holds the folder `which` finds node in, ssh's folder and the system folders. `check` fails, naming the path, when the
+// program, the folder, the installed copy (by real path), the log or the state folder sits under a protected folder, when the installed
+// ~/Library/LaunchAgents plist names such a path, when the program is not there and executable, and, for a loaded job, when `launchctl
+// print` reports a last exit code other than 0 (no launchctl, or not loaded: skipped). It probes ssh with the SSH_AUTH_SOCK `launchctl
+// getenv` gives, which is what launchd gives the job, and none when that is empty; it reads the newest seq, relays nothing, and sets the
+// cursor only when there is none.
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { followMain } from './checkout.mjs';
 import { oneLine } from './events.mjs';
-import { contextOf, placeOf, wakeFile } from './factory.mjs';
+import { contextOf, installedRoot, placeOf, wakeFile } from './factory.mjs';
 import { parseTeam } from './names.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { plist } from './queue.mjs';
+import { liveRuns } from './seat.mjs';
 import { newsLine, post as postLine, recordedPath } from './wake.mjs';
 
 export const HOST = 'factory@tuans-mac-mini';
@@ -116,9 +127,37 @@ function reseat(cursorFile, newest, log) {
   return 0;
 }
 
-/** One pass. `fetch`, `newest` and `post` are passed in for tests. Returns 0, or 1 when ssh failed (the cursor stays). A pass with no cursor,
- * or with one above the Mac mini's newest (its file was made anew), only learns the newest seq: it reads no line and wakes nothing. */
-export async function pass({ state, fetch = readNews, newest = readNewest, post = postLine, log = console.log }) {
+/** The first step of a pass (#390): the installed copy at `root` follows main, with no Lead counted live, as the Mac mini's sweep does. The
+ * status is logged only when it differs from the last pass's, kept in relay.checkout; a refusal is in queue-checkout.failed, which
+ * followMain writes. A raise is told the same way and never stops the pass. `move` is passed in for tests. */
+export function follow({ root, state, runs, env = process.env, log = console.log, move = followMain }) {
+  let line;
+  try {
+    const r = move({ root, state, live: () => liveRuns(runs), env });
+    line = r.status === 'updated' ? `checkout ${r.from.slice(0, 7)}..${r.to.slice(0, 7)} (${r.behind} commits)` : r.status === 'refused' ? `checkout not moved: ${r.why}` : `checkout ${r.status}`;
+  } catch (error) {
+    line = `checkout not moved: the update raised ${error.name}: ${oneLine(error.message)}`;
+  }
+  const kept = join(state, 'relay.checkout');
+  let last = null;
+  try {
+    last = readFileSync(kept, 'utf8').trim();
+  } catch {
+    // no earlier pass
+  }
+  if (last === line) return;
+  log(`relay: ${line}`);
+  mkdirSync(state, { recursive: true });
+  const tmp = `${kept}.tmp-${process.pid}`;
+  writeFileSync(tmp, `${line}\n`);
+  renameSync(tmp, kept);
+}
+
+/** One pass. `fetch`, `newest`, `post` and `follower` are passed in for tests; with a `root`, the installed copy follows main first. Returns 0,
+ * or 1 when ssh failed (the cursor stays). A pass with no cursor, or with one above the Mac mini's newest (its file was made anew), only
+ * learns the newest seq: it reads no line and wakes nothing. */
+export async function pass({ state, root = null, runs = null, env = process.env, follower = follow, fetch = readNews, newest = readNewest, post = postLine, log = console.log }) {
+  if (root) follower({ root, state, runs, env, log });
   const cursorFile = join(state, 'relay.cursor');
   const kept = readCursor(cursorFile);
   if (kept === null) return reseat(cursorFile, newest, log);
@@ -154,44 +193,95 @@ function which(name, path) {
   return null;
 }
 
-/** The LaunchAgent's job, in the shape queue.mjs's plist renders: `run` every 60 s from this clone, with a PATH that finds node and ssh,
- * logging to ~/Library/Logs/factory/relay.log (launchd does not make the folder; `check` does). No user: it runs under whoever loads it. */
+/** The LaunchAgent's job, in the shape queue.mjs's plist renders: `run` every 60 s from the installed copy (installedRoot), with a PATH that
+ * finds node and ssh, logging to ~/Library/Logs/factory/relay.log (launchd does not make the folder; `check` does). No user: it runs under
+ * whoever loads it. The settings that move the copy or the state are kept in its environment, so the job finds the same ones. */
 export function job(env = process.env) {
   const node = which('node', env.PATH) ?? process.execPath;
   const ssh = which('ssh', env.PATH) ?? '/usr/bin/ssh';
   // The folder `which` finds node in, as the shell has it (Homebrew's link folder, which an upgrade keeps), not the versioned one `process.execPath` names.
   const path = [...new Set([dirname(node), dirname(ssh), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
-  const kept = Object.fromEntries(['FACTORY_STATE', 'FACTORY_HOST_USER'].filter((k) => env[k]).map((k) => [k, env[k]]));
-  const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  return { label: LABEL, interval: 60, calendar: null, program: [join(factory, 'bin/factory-relay'), 'run'], cwd: factory, env: { PATH: path, ...kept }, log: join(env.HOME, 'Library/Logs/factory/relay.log'), user: null };
+  const kept = Object.fromEntries(['FACTORY_STATE', 'FACTORY_HOST_USER', 'FACTORY_CHECKOUT', 'XDG_DATA_HOME'].filter((k) => env[k]).map((k) => [k, env[k]]));
+  const root = installedRoot(env);
+  return { label: LABEL, interval: 60, calendar: null, program: [join(root, 'bin/factory-relay'), 'run'], cwd: root, env: { PATH: path, ...kept }, log: join(env.HOME, 'Library/Logs/factory/relay.log'), user: null };
 }
 
-/** What the checkout at `root`, which `plist` and `check` run from and the job would point at, is: { refuse, note }. A linked worktree
- * (`--git-dir` differs from `--git-common-dir`) is refused, since the job would run a folder that goes away with the worktree; a branch
- * other than main is only noted. A folder git cannot read is neither. */
-export function guard(root) {
-  const git = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
-  const dir = git('rev-parse', '--git-dir');
-  const common = git('rev-parse', '--git-common-dir');
-  if (dir.status !== 0 || common.status !== 0) return { refuse: null, note: null };
-  if (resolve(root, dir.stdout.trim()) !== resolve(root, common.stdout.trim())) return { refuse: `${root} is a linked worktree, which goes away; run this from the clone itself`, note: null };
-  const branch = git('branch', '--show-current').stdout.trim();
-  return { refuse: null, note: branch === 'main' ? null : `${root} is on ${branch ? `branch ${branch}` : 'no branch'}, not main` };
+/** The folders macOS refuses a launchd job, under the home folder. */
+const PROTECTED = ['Desktop', 'Documents', 'Downloads', 'Library/Mobile Documents'];
+
+/** The real path of `p` through its symlinks, even when `p` is not there yet: the nearest folder that is, with the rest added. */
+function realish(p) {
+  const rest = [];
+  for (let cur = resolve(p); ; cur = dirname(cur)) {
+    try {
+      return join(realpathSync(cur), ...rest);
+    } catch {
+      if (dirname(cur) === cur) return resolve(p);
+      rest.unshift(basename(cur));
+    }
+  }
 }
 
-/** Before the Human loads the job: makes the log's folder and says whether ssh to the Mac mini works with no prompt (it passes
- * SSH_AUTH_SOCK on from its own environment when set) and whether the news can be read there. It relays nothing and posts nothing: it sets
- * the cursor to the newest seq only when there is none. Returns the exit code. */
-export function check(env = process.env, note = null) {
+/** The protected folder (as `~/Desktop`, say) that `path` really sits under, or null. */
+export function protectedFolder(path, home) {
+  const real = realish(path);
+  for (const f of PROTECTED) {
+    for (const dir of new Set([join(realish(home), f), realish(join(home, f))])) if (real === dir || real.startsWith(`${dir}${sep}`)) return `~/${f}`;
+  }
+  return null;
+}
+
+/** What launchd would meet that a terminal does not: the problems with the job's paths, the installed plist and the loaded job, as lines
+ * (empty when there are none). `launchd(args)` runs launchctl in the job's environment. */
+function preflight(j, state, env, launchd) {
+  const problems = [];
+  const paths = [['program', j.program[0]], ['working folder', j.cwd], ['installed copy', installedRoot(env)], ['log', j.log], ['state folder', state]];
+  for (const [what, path] of paths) {
+    const folder = protectedFolder(path, env.HOME);
+    if (folder) problems.push(`the ${what} ${path} (really ${realish(path)}) sits under ${folder}, which macOS refuses a launchd job`);
+  }
+  try {
+    accessSync(j.program[0], constants.X_OK);
+  } catch {
+    problems.push(`${j.program[0]} is not there or not executable; run bin/install-factory from a clone`);
+  }
+  const installed = join(env.HOME, 'Library/LaunchAgents', `${LABEL}.plist`);
+  if (existsSync(installed)) {
+    const names = [...readFileSync(installed, 'utf8').matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]).filter((s) => s.startsWith('/'));
+    for (const path of names) {
+      const folder = protectedFolder(path, env.HOME);
+      if (folder) problems.push(`the installed ${installed} names ${path}, under ${folder}, which macOS refuses a launchd job; run bin/install-factory again`);
+    }
+  }
+  // Not loaded, or no launchctl: nothing to read, which is not a failure.
+  const printed = launchd(['print', `gui/${process.getuid?.()}/${LABEL}`]);
+  const last = printed.status === 0 ? /last exit code = (\d+)/.exec(printed.stdout ?? '') : null;
+  if (last && last[1] !== '0') problems.push(`the loaded job's last exit code is ${last[1]}; run bin/install-factory again to load it anew`);
+  return problems;
+}
+
+/** Before the Human loads the job (and after bin/install-factory loads it): makes the log's folder, fails on what launchd would refuse the
+ * job (see preflight), and says whether ssh to the Mac mini works with no prompt (with the SSH_AUTH_SOCK `launchctl getenv` gives, which is
+ * the job's, and none when that is empty) and whether the news can be read there. It relays nothing and posts nothing: it sets the cursor
+ * to the newest seq only when there is none. Returns the exit code. */
+export function check(env = process.env) {
   const j = job(env);
-  const jobEnv = { HOME: env.HOME, USER: env.USER ?? '', TMPDIR: env.TMPDIR ?? '/tmp', ...(env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: env.SSH_AUTH_SOCK } : {}), ...j.env };
+  const base = { HOME: env.HOME, USER: env.USER ?? '', TMPDIR: env.TMPDIR ?? '/tmp', ...j.env };
+  const launchd = (args) => spawnSync('launchctl', args, { env: base, encoding: 'utf8' });
+  const sock = launchd(['getenv', 'SSH_AUTH_SOCK']);
+  const jobEnv = { ...base, ...(sock.status === 0 && sock.stdout?.trim() ? { SSH_AUTH_SOCK: sock.stdout.trim() } : {}) };
   const say = (line) => console.log(`check: ${line}`);
-  if (note) say(note);
   mkdirSync(dirname(j.log), { recursive: true });
   say(`node ${spawnSync('node', ['--version'], { env: jobEnv, encoding: 'utf8' }).stdout?.trim() || 'not found'}`);
   const state = contextOf(jobEnv).state;
   say(`state folder ${state}`);
   say(`log ${j.log}`);
+  say(`installed copy ${realish(installedRoot(env))}`);
+  const problems = preflight(j, state, env, launchd);
+  if (problems.length) {
+    for (const p of problems) say(`not ready: ${p}`);
+    return 1;
+  }
   const probe = spawnSync('ssh', [...SSH_OPTIONS, HOST, 'true'], { env: jobEnv, encoding: 'utf8', timeout: SSH_MS });
   let why = null;
   if (probe.status !== 0) why = `ssh to the Mac mini does not work with no prompt: ${oneLine(probe.stderr || probe.error?.message || `exit ${probe.status}`)}`;
@@ -201,20 +291,18 @@ export function check(env = process.env, note = null) {
     if (newest.status !== 0 || !/^\d+$/.test(newest.stdout.trim())) why = `the Mac mini's news could not be read: ${oneLine(newest.stderr || `exit ${newest.status}`)}`;
     else if (readCursor(cursorFile) === null) writeCursor(cursorFile, Number(newest.stdout.trim()));
   }
-  say(why ? `not ready: ${why}` : 'ready; the Human loads the job');
+  say(why ? `not ready: ${why}` : 'ready');
   return why ? 1 : 0;
 }
 
-/** The command. `root` is the checkout that runs it, passed in for tests. */
-export async function main(argv, env = process.env, root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')) {
+/** The command. The installed copy is where `run` follows main and where the job points, whatever clone runs the command. */
+export async function main(argv, env = process.env) {
   const [command, ...rest] = argv;
   if (!['run', 'plist', 'check'].includes(command) || rest.length) throw new Error('usage: factory-relay run|plist|check');
   if (command !== 'plist' && placeOf(env) === 'factory') throw new Error('this is the factory host: its sweep delivers the news, so the relay runs on the MacBook');
-  if (command === 'run') return pass({ state: contextOf(env).state });
-  const g = guard(root);
-  if (g.refuse) throw new Error(g.refuse);
-  if (command === 'check') return check(env, g.note);
-  if (g.note) console.error(`factory-relay: note: ${g.note}`);
+  const ctx = contextOf(env);
+  if (command === 'run') return pass({ state: ctx.state, root: installedRoot(env), runs: ctx.runs, env });
+  if (command === 'check') return check(env);
   return void process.stdout.write(plist(job(env)));
 }
 

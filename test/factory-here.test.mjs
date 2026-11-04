@@ -469,6 +469,28 @@ test('lead --here has a hook on SessionStart and SessionEnd that records and rem
   }
 });
 
+test('lead --here\'s hook runs a copy of socket-hook.mjs under the state folder named by a hash of its bytes, reused by the next start (#390)', () => {
+  const s = world();
+  try {
+    s.identity();
+    const commandOf = () => settingsOf(s.nuls('claude.args')).hooks.SessionStart[0].hooks[0].command;
+    assert.equal(s.fac(['lead', 'alpha', '--here']).code, 0);
+    const first = commandOf();
+    const copy = first.match(/'([^']*\/hooks\/socket-hook-[0-9a-f]{7}\.mjs)'/)?.[1];
+    assert.equal(copy?.startsWith(join(s.state, 'hooks/')), true, first);
+    assert.deepEqual(readFileSync(copy), readFileSync(join(factory, 'bin/lib/socket-hook.mjs')));
+    assert.ok(!first.includes(join(factory, 'bin/lib/socket-hook.mjs')), 'the hook does not run the installed file itself');
+    // A copy that is there is reused, never written again.
+    writeFileSync(copy, '// marker\n');
+    assert.equal(s.fac(['lead', 'alpha', '--here']).code, 0);
+    assert.equal(commandOf(), first);
+    assert.equal(readFileSync(copy, 'utf8'), '// marker\n');
+    assert.deepEqual(readdirSync(join(s.state, 'hooks')), [copy.split('/').pop()]);
+  } finally {
+    s.done();
+  }
+});
+
 /** A real socket in the world's temporary folder, and what it was sent. */
 async function listener(s, name = 's') {
   const path = join(s.dir, name);

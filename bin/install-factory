@@ -1,13 +1,60 @@
 #!/usr/bin/env bash
-# Puts `factory` on the PATH (#177): makes ~/.local/bin/factory a symlink to this clone's bin/factory. The Human runs it, once per
-# machine, on the MacBook and as the factory user on the Mac mini; it can be run again. It replaces nothing that is not already
-# that symlink: a file, a folder or a link to another place is named and left as it is.
+# Puts `factory` on the PATH (#177) from the machine's installed copy of the factory (#390), which follows main by itself. The Human runs it,
+# once per machine, on the MacBook and as the factory user on the Mac mini; it can be run again.
+#   From any clone that is not the installed copy: it makes the installed copy when there is none (git clone --branch main --single-branch of
+#   $FACTORY_INSTALL_ORIGIN, default https://github.com/tuannd9288/factory.git, then an empty credential.helper in that clone, so its fetch is
+#   anonymous and never reaches the Keychain), else brings it to origin/main by followMain's rules (bin/lib/checkout.mjs); then it runs the
+#   installed copy's own bin/install-factory, so the code that does the work is main's. The installed copy is $FACTORY_CHECKOUT, ~/WORKSPACES
+#   on the Mac mini, and ${XDG_DATA_HOME:-~/.local/share}/factory/checkout on the MacBook (installedRoot, bin/lib/factory.mjs).
+#   From the installed copy: it first follows main by the same rule, and when that moved the copy it runs itself again from the moved copy,
+#   once; a refused follow is told and the run goes on with the copy as it is. Then ~/.local/bin/factory becomes a symlink to its bin/factory. It replaces a symlink whose target ends in
+#   /bin/factory (the old one into a clone included) and nothing else: a file, a folder or a link to another place is named and left as it is.
+#   On the MacBook only, it then writes the relay's LaunchAgent (bin/factory-relay plist) to ~/Library/LaunchAgents through a temporary name
+#   and a rename, unloads the old job when one is loaded, waits (10 seconds at most) until the job is gone, loads the new one and runs `bin/factory-relay check`. It says each step in a line.
+# A clone anywhere else, its branches and its uncommitted edits change nothing that runs; only a change that lands on main reaches the copy.
 set -euo pipefail
 [ "$#" -eq 0 ] || { echo "usage: bin/install-factory" >&2; exit 2; }
-target=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/factory
+PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+export PATH
+command -v node >/dev/null 2>&1 || { echo "install-factory: node is not on PATH ($PATH)" >&2; exit 127; }
+here=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+helper="$here/bin/lib/install-factory.mjs"
+root=$(node "$helper" root)
+
+if [ "$(cd -P "$root" 2>/dev/null && pwd || true)" != "$here" ]; then
+  if [ -e "$root/.git" ]; then
+    # A refusal is told (and is in queue-checkout.failed); the installed copy, where it was, is still what installs.
+    node "$helper" follow || echo "install-factory: going on with the installed copy as it is" >&2
+  elif [ -e "$root" ] && [ -n "$(ls -A "$root")" ]; then
+    echo "install-factory: $root exists and is not a clone; left as it is" >&2
+    exit 1
+  else
+    origin=${FACTORY_INSTALL_ORIGIN:-https://github.com/tuannd9288/factory.git}
+    mkdir -p "$(dirname "$root")"
+    # The empty helper and no prompt: the first clone is anonymous too, and never reaches the Keychain or asks for a login.
+    GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone -q --branch main --single-branch "$origin" "$root"
+    git -C "$root" config credential.helper ''
+    echo "install-factory: cloned $origin to $root"
+  fi
+  [ -x "$root/bin/install-factory" ] || { echo "install-factory: $root has no bin/install-factory to run" >&2; exit 1; }
+  FACTORY_INSTALL_FOLLOWED=1 exec "$root/bin/install-factory"
+elif [ -z "${FACTORY_INSTALL_FOLLOWED:-}" ]; then
+  # The copy's own run follows main first, by the same rule; when that moved it, it runs itself again from the moved copy, once.
+  before=$(git -C "$here" rev-parse HEAD 2>/dev/null || true)
+  node "$helper" follow || echo "install-factory: going on with the installed copy as it is" >&2
+  after=$(git -C "$here" rev-parse HEAD 2>/dev/null || true)
+  if [ "$before" != "$after" ]; then
+    FACTORY_INSTALL_FOLLOWED=1 exec "$here/bin/install-factory"
+  fi
+fi
+
+target=$here/bin/factory
 link=$HOME/.local/bin/factory
 if [ -L "$link" ]; then
-  [ "$(readlink "$link")" = "$target" ] || { echo "install-factory: $link is a link to $(readlink "$link"), not to $target; left as it is" >&2; exit 1; }
+  case "$(readlink "$link")" in
+    */bin/factory) [ "$(readlink "$link")" = "$target" ] || { rm "$link"; ln -s "$target" "$link"; } ;;
+    *) echo "install-factory: $link is a link to $(readlink "$link"), not into a factory's bin/factory; left as it is" >&2; exit 1 ;;
+  esac
 elif [ -e "$link" ]; then
   echo "install-factory: $link exists and is not a link; left as it is" >&2
   exit 1
@@ -17,3 +64,28 @@ else
 fi
 echo "factory: $link -> $target"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "note: $HOME/.local/bin is not on your PATH" ;; esac
+
+[ "$(node "$helper" place)" = macbook ] || exit 0
+label=io.github.tuannd9288.factory.relay
+agents=$HOME/Library/LaunchAgents
+plist=$agents/$label.plist
+mkdir -p "$agents"
+tmp=$plist.tmp-$$
+trap 'rm -f "$tmp"' EXIT
+"$here/bin/factory-relay" plist > "$tmp"
+mv -f "$tmp" "$plist"
+echo "install-factory: wrote $plist"
+domain=gui/$(id -u)
+if launchctl print "$domain/$label" >/dev/null 2>&1; then
+  launchctl bootout "$domain/$label"
+  echo "install-factory: unloaded the old job"
+  # bootout returns before the job is gone; bootstrap in that gap fails. Wait until it is not found, 10 seconds at most (FACTORY_INSTALL_WAIT).
+  waited=0
+  while launchctl print "$domain/$label" >/dev/null 2>&1 && [ "$waited" -lt $(( ${FACTORY_INSTALL_WAIT:-10} * 2 )) ]; do
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+fi
+launchctl bootstrap "$domain" "$plist" || { echo "install-factory: launchctl bootstrap of $label failed; run this same line again" >&2; exit 1; }
+echo "install-factory: loaded $label"
+"$here/bin/factory-relay" check
