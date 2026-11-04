@@ -162,14 +162,13 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   words of 2026-10-31 in its body), #286 (his words of 2026-11-01 in its body), and on 2026-11-02, relayed by the
   factory-repo session, #256 and #330 ("#256 lệnh kiểm (Recommended), #330 test chập chờn (Recommended)"), #333
   ("Làm ngay trong release 1") and #335 ("Vá ngay, trước công tắc (Recommended)"); and on 2026-11-03, relayed by the
-  factory-repo session, #351 ("A trước đã"); and on 2026-11-03,
+  factory-repo session, #351 ("A trước đã") and #369 ("trả lời i–vi: theo đề xuất", his answer vi); and on 2026-11-03,
   relayed by Colly and the factory-repo session, #373, #374 and #352 ("Đồng thời cho xử lý luôn phần dùng Linear đi"); and
   on 2026-11-03, relayed by the factory-repo session, #370 ("trả lời i–vi: theo đề xuất", about 14:30 +07, whose (iii) is
   that the sweep wakes a Lead and the Lead keeps no watchers; and "A", about 23:15 +07, relayed by Colly: one sweep on each
   Mac, the local inbox-socket wake, the cloud station after release 1); and, relayed by Colly and the factory-repo
   session, #375 ("đề xuất 1: làm ngay sau #370", on 2026-11-03 about 23:00 +07, and "Chốt giải pháp B Linear, tập trung
-  xử lý các việc để chạy trên Linear.", on 2026-11-04 at 14:16 +07). #369 left the freeze when he parked it ("5 ok.",
-  2026-11-04 at 14:47 +07).
+  xử lý các việc để chạy trên Linear.", on 2026-11-04 at 14:16 +07). He parked #369 on 2026-11-04 ("5 ok.", 14:47 +07).
   Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
@@ -179,6 +178,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 and
   https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675 and
   https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569 and
+  https://github.com/tuannd9288/factory/issues/369 and
   https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300 and
   https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A") and
   https://github.com/tuannd9288/factory/issues/375 (its body and comments).
@@ -191,8 +191,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **Linear, 2026-11-03.** Linear is his own surface: he decides, takes notes and asks questions there. GitHub stays the
   record (1b) until the entry below, and his answers reach it as a comment on the issue that names the relay (#352),
   for a repository still on GitHub. Colly sets up Linear and its own Linear access; nothing in the factory reads Linear
-  until #404 and #405 land (the entry below). H9 holds for Linear (its entry below). The per-repository tracker switch
-  his second quote asks for is #375, which the entry below decides. His words: "Ok. Dùng Linear" (about
+  until #404, #405 and #407 land (the entry below). H9 holds for Linear (its entry below). The per-repository tracker
+  switch his second quote asks for is #375, which the entry below decides. His words: "Ok. Dùng Linear" (about
   20:20 +07) and "Thay vì bỏ github hiện tại tại sao không thiết kế để có thể on/off Linear hoặc Github, kiểu nếu dùng
   github không dùng Linear cũng được, mà dùng Linear thì không cần Github. Đồng thời cho xử lý luôn phần dùng Linear đi."
   (about 21:45 +07). Source: https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300, relayed by
@@ -209,58 +209,16 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   each repository, the factory's being `FAC` while `INN` stays his team for decisions (the reasons are in #375's body);
   and, while repositories move, one list names those on Linear, which only grows and which the cut removes. None is on
   Linear yet; #406 adds the factory. #404 moves the list into the file its code reads and leaves this line pointing
-  there. FAC's labels and statuses are a proposal, in the section below, which he approves with the pull request that
-  holds it; nothing is created in Linear before. Waiting on him: the credential rule for 1b and the Factory app, one
-  or one for each team, with its names (#403), and how Linear's events reach the Macs (#375, decision 7, in research).
-  His words: "B theo đề xuất." (14:13 +07); "Chốt giải pháp B Linear, tập trung xử lý các việc để chạy trên Linear. Còn
+  there. Nothing in the factory reads Linear until #404, #405 and #407 land. FAC's labels and statuses are researched
+  and proposed in #406, and nothing is created in Linear before his word. Waiting on him: the credential rule for 1b
+  and the Factory app, one or one for each team, with its names (#403), and how Linear's events reach the Macs (#375,
+  decision 7: both research passes are done, and a recommendation goes to him). His words: "B theo đề xuất." (14:13
+  +07); "Chốt giải pháp B Linear, tập trung xử lý các việc để chạy trên Linear. Còn
   Github thì off mặc định, chỉ khi nào cần thì phát triển tiếp hoặc mày xem đề xuất là tag cái phần github rồi gỡ hẵn
   chỉ dùng B Linear, khi nào cần xây lại github thì lấy lại nếu cần, để code gọn?" (14:16); "Ok, tag rồi gỡ" (14:28);
-  "OK không xoá issue." (14:43); "5 ok." (14:47); "Rà lại phần Labels trên Linear tau thấy có Decision, Approval
-  OptionA,... là gì? Đừng có đặt tuỳ tiện. Mục đích rõ ràng" (14:54); and, on Linear's default labels, "Vì sao không dùng chuẩn chung?
-  Factory dùng nhãn gì?" (14:59). Sources:
+  "OK không xoá issue." (14:43); "5 ok." (14:47). Sources:
   https://github.com/tuannd9288/factory/issues/375 (its body and comments) and
   https://github.com/tuannd9288/factory/issues/402, relayed by Colly and the factory-repo session.
-
-## FAC's labels and statuses (proposal)
-
-The factory uses Linear's standard type labels (Bug, Feature, Improvement), one single-select Sublayer group, and one
-label of its own, `needs-human`, because no standard field marks that an issue waits for his answer.
-
-His to approve with the pull request that holds this section (Linear, 2026-11-04, in Decisions); nothing is created in
-Linear before, and #406 creates them. Linear's team `FAC` gets no label without a purpose written here: what it marks,
-who sets it, who reads it, and the GitHub label it replaces or why it is new. A label that departs from Linear's
-standard says why. Colly cleans up INN's labels separately.
-
-| Label | What it marks | Set by | Read by | Replaces, or why |
-|---|---|---|---|---|
-| Bug (standard) | Something that works wrongly | Whoever files the issue | The Human and Colly | `bug` |
-| Feature (standard) | A new capability | Whoever files the issue | The Human and Colly | `enhancement`, "New feature" |
-| Improvement (standard) | A change to what exists | Whoever files the issue | The Human and Colly | `enhancement`, the rest |
-| Sublayer, a single-select group, 17 children `0a` to `4b` | The sublayer the issue belongs to | Whoever files | The Human and Colly | `sublayer-0a` to `sublayer-4b` |
-| `needs-human` | The issue waits on a decision of his | The Lead, who removes it once answered | The sweep, `factory top`, the Human | `needs-human` on an issue |
-
-- **Sublayer** departs from the standard because this file requires every issue to name its sublayer, and a group lets
-  an issue carry only one.
-- **`needs-human`** departs because no standard field does its job. Assigning the issue to him does not mark it: the
-  Factory app is the issue's delegate and a person stays its assignee (Linear's agent model), so the assignee does not
-  change when the Lead waits on him. The sweep and `factory top` raise the wait from this label today
-  (`bin/lib/events.mjs`, `bin/lib/top.mjs`), and #405 reads Linear's. The label on a pull request stays on GitHub.
-- **`task` is dropped** for a repository on Linear. Its job is done by the status: Triage is an issue no team may claim,
-  Todo is one a team may, and Colly or the Human moves it there to release it. The claim check reads the status type
-  (unstarted or started) in place of the label (`kit/.gate/bin/lib/claim.mjs:132` today), and the ledger counts a task
-  from its move to Todo. #404, #405 and #407 do this, and 1a's words "labelled `task`" follow them.
-- The tier labels and `raised` mark pull requests, which stay on GitHub.
-- Left out, since no one sets or reads them: the eight other GitHub defaults (`accessibility`, `documentation`,
-  `duplicate`, `good first issue`, `help wanted`, `invalid`, `question`, `wontfix`; none on any issue), and `digest`,
-  which marks an issue in another repository; it is added if #405 moves the digest to Linear.
-
-Statuses are Linear's defaults, with Triage on, and no status beyond them:
-- **Triage** is the board's Triage: an issue no team may claim yet, such as a finding outside a task.
-- **Todo** is the board's Todo: released, to be claimed. **In Progress** and **Done** are the board's, and Linear's
-  pull-request automation moves them.
-- **Backlog** and **Canceled** are Linear's. No rule here uses Backlog; Canceled replaces a GitHub issue closed as not
-  planned.
-- Who a task waits on is derived from `needs-human` and the checks, not stored as a status.
 
 ## Tiers
 
@@ -381,9 +339,9 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   surface: with Linear down, that repository's issues cannot be read and a gated repository's `tier` cannot pass
   (#407). As his surface for deciding, notes and questions (#373), Linear starts none of the factory's sessions, and
   its coding sessions, Loops and "open in coding tool" stay off (1); his comment on a Linear issue is the record, with
-  no relay, and a decision of his on a GitHub issue counts once it is relayed there (2); the factory's own code reads
-  Linear only through its own app (#403), never under his login, the credential rule for 1b waits on him (#403), and
-  Colly's own Linear access is Colly's, outside the factory's code (3).
+  no relay, and for a repository still on GitHub a decision of his counts once it is relayed to the GitHub issue (2);
+  Colly's own Linear access is Colly's, outside the factory's code, and the credential rule for 1b waits on him: #403
+  proposes that the factory's code reads Linear only through its own app, never under his login (3).
   Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
