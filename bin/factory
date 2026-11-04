@@ -16,6 +16,9 @@
 #                                  and exit code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
 #                                  --body-file, --notes-file, --env-file, --input, --field or -F (pass it on stdin: --body-file -, -F name=@-,
 #                                  --input -); on the Mac mini it runs gh itself (#349)
+#   factory linear <verb> ...      a Lead's steps on a repository on Linear (#404; bin/lib/linear-cli.mjs has the verbs): take, read, comment, ask,
+#                                  answered, create and onboard, as the Factory app; one JSON object on stdout, exit 0, 1 (Linear refused) or 2 (usage); a
+#                                  body comes on stdin (--body-file -); on the MacBook the same command runs on the Mac mini by ssh, stdin kept
 #   factory wake <repo> --issue <n> [--team <name>]  wakes the Lead of a team (#351): one line into its Claude Code inbox socket, which says to re-read
 #                                  the issue (the message itself is a comment there) and types nothing into its pane; on the Mac mini it posts to the socket
 #                                  its hook recorded in ~/factory-runs/<repo>-<team>/socket; on the MacBook to the socket `lead --here` recorded when that

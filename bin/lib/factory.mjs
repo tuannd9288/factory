@@ -345,6 +345,7 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory lead <repo> [--team <name>] [--new] [--dry-run]
        bin/factory lead <repo> [--team <name>] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
        bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)
+       bin/factory linear take|read|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
@@ -598,6 +599,28 @@ function ghCmd(args, env) {
   const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { stdio: 'inherit', env });
   if (r.error) {
     console.error(`bin/factory: gh: ssh did not run (${r.error.code ?? 'error'})`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
+/** `factory linear <verb> ...` (#404): a Lead's steps on a repository on Linear (bin/lib/linear-cli.mjs). On the factory host it runs there and
+ * reads the Factory app's token in its own process; on the MacBook it runs the same command on the host, in the host user's login shell over ssh,
+ * with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of this Mac is
+ * involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
+async function linearCmd(args, env) {
+  const cli = await import('./linear-cli.mjs');
+  if (placeOf(env) === 'factory') return cli.main(args, env);
+  try {
+    cli.parse(args);
+  } catch (e) {
+    console.log(JSON.stringify({ ok: false, error: e.message }));
+    return 2;
+  }
+  const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(['~/WORKSPACES/bin/factory', 'linear', ...args.map(word)].join(' '))}`], { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: linear: ssh did not run (${r.error.code ?? 'error'})`);
     return 1;
   }
   return r.status ?? 1;
@@ -969,6 +992,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'top') return top(rest, env);
   if (cmd === 'lead') return lead(rest, env);
   if (cmd === 'gh') return ghCmd(rest, env);
+  if (cmd === 'linear') return linearCmd(rest, env);
   if (cmd === 'wake') return wake(rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);
