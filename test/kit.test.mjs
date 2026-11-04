@@ -528,6 +528,8 @@ describe('review, verdict, tier and rounds', () => {
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
         '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
         '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
+        // #379: the pull request's comments, kept in $FAKE/comments.json by comments.mjs; a write fails while nowrite exists.
+        '  *issues/7/comments*|*issues/comments/*) node "$FAKE/comments.mjs" "$@" ;;',
         // #374: each review request is logged; the one for the login in norequest, when that exists, fails.
         '  *requested_reviewers*) echo "$*" >>"$FAKE/requests"; if [ -e "$FAKE/norequest" ]; then case "$*" in *"=$(cat "$FAKE/norequest")") echo boom >&2; exit 1 ;; esac; fi; echo "{}" ;;',
         '  *reviews*) cat "$FAKE/reviews.json" ;;',
@@ -537,6 +539,35 @@ describe('review, verdict, tier and rounds', () => {
         'esac',
         '',
       ].join('\n'),
+    });
+    // #379: a comments API of one pull request: a read answers the pages (--paginate --slurp), a POST adds the bot's comment, a PATCH
+    // replaces the body of one comment; every write is logged to $FAKE/comment-writes.
+    write(fake, {
+      'comments.mjs': `import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+const [fake, args] = [process.env.FAKE, process.argv.slice(2)];
+const file = fake + '/comments.json';
+const pages = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [[]];
+const method = args.includes('-X') ? args[args.indexOf('-X') + 1] : 'GET';
+const field = args.find((a) => a.startsWith('body='));
+if (method === 'GET') {
+  if (!args.includes('--paginate') || !args.includes('--slurp')) { console.error('fake gh: the comments are asked without --paginate --slurp'); process.exit(1); }
+  if (existsSync(fake + '/noread')) { console.error('HTTP 502'); process.exit(1); }
+  console.log(JSON.stringify(pages));
+  process.exit(0);
+}
+if (existsSync(fake + '/nowrite')) { console.error('HTTP 403'); process.exit(1); }
+const all = pages.flat();
+if (method === 'POST') {
+  all.push({ id: 1000 + all.length, user: { login: 'github-actions[bot]' }, body: field.slice(5) });
+  appendFileSync(fake + '/comment-writes', 'POST\\n');
+} else if (method === 'PATCH') {
+  const id = Number(args.find((a) => /issues\\/comments\\/\\d+$/.test(a)).split('/').pop());
+  all.find((c) => c.id === id).body = field.slice(5);
+  appendFileSync(fake + '/comment-writes', 'PATCH ' + id + '\\n');
+}
+writeFileSync(file, JSON.stringify([all]));
+console.log('{}');
+`,
     });
     run(fake, 'chmod', ['+x', 'bin/gh']);
     verify('success');
@@ -603,7 +634,7 @@ describe('review, verdict, tier and rounds', () => {
     labels();
     reviews([]);
     // The rules in force on main are the kit's gate: the merge switch at 1-2 (#333).
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null, 'entire-rules': null, norequest: null });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null, 'entire-rules': null, norequest: null, 'comments.json': null, 'comment-writes': null, noread: null, nowrite: null });
   });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
   /** The rules in force on main with one pull_request rule: the merge switch's two parameters (#333). */
@@ -1096,6 +1127,98 @@ describe('review, verdict, tier and rounds', () => {
     } finally {
       write(trusted, { '.github/CODEOWNERS': kept });
     }
+  });
+  // #379: the gate's risk score for Linear's Reviews, one comment of the pull request with a linear:extension riskScore block.
+  const posted = () => (existsSync(join(fake, 'comments.json')) ? JSON.parse(readFileSync(join(fake, 'comments.json'), 'utf8')).flat() : []);
+  const writes = () => (existsSync(join(fake, 'comment-writes')) ? readFileSync(join(fake, 'comment-writes'), 'utf8').trim().split('\n') : []);
+  /** The riskScore plugin of one comment's block, parsed; the block is the only `-->` besides the marker's. */
+  const riskOf = (comment) => {
+    assert.equal(comment.body.split('-->').length - 1, 2, comment.body);
+    const m = /^<!-- linear:extension (.*) -->$/m.exec(comment.body);
+    assert.ok(m, comment.body);
+    const block = JSON.parse(m[1]);
+    assert.equal(block.version, 1);
+    assert.equal(block.plugins.length, 1);
+    return block.plugins[0];
+  };
+  const ownComments = () => posted().filter((c) => c.user.login === 'github-actions[bot]');
+  test('the first run writes the risk score as one comment, and a later head edits it', () => {
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(ownComments().length, 1, first.out);
+    assert.deepEqual(writes(), ['POST']);
+    let plugin = riskOf(ownComments()[0]);
+    assert.equal(plugin.plugin, 'riskScore');
+    assert.equal(plugin.sha, first.head);
+    assert.equal(plugin.level, 3);
+    assert.ok(plugin.explanations.some((e) => e.includes('AGENTS.md')));
+    assert.equal(plugin.visible, undefined);
+    const second = job('tier', { 'AGENTS.md': '# app two\n' }, pr);
+    assert.notEqual(second.head, first.head);
+    assert.equal(ownComments().length, 1);
+    assert.deepEqual(writes(), ['POST', `PATCH ${ownComments()[0].id}`]);
+    plugin = riskOf(ownComments()[0]);
+    assert.equal(plugin.sha, second.head);
+  });
+  test('the level follows the tier, at the merge switch\'s all too', () => {
+    const levelOf = (files, env = pr) => {
+      write(fake, { 'comments.json': null });
+      const out = job('tier', files, env);
+      return [out, riskOf(ownComments()[0])];
+    };
+    let [out, plugin] = levelOf({ 'src/math.js': MUL });
+    assert.equal(out.code, 0, out.out);
+    assert.equal(plugin.level, 1);
+    assert.ok(plugin.explanations.length >= 1);
+    [out, plugin] = levelOf({ 'src/auth/t.js': 'export const t = 1;\n' });
+    assert.equal(out.code, 0, out.out);
+    assert.equal(plugin.level, 2);
+    [, plugin] = levelOf({ 'AGENTS.md': '# app\n' });
+    assert.equal(plugin.level, 3);
+    rulesAre(switchRules(0, false));
+    [out, plugin] = levelOf({ 'AGENTS.md': '# app\n' });
+    assert.equal(out.code, 0, out.out);
+    assert.equal(plugin.level, 3);
+  });
+  test('a comment by anyone else, or one without the marker, is not the gate\'s', () => {
+    const marker = '<!-- factory-gate:risk-score -->';
+    const planted = `${marker}\nRisk\n<!-- linear:extension {"version":1,"plugins":[{"plugin":"riskScore","level":1}]} -->\n`;
+    write(fake, { 'comments.json': JSON.stringify([[{ id: 5, user: { login: 'someone' }, body: planted }, { id: 6, user: { login: 'github-actions[bot]' }, body: 'a note, no marker' }]]) });
+    job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.deepEqual(writes(), ['POST']);
+    const all = posted();
+    assert.equal(all.length, 3);
+    assert.equal(all[0].body, planted);
+    assert.equal(all[1].body, 'a note, no marker');
+    assert.equal(riskOf(all[2]).level, 3);
+  });
+  test('many long paths keep the explanations within Linear\'s limits, and a path holding --> cannot end the block', () => {
+    const files = {};
+    for (let i = 0; i < 12; i++) files[`.claude/${'a'.repeat(100)}/${'b'.repeat(100)}-${i}-->ö</x>.md`] = 'x\n';
+    job('tier', files, pr);
+    const plugin = riskOf(ownComments()[0]);
+    assert.ok(plugin.explanations.length >= 1 && plugin.explanations.length <= 8, `${plugin.explanations.length}`);
+    for (const e of plugin.explanations) {
+      assert.ok(typeof e === 'string' && e.length >= 1 && Array.from(e).length <= 200 && e.length <= 200, e);
+    }
+    assert.ok(plugin.explanations.some((e) => e.includes('-->')));
+    assert.ok(plugin.explanations.some((e) => /^and \d+ more$/.test(e)));
+    assert.equal(plugin.level, 3);
+  });
+  test('a failed read or write of the comment changes nothing in tier\'s result but one line', () => {
+    const plain = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    const result = (o) => [o.code, o.out.split('\n').filter((l) => !/risk score/.test(l)).join('\n')];
+    for (const fail of ['nowrite', 'noread']) {
+      write(fake, { 'comments.json': null, 'comment-writes': null, [fail]: '' });
+      const out = again('tier', plain.head, pr);
+      assert.deepEqual(result(out), result(plain), fail);
+      assert.match(out.out, /tier: could not (write|edit) the risk score/, fail);
+      assert.deepEqual(writes(), [], fail);
+      write(fake, { [fail]: null });
+    }
+    const ok = job('tier', { 'src/math.js': MUL }, pr);
+    write(fake, { nowrite: '' });
+    const failed = again('tier', ok.head, pr);
+    assert.deepEqual(result(failed), result(ok));
   });
   test('rounds requests the code owners with needs-human at the third red head, unless the switch is at all or unreadable', () => {
     const red = (oid, name = 'verify', conclusion = 'FAILURE') => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion }] } }] } } });
