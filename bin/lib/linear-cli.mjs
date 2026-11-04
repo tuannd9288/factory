@@ -10,7 +10,9 @@
 //   ask <KEY> --team <team> --body-file -       status Needs Human, the Human assigned, one comment (the question and its tick boxes)
 //   answered <KEY> --team <team>                the assignee removed, the issue back in the first `started` status
 //   list --team-key <KEY> [--status <type>]...  the team's open issues (default types triage, backlog, unstarted, started); a read
-//   create --team-key <KEY> --title <t> --status <name> --body-file - [--delegate]   an issue with an explicit status, never Triage by accident
+//   create --team-key <KEY> --title <t> --status <name> --body-file - [--delegate --team <team>]   an issue with an explicit status, never Triage
+//                                               by accident; --delegate (which needs --team) also posts the holder comment a take posts
+//   comment and ask refuse a body with a line that reads as a holder or release comment (those are for take, release and create)
 //   onboard <repo> --key <KEY> --name <name>    the repository's team (copied from FAC) and its Needs Human status, and the registry
 // One JSON object on stdout. Exit 0 done, 1 Linear refused or failed (the reason is in `error`, never a token), 2 usage.
 // Scope: take, comment, ask, answered, create and list act only on a team that is in the registry, never on INN or any other team; read does
@@ -42,7 +44,7 @@ const SHAPES = {
   ask: { args: 1, flags: { '--team': 'value', '--body-file': 'value' } },
   answered: { args: 1, flags: { '--team': 'value' } },
   release: { args: 1, flags: { '--team': 'value' } },
-  create: { args: 0, flags: { '--team-key': 'value', '--title': 'value', '--status': 'value', '--body-file': 'value', '--delegate': 'bool' } },
+  create: { args: 0, flags: { '--team': 'value', '--team-key': 'value', '--title': 'value', '--status': 'value', '--body-file': 'value', '--delegate': 'bool' } },
   onboard: { args: 1, flags: { '--key': 'value', '--name': 'value' } },
   list: { args: 0, flags: { '--team-key': 'value', '--status': 'repeat' } },
 };
@@ -72,6 +74,7 @@ export function parse(argv) {
   }
   if (args.length !== shape.args) throw new Usage(`${verb}: expects ${shape.args} argument${shape.args === 1 ? '' : 's'}`);
   for (const f of REQUIRED[verb] ?? []) if (!(f in flags)) throw new Usage(`${verb}: ${f} is required`);
+  if (verb === 'create' && flags['--delegate'] && !('--team' in flags)) throw new Usage('create: --delegate needs --team, the team that holds the issue');
   if ('--body-file' in flags && flags['--body-file'] !== '-') throw new Usage(`${verb}: the body comes on stdin: --body-file -`);
   if (verb === 'onboard' ? !WORD.test(args[0]) : shape.args === 1 && !KEY.test(args[0])) throw new Usage(`${verb}: ${args[0]} is not a ${verb === 'onboard' ? 'repository name' : 'issue key such as FAC-12'}`);
   if ('--team' in flags && !TEAM.test(flags['--team'])) throw new Usage(`${verb}: --team is a team name: a lowercase letter, then at most 31 lowercase letters and digits`);
@@ -85,6 +88,9 @@ const TAKEN = 'Taken by team';
 const RELEASED = 'Released by team';
 const TAKEN_LINE = new RegExp(`^${TAKEN} ([a-z][a-z0-9]{0,31})\\.\\s*$`);
 const RELEASED_LINE = new RegExp(`^${RELEASED} ([a-z][a-z0-9]{0,31})(?:\\.|\\s\\()`);
+
+/** Whether a line reads as a holder or a release comment line. */
+export const isHolderLine = (line) => TAKEN_LINE.test(line) || RELEASED_LINE.test(line);
 
 /** The team that holds an issue, or null: the earliest "Taken by team X." comment after the last "Released by team Y" one, from comments of
  * { body, createdAt } in any order. The delegate is the one shared app for every team, so only these comments say which team holds it. */
@@ -154,30 +160,32 @@ export function createCli({ api, state, readStdin }) {
     return all;
   }
 
+  /** The holder comment of a take, and the read-back after it: when another named team's comment came first, refuse. A read-back with no
+   * holder (its own comment not yet visible) is success. Used by `take` and by `create --delegate`. */
+  async function announceTake(issueId, key, team) {
+    const commentId = done(await api.commentCreate({ issueId, body: `${TAKEN} ${team}.`, team }), 'commentCreate').comment?.id ?? null;
+    const first = holderOf(await commentsOf(key));
+    if (first && first !== team) throw new Refused(`${key} is held by team ${first}, whose take came first; take another issue`);
+    return commentId;
+  }
+
   /** The lock of a repository with no gate to claim in (#407 makes the gate read Linear). An issue is held by the team of the earliest
-   * holder comment. A take of an issue the app already holds is allowed for the holder's own team, or when no comment names a holder (its
-   * comment failed). After its own comment, `take` reads the comments once more: when another team's comment came first it refuses and
-   * changes nothing more, since the delegate and the status are the same either way. */
+   * holder comment. Another team's issue is refused with nothing written, whether the app is still its delegate or not: that team takes
+   * it again or releases it. The holder's own team may take it again, and so may anyone when no comment names a holder (its comment
+   * failed). After its own comment, `take` reads the comments once more, so a lost race changes nothing more. */
   async function take({ args: [key], flags }) {
     const team = flags['--team'];
     const issue = await issueTeam(key);
     const to = started(issue);
     const delegateId = await api.appUserId();
-    const held = issue.delegate?.id === delegateId;
-    let who = holderOf(await commentsOf(key));
-    if (who && who !== team && held) throw new Refused(`${key} is held by team ${who}; take another issue`);
-    // The delegate was cleared by hand while a holder comment stands: close that holder's turn, so the earliest comment is no stale one.
-    if (who && who !== team && !held) {
-      done(await api.commentCreate({ issueId: issue.id, body: `${RELEASED} ${who} (the delegate was cleared by hand).`, team }), 'commentCreate');
-      who = null;
+    const who = holderOf(await commentsOf(key));
+    if (who && who !== team) {
+      throw new Refused(issue.delegate?.id === delegateId
+        ? `${key} is held by team ${who}; take another issue`
+        : `${key} is held by team ${who}, though its delegate is not set; that team releases it with factory linear release, or takes it again; take another issue`);
     }
     done(await update(issue.id, { delegateId, assigneeId: null, stateId: to.id }), 'issueUpdate');
-    let commentId = null;
-    if (who !== team) {
-      commentId = done(await api.commentCreate({ issueId: issue.id, body: `${TAKEN} ${team}.`, team }), 'commentCreate').comment?.id ?? null;
-      const first = holderOf(await commentsOf(key));
-      if (first !== team) throw new Refused(`${key} is held by team ${first}, whose take came first; take another issue`);
-    }
+    const commentId = who === team ? null : await announceTake(issue.id, key, team);
     return { ok: true, key, status: to.name, delegate: 'app', assignee: null, team, commentId };
   }
 
@@ -219,15 +227,22 @@ export function createCli({ api, state, readStdin }) {
     return body;
   };
 
-  async function comment({ args: [key], flags }) {
+  /** `comment` and `ask` post no line that holderOf would read as a holder or a release: those are for take, release and create. */
+  const bodyForComment = async () => {
     const body = await bodyOf();
+    if (body.split('\n').some(isHolderLine)) throw new Refused('the body has a line that reads as a holder comment (Taken by team … or Released by team …); only take, release and create post those; nothing was written');
+    return body;
+  };
+
+  async function comment({ args: [key], flags }) {
+    const body = await bodyForComment();
     const issue = await issueTeam(key);
     const c = done(await api.commentCreate({ issueId: issue.id, body, team: flags['--team'] }), 'commentCreate');
     return { ok: true, key, commentId: c.comment?.id ?? null };
   }
 
   async function ask({ args: [key], flags }) {
-    const body = await bodyOf();
+    const body = await bodyForComment();
     const issue = await issueTeam(key);
     const to = stateNamed(issue, NEEDS_HUMAN);
     const assigneeId = await human();
@@ -251,8 +266,11 @@ export function createCli({ api, state, readStdin }) {
     if (!team) throw new Refused(`Linear has no team with key ${teamKey}`);
     const status = team.states.nodes.find((s) => s.name === flags['--status']);
     if (!status) throw new Refused(`team ${teamKey} has no status named ${flags['--status']}`);
-    const r = done(await api.issueCreate({ teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate: flags['--delegate'] === true, team: team.name }), 'issueCreate');
-    return { ok: true, key: r.issue?.identifier ?? null, status: status.name, delegate: flags['--delegate'] === true ? 'app' : null };
+    const delegate = flags['--delegate'] === true;
+    const r = done(await api.issueCreate({ teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate, team: team.name }), 'issueCreate');
+    // An issue created with the app as its delegate is held by the creating team, as a take would say.
+    if (delegate) await announceTake(r.issue.id, r.issue.identifier, flags['--team']);
+    return { ok: true, key: r.issue?.identifier ?? null, status: status.name, delegate: delegate ? 'app' : null };
   }
 
   async function list({ flags }) {

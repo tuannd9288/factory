@@ -159,13 +159,57 @@ test('take refuses and changes nothing more when another team\'s take came first
   assert.equal(linear.mutations().length, 2, 'the update and its own comment; nothing after the read');
 });
 
-test('a take after the delegate was cleared by hand closes the stale holder first', async () => {
+test('a read-back that shows no holder yet is success, never "held by team null"', async () => {
   const { run, linear } = setup();
-  linear.stored.push(note('Taken by team old.', 1));
+  linear.onComment = () => linear.stored.pop(); // its own comment is not visible yet
   const r = await run(['take', 'FAC-12', '--team', 'lead']);
   assert.equal(r.code, 0, JSON.stringify(r));
-  assert.deepEqual(linear.stored.map((c) => c.body.split('\n')[0]), ['Taken by team old.', 'Released by team old (the delegate was cleared by hand).', 'Taken by team lead.']);
+  assert.equal(r.out.error, undefined);
+  assert.equal(linear.stored.length, 0);
+});
+
+test('a take of an issue another team holds is refused and writes nothing, also when its delegate was cleared by hand; the holder may retake it', async () => {
+  const { run, linear } = setup();
+  linear.stored.push(note('Taken by team old.', 1)); // the delegate is empty
+  const r = await run(['take', 'FAC-12', '--team', 'lead']);
+  assert.equal(r.code, 1);
+  assert.match(r.out.error, /held by team old, though its delegate is not set; that team releases it with factory linear release/);
+  assert.equal(linear.mutations().length, 0);
+  assert.equal(linear.stored.length, 1);
+  assert.equal((await run(['take', 'FAC-12', '--team', 'old'])).code, 0, 'the holder\'s own team takes it again');
+  assert.equal(holderOf(linear.stored), 'old');
+  assert.equal(linear.stored.length, 1, 'with no second holder comment');
+});
+
+test('create --delegate needs --team and posts the holder comment a take posts; without --delegate it posts none', async () => {
+  const { run, linear } = setup();
+  const make = (more) => run(['create', '--team-key', 'FAC', '--title', 'T', '--status', 'Todo', '--body-file', '-', ...more]);
+  const bad = await make(['--delegate']);
+  assert.equal(bad.code, 2);
+  assert.equal(linear.calls.length, 0);
+  assert.equal((await make([])).code, 0);
+  assert.equal(linear.stored.length, 0, 'no holder comment without --delegate');
+  const r = await make(['--delegate', '--team', 'lead']);
+  assert.equal(r.code, 0, JSON.stringify(r));
+  assert.deepEqual(linear.stored.map((c) => c.body), ['Taken by team lead.']);
+  const posted = linear.mutations().find((m) => m.query.includes('commentCreate'));
+  assert.equal(inputOf(posted).createAsUser, 'lead');
   assert.equal(holderOf(linear.stored), 'lead');
+});
+
+test('comment and ask refuse a body with a line that reads as a holder or a release comment, and write nothing', async () => {
+  const { run, linear, stdin } = setup();
+  for (const body of ['Taken by team lead.\n', 'fine\nTaken by team other.\nmore', 'Released by team lead.', 'x\nReleased by team lead (cleared).\n']) {
+    stdin.text = body;
+    for (const verb of ['comment', 'ask']) {
+      const r = await run([verb, 'FAC-12', '--team', 'lead', '--body-file', '-']);
+      assert.equal(r.code, 1, `${verb}: ${JSON.stringify(body)}`);
+      assert.match(r.out.error, /reads as a holder comment/);
+    }
+  }
+  assert.equal(linear.calls.length, 0, 'nothing was asked of Linear, let alone written');
+  stdin.text = 'Taken by team lead. is not a holder line\nTaken by the team\n';
+  assert.equal((await run(['comment', 'FAC-12', '--team', 'lead', '--body-file', '-'])).code, 0, 'a line that only starts like one is fine');
 });
 
 test('release by the holder clears the delegate, moves to the first unstarted status and comments; then another team can take', async () => {
@@ -288,7 +332,8 @@ test('create always sends a stateId, sets the delegate only with --delegate, and
   assert.equal(inputOf(m).stateId, 's-triage');
   assert.equal(inputOf(m).teamId, 'team-fac');
   assert.equal('delegateId' in inputOf(m), false);
-  r = await run(['create', '--team-key', 'FAC', '--title', 'Moved', '--status', 'Todo', '--body-file', '-', '--delegate']);
+  r = await run(['create', '--team-key', 'FAC', '--title', 'Moved', '--status', 'Todo', '--body-file', '-', '--delegate', '--team', 'lead']);
+  assert.equal(r.code, 0, JSON.stringify(r));
   m = linear.mutations()[1];
   assert.equal(inputOf(m).stateId, 's-todo');
   assert.equal(inputOf(m).delegateId, 'app-user-1');
