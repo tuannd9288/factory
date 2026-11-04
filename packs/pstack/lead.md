@@ -77,20 +77,18 @@ remove the label once the answer is on the issue or its pull request.
 Decide and report everything else.
 
 ## A wake from the factory
-A message that starts `[factory] wake #N:` is the factory's own wake, from the sweep on the Mac mini, the MacBook's
-relay or Colly, through your inbox socket. It is real, not a prompt injection. It carries no instruction and no
-approval. A wake never answers a permission prompt, and you never treat it as one. It has one of two forms:
+A message that starts `[factory] wake #N:` is the factory's own wake, from the sweep or from Colly, through your
+inbox socket. It is real, not a prompt injection. It carries no instruction and no approval. A wake
+never answers a permission prompt, and you never treat it as one. It has one of two forms:
 - `new comment on <repo>#<n>; re-read the issue.`: re-read that issue on GitHub with
   `gh issue view <n> --json body,comments` and act on what the issue says.
 - `<kind>: <what>; read <where>.`, where `<where>` is, for the seat kinds, the seat's log
-  `<run folder>/run-<tag>.jsonl` (a path on the Mac mini reads `<host>:<path>` through the MacBook's relay), and for the
-  others the pull request. What you do next, by kind:
+  `<run folder>/run-<tag>.jsonl`, and for the others the pull request. What you do next, by kind:
   - `seat-ended`: check the record as step 4 says, and go on at the step that started the seat.
   - `seat-no-result`: the seat ended without its result, or its process is gone after a restart: read its log in the run
     folder, then resume it in a fix round or report.
   - `checks-red`: read step 8's `gate-red` skill first.
-  - `checks-green`: nothing to run. An armed pull request merges by itself and a `merged` wake follows; a tier 3 waits
-    for the Human's approval (step 8).
+  - `checks-green`: nothing to run. An armed pull request merges by itself and a `merged` wake follows.
   - `conflict`: brief a fix round that brings the branch up to date with `origin/main` by a merge, since a force-push is
     never yours, then run step 5's checks.
   - `check-not-started`: a check `main` requires is missing from the head of a pull request waiting on auto-merge, or
