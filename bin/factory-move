@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The move of a repository's open GitHub issues to its Linear team (#406, sublayer 1b), once: bin/factory-move <owner>/<repo> --team-key <KEY>
+# --board <owner>/<number> [--apply] [--limit N]. Without --apply it reads GitHub and Linear and prints the plan, writing nothing; --apply writes,
+# and a second run finishes what a first left half done. It is not a `factory linear` verb; the header of bin/lib/move.mjs has the rest.
+exec node "$(dirname "$0")/lib/move.mjs" "$@"
