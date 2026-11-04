@@ -34,6 +34,8 @@ export const GRACE_MS = 60_000;
 /** Hosted image for displayIconUrl. None exists yet, so writes carry none (Linear then shows the app's own icon). */
 export const ICON_URL = null;
 export const CONDITION = 'linear-auth-failed';
+/** No request waits longer, so a hung connection cannot stall the daemon's pass. */
+const REQUEST_MS = 20_000;
 const LOCK_STALE_MS = 60_000;
 const LOCK_WAIT_MS = 30_000;
 
@@ -148,6 +150,7 @@ export function createLinear({
       try {
         res = await fetchFn(TOKEN_URL, {
           method: 'POST',
+          signal: AbortSignal.timeout(REQUEST_MS),
           headers: { 'content-type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ grant_type: 'client_credentials', client_id: c.id, client_secret: c.secret, scope: SCOPES.join(','), actor: 'app' }).toString(),
         });
@@ -179,7 +182,7 @@ export function createLinear({
   }
 
   async function send(bearer, query, variables) {
-    const res = await fetchFn(GRAPHQL_URL, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` }, body: JSON.stringify({ query, variables }) });
+    const res = await fetchFn(GRAPHQL_URL, { method: 'POST', signal: AbortSignal.timeout(REQUEST_MS), headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` }, body: JSON.stringify({ query, variables }) });
     let body = null;
     try {
       body = JSON.parse(await res.text());

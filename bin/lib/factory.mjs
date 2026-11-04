@@ -22,7 +22,7 @@ import { quote } from '../../packs/pstack/bin/lead.mjs';
 import { DEFAULT_TEAM, TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { leadTeams } from './top.mjs';
-import { accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeToken } from './token.mjs';
+import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -335,7 +335,8 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
 
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
-       bin/factory store <account>   (on the Mac mini; reads the token from stdin)
+       bin/factory login linear-app <client-id|client-secret>   (the Factory app's Linear credentials, #403; no setup-token)
+       bin/factory store <account>   (on the Mac mini; reads the token from stdin; \`store linear-app <client-id|client-secret>\` likewise)
        bin/factory use [<row|repo-team> [<letter>]]   (the row's account becomes the letter's; <repo>-<team> makes a team's row, and that team's running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory top [--once] [--width N] [--full]
@@ -641,17 +642,18 @@ async function top(args, env) {
  * ssh to `factory store` there, the token on ssh's stdin and in no argument. */
 async function login(args, env) {
   const words = args.filter((a) => a !== '--no-setup');
-  if (words.length !== 1) {
+  const app = appSlot(words);
+  if (!app && words.length !== 1) {
     console.error(USAGE);
     return 2;
   }
   const [account] = words;
-  const refused = accountRefusal(account);
+  const refused = app ? null : accountRefusal(account);
   if (refused) {
     console.error(`bin/factory: ${refused}`);
     return 2;
   }
-  if (!args.includes('--no-setup')) {
+  if (!app && !args.includes('--no-setup')) {
     const r = spawnSync('claude', ['setup-token'], { stdio: 'inherit', env });
     if (r.error || r.status !== 0) {
       console.error('bin/factory: claude setup-token did not finish; nothing was stored');
@@ -674,33 +676,40 @@ async function login(args, env) {
     const { agentProfiles, state } = contextOf(env);
     let moved;
     try {
-      writeToken(agentProfiles, account, t.token);
-      moved = movedOld(agentProfiles, state);
+      if (app) writeAppFile(agentProfiles, app.app, app.file, t.token);
+      else writeToken(agentProfiles, account, t.token);
+      moved = app ? null : movedOld(agentProfiles, state);
     } catch (e) {
       console.error(`bin/factory: ${e.message}`);
       return 1;
     }
-    console.log(`stored the token of ${account} in ${join(tokenDir(agentProfiles), account)}`);
+    console.log(app ? `stored the ${app.file} of ${app.app}` : `stored the token of ${account} in ${join(tokenDir(agentProfiles), account)}`);
     if (moved) console.log(moved);
     return 0;
   }
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory store ${account}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory store ${words.join(' ')}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
   if (r.error?.code === 'ETIMEDOUT' || r.status !== 0) {
     const why = r.error?.code === 'ETIMEDOUT' ? 'timed out' : lastLine(`${r.stderr ?? ''}${r.stdout ?? ''}`);
     console.error(`bin/factory: the token was not stored on the Mac mini: ${why.split(t.token).join('[token]')}`);
     return 1;
   }
-  console.log(`stored the token of ${account} on the Mac mini`);
+  console.log(app ? `stored the ${app.file} of ${app.app} on the Mac mini` : `stored the token of ${account} on the Mac mini`);
   return 0;
+}
+
+/** `login`/`store` words that name a file of an app's folder (#403): `linear-app client-id` or `linear-app client-secret`, else null. */
+function appSlot(words) {
+  return words.length === 2 && APP_FOLDERS.includes(words[0]) && ['client-id', 'client-secret'].includes(words[1]) ? { app: words[0], file: words[1] } : null;
 }
 
 /** `factory store <account>`, on the Mac mini: one token from stdin, never from a terminal, written to the store. */
 async function store(args, env) {
-  if (args.length !== 1) {
+  const app = appSlot(args);
+  if (!app && args.length !== 1) {
     console.error(USAGE);
     return 2;
   }
-  const refused = accountRefusal(args[0]);
+  const refused = app ? null : accountRefusal(args[0]);
   if (refused) {
     console.error(`bin/factory: ${refused}`);
     return 2;
@@ -721,13 +730,14 @@ async function store(args, env) {
   let moved;
   try {
     const { agentProfiles, state } = contextOf(env);
-    writeToken(agentProfiles, args[0], t.token);
-    moved = movedOld(agentProfiles, state);
+    if (app) writeAppFile(agentProfiles, app.app, app.file, t.token);
+    else writeToken(agentProfiles, args[0], t.token);
+    moved = app ? null : movedOld(agentProfiles, state);
   } catch (e) {
     console.error(`bin/factory: ${e.message}`);
     return 1;
   }
-  console.log(`stored the token of ${args[0]}`);
+  console.log(app ? `stored the ${app.file} of ${app.app}` : `stored the token of ${args[0]}`);
   if (moved) console.log(moved);
   return 0;
 }
