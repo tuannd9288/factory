@@ -19,7 +19,8 @@
 #            `review`: a red or cancelled one fails it, so "Re-run failed jobs" re-runs both. It reads the review's result
 #            annotation whatever the conclusion; below tier 3 a raise there, or in any review on this head, makes it label
 #            the pull request raised and tier-3 (`pull-requests: write`, which also adds its tier label and, while it waits
-#            for the Human's approval, requests the code owners' review, #374) and wait for an approval given after the
+#            for the Human's approval, requests the code owners' review, #374, and writes the risk score comment for
+#            Linear's Reviews, #379) and wait for an approval given after the
 #            raise; at tier 3 a raise adds nothing. A result left absent fails it. On tier 3, once the review is in, it reads the merge
 #            switch (the review parameters of the rules in force), and unless the switch is at all asks the Human's
 #            approval of the head, or of a commit whose patch the head carries unchanged. After his approval the queue
