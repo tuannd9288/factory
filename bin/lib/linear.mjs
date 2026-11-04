@@ -1,0 +1,247 @@
+// The factory's one way to reach Linear as the "Factory" app (#403, sublayer 1b): the only code that talks to Linear's API. The Lead's reads and
+// writes (#404), the sweep's readers (#405) and the daemon's listener (#414) all come through here.
+//   One token source. Two tokens minted from one app can revoke each other (seen 2026-11-04: a read-scoped token died when another was minted,
+//   4002 "You need to authenticate"), so there is one token, minted with one fixed set of scopes (SCOPES), and every caller reads it from the
+//   store for each request; none keeps its own copy.
+//   The store (bin/lib/token.mjs, #311): ~/.agent-profiles/tokens/linear-app/ holds `client-id` and `client-secret` (stored by
+//   `factory login linear-app <client-id|client-secret>`) and `access.json` { token, expiresAt, scope }, each mode 600 in a folder of mode 700.
+//   The folder is no file, so tokenAccounts, accountList, the table of `factory` and `factory use` never see it; the name is refused as an account.
+//   The mint (client credentials, 30 days) runs under tokens/linear-app/mint.lock, a folder made with mkdir. After taking it the caller re-reads
+//   access.json: a token another caller stored meanwhile, and not one this caller found dead, is used and nothing is minted.
+//   Renewal: `renew()` mints when less than RENEW_AHEAD_MS (7 days) is left. The daemon's pass runs it once a minute (bin/lib/daemon-pass.mjs), so
+//   a token is replaced for every caller long before it ends. A host with no credentials stored is not an error: renew says 'unconfigured'.
+//   An authentication failure (HTTP 401, or an error whose code says authentication, or a message that says "authenticate"): the caller re-reads
+//   the store and retries once with a token another caller stored there; if it still fails, it mints once under the lock and retries once; if that
+//   fails too it raises the condition `linear-auth-failed` (a `start` line in events.jsonl and a line in `factory top`, bin/lib/events.mjs) and
+//   throws. A refused mint raises it too. A success after that clears it. Nothing here loops: a request makes two sends and one mint at most.
+//   Nothing printed, thrown or written holds the secret or a token: messages are built from a status and a code, and scrubbed of the values in play.
+//   Writes show their team: every comment and issue passes createAsUser (the team's name) and, once an icon is hosted (ICON_URL), displayIconUrl,
+//   so Linear shows "<team> (via Factory)". `delegateToApp` sets the app as an issue's delegate (`delegateId`, the app's own user id).
+import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { readActive, record } from './events.mjs';
+import { redact } from './redact.mjs';
+import { APP_FOLDERS, appDir, readTokenFile, writeAppFile } from './token.mjs';
+
+export const APP = APP_FOLDERS[0];
+export const TOKEN_URL = 'https://api.linear.app/oauth/token';
+export const GRAPHQL_URL = 'https://api.linear.app/graphql';
+/** The one set of scopes every token is minted with. Changing it changes every caller's token at the next mint. */
+export const SCOPES = ['read', 'write', 'issues:create', 'comments:create', 'app:assignable'];
+export const RENEW_AHEAD_MS = 7 * 24 * 60 * 60_000;
+/** A token with less than this left is not used for a request. */
+export const GRACE_MS = 60_000;
+/** Hosted image for displayIconUrl. None exists yet, so writes carry none (Linear then shows the app's own icon). */
+export const ICON_URL = null;
+export const CONDITION = 'linear-auth-failed';
+const LOCK_STALE_MS = 60_000;
+const LOCK_WAIT_MS = 30_000;
+
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const first = (error) => String(error?.message ?? error).split('\n')[0];
+
+/** A failure that is Linear's refusal of the token, from the HTTP status and the parsed body. */
+export function isAuthFailure(status, body) {
+  if (status === 401) return true;
+  return (body?.errors ?? []).some((e) => /AUTHENTICATION/i.test(`${e?.extensions?.code ?? ''}${e?.extensions?.type ?? ''}`) || /authenticate|\b4002\b/i.test(String(e?.message ?? '')));
+}
+
+export function createLinear({
+  agentProfiles = process.env.AGENT_PROFILES ?? join(process.env.HOME, '.agent-profiles'),
+  state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'),
+  fetchFn = globalThis.fetch,
+  now = Date.now,
+  sleep = defaultSleep,
+  team = process.env.FACTORY_TEAM,
+  iconUrl = ICON_URL,
+  raise = null,
+} = {}) {
+  const folder = appDir(agentProfiles, APP);
+  const lockDir = join(folder, 'mint.lock');
+  let appId = null;
+
+  const secrets = () => ['client-id', 'client-secret'].map((n) => readTokenFile(join(folder, n)).token).filter(Boolean);
+  /** The text with the secrets, and any token in play, hidden, then redacted, one line, at most 200 characters. */
+  const scrub = (text, extra = []) => {
+    let out = String(text);
+    for (const s of [...secrets(), ...extra]) if (s) out = out.split(s).join('[hidden]');
+    return redact(out).replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
+  };
+  const fail = (message, extra = []) => new Error(scrub(message, extra));
+
+  const credentials = () => {
+    const id = readTokenFile(join(folder, 'client-id'));
+    const secret = readTokenFile(join(folder, 'client-secret'));
+    return id.token && secret.token ? { id: id.token, secret: secret.token } : null;
+  };
+
+  /** access.json as { token, expiresAt, scope }, or null for none or one that does not read. */
+  const readStored = () => {
+    try {
+      const s = JSON.parse(readFileSync(join(folder, 'access.json'), 'utf8'));
+      return typeof s?.token === 'string' && /^[\x21-\x7e]+$/.test(s.token) && Number.isFinite(s.expiresAt) ? s : null;
+    } catch {
+      return null;
+    }
+  };
+  const lasts = (stored, ahead, failed = []) => Boolean(stored) && stored.expiresAt - now() > ahead && !failed.includes(stored.token);
+
+  /** Clears the condition once something works again. */
+  const settle = () => {
+    try {
+      if (readActive(state).conditions[CONDITION]) record({ state, found: [], read: new Set(['linear']), now: now() });
+    } catch {
+      // the events could not be written: nothing is cleared, nothing fails
+    }
+  };
+  const alarm = (reason) => {
+    if (raise) return raise(reason);
+    record({ state, found: [{ key: CONDITION, scope: 'linear', top: true, text: `the Factory app's Linear token fails: ${reason}` }], read: new Set(), now: now() });
+  };
+  /** Raises the condition and returns the error to throw. The reason is scrubbed first. */
+  const loud = (message, extra = []) => {
+    const error = fail(message, extra);
+    try {
+      alarm(error.message);
+    } catch {
+      // the events could not be written: the error still goes up
+    }
+    return error;
+  };
+
+  async function withLock(fn) {
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    const until = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+      try {
+        mkdirSync(lockDir);
+        break;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+      }
+      try {
+        if (Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) rmSync(lockDir, { recursive: true, force: true });
+      } catch {
+        continue;
+      }
+      if (Date.now() > until) throw fail('the mint lock is held');
+      await sleep(25);
+    }
+    try {
+      return await fn();
+    } finally {
+      rmSync(lockDir, { recursive: true, force: true });
+    }
+  }
+
+  /** The stored token if it lasts `ahead` and is not one in `failed`; else a new one, minted under the lock after a re-read of the store.
+   * Returns { token, minted }. */
+  async function mint({ ahead = GRACE_MS, failed = [] } = {}) {
+    if (!credentials()) throw fail('the Factory app is not configured: its client id and secret are not stored');
+    return withLock(async () => {
+      const stored = readStored();
+      if (lasts(stored, ahead, failed)) return { token: stored.token, minted: false };
+      const c = credentials();
+      if (!c) throw fail('the Factory app is not configured: its client id and secret are not stored');
+      let res;
+      let body = null;
+      try {
+        res = await fetchFn(TOKEN_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ grant_type: 'client_credentials', client_id: c.id, client_secret: c.secret, scope: SCOPES.join(','), actor: 'app' }).toString(),
+        });
+        body = JSON.parse(await res.text());
+      } catch (error) {
+        if (!res) throw loud(`the token request did not reach Linear: ${first(error)}`);
+      }
+      const token = body?.access_token;
+      if (res.status !== 200 || typeof token !== 'string' || !Number.isFinite(body.expires_in)) throw loud(`Linear refused the token request (HTTP ${res.status})`);
+      writeAppFile(agentProfiles, APP, 'access.json', `${JSON.stringify({ token, expiresAt: now() + body.expires_in * 1000, scope: body.scope ?? SCOPES.join(',') })}\n`);
+      appId = null;
+      settle();
+      return { token, minted: true };
+    });
+  }
+
+  /** The token every caller uses: the stored one, or a new one when none lasts. */
+  async function token() {
+    const stored = readStored();
+    return lasts(stored, GRACE_MS) ? stored.token : (await mint()).token;
+  }
+
+  /** Mints when less than RENEW_AHEAD_MS is left: 'renewed', 'kept', or 'unconfigured' when no credentials are stored. Throws (after raising the
+   * condition) when the mint fails. */
+  async function renew() {
+    if (!credentials()) return 'unconfigured';
+    if (lasts(readStored(), RENEW_AHEAD_MS)) return 'kept';
+    return (await mint({ ahead: RENEW_AHEAD_MS })).minted ? 'renewed' : 'kept';
+  }
+
+  async function send(bearer, query, variables) {
+    const res = await fetchFn(GRAPHQL_URL, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` }, body: JSON.stringify({ query, variables }) });
+    let body = null;
+    try {
+      body = JSON.parse(await res.text());
+    } catch {
+      // not JSON: the status says what it was
+    }
+    return { status: res.status, body };
+  }
+
+  /** One GraphQL request; the `data` of the answer. */
+  async function request(query, variables = {}) {
+    const used = await token();
+    const tried = [used];
+    const done = (r, mended) => {
+      if (r.status >= 400 || r.body?.errors?.length) throw fail(`Linear answered HTTP ${r.status}: ${r.body?.errors?.[0]?.message ?? 'no data'}`, tried);
+      if (mended) settle();
+      return r.body?.data;
+    };
+    let r = await send(used, query, variables);
+    if (!isAuthFailure(r.status, r.body)) return done(r, false);
+    const stored = readStored();
+    if (lasts(stored, GRACE_MS) && !tried.includes(stored.token)) {
+      tried.push(stored.token);
+      r = await send(stored.token, query, variables);
+      if (!isAuthFailure(r.status, r.body)) return done(r, true);
+    }
+    const fresh = (await mint({ failed: tried })).token;
+    tried.push(fresh);
+    r = await send(fresh, query, variables);
+    if (!isAuthFailure(r.status, r.body)) return done(r, true);
+    throw loud(`Linear fails authentication with a token minted just now (HTTP ${r.status})`, tried);
+  }
+
+  const teamOf = (given) => {
+    const name = given ?? team;
+    if (!name) throw fail('a write needs the team name (FACTORY_TEAM, or the team argument)');
+    return name;
+  };
+  const asTeam = (given) => ({ createAsUser: teamOf(given), ...(iconUrl ? { displayIconUrl: iconUrl } : {}) });
+
+  /** The app's own user id (the delegate), read once for each token. */
+  async function appUserId() {
+    appId ??= (await request('query { viewer { id } }'))?.viewer?.id ?? null;
+    if (!appId) throw fail('Linear did not name the app\'s user');
+    return appId;
+  }
+
+  async function commentCreate({ issueId, body, team: given }) {
+    const input = { issueId, body, ...asTeam(given) };
+    return request('mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id } } }', { input });
+  }
+
+  /** `delegate: true` sets the app as the new issue's delegate. */
+  async function issueCreate({ delegate = false, team: given, ...fields }) {
+    const input = { ...fields, ...asTeam(given), ...(delegate ? { delegateId: await appUserId() } : {}) };
+    return request('mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier } } }', { input });
+  }
+
+  /** The app is the delegate of an issue a Lead holds. */
+  async function delegateToApp(issueId) {
+    return request('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }', { id: issueId, input: { delegateId: await appUserId() } });
+  }
+
+  return { token, mint, renew, request, commentCreate, issueCreate, delegateToApp, appUserId };
+}

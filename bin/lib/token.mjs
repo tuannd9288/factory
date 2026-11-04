@@ -6,10 +6,17 @@ import { join } from 'node:path';
 
 const ACCOUNT = /^[a-z0-9][a-z0-9._-]*$/;
 
+/** Names that are folders of the store, not Claude accounts (#403): the Factory app's Linear credentials and token live in
+ * tokens/linear-app/, which tokenAccounts skips because it is no file. No account may take the name. */
+export const APP_FOLDERS = ['linear-app'];
+
 /** The reason a name is refused, or null. The name is never quoted: a token pasted by mistake must not come back. */
-export const accountRefusal = (name) => (typeof name === 'string' && ACCOUNT.test(name) && !name.includes('..')
-  ? null
-  : 'the account name is refused: lowercase letters, digits, ".", "_" and "-", starting with a letter or digit, and no ".."');
+export const accountRefusal = (name) => {
+  if (typeof name === 'string' && APP_FOLDERS.includes(name)) return 'the account name is refused: it is a folder of the store for an app, not an account';
+  return typeof name === 'string' && ACCOUNT.test(name) && !name.includes('..')
+    ? null
+    : 'the account name is refused: lowercase letters, digits, ".", "_" and "-", starting with a letter or digit, and no ".."';
+};
 
 /** { token } from what stdin held: a carriage return is a line end (a terminal in raw mode sends Return as one), a single trailing
  * newline is removed and spaces and tabs around the token are trimmed; or { error } for an empty token, more than one line, or
@@ -56,6 +63,37 @@ export function writeToken(agentProfiles, account, token) {
   try {
     writeFileSync(tmp, `${token}\n`, { mode: 0o600, flag: 'wx' });
     renameSync(tmp, join(dir, account));
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+/** An app's folder in the store (#403): tokens/<app>/, mode 700, holding one file for each secret (mode 600). */
+export const appDir = (agentProfiles, app) => join(tokenDir(agentProfiles), app);
+
+/** Writes one file of an app's folder through a temporary file and a rename, mode 600. `app` is one of APP_FOLDERS and `name` a plain
+ * file name; the caller has checked the text. */
+export function writeAppFile(agentProfiles, app, name, text) {
+  if (!APP_FOLDERS.includes(app) || !/^[a-z][a-z0-9.-]*$/.test(name)) throw new Error('that is not a file of an app folder');
+  const dir = tokenDir(agentProfiles);
+  let st = null;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    // no store yet: made below
+  }
+  if (st?.isSymbolicLink()) throw new Error(`${dir} is a symlink; nothing was stored`);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const folder = appDir(agentProfiles, app);
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
+  chmodSync(folder, 0o700);
+  const tmp = join(folder, `.${name}.${process.pid}.tmp`);
+  rmSync(tmp, { force: true });
+  try {
+    writeFileSync(tmp, text.endsWith('\n') ? text : `${text}\n`, { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, join(folder, name));
   } catch (e) {
     rmSync(tmp, { force: true });
     throw e;
