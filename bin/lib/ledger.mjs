@@ -12,7 +12,8 @@ import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
 import { coverage } from '../../packs/pstack/scripts/lib/verdict.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 import { job, plist } from './queue.mjs';
-import { readSessions } from './records.mjs';
+import { enforcerIndex, findingsSection, repeatedKinds } from './findings.mjs';
+import { lastRecords, readSessions } from './records.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PRICES = JSON.parse(readFileSync(join(here, 'prices.json'), 'utf8')).models;
@@ -419,20 +420,13 @@ export function revertCount(rows, { since, until }) {
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
 
-export { readSessions };
+export { lastRecords, readSessions };
 
 /** The sessions that ran in the period, one record each: a resumed session's total_cost_usd covers the whole session, so a
  * session counts once, by its last record; the records of one session are never added (#89). */
 export function keptSessions(records, since, until) {
   const [from, to] = [Date.parse(`${since}T00:00:00Z`), Date.parse(`${until}T23:59:59Z`)];
   return lastRecords(records.filter((x) => inWindow(x.start, x.end, from, to)));
-}
-
-/** One record for each session, its last, in the order the sessions started. */
-export function lastRecords(records) {
-  const last = new Map();
-  for (const r of [...records].sort((a, b) => Date.parse(a.end) - Date.parse(b.end))) last.set(r.session ?? `${r.run}#${r.tag}`, r);
-  return [...last.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 }
 
 /** The cost of the seat sessions that name a repository and a branch, from every record there is: owner/name, then branch,
@@ -469,7 +463,7 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {} }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, findings = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -535,6 +529,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     if (uncharged.count) lines.push(`- ${uncharged.count} ${uncharged.count === 1 ? 'session' : 'sessions'} ($${uncharged.dollars.toFixed(2)} at API prices) charged to no task, because the record names no repository and branch`);
   }
   if (quota) lines.push('', ...(quota.error ? ['## Quota windows (what Claude Code itself reports)', '', `- ${quota.error}`] : quotaSection(quota.rows, { now: quota.now })), '', '## Role, model and seat (bin/seat)', '', ...roleMapLines(keptSessions(sessions ?? [], since, until), accounts));
+  if (findings) lines.push('', ...findingsSection(findings));
   if (queue) {
     lines.push('', '## Merge queue (bin/factory-queue)', '');
     if (queue.missing) lines.push(`- Cannot check the queue: the state folder ${queue.dir} does not exist (the queue has not run, or FACTORY_STATE is wrong).`);
@@ -573,6 +568,33 @@ closedByPullRequestsReferences(first:20,includeClosedPrs:true){nodes{number}}}}}
 
 function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+/** The number of the merged pull request from a branch of a repository, or null: the one read of "which pull request is this
+ * reviewer record's" (#408), by the record's repository and branch. Each answer is asked of GitHub once. */
+function mergedPullLookup() {
+  const seen = new Map();
+  return (repo, branch) => {
+    const key = `${repo}\n${branch}`;
+    if (!seen.has(key)) {
+      const pulls = JSON.parse(gh(['api', `repos/${repo}/pulls?state=all&per_page=100&head=${repo.split('/')[0]}:${encodeURIComponent(branch)}`]));
+      seen.set(key, pulls.find((p) => p.merged_at)?.number ?? null);
+    }
+    return seen.get(key);
+  };
+}
+
+/** The issue of a repository whose body has the line `Kind: <kind>`, open or closed, as { number, state }, or null: the one read
+ * of enforcer issues (#408), which the move to Linear points at Linear (#405). A repository's issues are read once. */
+function enforcerLookup() {
+  const byRepo = new Map();
+  return (repo, kind) => {
+    if (!byRepo.has(repo)) {
+      const all = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/issues?state=all&per_page=100`])).flat();
+      byRepo.set(repo, enforcerIndex(all.filter((i) => !i.pull_request)));
+    }
+    return byRepo.get(repo).get(kind) ?? null;
+  };
 }
 
 /** The factory's clones under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose
@@ -775,7 +797,13 @@ function main(argv) {
     }
   }
   const report = inspect(folders, { latest: opts.latest });
-  const text = digest(rows, { ...opts, secrets, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(state) });
+  let findings;
+  try {
+    findings = repeatedKinds(sessions, { mergedOf: mergedPullLookup(), enforcerOf: enforcerLookup() });
+  } catch (error) {
+    findings = { error: `The findings could not be read (${String(error.stderr || error.message).trim().split('\n')[0]}).` };
+  }
+  const text = digest(rows, { ...opts, secrets, findings, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(state) });
   if (!opts.post) {
     process.stdout.write(text);
     return;
