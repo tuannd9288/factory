@@ -2,8 +2,9 @@
 // `linear:extension` block with the `riskScore` plugin (https://linear.app/docs/diffs). Linear reads it from GitHub;
 // no Linear key and no Linear call are used. The tier is the gate's, never changed here.
 //   node risk-score.mjs body --sha <40 hex> --tier <1|2|3>   the tier command's output on stdin; prints the comment
-//   node risk-score.mjs find --login <login>                 the comments (gh api --paginate --slurp) on stdin; prints the id of
-//                                                            the gate's comment, or nothing when there is none
+//   node risk-score.mjs find --login <login> [--body <text>] the comments (gh api --paginate --slurp) on stdin; prints the id of
+//                                                            the gate's comment, then `same` when --body is what it holds; or
+//                                                            nothing when there is none
 // Levels: tier 1 is 1 (Low risk), tier 2 is 2 (Typical risk), tier 3 is 3 (High risk). Linear's level 4 (Very high risk) is not
 // used: the gate has no fourth tier.
 // The explanations are the reasons `tier` printed, cut to Linear's limits (1 to 8 strings, each 1 to 200 characters). A reason
@@ -32,7 +33,7 @@ function fit(s, room) {
 /** One reason of tier's output as an explanation: its path cut to fit, its closing parenthesis kept, no text from the diff. */
 function explain(reason) {
   if (/^raised by the reviewer/.test(reason)) return 'raised by the reviewer';
-  const key = /^(.*) \(protected line: .*\)$/.exec(reason);
+  const key = /^(.*?) \(protected line: .*\)$/.exec(reason);
   const [, path, tail] = key ? [null, key[1], ' (protected line)'] : (/^(.*?)( \([^()]*\))$/.exec(reason) ?? [null, reason, '']);
   const room = Math.max(LIMIT - Math.max(tail.length, Array.from(tail).length), 2);
   const whole = `${fit(path, room)}${tail}`;
@@ -59,12 +60,13 @@ export function body({ sha, tier, out }) {
   return `${MARKER}\nRisk for Linear's Reviews: tier ${tier} (${LEVELS[tier]}) at ${sha.slice(0, 7)}\n<!-- linear:extension ${json(block)} -->\n`;
 }
 
-/** The id of the gate's own comment among `comments` (pages or a flat list), the first one if there are several. */
+/** The gate's own comment among `comments` (pages or a flat list), the first one if there are several. */
 export function find(comments, login) {
   const all = comments.flat();
-  const mine = all.find((c) => c?.user?.login === login && typeof c.body === 'string' && c.body.startsWith(MARKER));
-  return mine?.id;
+  return all.find((c) => c?.user?.login === login && typeof c.body === 'string' && c.body.startsWith(MARKER));
 }
+
+const same = (a, b) => a.replace(/\r\n/g, '\n').trimEnd() === b.replace(/\r\n/g, '\n').trimEnd();
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -77,8 +79,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     else if (cmd === 'find') {
       const login = opt('login');
       if (!login) throw new Error('no login to tell the gate\'s comment by');
-      const id = find(JSON.parse(input), login);
-      if (id !== undefined) process.stdout.write(`${id}\n`);
+      const mine = find(JSON.parse(input), login);
+      if (mine) process.stdout.write(`${mine.id}${opt('body') !== undefined && same(mine.body, opt('body')) ? ' same' : ''}\n`);
     } else throw new Error('usage: risk-score.mjs body --sha <sha> --tier <n> | find --login <login>');
   } catch (error) {
     console.log(`risk-score: ${error.message}`);

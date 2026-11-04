@@ -99,20 +99,24 @@ request_owners() {
 }
 # Writes the tier as the gate judged it into Linear's Reviews (#379): one comment of the pull request, found by its marker among
 # the comments the job's own login wrote (github-actions[bot], the login of the job's token; GATE_BOT_LOGIN overrides) and edited,
-# or created when there is none. The comment holds a `linear:extension` block with the riskScore plugin for $head: level 1, 2 or 3
+# or created when there is none, and left alone when it already holds the body the run would write. The comment holds a `linear:extension` block with the riskScore plugin for $head: level 1, 2 or 3
 # for tier 1, 2 or 3 (Linear's level 4 is not used, the gate has no fourth tier), and the reasons tier printed, cut to Linear's
 # limits (.gate/bin/lib/risk-score.mjs). It records the tier, for every tier and at every position of the merge switch, and asks
 # nothing of anyone. No Linear key and no Linear call. A failed read or write prints one line and changes nothing: the caller's
 # result stands. Takes the tier command's output and the tier number.
 post_risk() {
-  local text="$1" level="$2" comment list id
+  local text="$1" level="$2" comment list found id same
   comment=$(printf '%s\n' "$text" | node .gate/bin/lib/risk-score.mjs body --sha "$head" --tier "$level") ||
     { echo "$job: could not write the risk score for Linear's Reviews: the comment could not be built${comment:+ ($comment)}"; return 0; }
-  list=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/issues/${GATE_PR:-}/comments" 2>&1) ||
+  list=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/issues/${GATE_PR:-}/comments?per_page=100") ||
     { echo "$job: could not write the risk score for Linear's Reviews: the comments could not be read"; return 0; }
-  id=$(printf '%s' "$list" | node .gate/bin/lib/risk-score.mjs find --login "${GATE_BOT_LOGIN:-github-actions[bot]}") ||
+  found=$(printf '%s' "$list" | node .gate/bin/lib/risk-score.mjs find --login "${GATE_BOT_LOGIN:-github-actions[bot]}" --body "$comment") ||
     { echo "$job: could not write the risk score for Linear's Reviews: the comments could not be read as comments"; return 0; }
-  if [ -n "$id" ]; then
+  read -r id same <<<"$found"
+  if [ "$same" = same ]; then
+    echo "$job: the risk score comment for Linear's Reviews already holds tier $level at ${head:0:8}; nothing written"
+    return 0
+  elif [ -n "$id" ]; then
     gh api -X PATCH "repos/${GITHUB_REPOSITORY:-}/issues/comments/$id" -f "body=$comment" >/dev/null 2>&1 ||
       { echo "$job: could not edit the risk score comment for Linear's Reviews"; return 0; }
   else

@@ -1203,10 +1203,31 @@ console.log('{}');
     assert.ok(plugin.explanations.some((e) => e.includes('-->')));
     assert.ok(plugin.explanations.some((e) => /^and \d+ more$/.test(e)));
     assert.equal(plugin.level, 3);
+    // A key line that itself holds the words of tier's own reason leaves no text of the changed line in the block.
+    write(fake, { 'comments.json': null });
+    job('tier', { 'package.json': '{\n  "scripts": {\n    "test": "node (protected line: LEAKED-TEXT) x"\n  }\n}\n' }, pr);
+    const key = ownComments()[0];
+    assert.doesNotMatch(key.body, /LEAKED-TEXT|"node/);
+    assert.deepEqual(riskOf(key).explanations, ['package.json (protected line)']);
+  });
+  test('a run that would write what the comment already holds writes nothing', () => {
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.deepEqual(writes(), ['POST']);
+    const again1 = again('tier', first.head, pr);
+    assert.deepEqual(writes(), ['POST']);
+    assert.equal(again1.code, first.code);
+    assert.match(again1.out, /nothing written/);
+    // The same body with the line breaks GitHub may store it with.
+    write(fake, { 'comments.json': JSON.stringify([ownComments().map((c) => ({ ...c, body: `${c.body.replace(/\n/g, '\r\n')}\r\n` }))]) });
+    again('tier', first.head, pr);
+    assert.deepEqual(writes(), ['POST']);
+    // Another head is a different body: it edits.
+    job('tier', { 'AGENTS.md': '# app three\n' }, pr);
+    assert.deepEqual(writes(), ['POST', `PATCH ${ownComments()[0].id}`]);
   });
   test('a failed read or write of the comment changes nothing in tier\'s result but one line', () => {
     const plain = job('tier', { 'AGENTS.md': '# app\n' }, pr);
-    const result = (o) => [o.code, o.out.split('\n').filter((l) => !/risk score/.test(l)).join('\n')];
+    const result = (o) => [o.code, o.out.split('\n').filter((l) => !/risk score|^HTTP \d+$/.test(l)).join('\n')];
     for (const fail of ['nowrite', 'noread']) {
       write(fake, { 'comments.json': null, 'comment-writes': null, [fail]: '' });
       const out = again('tier', plain.head, pr);
@@ -1215,10 +1236,13 @@ console.log('{}');
       assert.deepEqual(writes(), [], fail);
       write(fake, { [fail]: null });
     }
+    // An edit that fails: the comment holds another body.
+    write(fake, { 'comments.json': null, 'comment-writes': null });
     const ok = job('tier', { 'src/math.js': MUL }, pr);
-    write(fake, { nowrite: '' });
+    write(fake, { 'comments.json': JSON.stringify([ownComments().map((c) => ({ ...c, body: `${c.body}\nolder` }))]), nowrite: '' });
     const failed = again('tier', ok.head, pr);
     assert.deepEqual(result(failed), result(ok));
+    assert.match(failed.out, /could not edit the risk score/);
   });
   test('rounds requests the code owners with needs-human at the third red head, unless the switch is at all or unreadable', () => {
     const red = (oid, name = 'verify', conclusion = 'FAILURE') => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion }] } }] } } });
