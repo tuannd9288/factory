@@ -199,7 +199,7 @@ describe('lead role.sha (#316)', () => {
   }));
 
   test('a repository in the Linear registry gets only the Linear form of lead.md, any other only the GitHub form (#404)', () => world((w) => {
-    setRole(w, 'Take: <!--github-->GH issue<!--/github--><!--linear-->LIN issue<!--/linear--> for {{TEAM}}.\n<!--linear-->Linear only\n<!--/linear-->\nend\n');
+    setRole(w, 'Take: <!--github-->GH issue<!--/github--><!--linear-->LIN issue of {{TEAMKEY}}<!--/linear--> for {{TEAM}}.\n<!--linear-->Linear only\n<!--/linear-->\nend\n');
     const prompt = () => {
       const call = w.log().at(-1);
       return call.argv[call.argv.indexOf('--append-system-prompt') + 1];
@@ -210,7 +210,7 @@ describe('lead role.sha (#316)', () => {
     mkdirSync(dirname(registry), { recursive: true });
     writeFileSync(registry, JSON.stringify({ zalo: { key: 'ZAL', teamId: 't-1' } }));
     assert.equal(w.lead(['--new']).code, 0);
-    assert.equal(prompt(), 'Take: LIN issue for lead.\nLinear only\n\nend\n');
+    assert.equal(prompt(), 'Take: LIN issue of ZAL for lead.\nLinear only\n\nend\n');
     writeFileSync(registry, JSON.stringify({ other: { key: 'OTH', teamId: 't-2' } }));
     assert.equal(w.lead(['--new']).code, 0);
     assert.equal(prompt(), 'Take: GH issue for lead.\nend\n');

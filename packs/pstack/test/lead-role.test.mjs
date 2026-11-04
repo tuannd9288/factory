@@ -25,6 +25,8 @@ test('the GitHub form has no Linear step and no marker, and the Linear form has 
   assert.match(github, /gh issue view/);
   assert.doesNotMatch(linear, /gh issue/);
   assert.match(linear, /factory linear take/);
+  assert.match(linear, /factory linear list --team-key \{\{TEAMKEY\}\}/);
+  assert.doesNotMatch(github, /TEAMKEY/);
   // the rest of the loop is the same in both forms
   for (const out of [github, linear]) assert.match(out, /scripts\/ship --body-file/);
 });

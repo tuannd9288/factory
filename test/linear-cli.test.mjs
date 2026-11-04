@@ -41,6 +41,11 @@ function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFa
     if (q.includes('issueUpdate')) return failIssueUpdate ? json(200, { errors: [{ message: `refused for ${TOKEN}` }] }) : json(200, { data: { issueUpdate: { success: true, issue: { id: 'issue-uuid-1', identifier: 'FAC-12' } } } });
     if (q.includes('commentCreate')) return json(200, { data: { commentCreate: { success: true, comment: { id: `c-${f.comments.length}` } } } });
     if (q.includes('issueCreate')) return json(200, { data: { issueCreate: { success: true, issue: { id: 'new-1', identifier: 'FAC-99' } } } });
+    if (q.includes('issues(')) {
+      const pages = f.listPages ?? [[]];
+      const at = v.after ? Number(v.after) : 0;
+      return json(200, { data: { issues: { nodes: pages[at], pageInfo: { hasNextPage: at + 1 < pages.length, endCursor: String(at + 1) } } } });
+    }
     if (q.includes('comments(')) {
       const page = f.pages ?? [{ nodes: [], more: false }];
       const at = v.after ? Number(v.after) : 0;
@@ -93,6 +98,32 @@ test('read gives the issue and every comment with its author, across pages', asy
   assert.equal(r.out.title, 'T');
   assert.equal(r.out.assignee.name, 'Owner');
   assert.equal(linear.mutations().length, 0);
+});
+
+test('list filters by the team key and the open status types, follows every page, and writes nothing', async () => {
+  const { run, linear } = setup();
+  const node = (n, extra = {}) => ({ identifier: `FAC-${n}`, title: `T${n}`, updatedAt: '2026-11-04T01:00:00Z', state: { name: 'Todo', type: 'unstarted' }, delegate: null, assignee: null, ...extra });
+  linear.listPages = [[node(1), node(2, { delegate: { name: 'Factory' } })], [node(3, { assignee: { name: 'Owner' }, state: { name: 'Triage', type: 'triage' } })]];
+  const r = await run(['list', '--team-key', 'FAC']);
+  assert.equal(r.code, 0);
+  const sent = linear.calls.filter((c) => c.query.includes('issues('));
+  assert.equal(sent.length, 2, 'both pages');
+  assert.deepEqual(sent[0].variables.filter, { team: { key: { eq: 'FAC' } }, state: { type: { in: ['triage', 'backlog', 'unstarted', 'started'] } } });
+  assert.equal(sent[1].variables.after, '1');
+  assert.deepEqual(r.out.issues.map((i) => i.key), ['FAC-1', 'FAC-2', 'FAC-3']);
+  assert.deepEqual(r.out.issues[1], { key: 'FAC-2', title: 'T2', status: 'Todo', statusType: 'unstarted', delegate: 'Factory', assignee: null, updatedAt: '2026-11-04T01:00:00Z' });
+  assert.equal(r.out.issues[2].assignee, 'Owner');
+  assert.equal(linear.mutations().length, 0);
+  assert.equal(linear.calls.some((c) => JSON.stringify(c).includes('createAsUser')), false);
+});
+
+test('list --status narrows the types, and refuses a type that is not open', async () => {
+  const { run, linear } = setup();
+  const r = await run(['list', '--team-key', 'FAC', '--status', 'unstarted', '--status', 'triage']);
+  assert.equal(r.code, 0);
+  assert.deepEqual(linear.calls.find((c) => c.query.includes('issues(')).variables.filter.state, { type: { in: ['unstarted', 'triage'] } });
+  assert.equal((await run(['list', '--team-key', 'FAC', '--status', 'completed'])).code, 2);
+  assert.equal((await run(['list'])).code, 2);
 });
 
 test('comment posts one comment from the team, with the body from stdin', async () => {

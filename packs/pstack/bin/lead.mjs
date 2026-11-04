@@ -26,6 +26,7 @@ import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../
 
 const USAGE = 'usage: factory lead <repo> [--team <name>] [--new] [--dry-run]   (--team names the team, default lead; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
 const TEAM_TOKEN = '{{TEAM}}'; // in lead.md where the team's name goes; nothing else in that text is written so
+const TEAM_KEY_TOKEN = '{{TEAMKEY}}'; // in the Linear form of lead.md: the repository's Linear team key, from the registry
 
 /** lead.md holds each issue step twice, between <!--github-->…<!--/github--> and <!--linear-->…<!--/linear-->. The text for a repository keeps
  * one form and drops the other, markers included, so a Lead never sees both (#404). A span that starts a line takes its line break with it. */
@@ -324,7 +325,8 @@ function main(argv, env) {
   }
   const rolePath = join(root, 'packs/pstack/lead.md');
   const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
-  const roleText = existsSync(rolePath) ? roleOf(readFileSync(rolePath, 'utf8'), Boolean(onLinear(repo, stateDir))).replaceAll(TEAM_TOKEN, team) : '';
+  const linear = onLinear(repo, stateDir);
+  const roleText = existsSync(rolePath) ? roleOf(readFileSync(rolePath, 'utf8'), Boolean(linear)).replaceAll(TEAM_TOKEN, team).replaceAll(TEAM_KEY_TOKEN, linear?.key ?? '') : '';
   if (!roleText.trim()) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;

@@ -9,8 +9,9 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
 `<KEY>` is the same key.
 <!--/linear-->
 1. <!--github-->Take an issue labelled `task`: read it with `gh issue view <n>`, then claim it with `.gate/bin/claim <n> {{TEAM}}`. A
-   refused claim belongs to another team; take another issue.<!--/github--><!--linear-->Take an issue in the Todo status of the repository's
-   team, by the key you are given: read it with `factory linear read <KEY>`, claim it with `.gate/bin/claim <KEY> {{TEAM}}` (the claim is a
+   refused claim belongs to another team; take another issue.<!--/github--><!--linear-->List your team's work with
+   `factory linear list --team-key {{TEAMKEY}} --status unstarted`, and clear its Triage the same way with `--status triage`; take an issue
+   that has no delegate. Read it with `factory linear read <KEY>`, claim it with `.gate/bin/claim <KEY> {{TEAM}}` (the claim is a
    GitHub ref, named by the key), then run `factory linear take <KEY> --team {{TEAM}}`: it makes the Factory app the issue's delegate and moves
    it to In Progress, and assigns no person. A refused claim belongs to another team; take another issue.<!--/linear-->
 2. Make its run folder and worktree from `main`: `mkdir -p ~/factory-runs/<repo>-<n>`, `git fetch origin`, then
@@ -38,7 +39,7 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
      titled for the finding, whose body says "Found while working on #<n>" and gives the worker's line. Give it no `task`
      label, so no team can claim it: it waits in Triage. Then go on with issue <n>; the fix is never on its branch.<!--/github--><!--linear-->open
      an issue of this repository with
-     `factory linear create --team-key <KEY of the team> --title <title> --status Triage --body-file -`, whose body says "Found while working
+     `factory linear create --team-key {{TEAMKEY}} --title <title> --status Triage --body-file -`, whose body says "Found while working
      on <KEY>" and gives the worker's line. Give it no `--delegate`, so no team holds it: it waits in Triage. Then go on with issue <n>; the fix
      is never on its branch.<!--/linear-->
    - The issue's premise proved wrong, or the work would change its goal or cost: <!--github-->write it on issue <n> with

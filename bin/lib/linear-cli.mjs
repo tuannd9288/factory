@@ -6,6 +6,7 @@
 //   comment <KEY> --team <team> --body-file -   one comment, shown as "<team> (via Factory)"
 //   ask <KEY> --team <team> --body-file -       status Needs Human, the Human assigned, one comment (the question and its tick boxes)
 //   answered <KEY> --team <team>                the assignee removed, the issue back in the first `started` status
+//   list --team-key <KEY> [--status <type>]...  the team's open issues (default types triage, backlog, unstarted, started); a read
 //   create --team-key <KEY> --title <t> --status <name> --body-file - [--delegate]   an issue with an explicit status, never Triage by accident
 //   onboard <repo> --key <KEY> --name <name>    the repository's team (copied from FAC) and its Needs Human status, and the registry
 // One JSON object on stdout. Exit 0 done, 1 Linear refused or failed (the reason is in `error`, never a token), 2 usage.
@@ -37,10 +38,13 @@ const SHAPES = {
   answered: { args: 1, flags: { '--team': 'value' } },
   create: { args: 0, flags: { '--team-key': 'value', '--title': 'value', '--status': 'value', '--body-file': 'value', '--delegate': 'bool' } },
   onboard: { args: 1, flags: { '--key': 'value', '--name': 'value' } },
+  list: { args: 0, flags: { '--team-key': 'value', '--status': 'repeat' } },
 };
+/** The status types of the shared view 'Active (all teams)': what `list` shows unless `--status` narrows it. */
+export const OPEN_TYPES = ['triage', 'backlog', 'unstarted', 'started'];
 const REQUIRED = {
   take: ['--team'], comment: ['--team', '--body-file'], ask: ['--team', '--body-file'], answered: ['--team'],
-  create: ['--team-key', '--title', '--status', '--body-file'], onboard: ['--key', '--name'],
+  create: ['--team-key', '--title', '--status', '--body-file'], onboard: ['--key', '--name'], list: ['--team-key'],
 };
 
 /** { verb, args, flags } or a thrown Usage. A flag is given once; a body comes on stdin only, since a path names a file on the caller's Mac. */
@@ -54,9 +58,10 @@ export function parse(argv) {
     const a = rest[i];
     const kind = a.startsWith('--') ? shape.flags[a] : undefined;
     if (a.startsWith('--')) {
-      if (!kind || a in flags) throw new Usage(`${verb}: ${kind ? `${a} is given twice` : `${a} is not a flag of it`}`);
-      flags[a] = kind === 'bool' ? true : rest[++i];
-      if (flags[a] === undefined) throw new Usage(`${verb}: ${a} needs a value`);
+      if (!kind || (a in flags && kind !== 'repeat')) throw new Usage(`${verb}: ${kind ? `${a} is given twice` : `${a} is not a flag of it`}`);
+      const value = kind === 'bool' ? true : rest[++i];
+      if (value === undefined) throw new Usage(`${verb}: ${a} needs a value`);
+      flags[a] = kind === 'repeat' ? [...(flags[a] ?? []), value] : value;
     } else args.push(a);
   }
   if (args.length !== shape.args) throw new Usage(`${verb}: expects ${shape.args} argument${shape.args === 1 ? '' : 's'}`);
@@ -65,7 +70,8 @@ export function parse(argv) {
   if (verb === 'onboard' ? !WORD.test(args[0]) : shape.args === 1 && !KEY.test(args[0])) throw new Usage(`${verb}: ${args[0]} is not a ${verb === 'onboard' ? 'repository name' : 'issue key such as FAC-12'}`);
   if ('--team' in flags && !WORD.test(flags['--team'])) throw new Usage(`${verb}: --team is a plain name`);
   for (const f of ['--team-key', '--key']) if (f in flags && !TEAM_KEY.test(flags[f])) throw new Usage(`${verb}: ${f} is a team key such as FAC`);
-  for (const f of ['--title', '--status', '--name']) if (f in flags && (!flags[f].trim() || flags[f].length > 200 || /[\x00-\x1f]/.test(flags[f]))) throw new Usage(`${verb}: ${f} is one line of 1 to 200 characters`);
+  if (verb === 'list') for (const t of flags['--status'] ?? []) if (!OPEN_TYPES.includes(t)) throw new Usage(`list: --status is one of ${OPEN_TYPES.join(', ')}`);
+  for (const f of verb === 'list' ? [] : ['--title', '--status', '--name']) if (f in flags && (!flags[f].trim() || flags[f].length > 200 || /[\x00-\x1f]/.test(flags[f]))) throw new Usage(`${verb}: ${f} is one line of 1 to 200 characters`);
   return { verb, args, flags };
 }
 
@@ -171,6 +177,23 @@ export function createCli({ api, state, readStdin }) {
     return { ok: true, key: r.issue?.identifier ?? null, status: status.name, delegate: flags['--delegate'] === true ? 'app' : null };
   }
 
+  async function list({ flags }) {
+    const teamKey = flags['--team-key'];
+    const types = flags['--status']?.length ? [...new Set(flags['--status'])] : OPEN_TYPES;
+    const issues = [];
+    let after = null;
+    do {
+      const data = await q(`query($filter: IssueFilter, $after: String) { issues(filter: $filter, first: 100, after: $after) {
+        nodes { identifier title updatedAt state { name type } delegate { name } assignee { name } } pageInfo { hasNextPage endCursor } } }`,
+      { filter: { team: { key: { eq: teamKey } }, state: { type: { in: types } } }, after });
+      const page = data?.issues;
+      if (!page) throw new Refused('Linear did not answer the list');
+      for (const n of page.nodes) issues.push({ key: n.identifier, title: n.title, status: n.state?.name ?? null, statusType: n.state?.type ?? null, delegate: n.delegate?.name ?? null, assignee: n.assignee?.name ?? null, updatedAt: n.updatedAt });
+      after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+    } while (after);
+    return { ok: true, teamKey, statusTypes: types, count: issues.length, issues };
+  }
+
   const BY_HAND = `Linear refused the app. By hand, in about a minute: in Linear create the team with this key and name, choosing "copy settings from" Factory (${FIRST_TEAM}); then check it has a status named "${NEEDS_HUMAN}" of type Started, adding it if not; then run this command again.`;
 
   async function onboard({ args: [repo], flags }) {
@@ -212,7 +235,7 @@ export function createCli({ api, state, readStdin }) {
     };
   }
 
-  const verbs = { take, read, comment, ask, answered, create, onboard };
+  const verbs = { take, read, comment, ask, answered, create, onboard, list };
   /** Runs one verb; { code, out } with `out` the JSON object. */
   return async function run(argv) {
     let parsed;
@@ -242,6 +265,6 @@ export async function main(argv, env = process.env, { api, readStdin = () => (pr
   const run = createCli({ api: api ?? createLinear({ state }), state, readStdin });
   const { code, out } = await run(argv);
   console.log(JSON.stringify(out));
-  if (code === 2) console.error('usage: factory linear take|read|comment|ask|answered|create|onboard ... (see bin/lib/linear-cli.mjs)');
+  if (code === 2) console.error('usage: factory linear take|read|list|comment|ask|answered|create|onboard ... (see bin/lib/linear-cli.mjs)');
   return code;
 }
