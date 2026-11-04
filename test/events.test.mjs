@@ -336,6 +336,47 @@ test('factory-events without --follow prints the start lines after the cursor an
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+test('factory-events leaves out the six news kinds of #370 and --news prints only them; --news keeps a cursor of its own', async () => {
+  await withDir((dir) =>
+    withFollowers(async (start) => {
+      const state = join(dir, 'state');
+      seed(state, [['start', 'checks-red o/app#1 abc'], ['start', 'gh-refused'], ['start', 'merged o/app#2'], ['start', 'check-not-started o/app#3 verify'], ['start', 'comment o/app#4 9']]);
+      const seqs = (args) => spawnSync(join(factory, 'bin/factory-events'), args, { encoding: 'utf8', env: eventsEnv(state) }).stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).seq);
+      assert.deepEqual(seqs([]), [2, 4, 5]);
+      assert.deepEqual(seqs(['--news']), [1, 3]);
+      assert.ok(!existsSync(join(state, 'events.news.cursor')), 'a look moves no cursor');
+      const news = start(state, ['--news']);
+      await news.until(2);
+      await sleep(1200);
+      assert.deepEqual(news.lines().map((l) => l.seq), [1, 3]);
+      assert.equal(readFileSync(join(state, 'events.news.cursor'), 'utf8').trim(), '3');
+      assert.ok(!existsSync(join(state, 'events.cursor')), "Colly's cursor did not move");
+      append(state, 6, 'start', 'seat-ended /r/app-1 worker');
+      append(state, 7, 'start', 'out-of-quota a');
+      await news.until(3);
+      assert.deepEqual(news.lines().map((l) => l.seq), [1, 3, 6]);
+      await news.stop();
+      const colly = start(state, []);
+      await colly.until(4);
+      assert.deepEqual(colly.lines().map((l) => l.seq), [2, 4, 5, 7]);
+    }),
+  );
+});
+
+test('--news --newest prints the highest news seq alone, 0 with none, moves no cursor, and takes no other flag', async () => {
+  await withDir((dir) => {
+    const state = join(dir, 'state');
+    const run = (args) => spawnSync(join(factory, 'bin/factory-events'), args, { encoding: 'utf8', env: eventsEnv(state) });
+    seed(state, [['start', 'gh-refused']]);
+    assert.equal(run(['--news', '--newest']).stdout, '0\n');
+    append(state, 2, 'start', 'merged o/app#2');
+    append(state, 3, 'start', 'out-of-quota a');
+    assert.equal(run(['--news', '--newest']).stdout, '2\n');
+    assert.ok(!existsSync(join(state, 'events.news.cursor')));
+    for (const args of [['--newest'], ['--news', '--newest', '--follow'], ['--news', '--newest', '--after', '1']]) assert.equal(run(args).status, 2);
+  });
+});
+
 /** factory-events --follow (with these args), with what it has printed so far. */
 function follow(state, args = []) {
   const child = spawn(join(factory, 'bin/factory-events'), ['--follow', ...args], { env: eventsEnv(state), stdio: ['ignore', 'pipe', 'pipe'] });

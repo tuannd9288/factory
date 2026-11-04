@@ -13,7 +13,10 @@
 // The sweep writes them (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
 // of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
 // which are no condition and are never cleared; the sweep writes one too, a `comment` line when it wakes a Lead for a new comment (#351,
-// bin/lib/comment-wake.mjs). The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
+// bin/lib/comment-wake.mjs), and one line of its own for each piece of news of a Lead's seats, checks and pull request (#370,
+// bin/lib/news-wake.mjs: seat-ended, seat-no-result, checks-red, checks-green, conflict, merged: NEWS_KINDS, the Lead's, which
+// `bin/factory-events` leaves out and `--news` alone prints, after a cursor of its own, $FACTORY_STATE/events.news.cursor). `observe` also hands each started
+// check-not-started condition to its `onStart`, which wakes that pull request's Lead. The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
 // of that write alone, and `seq` stays unique and increasing across both.
 // Only record and appendStart write: $FACTORY_STATE/events-active.json remembers which conditions hold and since when,
 // and a repository the sweep could not read keeps its conditions, since only a read that succeeded can end one. `factory top` and
@@ -22,6 +25,7 @@
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountOut } from './seat.mjs';
 import { accountList, seatAccounts } from './token.mjs';
@@ -219,18 +223,20 @@ export function record(args) {
   return withEventsLock(args.state, () => recordLocked(args));
 }
 
-/** One line that is no condition: a `start` that nothing clears (the reader's findings, #339). Returns its seq. */
-export function appendStart({ state, kind, key, text, now = Date.now() }) {
+/** One line that is no condition: a `start` that nothing clears (the reader's findings, #339). Returns its seq. `extra` is more fields
+ * of the line, as data for a reader that must not parse `text` (the news lines' `lead`, `woke`, `why`, `what` and `where`, #370); it
+ * cannot replace a field the line has. */
+export function appendStart({ state, kind, key, text, extra = {}, now = Date.now() }) {
   return withEventsLock(state, () => {
     const active = readActive(state);
     const seq = Math.max(active.seq, ...readLines(state).map((e) => e.seq)) + 1;
-    appendFileSync(join(state, 'events.jsonl'), `${JSON.stringify({ seq, at: new Date(now).toISOString(), type: 'start', kind, key, text: oneLine(text) })}\n`);
+    appendFileSync(join(state, 'events.jsonl'), `${JSON.stringify({ ...extra, seq, at: new Date(now).toISOString(), type: 'start', kind, key, text: oneLine(text) })}\n`);
     writeAtomic(join(state, 'events-active.json'), `${JSON.stringify({ seq, conditions: active.conditions })}\n`);
     return seq;
   });
 }
 
-function recordLocked({ state, found, read, now = Date.now() }) {
+function recordLocked({ state, found, read, now = Date.now(), started }) {
   const active = readActive(state);
   const next = {};
   const changes = [];
@@ -241,6 +247,7 @@ function recordLocked({ state, found, read, now = Date.now() }) {
     if (!c.started && now - c.since >= (f.afterMs ?? 0)) {
       c.started = true;
       changes.push(['start', c]);
+      started?.push(c);
     }
     next[f.key] = c;
   }
@@ -264,7 +271,7 @@ function recordLocked({ state, found, read, now = Date.now() }) {
 /** The step after a sweep's repository loop: every condition from what the sweep read. `reads` is { repo -> { required, prs, issues } }
  * for the repositories it read. The local readers (the Leads, the accounts) start nothing and call no gh; one that fails leaves its
  * conditions as they were. gh-refused ends only on a sweep whose gh calls all succeeded (`notes`). */
-export function observe({ state, reads, runs, agentProfiles, now = Date.now(), processes, switches = new Map() }) {
+export function observe({ state, reads, runs, agentProfiles, now = Date.now(), processes, switches = new Map(), onStart }) {
   const found = [];
   const read = new Set();
   // `switches` is { repo -> last move or null } for the repositories whose merge switch the sweep read.
@@ -292,7 +299,18 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
     found.push({ key: 'gh-refused', scope: 'gh', top: true, text: notes.refused });
     read.add('gh');
   } else if (!notes.failed) read.add('gh');
-  return record({ state, found, read, now });
+  const started = [];
+  const changed = record({ state, found, read, now, started });
+  // #370: the start of a check-not-started condition is told to the pull request's Lead as well, after its line is written and the
+  // events lock is let go; `onStart` gets each condition that started and its failure never changes the result.
+  for (const c of started.filter((s) => s.kind === 'check-not-started')) {
+    try {
+      onStart?.(c);
+    } catch (error) {
+      console.log(`queue: the wake for ${c.key} failed: ${String(error.message).split('\n')[0]}`);
+    }
+  }
+  return changed;
 }
 
 /** `factory-events [--follow] [--after <seq>]`: the start lines after the cursor (or after <seq>, which the reader says it got as far
@@ -301,19 +319,27 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
  * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. */
 function main(argv) {
   let follow = false;
+  let news = false;
+  let newest = false;
   let after = null;
-  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>]');
+  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>] [--news [--newest]]');
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--follow') follow = true;
+    else if (argv[i] === '--news') news = true;
+    else if (argv[i] === '--newest') newest = true;
     else if (argv[i] === '--after') {
       const v = argv[++i] ?? '';
       if (!/^\d+$/.test(v) || !Number.isSafeInteger(Number(v))) throw usage();
       after = Number(v);
     } else throw usage();
   }
+  if (newest && (!news || follow || after !== null)) throw usage();
   const state = stateDir();
   const file = join(state, 'events.jsonl');
-  const cursorFile = join(state, 'events.cursor');
+  // `--news --newest` prints the highest seq of a news line, or 0, and nothing else; it moves no cursor. The relay's first pass reads only this.
+  if (newest) return void console.log(Math.max(0, ...readLines(state).filter((e) => e.type === 'start' && NEWS_KINDS.has(e.kind)).map((e) => e.seq)));
+  // --news has a cursor of its own: Colly's never moves for it.
+  const cursorFile = join(state, news ? 'events.news.cursor' : 'events.cursor');
   let cursor = Number(readText(cursorFile).trim()) || 0;
   const highest = Math.max(0, ...readLines(state).map((e) => e.seq));
   let queued = after ?? cursor;
@@ -374,7 +400,7 @@ function main(argv) {
       } catch {
         continue;
       }
-      if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= queued) continue;
+      if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= queued || NEWS_KINDS.has(e.kind) !== news) continue;
       queued = e.seq;
       pending.push({ seq: e.seq, line: l });
     }
