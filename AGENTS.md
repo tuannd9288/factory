@@ -213,8 +213,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   and, while repositories move, one list names those on Linear, which only grows and which the cut removes. None is on
   Linear yet; #406 adds the factory. #404 moves the list into the file its code reads and leaves this line pointing
   there. Nothing in the factory reads Linear until #404, #405 and #407 land. FAC's labels and statuses are researched
-  and proposed in #406, and nothing is created in Linear before his word. Waiting on him: the credential rule for 1b
-  and the Factory app, one or one for each team, with its names (#403), and how Linear's events reach the Macs (#375,
+  and proposed in #406, and nothing is created in Linear before his word. The credential rule for 1b and the one shared
+  Factory app are decided in the entry below (#403). Waiting on him: how Linear's events reach the Macs (#375,
   decision 7: both research passes are done, and a recommendation goes to him). His words: "B theo đề xuất." (14:13
   +07); "Chốt giải pháp B Linear, tập trung xử lý các việc để chạy trên Linear. Còn
   Github thì off mặc định, chỉ khi nào cần thì phát triển tiếp hoặc mày xem đề xuất là tag cái phần github rồi gỡ hẵn
@@ -222,6 +222,12 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   "OK không xoá issue." (14:43); "5 ok." (14:47). Sources:
   https://github.com/tuannd9288/factory/issues/375 (its body and comments) and
   https://github.com/tuannd9288/factory/issues/402, relayed by Colly and the factory-repo session.
+- **The Factory app's Linear key, 2026-11-04.** The credential rule for sublayer 1b (#403): the factory's code reaches
+  Linear only as its own app "Factory", never under his login, and the token store (`bin/lib/token.mjs`, #311's route)
+  may hold the app's client id, its client secret and the access token minted from them, in `tokens/linear-app/`, and
+  nothing else of Linear's. There is one shared app, and each team's writes show its own name (INN-13, "ok", 16:26:50
+  +07, 09:26:50Z). His words on INN-14, relayed by Colly and the factory-repo session: "theo đề xuất" (16:27:24 +07,
+  09:27:24Z). Source: https://github.com/tuannd9288/factory/issues/403 (its comment of 09:39:28Z).
 - **Effectiveness, 2026-11-04.** The daemon of #399 is held to beat piggery. Its store was picked on effectiveness, and
   adding a technology did not count against the pick: SQLite through `node:sqlite`, with the measurements on #399. His
   words, relayed by Colly and the factory-repo session: "Đảm bảo bộ não thiết kế phải hoạt
@@ -349,8 +355,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   (#407). As his surface for deciding, notes and questions (#373), Linear starts none of the factory's sessions, and
   its coding sessions, Loops and "open in coding tool" stay off (1); his comment on a Linear issue is the record, with
   no relay, and for a repository still on GitHub a decision of his counts once it is relayed to the GitHub issue (2);
-  Colly's own Linear access is Colly's, outside the factory's code, and the credential rule for 1b waits on him: #403
-  proposes that the factory's code reads Linear only through its own app, never under his login (3).
+  Colly's own Linear access is Colly's, outside the factory's code, and the credential rule for 1b is in Decisions ("The
+  Factory app's Linear key"): the factory's code reads Linear only through its own app, never under his login (3).
   Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
@@ -408,6 +414,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves. Its job's command, `sweep` with no repository, starts the daemon when nobody answers; `sweep --once` and `sweep --repo` run one pass in-process (#399) |
 | `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery. It lives on a lease from the job's pings: `launchctl bootout` of the job stops it within about three minutes; to stop it at once, or before re-installing a changed plist, check that the pid in `$FACTORY_STATE/daemon.lock` is the daemon (`ps -p <pid> -o command=` ends in `bin/lib/daemon.mjs`; a stale lock can name a reused pid), then send it SIGTERM |
+| `bin/lib/linear.mjs` | The only code that talks to Linear's API, as the Factory app (#403): one token source in `tokens/linear-app/` (client id and secret, the minted token with its expiry), minted under a lock with one fixed set of scopes and renewed 7 days ahead by the daemon's pass; an authentication failure re-reads, mints once and then raises `linear-auth-failed`; writes pass `createAsUser`; `factory login linear-app client-id\|client-secret` stores the credentials; the header has the rest |
 | `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
 | `bin/factory-events` | What the sweep tells Colly (#309): the `start` lines of `$FACTORY_STATE/events.jsonl` after its cursor; `--follow` moves the cursor and follows the file; the header has the ssh command |
