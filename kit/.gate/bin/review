@@ -29,6 +29,9 @@
 #            .github/CODEOWNERS other than the author, users only, with one POST to the pull request's requested_reviewers
 #            for each owner (#374): the pull request is in their review queue. It requests nothing below tier 3, at the
 #            switch's `all` or once approved, and a failed request prints one line and leaves the result as it was
+#            Once the tier is final it also writes it for Linear's Reviews (#379): post_risk below, one comment of the pull
+#            request that holds a `linear:extension` riskScore block for the head, at every tier and every switch position;
+#            a failed write prints one line and leaves the result as it was
 #   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3) and,
 #            unless the merge switch is at `all` or cannot be read, requests the same owners' review (#374), since tier
 #            does not see the label until the next event
@@ -92,6 +95,31 @@ request_owners() {
   done <<<"$list"
   [ "${#done_[@]}" -eq 0 ] || echo "$job: requested the review of ${done_[*]}"
   [ "${#failed[@]}" -eq 0 ] || echo "$job: could not request the review of ${failed[*]}"
+  return 0
+}
+# Writes the tier as the gate judged it into Linear's Reviews (#379): one comment of the pull request, found by its marker among
+# the comments the job's own login wrote (github-actions[bot], the login of the job's token; GATE_BOT_LOGIN overrides) and edited,
+# or created when there is none. The comment holds a `linear:extension` block with the riskScore plugin for $head: level 1, 2 or 3
+# for tier 1, 2 or 3 (Linear's level 4 is not used, the gate has no fourth tier), and the reasons tier printed, cut to Linear's
+# limits (.gate/bin/lib/risk-score.mjs). It records the tier, for every tier and at every position of the merge switch, and asks
+# nothing of anyone. No Linear key and no Linear call. A failed read or write prints one line and changes nothing: the caller's
+# result stands. Takes the tier command's output and the tier number.
+post_risk() {
+  local text="$1" level="$2" comment list id
+  comment=$(printf '%s\n' "$text" | node .gate/bin/lib/risk-score.mjs body --sha "$head" --tier "$level") ||
+    { echo "$job: could not write the risk score for Linear's Reviews: the comment could not be built${comment:+ ($comment)}"; return 0; }
+  list=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/issues/${GATE_PR:-}/comments" 2>&1) ||
+    { echo "$job: could not write the risk score for Linear's Reviews: the comments could not be read"; return 0; }
+  id=$(printf '%s' "$list" | node .gate/bin/lib/risk-score.mjs find --login "${GATE_BOT_LOGIN:-github-actions[bot]}") ||
+    { echo "$job: could not write the risk score for Linear's Reviews: the comments could not be read as comments"; return 0; }
+  if [ -n "$id" ]; then
+    gh api -X PATCH "repos/${GITHUB_REPOSITORY:-}/issues/comments/$id" -f "body=$comment" >/dev/null 2>&1 ||
+      { echo "$job: could not edit the risk score comment for Linear's Reviews"; return 0; }
+  else
+    gh api -X POST "repos/${GITHUB_REPOSITORY:-}/issues/${GATE_PR:-}/comments" -f "body=$comment" >/dev/null 2>&1 ||
+      { echo "$job: could not write the risk score comment for Linear's Reviews"; return 0; }
+  fi
+  echo "$job: wrote the risk score for Linear's Reviews (tier $level at ${head:0:8})"
   return 0
 }
 # A red round is a head commit on which a required check other than tier failed; tier waits on the Human, not the writer.
@@ -290,6 +318,7 @@ case "$job" in
     guarded "$out"
     [ -z "$claim_msg" ] || guarded "$claim_msg"
     if [ -n "${GATE_PR:-}" ]; then
+      post_risk "$out" "$n"
       gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label "tier-$n" >/dev/null || echo "tier: could not add the label tier-$n, which only shows the tier"
       for k in 1 2 3; do
         [ "$k" -lt "$n" ] && gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label "tier-$k" >/dev/null 2>&1
