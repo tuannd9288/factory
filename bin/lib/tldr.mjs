@@ -145,14 +145,14 @@ export function onboardTldr(name, evidence, silence) {
   const settingsEn = rows.map((r) => say(r.en)).join('; ');
   return section(
     {
-      decide: `Duyệt PR đưa ${name} vào factory (gate là bộ kiểm tra tự động, hooks, template PR, luật cho agent)${settings ? `, với cài đặt của gate: ${settings}` : ''}.`,
+      decide: `Duyệt PR đưa ${name} vào factory: thêm gate (bộ kiểm tra tự động), hooks, template PR và luật cho agent${settings ? `, với cài đặt của gate: ${settings}` : ''}.`,
       recommend: `Approve, nếu các cài đặt trên đúng ý anh và session của ${name} đã liệt kê các file sửa trong phần chi tiết.`,
-      risk: `verify đỏ tới khi PR này merge là bình thường, chưa có review AI nào chạy; ${REVERT}.`,
+      risk: `verify đỏ tới khi PR này merge là bình thường và không chặn merge, chưa có review AI nào chạy; ${REVERT}.`,
     },
     {
-      decide: `Approve the PR that brings ${name} into the factory (the gate is automatic checks, plus hooks, a PR template and agent rules)${settingsEn ? `, with these gate settings: ${settingsEn}` : ''}.`,
+      decide: `Approve the PR that brings ${name} into the factory: it adds the gate (automatic checks), hooks, a PR template and agent rules${settingsEn ? `, with these gate settings: ${settingsEn}` : ''}.`,
       recommend: `Approve, if the settings above are what you want and ${name}'s session has listed the files it edits in the detail.`,
-      risk: `verify stays red until this PR merges, which is normal, and no AI review has run yet; ${REVERT_EN}.`,
+      risk: `verify stays red until this PR merges, which is normal and does not block the merge, and no AI review has run yet; ${REVERT_EN}.`,
     },
     silence,
   );

@@ -39,6 +39,9 @@ const times = (text, pattern) => [...text.matchAll(pattern)].length;
 const COUNTS = { added: 1, updated: 0, removed: 0, kept: 3 };
 // The four settings' names in the summary; the reviewer's is a word of other names too, so it is told apart by its colon.
 const NAMES = [/máy chạy việc của main/g, /máy kiểm từng thay đổi/g, /máy giữ key của reviewer/g, /(?<!của )reviewer:/g];
+// The same four in the English block.
+const NAMES_EN = [/the machine that runs main/g, /the machine that checks each change/g, /the machine that holds the reviewer's key/g, /reviewer:/g];
+const en = (text) => text.split('\n\n')[1];
 const structure = (text) => {
   const blocks = text.split('\n\n');
   assert.equal(blocks.length, 2);
@@ -65,6 +68,7 @@ describe('the summary of a kit pull request', () => {
     structure(full);
     const text = vi(full);
     for (const name of NAMES) assert.equal(times(text, name), 1, String(name));
+    for (const name of NAMES_EN) assert.equal(times(en(full), name), 1, String(name));
     assert.doesNotMatch(full, /ubuntu-latest|\.yml|\.github|\.gate/);
     assert.equal(decisions(text), 0);
   });
@@ -98,6 +102,7 @@ describe('the summary of a kit pull request', () => {
     structure(none);
     assert.equal(bullet(none, 'Đề xuất'), '- **Đề xuất:** Approve.');
     for (const name of NAMES) assert.equal(times(vi(none), name), 0, String(name));
+    for (const name of NAMES_EN) assert.equal(times(en(none), name), 0, String(name));
     const touched = kitUpdateTldr('app', { ...COUNTS, updated: 2, removed: 1 }, STAY);
     assert.notEqual(bullet(touched, 'Rủi ro'), bullet(none, 'Rủi ro'));
     assert.match(bullet(touched, 'Rủi ro'), /\b3\b/);
@@ -118,6 +123,12 @@ describe('the summary of a kit pull request', () => {
       assert.equal(times(bullet(text, 'Đề xuất'), name), i === 0 ? 0 : 1, String(name));
       assert.equal(times(outside, name), 0, String(name));
     }
+    // The English block names the same settings once each, in Recommendation.
+    const outsideEn = without(en(full), 'Recommendation');
+    for (const [i, name] of NAMES_EN.entries()) {
+      assert.equal(times(bullet(en(full), 'Recommendation'), name), i === 0 ? 0 : 1, String(name));
+      assert.equal(times(outsideEn, name), 0, String(name));
+    }
     assert.doesNotMatch(full, /#335|before #|variable|\.yml/);
     assert.notEqual(bullet(text, 'Đề xuất'), bullet(kitUpdateTldr('app', COUNTS, STAY), 'Đề xuất'));
   });
@@ -131,6 +142,10 @@ describe('the summary of a kit pull request', () => {
     for (const name of NAMES) {
       assert.equal(times(bullet(text, 'Đề xuất'), name), 1, String(name));
       assert.equal(times(outside, name), 0, String(name));
+    }
+    for (const name of NAMES_EN) {
+      assert.equal(times(bullet(en(full), 'Recommendation'), name), 1, String(name));
+      assert.equal(times(without(en(full), 'Recommendation'), name), 0, String(name));
     }
     assert.notEqual(bullet(text, 'Anh quyết'), bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Anh quyết'));
     assert.notEqual(bullet(text, 'Anh quyết'), bullet(kitUpdateTldr('app', COUNTS, STAY), 'Anh quyết'));

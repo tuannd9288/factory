@@ -100,10 +100,11 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   "(a) Tiếng Việt, 3 dòng như mẫu trên, thay khung tiếng Anh. Đây là ngoại lệ duy nhất của luật 'repo chỉ tiếng Anh',
   vì khung này chỉ để mày đọc." Then, the same day at 15:15 +07, relayed by Colly and the factory-repo session: "Đồng
   thời phần tóm tắt cho anh viết gọn TLTR kiểu đấy đi, có nên song ngữ không?" and "Song ngữ chỉ cho TLTR ấy"; and on
-  INN-16 at 16:30:11 +07 (09:30:11Z): "theo đề xuất", his choice A. So the summary is two blocks, the Vietnamese one and,
-  after it, `**TL;DR**` with the same lines in English (You decide, Recommendation, Risk), each line one sentence, the
-  order the same as on an INN item; a fourth line, "Nếu không trả lời" / "If no answer", appears only when silence has
-  a consequence. Only these two blocks are bilingual, and the Vietnamese block alone is the repository's Vietnamese.
+  INN-16 at 16:30:11 +07 (09:30:11Z): "theo đề xuất", his choice A. So the summary is two blocks, the Vietnamese one
+  and, after it, `**TL;DR**` with the same lines in English (You decide, Recommendation, Risk), each line one
+  sentence, the order the same as on an INN item; a fourth line, "Nếu không trả lời" / "If no answer", appears only
+  when silence has a consequence. Only these two blocks are bilingual, and the Vietnamese block alone is the
+  repository's Vietnamese.
   Sources: https://github.com/tuannd9288/factory/issues/98, https://github.com/tuannd9288/factory/issues/386 and
   https://github.com/tuannd9288/factory/issues/411.
 - **Control surfaces (#68), 2026-10-25 to 2026-10-31.** The factory runs on Ghostty and Herdr until it is finished,
@@ -393,7 +394,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
 - Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
   with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its `**TL;DR**`
-  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386, #411). Its title carries no issue number, which stays in the body.
+  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386,
+  #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|

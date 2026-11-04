@@ -56,13 +56,14 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>`. It takes one
    step a run: run it again at once, run after run, until it says `armed` or stops, and only then end the turn,
    naming what it waits on. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386, #411) and
-   its three lines, Anh quyết, Đề xuất and Rủi ro, in Vietnamese plain words with the terms in English (PR, main, revert,
-   Approve), then `**TL;DR**` with the same three in English (You decide, Recommendation, Risk). Each line is one
-   sentence, with no commit ids and no file paths; the Vietnamese block is the repository's only Vietnamese. Any decision
-   for the Human is numbered in Đề xuất, each with your recommendation; on tier 1 and 2 leave both blocks out. Your detail
-   goes below them, in the template's `<details>` block. When a later push makes the summary untrue, rewrite it in the same turn
-   with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was opened (the
-   reviewer's raise, a `needs-human` label). The body also carries `Closes #<n>`, so GitHub closes the issue on merge,
+   its three lines, Anh quyết, Đề xuất and Rủi ro, in Vietnamese plain words with the terms in English (PR, main,
+   revert, Approve), then `**TL;DR**` with the same three in English (You decide, Recommendation, Risk). Each line is
+   one sentence, with no commit ids and no file paths; the Vietnamese block is the repository's only Vietnamese. Any
+   decision for the Human is numbered in Đề xuất, each with your recommendation; add a fourth line, "Nếu không trả
+   lời" / "If no answer", only when silence has a consequence; on tier 1 and 2 leave both blocks out. Your detail goes
+   below them, in the template's `<details>` block. When a later push makes the summary untrue, rewrite it in the same
+   turn with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was
+   opened (the reviewer's raise, a `needs-human` label). The body also carries `Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`, outside that block. The title carries no issue number (`ship`
    drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
    the pull request.
