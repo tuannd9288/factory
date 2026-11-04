@@ -2,6 +2,9 @@
 # bin/seat <role> <brief> --run <run folder> --work <work folder> [options] (#91): starts one unattended `claude -p` session
 # in the background, on a seat, with the role's preset, and appends its record to $FACTORY_STATE/sessions.jsonl when it ends.
 # Exits 2 on a usage error, a missing seat token or no free seat. See bin/lib/seat.mjs.
+# Right after that append the supervisor posts { verb: 'seat-ended', run, tag, session } to the daemon's socket, $FACTORY_STATE/daemon.sock
+# (#399, bin/lib/daemon.mjs), 2 s at most, so the seat's Lead is woken within seconds and not at the next pass. It never starts the daemon (its
+# pass needs the job's environment, not a seat's account), and a post that fails changes nothing about the seat: one line in run-<tag>.err.
 # Unattended runs (launchd, `herdr pane run`) start no shell and never load .envrc. With no permission mode `claude -p` starts
 # in `default` and denies every call that needs approval (2.1.308, 2026-10-22: `git branch x` gave "This command requires
 # approval"); name the mode and the exact commands the run may use (code.claude.com/docs/en/permissions, fetched 2026-10-22). A

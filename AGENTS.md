@@ -166,7 +166,9 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   relayed by Colly and the factory-repo session, #373, #374 and #352 ("Đồng thời cho xử lý luôn phần dùng Linear đi"); and
   on 2026-11-03, relayed by the factory-repo session, #370 ("trả lời i–vi: theo đề xuất", about 14:30 +07, whose (iii) is
   that the sweep wakes a Lead and the Lead keeps no watchers; and "A", about 23:15 +07, relayed by Colly: one sweep on each
-  Mac, the local inbox-socket wake, the cloud station after release 1).
+  Mac, the local inbox-socket wake, the cloud station after release 1); and on 2026-11-04, relayed by Colly and the
+  factory-repo session, #399 ("Về cái sweep thì triển khai luôn đi, chứ sao chờ?", 14:06 +07, 07:06:31Z: the sweep becomes
+  a daemon, the piggery way).
   Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
@@ -178,7 +180,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569 and
   https://github.com/tuannd9288/factory/issues/369 and
   https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300 and
-  https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A").
+  https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A") and
+  https://github.com/tuannd9288/factory/issues/399 (its body).
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and
@@ -366,7 +369,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` on the Mac mini under the agents' login, by ssh; on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH from each machine's installed copy of the factory (#390): `$FACTORY_CHECKOUT`, `~/WORKSPACES` on the Mac mini, `${XDG_DATA_HOME:-~/.local/share}/factory/checkout` on the MacBook (`installedRoot`), outside the folders macOS refuses a launchd job and never set by a dev clone's branch or edits, which change nothing that runs. Run from a clone that is not that copy, it clones the copy (main only, an empty `credential.helper`) or brings it to `origin/main` by `followMain`'s rules, then runs the copy's own `bin/install-factory`, which makes `~/.local/bin/factory` a symlink to the copy's `bin/factory` and replaces only a symlink whose target ends in `/bin/factory`; on the MacBook it also writes the relay's LaunchAgent, loads it anew and runs `bin/factory-relay check`. His one line after a change here is `~/.local/share/factory/checkout/bin/install-factory` when the copy exists, else `bin/install-factory` from any clone; it can be run again |
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
-| `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
+| `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves. Its job's command, `sweep` with no repository, starts the daemon when nobody answers; `sweep --once` and `sweep --repo` run one pass in-process (#399) |
+| `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery |
 | `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
 | `bin/factory-events` | What the sweep tells Colly (#309): the `start` lines of `$FACTORY_STATE/events.jsonl` after its cursor; `--follow` moves the cursor and follows the file; the header has the ssh command |

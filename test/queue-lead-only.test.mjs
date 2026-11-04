@@ -38,7 +38,7 @@ function world() {
   const put = (nodes) => writeFileSync(join(dir, 'prs.json'), JSON.stringify({ data: { repository: { pullRequests: { nodes } } } }));
   return {
     dir, root, state, put,
-    sweep: (args = ['sweep']) => {
+    sweep: (args = ['sweep', '--once']) => {
       writeFileSync(join(dir, 'calls'), '');
       const out = spawnSync(join(factory, 'bin/factory-queue'), args, { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, FACTORY_RUNS: runs, FACTORY_ROOT: root, FACTORY_CHECKOUT: '' } });
       return { out: out.stdout + out.stderr, calls: readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean) };

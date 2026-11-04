@@ -33,7 +33,8 @@ function withRoot(body) {
     const home = join(dir, 'home');
     mkdirSync(home);
     const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: home, FACTORY_STATE: join(dir, 'state'), FACTORY_ROOT: root };
-    const queue = (...args) => spawnSync(join(factory, 'bin/factory-queue'), args, { encoding: 'utf8', env });
+    // A bare `sweep` hands the pass to the daemon (#399); these tests look at one pass.
+    const queue = (...args) => spawnSync(join(factory, 'bin/factory-queue'), args[0] === 'sweep' ? [...args, '--once'] : args, { encoding: 'utf8', env });
     body({ dir, root, queue });
   } finally {
     rmSync(dir, { recursive: true, force: true });
