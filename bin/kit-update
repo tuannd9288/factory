@@ -187,6 +187,8 @@ if ! evidence=$("$factory/bin/kit-evidence" --factory "$factory" --commit "$kit_
   echo "kit-update: the kit evidence fails; $branch is committed, not pushed, and no pull request is open"
   exit 1
 fi
+tldr=$(node "$factory/bin/lib/tldr.mjs" kit-update "$name" "$(n added)" "$(n updated)" "$(n removed)" "$(n kept)" <<<"$evidence") || tldr=""
+[ -n "$tldr" ] || { echo "kit-update: the opening summary for the Human is empty; $branch is committed, not pushed, and no pull request is open"; exit 1; }
 printf '%s\n' "$evidence"
 echo "kit-update: kit committed on $branch ($(n added) added, $(n updated) updated, $(n removed) removed, $(n kept) kept as they were)"
 [ "$open_pr" -eq 1 ] || { echo "kit-update: --no-pr; push $branch and open the pull request yourself"; exit 0; }
@@ -204,6 +206,11 @@ grep -qx '.claude/settings.json' "$lists/updated" && note=" The repository's \`.
 grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.github/CODEOWNERS\` is its own, so it is kept: the kit's new lines do not reach this file."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
 gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
+$tldr
+
+<details>
+<summary>The change in detail</summary>
+
 **What changed:** Brings the kit of $name up to factory \`$sha7\`: $(n added) $([ "$(n added)" -eq 1 ] && echo file || echo files) added, $(n updated) updated, $(n removed) removed; $(n kept) of the repository's own files kept as they were.
 **Effect:** \`.gate/kit-commit\` names the factory commit; \`.gate/kit-files\` is rewritten for the new kit; kit files the repository changed itself are kept, named below; \`AGENTS.md\` has only its \`## Gate\` block replaced, its head and tail are the repository's, and so is \`CLAUDE.md\`. \`.gitattributes\` has only the kit's review-categories block replaced (or put at its start); the repository's own lines come after it and win.$note$modnote
 **Evidence:** \`bin/kit-evidence\` PASS for factory commit \`$sha7\`; the full \`.gate/bin/verify\` was green before the push.
@@ -232,6 +239,8 @@ ${fence}text
 $evidence
 $fence
 Re-check from the factory's clone: \`bin/kit-evidence --factory <factory> --commit $kit_commit --repo <clone> --base $base --head $head --slug $slug --id $id\`
+
+</details>
 
 Issue: none
 Team: factory/kit-update

@@ -50,12 +50,20 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
    `--tag review<k>`, and wait for its record with `"tag":"review<k>"` the same way; sort its `foundOutside` as in step 4. On `FAIL`, brief a fix round as in
    step 5, run step 5's checks again, then review again. A `fix<k>` or `review<k>` tag is used once in a run: `<k>`
    counts on and never restarts. Push only after a `PASS`; after three `FAIL` rounds, ask the Human.
-7. Push from the worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run
-   `scripts/ship --body-file <file>` until it says `armed` or stops. The body's first line is `Closes #<n>`, so GitHub
-   closes the issue on merge. It also carries `Issue: #<n>`, `Claim: <sha>`, `Team: {{TEAM}}` and the template's summary
-   for the Human. On a stop, put the reason and your recommended answer in the pull request.
-8. Run `.gate/bin/tier` in the worktree; it prints the tier. On tier 3, tell the Human the pull request, its head
-   commit and what he approves. When a check is red, read `.claude/skills/gate-red/SKILL.md` first.
+7. Run `.gate/bin/tier` in the worktree; it prints the tier, which you need before you write the body. Push from the
+   worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>` until it
+   says `armed` or stops. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386) and its three
+   lines, Thay đổi, Rủi ro and Đề xuất, in Vietnamese plain words with the terms in English (PR, main, revert, Approve),
+   with no commit ids and no file paths; it is the repository's only Vietnamese. Any decision for the Human is numbered in
+   Đề xuất, each with your recommendation; on tier 1 and 2 leave the lines out. Your detail goes below them, in the
+   template's `<details>` block. When a later push makes the summary untrue, rewrite it in the same turn with
+   `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was opened (the
+   reviewer's raise, a `needs-human` label). The body also carries `Closes #<n>`, so GitHub closes the issue on merge,
+   `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`, outside that block. The title carries no issue number (`ship`
+   drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
+   the pull request.
+8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a
+   check is red, read `.claude/skills/gate-red/SKILL.md` first.
 9. When it has landed, check that the issue closed. The queue's sweep removes the worktree.
 
 ## What you ask the Human

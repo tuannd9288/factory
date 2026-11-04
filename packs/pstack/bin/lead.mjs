@@ -54,7 +54,8 @@ export function newestSession(dir) {
 }
 
 // The Lead's grants (lead.md): it reads, claims, makes worktrees, pushes its own HEAD, files, comments on and edits issues,
-// ships pull requests through scripts/ship (which runs gh for it), comments on them, starts workers through bin/seat and
+// ships pull requests through scripts/ship (which runs gh for it), rewrites a pull request's body through scripts/pr-body
+// (#386; never `gh pr edit`, which also changes labels, base and reviewers), comments on them, starts workers through bin/seat and
 // checks their briefs with bin/brief-check (#185). In auto mode a write to GitHub that no rule names is refused by the
 // classifier (#277). lead.md tells it to write no change itself; the grants alone do not stop it. It may read with
 // gh api and needs the Human's approval to write through it (his answer 2026-11-02 15:09:43, #343); no setting blocks
@@ -66,7 +67,7 @@ const allowOf = (root) => [
   'Bash(cd:*)', 'Bash(ls:*)', 'Bash(mkdir:*)',
   'Bash(.gate/bin/claim:*)', 'Bash(.gate/bin/tier:*)', 'Bash(.gate/bin/verify:*)', 'Bash(.gate/bin/red-check:*)',
   'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
-  'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)',
+  'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
   `Bash(${join(root, 'bin/seat')}:*)`,
   `Bash(${join(root, 'bin/brief-check')}:*)`,
 ];

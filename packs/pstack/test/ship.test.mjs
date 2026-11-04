@@ -70,7 +70,7 @@ if (verdict === 'PASS' || verdict === 'PASS+NOTES') {
 process.exit(verdict === 'FAIL' ? 1 : 2);
 `;
 
-const BODY = 'Closes #3\n\n## Summary for the Human\n- Purpose: names the operation\n';
+const BODY = '**Tóm tắt cho anh**\n- **Thay đổi:** x\n- **Rủi ro:** y\n- **Đề xuất:** Approve.\n\n<details>\n<summary>The change in detail</summary>\n\n- Purpose: names the operation\n\n</details>\n\nCloses #3\n';
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
 function world({ driver = true, liveVerify = true } = {}) {
@@ -168,6 +168,25 @@ describe('opening the pull request', () => {
     assert.match(create, /--body-file /);
     assert.equal(w.read('created-body'), BODY);
     assert.equal(w.read('lv-calls'), '', 'it opens, and goes no further in the same run');
+  });
+
+  test('takes the title from the last subject without its trailing issue number, and --title as given', () => {
+    let w = world();
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Print three (#12)');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Print three --body-file /);
+    w = world();
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Print two --body-file /);
+    w = world();
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Print three (#12)');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    assert.equal(w.ship(['--body-file', join(w.dir, 'body.md'), '--title', 'Given (#12)']).code, 0);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Given \(#12\) --body-file /);
   });
 
   test('refuses a body that still holds the template\'s placeholder', () => {
