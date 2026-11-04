@@ -108,6 +108,25 @@ test('the reduction of a seat stream keeps the assistant\'s text and the tool na
   assert.match(out, /The deploy token is \[redacted\]/);
 });
 
+test('the reduction keeps the input of a StructuredOutput call, redacted, and no other tool\'s input or result', async () => {
+  const { reduce } = await reader();
+  const out = reduce(fixture('seat-report.jsonl'));
+  for (const kept of ['[tool Read]', '[tool StructuredOutput]', 'I skipped the migration step because the fixture database was missing.', 'I ran the full suite once although the brief said not to.', 'The build script also ignores the retry flag.'])
+    assert.ok(out.includes(kept), kept);
+  for (const gone of ['REPORT-TOOL-INPUT-MARKER', 'REPORT-TOOL-OUTPUT-MARKER', 'REPORT-TOOL-RESULT-MARKER', 'REPORT-RESULT-MARKER', 'Structured output provided successfully'])
+    assert.ok(!out.includes(gone), `${gone} is in the reduction`);
+  assert.ok(!out.includes('ghp_abcdefghijklmnopqrstuvwxyz0123456789'));
+  assert.match(out, /deploy key \[redacted\] was pasted/);
+  // The report follows its tool line, as compact JSON; a string input is taken as it is.
+  assert.match(out, /\[tool StructuredOutput\]\n\{"status":"partial"/);
+  const one = (input) => reduce(`${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'StructuredOutput', input }] }, parent_tool_use_id: null })}\n`);
+  assert.equal(one('plain report words'), '[tool StructuredOutput]\nplain report words');
+  // Only that exact name: another tool's input stays out, and so does a subagent's call.
+  const other = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'StructuredOutputX', input: { a: 'OTHER-INPUT-MARKER' } }] }, parent_tool_use_id: null });
+  const sub = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'StructuredOutput', input: { a: 'SUB-INPUT-MARKER' } }] }, parent_tool_use_id: 'toolu_9' });
+  assert.equal(reduce(`${other}\n${sub}\n`), '[tool StructuredOutputX]');
+});
+
 test('the reduction of a Lead copy drops the lines that are not the assistant\'s own, a subagent\'s included', async () => {
   const { reduce } = await reader();
   const out = reduce(fixture('lead-copy.jsonl'));
@@ -581,7 +600,52 @@ test('a pass sends at most 400,000 characters a call and makes at most 3 calls; 
   });
 });
 
+test('an event that quotes a seat\'s StructuredOutput report is kept by the quote check', async () => {
+  await withDir(async (dir) => {
+    const w = world(dir);
+    w.put(w.seatFile(), '');
+    await w.pass({ now: T0 });
+    appendFileSync(w.seatFile(), fixture('seat-report.jsonl'));
+    w.answer({ events: [{ kind: 'admits-mistake', session: 'issue-333 fix9', quote: 'I ran the full suite once although the brief said not to.', why: 'a lapse in its report' }] });
+    const r = await w.pass({ now: T0 + 15 * MIN });
+    assert.deepEqual(r.failed, []);
+    assert.equal(r.events, 1);
+    assert.deepEqual(w.shape(), ['start admits-mistake issue-333 fix9']);
+    assert.ok(w.calls()[0].input.includes('I ran the full suite once'));
+  });
+});
+
 // ---- the pass: lock and crash ---------------------------------------------------------------------------------------------
+
+test('a pass writes reader/last.json with its counts, a crashed one too, and one that found the lock taken writes nothing', async () => {
+  await withDir(async (dir) => {
+    const w = world(dir);
+    const last = () => JSON.parse(readFileSync(join(w.state, 'reader/last.json'), 'utf8'));
+    w.put(w.seatFile(), '');
+    await w.pass({ now: T0 });
+    assert.deepEqual(last(), { at: new Date(T0).toISOString(), status: 'ok', calls: 0, events: 0, failed: [], chars: 0 });
+    appendFileSync(w.seatFile(), fixture('seat-report.jsonl'));
+    w.answer({ events: [
+      { kind: 'admits-mistake', session: 'issue-333 fix9', quote: 'I ran the full suite once although the brief said not to.', why: 'w' },
+      { kind: 'drift', session: 'issue-333 fix9', quote: 'invented text', why: 'w' },
+    ] });
+    await w.pass({ now: T0 + 15 * MIN });
+    const sent = w.calls()[0].input.length;
+    assert.ok(sent > 0);
+    assert.deepEqual(last(), { at: new Date(T0 + 15 * MIN).toISOString(), status: 'ok', calls: 1, events: 1, failed: ['answer'], chars: sent });
+    const { takeLock } = await import('../bin/lib/queue.mjs');
+    const mine = takeLock(join(w.state, 'reader.lock'));
+    assert.ok(mine);
+    assert.equal((await w.pass({ now: T0 + 30 * MIN })).status, 'running');
+    assert.equal(last().at, new Date(T0 + 15 * MIN).toISOString(), 'a pass that found the lock taken wrote nothing');
+    rmSync(join(w.state, 'reader.lock'));
+    rmSync(join(w.state, 'reader/cursors.json'));
+    mkdirSync(join(w.state, 'reader/cursors.json'));
+    const r = await w.pass({ now: T0 + 45 * MIN });
+    assert.equal(r.status, 'crashed');
+    assert.deepEqual(last(), { at: new Date(T0 + 45 * MIN).toISOString(), status: 'crashed', calls: 0, events: 0, failed: [], chars: 0 });
+  });
+});
 
 test('a pass holds reader.lock: a live holder stops another pass, and a lock whose pid is gone is stale', async () => {
   await withDir(async (dir) => {
