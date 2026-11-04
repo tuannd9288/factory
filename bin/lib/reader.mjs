@@ -240,11 +240,13 @@ export function parseAnswer(text) {
 }
 
 /** The quote check: an event is kept when its session is one of the headers sent (`parts`: header -> the text sent for it) and its quote, of
- * at least 8 characters, is verbatim in that session's part; every other is dropped. */
+ * at least 8 characters, is verbatim in that session's part, or its JSON-escaped form is: a `StructuredOutput` report is sent as JSON, so a
+ * `"` or a line break in it is sent as `\"` or `\n`, and a model may quote either the plain text or what it saw. Every other is dropped. */
 export function judge(answer, parts) {
   const kept = [];
   const dropped = [];
-  for (const e of answer.events) (parts.has(e.session) && e.quote.length >= MIN_QUOTE && parts.get(e.session).includes(e.quote) ? kept : dropped).push(e);
+  const inPart = (part, quote) => part.includes(quote) || part.includes(JSON.stringify(quote).slice(1, -1));
+  for (const e of answer.events) (parts.has(e.session) && e.quote.length >= MIN_QUOTE && inPart(parts.get(e.session), e.quote) ? kept : dropped).push(e);
   return { kept, dropped };
 }
 

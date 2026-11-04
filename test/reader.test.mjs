@@ -263,6 +263,23 @@ test('the quote check keeps a quote that is verbatim in its session\'s part, and
   assert.equal(r.dropped.length, 5);
 });
 
+test('the quote check keeps a quote across a `"` or a line break of a report, in plain or escaped form, and drops a made-up one', async () => {
+  const { judge, reduce } = await reader();
+  const parts = new Map([['issue-333 fix9', reduce(fixture('seat-report.jsonl'))]]);
+  const ev = (quote) => ({ kind: 'admits-mistake', session: 'issue-333 fix9', quote, why: 'w' });
+  const plainQuote = 'refused: "Permission denied (publickey)" twice\nthen I tried it';
+  const quotes = {
+    plainQuote,
+    escapedQuote: 'refused: \\"Permission denied (publickey)\\" twice\\nthen I tried it',
+    plainQuoteOnly: '"Permission denied (publickey)"',
+    madeUpPlain: 'refused: "Connection reset by peer" twice\nthen I tried it',
+    madeUpEscaped: 'refused: \\"Connection reset by peer\\" twice\\nthen I tried it',
+  };
+  const r = judge({ events: Object.values(quotes).map(ev) }, parts);
+  assert.deepEqual(r.kept.map((e) => e.quote), [quotes.plainQuote, quotes.escapedQuote, quotes.plainQuoteOnly]);
+  assert.deepEqual(r.dropped.map((e) => e.quote), [quotes.madeUpPlain, quotes.madeUpEscaped]);
+});
+
 test('a malformed answer writes reader-failed answer and no event, and moves no cursor', async () => {
   await withDir(async (dir) => {
     const w = world(dir);
