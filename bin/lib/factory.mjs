@@ -403,7 +403,7 @@ const GIT_CONFIG = [
 ];
 
 /** Where the socket of the MacBook Lead of a repository's team is recorded (#351), beside `lead-here`'s other files. */
-const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}-${team}.socket`);
+export const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}-${team}.socket`);
 
 /** `factory wake <repo> --issue <n> [--team <name>]` (#351): posts one line into the Lead's Claude Code inbox socket, which says to re-read
  * the issue and carries nothing else (bin/lib/wake.mjs); the message itself is a comment on the issue. On the factory host the socket is the
