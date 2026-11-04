@@ -69,7 +69,15 @@ describe('bin/kit-update', () => {
       assert.equal(git(w.repo, 'log', '-1', '--format=%s', rev), `Bring the kit up to factory main ${sha7}`);
       assert.match(git(w.repo, 'log', '-1', '--format=%b', rev), new RegExp(full));
       assert.equal(readFileSync(w.title, 'utf8'), `Bring the kit up to factory main ${sha7}`);
-      const lines = text.split('\n');
+      // The body opens with the TL;DR for the Human (#386); after it the body is what it was.
+      const [tldr, ...afterTldr] = text.split('\n\n');
+      const bullets = tldr.split('\n');
+      assert.equal(bullets[0], '## TL;DR for the Human');
+      assert.deepEqual(bullets.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['What you will see', 'What changes', 'What it fixes', 'Risk', 'Recommendation']);
+      assert.match(bullets[2], /2 files added, 5 updated, 1 removed/);
+      // It says that the update changes files the repository has.
+      assert.match(bullets[4], /changes 6 files the repository already has/);
+      const lines = afterTldr.join('\n\n').split('\n');
       assert.match(lines[0], /: 2 files added, 5 updated, 1 removed;/);
       assert.deepEqual(lines.slice(0, 3).map((l) => l.split(':**')[0]), ['**What changed', '**Effect', '**Evidence']);
       // A blank line between, or the rule would turn the third line into a heading.
@@ -267,7 +275,8 @@ describe('bin/kit-update, after review', () => {
       const out = w.update(['app']);
       assert.equal(out.code, 0, out.out);
       const body = readFileSync(w.body, 'utf8');
-      const lines = body.split('\n');
+      assert.match(body, /^## TL;DR for the Human\n- \*\*What you will see:\*\*/);
+      const lines = body.slice(body.indexOf('\n\n') + 2).split('\n'); // after the TL;DR (#386)
       // The gate reads two lines of this body (#133): the team that wrote it and that it answers no issue.
       const team = run(w.dir, process.execPath, [join(factory, 'kit/.gate/bin/lib/prbody.mjs'), '--team', w.body]);
       assert.equal(team.code, 0, team.out);

@@ -347,7 +347,10 @@ if [ "$had_config" -eq 0 ] && [ -f scripts/verify ]; then
   moved="${moved:+$moved }$adapter_note."
 fi
 [ -z "$untouched" ] || moved="${moved:+$moved }The repository's own hooks stay in \`.githooks/\` and run only in a clone that ran the repository's own setup; the kit's \`.gate/hooks/\` serve a repository with none."
+tldr=$(node "$factory/bin/lib/tldr.mjs" onboard "$name" <<<"$evidence")
 gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, hooks, hand-in rules and templates" --body "$(cat <<EOF
+$tldr
+
 ## Summary for the Human
 - Purpose: bring $name into the factory with the kit of tuannd9288/factory.
 - Change: \`.gate/bin/\` (verify, rules, red-check, tier, prove-check, verify-trusted, review, setup), \`.gate/hooks/\`, \`.gate/\` (with \`protected\`: the tier-3 paths), three workflows (gate, gate-trusted, main), the PR template, CODEOWNERS, deny rules, \`.gate/kit-commit\` (the factory commit), the \`## Gate\` block in \`AGENTS.md\`, the review-categories block in \`.gitattributes\` and, where there was none, \`CLAUDE.md\`.
