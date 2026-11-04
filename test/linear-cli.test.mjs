@@ -314,13 +314,17 @@ for (const owners of [[], ['a', 'b']]) {
   });
 }
 
-test('answered removes the assignee and moves back to the first started status', async () => {
+test('answered is one issueUpdate, the assignee removed and a started status, and no comment (his Inbox gets no receipt)', async () => {
   const { run, linear } = setup();
   const r = await run(['answered', 'FAC-12', '--team', 'lead']);
   assert.equal(r.code, 0);
-  const [m] = linear.mutations();
-  assert.equal(inputOf(m).assigneeId, null);
-  assert.equal(inputOf(m).stateId, 's-prog');
+  const ms = linear.mutations();
+  assert.equal(ms.length, 1, 'one write');
+  assert.ok(ms[0].query.includes('issueUpdate'));
+  assert.equal(inputOf(ms[0]).assigneeId, null);
+  assert.equal(inputOf(ms[0]).stateId, 's-prog');
+  assert.equal(linear.calls.some((c) => c.query.includes('commentCreate')), false);
+  assert.equal(linear.stored.length, 0);
 });
 
 test('create always sends a stateId, sets the delegate only with --delegate, and refuses an unknown status', async () => {

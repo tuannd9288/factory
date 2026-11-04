@@ -53,7 +53,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
      `factory linear ask <n> --team {{TEAM}} --body-file -` with the question, your recommendation and its tick boxes in the layout of an INN
      item (#411): it moves the issue to Needs Human, assigns the Human and posts that body as one comment. Stop work on <n> at that question.
      Colly decides it, or takes it to the Human. When the answer is on the issue (read it with `factory linear read <n>`), run
-     `factory linear answered <n> --team {{TEAM}}`, which removes him as assignee and moves the issue back to In Progress, and go on.<!--/linear-->
+     `factory linear answered <n> --team {{TEAM}}`, which removes him as assignee and moves the issue back to In Progress, and go on. Run that and
+     nothing else: no receipt comment, no thanks, no emoji or reaction, since each lands in his Inbox.<!--/linear-->
 
    How many workers run at once is your call:
    when the load is above the cores (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Your `bin/seat` calls inherit
@@ -98,7 +99,9 @@ Only a tier-3 approval, a merge that ship hands him, a change that failed three 
 cost.
 Number each question and give your recommended answer. While you wait on any decision, <!--github-->label your issue `needs-human`;
 remove the label once the answer is on the issue or its pull request.<!--/github--><!--linear-->move your issue to Needs Human with
-`factory linear ask`; move it back with `factory linear answered` once the answer is on the issue or its pull request.<!--/linear-->
+`factory linear ask`; move it back with `factory linear answered` once the answer is on the issue or its pull request, and acknowledge it
+with that alone: no receipt comment, no emoji or reaction, since each lands in his Inbox.<!--/linear-->
+Never request his review on a pull request yourself: the gate requests it only while a tier-3 pull request waits for his approval (#374).
 Decide and report everything else.
 
 ## A wake from the factory
@@ -139,8 +142,10 @@ for example "Waiting on #212 checks" or "Waiting on review2 of #212", so the pan
 ## Keeping the work across sessions
 A long run wears your context down, and a compaction can drop what the Human told you, so the work lives on GitHub and
 on disk, never only in your context (#185).
-- **The Human's words.** Put each answer he gives you along the way on its issue at once, verbatim and in double quotes,
-  in his language, with <!--github-->`gh issue comment`<!--/github--><!--linear-->`factory linear comment <KEY> --team {{TEAM}} --body-file -`<!--/linear--> (#90). A brief that rests on his words quotes them from those comments: save
+- **The Human's words.** <!--github-->Put each answer he gives you along the way on its issue at once, verbatim and in double quotes,
+  in his language, with `gh issue comment`<!--/github--><!--linear-->An answer he wrote as a comment on the issue is already the record:
+  do not post it again. An answer he gave elsewhere, for example relayed by Colly, you put on the issue at once, verbatim and in double quotes,
+  in his language, with `factory linear comment <KEY> --team {{TEAM}} --body-file -`<!--/linear--> (#90). A brief that rests on his words quotes them from those comments: save
   the comments as `relay.md` beside the brief, end the brief with the line `## Colly's message, attached as data` and the
   relay below it, and run `/Users/factory/WORKSPACES/bin/brief-check <brief> <relay.md>` before the worker starts; on a
   failure, fix the brief.
