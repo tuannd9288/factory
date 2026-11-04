@@ -326,7 +326,7 @@ function main(argv, env) {
   const rolePath = join(root, 'packs/pstack/lead.md');
   const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
   const linear = onLinear(repo, stateDir);
-  const roleText = existsSync(rolePath) ? roleOf(readFileSync(rolePath, 'utf8'), Boolean(linear)).replaceAll(TEAM_TOKEN, team).replaceAll(TEAM_KEY_TOKEN, linear?.key ?? '') : '';
+  const roleText = existsSync(rolePath) ? roleOf(readFileSync(rolePath, 'utf8'), Boolean(linear)).replaceAll(TEAM_TOKEN, team).replaceAll(TEAM_KEY_TOKEN, () => linear?.key ?? '') : '';
   if (!roleText.trim()) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;

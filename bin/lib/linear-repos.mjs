@@ -16,11 +16,14 @@ export function readRegistry(state) {
   }
 }
 
+/** The grammar of a Linear team key; an entry whose key does not match is no entry. */
+export const TEAM_KEY = /^[A-Z][A-Z0-9]{1,9}$/;
+
 /** The repository's registry entry ({ key, teamId }), or null when it is on GitHub. */
 export function onLinear(repo, state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory')) {
   const registry = readRegistry(state);
   const e = Object.hasOwn(registry, repo) ? registry[repo] : null;
-  return e && typeof e.key === 'string' && typeof e.teamId === 'string' ? e : null;
+  return e && typeof e.key === 'string' && TEAM_KEY.test(e.key) && typeof e.teamId === 'string' ? e : null;
 }
 
 export function writeRegistry(state, registry) {

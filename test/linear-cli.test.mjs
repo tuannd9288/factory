@@ -255,6 +255,9 @@ test('a repository not in the registry is on GitHub; a bad registry file is none
   writeFileSync(registryFile(root), JSON.stringify({ a: { key: 'AAA', teamId: 't' } }));
   assert.equal(onLinear('a', root).key, 'AAA');
   assert.equal(onLinear('constructor', root), null);
+  writeFileSync(registryFile(root), JSON.stringify({ a: { key: "A$'B", teamId: 't' }, b: { key: 'bad', teamId: 't' } }));
+  assert.equal(onLinear('a', root), null, 'a key outside the team-key grammar is no entry');
+  assert.equal(onLinear('b', root), null);
 });
 
 test('usage errors exit 2 before any call; a body comes on stdin only', async () => {

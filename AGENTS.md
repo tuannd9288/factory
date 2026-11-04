@@ -222,9 +222,9 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   deleted: open issues move to FAC, each with a "moved to FAC-n" line, and the closed GitHub issues stay as a read-only
   archive. #369 is parked, since Linear's Project page and Inbox replace it. The Lead's decisions: one Linear team for
   each repository, the factory's being `FAC` while `INN` stays his team for decisions (the reasons are in #375's body);
-  and, while repositories move, one list names those on Linear, which only grows and which the cut removes. None is on
-  Linear yet; #406 adds the factory. #404 moves the list into the file its code reads and leaves this line pointing
-  there. Nothing in the factory reads Linear until #404, #405 and #407 land. FAC's labels and statuses are researched
+  and, while repositories move, one list names those on Linear, which only grows and which the cut removes: it is
+  `$FACTORY_STATE/linear/repos.json`, written by `factory linear onboard`. None is on Linear yet; #406 adds the
+  factory. Nothing in the factory reads Linear until #404, #405 and #407 land. FAC's labels and statuses are researched
   and proposed in #406, and nothing is created in Linear before his word. The credential rule for 1b and the one shared
   Factory app are decided in the entry below (#403). Waiting on him: how Linear's events reach the Macs (#375,
   decision 7: both research passes are done, and a recommendation goes to him). His words: "B theo đề xuất." (14:13
