@@ -345,7 +345,7 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory lead <repo> [--team <name>] [--new] [--dry-run]
        bin/factory lead <repo> [--team <name>] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
        bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)
-       bin/factory linear take|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
+       bin/factory linear take|release|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;

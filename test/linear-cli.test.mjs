@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLinear } from '../bin/lib/linear.mjs';
-import { createCli, onLinear, parse, registryFile } from '../bin/lib/linear-cli.mjs';
+import { createCli, holderOf, onLinear, parse, registryFile } from '../bin/lib/linear-cli.mjs';
 import { writeAppFile } from '../bin/lib/token.mjs';
 
 const json = (status, body) => ({ status, ok: status < 400, text: async () => JSON.stringify(body) });
@@ -16,7 +16,7 @@ const SECRET = 'invented-client-secret-0001';
 
 /** A fake Linear with one team FAC; `teams` is the workspace's teams by key. */
 function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFails = false, failIssueUpdate = false } = {}) {
-  const f = { calls: [], appId: 'app-user-1', comments: [], teams: {}, pages: null };
+  const f = { calls: [], appId: 'app-user-1', stored: [], teams: {}, pages: null, failComment: false, onComment: null };
   f.teams.FAC = { id: 'team-fac', key: 'FAC', name: 'Factory', states: { nodes: [st('s-triage', 'Triage', 'triage', 0), st('s-nh', 'Needs Human', 'started', 1), st('s-todo', 'Todo', 'unstarted', 2), st('s-prog', 'In Progress', 'started', 3), st('s-done', 'Done', 'completed', 4)] } };
   f.issue = { id: 'issue-uuid-1', identifier: 'FAC-12', team: f.teams.FAC };
   f.mutations = () => f.calls.filter((c) => c.query.includes('mutation'));
@@ -39,8 +39,17 @@ function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFa
       return json(200, { data: { workflowStateCreate: { success: true } } });
     }
     if (q.includes('teams(')) return json(200, { data: { teams: { nodes: f.teams[v.key] ? [f.teams[v.key]] : [] } } });
-    if (q.includes('issueUpdate')) return failIssueUpdate ? json(200, { errors: [{ message: `refused for ${TOKEN} and ${SECRET}` }] }) : json(200, { data: { issueUpdate: { success: true, issue: { id: 'issue-uuid-1', identifier: 'FAC-12' } } } });
-    if (q.includes('commentCreate')) return json(200, { data: { commentCreate: { success: true, comment: { id: `c-${f.comments.length}` } } } });
+    if (q.includes('issueUpdate')) {
+      if (failIssueUpdate) return json(200, { errors: [{ message: `refused for ${TOKEN} and ${SECRET}` }] });
+      if ('delegateId' in v.input) f.issue.delegate = v.input.delegateId ? { id: v.input.delegateId } : null;
+      return json(200, { data: { issueUpdate: { success: true, issue: { id: 'issue-uuid-1', identifier: 'FAC-12' } } } });
+    }
+    if (q.includes('commentCreate')) {
+      if (f.failComment) return json(200, { errors: [{ message: 'comment refused' }] });
+      f.stored.push({ body: v.input.body, createdAt: `2026-11-05T00:00:${String(f.stored.length).padStart(2, '0')}Z` }); // after any comment a test seeds with at()
+      f.onComment?.(v.input.body);
+      return json(200, { data: { commentCreate: { success: true, comment: { id: `c-${f.stored.length}` } } } });
+    }
     if (q.includes('issueCreate')) return json(200, { data: { issueCreate: { success: true, issue: { id: 'new-1', identifier: 'FAC-99' } } } });
     if (q.includes('issues(')) {
       const pages = f.listPages ?? [[]];
@@ -48,7 +57,7 @@ function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFa
       return json(200, { data: { issues: { nodes: pages[at], pageInfo: { hasNextPage: at + 1 < pages.length, endCursor: String(at + 1) } } } });
     }
     if (q.includes('comments(')) {
-      const page = f.pages ?? [{ nodes: [], more: false }];
+      const page = f.pages ?? [{ nodes: f.stored }];
       const at = v.after ? Number(v.after) : 0;
       return json(200, { data: { issue: { identifier: 'FAC-12', title: 'T', description: 'D', url: 'https://linear.app/x/FAC-12', state: { name: 'Todo', type: 'unstarted' }, delegate: null, assignee: { id: 'owner-1', name: 'Owner' },
         comments: { nodes: page[at].nodes, pageInfo: { hasNextPage: at + 1 < page.length, endCursor: String(at + 1) } } } } });
@@ -94,15 +103,99 @@ test('take sets the app as delegate and the first started status, and names no a
   assert.equal(inputOf(ms[1]).createAsUser, 'lead');
 });
 
-test('take is the lock: it refuses an issue whose delegate is already the app, and writes nothing', async () => {
+const at = (n) => `2026-11-04T00:${String(n).padStart(2, '0')}:00Z`;
+const note = (body, n) => ({ body, createdAt: at(n) });
+
+test('the holder is the earliest "Taken by team" comment after the last release', () => {
+  assert.equal(holderOf([]), null);
+  assert.equal(holderOf([note('just a comment', 1)]), null);
+  assert.equal(holderOf([note('Taken by team a.', 1)]), 'a');
+  assert.equal(holderOf([note('Taken by team b.', 2), note('Taken by team a.', 1)]), 'a', 'by time, in any order');
+  assert.equal(holderOf([note('Taken by team a.', 1), note('Taken by team b.', 2)]), 'a', 'the earliest keeps it');
+  assert.equal(holderOf([note('Taken by team a.', 1), note('Released by team a.', 2)]), null);
+  assert.equal(holderOf([note('Taken by team a.', 1), note('Taken by team b.', 2), note('Released by team a.', 3), note('Taken by team b.', 4)]), 'b', 'only the comments after the last release count');
+  assert.equal(holderOf([note('Taken by team a.', 1), note('Released by team a (the delegate was cleared by hand).', 2)]), null);
+  assert.equal(holderOf([note('Taken by team a. And more', 1), note('I Taken by team b.', 2)]), null, 'only the exact line counts');
+});
+
+test('take is refused when the app holds the issue for another team, and writes nothing', async () => {
   const { run, linear } = setup();
   linear.issue.delegate = { id: 'app-user-1' };
+  linear.stored.push(note('Taken by team other.', 1));
   const r = await run(['take', 'FAC-12', '--team', 'lead']);
   assert.equal(r.code, 1);
-  assert.match(r.out.error, /held/);
+  assert.match(r.out.error, /held by team other/);
   assert.equal(linear.mutations().length, 0);
-  linear.issue.delegate = { id: 'someone-else' };
-  assert.equal((await run(['take', 'FAC-12', '--team', 'lead'])).code, 0, 'a delegate that is not the app does not hold it');
+});
+
+test('a retake by the holder\'s own team is allowed and posts no second holder comment', async () => {
+  const { run, linear } = setup();
+  assert.equal((await run(['take', 'FAC-12', '--team', 'lead'])).code, 0);
+  assert.equal(linear.stored.length, 1);
+  const again = await run(['take', 'FAC-12', '--team', 'lead']);
+  assert.equal(again.code, 0);
+  assert.equal(linear.stored.length, 1, 'one holder comment');
+  assert.equal((await run(['take', 'FAC-12', '--team', 'other'])).code, 1, 'another team is still refused');
+});
+
+test('a retake after a failed holder comment is allowed, and the comment is posted then', async () => {
+  const { run, linear } = setup();
+  linear.failComment = true;
+  assert.equal((await run(['take', 'FAC-12', '--team', 'lead'])).code, 1, 'the comment failed');
+  assert.equal(linear.issue.delegate.id, 'app-user-1', 'the delegate is set');
+  assert.equal(linear.stored.length, 0);
+  linear.failComment = false;
+  const r = await run(['take', 'FAC-12', '--team', 'lead']);
+  assert.equal(r.code, 0, JSON.stringify(r));
+  assert.deepEqual(linear.stored.map((c) => c.body), ['Taken by team lead.']);
+});
+
+test('take refuses and changes nothing more when another team\'s take came first, read after its own comment', async () => {
+  const { run, linear } = setup();
+  linear.onComment = () => linear.stored.push({ body: 'Taken by team other.', createdAt: '2026-11-04T23:00:00Z' }); // before the take's own comment
+  const r = await run(['take', 'FAC-12', '--team', 'lead']);
+  assert.equal(r.code, 1);
+  assert.match(r.out.error, /held by team other, whose take came first/);
+  assert.equal(linear.mutations().length, 2, 'the update and its own comment; nothing after the read');
+});
+
+test('a take after the delegate was cleared by hand closes the stale holder first', async () => {
+  const { run, linear } = setup();
+  linear.stored.push(note('Taken by team old.', 1));
+  const r = await run(['take', 'FAC-12', '--team', 'lead']);
+  assert.equal(r.code, 0, JSON.stringify(r));
+  assert.deepEqual(linear.stored.map((c) => c.body.split('\n')[0]), ['Taken by team old.', 'Released by team old (the delegate was cleared by hand).', 'Taken by team lead.']);
+  assert.equal(holderOf(linear.stored), 'lead');
+});
+
+test('release by the holder clears the delegate, moves to the first unstarted status and comments; then another team can take', async () => {
+  const { run, linear } = setup();
+  assert.equal((await run(['take', 'FAC-12', '--team', 'lead'])).code, 0);
+  const before = linear.mutations().length;
+  const r = await run(['release', 'FAC-12', '--team', 'lead']);
+  assert.equal(r.code, 0, JSON.stringify(r));
+  const ms = linear.mutations().slice(before);
+  assert.equal(ms.length, 2);
+  assert.equal(inputOf(ms[0]).delegateId, null);
+  assert.equal(inputOf(ms[0]).stateId, 's-todo');
+  assert.equal(inputOf(ms[1]).body, 'Released by team lead.');
+  assert.equal(linear.issue.delegate, null);
+  assert.equal(holderOf(linear.stored), null);
+  assert.equal((await run(['take', 'FAC-12', '--team', 'other'])).code, 0, 'a later take counts only the comments after the release');
+  assert.equal(holderOf(linear.stored), 'other');
+});
+
+test('release is refused for a team that is not the holder, and for an issue nobody holds, and writes nothing', async () => {
+  const { run, linear } = setup();
+  const none = await run(['release', 'FAC-12', '--team', 'lead']);
+  assert.equal(none.code, 1);
+  assert.match(none.out.error, /held by no team/);
+  assert.equal((await run(['take', 'FAC-12', '--team', 'lead'])).code, 0);
+  const before = linear.mutations().length;
+  const r = await run(['release', 'FAC-12', '--team', 'other']);
+  assert.equal(r.code, 1);
+  assert.match(r.out.error, /held by team lead, not other/);
+  assert.equal(linear.mutations().length, before);
 });
 
 test('read gives the issue and every comment with its author, across pages', async () => {
@@ -240,6 +333,18 @@ test('onboard of a new team copies FAC\'s settings and adds Needs Human only whe
     assert.equal(linear.mutations().length, n, 'a second run writes nothing to Linear');
     assert.equal(again.out.next, undefined);
   }
+});
+
+test('onboard onto an existing team that has no Needs Human status is refused, and changes nothing', async () => {
+  const { run, linear, state } = setup();
+  linear.teams.INN = { id: 'team-inn', key: 'INN', name: 'InnoStack', states: { nodes: [st('i1', 'In Progress', 'started', 1)] } };
+  const before = readFileSync(registryFile(state), 'utf8');
+  const r = await run(['onboard', 'decisions', '--key', 'INN', '--name', 'InnoStack']);
+  assert.equal(r.code, 1);
+  assert.match(r.out.error, /exists but has no status named Needs Human of type started/);
+  assert.equal(linear.mutations().length, 0);
+  assert.equal(readFileSync(registryFile(state), 'utf8'), before);
+  assert.equal(onLinear('decisions', state), null);
 });
 
 test('onboard prints the by-hand instruction and exits 1 when Linear refuses the team, and registers nothing', async () => {

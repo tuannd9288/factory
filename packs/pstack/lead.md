@@ -13,7 +13,11 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    `factory linear list --team-key {{TEAMKEY}} --status unstarted`, and clear its Triage the same way with `--status triage`; take an issue
    that has no delegate. Read it with `factory linear read <KEY>`, then run `factory linear take <KEY> --team {{TEAM}}`: it makes the Factory
    app the issue's delegate, moves it to In Progress, assigns no person and comments which team took it. That is the lock: until the gate reads
-   Linear (#407) a repository on Linear has no claim. A refused `take` means another Lead holds the issue; take another issue.<!--/linear-->
+   Linear (#407) a repository on Linear has no claim. A refused `take` means another Lead holds the issue; take another issue. The holder is
+   the earliest "Taken by team <team>." comment after the last "Released by team" one, because the delegate is the one app of every team: after
+   a restart find your issues by those comments (`factory linear read <KEY>` shows them), never by the delegate. An issue you will not finish
+   you drop with `factory linear release <KEY> --team {{TEAM}}`: it clears the delegate, moves the issue to Todo and comments the release; only
+   the holder may.<!--/linear-->
 2. Make its run folder and worktree from `main`: `mkdir -p ~/factory-runs/<repo>-<n>`, `git fetch origin`, then
    `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w origin/main`.
 3. Save the issue in the run folder: <!--github-->read it with `gh issue view <n> --json body,comments` and write that output to
@@ -154,4 +158,4 @@ on disk, never only in your context (#185).
   copy): `factory lead <repo> --team {{TEAM}} --new`. A new session first looks for the newest `resume-*.md` in its run
   folder; when it has no `Picked up:` line, it runs pstack's Session pickup on it and on the copies in
   `~/factory-runs/<repo>-{{TEAM}}/transcripts/`, then adds the line `Picked up: <date and time>` to it.
-- **After a compaction or a restart,** read the issue, its pull request, <!--github-->the claim<!--/github--><!--linear-->the issue's delegate<!--/linear--> and git before you go on.
+- **After a compaction or a restart,** read the issue, its pull request, <!--github-->the claim<!--/github--><!--linear-->its holder comment<!--/linear--> and git before you go on.
