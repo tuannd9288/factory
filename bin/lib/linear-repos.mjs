@@ -1,35 +1,81 @@
 // The registry of repositories on Linear (#404): $FACTORY_STATE/linear/repos.json, { "<repo>": { key, teamId } }, on the factory host. Only
-// `factory linear onboard` writes it (bin/lib/linear-cli.mjs), atomically; a repository not in it is on GitHub. It imports nothing but node:
-// modules, so the pack's launcher can read it without the rest of the factory.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+// `factory linear onboard` writes it (bin/lib/linear-cli.mjs), atomically and under a lock; a repository not in it is on GitHub. A file that
+// exists and does not parse is an error, never an empty registry: every reader refuses, and `onboard` writes nothing. It imports nothing but
+// node: modules, so the pack's launcher can read it without the rest of the factory.
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const registryFile = (state) => join(state, 'linear', 'repos.json');
 
-/** The registry as { repo: { key, teamId } }; an absent or unreadable file is no repository on Linear. */
-export function readRegistry(state) {
-  try {
-    const r = JSON.parse(readFileSync(registryFile(state), 'utf8'));
-    return r && typeof r === 'object' && !Array.isArray(r) ? r : {};
-  } catch {
-    return {};
-  }
-}
-
 /** The grammar of a Linear team key; an entry whose key does not match is no entry. */
 export const TEAM_KEY = /^[A-Z][A-Z0-9]{1,9}$/;
 
-/** The repository's registry entry ({ key, teamId }), or null when it is on GitHub. */
+const LOCK_STALE_MS = 60_000;
+const LOCK_WAIT_MS = 30_000;
+
+/** The registry as { repo: { key, teamId } }: {} when there is no file; throws when the file is there and does not read or parse. */
+export function readRegistry(state) {
+  const file = registryFile(state);
+  let text;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    throw new Error(`the registry ${file} exists but cannot be read (${e.code ?? 'error'}); nothing was changed`);
+  }
+  let r;
+  try {
+    r = JSON.parse(text);
+  } catch {
+    r = null;
+  }
+  if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error(`the registry ${file} exists but does not parse as an object; nothing was changed`);
+  return r;
+}
+
+/** The repository's registry entry ({ key, teamId }), or null when it is on GitHub. Throws as readRegistry does. */
 export function onLinear(repo, state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory')) {
   const registry = readRegistry(state);
   const e = Object.hasOwn(registry, repo) ? registry[repo] : null;
   return e && typeof e.key === 'string' && TEAM_KEY.test(e.key) && typeof e.teamId === 'string' ? e : null;
 }
 
-export function writeRegistry(state, registry) {
+function writeRegistry(state, registry) {
   const file = registryFile(state);
-  mkdirSync(join(state, 'linear'), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, file);
+}
+
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** Reads the registry, hands it to `change`, and writes what that returns (nothing when it returns null), all under a mkdir lock so two
+ * onboards cannot lose an update. Resolves to whether the file was written. */
+export async function updateRegistry(state, change) {
+  const dir = join(state, 'linear');
+  mkdirSync(dir, { recursive: true });
+  const lock = join(dir, 'repos.lock');
+  const until = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+    try {
+      if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmSync(lock, { recursive: true, force: true });
+    } catch {
+      continue;
+    }
+    if (Date.now() > until) throw new Error('the registry lock is held');
+    await sleep(25);
+  }
+  try {
+    const next = change(readRegistry(state));
+    if (next) writeRegistry(state, next);
+    return Boolean(next);
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
 }

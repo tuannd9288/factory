@@ -216,6 +216,18 @@ describe('lead role.sha (#316)', () => {
     assert.equal(prompt(), 'Take: GH issue for lead.\nend\n');
   }));
 
+  test('a registry file that does not parse stops the start, names the file, and starts no claude (#404)', () => world((w) => {
+    const registry = join(w.home, '.local/state/factory/linear/repos.json');
+    mkdirSync(dirname(registry), { recursive: true });
+    writeFileSync(registry, '{broken');
+    for (const args of [[], ['--dry-run']]) {
+      const r = w.lead(args);
+      assert.equal(r.code, 2, r.err);
+      assert.ok(r.err.includes(registry), r.err);
+    }
+    assert.deepEqual(w.log(), []);
+  }));
+
   test('a resume with an equal role.sha gives no message and leaves the file as it is (#316)', () => world((w) => {
     w.copy(`${A}.jsonl`, 4000);
     recorded(w, `${hashOf('# role\n')} ${A}\n`);

@@ -11,18 +11,20 @@
 //   create --team-key <KEY> --title <t> --status <name> --body-file - [--delegate]   an issue with an explicit status, never Triage by accident
 //   onboard <repo> --key <KEY> --name <name>    the repository's team (copied from FAC) and its Needs Human status, and the registry
 // One JSON object on stdout. Exit 0 done, 1 Linear refused or failed (the reason is in `error`, never a token), 2 usage.
+// Scope: take, comment, ask, answered, create and list act only on a team that is in the registry, never on INN or any other team; read does
+// not. `--team` is a team name of the factory's grammar (bin/lib/names.mjs). A corrupt registry file refuses every verb that reads it.
 // The Human is found, never stored: the one workspace owner who is not an app; any other count refuses.
 // The registry, $FACTORY_STATE/linear/repos.json { "<repo>": { key, teamId } }, is written only by `onboard`, atomically; a repository
 // not in it is on GitHub. `onLinear(repo)` reads it.
 import { join } from 'node:path';
 import { createLinear } from './linear.mjs';
-import { onLinear, readRegistry, registryFile, writeRegistry } from './linear-repos.mjs';
+import { TEAM_KEY, onLinear, readRegistry, registryFile, updateRegistry } from './linear-repos.mjs';
+import { TEAM } from './names.mjs';
 
 export const NEEDS_HUMAN = 'Needs Human';
 const FIRST_TEAM = 'FAC';
 const COLOR = '#f2994a';
 const KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/;
-const TEAM_KEY = /^[A-Z][A-Z0-9]{1,9}$/;
 const WORD = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_BODY = 60_000;
 
@@ -69,7 +71,7 @@ export function parse(argv) {
   for (const f of REQUIRED[verb] ?? []) if (!(f in flags)) throw new Usage(`${verb}: ${f} is required`);
   if ('--body-file' in flags && flags['--body-file'] !== '-') throw new Usage(`${verb}: the body comes on stdin: --body-file -`);
   if (verb === 'onboard' ? !WORD.test(args[0]) : shape.args === 1 && !KEY.test(args[0])) throw new Usage(`${verb}: ${args[0]} is not a ${verb === 'onboard' ? 'repository name' : 'issue key such as FAC-12'}`);
-  if ('--team' in flags && !WORD.test(flags['--team'])) throw new Usage(`${verb}: --team is a plain name`);
+  if ('--team' in flags && !TEAM.test(flags['--team'])) throw new Usage(`${verb}: --team is a team name: a lowercase letter, then at most 31 lowercase letters and digits`);
   for (const f of ['--team-key', '--key']) if (f in flags && !TEAM_KEY.test(flags[f])) throw new Usage(`${verb}: ${f} is a team key such as FAC`);
   if (verb === 'list') for (const t of flags['--status'] ?? []) if (!OPEN_TYPES.includes(t)) throw new Usage(`list: --status is one of ${OPEN_TYPES.join(', ')}`);
   for (const f of verb === 'list' ? [] : ['--title', '--status', '--name']) if (f in flags && (!flags[f].trim() || flags[f].length > 200 || /[\x00-\x1f]/.test(flags[f]))) throw new Usage(`${verb}: ${f} is one line of 1 to 200 characters`);
@@ -82,9 +84,17 @@ const firstStarted = (states) => states.filter((s) => s.type === 'started' && s.
 export function createCli({ api, state, readStdin }) {
   const q = (query, vars) => api.request(query, vars);
 
-  async function issueTeam(key) {
+  /** A write or a list acts only on the team of a repository in the registry, so a Lead cannot touch INN or any other team. */
+  const inScope = (teamKey) => {
+    const keys = Object.values(readRegistry(state)).map((e) => e?.key);
+    if (!keys.includes(teamKey)) throw new Refused(`team ${teamKey} is not the team of a repository on Linear (not in the registry); nothing was done`);
+  };
+
+  /** The issue with its team; with `scoped`, refused unless its team is a repository's. */
+  async function issueTeam(key, { scoped = true } = {}) {
     const issue = (await q(`query($id: String!) { issue(id: $id) { id identifier delegate { id } team { id key ${STATES} } } }`, { id: key }))?.issue;
     if (!issue) throw new Refused(`Linear has no issue ${key}`);
+    if (scoped) inScope(issue.team.key);
     return issue;
   }
   const stateNamed = (issue, name) => {
@@ -173,6 +183,7 @@ export function createCli({ api, state, readStdin }) {
   async function create({ flags }) {
     const body = await bodyOf();
     const teamKey = flags['--team-key'];
+    inScope(teamKey);
     const team = (await q(`query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key name ${STATES} } } }`, { key: teamKey }))?.teams?.nodes?.[0];
     if (!team) throw new Refused(`Linear has no team with key ${teamKey}`);
     const status = team.states.nodes.find((s) => s.name === flags['--status']);
@@ -183,6 +194,7 @@ export function createCli({ api, state, readStdin }) {
 
   async function list({ flags }) {
     const teamKey = flags['--team-key'];
+    inScope(teamKey);
     const types = flags['--status']?.length ? [...new Set(flags['--status'])] : OPEN_TYPES;
     const issues = [];
     let after = null;
@@ -202,6 +214,10 @@ export function createCli({ api, state, readStdin }) {
 
   async function onboard({ args: [repo], flags }) {
     const key = flags['--key'];
+    // Before anything is created: a corrupt registry throws here, and a key that is another repository's is refused.
+    const taken = (registry) => Object.entries(registry).find(([other, e]) => other !== repo && e?.key === key)?.[0];
+    const clash = taken(readRegistry(state));
+    if (clash) throw new Refused(`key ${key} is already the team of ${clash}; nothing was changed`);
     const find = async (k) => (await q(`query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key name ${STATES} } } }`, { key: k }))?.teams?.nodes?.[0] ?? null;
     let team = await find(key);
     let createdTeam = false;
@@ -228,11 +244,13 @@ export function createCli({ api, state, readStdin }) {
       }
       createdState = true;
     }
-    const registry = readRegistry(state);
     const now = { key, teamId: team.id };
-    const had = registry[repo];
-    const changed = !had || had.key !== now.key || had.teamId !== now.teamId;
-    if (changed) writeRegistry(state, { ...registry, [repo]: now });
+    const changed = await updateRegistry(state, (registry) => {
+      const other = taken(registry);
+      if (other) throw new Refused(`key ${key} is already the team of ${other}; the registry was not changed`);
+      const had = registry[repo];
+      return !had || had.key !== now.key || had.teamId !== now.teamId ? { ...registry, [repo]: now } : null;
+    });
     return {
       ok: true, repo, key, teamId: team.id, createdTeam, createdState, registered: changed,
       ...(createdTeam ? { next: `Grant the Factory app the team ${key} with one click: Settings → AI & Agents.` } : {}),

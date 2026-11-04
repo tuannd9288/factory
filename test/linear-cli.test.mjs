@@ -2,7 +2,7 @@
 // mutation and the fields the verb really sends. Every id and token below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLinear } from '../bin/lib/linear.mjs';
@@ -12,6 +12,7 @@ import { writeAppFile } from '../bin/lib/token.mjs';
 const json = (status, body) => ({ status, ok: status < 400, text: async () => JSON.stringify(body) });
 const st = (id, name, type, position) => ({ id, name, type, position });
 const TOKEN = 'lin_cli_token_0001';
+const SECRET = 'invented-client-secret-0001';
 
 /** A fake Linear with one team FAC; `teams` is the workspace's teams by key. */
 function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFails = false, failIssueUpdate = false } = {}) {
@@ -38,7 +39,7 @@ function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFa
       return json(200, { data: { workflowStateCreate: { success: true } } });
     }
     if (q.includes('teams(')) return json(200, { data: { teams: { nodes: f.teams[v.key] ? [f.teams[v.key]] : [] } } });
-    if (q.includes('issueUpdate')) return failIssueUpdate ? json(200, { errors: [{ message: `refused for ${TOKEN}` }] }) : json(200, { data: { issueUpdate: { success: true, issue: { id: 'issue-uuid-1', identifier: 'FAC-12' } } } });
+    if (q.includes('issueUpdate')) return failIssueUpdate ? json(200, { errors: [{ message: `refused for ${TOKEN} and ${SECRET}` }] }) : json(200, { data: { issueUpdate: { success: true, issue: { id: 'issue-uuid-1', identifier: 'FAC-12' } } } });
     if (q.includes('commentCreate')) return json(200, { data: { commentCreate: { success: true, comment: { id: `c-${f.comments.length}` } } } });
     if (q.includes('issueCreate')) return json(200, { data: { issueCreate: { success: true, issue: { id: 'new-1', identifier: 'FAC-99' } } } });
     if (q.includes('issues(')) {
@@ -64,7 +65,10 @@ function setup(opts) {
   const state = join(root, 'state');
   mkdirSync(state, { recursive: true });
   writeAppFile(agentProfiles, 'linear-app', 'client-id', 'invented-client-id-0001');
-  writeAppFile(agentProfiles, 'linear-app', 'client-secret', 'invented-client-secret-0001');
+  writeAppFile(agentProfiles, 'linear-app', 'client-secret', SECRET);
+  // The factory repository is on Linear, as the registry says.
+  mkdirSync(join(state, 'linear'), { recursive: true });
+  writeFileSync(registryFile(state), JSON.stringify({ factory: { key: 'FAC', teamId: 'team-fac' } }));
   const linear = fake(opts);
   const stdin = { text: 'the body\n' };
   const api = createLinear({ agentProfiles, state, fetchFn: (...a) => linear.fetchFn(...a), raise: () => {} });
@@ -76,7 +80,7 @@ const inputOf = (call) => call.variables.input;
 
 test('take sets the app as delegate and the first started status, and names no assignee', async () => {
   const { run, linear } = setup();
-  const r = await run(['take', 'FAC-12', '--team', 'factory-otter']);
+  const r = await run(['take', 'FAC-12', '--team', 'lead']);
   assert.equal(r.code, 0);
   const [m] = linear.mutations();
   assert.equal(m.variables.id, 'issue-uuid-1');
@@ -86,19 +90,19 @@ test('take sets the app as delegate and the first started status, and names no a
   const ms = linear.mutations();
   assert.equal(ms.length, 2);
   assert.equal(inputOf(ms[1]).issueId, 'issue-uuid-1');
-  assert.match(inputOf(ms[1]).body, /factory-otter/);
-  assert.equal(inputOf(ms[1]).createAsUser, 'factory-otter');
+  assert.match(inputOf(ms[1]).body, /lead/);
+  assert.equal(inputOf(ms[1]).createAsUser, 'lead');
 });
 
 test('take is the lock: it refuses an issue whose delegate is already the app, and writes nothing', async () => {
   const { run, linear } = setup();
   linear.issue.delegate = { id: 'app-user-1' };
-  const r = await run(['take', 'FAC-12', '--team', 'factory-otter']);
+  const r = await run(['take', 'FAC-12', '--team', 'lead']);
   assert.equal(r.code, 1);
   assert.match(r.out.error, /held/);
   assert.equal(linear.mutations().length, 0);
   linear.issue.delegate = { id: 'someone-else' };
-  assert.equal((await run(['take', 'FAC-12', '--team', 'factory-otter'])).code, 0, 'a delegate that is not the app does not hold it');
+  assert.equal((await run(['take', 'FAC-12', '--team', 'lead'])).code, 0, 'a delegate that is not the app does not hold it');
 });
 
 test('read gives the issue and every comment with its author, across pages', async () => {
@@ -143,17 +147,17 @@ test('list --status narrows the types, and refuses a type that is not open', asy
 
 test('comment posts one comment from the team, with the body from stdin', async () => {
   const { run, linear } = setup();
-  const r = await run(['comment', 'FAC-12', '--team', 'factory-otter', '--body-file', '-']);
+  const r = await run(['comment', 'FAC-12', '--team', 'lead', '--body-file', '-']);
   assert.equal(r.code, 0);
   const [m] = linear.mutations();
   assert.equal(inputOf(m).issueId, 'issue-uuid-1');
   assert.equal(inputOf(m).body, 'the body\n');
-  assert.equal(inputOf(m).createAsUser, 'factory-otter');
+  assert.equal(inputOf(m).createAsUser, 'lead');
 });
 
 test('ask moves to Needs Human, assigns the one owner, and posts one comment', async () => {
   const { run, linear } = setup();
-  const r = await run(['ask', 'FAC-12', '--team', 'factory-otter', '--body-file', '-']);
+  const r = await run(['ask', 'FAC-12', '--team', 'lead', '--body-file', '-']);
   assert.equal(r.code, 0);
   const ms = linear.mutations();
   assert.equal(ms.length, 2);
@@ -166,7 +170,7 @@ test('ask moves to Needs Human, assigns the one owner, and posts one comment', a
 for (const owners of [[], ['a', 'b']]) {
   test(`ask refuses when the workspace has ${owners.length} owners who are not apps, and writes nothing`, async () => {
     const { run, linear } = setup({ owners });
-    const r = await run(['ask', 'FAC-12', '--team', 'factory-otter', '--body-file', '-']);
+    const r = await run(['ask', 'FAC-12', '--team', 'lead', '--body-file', '-']);
     assert.equal(r.code, 1);
     assert.match(r.out.error, new RegExp(`found ${owners.length}`));
     assert.equal(linear.mutations().length, 0);
@@ -175,7 +179,7 @@ for (const owners of [[], ['a', 'b']]) {
 
 test('answered removes the assignee and moves back to the first started status', async () => {
   const { run, linear } = setup();
-  const r = await run(['answered', 'FAC-12', '--team', 'factory-otter']);
+  const r = await run(['answered', 'FAC-12', '--team', 'lead']);
   assert.equal(r.code, 0);
   const [m] = linear.mutations();
   assert.equal(inputOf(m).assigneeId, null);
@@ -246,12 +250,14 @@ test('onboard prints the by-hand instruction and exits 1 when Linear refuses the
   assert.equal(onLinear('probe', state), null);
 });
 
-test('a repository not in the registry is on GitHub; a bad registry file is none', () => {
+test('a repository not in the registry is on GitHub; a registry file that does not parse is refused, never read as empty', () => {
   const root = mkdtempSync(join(tmpdir(), 'linear-cli-'));
   assert.equal(onLinear('anything', root), null);
   mkdirSync(join(root, 'linear'));
-  writeFileSync(registryFile(root), '{not json');
-  assert.equal(onLinear('anything', root), null);
+  for (const bad of ['{not json', '[]', 'null', '"x"']) {
+    writeFileSync(registryFile(root), bad);
+    assert.throws(() => onLinear('anything', root), (e) => e.message.includes(registryFile(root)), bad);
+  }
   writeFileSync(registryFile(root), JSON.stringify({ a: { key: 'AAA', teamId: 't' } }));
   assert.equal(onLinear('a', root).key, 'AAA');
   assert.equal(onLinear('constructor', root), null);
@@ -280,6 +286,64 @@ test('no token appears in a result or an error', async () => {
   const { run, linear } = setup({ failIssueUpdate: true });
   const results = [await run(['take', 'FAC-12', '--team', 'x']), await run(['answered', 'FAC-12', '--team', 'x'])];
   assert.ok(results.every((r) => r.code === 1));
-  for (const r of results) assert.equal(JSON.stringify(r).includes(TOKEN), false);
+  for (const r of results) {
+    assert.equal(JSON.stringify(r).includes(TOKEN), false);
+    assert.equal(JSON.stringify(r).includes(SECRET), false, 'nor the client secret');
+  }
   assert.ok(linear.calls.length > 0);
+  assert.ok(linear.calls.every((c) => !JSON.stringify(c).includes(SECRET)), 'the secret is never sent to the GraphQL endpoint');
+});
+
+test('a write or a list on a team that is not a repository\'s is refused, and nothing is written; read still works', async () => {
+  const { run, linear } = setup();
+  linear.teams.INN = { id: 'team-inn', key: 'INN', name: 'InnoStack', states: { nodes: [st('i1', 'In Progress', 'started', 1), st('i2', 'Needs Human', 'started', 2)] } };
+  linear.issue = { id: 'inn-uuid', identifier: 'INN-22', delegate: null, team: linear.teams.INN };
+  for (const argv of [['take', 'INN-22', '--team', 'lead'], ['answered', 'INN-22', '--team', 'lead'], ['comment', 'INN-22', '--team', 'lead', '--body-file', '-'], ['ask', 'INN-22', '--team', 'lead', '--body-file', '-'],
+    ['create', '--team-key', 'INN', '--title', 'x', '--status', 'Triage', '--body-file', '-'], ['list', '--team-key', 'INN']]) {
+    const r = await run(argv);
+    assert.equal(r.code, 1, argv.join(' '));
+    assert.match(r.out.error, /not the team of a repository on Linear/);
+  }
+  assert.equal(linear.mutations().length, 0);
+  assert.equal(linear.calls.some((c) => c.query.includes('issues(')), false, 'a refused list asks Linear for nothing');
+  assert.equal((await run(['read', 'INN-22'])).code, 0);
+});
+
+test('--team is a team name of the factory\'s grammar', async () => {
+  const { run, linear } = setup();
+  for (const team of ['factory-otter', 'Lead', '1lead', 'a'.repeat(33), 'a b']) assert.equal((await run(['take', 'FAC-12', '--team', team])).code, 2, team);
+  assert.equal(linear.calls.length, 0);
+});
+
+test('onboard refuses a key that is already another repository\'s team, before it creates anything', async () => {
+  const { run, linear, state } = setup();
+  const r = await run(['onboard', 'other', '--key', 'FAC', '--name', 'other']);
+  assert.equal(r.code, 1);
+  assert.match(r.out.error, /already the team of factory/);
+  assert.equal(linear.calls.length, 0);
+  assert.equal(onLinear('other', state), null);
+});
+
+test('a registry that does not parse stops onboard and every scoped verb, and is left as it was', async () => {
+  const { run, linear, state } = setup();
+  writeFileSync(registryFile(state), '{broken');
+  for (const argv of [['onboard', 'probe', '--key', 'PRB', '--name', 'probe'], ['take', 'FAC-12', '--team', 'lead'], ['list', '--team-key', 'FAC']]) {
+    const r = await run(argv);
+    assert.equal(r.code, 1, argv.join(' '));
+    assert.match(r.out.error, /does not parse/);
+  }
+  assert.equal(linear.mutations().length, 0, 'nothing was created in Linear');
+  assert.equal(readFileSync(registryFile(state), 'utf8'), '{broken');
+});
+
+test('two onboards at once both reach the registry, and the lock is gone after', async () => {
+  const { run, linear, state } = setup();
+  linear.teams.AAA = { id: 'team-AAA', key: 'AAA', name: 'a', states: { nodes: [st('a1', 'Needs Human', 'started', 1)] } };
+  linear.teams.BBB = { id: 'team-BBB', key: 'BBB', name: 'b', states: { nodes: [st('b1', 'Needs Human', 'started', 1)] } };
+  const [a, b] = await Promise.all([run(['onboard', 'repoa', '--key', 'AAA', '--name', 'a']), run(['onboard', 'repob', '--key', 'BBB', '--name', 'b'])]);
+  assert.equal(a.code + b.code, 0);
+  assert.equal(onLinear('repoa', state).key, 'AAA');
+  assert.equal(onLinear('repob', state).key, 'BBB');
+  assert.equal(onLinear('factory', state).key, 'FAC');
+  assert.equal(existsSync(join(state, 'linear', 'repos.lock')), false);
 });
