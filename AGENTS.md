@@ -162,10 +162,11 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   words of 2026-10-31 in its body), #286 (his words of 2026-11-01 in its body), and on 2026-11-02, relayed by the
   factory-repo session, #256 and #330 ("#256 lệnh kiểm (Recommended), #330 test chập chờn (Recommended)"), #333
   ("Làm ngay trong release 1") and #335 ("Vá ngay, trước công tắc (Recommended)"); and on 2026-11-03, relayed by the
-  factory-repo session, #351 ("A trước đã"); and on 2026-11-03, relayed by Colly and the factory-repo session, #373, #374
-  and #352 ("Đồng thời cho xử lý luôn phần dùng Linear đi"); and on 2026-11-03, relayed by the factory-repo session, #370
-  ("trả lời i–vi: theo đề xuất", about 14:30 +07, whose (iii) is that the sweep wakes a Lead and the Lead keeps no watchers; and
-  "A", about 23:15 +07, relayed by Colly: one sweep on each Mac, the local inbox-socket wake, the cloud station after release 1).
+  factory-repo session, #351 ("A trước đã") and #369 ("trả lời i–vi: theo đề xuất", his answer vi); and on 2026-11-03,
+  relayed by Colly and the factory-repo session, #373, #374 and #352 ("Đồng thời cho xử lý luôn phần dùng Linear đi"); and
+  on 2026-11-03, relayed by the factory-repo session, #370 ("trả lời i–vi: theo đề xuất", about 14:30 +07, whose (iii) is
+  that the sweep wakes a Lead and the Lead keeps no watchers; and "A", about 23:15 +07, relayed by Colly: one sweep on each
+  Mac, the local inbox-socket wake, the cloud station after release 1).
   Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
@@ -175,6 +176,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 and
   https://github.com/tuannd9288/factory/issues/335#issuecomment-6568390675 and
   https://github.com/tuannd9288/factory/issues/351#issuecomment-6594728569 and
+  https://github.com/tuannd9288/factory/issues/369 and
   https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300 and
   https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A").
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
@@ -363,6 +365,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest. `factory lead <repo> [--team <name>] --here [-- <claude arguments>]` (#349) is the MacBook's own Lead, with no `gh` login and no git credential of the Human's; a push to GitHub over HTTPS fails, and git over ssh is off |
 | `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` on the Mac mini under the agents' login, by ssh; on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH: `~/.local/bin/factory` becomes a symlink to this clone's `bin/factory`; he runs it on the MacBook and as `factory` on the Mac mini; it can be run again and replaces nothing that is not already that symlink |
+| `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves |
 | `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
