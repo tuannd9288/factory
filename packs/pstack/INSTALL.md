@@ -1,13 +1,13 @@
 # Installing the pstack pack in a repository
 
 The pack is a folder a team copies; the kit does not lay it. A pack is what the factory holds only for one way of working, and
-a team copies it; the kit lays none (#132). `packs/pstack/` holds its scripts (`ship`, `live-verify`), `.gate/driver.json`, the
+a team copies it; the kit lays none (#132). `packs/pstack/` holds its scripts (`ship`, `pr-body`, `live-verify`), `.gate/driver.json`, the
 pin (`settings.json`), the prose for the repository's own `AGENTS.md` (`section.md`) and its sources (`yields.md`), two rows for
 `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that chooses it copies them in its own tier-3 pull request.
 There is no `.gate/pack` and no `--pack`. Run from the repository's root, with the factory
 checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.gate/` and `.claude/` are tier 3.
 
-1. `mkdir -p scripts/lib && cp -p $FACTORY/packs/pstack/scripts/ship scripts/ && cp -p
+1. `mkdir -p scripts/lib && cp -p $FACTORY/packs/pstack/scripts/ship $FACTORY/packs/pstack/scripts/pr-body scripts/ && cp -p
    $FACTORY/packs/pstack/scripts/lib/ship.mjs $FACTORY/packs/pstack/scripts/lib/driver.mjs scripts/lib/`. A `scripts/`
    the repository already has keeps its other files. `live-verify`, `lib/live-verify.mjs` and `lib/verdict.mjs` stay out
    until #264 is fixed (`yields.md`, "The live verifier").

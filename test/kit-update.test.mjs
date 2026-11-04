@@ -69,7 +69,19 @@ describe('bin/kit-update', () => {
       assert.equal(git(w.repo, 'log', '-1', '--format=%s', rev), `Bring the kit up to factory main ${sha7}`);
       assert.match(git(w.repo, 'log', '-1', '--format=%b', rev), new RegExp(full));
       assert.equal(readFileSync(w.title, 'utf8'), `Bring the kit up to factory main ${sha7}`);
-      const lines = text.split('\n');
+      // The body opens with the Human's summary (#386); the agents' detail follows in one <details> block, the header lines after it.
+      const [tldr, open, ...afterTldr] = text.split('\n\n');
+      const bullets = tldr.split('\n');
+      assert.equal(bullets[0], '**Tóm tắt cho anh**');
+      assert.deepEqual(bullets.slice(1).map((l) => l.match(/^- \*\*([^:]+):\*\* \S/)?.[1]), ['Thay đổi', 'Rủi ro', 'Đề xuất']);
+      // Its Thay đổi bullet counts the files added, updated and removed (2, 5, 1); its Rủi ro the files the repository has that
+      // the update touches (5 updated, 1 removed).
+      assert.match(bullets[1], /\b2\b.*\b5\b.*\b1\b/);
+      assert.match(bullets[2], /\b6\b/);
+      assert.equal(open, '<details>\n<summary>The change in detail</summary>');
+      assert.doesNotMatch(text, /TL;DR for the Human|Summary for the Human/);
+      assert.match(text.slice(text.indexOf('</details>')), /^<\/details>\n\nIssue: none\nTeam: factory\/kit-update\n?$/);
+      const lines = afterTldr.join('\n\n').split('\n');
       assert.match(lines[0], /: 2 files added, 5 updated, 1 removed;/);
       assert.deepEqual(lines.slice(0, 3).map((l) => l.split(':**')[0]), ['**What changed', '**Effect', '**Evidence']);
       // A blank line between, or the rule would turn the third line into a heading.
@@ -267,7 +279,9 @@ describe('bin/kit-update, after review', () => {
       const out = w.update(['app']);
       assert.equal(out.code, 0, out.out);
       const body = readFileSync(w.body, 'utf8');
-      const lines = body.split('\n');
+      assert.match(body, /^\*\*Tóm tắt cho anh\*\*\n- \*\*Thay đổi:\*\*/);
+      assert.ok(body.indexOf('<details>\n<summary>The change in detail</summary>\n\n') > 0 && body.indexOf('</details>') > body.indexOf('Kit evidence'));
+      const lines = body.slice(body.indexOf('</summary>\n\n') + 12).split('\n'); // inside the detail block (#386)
       // The gate reads two lines of this body (#133): the team that wrote it and that it answers no issue.
       const team = run(w.dir, process.execPath, [join(factory, 'kit/.gate/bin/lib/prbody.mjs'), '--team', w.body]);
       assert.equal(team.code, 0, team.out);
