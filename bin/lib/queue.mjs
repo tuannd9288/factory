@@ -21,6 +21,16 @@
 // Right after each repository's read it wakes the Lead that holds the issue of a new comment (#351, bin/lib/comment-wake.mjs), from fields
 // of the same query: a `comment` start line in the events and one line into the Lead's inbox socket. It adds a gh call only when the claim
 // refs read do not name the holder of a fresh comment's issue and there are more of them (claimLookup).
+// Beside it, from the same query (which also asks for each open pull request's body and `mergeable` and 10 merged ones),
+// it wakes the Lead on its news (#370, bin/lib/news-wake.mjs): a pull request's checks red or all green, a conflict, a merge, and, once
+// after the loop, a seat that ended or a run whose process is gone with no record. One `start` line each, one line into the Lead's
+// socket, no gh call; the start of a check-not-started condition wakes that pull request's Lead too. The merged ones are the 10 most
+// recently updated of the merged pull requests, the query having no order by merge time.
+// The news wake also reads every repository that has a team row (teamRows, bin/lib/teams.mjs) and is not taken in, the factory's own
+// among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and nothing else: no branch
+// update, no tier re-run, no comment wake (no claim is held there), no #309 condition, no switch watch beyond watchOwn's. Not with --repo.
+// The rules it read for the factory's own repository are handed to watchOwn, so they are read once in a sweep.
+// A pull request of the factory's own repository finds its Lead by its `Team:` line (`Team: lead` is `factory-lead`).
 // After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
@@ -32,17 +42,18 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, checkPlists, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
-import { FIELDS, readCursor, wakeOnComments } from './comment-wake.mjs';
+import { RED, failedCheck, pickReruns } from './checks.mjs';
+import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { noteGh, observe, resetNotes } from './events.mjs';
 import { clonesUnder } from './ledger.mjs';
+import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
 import { watchSwitch } from './switch-watch.mjs';
+import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 
-const RED = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ACTION_REQUIRED']);
 const CALL_MS = 60_000;
-const ENTIRE = 'Entire Gates';
 
 /** The pull request to update now, or null: the oldest one waiting on auto-merge behind its base whose required
  * checks did not fail (a failing one needs a new commit, which the gate judges anyway; a red tier check only waits on
@@ -58,8 +69,7 @@ export function pickUpdate(prs, required, position) {
   const waiting = prs.filter((p) => p.autoMerge && !p.isDraft);
   const check = (p, name) => p.checks[name] ?? p.apps?.[name];
   const judging = (p) => required.some((name) => !check(p, name) || check(p, name).state === 'PENDING');
-  const failed = (p) =>
-    required.some((name) => name !== 'tier' && (p.checks[name] ? RED.has(p.checks[name].state) : Boolean(p.apps?.[name]) && !['SUCCESS', 'PENDING'].includes(p.apps[name].state)));
+  const failed = (p) => required.some((name) => name !== 'tier' && failedCheck(p, name));
   const unapproved = (p) =>
     (p.labels.some((l) => l === 'tier-3' || l === 'needs-human') && p.checks.tier?.state !== 'SUCCESS') ||
     (position === 'none' && !p.approvals.some((a) => a.login !== p.author));
@@ -70,24 +80,11 @@ export function pickUpdate(prs, required, position) {
   return behind[0] ?? null;
 }
 
-/** The tier jobs to re-run, alone, so no reviewer runs again for a click: a failed tier check on a pull request that
- * someone other than its author approved on the head commit after that check started, so an approval landing while
- * the job ran is not lost, or (#155) whose Entire Gates check, of an App other than Actions, concluded after it
- * started. The tier check itself decides whether the approver may approve, and what Entire's conclusion means; it
- * pins Entire's App, so a copy of that name only costs one re-run. */
-export function pickReruns(prs) {
-  return prs
-    .filter((p) => RED.has(p.checks.tier?.state) && p.checks.tier.jobId)
-    .filter(
-      (p) =>
-        p.approvals.some((a) => a.login !== p.author && a.oid === p.head && a.at > p.checks.tier.startedAt) ||
-        (Boolean(p.apps?.[ENTIRE]?.completedAt) && p.apps[ENTIRE].completedAt > p.checks.tier.startedAt),
-    )
-    .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId }));
-}
+// pickReruns is in bin/lib/checks.mjs, where the wake on a Lead's news reads it too (#370); tests and callers still take it from here.
+export { pickReruns };
 
-const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} pullRequests(states:OPEN,first:100){nodes{
-number isDraft createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
+export const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} ${MERGED_FIELDS} pullRequests(states:OPEN,first:100){nodes{
+number isDraft body mergeable createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{id databaseId name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
 
@@ -99,7 +96,8 @@ const recordsQuery = (ids) => `query{nodes(ids:${JSON.stringify(ids)}){... on Ch
 // A failed call is noted for the events (#309: gh-refused) and thrown as before.
 const gh = (args) => {
   try {
-    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS });
+    // The query's answer carries the body of up to 110 pull requests (#370), which can pass execFileSync's 1 MiB default.
+    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS, maxBuffer: 64 * 1024 * 1024 });
   } catch (error) {
     noteGh(args, error);
     throw error;
@@ -128,6 +126,8 @@ function openPulls(repo, since) {
     return {
       number: p.number,
       isDraft: p.isDraft,
+      body: p.body ?? '',
+      mergeable: p.mergeable,
       createdAt: p.createdAt,
       mergeStateStatus: p.mergeStateStatus,
       base: p.baseRefName,
@@ -140,7 +140,8 @@ function openPulls(repo, since) {
       apps,
     };
   });
-  return { prs, issues, comments: { claims: data.data.repository.claims, recent: data.data.repository.recent } };
+  const merged = (data.data.repository.merged?.nodes ?? []).map((p) => ({ number: p.number, head: p.headRefOid, body: p.body ?? '', mergedAt: p.mergedAt }));
+  return { prs, issues, merged, comments: { claims: data.data.repository.claims, recent: data.data.repository.recent } };
 }
 
 /** The claim refs of exactly these issues, by name, in one query (#351): for the holders QUERY's first 100 refs did not reach, since GitHub
@@ -323,13 +324,19 @@ function sweep(repo, reads, state, switches, { self, folder, runs }) {
   const rules = pagesOf(rulesIn(repo));
   const required = requiredIn(rules);
   const asked = new Date().toISOString();
-  const { prs, issues, comments } = openPulls(repo, readCursor(state, repo)?.at);
-  reads.set(repo, { required, prs, issues });
+  const { prs, issues, merged, comments } = openPulls(repo, readCursor(state, repo)?.at);
+  reads.set(repo, { required, prs, issues, claims: comments.claims?.nodes, folder });
   // The wake on comments (#351) follows the read, and a failure of it never stops the sweep.
   try {
     wakeOnComments({ repo, folder, state, runs, data: comments, self, asked, lookup: (numbers) => claimLookup(repo, numbers) });
   } catch (error) {
     console.log(`queue: the comments of ${repo} were not handled: ${String(error.message).split('\n')[0]}`);
+  }
+  // So is the wake on the Lead's news (#370), beside it.
+  try {
+    wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });
+  } catch (error) {
+    console.log(`queue: the news of ${repo} was not handled: ${String(error.message).split('\n')[0]}`);
   }
   const { ran, position } = followSwitch(repo, state, rules, prs);
   if (position) switches.set(repo, watchSwitch({ state, repo, position }));
@@ -338,6 +345,38 @@ function sweep(repo, reads, state, switches, { self, folder, runs }) {
   if (!pr) return;
   gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
   console.log(`queue: updated ${repo}#${pr.number} to its base`);
+}
+
+/** The repositories with a team row (teamRows) that are not taken in, for the news wake alone (#370): { repo (owner/name), folder }, the
+ * factory's own among them (its folder is FACTORY_REPO and its clone is `root`). `taken` is the set of clone folders the sweep reads in
+ * full and `swept` the owner/name list it reads; `origin` names a clone's repository and is passed in for tests. A clone whose origin
+ * cannot be read is left out. */
+export function leadOnly({ state, root, taken, swept = [], origin = ownRepo }) {
+  const out = [];
+  for (const folder of new Set(teamRows(state, root).map((t) => t.repo))) {
+    if (taken.has(folder)) continue;
+    let repo;
+    try {
+      repo = origin(folder === FACTORY_REPO ? root : join(root, folder));
+    } catch {
+      continue;
+    }
+    if (repo && /^[\w.-]+\/[\w.-]+$/.test(repo) && !swept.includes(repo)) out.push({ repo, folder });
+  }
+  return out;
+}
+
+/** The sweep of a repository that is not taken in, for the news wake alone (#370): the rules' required checks and the same one query, then
+ * wakeOnNews. No branch update, no tier re-run, no comment wake, no condition for the events and no switch watch. Returns the claim
+ * holders it read, for a seat's run that names no team. The rules it read are put in `rulesRead` (repo -> pages), for watchOwn, so the
+ * factory's own rules are read once in a sweep. */
+function sweepNews(repo, folder, state, runs, rulesRead) {
+  const rules = pagesOf(rulesIn(repo));
+  rulesRead.set(repo, rules);
+  const required = requiredIn(rules);
+  const { prs, merged, comments } = openPulls(repo);
+  wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });
+  return holders(comments.claims?.nodes);
 }
 
 /** A process's start time as ps prints it, or null: with the pid it names one process, so a reused pid differs. */
@@ -495,15 +534,16 @@ function ownRepo(root) {
 
 /** The merge switch of the factory's own repository (#333), which the sweep does not otherwise read: its rules in force on main, one
  * call, and none of its pull requests. Not read where there is no checkout, or when `swept` holds it already. A failure is told in a
- * line and leaves the switch's condition as it was. */
-function watchOwn(state, swept, switches) {
+ * line and leaves the switch's condition as it was. `rulesRead` holds the rules the news read already took this sweep (repo -> pages):
+ * they are used in place of a second read. */
+function watchOwn(state, swept, switches, rulesRead = new Map()) {
   const root = checkoutRoot();
   if (!root) return;
   let own;
   try {
     own = ownRepo(root);
     if (!own || swept.includes(own)) return;
-    const position = positionOf(pagesOf(rulesIn(own)));
+    const position = positionOf(rulesRead.get(own) ?? pagesOf(rulesIn(own)));
     switches.set(own, watchSwitch({ state, repo: own, position }));
   } catch (error) {
     console.log(`queue: the merge switch of ${own ?? 'the factory'} could not be read (${String(error.stderr || error.message).trim().split('\n')[0]})`);
@@ -538,7 +578,9 @@ function recordEvents(state, reads, switches) {
   const failure = join(state, 'queue-events.failed');
   try {
     const home = process.env.HOME;
-    observe({ state, reads, switches, runs: process.env.FACTORY_RUNS ?? join(home, 'factory-runs'), agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles') });
+    const runs = process.env.FACTORY_RUNS ?? join(home, 'factory-runs');
+    const seen = new Set();
+    observe({ state, reads, switches, runs, agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles'), onStart: (condition) => wakeStarted({ condition, reads, runs, seen }) });
     rmSync(failure, { force: true });
   } catch (error) {
     mkdirSync(state, { recursive: true });
@@ -751,7 +793,27 @@ function main(argv) {
         failed += 1;
       }
     }
-    watchOwn(state, swept, switches);
+    // A repository with a team row that is not taken in, the factory's own among them, is read for the news wake alone (#370); not with
+    // an explicit --repo list.
+    const heldBy = new Map([...reads.values()].map((d) => [d.folder, holders(d.claims)]));
+    const rulesRead = new Map();
+    if (!repos.length) {
+      const root = process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+      for (const { repo, folder } of leadOnly({ state, root, taken: new Set([...clones.values()].map((d) => basename(d))) })) {
+        try {
+          heldBy.set(folder, sweepNews(repo, folder, state, runs, rulesRead));
+        } catch (error) {
+          console.log(`queue: the news of ${repo} was not read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
+        }
+      }
+    }
+    // The seats' news (#370) is the host's, not a repository's: once, after the loop, with the claim holders the loop read.
+    try {
+      wakeOnSeats({ state, runs, heldBy });
+    } catch (error) {
+      console.log(`queue: the seats' news was not handled: ${String(error.message).split('\n')[0]}`);
+    }
+    watchOwn(state, swept, switches, rulesRead);
     return failed ? 1 : 0;
   } finally {
     recordEvents(state, reads, switches);
