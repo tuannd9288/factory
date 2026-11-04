@@ -170,7 +170,10 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   session, #375 ("đề xuất 1: làm ngay sau #370", on 2026-11-03 about 23:00 +07, and "Chốt giải pháp B Linear, tập trung
   xử lý các việc để chạy trên Linear.", on 2026-11-04 at 14:16 +07) and #399 ("Về cái sweep thì triển khai luôn đi, chứ
   sao chờ?", on 2026-11-04 at 14:06 +07, 07:06:31Z: the sweep becomes a daemon, the piggery way). He parked #369 on
-  2026-11-04 ("5 ok.", 14:47 +07).
+  2026-11-04 ("5 ok.", 14:47 +07). Relayed by Colly and the factory-repo session, #408 leaves the freeze with his words
+  on the ADLC page, 2026-11-04 at 14:41 +07, 07:41:26Z: "Về ADLC thì tau thấy 1 và 2 có thể sau, 3 thì nên làm luôn
+  trong bản 1? Mày thấy sao?" and Colly agreed. Items 1 and 2 (#371's probe, managed settings) stay in Triage; item 3
+  is #408: a reviewer finding of one kind on two merged pull requests is listed in the weekly digest for an enforcer.
   Sources:
   https://github.com/tuannd9288/factory/issues/131#issuecomment-6460556380,
   https://github.com/tuannd9288/factory/issues/203#issuecomment-6561931880,
@@ -184,7 +187,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/373#issuecomment-6607020300 and
   https://github.com/tuannd9288/factory/issues/370#issuecomment-6609218324 (his "A") and
   https://github.com/tuannd9288/factory/issues/375 (its body and comments) and
-  https://github.com/tuannd9288/factory/issues/399 (its body).
+  https://github.com/tuannd9288/factory/issues/399 (its body) and
+  https://github.com/tuannd9288/factory/issues/408 (its body).
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and
