@@ -414,7 +414,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves. Its job's command, `sweep` with no repository, starts the daemon when nobody answers; `sweep --once` and `sweep --repo` run one pass in-process (#399) |
 | `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery. It lives on a lease from the job's pings: `launchctl bootout` of the job stops it within about three minutes; to stop it at once, or before re-installing a changed plist, check that the pid in `$FACTORY_STATE/daemon.lock` is the daemon (`ps -p <pid> -o command=` ends in `bin/lib/daemon.mjs`; a stale lock can name a reused pid), then send it SIGTERM |
-| `bin/lib/linear.mjs` | The only code that talks to Linear's API, as the Factory app (#403): one token source in `tokens/linear-app/` (client id and secret, the minted token with its expiry), minted under a lock with one fixed set of scopes and renewed 7 days ahead by the daemon's pass; an authentication failure re-reads, mints once and then raises `linear-auth-failed`; writes pass `createAsUser`; `factory login linear-app client-id\|client-secret` stores the credentials; the header has the rest |
+| `bin/lib/linear.mjs` | The only code that talks to Linear's API, as the Factory app (#403): one token source in `tokens/linear-app/` (client id and secret, the minted token with its expiry), minted under a lock with one fixed set of scopes and renewed 7 days ahead by the daemon's pass; an authentication failure re-reads, mints once and then raises `linear-auth-failed` (a request sends three times and mints twice at most), and any success clears it; writes pass `createAsUser`; `factory login linear-app client-id\|client-secret` stores the credentials; the header has the rest |
 | `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
 | `bin/factory-events` | What the sweep tells Colly (#309): the `start` lines of `$FACTORY_STATE/events.jsonl` after its cursor; `--follow` moves the cursor and follows the file; the header has the ssh command |
@@ -478,9 +478,9 @@ Claude Code updates itself on the stable channel; nothing in the factory pins th
 (`kit/.gate/bin/reviewer/package.json`, `kit/.gate/bin/lib/reviewer.json`). The digest's job is in `bin/factory-ledger`'s header,
 and the alerts hook's in `bin/factory-alerts`'s.
 
-The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of six conditions begins (a required check
+The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of seven conditions begins (a required check
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, the sweep's own `gh` refused,
-a repository's merge switch moved)
+a repository's merge switch moved, the Factory app's Linear token refused, raised by `bin/lib/linear.mjs`)
 and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
 starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out. The sweep also writes

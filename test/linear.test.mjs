@@ -2,10 +2,10 @@
 // secret and token below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readActive, readLines } from '../bin/lib/events.mjs';
+import { readActive, readLines, record } from '../bin/lib/events.mjs';
 import { accountList, accountRefusal, tokenAccounts, tokenDir } from '../bin/lib/token.mjs';
 
 const lib = () => import('../bin/lib/linear.mjs');
@@ -73,7 +73,6 @@ test('mint asks for the one fixed set of scopes, stores the token with its expir
   assert.equal(linear.mints.length, 1);
   assert.equal(linear.mints[0].grant_type, 'client_credentials');
   assert.equal(linear.mints[0].scope, SCOPES.join(','));
-  assert.equal(linear.mints[0].actor, 'app');
   const file = join(tokenDir(f.agentProfiles), 'linear-app', 'access.json');
   assert.equal(statSync(file).mode & 0o777, 0o600);
   const stored = JSON.parse(readFileSync(file, 'utf8'));
@@ -194,20 +193,58 @@ test('a refused mint is a loud stop too, and the error holds no secret or token'
   assert.ok(!raised[0].includes(SECRET));
 });
 
-test('an error from Linear that echoes the token is scrubbed', async () => {
+test('a non-auth error whose text holds the token sent and the client secret is scrubbed from the message and the events', async () => {
   const f = fixture();
   await configure(f);
-  const linear = fakeLinear({ echoSecret: true });
+  const linear = fakeLinear();
   const { api, raised } = await make(f, linear);
-  await api.token();
-  linear.valid = new Set();
-  const failing = linear.fetchFn;
-  linear.fetchFn = async (url, init) => (url.endsWith('/oauth/token') ? json(500, { error: 'down' }) : failing(url, init));
+  const good = linear.fetchFn;
+  linear.fetchFn = async (url, init) => (url.endsWith('/oauth/token')
+    ? good(url, init)
+    : json(200, { errors: [{ message: `bad input for ${init.headers.authorization.replace('Bearer ', '')} and ${SECRET} and lin_oauth_abcdefghijklmnop12` }] }));
   let message = '';
   await api.request('query { x }').catch((e) => { message = e.message; });
-  assert.ok(message.length > 0);
-  assert.ok(!message.includes('lin_1'));
-  assert.ok(raised.every((r) => !r.includes('lin_1') && !r.includes(SECRET)));
+  assert.match(message, /Linear answered HTTP 200/);
+  for (const s of ['lin_1', SECRET, 'lin_oauth_abcdefghijklmnop12']) assert.ok(!message.includes(s));
+  const events = existsSync(join(f.state, 'events.jsonl')) ? readFileSync(join(f.state, 'events.jsonl'), 'utf8') : '';
+  for (const s of ['lin_1', SECRET]) assert.ok(!events.includes(s));
+  assert.deepEqual(raised, []);
+});
+
+test('any success clears the raised condition, a first-send success included, and writes a line only when it was raised', async () => {
+  const f = fixture();
+  await configure(f);
+  const linear = fakeLinear();
+  const { createLinear } = await lib();
+  const api = createLinear({ ...f, fetchFn: linear.fetchFn, team: 'factory-otter' });
+  await api.token();
+  record({ state: f.state, found: [{ key: 'linear-auth-failed', scope: 'linear', top: true, text: 'raised' }], read: new Set() });
+  assert.ok(readActive(f.state).conditions['linear-auth-failed']);
+  await api.request('query { x }');
+  assert.equal(linear.calls.length, 1); // no retry was needed
+  assert.equal(readActive(f.state).conditions['linear-auth-failed'], undefined);
+  assert.equal(readLines(f.state).filter((e) => e.type === 'clear').length, 1);
+  await api.request('query { x }');
+  assert.equal(readLines(f.state).length, 2); // the start and the clear, nothing from the second success
+});
+
+test('a symlinked app folder is refused: nothing is written through it, read from it or locked in it', async () => {
+  const f = fixture();
+  const away = join(f.root, 'away');
+  mkdirSync(away);
+  mkdirSync(tokenDir(f.agentProfiles), { recursive: true });
+  symlinkSync(away, join(tokenDir(f.agentProfiles), 'linear-app'));
+  const { writeAppFile } = await import('../bin/lib/token.mjs');
+  assert.throws(() => writeAppFile(f.agentProfiles, 'linear-app', 'client-secret', SECRET), /symlink/);
+  assert.deepEqual(readdirSync(away), []);
+  writeFileSync(join(away, 'client-id'), 'invented-client-id-0001\n');
+  writeFileSync(join(away, 'client-secret'), `${SECRET}\n`);
+  const linear = fakeLinear();
+  const { api } = await make(f, linear);
+  await assert.rejects(() => api.token(), /symlink/);
+  assert.equal(await api.renew().catch((e) => e.message.includes('symlink')), true);
+  assert.equal(linear.mints.length, 0);
+  assert.deepEqual(readdirSync(away).sort(), ['client-id', 'client-secret']);
 });
 
 test('commentCreate passes the team as createAsUser and no icon until one is hosted', async () => {

@@ -13,11 +13,13 @@
 //   An authentication failure (HTTP 401, or an error whose code says authentication, or a message that says "authenticate"): the caller re-reads
 //   the store and retries once with a token another caller stored there; if it still fails, it mints once under the lock and retries once; if that
 //   fails too it raises the condition `linear-auth-failed` (a `start` line in events.jsonl and a line in `factory top`, bin/lib/events.mjs) and
-//   throws. A refused mint raises it too. A success after that clears it. Nothing here loops: a request makes two sends and one mint at most.
+//   throws. A refused mint raises it too. Any success after that clears it. Nothing here loops: a request makes three sends and two mints at most
+//   (token() may mint, then the first send, the send with a token another caller stored, the retry's mint and the send with its token).
+//   A symlinked tokens/linear-app is refused: nothing is read from it or written to it.
 //   Nothing printed, thrown or written holds the secret or a token: messages are built from a status and a code, and scrubbed of the values in play.
 //   Writes show their team: every comment and issue passes createAsUser (the team's name) and, once an icon is hosted (ICON_URL), displayIconUrl,
 //   so Linear shows "<team> (via Factory)". `delegateToApp` sets the app as an issue's delegate (`delegateId`, the app's own user id).
-import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readActive, record } from './events.mjs';
 import { redact } from './redact.mjs';
@@ -62,7 +64,17 @@ export function createLinear({
   const lockDir = join(folder, 'mint.lock');
   let appId = null;
 
-  const secrets = () => ['client-id', 'client-secret'].map((n) => readTokenFile(join(folder, n)).token).filter(Boolean);
+  /** Whether the app's folder is no symlink (a missing folder is none either). */
+  const plain = () => {
+    try {
+      return !lstatSync(folder).isSymbolicLink();
+    } catch {
+      return true;
+    }
+  };
+  const symlinked = () => `${folder} is a symlink; nothing was read from it or written to it`;
+
+  const secrets = () => (plain() ? ['client-id', 'client-secret'].map((n) => readTokenFile(join(folder, n)).token).filter(Boolean) : []);
   /** The text with the secrets, and any token in play, hidden, then redacted, one line, at most 200 characters. */
   const scrub = (text, extra = []) => {
     let out = String(text);
@@ -72,6 +84,7 @@ export function createLinear({
   const fail = (message, extra = []) => new Error(scrub(message, extra));
 
   const credentials = () => {
+    if (!plain()) return null;
     const id = readTokenFile(join(folder, 'client-id'));
     const secret = readTokenFile(join(folder, 'client-secret'));
     return id.token && secret.token ? { id: id.token, secret: secret.token } : null;
@@ -79,6 +92,7 @@ export function createLinear({
 
   /** access.json as { token, expiresAt, scope }, or null for none or one that does not read. */
   const readStored = () => {
+    if (!plain()) return null;
     try {
       const s = JSON.parse(readFileSync(join(folder, 'access.json'), 'utf8'));
       return typeof s?.token === 'string' && /^[\x21-\x7e]+$/.test(s.token) && Number.isFinite(s.expiresAt) ? s : null;
@@ -112,6 +126,7 @@ export function createLinear({
   };
 
   async function withLock(fn) {
+    if (!plain()) throw fail(symlinked());
     mkdirSync(folder, { recursive: true, mode: 0o700 });
     const until = Date.now() + LOCK_WAIT_MS;
     for (;;) {
@@ -139,6 +154,7 @@ export function createLinear({
   /** The stored token if it lasts `ahead` and is not one in `failed`; else a new one, minted under the lock after a re-read of the store.
    * Returns { token, minted }. */
   async function mint({ ahead = GRACE_MS, failed = [] } = {}) {
+    if (!plain()) throw fail(symlinked());
     if (!credentials()) throw fail('the Factory app is not configured: its client id and secret are not stored');
     return withLock(async () => {
       const stored = readStored();
@@ -152,7 +168,7 @@ export function createLinear({
           method: 'POST',
           signal: AbortSignal.timeout(REQUEST_MS),
           headers: { 'content-type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ grant_type: 'client_credentials', client_id: c.id, client_secret: c.secret, scope: SCOPES.join(','), actor: 'app' }).toString(),
+          body: new URLSearchParams({ grant_type: 'client_credentials', client_id: c.id, client_secret: c.secret, scope: SCOPES.join(',') }).toString(),
         });
         body = JSON.parse(await res.text());
       } catch (error) {
@@ -176,6 +192,7 @@ export function createLinear({
   /** Mints when less than RENEW_AHEAD_MS is left: 'renewed', 'kept', or 'unconfigured' when no credentials are stored. Throws (after raising the
    * condition) when the mint fails. */
   async function renew() {
+    if (!plain()) throw fail(symlinked());
     if (!credentials()) return 'unconfigured';
     if (lasts(readStored(), RENEW_AHEAD_MS)) return 'kept';
     return (await mint({ ahead: RENEW_AHEAD_MS })).minted ? 'renewed' : 'kept';
@@ -196,23 +213,23 @@ export function createLinear({
   async function request(query, variables = {}) {
     const used = await token();
     const tried = [used];
-    const done = (r, mended) => {
+    const done = (r) => {
       if (r.status >= 400 || r.body?.errors?.length) throw fail(`Linear answered HTTP ${r.status}: ${r.body?.errors?.[0]?.message ?? 'no data'}`, tried);
-      if (mended) settle();
+      settle();
       return r.body?.data;
     };
     let r = await send(used, query, variables);
-    if (!isAuthFailure(r.status, r.body)) return done(r, false);
+    if (!isAuthFailure(r.status, r.body)) return done(r);
     const stored = readStored();
     if (lasts(stored, GRACE_MS) && !tried.includes(stored.token)) {
       tried.push(stored.token);
       r = await send(stored.token, query, variables);
-      if (!isAuthFailure(r.status, r.body)) return done(r, true);
+      if (!isAuthFailure(r.status, r.body)) return done(r);
     }
     const fresh = (await mint({ failed: tried })).token;
     tried.push(fresh);
     r = await send(fresh, query, variables);
-    if (!isAuthFailure(r.status, r.body)) return done(r, true);
+    if (!isAuthFailure(r.status, r.body)) return done(r);
     throw loud(`Linear fails authentication with a token minted just now (HTTP ${r.status})`, tried);
   }
 

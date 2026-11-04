@@ -87,6 +87,13 @@ export function writeAppFile(agentProfiles, app, name, text) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const folder = appDir(agentProfiles, app);
+  let fst = null;
+  try {
+    fst = lstatSync(folder);
+  } catch {
+    // no folder yet: made below
+  }
+  if (fst?.isSymbolicLink()) throw new Error(`${folder} is a symlink; nothing was stored`);
   mkdirSync(folder, { recursive: true, mode: 0o700 });
   chmodSync(folder, 0o700);
   const tmp = join(folder, `.${name}.${process.pid}.tmp`);
