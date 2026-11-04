@@ -336,7 +336,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
 - Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
   with the kit template's `## TL;DR for the Human`, in plain English, his only section; the agents' detail is collapsed
-  below it (#386).
+  below it (#386). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|

@@ -1,5 +1,5 @@
 ## TL;DR for the Human
-<!-- Tier 3 only: delete this whole section on tier 1 and 2. Plain English for a reader who is not technical; no commit ids, no file paths. Any decision for the Human goes in its last line, numbered, each with your recommendation. -->
+<!-- Tier 3 only: delete this whole section on tier 1 and 2. The title carries no issue number; the issue is in `Issue:`. Plain English for a reader who is not technical; no commit ids, no file paths. Any decision for the Human goes in its last line, numbered, each with your recommendation. -->
 - **What you will see:** (what looks or behaves differently to you, in a sentence or two)
 - **What changes:** (what this pull request does)
 - **What it fixes:** (the problem or the need behind it)

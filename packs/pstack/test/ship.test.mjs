@@ -170,6 +170,25 @@ describe('opening the pull request', () => {
     assert.equal(w.read('lv-calls'), '', 'it opens, and goes no further in the same run');
   });
 
+  test('takes the title from the last subject without its trailing issue number, and --title as given', () => {
+    let w = world();
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Print three (#12)');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Print three --body-file /);
+    w = world();
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Print two --body-file /);
+    w = world();
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Print three (#12)');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    assert.equal(w.ship(['--body-file', join(w.dir, 'body.md'), '--title', 'Given (#12)']).code, 0);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Given \(#12\) --body-file /);
+  });
+
   test('refuses a body that still holds the template\'s placeholder', () => {
     const w = world();
     w.passed();
