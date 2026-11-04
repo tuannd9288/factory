@@ -1197,6 +1197,12 @@ export async function textOf(mode, { width = 80, after = null, deadlineMs = mode
   return { text: await make(await snapshot({ shared: true, ...opts, offline: true })), late: true };
 }
 
+// The live loop reads nothing once nobody has pressed a key for this long (#396).
+export const IDLE_MS = 600_000;
+
+/** Whether the live loop's tick reads: yes until `IDLE_MS` has passed since the last key. */
+export const readDue = ({ lastKeyAt, now }) => now - lastKeyAt < IDLE_MS;
+
 async function loop(opts) {
   const out = process.stdout;
   const cache = {};
@@ -1204,13 +1210,23 @@ async function loop(opts) {
   let tab = 0;
   let full = Boolean(opts.full);
   let busy = false;
+  let lastKeyAt = Date.now();
+  let paused = false;
   const draw = () => {
     if (!snap) return;
-    const text = render(snap, { width: out.columns ?? 120, tab, rows: out.rows ?? null, full, color: opts.color, keys: true }).split('\n').map((l) => `${l}\x1b[K`).join('\n');
+    const frame = render(snap, { width: out.columns ?? 120, tab, rows: out.rows ?? null, full, color: opts.color, keys: true });
+    const text = (paused ? `paused: no key for ${IDLE_MS / 60_000} min, nothing is read; any key resumes\n${frame}` : frame).split('\n').map((l) => `${l}\x1b[K`).join('\n');
     out.write(`\x1b[H${text}\x1b[J`);
   };
   const tick = async () => {
     if (busy) return;
+    if (!readDue({ lastKeyAt, now: Date.now() })) {
+      if (!paused) {
+        paused = true;
+        draw();
+      }
+      return;
+    }
     busy = true;
     try {
       snap = await snapshot({ ...opts, cache, now: Date.now(), shared: true });
@@ -1238,6 +1254,11 @@ async function loop(opts) {
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (key) => {
     if (key === 'q' || key === '\x03') return process.exit(0);
+    lastKeyAt = Date.now();
+    if (paused) {
+      paused = false;
+      tick();
+    }
     const count = snap ? tabsOf(snap).length : 1;
     if (key === 'c') full = !full;
     else if (key === '\t') tab = (tab + 1) % count;
