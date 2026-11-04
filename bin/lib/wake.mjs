@@ -4,7 +4,8 @@
 // factory repository's own Lead), since the path changes on every restart. The line is piggery's form (internal/cli/mcp.go, `nudge`, MIT):
 // one JSON object { type: "user", message: { content } } and a newline, with no `priority` (it would abort a running tool) and no auth
 // line: the token Claude Code exports (CLAUDE_CODE_MESSAGING_TOKEN) is never read here. Claude Code drops identical repeats, so each line
-// names a number that differs on every post.
+// names a number that differs on every post. Two lines are built here: wakeLine, for a new comment (#351), and newsLine, for the sweep's
+// news of a Lead's seat, checks and pull request (#370, bin/lib/news-wake.mjs).
 import { spawnSync } from 'node:child_process';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { createConnection } from 'node:net';
@@ -17,9 +18,18 @@ let counter = 0;
 
 /** The line to post for a new comment on `repo`#`issue`. The number in it is the time in ms and a counter of this process. */
 export function wakeLine(repo, issue, now = Date.now()) {
+  return envelope((n) => `[factory] wake #${n}: new comment on ${repo}#${issue}; re-read the issue.`, now);
+}
+
+/** The line to post for news of a Lead's work (#370): the kind (seat-ended, checks-red, merged...), what happened and where to read it (a
+ * run folder's log, or a pull request's URL). It names the news and carries no content from it and no authority; the number is as wakeLine's. */
+export function newsLine(kind, what, where, now = Date.now()) {
+  return envelope((n) => `[factory] wake #${n}: ${kind}: ${what}; read ${where}.`, now);
+}
+
+function envelope(content, now) {
   counter += 1;
-  const content = `[factory] wake #${now}-${counter}: new comment on ${repo}#${issue}; re-read the issue.`;
-  return `${JSON.stringify({ type: 'user', message: { content } })}\n`;
+  return `${JSON.stringify({ type: 'user', message: { content: content(`${now}-${counter}`) } })}\n`;
 }
 
 /** The path a hook recorded in `file`, without a leading `uds:`, or null when there is no such file or it is empty. */
