@@ -95,10 +95,18 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   from the chat he relayed on #98: "Không dùng tiếng việt ở workspaces, chỉ giải thích tau bằng tiếng việt, thuật ngữ,
   code,status ... tiếng anh. Các repo trong workspace thì codebase này kia cũng tiếng anh theo chuẩn quốc tế, UI Text,...
   thì tuỳ vào dự án." A quote keeps his words. The one exception, from 2026-11-04: a tier-3 pull request's body opens with
-  a short Vietnamese summary for him, `**Tóm tắt cho anh**` and its three lines, which is the repository's only
-  Vietnamese. His "1. ok theo đề xuất." (about 12:05 +07, relayed by Colly) answers Colly's question: "(a) Tiếng Việt, 3
-  dòng như mẫu trên, thay khung tiếng Anh. Đây là ngoại lệ duy nhất của luật 'repo chỉ tiếng Anh', vì khung này chỉ để
-  mày đọc." Sources: https://github.com/tuannd9288/factory/issues/98 and https://github.com/tuannd9288/factory/issues/386.
+  a short Vietnamese summary for him, `**Tóm tắt cho anh**` and its lines (Anh quyết, Đề xuất, Rủi ro), which is the
+  repository's only Vietnamese. His "1. ok theo đề xuất." (about 12:05 +07, relayed by Colly) answers Colly's question:
+  "(a) Tiếng Việt, 3 dòng như mẫu trên, thay khung tiếng Anh. Đây là ngoại lệ duy nhất của luật 'repo chỉ tiếng Anh',
+  vì khung này chỉ để mày đọc." Then, the same day at 15:15 +07, relayed by Colly and the factory-repo session: "Đồng
+  thời phần tóm tắt cho anh viết gọn TLTR kiểu đấy đi, có nên song ngữ không?" and "Song ngữ chỉ cho TLTR ấy"; and on
+  INN-16 at 16:30:11 +07 (09:30:11Z): "theo đề xuất", his choice A. So the summary is two blocks, the Vietnamese one
+  and, after it, `**TL;DR**` with the same lines in English (You decide, Recommendation, Risk), each line one
+  sentence, the order the same as on an INN item; a fourth line, "Nếu không trả lời" / "If no answer", appears only
+  when silence has a consequence. Only these two blocks are bilingual, and the Vietnamese block alone is the
+  repository's Vietnamese.
+  Sources: https://github.com/tuannd9288/factory/issues/98, https://github.com/tuannd9288/factory/issues/386 and
+  https://github.com/tuannd9288/factory/issues/411.
 - **Control surfaces (#68), 2026-10-25 to 2026-10-31.** The factory runs on Ghostty and Herdr until it is finished,
   and Rex and Paseo are rolled out after that. His words to Colly in chat, relayed by Colly: "trước mắt cứ chạy với
   ghostty + herdr cho hoàn thành cái factory rồi triển khai rex và paseo" (2026-10-29), and "nếu đang bị mở rộng ra thì
@@ -389,8 +397,9 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
 - Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `**Tóm tắt cho anh**` and its three lines, in Vietnamese (Language, in Decisions), his only
-  section; the agents' detail is collapsed below it (#386). Its title carries no issue number, which stays in the body.
+  with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its `**TL;DR**`
+  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386,
+  #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|
