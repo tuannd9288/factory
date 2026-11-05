@@ -135,6 +135,7 @@ describe('leadArgs', () => {
       'Bash(.gate/bin/claim:*)', 'Bash(.gate/bin/tier:*)', 'Bash(.gate/bin/verify:*)', 'Bash(.gate/bin/red-check:*)',
       'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
       'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
+      'Bash(factory linear:*)',
       'Bash(' + root + '/bin/seat:*)',
       'Bash(' + root + '/bin/brief-check:*)',
     ]);

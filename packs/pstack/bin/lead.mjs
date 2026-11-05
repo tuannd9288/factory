@@ -18,6 +18,7 @@ import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
+import { onLinear } from '../../../bin/lib/linear-repos.mjs';
 import { DEFAULT_TEAM, TEAM, firstFree } from '../../../bin/lib/names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
@@ -25,6 +26,20 @@ import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../
 
 const USAGE = 'usage: factory lead <repo> [--team <name>] [--new] [--dry-run]   (--team names the team, default lead; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
 const TEAM_TOKEN = '{{TEAM}}'; // in lead.md where the team's name goes; nothing else in that text is written so
+const TEAM_KEY_TOKEN = '{{TEAMKEY}}'; // in the Linear form of lead.md: the repository's Linear team key, from the registry
+
+/** lead.md holds each issue step twice, between <!--github-->…<!--/github--> and <!--linear-->…<!--/linear-->. The text for a repository keeps
+ * one form and drops the other, markers included, so a Lead never sees both (#404). A span that starts a line takes its line break with it. */
+export function roleOf(text, linear) {
+  const drop = linear ? 'github' : 'linear';
+  const keep = linear ? 'linear' : 'github';
+  return text
+    .replace(new RegExp(`^<!--${drop}-->[\\s\\S]*?<!--/${drop}-->\\n`, 'gm'), '')
+    .replace(new RegExp(`<!--${drop}-->[\\s\\S]*?<!--/${drop}-->`, 'g'), '')
+    .replaceAll(`<!--${keep}-->`, '')
+    .replaceAll(`<!--/${keep}-->`, '');
+}
+
 const ROLE_CHANGED = '[factory] your role changed:'; // the head of a resumed session's first message (#316)
 const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/;
 
@@ -68,6 +83,7 @@ const allowOf = (root) => [
   'Bash(.gate/bin/claim:*)', 'Bash(.gate/bin/tier:*)', 'Bash(.gate/bin/verify:*)', 'Bash(.gate/bin/red-check:*)',
   'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
   'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
+  'Bash(factory linear:*)',
   `Bash(${join(root, 'bin/seat')}:*)`,
   `Bash(${join(root, 'bin/brief-check')}:*)`,
 ];
@@ -308,7 +324,16 @@ function main(argv, env) {
     return 2;
   }
   const rolePath = join(root, 'packs/pstack/lead.md');
-  const roleText = existsSync(rolePath) ? readFileSync(rolePath, 'utf8').replaceAll(TEAM_TOKEN, team) : '';
+  const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  let linear;
+  try {
+    linear = onLinear(repo, stateDir);
+  } catch (e) {
+    // A registry that does not parse would give every repository the GitHub form without a word: no start instead.
+    process.stderr.write(`bin/lead: ${e.message}\n`);
+    return 2;
+  }
+  const roleText = existsSync(rolePath) ? roleOf(readFileSync(rolePath, 'utf8'), Boolean(linear)).replaceAll(TEAM_TOKEN, team).replaceAll(TEAM_KEY_TOKEN, () => linear?.key ?? '') : '';
   if (!roleText.trim()) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;

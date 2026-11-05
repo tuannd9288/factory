@@ -198,6 +198,23 @@ describe('opening the pull request', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr create')));
   });
 
+  test('opens a body that carries Fixes <KEY> and Issue: <KEY> in place of the Closes line (#404), and refuses one that keeps the template\'s Issue line', () => {
+    const w = world();
+    w.passed();
+    const linear = BODY.replace('Closes #3\n', 'Fixes FAC-12\nIssue: FAC-12\n');
+    writeFileSync(join(w.dir, 'linear.md'), linear);
+    const out = w.ship(['--body-file', join(w.dir, 'linear.md')]);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^ship: opened #7 /m);
+    assert.equal(w.read('created-body'), linear);
+    const kept = world();
+    kept.passed();
+    writeFileSync(join(kept.dir, 'mixed.md'), BODY.replace('Closes #3\n', 'Fixes FAC-12\nIssue: #<issue labelled task>\n'));
+    const mixed = kept.ship(['--body-file', join(kept.dir, 'mixed.md')]);
+    assert.equal(mixed.code, 1, mixed.out);
+    assert.ok(!kept.calls().some((c) => c.startsWith('pr create')));
+  });
+
   test('is refused on main and on a detached head', () => {
     const w = world();
     git(w.repo, 'switch', '-q', 'main');
