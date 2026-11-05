@@ -12,9 +12,8 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
 `skills/poteto-mode/playbooks/` unless a path says otherwise):
 
 - **Force-push** (`shipping.md:8`, `babysit.md:10`, `autopilot-full.md:12`): `forcePush` in origin/main’s `.gate/driver.json` defaults to `pstack`: only your own PR branch with `--force-with-lease`, never main or from a babysit; `off` forbids rewrites (the Human, #436, 2026-11-05).
-- **Stacked pull requests** (`opening-a-pr.md:28`, `autopilot-stack.md:6`, `multi-phase-plan.md:57`: a base that is the
-  parent's branch; `shipping.md:8`: retarget to trunk with `gh pr edit --base`). `scripts/ship` opens with `--base main`
-  and refuses to arm any other base (`refused to arm #<n>: its base is <base>, not main`): no stack.
+- **Stacked pull requests** (`opening-a-pr.md:28-32`, `shipping.md` step 4, `autopilot-stack.md`): `stacks` in `.gate/driver.json` on `origin/main` defaults to `pstack`; `off` keeps the old refusal, and restacking merges `origin/main` into the child after retargeting to `main`.
+  The Human, 2026-11-05: "Thứ nhất PR Chồng PR là đúng, áp dụng cách đấy -> Factory đang làm lệch đi, hoặc là nó phải có công tắc. Trước tau nói cái nào khác thì đề xuất gạt công tắc mặc định giống pstack đầu tiên mà sao giờ vẫn lệch?"
 - **Merge by hand** (`shipping.md:8`: `gh pr merge <pr> --squash`). `factory-gate` allows merge commits only
   (`kit/.gate/ruleset.json:18`), and `scripts/ship` arms `--auto --merge`; nobody merges by hand.
 - **The pull request's title and body** (`opening-a-pr.md:11`, `:13`: a Conventional Commits title, a body that becomes
