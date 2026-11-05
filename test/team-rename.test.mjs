@@ -49,13 +49,14 @@ test('Linear holder moves through the CLI functions without changing issue statu
   const comments = [{ body: 'Taken by team lead.', createdAt: '0' }];
   o.api = {
     request: async (query) => query.includes('issues(filter:') ? { issues: { nodes: [{ id: 'i', identifier: 'FAC-4' }], pageInfo: {} } } : { issue: { comments: { nodes: comments, pageInfo: {} } } },
-    commentCreate: async ({ body }) => { comments.push({ body, createdAt: String(comments.length) }); return { commentCreate: { success: true, comment: { id: 'c' } } }; },
+    commentCreate: async ({ body, team }) => { comments.push({ body, team, createdAt: String(comments.length) }); return { commentCreate: { success: true, comment: { id: 'c' } } }; },
   };
   await renameTeam('factory', 'lead', 'otter', o);
   assert.equal(comments.length, 1);
   await renameTeam('factory', 'lead', 'otter', { ...o, apply: true });
   assert.equal(holderOf(comments), 'otter');
   assert.deepEqual(comments.map((c) => c.body), ['Taken by team lead.', 'Released by team lead.', 'Taken by team otter.']);
+  assert.deepEqual(comments.slice(1).map((c) => c.team), ['factory-lead', 'factory-otter'], 'each write shows the full team name (#441)');
 });
 
 test('a partial failure reports completed and remaining moves', async (t) => {
