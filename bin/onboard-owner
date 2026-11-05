@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The admin step of taking a repository in; Colly runs it from this clone, on the Human's gh login, first without
-# --apply, then with it after his one approval of the changes it prints:
+# --apply, then with it after his one approval of the changes it prints; each successful run without --merge ends
+# with his manual Linear Code installation step:
 #   bin/onboard-owner <owner/name> --id <repository id>            show what it would change, and change nothing
 #   bin/onboard-owner <owner/name> --id <repository id> --apply    invite the agents' account (write), set the
 #        factory's rulesets (no rewrite on any branch; on main, a bootstrap one until the kit lands, then the kit's
