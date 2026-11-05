@@ -531,6 +531,7 @@ describe('review, verdict, tier and rounds', () => {
         // #379: the pull request's comments, kept in $FAKE/comments.json by comments.mjs; a write fails while nowrite exists.
         '  *issues/7/comments*|*issues/comments/*) node "$FAKE/comments.mjs" "$@" ;;',
         // #374: each review request is logged; the one for the login in norequest, when that exists, fails.
+        '  "pr view 7 --repo o/app --json isDraft --jq .isDraft") cat "$FAKE/draft" 2>/dev/null || echo false ;;',
         '  *requested_reviewers*) echo "$*" >>"$FAKE/requests"; if [ -e "$FAKE/norequest" ]; then case "$*" in *"=$(cat "$FAKE/norequest")") echo boom >&2; exit 1 ;; esac; fi; echo "{}" ;;',
         '  *reviews*) cat "$FAKE/reviews.json" ;;',
         '  "pr edit"*raised*) [ -e "$FAKE/nolabel" ] && { echo "Could not resolve to a Label with the name raised" >&2; exit 1; }; echo "$*" >>"$FAKE/edits" ;;',
@@ -634,7 +635,7 @@ console.log('{}');
     labels();
     reviews([]);
     // The rules in force on main are the kit's gate: the merge switch at 1-2 (#333).
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null, 'entire-rules': null, norequest: null, 'comments.json': null, 'comment-writes': null, noread: null, nowrite: null });
+    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null, 'entire-rules': null, norequest: null, draft: null, 'comments.json': null, 'comment-writes': null, noread: null, nowrite: null });
   });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
   /** The rules in force on main with one pull_request rule: the merge switch's two parameters (#333). */
@@ -1064,6 +1065,16 @@ console.log('{}');
     const self = again('tier', out.head, { ...pr, GATE_PR_AUTHOR: 'tuannd9288' });
     assert.equal(self.code, 1, self.out);
     assert.equal(self.requests, '');
+  });
+  test('a draft asks no code-owner review until marked ready', () => {
+    write(fake, { draft: 'true' });
+    const out = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    assert.equal(out.code, 1, out.out);
+    assert.equal(out.requests, '');
+    write(fake, { draft: 'false' });
+    const ready = again('tier', out.head, pr);
+    assert.equal(ready.code, 1, ready.out);
+    assert.match(ready.requests, ask);
   });
   test('tier 3 with an approval of the head, tier 2, and tier 3 at all request nothing', () => {
     const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);

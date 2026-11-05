@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory } from './helpers.mjs';
+import { factory, git, commit } from './helpers.mjs';
 import { pickUpdate, switchDue } from '../bin/lib/queue.mjs';
 
 const rule = (count, owner) => ({ type: 'pull_request', parameters: { required_approving_review_count: count, require_code_owner_review: owner } });
@@ -30,6 +30,7 @@ function world() {
       '  *"nodes(ids"*) if [ -e "$Q/recfail" ]; then echo "HTTP 502" >&2; exit 1; fi; cat "$Q/records.json" ;;',
       '  *graphql*) cat "$Q/prs.json" ;;',
       '  "run rerun --job "*) case " $(cat "$Q/fail" 2>/dev/null) " in *" $4 "*) echo "HTTP 403: Workflow run cannot be rerun" >&2; exit 1 ;; esac ;;',
+      '  "pr ready "*|"pr merge "*) ;;',
       '  *) exit 1 ;;',
       'esac',
       '',
@@ -42,6 +43,16 @@ function world() {
   return {
     dir,
     state,
+    policy: (drafts) => {
+      const repo = join(dir, 'root/app');
+      mkdirSync(repo, { recursive: true });
+      git(repo, 'init', '-q', '-b', 'main');
+      git(repo, 'remote', 'add', 'origin', 'https://github.com/o/app.git');
+      commit(repo, { '.gate/config.sh': '', '.gate/driver.json': JSON.stringify({ drafts }) }, 'policy');
+      git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+      // A worktree edit cannot opt a repository out of main's rule.
+      writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ drafts: 'pstack' }));
+    },
     rules: (position) => put('rules.json', position === 'all' ? [rule(0, false)] : position === 'none' ? [rule(1, true)] : [rule(0, true)]),
     rulesText: (text) => writeFileSync(join(dir, 'rules.json'), text),
     /** The jobs whose re-run GitHub refuses, space-separated; none with no argument. */
@@ -61,7 +72,7 @@ function world() {
     /** One sweep, with the gh calls it made. */
     sweep: () => {
       writeFileSync(join(dir, 'calls'), '');
-      const out = spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs') } });
+      const out = spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_ROOT: join(dir, 'root'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs') } });
       const calls = readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean);
       return { code: out.status, out: out.stdout + out.stderr, calls, reruns: calls.filter((c) => c.startsWith('run rerun')) };
     },
@@ -495,4 +506,60 @@ test('at none the queue updates no pull request that lacks an approval of someon
   assert.equal(pickUpdate([behind(1, own)], [], 'none'), null, 'its author\'s own approval is none');
   assert.equal(pickUpdate([behind(1), behind(2, approved)], [], 'none')?.number, 2);
   for (const position of ['1-2', 'all', undefined]) assert.equal(pickUpdate([behind(1)], [], position)?.number, 1, String(position));
+});
+
+test('landable sweeps every PR: green drafts become ready and armed, red or conflicting ready PRs become drafts', () => {
+  const w = world();
+  try {
+    w.policy('landable');
+    w.rules('1-2');
+    const prs = [
+      [true, 'SUCCESS', 'MERGEABLE'],
+      [true, 'PENDING', 'MERGEABLE'],
+      [true, 'FAILURE', 'MERGEABLE'],
+      [true, 'SUCCESS', 'CONFLICTING'],
+      [false, 'FAILURE', 'MERGEABLE'],
+      [false, 'SUCCESS', 'CONFLICTING'],
+      [false, 'SUCCESS', 'MERGEABLE'],
+      [false, 'PENDING', 'MERGEABLE'],
+      [true, null, 'MERGEABLE'],
+      [true, 'SUCCESS', 'UNKNOWN'],
+    ].map(([draft, verify, mergeable], i) => {
+      const p = pull(i + 1, { draft, labels: [], auto: false });
+      p.mergeable = mergeable;
+      const checks = p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes;
+      if (verify) checks.push({ ...checks[0], id: `V_${i}`, name: 'verify', status: verify === 'PENDING' ? 'IN_PROGRESS' : 'COMPLETED', conclusion: verify });
+      return p;
+    });
+    w.pulls(prs);
+    const r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
+      'pr ready 1 --repo o/app',
+      'pr merge 1 --repo o/app --auto --merge',
+      'pr ready 5 --repo o/app --undo',
+      'pr ready 6 --repo o/app --undo',
+      'pr ready 10 --repo o/app',
+      'pr merge 10 --repo o/app --auto --merge',
+    ]);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('pstack does not change draft status or arm auto-merge', () => {
+  const w = world();
+  try {
+    w.policy('pstack');
+    w.rules('1-2');
+    const p = pull(1, { draft: true, labels: [], auto: false });
+    p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].name = 'verify';
+    p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].conclusion = 'SUCCESS';
+    w.pulls([p]);
+    const r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), []);
+  } finally {
+    w.cleanup();
+  }
 });

@@ -29,7 +29,7 @@ if (a[0] === 'pr' && a[1] === 'create') {
   fs.copyFileSync(a[a.indexOf('--body-file') + 1], sh + '/created-body');
   const head = fs.readFileSync(sh + '/head', 'utf8').trim();
   const base = fs.readFileSync(sh + '/base', 'utf8').trim();
-  fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, url: 'https://github.com/o/app/pull/7', baseRefName: a[a.indexOf('--base') + 1], baseRefOid: base, headRefOid: head, labels: [], autoMergeRequest: null, statusCheckRollup: [] }));
+  fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, url: 'https://github.com/o/app/pull/7', baseRefName: a[a.indexOf('--base') + 1], baseRefOid: base, headRefOid: head, labels: [], isDraft: a.includes('--draft'), autoMergeRequest: null, statusCheckRollup: [] }));
   out('https://github.com/o/app/pull/7\n');
 }
 // The comments are $SH/comments.json; a comment gh posts is by the pull request's author ($SH/author, else agent).
@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
-function world({ driver = true, liveVerify = true, stacks } = {}) {
+function world({ driver = true, liveVerify = true, stacks, drafts } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
   directories.push(dir);
   const repo = join(dir, 'app');
@@ -100,9 +100,9 @@ function world({ driver = true, liveVerify = true, stacks } = {}) {
   cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
   // main's driver, which ship reads at the base: filled by default, the pack's empty one when `driver` is false.
   if (driver) writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ name: 'cli', start: '', drive: 'node cli.js', network: false }));
-  if (stacks) {
+  if (stacks || drafts) {
     const file = join(repo, '.gate/driver.json');
-    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stacks }));
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stacks, drafts }));
   }
   mkdirSync(sh);
   git(repo, 'init', '-q', '-b', 'main');
@@ -162,6 +162,18 @@ test('removes every world when its test ends', async (t) => {
 });
 
 describe('opening the pull request', () => {
+  test('landable opens a draft using main policy and leaves auto-merge to the queue', () => {
+    const w = world({ drafts: 'landable' });
+    writeFileSync(join(w.repo, '.gate/driver.json'), JSON.stringify({ drafts: 'pstack' }));
+    w.passed();
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.ok(w.calls().find((c) => c.startsWith('pr create')).includes('--draft'));
+    assert.ok(!w.calls().some((c) => c.includes('--auto')));
+    assert.equal(w.ship().code, 0);
+    assert.ok(!w.calls().some((c) => c.includes('--auto')));
+  });
+
   test('is refused without a red-check stamp, and for one against another base', () => {
     const w = world();
     let out = w.ship();
@@ -194,6 +206,7 @@ describe('opening the pull request', () => {
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: opened #7 https:\/\/github\.com\/o\/app\/pull\/7$/m);
     const create = w.calls().find((c) => c.startsWith('pr create'));
+    assert.ok(!create.includes('--draft'));
     assert.match(create, /--base main/);
     assert.match(create, /--head work/);
     assert.match(create, /--title Print two/);
