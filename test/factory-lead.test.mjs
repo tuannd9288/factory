@@ -36,7 +36,7 @@ test('lead takes a plain repository name and --new or --dry-run once each: the u
     for (const args of [['../x'], ['factory-probe', '--continue'], [], ['factory-probe', '--new', '--new'], ['-x'], ['a;id'], ['factory-probe', 'extra']]) {
       const r = s.fac('lead', ...args);
       assert.equal(r.code, 2, args.join(' '));
-      assert.match(r.out, /bin\/factory lead <repo> \[--team <name>\] \[--new\] \[--dry-run\]/);
+      assert.match(r.out, /bin\/factory lead <repo> \[--team <name> \| --new-team\] \[--new\] \[--dry-run\]/);
     }
     assert.deepEqual(SSH(s), []);
   } finally {
@@ -51,7 +51,7 @@ test('lead --team takes a name of a letter then letters and digits, at most 32, 
     for (const team of bad) {
       const r = s.fac('lead', 'factory-probe', '--team', team);
       assert.equal(r.code, 2, JSON.stringify(team));
-      assert.match(r.out, /bin\/factory lead <repo> \[--team <name>\]/);
+      assert.match(r.out, /bin\/factory lead <repo> \[--team <name> \| --new-team\]/);
     }
     for (const args of [['factory-probe', '--team'], ['factory-probe', '--team', 'b', '--team', 'c'], ['--team', 'b'], ['factory-probe', '--team', '--new']]) {
       assert.equal(s.fac('lead', ...args).code, 2, args.join(' '));

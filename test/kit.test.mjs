@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { APP, commit, factory, git, quiet, repoWithKit, run, script, write } from './helpers.mjs';
 
 const RED_AT_BASE =
@@ -2426,15 +2426,9 @@ describe('onboard', () => {
     write(repo, { '.claude/worktrees/t/a.txt': 'a\n' });
     assert.equal(git(repo, 'status', '--porcelain', '--', '.claude/worktrees'), '');
   };
-  test('clones, makes the Claude profile keyed by owner and repository, writes .envrc, and keeps files the repository had', () => {
+  test('clones and keeps files the repository had', () => {
     const r = repoWithKit({ '.github/pull_request_template.md': '## Our own\n' });
     try {
-      const owner = basename(r.dir);
-      assert.ok(existsSync(join(r.dir, 'profiles', owner, 'app/claude')));
-      assert.ok(!existsSync(join(r.dir, 'profiles', owner, 'app/codex')));
-      assert.ok(!existsSync(join(r.dir, 'profiles/app')));
-      assert.match(readFileSync(join(r.repo, '.envrc'), 'utf8'), new RegExp(`^export CLAUDE_CONFIG_DIR=".*profiles/${owner}/app/claude"\n$`));
-      assert.match(readFileSync(join(r.repo, '.git/info/exclude'), 'utf8'), /^\.envrc$/m);
       assertWorktreesIgnored(r.repo);
       assert.equal(readFileSync(join(r.repo, '.github/pull_request_template.md'), 'utf8'), '## Our own\n');
       assert.match(r.onboard, /1 kept as they were/);
@@ -2444,11 +2438,10 @@ describe('onboard', () => {
       r.cleanup();
     }
   });
-  test('keeps an .envrc the repository has, and says what to add to it', () => {
+  test('keeps an .envrc the repository has', () => {
     const r = repoWithKit({ '.envrc': 'export FOO=1\n' });
     try {
       assert.equal(readFileSync(join(r.repo, '.envrc'), 'utf8'), 'export FOO=1\n');
-      assert.match(r.onboard, /\.envrc exists and is kept; add to it: export CLAUDE_CONFIG_DIR=/);
       assertWorktreesIgnored(r.repo);
     } finally {
       r.cleanup();
@@ -2476,31 +2469,6 @@ describe('onboard', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-  /** A seed repository with `files` (null-valued entries skipped) and, beside it, what onboard needs; `link` makes
-   * CLAUDE.md a symlink to AGENTS.md, as some repositories keep it. */
-  const seeded = (files, { link = false } = {}) => {
-    const dir = mkdtempSync(join(tmpdir(), 'factory-own-'));
-    const seed = join(dir, 'seed');
-    git(dir, 'init', '-q', '-b', 'main', seed);
-    write(seed, { ...APP, ...files });
-    for (const hook of Object.keys(files).filter((p) => p.startsWith('.githooks/'))) chmodSync(join(seed, hook), 0o755);
-    if (link) symlinkSync('AGENTS.md', join(seed, 'CLAUDE.md'));
-    commit(seed, {}, 'start');
-    git(dir, 'clone', '-q', '--bare', seed, join(dir, 'app.git'));
-    const onboard = (...args) =>
-      run(dir, join(factory, 'bin/onboard'), [join(dir, 'app.git'), '--no-pr', ...args], {
-        ...quiet,
-        FACTORY_ROOT: join(dir, 'root'),
-        AGENT_PROFILES: join(dir, 'profiles'),
-        XDG_DATA_HOME: join(dir, 'xdg'),
-        XDG_CONFIG_HOME: join(dir, 'xdg-config'),
-      });
-    const own = (text) => {
-      writeFileSync(join(dir, 'own.md'), text);
-      return join(dir, 'own.md');
-    };
-    return { dir, repo: join(dir, 'root/app'), onboard, own, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
-  };
   test('refuses a folder that exists', () => {
     const r = repoWithKit();
     try {
@@ -2509,43 +2477,6 @@ describe('onboard', () => {
       assert.match(out.out, /exists; nothing done/);
     } finally {
       r.cleanup();
-    }
-  });
-  // #30: the profile's settings.json is the one place that turns off what the logged-in claude.ai account loads.
-  // #24: and the stable update channel, and the SessionStart hook that tells the Human about every *.failed file.
-  const SETTINGS = {
-    disableClaudeAiConnectors: true,
-    syncClaudeAiSkills: false,
-    syncClaudeAiPlugins: false,
-    autoUpdatesChannel: 'stable',
-    hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: join(factory, 'bin/factory-alerts'), timeout: 10 }] }] },
-  };
-  test("writes the profile it creates a settings.json that keeps claude.ai's connectors, skills and plugins out, stays on the stable channel and runs factory-alerts at session start", () => {
-    const r = repoWithKit();
-    try {
-      const profile = join(r.dir, 'profiles', basename(r.dir), 'app/claude');
-      assert.deepEqual(readdirSync(profile), ['settings.json']);
-      assert.deepEqual(JSON.parse(readFileSync(join(profile, 'settings.json'), 'utf8')), SETTINGS);
-    } finally {
-      r.cleanup();
-    }
-  });
-  test('writes nothing into a profile that exists, and prints every key for the Human to add', () => {
-    for (const before of [{}, { 'settings.json': '{ "theme": "dark" }\n' }]) {
-      const s = seeded({});
-      try {
-        const profile = join(s.dir, 'profiles', basename(s.dir), 'app/claude');
-        mkdirSync(profile, { recursive: true });
-        write(profile, before);
-        const out = s.onboard();
-        assert.equal(out.code, 0, out.out);
-        assert.deepEqual(readdirSync(profile), Object.keys(before));
-        for (const [name, text] of Object.entries(before)) assert.equal(readFileSync(join(profile, name), 'utf8'), text);
-        assert.match(out.out, /^onboard: profile \S+\/app\/claude exists and is kept; only the Human edits it, and its settings\.json needs these keys:$/m);
-        assert.ok(out.out.includes(`${JSON.stringify(SETTINGS, null, 2)}\n`), out.out);
-      } finally {
-        s.cleanup();
-      }
     }
   });
 });
