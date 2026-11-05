@@ -1,7 +1,7 @@
 // The opening of a kit pull request's body (#386, #411): `**Tóm tắt cho anh**`, three bullets (Anh quyết, Đề xuất, Rủi ro) in plain
 // Vietnamese with the terms in English, so the Human reads and approves a tier-3 pull request from them, then `**TL;DR**` with
 // the same three in English (You decide, Recommendation, Risk). They are the same layout as kit/.github/pull_request_template.md,
-// and the Vietnamese block is the repository's only Vietnamese (AGENTS.md, Language); a decision for him is numbered in Đề xuất,
+// and the Vietnamese block is the repository's only Vietnamese (docs/decisions.md, Language); a decision for him is numbered in Đề xuất,
 // each with a recommendation, and each changed setting is named once, there. A fourth line (Nếu không trả lời / If no answer) is
 // written only when a caller passes `silence`, `{ vi, en }`; bin/onboard and bin/kit-update pass none.
 //

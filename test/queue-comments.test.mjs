@@ -7,6 +7,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { handleLinearEvent } from '../bin/lib/linear-listen.mjs';
+import { openStore } from '../bin/lib/store.mjs';
 import { factory } from './helpers.mjs';
 
 const T = (n) => `2026-11-03T10:0${n}:00Z`;
@@ -348,4 +350,47 @@ test('no lookup is made when the holder is among the refs read, when all refs we
   } finally {
     w.done();
   }
+});
+
+
+test('Linear comments keep the cursor-before-post and post-before-event order with an async post', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'linear-comments-'));
+  const state = join(dir, 'state');
+  mkdirSync(join(state, 'linear'), { recursive: true });
+  writeFileSync(join(state, 'linear', 'repos.json'), JSON.stringify({ app: { key: 'FAC', teamId: 'fac' } }));
+  const store = openStore(join(state, 'factory.db'));
+  t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const event = { kind: 'commentCreated', id: 'comment', issueIdentifier: 'FAC-7', teamKey: 'FAC', time: 1000 };
+  let calls = 0;
+  let finish;
+  const options = { state, runs: join(dir, 'runs'), now: () => 1500,
+    linear: { request: async (query, { after }) => {
+      assert.match(query, /^query/);
+      return { issue: { comments: { nodes: after
+        ? [{ body: 'Taken by team beta.', createdAt: T(3) }]
+        : [{ body: 'Taken by team alpha.', createdAt: T(1) }, { body: 'Released by team alpha.', createdAt: T(2) }],
+      pageInfo: { hasNextPage: !after, endCursor: after ? null : 'second' } } } };
+    } },
+    post: async (file, line) => {
+      calls += 1;
+      assert.equal(file, join(dir, 'runs', 'app-beta', 'socket'));
+      assert.match(JSON.parse(line).message.content, /new comment on app#FAC-7; re-read the issue\./);
+      assert.equal(store.offset('linear:FAC'), 1000);
+      assert.equal(store.linearEvents().length, 1);
+      assert.equal(existsSync(join(state, 'events.jsonl')), false);
+      return new Promise((resolve) => { finish = resolve; });
+    } };
+  await assert.rejects(handleLinearEvent(store, event, { ...options, linear: { request: async () => { throw new Error('read failed'); } } }), /read failed/);
+  assert.equal(store.offset('linear:FAC'), 0);
+  assert.equal(store.linearEvents().length, 0);
+  const handling = handleLinearEvent(store, event, options);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  assert.equal(await handleLinearEvent(store, event, options), false);
+  finish({ posted: true });
+  await handling;
+  assert.equal(store.linearEvents()[0].wake_delay_ms, 500);
+  const line = JSON.parse(readFileSync(join(state, 'events.jsonl'), 'utf8').trim());
+  assert.deepEqual([line.type, line.kind, line.key], ['start', 'comment', 'comment app#FAC-7 comment']);
+  assert.match(line.text, /app-beta: woken$/);
 });

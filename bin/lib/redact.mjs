@@ -1,5 +1,5 @@
 // The factory's one redaction (#339): the patterns bin/lib/events.mjs had (#309), then seatwork's. The seatwork part is a port of
-// plugin/server/redact.ts at f537341 (tuannd9288's seatwork; "seatwork may be used freely, its code and its text alike", AGENTS.md,
+// plugin/server/redact.ts at f537341 (tuannd9288's seatwork; "seatwork may be used freely, its code and its text alike", docs/decisions.md,
 // Decisions, 2026-10-21): its token forms (TOKENS), SURE patterns (which match only secrets) and LIKELY ones (which read a word as a
 // value because its name says secret), and `looksGenerated`, with the types gone. The kit's hand-in patterns (.gate/handin.json) hold no
 // secret rule, so seatwork's stand in for them. seatwork's safety/gate/rules/secrets.ts is not ported: it holds secret file paths,
