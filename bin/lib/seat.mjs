@@ -589,6 +589,7 @@ export function recordOf(spec, events, { code, signal, error = null, end = new D
   // is cumulative, so the last result's is the whole; the report is the last one that has it.
   const results = events.filter((e) => e.type === 'result');
   const result = results.at(-1) ?? null;
+  if (result?.is_error) error = result.result || result.errors?.join('; ') || result.terminal_reason || '';
   const sum = (key) => (results.some((r) => typeof r[key] === 'number') ? results.reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0) : null);
   const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
   return {
@@ -598,7 +599,7 @@ export function recordOf(spec, events, { code, signal, error = null, end = new D
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
     turns: sum('num_turns'), duration_ms: sum('duration_ms'), total_cost_usd: result?.total_cost_usd ?? null,
     structured: results.findLast((r) => r.structured_output !== undefined && r.structured_output !== null)?.structured_output ?? null,
-    ended: result ? (result.subtype ?? 'result') : 'no-result',
+    ended: result?.is_error ? 'error' : result ? (result.subtype ?? 'result') : 'no-result',
     exitCode: code ?? null, signal: signal ?? null, ...(error ? { error } : {}),
   };
 }
