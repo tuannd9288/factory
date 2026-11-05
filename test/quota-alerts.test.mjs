@@ -38,7 +38,7 @@ function world(body) {
   };
   const alerts = (args = ['--text'], env = {}) => {
     const { FACTORY_NO_ALERTS, FACTORY_STATUSLINE, ...outer } = process.env;
-    const r = spawnSync(join(factory, 'bin/factory-alerts'), args, { encoding: 'utf8', env: { ...outer, FACTORY_STATE: state, FACTORY_RUNS: runs, TZ: 'UTC', ...env } });
+    const r = spawnSync(join(factory, 'bin/factory-alerts'), args, { encoding: 'utf8', env: { ...outer, FACTORY_STATE: state, FACTORY_RUNS: runs, FACTORY_TEAM: 'factory-lead', TZ: 'UTC', ...env } });
     return { code: r.status, out: r.stdout, err: r.stderr, lines: r.stdout.split('\n').filter(Boolean) };
   };
   try {
@@ -132,7 +132,7 @@ function warningLine({ seven = 0.78, five = 0.3, sevenIn = 24 * HOUR }) {
 test('an allowed_warning window is named once, with its account, window and reset (#311)', () => {
   world(({ log, alerts }) => {
     log(2, warningLine({}));
-    const r = alerts();
+    const r = alerts(['--text'], { FACTORY_TEAM: 'factory-alpha' });
     assert.equal(r.lines.length, 1, r.out);
     assert.match(r.lines[0], /account acct-2.*seven-day.*warning.*78%.*resets/);
   });
@@ -141,7 +141,7 @@ test('an allowed_warning window is named once, with its account, window and rese
 test('the warning line goes away once the window\'s reset has passed', () => {
   world(({ log, alerts }) => {
     log(2, warningLine({ sevenIn: -HOUR }));
-    assert.equal(alerts().out, '');
+    assert.equal(alerts(['--text'], { FACTORY_TEAM: 'factory-alpha' }).out, '');
   });
 });
 
@@ -171,5 +171,24 @@ test('a rejected event of another rateLimitType expires at the event\'s own rese
     assert.equal(alerts().out, '');
     log(1, opus(HOUR));
     assert.match(alerts().out, /account acct-1.*rejected.*resets/);
+  });
+});
+
+test('SessionStart is silent outside the factory and scopes quota to the current team (#398)', () => {
+  world(({ state, log, alerts }) => {
+    writeFileSync(join(state, 'queue-run.failed'), 'queue failed\n');
+    log(1, eventLine('synthetic-rejected-event.jsonl', {}));
+    log(2, warningLine({}));
+    assert.deepEqual(alerts([], { FACTORY_TEAM: '' }), { code: 0, out: '', err: '', lines: [] });
+    for (const [team, own, other] of [['factory-lead', 1, 2], ['factory-alpha', 2, 1]]) {
+      const result = alerts([], { FACTORY_TEAM: team });
+      assert.equal(result.code, 0, result.err);
+      const payload = JSON.parse(result.out);
+      for (const text of [payload.systemMessage, payload.hookSpecificOutput.additionalContext]) {
+        assert.match(text, /queue-run\.failed/);
+        assert.ok(text.includes(`account acct-${own}`));
+        assert.ok(!text.includes(`account acct-${other}`));
+      }
+    }
   });
 });
