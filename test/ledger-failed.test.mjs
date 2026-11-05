@@ -24,7 +24,11 @@ function withMachine(body) {
     git(dir, 'clone', '-q', '--bare', join(dir, 'root'), join(dir, 'origin.git'));
     git(join(dir, 'root'), 'remote', 'add', 'origin', join(dir, 'origin.git'));
     const state = join(dir, 'state');
-    const env = { ...process.env, ...quiet, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: dir, Q: dir, VIS: 'PRIVATE', FAIL_CREATE: '', FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), FACTORY_PROFILE_DIRS: '' };
+    git(join(dir, 'root'), 'checkout', '-qb', 'records/first');
+    commit(join(dir, 'root'), { 'rows.jsonl': JSON.stringify({ v: 1, node: 'first', kind: 'session', row: { session: 'base', role: 'worker', tag: 'base', start: '2026-10-27T00:00:00Z', end: '2026-10-27T01:00:00Z', total_cost_usd: 1 } }) + '\n' });
+    git(join(dir, 'root'), 'push', join(dir, 'origin.git'), 'records/first');
+    git(join(dir, 'root'), 'checkout', 'main');
+    const env = { ...process.env, ...quiet, GIT_CONFIG_COUNT: '7', GIT_CONFIG_KEY_6: `url.${join(dir, 'origin.git')}.insteadOf`, GIT_CONFIG_VALUE_6: 'https://github.com/tuannd9288/better-factory.git', PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: dir, Q: dir, VIS: 'PRIVATE', FAIL_CREATE: '', FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), FACTORY_PROFILE_DIRS: '' };
     const run = (args, more = {}) => spawnSync(join(factory, 'bin/factory-ledger'), ['--repo', 'o/app', '--since', '2026-10-17', '--until', '2026-10-24', ...args], { encoding: 'utf8', env: { ...env, ...more } });
     body({ run, report: join(state, 'digest.failed'), state });
   } finally {
