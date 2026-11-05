@@ -323,7 +323,7 @@ function rerun(repo, number, jobId, why, quiet = false) {
  * read a failed one; a repository whose read failed is not in `reads`, and its conditions stay as they were (#309). The switch is
  * followed after that (#333): its record query and re-runs are not reads of the events, and the pull requests it judges are
  * copies, so what `reads` holds is what the first two reads gave. */
-function sweep(repo, reads, state, switches, { self, folder, runs }) {
+function sweep(repo, reads, state, switches, { self, folder, runs, clone }) {
   const rules = pagesOf(rulesIn(repo));
   const required = requiredIn(rules);
   const asked = new Date().toISOString();
@@ -340,6 +340,23 @@ function sweep(repo, reads, state, switches, { self, folder, runs }) {
     wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });
   } catch (error) {
     console.log(`queue: the news of ${repo} was not handled: ${String(error.message).split('\n')[0]}`);
+  }
+  // Like ship, only origin/main's policy counts, never the candidate's driver file.
+  let policy = {};
+  if (clone && spawnSync('git', ['-C', clone, 'cat-file', '-e', 'origin/main:.gate/driver.json'], { stdio: 'ignore' }).status === 0)
+    policy = JSON.parse(execFileSync('git', ['-C', clone, 'show', 'origin/main:.gate/driver.json'], { encoding: 'utf8' }));
+  const merge = policy.merge === 'merge' ? 'merge' : 'squash';
+  if (policy.drafts === 'landable') {
+    for (const pr of prs) {
+      const conflict = pr.mergeable === 'CONFLICTING';
+      if (pr.isDraft && pr.checks.verify?.state === 'SUCCESS' && !conflict) {
+        gh(['pr', 'ready', String(pr.number), '--repo', repo]);
+        gh(['pr', 'merge', String(pr.number), '--repo', repo, '--auto', `--${merge}`]);
+      } else if (!pr.isDraft && (RED.has(pr.checks.verify?.state) || conflict)) {
+        gh(['pr', 'ready', String(pr.number), '--repo', repo, '--undo']);
+        pr.isDraft = true;
+      }
+    }
   }
   const { ran, position } = followSwitch(repo, state, rules, prs);
   if (position) switches.set(repo, watchSwitch({ state, repo, position }));
@@ -767,7 +784,7 @@ export function runPass({ repos = [], human, state }) {
     for (const repo of swept) {
       const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
-        sweep(repo, reads, state, switches, { self: who.login, folder: clones.has(repo) ? basename(clones.get(repo)) : repo.split('/')[1], runs });
+        sweep(repo, reads, state, switches, { self: who.login, clone: clones.get(repo), folder: clones.has(repo) ? basename(clones.get(repo)) : repo.split('/')[1], runs });
         rmSync(report, { force: true });
         writeFileSync(join(state, `queue-${repo.replace('/', '-')}.ok`), `${new Date().toISOString()}\n`);
       } catch (error) {
