@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { alertLines, quotaRows } from './quota.mjs';
+import { readAccounts } from './token.mjs';
 
 const pad = (n) => String(n).padStart(2, '0');
 /** A time as the Human reads it, in the local zone: 2026-10-24 06:05. */
@@ -36,14 +37,15 @@ export function lines(state) {
   };
 }
 
-/** The quota alerts (#63): each account's newest rate_limit_event (quotaRows, #311) under FACTORY_RUNS (default ~/factory-runs). A status line
+/** The quota alerts (#63): the current team's account's newest rate_limit_event (quotaRows, #311) under FACTORY_RUNS (default ~/factory-runs). A status line
  * reports no rejection or warning, only a use, so the hook reads none (#194). A runs folder that cannot be read gives none:
  * the hook never fails a session. */
 export function quotaLines(env) {
   try {
     const runs = env.FACTORY_RUNS ?? join(env.HOME ?? homedir(), 'factory-runs');
     const state = env.FACTORY_STATE ?? join(env.HOME ?? homedir(), '.local/state/factory');
-    return alertLines(quotaRows({ runs, state, root: env.FACTORY_ROOT }));
+    const account = env.FACTORY_TEAM && readAccounts(state)[`factory/${env.FACTORY_TEAM}`];
+    return alertLines(quotaRows({ runs, state, accounts: account ? [account] : [] }));
   } catch {
     return [];
   }
@@ -51,7 +53,8 @@ export function quotaLines(env) {
 
 /** What the hook prints for `argv`, or '' for nothing. */
 export function output(argv, env) {
-  if (env.FACTORY_NO_ALERTS === '1') return '';
+  // Like piggery's SessionStart join guard: a session without a factory team is not ours to drive.
+  if (!env.FACTORY_TEAM || env.FACTORY_NO_ALERTS === '1') return '';
   const { lines: failed, unreadable } = lines(env.FACTORY_STATE ?? join(env.HOME ?? homedir(), '.local/state/factory'));
   const found = [...failed, ...quotaLines(env)];
   if (!found.length) return '';
