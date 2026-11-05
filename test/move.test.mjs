@@ -135,7 +135,7 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
   for (const i of issues) writeFileSync(join(w.rewrites, `${i.number}.md`), REWRITE);
   w.state = join(root, 'state');
   mkdirSync(join(w.state, 'linear'), { recursive: true });
-  if (registry) writeFileSync(registryFile(w.state), JSON.stringify({ [REPO]: { key: 'FAC', teamId: 'team-fac' } }));
+  if (registry) writeFileSync(registryFile(w.state), JSON.stringify({ [REPO.split('/')[1]]: { key: 'FAC', teamId: 'team-fac' } }));
   const agentProfiles = join(root, 'profiles');
   writeAppFile(agentProfiles, 'linear-app', 'client-id', 'invented-client-id-0001');
   writeAppFile(agentProfiles, 'linear-app', 'client-secret', SECRET);
