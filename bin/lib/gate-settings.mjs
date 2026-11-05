@@ -10,7 +10,7 @@
 //   node bin/lib/gate-settings.mjs render <path> --human <login> [options]   fills in the kit file at <path>, in place
 // The options: --reviewer stub|claude|entire ('' for none), and --runner, --pr-runner, --trusted-runner <json>
 // ("ubuntu-latest" or ["self-hosted","macOS"]).
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export const MAIN = '.github/workflows/main.yml';
@@ -43,6 +43,7 @@ const GENERIC = new Set(['self-hosted', 'linux', 'macos', 'windows', 'x86', 'x64
 
 /** What a kit file needs filled in: [from, to] pairs, each applied to the first match on every line, as sed's s/from/to/. */
 export const FILLED = {
+  '.gate/ruleset.json': (v) => [[/"allowed_merge_methods": \["(?:merge|squash)"\]/, `"allowed_merge_methods": ["${v.mergeMethod === 'merge' ? 'merge' : 'squash'}"]`]],
   '.github/CODEOWNERS': (v) => [['@OWNER', `@${v.human}`]],
   [MAIN]: (v) => [[KIT_RUNS_ON, runsOn(v.runner ?? DEFAULTS.runner)]],
   [GATE]: (v) => [[KIT_RUNS_ON, runsOn(v.prRunner ?? DEFAULTS.prRunner)]],
@@ -82,6 +83,10 @@ export function parseRunner(text) {
  * wrong form). The caller compares the file with the kit filled in with these, so a file that holds more than that fails. */
 export function valuesOf(path, text) {
   const found = {};
+  if (path === '.gate/ruleset.json') {
+    const method = /"allowed_merge_methods": \["(merge|squash)"\]/.exec(text)?.[1];
+    if (method) found.mergeMethod = method;
+  }
   const runner = SETTINGS.find((s) => s.file === path && s.key !== 'reviewer');
   if (runner) {
     const seen = [...new Set(text.split('\n').map((l) => /^\s*runs-on: (.*)$/.exec(l)?.[1]).filter((v) => v !== undefined))];
@@ -178,6 +183,8 @@ function main([verb, ...rest]) {
       console.log(problem ?? `${path} is no file the kit fills in`);
       return 2;
     }
+    if (path === '.gate/ruleset.json' && existsSync('.gate/driver.json'))
+      values.mergeMethod = JSON.parse(readFileSync('.gate/driver.json', 'utf8')).merge;
     writeFileSync(path, render(path, readFileSync(path, 'utf8'), { ...values, human }));
     return 0;
   }

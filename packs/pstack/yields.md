@@ -16,11 +16,9 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
   `git push` (`Bash(git push:*)` in `bin/lib/seat.mjs`). Fix forward with a new commit.
 - **Stacked pull requests** (`opening-a-pr.md:28-32`, `shipping.md` step 4, `autopilot-stack.md`): `stacks` in `.gate/driver.json` on `origin/main` defaults to `pstack`; `off` keeps the old refusal, and restacking merges `origin/main` into the child after retargeting to `main`.
   The Human, 2026-11-05: "Thứ nhất PR Chồng PR là đúng, áp dụng cách đấy -> Factory đang làm lệch đi, hoặc là nó phải có công tắc. Trước tau nói cái nào khác thì đề xuất gạt công tắc mặc định giống pstack đầu tiên mà sao giờ vẫn lệch?"
-- **Merge by hand** (`shipping.md:8`: `gh pr merge <pr> --squash`). `factory-gate` allows merge commits only
-  (`kit/.gate/ruleset.json:18`), and `scripts/ship` arms `--auto --merge`; nobody merges by hand.
-- **The pull request's title and body** (`opening-a-pr.md:11`, `:13`: a Conventional Commits title, a body that becomes
-  the squash commit body). The template wins: `scripts/ship --body-file` sends the repository's template with
-  `Closes #<issue>` filled in, and the title is the head commit's subject.
+- **Merge by hand** (`shipping.md` step 4): `merge` in `.gate/driver.json` on main defaults to `squash`; `merge` selects merge commits, and `scripts/ship` arms the selected method with `--auto`.
+- **The pull request's body** (`opening-a-pr.md:13`: a body that becomes the squash commit body). The template wins:
+  `scripts/ship --body-file` sends the repository's template with `Closes #<issue>` filled in.
 - **Babysit's `watch-pr`** (`babysit.md:12`; `shipping.md:9`). It runs `gh api graphql` inside, only to read. The Human
   allowed it on 2026-10-30 ("theo đề xuất", Factory Map v18 item 3); the grant is #182's work, not made yet. Babysit's
   replies through `gh api` (`babysit.md:20`) are not used: the Human's decision on #182 (2026-10-30). Since his answer
