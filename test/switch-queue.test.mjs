@@ -43,15 +43,15 @@ function world() {
   return {
     dir,
     state,
-    policy: (drafts) => {
+    policy: (drafts, merge) => {
       const repo = join(dir, 'root/app');
       mkdirSync(repo, { recursive: true });
       git(repo, 'init', '-q', '-b', 'main');
       git(repo, 'remote', 'add', 'origin', 'https://github.com/o/app.git');
-      commit(repo, { '.gate/config.sh': '', '.gate/driver.json': JSON.stringify({ drafts }) }, 'policy');
+      commit(repo, { '.gate/config.sh': '', '.gate/driver.json': JSON.stringify({ drafts, merge }) }, 'policy');
       git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
       // A worktree edit cannot opt a repository out of main's rule.
-      writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ drafts: 'pstack' }));
+      writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ drafts: 'pstack', merge: merge === 'merge' ? 'squash' : 'merge' }));
     },
     rules: (position) => put('rules.json', position === 'all' ? [rule(0, false)] : position === 'none' ? [rule(1, true)] : [rule(0, true)]),
     rulesText: (text) => writeFileSync(join(dir, 'rules.json'), text),
@@ -536,11 +536,11 @@ test('landable sweeps every PR: green drafts become ready and armed, red or conf
     assert.equal(r.code, 0, r.out);
     assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
       'pr ready 1 --repo o/app',
-      'pr merge 1 --repo o/app --auto --merge',
+      'pr merge 1 --repo o/app --auto --squash',
       'pr ready 5 --repo o/app --undo',
       'pr ready 6 --repo o/app --undo',
       'pr ready 10 --repo o/app',
-      'pr merge 10 --repo o/app --auto --merge',
+      'pr merge 10 --repo o/app --auto --squash',
     ]);
   } finally {
     w.cleanup();
@@ -563,3 +563,27 @@ test('pstack does not change draft status or arm auto-merge', () => {
     w.cleanup();
   }
 });
+
+for (const merge of [undefined, 'squash', 'merge']) {
+  test(`landable arms with ${merge ?? 'default squash'} from origin/main after marking ready`, () => {
+    const w = world();
+    try {
+      w.policy('landable', merge);
+      w.rules('1-2');
+      const p = pull(1, { draft: true, labels: [], auto: false });
+      p.mergeable = 'MERGEABLE';
+      const check = p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0];
+      check.name = 'verify';
+      check.conclusion = 'SUCCESS';
+      w.pulls([p]);
+      const r = w.sweep();
+      assert.equal(r.code, 0, r.out);
+      assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
+        'pr ready 1 --repo o/app',
+        `pr merge 1 --repo o/app --auto --${merge ?? 'squash'}`,
+      ]);
+    } finally {
+      w.cleanup();
+    }
+  });
+}

@@ -467,3 +467,53 @@ test('the drill of #83 as recorded: factory-scratch#57 reverts #56', () => {
   assert.deepEqual([c.n, c.k, c.m], [1, 1, 1]);
   assert.deepEqual(c.reverted, [{ repo: 'tuannd9288/factory-scratch', number: 56 }]);
 });
+
+for (const method of ['squash', 'merge']) {
+  test(`${method}: merged PR rounds, patch coverage and digest use the original PR commits`, async () => {
+    const { git, commit: save } = await import('./helpers.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'ledger-method-'));
+    try {
+      git(dir, 'init', '-q', '-b', 'main');
+      const base = save(dir, { a: 'base\n' }, 'Start');
+      git(dir, 'switch', '-q', '-c', 'topic');
+      const head = save(dir, { b: 'change\n' }, 'Add b');
+      const patch = ledger.patchIn(dir)(head, head);
+      assert.ok(patch);
+      git(dir, 'switch', '-q', 'main');
+      if (method === 'squash') {
+        git(dir, 'merge', '--squash', 'topic');
+        save(dir, {}, 'Add b (#7)');
+      } else git(dir, 'merge', '--no-ff', '-m', 'Merge topic', 'topic');
+      const landed = git(dir, 'rev-parse', 'HEAD');
+      assert.equal(git(dir, 'rev-parse', 'HEAD^1'), base);
+      assert.equal(ledger.patchIn(dir)(landed, head), patch);
+      const clone = join(dir, 'main-only');
+      git(dir, 'clone', '--no-local', '--single-branch', '--branch', 'main', dir, clone);
+      assert.equal(ledger.patchIn(clone)(landed, head), patch);
+      const row = rowOf('o/r', pr({
+        headRefOid: head, mergeCommit: { oid: landed }, state: 'MERGED', mergedAt: '2026-10-20T12:00:00Z',
+        comments: { nodes: [said('PASS', H, patch)] },
+        timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'MergedEvent' }] },
+        commits: { nodes: [commit(head, green), { commit: { ...commit('queue-update', green).commit, parents: { totalCount: 2 } } }] },
+      }), { human: 'boss', costs: null, profile: false, patchOf: ledger.patchIn(dir) });
+      assert.equal(row.rounds, 1);
+      assert.equal(row.firstPass, true);
+      assert.equal(row.live, true);
+      assert.equal(row.touched, false);
+      const text = digest([row], { since: '2026-10-14', until: '2026-10-21' });
+      assert.match(text, /1 task: 1 merged/);
+      assert.match(text, /Tasks merged: 1\/1/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
+for (const title of ['Revert "fix(queue): update stale pull requests"', 'revert: fix(queue): update stale pull requests', 'revert(queue): "fix(queue): update stale pull requests"']) {
+  test(`ledger and digest find the original PR for ${title}`, () => {
+    const rows = revertRows(
+      mergedPR(1, 'fix(queue): update stale pull requests', '2026-10-15T10:00:00Z'),
+      mergedPR(2, title, '2026-10-16T10:00:00Z'),
+    );
+    assert.deepEqual(countOf(rows), { n: 1, k: 1, m: 1, reverted: ['o/r#1'] });
+    assert.match(digest(rows, revertPeriod), /Reverted PRs: o\/r#1/);
+  });
+}

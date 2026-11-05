@@ -345,12 +345,13 @@ function sweep(repo, reads, state, switches, { self, folder, runs, clone }) {
   let policy = {};
   if (clone && spawnSync('git', ['-C', clone, 'cat-file', '-e', 'origin/main:.gate/driver.json'], { stdio: 'ignore' }).status === 0)
     policy = JSON.parse(execFileSync('git', ['-C', clone, 'show', 'origin/main:.gate/driver.json'], { encoding: 'utf8' }));
+  const merge = policy.merge === 'merge' ? 'merge' : 'squash';
   if (policy.drafts === 'landable') {
     for (const pr of prs) {
       const conflict = pr.mergeable === 'CONFLICTING';
       if (pr.isDraft && pr.checks.verify?.state === 'SUCCESS' && !conflict) {
         gh(['pr', 'ready', String(pr.number), '--repo', repo]);
-        gh(['pr', 'merge', String(pr.number), '--repo', repo, '--auto', '--merge']);
+        gh(['pr', 'merge', String(pr.number), '--repo', repo, '--auto', `--${merge}`]);
       } else if (!pr.isDraft && (RED.has(pr.checks.verify?.state) || conflict)) {
         gh(['pr', 'ready', String(pr.number), '--repo', repo, '--undo']);
         pr.isDraft = true;
