@@ -213,10 +213,10 @@ describe('leadArgs', () => {
     }
   });
 
-  test('the deny list keeps Edit and Write out of the live clone, by an absolute path', () => {
+  test('the deny list protects the live clone with Edit and has no path-scoped Write rule', () => {
     const deny = list('--disallowedTools');
     assert.ok(deny.includes('Edit(//fx/WORKSPACES/zalo-gateway/**)'));
-    assert.ok(deny.includes('Write(//fx/WORKSPACES/zalo-gateway/**)'));
+    assert.ok(!deny.some((rule) => rule.startsWith('Write(')));
   });
 });
 
