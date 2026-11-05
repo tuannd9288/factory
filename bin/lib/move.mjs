@@ -12,6 +12,9 @@
 // #n" when the parent does not move, then "**Sublayer:** <code>" taken from a `sublayer-*` label when the body has none, then the body as it
 // is. Its created date is GitHub's. Each GitHub comment follows in order, verbatim, dated as GitHub dates it, shown as "<login> (via GitHub)".
 // A parent that moves too is the issue's `parentId` (set later, by the end of a run, when the parent moved after the child).
+// `--project <name> --in-project <n>,<n>,...`: the issues numbered get that Linear project (found by name; the run refuses before any write
+// when it is not found, is found twice or does not include the team); every other issue gets none. An issue made or adopted without it gets
+// it by `issueUpdate` on a later run, and the map's `project: true` records it. A number that is no open issue is reported in the plan.
 // On GitHub, once the Linear side is complete (created, comments, holder): one comment "Moved to <KEY>: <URL>", then the issue is closed as
 // not planned. Nothing is deleted.
 // Resuming: $FACTORY_STATE/linear/moved/<owner>-<repo>.json records each step as it is done, written atomically after every step:
@@ -63,7 +66,7 @@ export function parse(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) args.push(a);
     else if (a === '--apply') flags.apply = true;
-    else if (['--team-key', '--board', '--limit'].includes(a)) {
+    else if (['--team-key', '--board', '--limit', '--project', '--in-project'].includes(a)) {
       if (a in flags) throw new Usage(`${a} is given twice`);
       if (argv[i + 1] === undefined) throw new Usage(`${a} needs a value`);
       flags[a] = argv[++i];
@@ -74,7 +77,13 @@ export function parse(argv) {
   const board = /^([\w.-]+)\/([1-9]\d*)$/.exec(flags['--board'] ?? '');
   if (!board) throw new Usage('--board is required, as owner/number');
   if ('--limit' in flags && !/^[1-9]\d*$/.test(flags['--limit'])) throw new Usage('--limit is a whole number of at least 1');
-  return { repo: args[0], teamKey: flags['--team-key'], board: { owner: board[1], number: Number(board[2]) }, apply: flags.apply === true, limit: '--limit' in flags ? Number(flags['--limit']) : Infinity };
+  if (('--project' in flags) !== ('--in-project' in flags)) throw new Usage('--project and --in-project go together');
+  if ('--project' in flags && !flags['--project'].trim()) throw new Usage('--project is a project name');
+  if ('--in-project' in flags && !/^[1-9]\d*(,[1-9]\d*)*$/.test(flags['--in-project'])) throw new Usage('--in-project is issue numbers, such as 3,5,8');
+  return {
+    repo: args[0], teamKey: flags['--team-key'], board: { owner: board[1], number: Number(board[2]) }, apply: flags.apply === true, limit: '--limit' in flags ? Number(flags['--limit']) : Infinity,
+    ...('--project' in flags ? { project: flags['--project'], inProject: flags['--in-project'].split(',').map(Number) } : {}),
+  };
 }
 
 export const mapFile = (state, repo) => join(state, 'linear', 'moved', `${repo.replace('/', '-')}.json`);
@@ -158,7 +167,16 @@ export function createMove({ gh = ghRun, api, state }) {
     return `${head.join('\n')}\n\n${issue.body}`;
   };
 
-  async function run({ repo, teamKey, board, apply, limit }, log = () => {}) {
+  /** The one project of that name, which includes the team; anything else refuses. */
+  async function findProject(projectName, team) {
+    const found = (await api.request('query($name: String!) { projects(filter: { name: { eq: $name } }, first: 5) { nodes { id name teams(first: 100) { nodes { id } } } } }', { name: projectName }))?.projects?.nodes ?? [];
+    if (found.length === 0) throw new Refused(`Linear has no project named "${projectName}"; nothing was written`);
+    if (found.length > 1) throw new Refused(`${found.length} projects are named "${projectName}"; nothing was written`);
+    if (!found[0].teams.nodes.some((t) => t.id === team.id)) throw new Refused(`project "${projectName}" does not include team ${team.key}; nothing was written`);
+    return found[0];
+  }
+
+  async function run({ repo, teamKey, board, apply, limit, project: projectName = null, inProject = [] }, log = () => {}) {
     const [owner, name] = repo.split('/');
     let entry;
     try {
@@ -179,15 +197,20 @@ export function createMove({ gh = ghRun, api, state }) {
     for (const fac of new Set(issues.map((i) => stateOf(i).fac))) {
       if (!team.states.nodes.some((s) => s.name === fac)) throw new Refused(`team ${teamKey} has no status named ${fac}; nothing was written`);
     }
+    const project = projectName ? await findProject(projectName, team) : null;
+    const inSet = new Set(inProject);
     const open = new Set(issues.map((i) => i.number));
     const moves = (n) => open.has(n) || Boolean(map.issues[n]?.key);
+    const projectOf = (n) => (project && inSet.has(n) ? project : null);
     const todo = issues.filter((i) => !map.issues[i.number]?.closed).slice(0, limit);
     const comments = new Map(todo.map((i) => [i.number, readComments(owner, name, i.number)]));
     const toCopy = (i) => comments.get(i.number).filter((c) => !MOVED_TO.test(c.body));
     const lines = todo.map((i) => {
       const parent = i.parent === null ? 'none' : `#${i.parent} (${moves(i.parent) ? 'moves' : 'stays on GitHub'})`;
-      return `#${i.number} | ${i.title} | ${stateOf(i).fac} | holder ${stateOf(i).hold ? LEAD_TEAM : 'none'} | parent ${parent} | ${toCopy(i).length} comments`;
+      return `#${i.number} | ${i.title} | ${stateOf(i).fac} | holder ${stateOf(i).hold ? LEAD_TEAM : 'none'} | parent ${parent} | ${toCopy(i).length} comments${project ? ` | project ${projectOf(i.number) ? project.name : 'none'}` : ''}`;
     });
+    // A number named for the project that is no open issue and no moved one is reported, not refused.
+    for (const n of inProject) if (!moves(n)) lines.push(`#${n} | not an open issue, so no project`);
     if (!apply) return { ok: true, applied: false, count: todo.length, lines };
 
     const save = () => writeMap(file, map);
@@ -198,7 +221,7 @@ export function createMove({ gh = ghRun, api, state }) {
       const copy = toCopy(issue);
       let e = map.issues[issue.number];
       if (!e?.key) {
-        e = (await adopt(issue, team, comments.get(issue.number))) ?? (await create(issue, status, team, map, moves));
+        e = (await adopt(issue, team, comments.get(issue.number))) ?? (await create(issue, status, team, map, moves, projectOf(issue.number)));
         map.issues[issue.number] = e;
         save();
       }
@@ -235,6 +258,17 @@ export function createMove({ gh = ghRun, api, state }) {
         log(`#${n} -> parent ${parent.key}`);
       }
     }
+    // An issue created or adopted without its project gets it now, closed on GitHub or not.
+    if (project) {
+      for (const [n, e] of Object.entries(map.issues)) {
+        if (e.key && inSet.has(Number(n)) && !e.project) {
+          done(await api.request('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }', { id: e.id, input: { projectId: project.id } }), 'issueUpdate');
+          e.project = true;
+          save();
+          log(`#${n} -> project ${project.name}`);
+        }
+      }
+    }
     return { ok: true, applied: true, count: moved.length, moved };
   }
 
@@ -252,15 +286,15 @@ export function createMove({ gh = ghRun, api, state }) {
     };
   }
 
-  async function create(issue, status, team, map, moves) {
+  async function create(issue, status, team, map, moves, project) {
     const parent = issue.parent === null ? undefined : map.issues[issue.parent];
     const stay = issue.parent !== null && !moves(issue.parent);
     const made = done(await api.issueCreate({
       teamId: team.id, title: issue.title, description: descriptionOf(issue, { parentStays: stay }), stateId: status.id, createdAt: issue.createdAt,
-      ...(parent?.id ? { parentId: parent.id } : {}), delegate: STATUS[issue.board ?? 'Triage'].hold, team: team.name,
+      ...(parent?.id ? { parentId: parent.id } : {}), ...(project ? { projectId: project.id } : {}), delegate: STATUS[issue.board ?? 'Triage'].hold, team: team.name,
     }), 'issueCreate');
     if (!made.issue?.id) throw new Refused('Linear did not name the issue it created');
-    return { key: made.issue.identifier, id: made.issue.id, url: made.issue.url, parentOf: issue.parent, comments: 0, parent: Boolean(parent?.id), held: false, ghComment: false, closed: false };
+    return { key: made.issue.identifier, id: made.issue.id, url: made.issue.url, parentOf: issue.parent, comments: 0, parent: Boolean(parent?.id), ...(project ? { project: true } : {}), held: false, ghComment: false, closed: false };
   }
 
   return { run };
@@ -273,7 +307,7 @@ export async function main(argv, env = process.env, { api, gh } = {}) {
     opts = parse(argv);
   } catch (e) {
     console.log(JSON.stringify({ ok: false, error: e.message }));
-    console.error('usage: factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--limit N] (see bin/lib/move.mjs)');
+    console.error('usage: factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--limit N] [--project <name> --in-project <n>,...] (see bin/lib/move.mjs)');
     return 2;
   }
   const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');

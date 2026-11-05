@@ -42,6 +42,7 @@ const defaultComments = () => ({
  * index of a write that fails once. */
 function world({ issues = defaultIssues(), comments = defaultComments(), pageSize = 2, registry = { proj: 1 } } = {}) {
   const w = { issues, comments, writes: [], attempts: 0, failAt: null, created: [], lcomments: {}, updates: [], faultMessage: null };
+  w.projects = [{ id: 'proj-1', name: 'Release 1', teams: { nodes: [{ id: 'team-fac' }, { id: 'team-other' }] } }];
   w.fail = () => {
     const n = w.attempts++;
     if (w.failAt === n) {
@@ -85,6 +86,7 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
     const q = body.query;
     const v = body.variables ?? {};
     if (q.includes('viewer')) return json(200, { data: { viewer: { id: 'app-user-1' } } });
+    if (q.includes('projects(')) return json(200, { data: { projects: { nodes: w.projects.filter((p) => p.name === v.name) } } });
     if (q.includes('teams(')) return json(200, { data: { teams: { nodes: [{ id: 'team-fac', key: 'FAC', name: 'Factory', states: { nodes: [st('s-triage', 'Triage', 'triage', 0), st('s-todo', 'Todo', 'unstarted', 1), st('s-prog', 'In Progress', 'started', 2), st('s-done', 'Done', 'completed', 3)] } }] } } });
     const mutation = q.includes('mutation');
     if (mutation && w.fail()) return json(200, { errors: [{ message: w.faultMessage ?? 'Linear refused the write' }] });
@@ -329,4 +331,65 @@ test('the command line: one repository, a team key and a board; a bad flag is a 
   for (const bad of [[], [REPO], [REPO, '--team-key', 'fac', '--board', 'ownr/7'], [REPO, '--team-key', 'FAC', '--board', 'ownr'], [REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--limit', '0'], [REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--force']]) {
     assert.throws(() => parse(bad));
   }
+  const base = [REPO, '--team-key', 'FAC', '--board', 'ownr/7'];
+  assert.deepEqual(parse([...base, '--project', 'Release 1', '--in-project', '3,5']).inProject, [3, 5]);
+  assert.equal(parse([...base, '--project', 'Release 1', '--in-project', '3,5']).project, 'Release 1');
+  for (const bad of [['--project', 'Release 1'], ['--in-project', '3'], ['--project', 'Release 1', '--in-project', '3,x'], ['--project', 'Release 1', '--in-project', '0']]) {
+    assert.throws(() => parse([...base, ...bad]));
+  }
+});
+
+const PROJECT = { project: 'Release 1', inProject: [1, 4, 77] };
+
+test('the project is sent only for the numbers given, and the plan line shows it', async () => {
+  const w = world();
+  const dry = await w.run({ ...PROJECT, apply: false });
+  assert.deepEqual(w.writes, []);
+  assert.match(dry.lines[0], /\| project Release 1$/);
+  assert.match(dry.lines[1], /\| project none$/);
+  assert.match(dry.lines[3], /\| project Release 1$/);
+  assert.equal(dry.lines[5], '#77 | not an open issue, so no project', 'reported, not an error');
+  await w.run(PROJECT);
+  for (const n of [1, 4]) assert.equal(byNumber(w, n).input.projectId, 'proj-1');
+  for (const n of [2, 3, 5]) assert.equal('projectId' in byNumber(w, n).input, false);
+  assert.equal(w.map().issues['1'].project, true);
+  assert.equal('project' in w.map().issues['2'], false);
+  assert.equal(w.updates.length, 0, 'created with it: nothing to add later');
+});
+
+test('without --project no issue gets one, and the plan line has none', async () => {
+  const w = world();
+  const dry = await w.run({ apply: false });
+  assert.doesNotMatch(dry.lines[0], /project/);
+  await w.run();
+  assert.ok(w.created.every((c) => !('projectId' in c.input)));
+});
+
+test('a project that is not found, found twice or without the team refuses before any write', async () => {
+  const cases = [
+    [(w) => { w.projects = []; }, /no project named "Release 1"/],
+    [(w) => { w.projects.push({ ...w.projects[0], id: 'proj-2' }); }, /2 projects are named/],
+    [(w) => { w.projects[0].teams = { nodes: [{ id: 'team-other' }] }; }, /does not include team FAC/],
+  ];
+  for (const [setup, why] of cases) {
+    const w = world();
+    setup(w);
+    await assert.rejects(w.run(PROJECT), why);
+    assert.deepEqual(w.writes, []);
+    assert.equal(existsSync(mapFile(w.state, REPO)), false);
+  }
+});
+
+test('a later run adds the project to an issue made without it, closed on GitHub or not, once', async () => {
+  const w = world();
+  await w.run({ limit: 1 }); // #1 is moved and closed, with no project
+  assert.equal('project' in w.map().issues['1'], false);
+  await w.run(PROJECT);
+  const one = byNumber(w, 1);
+  assert.deepEqual(w.updates.filter((u) => 'projectId' in u.input), [{ id: one.id, input: { projectId: 'proj-1' } }]);
+  assert.equal(byNumber(w, 4).input.projectId, 'proj-1');
+  assert.equal(w.map().issues['1'].project, true);
+  const again = w.writes.length;
+  await w.run(PROJECT);
+  assert.equal(w.writes.length, again, 'nothing more to do');
 });
