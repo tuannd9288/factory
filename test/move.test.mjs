@@ -172,6 +172,7 @@ test('the status map: Triage, no item, Todo and In Progress, the last held by th
   const held = w.lcomments[byNumber(w, 4).id].find((c) => c.body === 'Taken by team lead.');
   assert.ok(held, 'the holder comment of #404\'s code');
   assert.equal(held.input.createAsUser, 'lead');
+  for (const n of [1, 2, 3, 4, 5]) assert.equal(byNumber(w, n).input.createAsUser, 'lead', 'a moved issue shows the Lead\'s team, not the Linear team\'s name');
   assert.equal(w.lcomments[byNumber(w, 3).id].length, 0);
 });
 

@@ -365,7 +365,7 @@ export function createMove({ gh = ghRun, api, state }) {
     const stay = issue.parent !== null && !moves(issue.parent);
     const made = done(await api.issueCreate({
       teamId: team.id, title: issue.title, description: descriptionOf(issue, { parentStays: stay }), stateId: status.id, createdAt: issue.createdAt,
-      ...(parent?.id ? { parentId: parent.id } : {}), ...(project ? { projectId: project.id } : {}), delegate: STATUS[issue.board ?? 'Triage'].hold, team: team.name,
+      ...(parent?.id ? { parentId: parent.id } : {}), ...(project ? { projectId: project.id } : {}), delegate: STATUS[issue.board ?? 'Triage'].hold, team: LEAD_TEAM,
     }), 'issueCreate');
     if (!made.issue?.id) throw new Refused('Linear did not name the issue it created');
     return { key: made.issue.identifier, id: made.issue.id, url: made.issue.url, parentOf: issue.parent, comments: 0, parent: Boolean(parent?.id), source: sourceOf(issue.title, issue.body, issue.rewrite), ...(project ? { project: true } : {}), held: false, ghComment: false, closed: false };

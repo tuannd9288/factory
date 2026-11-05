@@ -80,7 +80,8 @@ function setup(opts) {
   writeFileSync(registryFile(state), JSON.stringify({ factory: { key: 'FAC', teamId: 'team-fac' } }));
   const linear = fake(opts);
   const stdin = { text: 'the body\n' };
-  const api = createLinear({ agentProfiles, state, fetchFn: (...a) => linear.fetchFn(...a), raise: () => {} });
+  // A Lead's environment names its seat team (FACTORY_TEAM); a write without --team shows that name.
+  const api = createLinear({ agentProfiles, state, team: 'factory-lead', fetchFn: (...a) => linear.fetchFn(...a), raise: () => {} });
   const run = createCli({ api, state, readStdin: async () => stdin.text });
   return { run, linear, state, stdin };
 }
@@ -194,6 +195,8 @@ test('create --delegate needs --team and posts the holder comment a take posts; 
   assert.deepEqual(linear.stored.map((c) => c.body), ['Taken by team lead.']);
   const posted = linear.mutations().find((m) => m.query.includes('commentCreate'));
   assert.equal(inputOf(posted).createAsUser, 'lead');
+  const created = linear.mutations().filter((m) => m.query.includes('issueCreate')).at(-1);
+  assert.equal(inputOf(created).createAsUser, 'lead', 'the issue shows the Lead\'s team, not the Linear team\'s name');
   assert.equal(holderOf(linear.stored), 'lead');
 });
 
@@ -332,6 +335,7 @@ test('create always sends a stateId, sets the delegate only with --delegate, and
   let r = await run(['create', '--team-key', 'FAC', '--title', 'A finding', '--status', 'Triage', '--body-file', '-']);
   assert.equal(r.code, 0);
   assert.equal(r.out.key, 'FAC-99');
+  assert.equal(inputOf(linear.mutations().find((m) => m.query.includes('issueCreate'))).createAsUser, 'factory-lead', 'without --team, the Lead\'s own team, not the Linear team\'s name');
   let [m] = linear.mutations();
   assert.equal(inputOf(m).stateId, 's-triage');
   assert.equal(inputOf(m).teamId, 'team-fac');

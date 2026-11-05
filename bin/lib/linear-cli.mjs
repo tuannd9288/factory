@@ -270,7 +270,7 @@ export function createCli({ api, state, readStdin }) {
     const status = team.states.nodes.find((s) => s.name === flags['--status']);
     if (!status) throw new Refused(`team ${teamKey} has no status named ${flags['--status']}`);
     const delegate = flags['--delegate'] === true;
-    const r = done(await api.issueCreate({ teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate, team: team.name }), 'issueCreate');
+    const r = done(await api.issueCreate({ teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate, team: flags['--team'] }), 'issueCreate');
     // An issue created with the app as its delegate is held by the creating team, as a take would say.
     if (delegate) await announceTake(r.issue.id, r.issue.identifier, flags['--team']);
     return { ok: true, key: r.issue?.identifier ?? null, status: status.name, delegate: delegate ? 'app' : null };
