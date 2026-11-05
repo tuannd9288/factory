@@ -468,7 +468,7 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, findings = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, findings = null, unread = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -527,6 +527,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
       `| ${r.repo.split('/')[1]} | [${at(r.number).trim()}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `yes (${r.touchedWhy})` : 'no'} | ${STATE[r.state]} |`,
     );
   }
+  if (unread?.size) lines.push('', ...[...unread].map(([repo, why]) => `- ${repo}: could not read its Linear issues (${why}); its task list above is missing and its enforcer lookup was skipped.`));
   if (sessions) {
     const { lines: ran, total } = sessionLines(sessions, since, until);
     const uncharged = unchargedSessions(sessions, since, until);
@@ -802,6 +803,12 @@ async function main(argv) {
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
   let linear = null;
   const linearApi = () => (linear ??= createLinear({ state }));
+  const unread = new Map();
+  const unreadBecause = (repo, error) => {
+    const why = String(error?.message ?? error).split('\n')[0].slice(0, 200);
+    if (!unread.has(repo)) unread.set(repo, why);
+    console.error(`ledger: ${repo}: its Linear issues could not be read: ${why}`);
+  };
   const clones = clonesUnder(root, (folder, why) => console.error(`ledger: skipped ${folder}: ${why}`));
   if (!opts.repos.length) opts.repos = [...clones.keys()];
   if (!opts.repos.length) throw new Error(`no repository under ${root}; pass --repo owner/name`);
@@ -823,13 +830,23 @@ async function main(argv) {
       return pulls.get(n);
     };
     // A repository on Linear (#406) has its tasks there, joined to pull requests by their `Issue: <KEY>` line.
-    const team = onLinear(repo, state);
+    // A registry or a Linear read that fails leaves this repository's tasks out and says so; the rest of the digest is written.
+    let team = null;
+    try {
+      team = onLinear(repo, state);
+    } catch (error) {
+      unreadBecause(repo, error);
+    }
     let tasks = null;
     if (team) {
       const allPulls = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/pulls?state=all&per_page=100`])).flat();
-      tasks = await linearTaskRows({ repo, api: linearApi(), teamKey: team.key, allPulls, pullRow: (n) => pull(n).row, from, to });
-      rows.push(...tasks.rows);
-    } else {
+      try {
+        tasks = await linearTaskRows({ repo, api: linearApi(), teamKey: team.key, allPulls, pullRow: (n) => pull(n).row, from, to });
+        rows.push(...tasks.rows);
+      } catch (error) {
+        unreadBecause(repo, error);
+      }
+    } else if (!unread.has(repo)) {
       for (const i of list('issues?labels=task&state=all&per_page=100')) {
         if (i.pull_request) continue;
         const node = graphql(ISSUE, i.number).issue;
@@ -839,7 +856,7 @@ async function main(argv) {
     }
     for (const p of list('pulls?state=all&per_page=100&sort=created&direction=desc')) {
       const { node, row } = pull(p.number);
-      const ofTask = tasks ? tasks.keys.has(linearIssueOf(node.body)) : node.closingIssuesReferences.nodes.some((i) => i.labels.nodes.some((l) => l.name === 'task'));
+      const ofTask = tasks ? tasks.keys.has(linearIssueOf(node.body)) : !unread.has(repo) && node.closingIssuesReferences.nodes.some((i) => i.labels.nodes.some((l) => l.name === 'task'));
       if (!ofTask) rows.push(row);
     }
   }
@@ -864,14 +881,23 @@ async function main(argv) {
   try {
     const onTeam = new Map();
     for (const repo of opts.repos) {
-      const team = onLinear(repo, state);
-      if (team) onTeam.set(repo, await enforcerIssues(linearApi(), team.key));
+      try {
+        const team = unread.has(repo) ? null : onLinear(repo, state);
+        if (team) onTeam.set(repo, await enforcerIssues(linearApi(), team.key));
+      } catch (error) {
+        unreadBecause(repo, error);
+      }
     }
-    findings = repeatedKinds(sessions, { mergedOf: mergedPullLookup(), enforcerOf: enforcerLookup(gh, { linear: (repo) => onTeam.get(repo) ?? null }) });
+    // A repository whose Linear issues could not be read is not looked up on GitHub instead: the lookup fails for it alone.
+    const linear = (repo) => {
+      if (unread.has(repo)) throw new Error(`its Linear issues could not be read: ${unread.get(repo)}`);
+      return onTeam.get(repo) ?? null;
+    };
+    findings = repeatedKinds(sessions, { mergedOf: mergedPullLookup(), enforcerOf: enforcerLookup(gh, { linear }) });
   } catch (error) {
     findings = { error: `The findings could not be read (${String(error.stderr || error.message).trim().split('\n')[0]}).` };
   }
-  const text = digest(rows, { ...opts, secrets, findings, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(state) });
+  const text = digest(rows, { ...opts, secrets, findings, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(state) });
   if (!opts.post) {
     process.stdout.write(text);
     return;

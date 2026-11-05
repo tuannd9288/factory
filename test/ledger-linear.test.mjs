@@ -95,3 +95,24 @@ test('a page of issues is followed to its end', async () => {
   const { rows } = await linearTaskRows({ repo: 'o/on', api, teamKey: 'FAC', allPulls: [], pullRow: () => assert.fail('no pull request'), from: FROM, to: TO });
   assert.deepEqual(rows.map((r) => r.number), ['FAC-1', 'FAC-2', 'FAC-3']);
 });
+
+test('a repository whose Linear issues could not be read gets a line in the digest, and the rest of the digest is written', () => {
+  const other = { ...prRow(7, { title: 'Other repo task' }), repo: 'o/gh', number: 7, url: 'u/7', state: 'landed', merged: '2026-11-04T00:00:00Z', hours: 1 };
+  const text = digest([other], { since: '2026-11-01', until: '2026-11-07', unread: new Map([['o/on', 'Linear answered HTTP 401: no data']]) });
+  assert.match(text, /- o\/on: could not read its Linear issues \(Linear answered HTTP 401: no data\); its task list above is missing and its enforcer lookup was skipped\./);
+  assert.match(text, /Other repo task/);
+  assert.doesNotMatch(digest([other], { since: '2026-11-01', until: '2026-11-07' }), /could not read its Linear issues/);
+});
+
+test('the enforcer lookup of a repository that could not be read fails for it alone, and does not fall back to GitHub', () => {
+  const asked = [];
+  const lookup = enforcerLookup((args) => (asked.push(args), '[[]]'), {
+    linear: (repo) => {
+      if (repo === 'o/on') throw new Error('its Linear issues could not be read: boom');
+      return null;
+    },
+  });
+  assert.throws(() => lookup('o/on', 'k-one'), /could not be read/);
+  assert.equal(lookup('o/gh', 'k-one'), null);
+  assert.equal(asked.length, 1, 'GitHub was asked for the other repository only');
+});
