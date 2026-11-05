@@ -8,6 +8,7 @@ import { createServer } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { freeWord } from '../bin/lib/team-names.mjs';
 import { factory } from './helpers.mjs';
 
 // Each fake writes what it got to $FAKE: its arguments one per NUL (<name>.args), and gh its stdin and exits with gh.exit.
@@ -95,7 +96,7 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
     });
     assert.deepEqual(permissions.deny, ['Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)']);
-    assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === 'alpha-lead', args.join(' '));
+    assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
     assert.equal(statSync(empty).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(empty), []);
     // The identity is read on the factory host, as the host's user, in its login shell.
@@ -606,7 +607,7 @@ test('wake on the MacBook with no local socket runs the same command on the Mac 
     await arrived(l.got, 1);
     assert.match(JSON.parse(l.got[0]).message.content, CONTENT('alpha', 12));
     // The Lead of another team has no socket there: the host says so, and the exit code is 1.
-    const none = s.fac(['wake', 'alpha', '--issue', '12']);
+    const none = s.fac(['wake', 'alpha', '--team', 'gamma', '--issue', '12']);
     assert.equal(none.code, 1, none.out);
     assert.match(none.out, /no file/);
     assert.match(none.out, /waits on GitHub/);
@@ -620,7 +621,7 @@ test('wake on the MacBook with no local socket runs the same command on the Mac 
   }
 });
 
-test('wake on the Mac mini posts to <runs>/<repo>-<team>/socket, the default team being lead, with no ssh (#351)', async () => {
+test('wake on the Mac mini posts to <runs>/<repo>-<team>/socket, using the only existing team, with no ssh (#351)', async () => {
   const s = world();
   const l = await listener(s);
   try {

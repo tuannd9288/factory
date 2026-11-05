@@ -1,5 +1,5 @@
 import { pushHook } from '../../../bin/lib/force-push.mjs';
-// packs/pstack/bin/lead (#163): starts the pstack Lead of one team of a repository (#196: --team, default lead; the session is named
+// packs/pstack/bin/lead (#163): starts the pstack Lead of one team of a repository (#196: --team, use the only existing team, pick a nickname when none exists, refuse when several exist; --new-team picks a free nickname; the session is named
 // <repo>-<team> and its folder is ~/factory-runs/<repo>-<team>/; the account row is the team's, factory/<repo>-<team>). This file holds the pure parts (the arguments of
 // claude, the enabled plugins, the refusals) and the start. Nobody logs in (#179): the Lead needs the row factory/<repo>-<team> in the
 // accounts file (#311) and refuses to start without it; it sets FACTORY_TEAM=<repo>-<team> in claude's environment for bin/seat; it reads that account's token file once, before setup, and gives it to claude's
@@ -20,12 +20,13 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { onLinear } from '../../../bin/lib/linear-repos.mjs';
-import { DEFAULT_TEAM, TEAM, firstFree } from '../../../bin/lib/names.mjs';
+import { TEAM, firstFree } from '../../../bin/lib/names.mjs';
+import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
-const USAGE = 'usage: factory lead <repo> [--team <name>] [--new] [--dry-run]   (--team names the team, default lead; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
+const USAGE = 'usage: factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]   (--team names the team, use the only existing team, pick a nickname when none exists, refuse when several exist; --new-team picks a free nickname; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
 const TEAM_TOKEN = '{{TEAM}}'; // in lead.md where the team's name goes; nothing else in that text is written so
 const TEAM_KEY_TOKEN = '{{TEAMKEY}}'; // in the Linear form of lead.md: the repository's Linear team key, from the registry
 
@@ -123,7 +124,7 @@ const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop',
  * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-<team>/
  * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
  * exec bit. */
-export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
+export function leadArgs({ repo, team, home, root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
   const cwd = join(root, repo);
   const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
@@ -227,6 +228,21 @@ export function markOnboarded(config) {
   }
 }
 
+/** Copy pstack's mapped skill defaults into the Lead profile on every start (#436). Model changes are the Human's. */
+export function writeModels(config, root) {
+  const file = join(config, 'rules/pstack-models.md');
+  const text = readFileSync(join(root, 'packs/pstack/pstack-models.md'));
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw new Error(`could not write ${file}: ${e.code ?? e.message}`);
+  }
+}
+
 /** The role text's hash (#316): SHA-256 hex of the exact string that goes to --append-system-prompt. */
 export const roleHash = (roleText) => createHash('sha256').update(roleText).digest('hex');
 
@@ -303,12 +319,13 @@ export function parseArgs(argv) {
       team = argv[++i] ?? '';
       if (!TEAM.test(team)) return { error: `the team "${team}" is not a letter then at most 31 lowercase letters and digits` };
     } else if (a.startsWith('--')) {
-      if (a !== '--new' && a !== '--dry-run') return { error: `unknown option ${a}` };
+      if (a !== '--new' && a !== '--dry-run' && a !== '--new-team') return { error: `unknown option ${a}` };
       flags.push(a);
     } else rest.push(a);
   }
   if (rest.length !== 1) return { error: '' };
-  return { repo: rest[0], team: team ?? DEFAULT_TEAM, flags };
+  if (new Set(flags).size !== flags.length || (team !== null && flags.includes('--new-team'))) return { error: '--new-team and --team are exclusive, flags are given once' };
+  return { repo: rest[0], team, flags };
 }
 
 function main(argv, env) {
@@ -317,7 +334,8 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: ${parsed.error ? `${parsed.error}\n` : ''}${USAGE}\n`);
     return 2;
   }
-  const { repo, team, flags } = parsed;
+  const { repo, flags } = parsed;
+  let { team } = parsed;
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
   const why = refusal(repo, root);
   if (why) {
@@ -328,6 +346,7 @@ function main(argv, env) {
   const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
   let linear;
   try {
+    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), root, newTeam: flags.includes('--new-team') });
     linear = onLinear(repo, stateDir);
   } catch (e) {
     // A registry that does not parse would give every repository the GitHub form without a word: no start instead.
@@ -414,6 +433,7 @@ function main(argv, env) {
   const token = t.token;
   try {
     markOnboarded(config);
+    writeModels(config, root);
   } catch (e) {
     process.stderr.write(`bin/lead: ${e.message}\n`);
     return 2;

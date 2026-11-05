@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# packs/pstack/bin/lead <repo> [--team <name>] [--new] [--dry-run] (#163, #166, #196): starts the pstack Lead of one team (default
-# `lead`) of an onboarded repository, an interactive claude session in ~/WORKSPACES/<repo> on the repository's own profile, named
+# packs/pstack/bin/lead <repo> [--team <name>] [--new] [--dry-run] (#163, #166, #196): starts the pstack Lead of one team (the only existing team, a nickname if none exists, or a refusal if several exist) of an onboarded repository, an interactive claude session in ~/WORKSPACES/<repo> on the repository's own profile, named
 # <repo>-<team>, its folder ~/factory-runs/<repo>-<team>/. `factory lead <repo> [--team <name>]` runs it. It resumes the newest
 # earlier session (from the transcript copies, never from the profile) unless --new. It runs the repository's .gate/bin/setup,
 # installs the plugins the repository's own .claude/settings.json enables (never adds a pin) and execs `direnv exec . claude`.

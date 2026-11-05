@@ -20,8 +20,9 @@ import { post, wakeLine } from './wake.mjs';
 import { liveOfAccount } from './seat.mjs';
 import { quote, roleOf } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
-import { DEFAULT_TEAM, TEAM, parseTeam } from './names.mjs';
+import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
+import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './top.mjs';
 import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
@@ -343,8 +344,8 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory top [--once] [--width N] [--full]
        bin/factory top --line [--width N]   (one line: what waits on the Human, teams, alerts)
        bin/factory top --brief [--after <seq>]   (the start hook's text for Colly; ends with the last seq)
-       bin/factory lead <repo> [--team <name>] [--new] [--dry-run]
-       bin/factory lead <repo> [--team <name>] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
+       bin/factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]
+       bin/factory lead <repo> [--team <name> | --new-team] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
        bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)
        bin/factory linear take|release|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
@@ -360,7 +361,7 @@ function onHostBySsh(sub, args, tty, env) {
   return r.status ?? 1;
 }
 
-/** `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository. On
+/** `factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository. On
  * the factory host it runs this clone's packs/pstack/bin/lead; on the MacBook it runs the same command there by ssh. The name, the
  * team (the grammar of bin/lib/names.mjs) and the flags are checked before anything runs. */
 function lead(all, env) {
@@ -372,7 +373,7 @@ function lead(all, env) {
   const flags = [];
   let teams = 0;
   let okTeam = true;
-  let team = DEFAULT_TEAM;
+  let team = null;
   for (let i = 0; i < more.length; i++) {
     if (more[i] === '--team') {
       teams += 1;
@@ -381,11 +382,15 @@ function lead(all, env) {
     } else flags.push(more[i]);
   }
   const here = flags.includes('--here');
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '') || teams > 1 || !okTeam || flags.some((f) => f !== '--new' && f !== '--dry-run' && f !== '--here') || new Set(flags).size !== flags.length || (here ? flags.length > 1 : passed !== null)) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '') || teams > 1 || !okTeam || flags.some((f) => f !== '--new' && f !== '--dry-run' && f !== '--here' && f !== '--new-team') || new Set(flags).size !== flags.length || (teams && flags.includes('--new-team')) || (here ? flags.some((f) => !['--here', '--new-team'].includes(f)) : passed !== null)) {
     console.error(USAGE);
     return 2;
   }
-  if (here) return leadHere(repo, team, passed ?? [], env);
+  if (here) {
+    try { team ??= pickTeam(repo, { ...contextOf(env), newTeam: flags.includes('--new-team') }); }
+    catch (e) { console.error(e.message); return 2; }
+    return leadHere(repo, team, passed ?? [], env);
+  }
   if (placeOf(env) !== 'factory') return onHostBySsh('lead', args, true, env);
   const r = spawnSync(resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/bin/lead'), args, { stdio: 'inherit', env });
   if (r.error) {
@@ -427,7 +432,7 @@ export const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}
 async function wake(args, env) {
   const [repo, ...more] = args;
   let issue = null;
-  let team = DEFAULT_TEAM;
+  let team = null;
   let ok = /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(repo ?? '');
   const seen = new Set();
   for (let i = 0; i < more.length && ok; i++) {
@@ -451,6 +456,8 @@ async function wake(args, env) {
   }
   const { state, runs } = contextOf(env);
   const onHost = placeOf(env) === 'factory';
+  try { team ??= pickTeam(repo, { ...contextOf(env), existing: true }); }
+  catch (e) { console.error(e.message); return 2; }
   const file = onHost ? join(runs, `${repo}-${team}`, 'socket') : wakeFile(state, repo, team);
   if (!onHost && !existsSync(file)) {
     const code = remote('wake', args, env);
@@ -532,6 +539,7 @@ function leadHere(repo, team, passed, env) {
   let hook;
   try {
     hook = copySocketHook(state);
+    mkdirSync(join(contextOf(env).runs, `${repo}-${team}`), { recursive: true });
   } catch (e) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 1;
@@ -842,7 +850,7 @@ const startNote = (repo, flag) => (repo === FACTORY_REPO ? '' : ` (factory lead 
  * `restartTeam`, if it runs; the other teams of the repository are not touched. 0 when it was restarted or does not run, else 1. */
 async function restartLead(repo, team, account, ctx, oldAccount) {
   const hasToken = tokenState(ctx.agentProfiles, account).ok;
-  const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
+  const flag = ` --team ${team}`;
   // `factory top`'s rule: a claude process with --name <repo>-<team>. A recorded pane may hold something else by now.
   if (!leadTeams(repo).includes(team)) {
     console.log(`the Lead of ${repo} (team ${team}) is not running; it takes ${account} at its next start${startNote(repo, flag)}`);
@@ -863,7 +871,7 @@ async function restartLead(repo, team, account, ctx, oldAccount) {
  * nothing, and says the Lead keeps running on `oldAccount` while its new workers take `account`. 0 once the start was sent, else 1
  * with the reason. */
 async function restartTeam(repo, team, account, ctx, oldAccount) {
-  const flag = team === DEFAULT_TEAM ? '' : ` --team ${team}`;
+  const flag = ` --team ${team}`;
   const who = `the Lead of ${repo} (team ${team})`;
   const next = `${who} takes it at its next start${startNote(repo, flag)}`;
   let pane = '';

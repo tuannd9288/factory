@@ -44,9 +44,8 @@ changes nothing; its apply mode changes a repository only through pull requests 
   `~/factory-runs/<repo>-<team>/transcripts/`, which seats are denied. That a profile keeps them under `projects/`,
   where the Lead's hook copies from, was checked by the Lead's live run on 2.1.308 (#185, issuecomment-6545015874,
   item d). `recall` and `reflect` themselves have not yet run on the copies (#185, acceptance 5).
-- **Rules.** The factory writes no rules into any profile; `setup-pstack`, their only writer, is not used. So nothing
-  the factory runs writes the adapter's `~/.claude/rules/pstack-models.md`; without it, a role uses its skill's default
-  slug (`docs/harness/claude-code.md:37`). A project's `.claude/rules/` loads in a seat session on 2.1.308: a probe's
+- **Rules.** The launcher writes `rules/pstack-models.md` into each Lead profile at every start, with the skill
+  defaults mapped by the adapter; a change of model is the Human's. A project's `.claude/rules/` loads in a seat session on 2.1.308: a probe's
   session quoted a marker line from `.claude/rules/factory-probe.md` with no tool call (#203's `run-rules-1.jsonl`). A
   profile's own `rules/` is per the docs, not probed: a probe would need a write into a profile's folder, which no agent
   makes.

@@ -220,7 +220,7 @@ for (const state of ['idle', 'done']) {
       const calls = herdrCalls(s);
       assert.deepEqual(calls.slice(0, 4), ['agent wait p-7 --timeout 600000', 'agent get p-7', 'agent prompt p-7 /exit', 'agent get p-7']);
       assert.equal(calls.length, 5);
-      assert.match(calls[4], new RegExp(`^pane run p-7 '\\S*/packs/pstack/bin/lead' ${REPO}$`));
+      assert.match(calls[4], new RegExp(`^pane run p-7 '\\S*/packs/pstack/bin/lead' ${REPO} --team lead$`));
       assert.ok(!r.out.includes(ANN) && !r.out.includes(BOB), 'no token in the output');
     } finally {
       s.done();

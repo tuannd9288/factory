@@ -9,6 +9,7 @@
 #   From the installed copy: it first follows main by the same rule, and when that moved the copy it runs itself again from the moved copy,
 #   once; a refused follow is told and the run goes on with the copy as it is. Then ~/.local/bin/factory becomes a symlink to its bin/factory. It replaces a symlink whose target ends in
 #   /bin/factory (the old one into a clone included) and nothing else: a file, a folder or a link to another place is named and left as it is.
+#   On the Mac mini, enables this repository's commit-msg hook from this main checkout, unless a hooksPath or executable default hook already exists.
 #   On the MacBook only, it then writes the relay's LaunchAgent (bin/factory-relay plist) to ~/Library/LaunchAgents through a temporary name
 #   and a rename, unloads the old job when one is loaded, waits (10 seconds at most) until the job is gone, loads the new one and runs `bin/factory-relay check`. It says each step in a line.
 # A clone anywhere else, its branches and its uncommitted edits change nothing that runs; only a change that lands on main reaches the copy.
@@ -65,7 +66,24 @@ fi
 echo "factory: $link -> $target"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "note: $HOME/.local/bin is not on your PATH" ;; esac
 
-[ "$(node "$helper" place)" = macbook ] || exit 0
+if [ "$(node "$helper" place)" != macbook ]; then
+  if hooks=$(git -C "$here" config --show-origin --get core.hooksPath); then
+    echo "install-factory: core.hooksPath already set ($hooks); left as it is"
+    exit 0
+  fi
+  hooks=$(git -C "$here" rev-parse --git-path hooks)
+  case "$hooks" in /*) ;; *) hooks=$here/$hooks ;; esac
+  for hook in "$hooks"/*; do
+    case "$hook" in *.sample) continue ;; esac
+    if [ -f "$hook" ] && [ -x "$hook" ]; then
+      echo "install-factory: existing hook $hook; left as it is"
+      exit 0
+    fi
+  done
+  git -C "$here" config --local core.hooksPath "$here/.githooks"
+  echo "install-factory: core.hooksPath set to $here/.githooks"
+  exit 0
+fi
 label=io.github.tuannd9288.factory.relay
 agents=$HOME/Library/LaunchAgents
 plist=$agents/$label.plist
