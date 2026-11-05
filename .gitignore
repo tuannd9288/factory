@@ -6,6 +6,9 @@
 !/AGENTS.md
 !/NOTICE
 !/bin/
+!/docs/
+/docs/*
+!/docs/decisions.md
 !/kit/
 !/modules/
 !/packs/
