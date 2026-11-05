@@ -32,7 +32,7 @@ function world() {
   git('init', '-q');
   git('remote', 'add', 'origin', 'https://github.com/o/factory.git');
   writeFileSync(join(state, 'accounts'), 'factory/factory-lead=acct\n');
-  writeFileSync(join(dir, 'gh'), ['#!/bin/sh', 'printf \'%s\\n\' "$(printf \'%s\' "$*" | tr \'\\n\' \' \')" >>"$Q/calls"', 'case "$*" in', '  "api user"*) echo agent-bot ;;', '  *rules/branches*) printf "["; cat "$Q/rules.json"; printf "]" ;;', '  *graphql*) cat "$Q/prs.json" ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
+  writeFileSync(join(dir, 'gh'), ['#!/bin/sh', 'printf \'%s\\n\' "$(printf \'%s\' "$*" | tr \'\\n\' \' \')" >>"$Q/calls"', 'case "$*" in', '  "api user"*) echo agent-bot ;;', '  *rules/branches*) printf "["; cat "$Q/rules.json"; printf "]" ;;', '  *graphql*) cat "$Q/prs.json" ;;', '  "run rerun "*) exit 0 ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
   chmodSync(join(dir, 'gh'), 0o755);
   writeFileSync(join(dir, 'rules.json'), JSON.stringify(rules));
   const put = (nodes) => writeFileSync(join(dir, 'prs.json'), JSON.stringify({ data: { repository: { pullRequests: { nodes } } } }));
@@ -106,6 +106,30 @@ test("a pull request of the factory's repository with `Team: lead` names the Lea
     assert.deepEqual(posts, [join(w.dir, 'runs', 'factory-lead', 'socket')]);
     const [line] = readLines(w.state);
     assert.deepEqual([line.lead, line.woke, 'why' in line], ['factory-lead', true, false]);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('the factory queue re-runs only its failed approval job after a fresh head approval (#456)', () => {
+  const w = world();
+  try {
+    const candidate = (number, conclusion = 'FAILURE', over = {}) => pull(number, {
+      commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [run('verify', 'SUCCESS'), run('approval', conclusion, String(100 + number)), run('tier', 'FAILURE', '99')] } } } }] },
+      ...over,
+    });
+    w.put([
+      candidate(7),
+      candidate(8, 'SUCCESS'),
+      candidate(9, 'FAILURE', { reviews: { nodes: [] } }),
+      candidate(10, 'FAILURE', { reviews: { nodes: [{ author: { login: 'someone' }, commit: { oid: 'h10' }, submittedAt: STARTED }] } }),
+      candidate(11, 'FAILURE', { reviews: { nodes: [{ author: { login: 'someone' }, commit: { oid: 'old' }, submittedAt: '2026-11-03T01:00:00Z' }] } }),
+    ]);
+    const first = w.sweep();
+    assert.deepEqual(first.calls.filter((c) => c.startsWith('run rerun')), ['run rerun --job 107 --repo o/factory']);
+    assert.ok(!first.calls.some((c) => c.startsWith('pr update-branch')));
+    w.put([candidate(7, 'SUCCESS')]);
+    assert.deepEqual(w.sweep().calls.filter((c) => c.startsWith('run rerun')), []);
   } finally {
     w.cleanup();
   }
