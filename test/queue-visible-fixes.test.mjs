@@ -7,6 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { commit, git, quiet } from './helpers.mjs';
 import * as ledger from '../bin/lib/ledger.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,12 +33,16 @@ function fakeGh(dir, list) {
   writeFileSync(join(dir, 'list.json'), JSON.stringify(list));
   writeFileSync(join(dir, 'calls'), '');
   mkdirSync(join(dir, 'root'), { recursive: true });
+  git(join(dir, 'root'), 'init', '-q', '-b', 'main');
+  commit(join(dir, 'root'), { 'README.md': '# factory\n' }, 'start');
+  git(dir, 'clone', '-q', '--bare', join(dir, 'root'), join(dir, 'origin.git'));
+  git(join(dir, 'root'), 'remote', 'add', 'origin', join(dir, 'origin.git'));
 }
 
 const ledgerCli = (dir, args, env = {}) =>
   spawnSync(join(factory, 'bin/factory-ledger'), ['--repo', 'o/app', '--since', '2026-10-17', '--until', '2026-10-24', ...args], {
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'), FACTORY_PROFILE_DIRS: '', ...env },
+    env: { ...process.env, ...quiet, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'), FACTORY_PROFILE_DIRS: '', ...env },
   });
 
 test('--post finds the issue by listing, never through the search index, which lags behind a new issue', () => {
