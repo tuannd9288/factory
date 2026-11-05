@@ -49,6 +49,7 @@ import { MAX_LINE, fits, socketPath } from './daemon-proto.mjs';
 import { holderOf, releaseLock, takeLock } from './queue.mjs';
 import { wakeOnSeatEnds } from './news-wake.mjs';
 import { openStore } from './store.mjs';
+import { startLinearSource } from './linear-listen.mjs';
 import { postSync } from './wake.mjs';
 
 export const PASS_MS = 60_000;
@@ -212,9 +213,9 @@ function releaseQueueLock(state) {
   if (holderOf(lock)?.pid === process.pid) rmSync(lock, { force: true });
 }
 
-/** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow` and `onStart` (told
+/** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow`, `startSource` and `onStart` (told
  * { stop, d } once it listens) are passed in for tests. */
-export async function run({ state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'), human = process.env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = process.env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(process.env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), onStart } = {}) {
+export async function run({ state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'), human = process.env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = process.env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(process.env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, onStart } = {}) {
   const sock = socketPath(state);
   if (!fits(sock)) throw new Error(`the socket path ${sock} is longer than 103 bytes`);
   mkdirSync(state, { recursive: true });
@@ -240,6 +241,7 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     if (d.stopping) return;
     d.stopping = true;
     log(`daemon: stopping: ${why}`);
+    d.linear?.stop();
     clearTimeout(d.timer);
     clearInterval(d.lease);
     const close = () => {
@@ -292,6 +294,7 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     releaseLock(lockFile, lock.token);
     throw error;
   }
+  d.linear = startSource({ state, store, log });
   if (signals) for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => stop(`signal ${sig}`));
   log(`daemon: listening on ${sock} (pid ${process.pid}, head ${String(LOADED ?? 'unknown').slice(0, 7)})`);
   // The lease: the job pings once a minute, so a daemon nobody pings (its job booted out) stops by itself, by the path of SIGTERM.
