@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Brings an onboarded repository up to the factory's main: the counterpart of bin/onboard for a repository that already
-# has the kit. It works on the clone onboard made, $FACTORY_ROOT/<name>, and opens "Bring the kit up to factory main
-# <sha7>" from the branch factory/kit-<sha7>.
+# has the kit. It works on the clone onboard made, $FACTORY_ROOT/<name>, and opens "chore(kit): update to
+# factory main <sha7>" from the branch factory/kit-<sha7>; its commit keeps "Bring the kit up to factory main <sha7>".
 #   bin/kit-update <repo-url|name> [--no-pr] [--module <name>]... [--no-module <name>]... [--reviewer <name>]
 #     [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]
 # From a fresh branch off origin/main, for every path of kit/ at this clone's HEAD (bin/lib/kitupdate.mjs):

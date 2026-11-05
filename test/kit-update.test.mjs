@@ -68,7 +68,7 @@ describe('bin/kit-update', () => {
       // The commit and the pull request.
       assert.equal(git(w.repo, 'log', '-1', '--format=%s', rev), `Bring the kit up to factory main ${sha7}`);
       assert.match(git(w.repo, 'log', '-1', '--format=%b', rev), new RegExp(full));
-      assert.equal(readFileSync(w.title, 'utf8'), `Bring the kit up to factory main ${sha7}`);
+      assert.equal(readFileSync(w.title, 'utf8'), `chore(kit): update to factory main ${sha7}`);
       // The body opens with the Human's summary (#386, #411), the Vietnamese block then the English one; the agents' detail follows
       // in one <details> block, the header lines after it.
       const [tldr, tldrEn, open, ...afterTldr] = text.split('\n\n');
