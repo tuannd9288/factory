@@ -7,7 +7,7 @@ as `prose` and gets one, or is deleted, within 30 days.
 | Rule | Enforced by |
 |---|---|
 | `AGENTS.md` has the kit's Gate block at its start (after an optional title line), is at most 150 lines and 32 KiB, and `CLAUDE.md` starts with the line `@AGENTS.md` or is a relative symlink to it | `.gate/bin/verify` (`instructions`); `.gate/bin/verify-trusted` reads the candidate's git objects, and a changed block passes only as a kit update the factory's `main` vouches for |
-| Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
+| Land through auto-merge: `merge` in `.gate/driver.json` on main defaults to `squash`; `merge` keeps merge commits | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
 | No rewrite of a pushed commit (rebase, amend) and no force-push in any form, wherever the flag stands (`--force`, `-f`, `--force-with-lease[=…]`, `+<ref>`, `--mirror`): a rewrite drops the red heads `rounds` counts and the commit the Human's approval is bound to | the ruleset `factory-branches` on every branch (`non_fast_forward`, set by the factory's `bin/onboard-owner`); deleting a branch other than `main` and `claim/*` and pushing it again is not refused, nor is a `--mirror` push that deletes such branches |
 | Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
 | Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or `AGENTS.md`, and review reads it | the reviewer |

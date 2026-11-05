@@ -134,3 +134,22 @@ test('the factory queue re-runs only its failed approval job after a fresh head 
     w.cleanup();
   }
 });
+
+for (const method of ['squash', 'merge']) {
+  test(`the sweep reports a ${method} PR from its merged state`, () => {
+    const w = world();
+    try {
+      w.put([]);
+      w.sweep();
+      writeFileSync(join(w.dir, 'prs.json'), JSON.stringify({ data: { repository: {
+        pullRequests: { nodes: [] },
+        merged: { nodes: [{ number: 8, headRefOid: 'original-head', body: 'Issue: none\nTeam: lead\n', mergedAt: new Date().toISOString(),
+          mergeCommit: { oid: 'landed', parents: { totalCount: method === 'squash' ? 1 : 2 } } }] },
+      } } }));
+      const out = w.sweep();
+      assert.equal(readLines(w.state).filter((e) => e.kind === 'merged').length, 1, out.out);
+      w.sweep();
+      assert.equal(readLines(w.state).filter((e) => e.kind === 'merged').length, 1);
+    } finally { w.cleanup(); }
+  });
+}

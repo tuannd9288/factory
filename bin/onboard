@@ -230,7 +230,7 @@ while IFS= read -r path; do
   cp -p "$factory/kit/$path" "$path"
   # CODEOWNERS gets its owner, and the three workflows the gate's settings (bin/lib/gate-settings.mjs).
   case "$path" in
-    .github/CODEOWNERS | .github/workflows/main.yml | .github/workflows/gate.yml | .github/workflows/gate-trusted.yml)
+    .gate/ruleset.json | .github/CODEOWNERS | .github/workflows/main.yml | .github/workflows/gate.yml | .github/workflows/gate-trusted.yml)
       node "$factory/bin/lib/gate-settings.mjs" render "$path" --human "$human" ${settings[@]+"${settings[@]}"} ;;
   esac
 done <"$lists/kit"
@@ -308,7 +308,7 @@ if [ "$had_config" -eq 0 ] && [ -f scripts/verify ]; then
   moved="${moved:+$moved }$adapter_note."
 fi
 [ -z "$untouched" ] || moved="${moved:+$moved }The repository's own hooks stay in \`.githooks/\` and run only in a clone that ran the repository's own setup; the kit's \`.gate/hooks/\` serve a repository with none."
-gh pr create --repo "$slug" --head factory/kit --title "Join the factory: gate, hooks, hand-in rules and templates" --body "$(cat <<EOF
+gh pr create --repo "$slug" --head factory/kit --title "chore(kit): add the factory gate, hooks and templates" --body "$(cat <<EOF
 $tldr
 
 <details>
