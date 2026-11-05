@@ -344,6 +344,9 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory top [--once] [--width N] [--full]
        bin/factory top --line [--width N]   (one line: what waits on the Human, teams, alerts)
        bin/factory top --brief [--after <seq>]   (the start hook's text for Colly; ends with the last seq)
+       bin/factory colly   (starts Colly in this pane on the MacBook)
+       bin/factory colly --line [--width N]
+       bin/factory colly --brief [--after <seq>]
        bin/factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]
        bin/factory lead <repo> [--team <name> | --new-team] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
        bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)
@@ -559,6 +562,63 @@ function leadHere(repo, team, passed, env) {
   const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, '--settings', JSON.stringify(settings), ...passed], { stdio: 'inherit', env });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
+/** Colly's current-pane launch (#365): the pack supplies the approved role; GitHub writes go through `factory gh`.
+ * INN-30 permits use and lead; login, store and logout remain denied. */
+function colly(args, env) {
+  if (args.includes('--line') || args.includes('--brief')) return top(args, env);
+  if (args.length) {
+    console.error(USAGE);
+    return 2;
+  }
+  if (placeOf(env) === 'factory') {
+    console.error('bin/factory: colly runs on the MacBook');
+    return 2;
+  }
+  const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/colly/colly.md');
+  let roleText;
+  try {
+    roleText = existsSync(rolePath) ? readFileSync(rolePath, 'utf8') : '';
+  } catch (e) {
+    console.error(`bin/factory: colly: ${e.message}`);
+    return 2;
+  }
+  if (!roleText.trim()) {
+    console.error(`bin/factory: colly: ${rolePath} is missing or empty`);
+    return 2;
+  }
+  const parent = join(contextOf(env).state, 'colly');
+  const empty = join(parent, 'gh-empty');
+  try {
+    mkdirSync(empty, { recursive: true, mode: 0o700 });
+    chmodSync(parent, 0o700);
+    chmodSync(empty, 0o700);
+  } catch (e) {
+    console.error(`bin/factory: colly: ${e.message}`);
+    return 1;
+  }
+  if (readdirSync(empty).includes('hosts.yml')) {
+    console.error(`bin/factory: colly: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
+    return 1;
+  }
+  const settings = {
+    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '' },
+    permissions: {
+      allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)'],
+      deny: [
+        'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
+        'Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*factory logout*)',
+        'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)', 'Bash(*lib/factory.mjs logout*)',
+      ],
+    },
+  };
+  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', 'colly', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: colly: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
   }
   return r.status ?? 1;
@@ -1013,6 +1073,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'use') return use(rest, env, io);
   if (cmd === 'logout') return logout(rest, env);
   if (cmd === 'top') return top(rest, env);
+  if (cmd === 'colly') return colly(rest, env);
   if (cmd === 'lead') return lead(rest, env);
   if (cmd === 'gh') return ghCmd(rest, env);
   if (cmd === 'linear') return linearCmd(rest, env);
