@@ -14,6 +14,28 @@ import * as seat from '../bin/lib/seat.mjs';
 const git = (cwd, ...args) => assert.equal(spawnSync('git', ['-C', cwd, ...args], { env: { ...process.env, ...quiet }, encoding: 'utf8' }).status, 0, args.join(' '));
 const recordIn = (cwd) => seat.recordOf({ role: 'worker', seat: 1, tag: 't', run: '/r', start: '2026-10-30T00:00:00Z', cwd }, [], { code: 0, end: new Date('2026-10-30T00:01:00Z') });
 
+test('an error result overrides success and records the first available failure message (#170)', () => {
+  const limit = "You've hit your session limit · resets 7:50pm (Asia/Saigon)";
+  const spec = { role: 'worker', seat: 1, tag: 't', run: '/r', start: '2026-10-30T00:00:00Z', cwd: tmpdir() };
+  const end = { code: 0, end: new Date('2026-10-30T00:01:00Z') };
+  for (const [fields, message] of [
+    [{ result: limit, errors: ['ignored'], terminal_reason: 'ignored' }, limit],
+    [{ result: '', errors: ['API error', 'retry failed'], terminal_reason: 'ignored' }, 'API error; retry failed'],
+    [{ errors: [], terminal_reason: 'terminal failure' }, 'terminal failure'],
+  ]) {
+    const rec = seat.recordOf(spec, [
+      { type: 'result', subtype: 'success' },
+      { type: 'result', subtype: 'success', is_error: true, ...fields },
+    ], end);
+    assert.equal(rec.ended, 'error');
+    assert.equal(rec.error, message);
+  }
+  const success = seat.recordOf(spec, [{ type: 'result', subtype: 'success', is_error: false }], end);
+  assert.equal(success.ended, 'success');
+  assert.equal(success.error, undefined);
+  assert.equal(seat.recordOf(spec, [], end).ended, 'no-result');
+});
+
 /** A work folder that is a clone: a commit on `branch` and `origin` at `url`. */
 function clone(url, branch = 'work-1') {
   const dir = mkdtempSync(join(tmpdir(), 'seat-record-'));
