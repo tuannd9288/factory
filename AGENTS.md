@@ -8,6 +8,23 @@ his SSH keys and gh login behind its home, which is `drwx------` on the Mac mini
 which macOS privacy controls (TCC) close to launchd jobs that were not granted access; not tested here. This file
 covers the factory's rules and taking a repository in. Inside a repository, that repository's own `AGENTS.md` governs.
 
+## Rules for building the factory
+
+His standing rules for building the factory, approved on INN-24 (A, 2026-11-05 13:52:46 +07); they are not copied into the kit or a pack.
+
+- **Snags.** At a snag, a bug or a security finding, a reviewer FAIL included, do what a reference system does about it; if none has it, record it in Triage with the reason and park it (31/10, 01/11, 05/11).
+- **Reference systems,** each at its pin, with a local copy under `data_mirror/data/repos/`: piggery `67c083e`, agent-orchestrator `9dc1c14`, pstack `4dd1d05` (`cursor-plugins`, the pin in `packs/pstack/settings.json`), zeroshot `0ad6653`, pi-herdsman `f2064d9`, dsh-superagent-prototype `8c32a9d`, paperclip `01d9a12`, warp-factory-examples `84e7c95`, seatworks `4c35563` (`seatworks-v3`), paseo-slp `a75c4db`, and Demonthorn's SLP articles; a system is added when he names one (05/11).
+- **Default to pstack and SLP.** Where the factory differs, the difference is a switch whose default is pstack's way; it deviates only on his dated word (13/10, 16/10, 05/11).
+- **Goals.** Every proposal names the goal it serves; review is the last layer (19/10, 21/10).
+- **Exception lists.** A check that needs a list of exceptions is dropped and left to review (25/10).
+- **No pauses.** Research, or a choice waiting on him, never pauses other work (31/10).
+- **Every repository.** A feature is built for every repository the factory serves, not only the factory repository (31/10).
+- **His choices.** Language, framework, database, hosting and large designs are his; agents propose (23/10).
+- **His questions** test a proposal; they are not orders, and they do not reject it (30/10, 04/11).
+- **Linear's own features** are used; one is dropped only with a recorded reason (03/11).
+- **Licences.** Never ask him about a licence (30/10).
+- **Installing.** A tool is installed the way its sibling tools are installed (02/11).
+
 ## Decisions
 
 Each line below gives the Human's decisions on one matter, with their dates and sources, and says what holds now; the
@@ -25,6 +42,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   commit, and tier 3 still waits for his approval (#203, which he approved "theo đề xuất" on 2026-10-30). Attack 12
   and the 20 seeded + 20 clean probes re-run when real use calls for them (#153; the Human, 2026-10-29: "ok, đưa về
   Triage, và theo dõi thực tế factory triển khai có hiệu quả hơn là đi xử lý cái vấn đề có thể không xảy ra không?").
+  Fixes come from failures in real use; no probe programme runs, and no work stops at a usage % (29–31/10).
   The pack's Lead arms auto-merge through `scripts/ship` (#163, #304). Sources:
   https://github.com/tuannd9288/factory/issues/203 (area 4) and https://github.com/tuannd9288/factory/issues/153; the
   bar of 2026-10-21 is `probes/plan.md` at the tag `before-271`. **The merge switch, 2026-11-02 (#333).** Each repository
@@ -107,6 +125,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   sentence, the order the same as on an INN item; a fourth line, "Nếu không trả lời" / "If no answer", appears only
   when silence has a consequence. Only these two blocks are bilingual, and the Vietnamese block alone is the
   repository's Vietnamese.
+  English is plain, and speaks in features rather than mechanics (31/10, 02/11).
   Sources: https://github.com/tuannd9288/factory/issues/98, https://github.com/tuannd9288/factory/issues/386 and
   https://github.com/tuannd9288/factory/issues/411.
 - **Control surfaces (#68), 2026-10-25 to 2026-10-31.** The factory runs on Ghostty and Herdr until it is finished,
@@ -160,7 +179,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   neither `ARCHITECTURE.md` nor `docs/` is required (K2; INN-23 A, 2026-11-04 23:37:50 +07, #422: a repository's product
   description is pstack's Feature Map, files in the repository, one short file per feature, from the user's side,
   updated in the same pull request as the code; flow diagrams are drawn only for a complex flow; Linear Documents hold
-  only writing he reads; the work comes after release 1); the Gate block states the gate's obligations directly, and
+  only writing he reads; the rule reaches every repository in release 1 (#428), the Feature Map after it (#422)); the Gate block states the gate's obligations directly, and
   `CLAUDE.md` is `@AGENTS.md`, an addendum allowed, or a relative symlink to `AGENTS.md` (K3). He had asked for it after the
   review: "Cho Astra review lại rồi đề xuất cho đúng thiết kế". Its pack and harness parts are in the two entries of
   2026-10-21 and 2026-10-22 above. 2a and H4 stay as they are, and so does "Cho file một phần đuôi của repo
@@ -239,6 +258,8 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   "OK không xoá issue." (14:43); "5 ok." (14:47). Sources:
   https://github.com/tuannd9288/factory/issues/375 (its body and comments) and
   https://github.com/tuannd9288/factory/issues/402, relayed by Colly and the factory-repo session.
+  Built work closes; where Linear now does a job, the code that did it is tagged and removed (04/11).
+  Every Linear label has a written purpose (04/11).
 - **The Factory app's Linear key, 2026-11-04.** The credential rule for sublayer 1b (#403): the factory's code reaches
   Linear only as its own app "Factory", never under his login, and the token store (`bin/lib/token.mjs`, #311's route)
   may hold the app's client id, its client secret and the access token minted from them, in `tokens/linear-app/`, and
@@ -251,6 +272,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   động tối ưu hơn piggery nha" (12:51 +07, 05:51:53Z), and, on the store, "Cái nào hiệu quả, quan trọng là hiệu quả, còn
   thêm công nghệ hay gì không quan trọng. Hiệu quả, tối ưu." (14:28 +07, 07:28:56Z). Source:
   https://github.com/tuannd9288/factory/issues/399.
+  Data leaving the machine, needing a server or costing money is a warning, never a reason to reject; use what exists before building (21/10, 03/11).
 
 ## Tiers
 
@@ -293,6 +315,7 @@ The map the Human settled on 2026-10-25: five layers, 17 sublayers, nine contrac
 "The LLC sublayer and the MAC sublayer together are intended to have the same function as that described in the OSI model for the Data Link Layer alone."
 Each name carries a source key; the keys, with their URLs and how fully each was read, are in
 https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every issue and proposal names its sublayer.
+Names are standard terms, never coined ones (25/10).
 
 - **Layer 0 Substrate** [SH]: what every agent runs on.
 - **Layer 1 Orchestration** [SD3, A1]: how work is given out and watched.
@@ -327,7 +350,7 @@ https://github.com/tuannd9288/factory/issues/80#issuecomment-6399460150. Every i
 - **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
 - **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
 - **4b Evals** [A8]: the pack's attacks (`packs/pstack/attacks.md`); the gate's attacks and the 20 seeded + 20 clean
-  probes, at the tag `before-271`, which re-run when real use calls for them (#153).
+  probes, at the tag `before-271`, which re-run when real use calls for them (#153); no probe programme runs (29–31/10).
 
 A sublayer may change anything inside it while its contracts hold; a change to a contract is tier 3 (as is every change
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's

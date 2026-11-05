@@ -16,6 +16,8 @@ const TOKEN = 'lin_move_token_0001';
 const SECRET = 'invented-move-secret-0001';
 const REPO = 'ownr/proj';
 const BOARD = { owner: 'ownr', number: 7 };
+const REWRITE = '**Sublayer:** 1b\n\n**Goal.**\nMove it.\n\n**Acceptance.**\nDone.\n\n**Limits.**\nNone.\n\n**Prior art.**\nSource.';
+const description = (n, body, parent = '') => `${REWRITE}\n\n+++ Agent notes\n\nMoved from https://github.com/${REPO}/issues/${n}${parent}\n\n${body}\n\n+++`;
 const TRICKY = 'He said "hi" and `ls`\nsecond line: déjà vu ✓ — 日本語';
 
 const item = (status, number = 7) => ({ project: { number, owner: { login: 'ownr' } }, fieldValueByName: status === null ? null : { name: status } });
@@ -91,6 +93,12 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
     if (q.includes('teams(')) return json(200, { data: { teams: { nodes: [{ id: 'team-fac', key: 'FAC', name: 'Factory', states: { nodes: [st('s-triage', 'Triage', 'triage', 0), st('s-todo', 'Todo', 'unstarted', 1), st('s-prog', 'In Progress', 'started', 2), st('s-done', 'Done', 'completed', 3)] } }] } } });
     const mutation = q.includes('mutation');
     if (mutation && w.fail()) return json(200, { errors: [{ message: w.faultMessage ?? 'Linear refused the write' }] });
+    if (q.includes('projectUpdate')) {
+      w.projectUpdate = v;
+      w.projects.find((p) => p.id === v.id).teams.nodes = v.input.teamIds.map((id) => ({ id }));
+      w.writes.push('linear:projectUpdate');
+      return json(200, { data: { projectUpdate: { success: true } } });
+    }
     if (q.includes('issueCreate')) {
       w.afterRead?.(); // something happens on GitHub after the run's first reads
       w.afterRead = null;
@@ -122,6 +130,9 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
     return json(200, { data: {} });
   };
   const root = mkdtempSync(join(tmpdir(), 'move-'));
+  w.rewrites = join(root, 'rewrites');
+  mkdirSync(w.rewrites);
+  for (const i of issues) writeFileSync(join(w.rewrites, `${i.number}.md`), REWRITE);
   w.state = join(root, 'state');
   mkdirSync(join(w.state, 'linear'), { recursive: true });
   if (registry) writeFileSync(registryFile(w.state), JSON.stringify({ [REPO]: { key: 'FAC', teamId: 'team-fac' } }));
@@ -129,12 +140,12 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
   writeAppFile(agentProfiles, 'linear-app', 'client-id', 'invented-client-id-0001');
   writeAppFile(agentProfiles, 'linear-app', 'client-secret', SECRET);
   w.api = createLinear({ agentProfiles, state: w.state, fetchFn: (...a) => w.fetchFn(...a), raise: () => {} });
-  w.run = (over = {}, log) => createMove({ gh: w.gh, api: w.api, state: w.state }).run({ repo: REPO, teamKey: 'FAC', board: BOARD, apply: true, limit: Infinity, ...over }, log);
+  w.run = (over = {}, log) => createMove({ gh: w.gh, api: w.api, state: w.state }).run({ repo: REPO, teamKey: 'FAC', board: BOARD, apply: true, limit: Infinity, rewrites: w.rewrites, ...over }, log);
   w.map = () => JSON.parse(readFileSync(mapFile(w.state, REPO), 'utf8'));
   return w;
 }
 
-const byNumber = (w, n) => w.created.find((c) => c.input.description.startsWith(`Moved from https://github.com/${REPO}/issues/${n}\n`));
+const byNumber = (w, n) => w.created.find((c) => c.input.description.includes(`Moved from https://github.com/${REPO}/issues/${n}\n`));
 
 test('the dry run writes nothing, on either side, and prints one plan line for each issue', async () => {
   const w = world();
@@ -178,14 +189,15 @@ test('a repository that is not in the registry with that team is refused with no
   assert.deepEqual(w.writes, []);
 });
 
-test('the description opens with Moved from, adds the Sublayer line from the label, and sends no label or assignee, with the GitHub dates', async () => {
+test('the rewrite opens the description and Agent notes preserve the original verbatim without label-derived text', async () => {
   const w = world();
+  writeFileSync(join(w.rewrites, '1.md'), `${REWRITE}  \n`);
   await w.run();
   const one = byNumber(w, 1).input;
   assert.equal(one.title, 'Issue 1');
-  assert.equal(one.description, `Moved from https://github.com/${REPO}/issues/1\n\n**Sublayer:** 1a\nthe first`, 'a body that has the line gets none added, and is verbatim');
-  assert.equal(byNumber(w, 2).input.description, `Moved from https://github.com/${REPO}/issues/2\n**Sublayer:** 1b\n\nbody 2`);
-  assert.match(byNumber(w, 3).input.description, /^Moved from [^\n]+\n\nbody 3$/);
+  assert.equal(one.description, description(1, '**Sublayer:** 1a\nthe first'));
+  assert.equal(byNumber(w, 2).input.description, description(2, 'body 2'));
+  assert.equal(byNumber(w, 3).input.description, description(3, 'body 3'));
   for (const c of w.created) {
     assert.equal('labelIds' in c.input, false);
     assert.equal('assigneeId' in c.input, false);
@@ -211,7 +223,7 @@ test('a parent that moves is the parentId; a parent that stays is a line in the 
   await w.run();
   assert.equal(byNumber(w, 4).input.parentId, byNumber(w, 1).id);
   assert.doesNotMatch(byNumber(w, 4).input.description, /Parent on GitHub/);
-  assert.match(byNumber(w, 5).input.description, /^Moved from [^\n]+\nParent on GitHub: #99\n/);
+  assert.match(byNumber(w, 5).input.description, /Moved from [^\n]+\nParent on GitHub: #99\n/);
   assert.equal('parentId' in byNumber(w, 5).input, false);
 });
 
@@ -221,7 +233,7 @@ test('a child moved before its parent gets its parentId when the parent is in th
   await w.run({ limit: 1 });
   assert.equal(w.updates.length, 0, 'the parent has not moved yet');
   await w.run();
-  const one = w.created.find((c) => c.input.description.startsWith(`Moved from https://github.com/${REPO}/issues/1\n`));
+  const one = w.created.find((c) => c.input.description.includes(`Moved from https://github.com/${REPO}/issues/1\n`));
   const three = byNumber(w, 3);
   assert.deepEqual(w.updates, [{ id: one.id, input: { parentId: three.id } }]);
   assert.equal(w.map().issues['1'].parent, true);
@@ -321,7 +333,7 @@ test('no token appears in the output or the error of a failed run', async () => 
   console.log = (...a) => lines.push(a.join(' '));
   let code;
   try {
-    code = await main([REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--apply'], { FACTORY_STATE: w.state, HOME: w.state }, { api: w.api, gh: w.gh });
+    code = await main([REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--apply', '--rewrites', w.rewrites], { FACTORY_STATE: w.state, HOME: w.state }, { api: w.api, gh: w.gh });
   } finally {
     console.log = real;
   }
@@ -332,7 +344,7 @@ test('no token appears in the output or the error of a failed run', async () => 
 
 test('the command line: one repository, a team key and a board; a bad flag is a usage error', () => {
   assert.deepEqual(parse([REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--limit', '3']), { repo: REPO, teamKey: 'FAC', board: { owner: 'ownr', number: 7 }, apply: false, limit: 3 });
-  assert.equal(parse([REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--apply']).apply, true);
+  assert.equal(parse([REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--apply', '--rewrites', '/tmp/rewrites']).apply, true);
   for (const bad of [[], [REPO], [REPO, '--team-key', 'fac', '--board', 'ownr/7'], [REPO, '--team-key', 'FAC', '--board', 'ownr'], [REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--limit', '0'], [REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--force']]) {
     assert.throws(() => parse(bad));
   }
@@ -370,11 +382,10 @@ test('without --project no issue gets one, and the plan line has none', async ()
   assert.ok(w.created.every((c) => !('projectId' in c.input)));
 });
 
-test('a project that is not found, found twice or without the team refuses before any write', async () => {
+test('a project that is not found or found twice refuses before any write', async () => {
   const cases = [
     [(w) => { w.projects = []; }, /no project named "Release 1"/],
     [(w) => { w.projects.push({ ...w.projects[0], id: 'proj-2' }); }, /2 projects are named/],
-    [(w) => { w.projects[0].teams = { nodes: [{ id: 'team-other' }] }; }, /does not include team FAC/],
   ];
   for (const [setup, why] of cases) {
     const w = world();
@@ -412,7 +423,7 @@ test('a comment and a body edit that arrive after the first read reach FAC, befo
   const one = byNumber(w, 1);
   assert.equal(w.lcomments[one.id].at(-1).input.body, 'a late comment');
   assert.equal(w.lcomments[one.id].at(-1).input.createAsUser, 'octo-late (via GitHub)');
-  assert.deepEqual(w.updates, [{ id: one.id, input: { title: 'New title', description: `Moved from https://github.com/${REPO}/issues/1\n**Sublayer:** 1c\n\nedited body` } }]);
+  assert.deepEqual(w.updates, [{ id: one.id, input: { title: 'New title', description: description(1, 'edited body') } }]);
   const at = (prefix) => w.writes.findIndex((x) => x.startsWith(prefix));
   assert.ok(at('linear:comment:uuid-1:a late comment') < at('gh:comment:1:'));
   assert.ok(at('linear:update:uuid-1') < at('gh:comment:1:'));
@@ -442,4 +453,201 @@ test('a map entry with a field of the wrong type is a corrupt map', async () => 
     await assert.rejects(w.run(), /does not parse as a map/);
     assert.deepEqual(w.writes, []);
   }
+});
+
+test('--apply without --rewrites is a usage error before any read or write', async () => {
+  const base = [REPO, '--team-key', 'FAC', '--board', 'ownr/7'];
+  assert.throws(() => parse([...base, '--apply']), /--apply requires --rewrites/);
+  const w = world();
+  w.gh = () => assert.fail('must not read GitHub');
+  w.api.request = () => assert.fail('must not read Linear');
+  await assert.rejects(w.run({ rewrites: undefined }), /--apply requires --rewrites/);
+  const env = { get FACTORY_STATE() { assert.fail('must not read environment'); } };
+  const log = console.log;
+  const error = console.error;
+  try {
+    console.log = console.error = () => {};
+    assert.equal(await main([...base, '--apply'], env), 2);
+  } finally { console.log = log; console.error = error; }
+  assert.deepEqual(w.writes, []);
+});
+
+test('missing rewrites are skipped in the plan and do not consume --limit', async () => {
+  const w = world();
+  rmSync(join(w.rewrites, '1.md'));
+  const plan = await w.run({ apply: false, limit: 1 });
+  assert.ok(plan.lines.includes('#1 | no rewrite'));
+  assert.equal(plan.count, 1);
+  await w.run({ limit: 1 });
+  assert.equal(w.created.length, 1);
+  assert.ok(byNumber(w, 2));
+  assert.equal(w.issues[0].closed, undefined);
+  const absent = world();
+  const dry = await absent.run({ apply: false, rewrites: undefined });
+  assert.equal(dry.count, 0);
+  assert.ok(dry.lines.every((l) => l.endsWith('no rewrite')));
+  assert.deepEqual(absent.writes, []);
+});
+
+test('each missing heading, wrong order and a collapse line refuse before any write, naming the file', async () => {
+  const headings = ['**Sublayer:**', '**Goal.**', '**Acceptance.**', '**Limits.**', '**Prior art.**'];
+  for (const body of [
+    ...headings.map((h) => REWRITE.replace(h, 'Removed')),
+    REWRITE.replace('**Goal.**', '**Limits.**').replace('**Limits.**\nNone.', '**Goal.**\nNone.'),
+    `${REWRITE}\n+++ hidden`,
+  ]) {
+    for (const apply of [false, true]) {
+      const w = world();
+      const file = join(w.rewrites, '5.md');
+      writeFileSync(file, body);
+      await assert.rejects(w.run({ apply }), (e) => e.message.includes(file));
+      assert.deepEqual(w.writes, []);
+      assert.equal(existsSync(mapFile(w.state, REPO)), false);
+    }
+  }
+});
+
+test('an original collapse line refuses only that issue and the plan explains why', async () => {
+  const w = world();
+  w.issues[0].body = 'Original\n+++ nested\ntext';
+  const dry = await w.run({ apply: false });
+  assert.ok(dry.lines.includes('#1 | original body has a line starting +++'));
+  await w.run();
+  assert.equal(byNumber(w, 1), undefined);
+  assert.equal(w.map().issues['1'], undefined);
+  assert.equal(w.issues[0].closed, undefined);
+  assert.equal(w.created.length, 4);
+  assert.equal(byNumber(w, 4).input.description, description(4, 'body 4', '\nParent on GitHub: #1'));
+  assert.ok(w.writes.every((line) => !/^gh:(?:comment|close):1(?::|$)/.test(line)));
+});
+
+test('an edited rewrite changes the source hash and updates a resumed issue', async () => {
+  const w = world({ issues: [gi(1)], comments: {} });
+  w.failAt = 1; // the GitHub comment, after creation
+  await assert.rejects(w.run());
+  const previous = w.map().issues['1'].source;
+  const revised = REWRITE.replace('Move it.', 'Revised goal.');
+  writeFileSync(join(w.rewrites, '1.md'), revised);
+  await w.run();
+  assert.notEqual(w.map().issues['1'].source, previous);
+  assert.equal(w.created.length, 1);
+  assert.deepEqual(w.updates, [{ id: byNumber(w, 1).id, input: {
+    title: 'Issue 1', description: description(1, 'body 1').replace(REWRITE, revised),
+  } }]);
+});
+
+test('--only validates numbers before writes and preserves its order with --limit and rewrites', async () => {
+  const base = [REPO, '--team-key', 'FAC', '--board', 'ownr/7'];
+  assert.deepEqual(parse([...base, '--only', '4,2,1']).only, [4, 2, 1]);
+  for (const value of ['0', '1,x', '1,', '-1', '']) assert.throws(() => parse([...base, '--only', value]), /--only/);
+  const w = world();
+  for (const apply of [false, true]) {
+    await assert.rejects(w.run({ apply, only: [1, 99], limit: 1 }), /#99 is not an open issue/);
+    assert.deepEqual(w.writes, []);
+  }
+  const plan = await w.run({ apply: false, only: [4, 2, 1], limit: 2 });
+  assert.deepEqual(plan.lines.map((l) => Number(/^#(\d+)/.exec(l)[1])), [4, 2]);
+  const result = await w.run({ only: [4, 2, 1], limit: 2 });
+  assert.deepEqual(result.moved.map((i) => i.number), [4, 2]);
+  assert.equal(byNumber(w, 1), undefined);
+  await assert.rejects(w.run({ only: [4] }), /#4 is not an open issue/);
+});
+
+test('a requested project gains the team before issue writes and retains its other teams', async () => {
+  const w = world();
+  w.projects[0].teams.nodes = [{ id: 'team-other' }];
+  const dry = await w.run({ ...PROJECT, apply: false });
+  assert.ok(dry.lines.includes('project Release 1 | would add team FAC'));
+  assert.deepEqual(w.writes, []);
+  await w.run(PROJECT);
+  assert.equal(w.writes[0], 'linear:projectUpdate');
+  assert.deepEqual(w.projectUpdate, { id: 'proj-1', input: { teamIds: ['team-other', 'team-fac'] } });
+  await w.run(PROJECT);
+  assert.equal(w.writes.filter((l) => l === 'linear:projectUpdate').length, 1);
+});
+
+test('a refused projectUpdate writes no issue', async () => {
+  const w = world();
+  w.projects[0].teams.nodes = [{ id: 'team-other' }];
+  w.failAt = 0;
+  await assert.rejects(w.run(PROJECT));
+  assert.deepEqual(w.writes, []);
+});
+
+test('a lost map never adopts a provenance line quoted in another issue copied body', async () => {
+  const quote = `Moved from https://github.com/${REPO}/issues/2`;
+  const w = world({ issues: [gi(1, { body: `Example:\n\`\`\`\n${quote}\n\`\`\`` }), gi(2)], comments: {} });
+  await w.run({ only: [1] });
+  const original = structuredClone(w.created[0]);
+  rmSync(mapFile(w.state, REPO));
+  await w.run({ only: [2] });
+  assert.equal(w.created.length, 2);
+  assert.deepEqual(w.created[0], original);
+  assert.deepEqual(w.updates, []);
+  assert.equal(w.map().issues['2'].id, w.created[1].id);
+});
+
+test('adoption accepts only line zero or the first non-blank line after the first exact Agent notes marker', async () => {
+  const line = `Moved from https://github.com/${REPO}/issues/1`;
+  for (const [description, matches] of [
+    [`${line}\n\nold body`, true],
+    [`Rewrite\r\n+++ Agent notes\r\n\r\n \t\r\n${line}\r\n\r\nbody`, true],
+    [`Rewrite\n${line}\n+++ Agent notes\n\nMoved from another URL`, false],
+    [`Rewrite\n+++ Agent notes\n\nOther line\n${line}`, false],
+    [`Rewrite\n+++ Agent notes\n\nOther line\n+++\n+++ Agent notes\n${line}`, false],
+    [`Rewrite\n+++ Agent notes extra\n${line}`, false],
+  ]) {
+    const w = world({ issues: [gi(1)], comments: {} });
+    w.created.push({ id: 'existing', identifier: 'FAC-50', url: 'u', input: { title: 'Issue 1', description } });
+    w.lcomments.existing = [];
+    await w.run();
+    assert.equal(w.created.length, matches ? 1 : 2, description);
+    assert.equal(w.map().issues['1'].id === 'existing', matches, description);
+  }
+});
+
+test('two --only runs attach parentId whichever run moves the parent', async () => {
+  for (const order of [[4, 1], [1, 4]]) {
+    const w = world();
+    await w.run({ only: [order[0]] });
+    await w.run({ only: [order[1]] });
+    const child = byNumber(w, 4);
+    const parent = byNumber(w, 1);
+    assert.equal(w.map().issues['4'].parent, true);
+    if (order[0] === 4) {
+      assert.deepEqual(w.updates, [{ id: child.id, input: { parentId: parent.id } }]);
+    } else {
+      assert.equal(child.input.parentId, parent.id);
+    }
+  }
+});
+
+test('a collapse line at re-read reports and retains the twin, defers updates and close, and can resume', async () => {
+  const w = world({ issues: [gi(1, { parent: { number: 2 } }), gi(2)], comments: {} });
+  w.afterRead = () => { w.issues[0].body = 'changed\n+++ nested'; };
+  const logs = [];
+  const result = await w.run({}, (line) => logs.push(line));
+  const twin = byNumber(w, 1);
+  const expected = `#1 | original body has a line starting +++ | twin ${twin.identifier} exists and was not updated`;
+  assert.ok(logs.includes(expected));
+  assert.ok(result.lines.includes(expected));
+  assert.equal(w.map().issues['1'].id, twin.id);
+  assert.equal(w.map().issues['1'].closed, false);
+  assert.equal(w.issues[0].closed, undefined);
+  assert.ok(w.writes.every((line) => !/^gh:(?:comment|close):1(?::|$)/.test(line)));
+  assert.deepEqual(w.updates, []);
+  const before = [...w.writes];
+  const dry = await w.run({ apply: false, project: 'Release 1', inProject: [1] });
+  assert.ok(dry.lines.includes(expected));
+  await w.run({ project: 'Release 1', inProject: [1] });
+  assert.deepEqual(w.writes, before);
+  w.issues[0].body = 'fixed body';
+  await w.run({ only: [1], project: 'Release 1', inProject: [1] });
+  assert.equal(w.created.length, 2);
+  assert.equal(w.map().issues['1'].id, twin.id);
+  assert.equal(w.map().issues['1'].closed, true);
+  assert.equal(w.map().issues['1'].parent, true);
+  assert.equal(w.map().issues['1'].project, true);
+  assert.equal(w.issues[0].closed, true);
+  assert.ok(w.updates.some((u) => u.id === twin.id && u.input.description === description(1, 'fixed body')));
 });
