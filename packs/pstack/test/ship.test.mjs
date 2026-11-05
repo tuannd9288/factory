@@ -15,12 +15,21 @@ const a = process.argv.slice(2);
 fs.appendFileSync(sh + '/gh-calls', a.join(' ') + '\n');
 const read = () => (fs.existsSync(sh + '/pr.json') ? JSON.parse(fs.readFileSync(sh + '/pr.json', 'utf8')) : null);
 const out = (s) => { process.stdout.write(s); process.exit(0); };
+if (a[0] === 'pr' && a[1] === 'list' && a.includes('merged'))
+  out(fs.existsSync(sh + '/parent.json') ? fs.readFileSync(sh + '/parent.json', 'utf8') : '[]');
+if (a[0] === 'pr' && a[1] === 'edit') {
+  const pr = read();
+  pr.baseRefName = a[a.indexOf('--base') + 1];
+  pr.baseRefOid = fs.readFileSync(sh + '/base', 'utf8').trim();
+  fs.writeFileSync(sh + '/pr.json', JSON.stringify(pr));
+  out('ok\n');
+}
 if (a[0] === 'pr' && a[1] === 'list') { const pr = read(); out(JSON.stringify(pr ? [pr] : [])); }
 if (a[0] === 'pr' && a[1] === 'create') {
   fs.copyFileSync(a[a.indexOf('--body-file') + 1], sh + '/created-body');
   const head = fs.readFileSync(sh + '/head', 'utf8').trim();
   const base = fs.readFileSync(sh + '/base', 'utf8').trim();
-  fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, url: 'https://github.com/o/app/pull/7', baseRefName: 'main', baseRefOid: base, headRefOid: head, labels: [], autoMergeRequest: null, statusCheckRollup: [] }));
+  fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, url: 'https://github.com/o/app/pull/7', baseRefName: a[a.indexOf('--base') + 1], baseRefOid: base, headRefOid: head, labels: [], autoMergeRequest: null, statusCheckRollup: [] }));
   out('https://github.com/o/app/pull/7\n');
 }
 // The comments are $SH/comments.json; a comment gh posts is by the pull request's author ($SH/author, else agent).
@@ -79,7 +88,7 @@ afterEach(() => {
 });
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
-function world({ driver = true, liveVerify = true } = {}) {
+function world({ driver = true, liveVerify = true, stacks } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
   directories.push(dir);
   const repo = join(dir, 'app');
@@ -91,6 +100,10 @@ function world({ driver = true, liveVerify = true } = {}) {
   cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
   // main's driver, which ship reads at the base: filled by default, the pack's empty one when `driver` is false.
   if (driver) writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ name: 'cli', start: '', drive: 'node cli.js', network: false }));
+  if (stacks) {
+    const file = join(repo, '.gate/driver.json');
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stacks }));
+  }
   mkdirSync(sh);
   git(repo, 'init', '-q', '-b', 'main');
   commit(repo, { 'cli.js': 'console.log(1);\n' }, 'start');
@@ -326,8 +339,10 @@ describe('the steps after it opened', () => {
     assert.doesNotMatch(out.out, /could not run|armed #7/);
   });
 
-  test('refuses to arm when the base is not main, and says which', () => {
-    const w = opened();
+  test('refuses to arm when stacks is off and the base is not main', () => {
+    const w = world({ stacks: 'off' });
+    w.passed();
+    assert.equal(w.ship().code, 0);
     w.pr({ baseRefName: 'develop' });
     const out = w.ship();
     assert.equal(out.code, 1, out.out);
@@ -829,5 +844,71 @@ describe('a repository with a driver on main', () => {
     assert.match(out.out, /live-verify answered FAIL/);
     assert.equal(w.read('lv-calls'), '--covered 7\n7\n');
     assert.ok(!w.calls().some((c) => c.startsWith('pr comment') || c.startsWith('pr merge')), w.calls().join('\n'));
+  });
+});
+
+describe('stacked pull requests', () => {
+  test('opens a child against its parent, by default and with pstack explicit', () => {
+    for (const stacks of [undefined, 'pstack']) {
+      const w = world({ stacks });
+      w.passed();
+      const out = w.ship(['--base', 'parent', '--body-file', join(w.dir, 'body.md')]);
+      assert.equal(out.code, 0, out.out);
+      assert.match(w.calls().find((c) => c.startsWith('pr create')), /--base parent /);
+    }
+  });
+
+  test('waits without verifying or arming while the parent is not merged', () => {
+    const w = world();
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    w.pr({ baseRefName: 'parent' });
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /waits for its parent/);
+    assert.equal(w.read('lv-calls'), '');
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge') || c.startsWith('pr edit')));
+  });
+
+  test('retargets after the parent merges and merges main without rewriting the child', () => {
+    const w = world();
+    const parent = w.head();
+    git(w.repo, 'branch', 'parent');
+    commit(w.repo, { 'child.js': 'child\n' }, 'Child');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    assert.equal(w.ship(['--base', 'parent', '--body-file', join(w.dir, 'body.md')]).code, 0);
+    w.pr({ baseRefOid: parent });
+    const child = w.head();
+    git(w.repo, 'switch', '-q', 'parent');
+    const tip = commit(w.repo, { 'parent.js': 'later\n' }, 'Parent advances');
+    git(w.repo, 'switch', '-q', 'main');
+    git(w.repo, 'merge', '--no-ff', '--no-edit', 'parent');
+    git(w.repo, 'push', '-q', 'origin', 'main');
+    git(w.repo, 'switch', '-q', 'work');
+    writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /push HEAD, then run ship again/);
+    assert.ok(w.calls().includes('pr edit 7 --base main'));
+    assert.equal(git(w.repo, 'rev-parse', 'HEAD^1'), child);
+    assert.equal(git(w.repo, 'rev-parse', 'HEAD^2'), git(w.repo, 'rev-parse', 'origin/main'));
+    assert.equal(w.read('lv-calls'), '');
+    assert.ok(!w.calls().some((c) => c.includes('--auto')));
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: w.head(), baseRefOid: git(w.repo, 'rev-parse', 'origin/main') });
+    assert.equal(w.ship().code, 0);
+    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
+  });
+
+  test('off on origin/main refuses opening a child even when HEAD enables stacks', () => {
+    const w = world({ stacks: 'off' });
+    commit(w.repo, { '.gate/driver.json': JSON.stringify({ stacks: 'pstack' }) }, 'Candidate policy');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    const out = w.ship(['--base', 'parent', '--body-file', join(w.dir, 'body.md')]);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /base is parent, not main/);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr create')));
   });
 });
