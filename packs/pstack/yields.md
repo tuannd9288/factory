@@ -22,6 +22,11 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
 - **The pull request's title and body** (`opening-a-pr.md:11`, `:13`: a Conventional Commits title, a body that becomes
   the squash commit body). The template wins: `scripts/ship --body-file` sends the repository's template with
   `Closes #<issue>` filled in, and the title is the head commit's subject.
+- **The pull request's title**. The factory does not take pstack's Conventional Commits title (`opening-a-pr.md:11`):
+  zeroshot uses free text in the repository's own convention (`native_v2_templates.rs:235-237`), paperclip uses free
+  text, imperative and under 70 characters (`github-pr-workflow SKILL.md:38-40`; `CONTRIBUTING.md:155`), and warp uses
+  free text (`00-warp-default-agents/agents/implement/agent.md:29`); agent-orchestrator, dsh and seatworks have no
+  PR-title rule. The factory keeps its titles, with no switch: where only pstack differs, keep the common way.
 - **Babysit's `watch-pr`** (`babysit.md:12`; `shipping.md:9`). It runs `gh api graphql` inside, only to read. The Human
   allowed it on 2026-10-30 ("theo đề xuất", Factory Map v18 item 3); the grant is #182's work, not made yet. Babysit's
   replies through `gh api` (`babysit.md:20`) are not used: the Human's decision on #182 (2026-10-30). Since his answer
