@@ -4,7 +4,7 @@
 # with his manual Linear Code installation step:
 #   bin/onboard-owner <owner/name> --id <repository id>            show what it would change, and change nothing
 #   bin/onboard-owner <owner/name> --id <repository id> --apply    invite the agents' account (write), set the
-#        factory's rulesets (no rewrite on any branch; on main, a bootstrap one until the kit lands, then the kit's
+#        factory's rulesets (forcePush defaults to pstack: no rewrite on main or claims; on main, a bootstrap one until the kit lands, then the kit's
 #        gate, which with GATE_REVIEWER=entire in main's gate-trusted.yml requires verify, tier and Entire's check
 #        Entire Gates instead of review and verdict), create the reviewer environment, allow auto-merge (#139),
 #        and read it all back
@@ -29,7 +29,7 @@
 # Colly runs it with --apply again once the kit pull request has merged, to put the kit's gate in; his approval of
 # the kit pull request covers that. It never runs git or anything the repository holds. FACTORY_AGENT (default:
 # tuan9288-agent) names the agents' account.
-# With --apply it sets factory-branches (every branch: no rewrite), factory-tags (every tag: no create, update or delete, but
+# With --apply it sets factory-branches (main and claims: no rewrite; every branch with forcePush off), factory-tags (every tag: no create, update or delete, but
 # for a repository admin), factory-claims (refs/heads/claim/**: no deletion, no rewrite, no bypass) and factory-bootstrap
 # (main: a pull request, one approval of the last push, merge commits only), creates the reviewer environment for main, turns
 # on "Allow auto-merge", and reads it all back; it calls only gh api and gh variable list. Once the agents' account has
