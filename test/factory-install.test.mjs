@@ -10,7 +10,7 @@ import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { factory, git, quiet, run } from './helpers.mjs';
 
-const COPIED = ['bin', 'packs', 'kit'];
+const COPIED = ['bin', 'packs', 'kit', '.githooks'];
 
 /** An origin (a bare repository) that holds this clone's code as one commit on main, and a HOME with fake launchctl and ssh. */
 function world(f) {
@@ -185,6 +185,42 @@ test('on the Mac mini it makes the link only: no launchd step, no plist, and the
   assert.equal(readlinkSync(w.link), join(w.home, 'WORKSPACES/bin/factory'));
   assert.deepEqual(w.launchctl(), []);
   assert.ok(!existsSync(join(w.home, 'Library')));
+}));
+
+test('Mac mini setup installs shared subject hooks and preserves existing hook configurations', () => world((w) => {
+  const env = { HOME: w.home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '0', FACTORY_HOST_USER: userInfo().username };
+  const root = join(w.home, 'WORKSPACES');
+  const config = (...args) => run(root, 'git', ['config', ...args], env);
+  const installed = w.install([], env);
+  assert.equal(installed.code, 0, installed.out);
+  assert.equal(config('--get', 'core.hooksPath').out.trim(), join(root, '.githooks'));
+  assert.deepEqual(readdirSync(join(root, '.githooks')), ['commit-msg']);
+  const again = w.install([], env);
+  assert.equal(again.code, 0, again.out);
+  assert.match(again.out, /core.hooksPath.*left as it is/);
+  const worktree = join(w.dir, 'worktree');
+  git(root, 'worktree', 'add', '-qb', 'worker', worktree);
+  for (const cwd of [root, worktree]) {
+    const commit = (subject) => run(cwd, 'git', ['-c', 'user.name=test', '-c', 'user.email=test@localhost', 'commit', '--allow-empty', '-qm', subject], env);
+    const bad = commit('x'.repeat(73));
+    assert.notEqual(bad.code, 0, bad.out);
+    assert.match(bad.out, /commit-msg: the subject has 73 characters; at most 72/);
+    const good = commit('Accept a valid subject');
+    assert.equal(good.code, 0, good.out);
+  }
+  assert.equal(config('--local', 'core.hooksPath', 'custom-hooks').code, 0);
+  assert.match(w.install([], env).out, /core.hooksPath.*left as it is/);
+  assert.equal(config('--get', 'core.hooksPath').out.trim(), 'custom-hooks');
+  assert.equal(config('--local', '--unset', 'core.hooksPath').code, 0);
+  const global = join(w.home, 'gitconfig');
+  writeFileSync(global, '[core]\n\thooksPath = global-hooks\n');
+  assert.match(w.install([], { ...env, GIT_CONFIG_GLOBAL: global }).out, /core.hooksPath.*left as it is/);
+  assert.equal(config('--local', '--get', 'core.hooksPath').code, 1);
+  const hook = join(root, '.git/hooks/pre-commit');
+  writeFileSync(hook, '#!/bin/sh\nexit 0\n');
+  chmodSync(hook, 0o755);
+  assert.match(w.install([], env).out, /hook.*left as it is/);
+  assert.equal(config('--local', '--get', 'core.hooksPath').code, 1);
 }));
 
 test('FACTORY_CHECKOUT and XDG_DATA_HOME name where the copy goes', () => world((w) => {
