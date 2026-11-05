@@ -67,7 +67,7 @@ describe('leadArgs', () => {
   const root = '/fx/WORKSPACES';
   const roleText = '# the role\nline two';
   const node = '/opt/homebrew/bin/node';
-  const { cwd, argv } = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node });
+  const { cwd, argv } = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node });
   const after = (flag) => argv[argv.indexOf(flag) + 1];
   const list = (flag) => {
     const out = [];
@@ -94,7 +94,7 @@ describe('leadArgs', () => {
   test('--resume <id> only when a session id is given, never --continue', () => {
     const id = '11111111-1111-4111-8111-111111111111';
     assert.ok(!argv.includes('--resume') && !argv.includes('--continue'));
-    const withId = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id }).argv;
+    const withId = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, resume: id }).argv;
     assert.equal(withId[withId.indexOf('--resume') + 1], id);
     assert.ok(!withId.includes('--continue'));
   });
@@ -102,7 +102,7 @@ describe('leadArgs', () => {
   test('a resume\'s message is claude\'s prompt argument, right after --resume <id> and before every option that takes a list (#316)', () => {
     const id = '11111111-1111-4111-8111-111111111111';
     const message = '[factory] your role changed:\n# the role';
-    const withMessage = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id, message }).argv;
+    const withMessage = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, resume: id, message }).argv;
     const at = withMessage.indexOf('--resume');
     assert.equal(withMessage[at + 1], id);
     assert.equal(withMessage[at + 2], message);
@@ -110,20 +110,20 @@ describe('leadArgs', () => {
     assert.ok(at + 2 < withMessage.indexOf('--allowedTools') && at + 2 < withMessage.indexOf('--disallowedTools'));
     assert.equal(withMessage[at + 3], '--allowedTools');
     assert.equal(withMessage[withMessage.indexOf('--append-system-prompt') + 1], roleText, 'the role text stays a system prompt');
-    const without = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id }).argv;
+    const without = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, resume: id }).argv;
     assert.equal(without[without.indexOf('--resume') + 2], '--allowedTools');
-    assert.ok(!leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, message }).argv.includes(message), 'a new session gets no message');
+    assert.ok(!leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, message }).argv.includes(message), 'a new session gets no message');
   });
 
   test('a new session\'s id goes as --session-id before the list options, and never with --resume (#316)', () => {
     const id = '33333333-3333-4333-8333-333333333333';
-    const fresh = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, sessionId: id }).argv;
+    const fresh = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, sessionId: id }).argv;
     assert.equal(fresh[fresh.indexOf('--session-id') + 1], id);
     assert.equal(fresh[fresh.indexOf('--session-id') + 2], '--allowedTools');
     assert.ok(!fresh.includes('--resume'));
-    const resumed = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id, sessionId: id }).argv;
+    const resumed = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, resume: id, sessionId: id }).argv;
     assert.ok(!resumed.includes('--session-id'));
-    assert.ok(!leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).argv.includes('--session-id'));
+    assert.ok(!leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node }).argv.includes('--session-id'));
   });
 
   test('the allow list is exactly the Lead\'s, with no blanket gh or git', () => {
@@ -179,7 +179,7 @@ describe('leadArgs', () => {
     const command = `'${node}' '${root}/packs/pstack/bin/transcript-copy.mjs' '${home}/factory-runs/zalo-gateway-lead/transcripts'`;
     assert.deepEqual(Object.keys(hooks).sort(), ['Notification', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit']);
     for (const event of Object.keys(hooks)) assert.deepEqual(hooks[event], [{ hooks: [{ type: 'command', command }] }]);
-    assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).hook, command);
+    assert.equal(leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node }).hook, command);
   });
 
   test('a team names the session and the hook\'s folder, <repo>-<team>; with none the team is lead, today\'s <repo>-lead (#196)', () => {
@@ -204,7 +204,7 @@ describe('leadArgs', () => {
       const source = join(config, 'projects/p/s.jsonl');
       writeFileSync(source, 'line\n');
       assert.equal(statSync(join(real, 'packs/pstack/bin/transcript-copy.mjs')).mode & 0o111, 0);
-      const { hook } = leadArgs({ repo: 'r', home: odd, root: real, roleText, node: process.execPath });
+      const { hook } = leadArgs({ repo: 'r', team: 'lead', home: odd, root: real, roleText, node: process.execPath });
       const r = spawnSync('sh', ['-c', hook], { input: JSON.stringify({ transcript_path: source }), encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: config } });
       assert.equal(r.status, 0, r.stderr);
       assert.equal(readFileSync(join(odd, 'factory-runs/r-lead/transcripts/s.jsonl'), 'utf8'), 'line\n');

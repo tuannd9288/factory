@@ -5,10 +5,13 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { freeWord } from '../bin/lib/team-names.mjs';
 import { createLinear } from '../bin/lib/linear.mjs';
 import { registryFile } from '../bin/lib/linear-repos.mjs';
-import { createMove, main, mapFile, parse } from '../bin/lib/move.mjs';
+import { createMove as makeMove, main, mapFile, parse } from '../bin/lib/move.mjs';
 import { writeAppFile } from '../bin/lib/token.mjs';
+
+const createMove = (options) => makeMove({ ...options, home: options.state, runs: join(options.state, 'runs') });
 
 const json = (status, body) => ({ status, ok: status < 400, text: async () => JSON.stringify(body) });
 const st = (id, name, type, position) => ({ id, name, type, position });
@@ -155,7 +158,7 @@ test('the dry run writes nothing, on either side, and prints one plan line for e
   assert.equal(existsSync(mapFile(w.state, REPO)), false);
   assert.equal(r.lines.length, 5);
   assert.equal(r.lines[0], '#1 | Issue 1 | Triage | holder none | parent none | 2 comments');
-  assert.equal(r.lines[3], '#4 | Issue 4 | In Progress | holder lead | parent #1 (moves) | 1 comments');
+  assert.equal(r.lines[3], `#4 | Issue 4 | In Progress | holder ${freeWord('proj', [])} | parent #1 (moves) | 1 comments`);
   assert.equal(r.lines[4], '#5 | Issue 5 | Triage | holder none | parent #99 (stays on GitHub) | 0 comments');
 });
 
@@ -169,9 +172,9 @@ test('the status map: Triage, no item, Todo and In Progress, the last held by th
   assert.equal(stateOf(4), 's-prog');
   for (const n of [1, 2, 3, 5]) assert.equal('delegateId' in byNumber(w, n).input, false);
   assert.equal(byNumber(w, 4).input.delegateId, 'app-user-1');
-  const held = w.lcomments[byNumber(w, 4).id].find((c) => c.body === 'Taken by team lead.');
+  const held = w.lcomments[byNumber(w, 4).id].find((c) => c.body === `Taken by team ${freeWord('proj', [])}.`);
   assert.ok(held, 'the holder comment of #404\'s code');
-  assert.equal(held.input.createAsUser, 'lead');
+  assert.equal(held.input.createAsUser, freeWord('proj', []));
   assert.equal(w.lcomments[byNumber(w, 3).id].length, 0);
 });
 
