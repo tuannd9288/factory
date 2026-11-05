@@ -44,7 +44,9 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **agent-desk and Claude Code, 2026-10-21 and 2026-10-27.** agent-desk stays parked. Every lead, worker and reviewer
   of the factory's own team runs through Claude Code, apart from pstack's other-family steps, which D2 sends to Codex
   (the live verifier's entry below); another team may bring its own harness (#131). The instruction file is for any
-  harness, and `ship` and the live verifier are the pstack team's, in `packs/pstack/` (#132). Sources: `1b319ee`;
+  harness, and `ship` and the live verifier are the pstack team's, in `packs/pstack/` (#132). On 2026-11-05 (#375, 07:46
+  +07, relayed by Colly and the factory-repo session) the Human allowed Peers to run on Codex (GPT-6 Astra) for parallel
+  release-1 work, with each brief reviewed by the Lead. Sources: `1b319ee`;
   https://github.com/tuannd9288/factory/issues/131 (its body, Limits) and
   https://github.com/tuannd9288/factory/issues/132 (its body).
 - **seatwork, 2026-10-21.** seatwork may be used freely, its code and its text alike. Source: the page "Factory của
@@ -155,7 +157,10 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   Colly's translation). On #132's instruction layer he answered the three questions of the decision page
   (https://claude.ai/artifact/SLNEk1B5nTict8swrmbBqD) with "Theo đề xuất của mày",
   and so took Colly's recommendations: the composed root `AGENTS.md` stays at most 150 lines and gains a 32 KiB cap (K1);
-  neither `ARCHITECTURE.md` nor `docs/` is required (K2); the Gate block states the gate's obligations directly, and
+  neither `ARCHITECTURE.md` nor `docs/` is required (K2; INN-23 A, 2026-11-04 23:37:50 +07, #422: a repository's product
+  description is pstack's Feature Map, files in the repository, one short file per feature, from the user's side,
+  updated in the same pull request as the code; flow diagrams are drawn only for a complex flow; Linear Documents hold
+  only writing he reads; the work comes after release 1); the Gate block states the gate's obligations directly, and
   `CLAUDE.md` is `@AGENTS.md`, an addendum allowed, or a relative symlink to `AGENTS.md` (K3). He had asked for it after the
   review: "Cho Astra review lại rồi đề xuất cho đúng thiết kế". Its pack and harness parts are in the two entries of
   2026-10-21 and 2026-10-22 above. 2a and H4 stay as they are, and so does "Cho file một phần đuôi của repo
@@ -222,9 +227,9 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   deleted: open issues move to FAC, each with a "moved to FAC-n" line, and the closed GitHub issues stay as a read-only
   archive. #369 is parked, since Linear's Project page and Inbox replace it. The Lead's decisions: one Linear team for
   each repository, the factory's being `FAC` while `INN` stays his team for decisions (the reasons are in #375's body);
-  and, while repositories move, one list names those on Linear, which only grows and which the cut removes. None is on
-  Linear yet; #406 adds the factory. #404 moves the list into the file its code reads and leaves this line pointing
-  there. Nothing in the factory reads Linear until #404, #405 and #407 land. FAC's labels and statuses are researched
+  and, while repositories move, one list names those on Linear, which only grows and which the cut removes: it is
+  `$FACTORY_STATE/linear/repos.json`, written by `factory linear onboard`. None is on Linear yet; #406 adds the
+  factory. Nothing in the factory reads Linear until #404, #405 and #407 land. FAC's labels and statuses are researched
   and proposed in #406, and nothing is created in Linear before his word. The credential rule for 1b and the one shared
   Factory app are decided in the entry below (#403). Waiting on him: how Linear's events reach the Macs (#375,
   decision 7: both research passes are done, and a recommendation goes to him). His words: "B theo đề xuất." (14:13
@@ -418,11 +423,13 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/kit-update` | The onboarded repository's counterpart of onboard: brings its clone up to a factory commit, with evidence, in a pull request from `factory/kit-<sha7>` |
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
-| `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; `--check` is its canary on Claude Code's session format; the header says what it charges a task from |
+| `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; `--check` is its canary on Claude Code's session format; the header says what it charges a task from; for a repository on Linear (#406) a task is a team issue that left Triage, joined to its pull requests by `Issue: <KEY>`, and the enforcer lookup reads the team's issues |
+| `bin/factory-move` | `bin/factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--limit N] [--project <name> --in-project <n>,…]` (#406): moves a repository's open GitHub issues to its Linear team, once, as the Factory app; a dry run prints the plan, `--apply` writes, a map file lets a second run resume, and each GitHub issue gets "Moved to <KEY>" and is closed as not planned, never deleted; not a `factory linear` verb; the header of `bin/lib/move.mjs` has the rest |
 | `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH): the table of profiles, accounts and quota, and `login`, `store`, `use` and `logout`, which only the Human runs (#177, #178); its header has the rest |
 | `bin/factory top` | The read-only view of every session and repository (#174, #286); the header of `bin/lib/top.mjs` has the rest |
 | `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest. `factory lead <repo> [--team <name>] --here [-- <claude arguments>]` (#349) is the MacBook's own Lead, with no `gh` login and no git credential of the Human's; a push to GitHub over HTTPS fails, and git over ssh is off |
 | `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` on the Mac mini under the agents' login, by ssh; on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
+| `bin/factory linear` | `factory linear <verb>` (#404): a Lead's steps on a repository on Linear, as the Factory app: `take`, `release`, `read`, `list`, `comment`, `ask`, `answered`, `create` and `onboard`, one JSON object out; on the MacBook it runs on the Mac mini by ssh, a body on stdin; `onboard` makes the repository's team (copied from FAC) and its Needs Human status and records it in `$FACTORY_STATE/linear/repos.json`, which `bin/lib/linear-repos.mjs` reads and which picks the Linear form of `packs/pstack/lead.md`; the header of `bin/lib/linear-cli.mjs` has the rest |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH from each machine's installed copy of the factory (#390): `$FACTORY_CHECKOUT`, `~/WORKSPACES` on the Mac mini, `${XDG_DATA_HOME:-~/.local/share}/factory/checkout` on the MacBook (`installedRoot`), outside the folders macOS refuses a launchd job and never set by a dev clone's branch or edits, which change nothing that runs. Run from a clone that is not that copy, it clones the copy (main only, an empty `credential.helper`) or brings it to `origin/main` by `followMain`'s rules, then runs the copy's own `bin/install-factory`, which makes `~/.local/bin/factory` a symlink to the copy's `bin/factory` and replaces only a symlink whose target ends in `/bin/factory`; on the MacBook it also writes the relay's LaunchAgent, loads it anew and runs `bin/factory-relay check`. His one line after a change here is `~/.local/share/factory/checkout/bin/install-factory` when the copy exists, else `bin/install-factory` from any clone; it can be run again |
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves. Its job's command, `sweep` with no repository, starts the daemon when nobody answers; `sweep --once` and `sweep --repo` run one pass in-process (#399) |
@@ -432,8 +439,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
 | `bin/factory-events` | What the sweep tells Colly (#309): the `start` lines of `$FACTORY_STATE/events.jsonl` after its cursor; `--follow` moves the cursor and follows the file; the header has the ssh command |
 | `bin/factory-relay` | The MacBook's relay of a Lead's news (#370): `run` is one pass that reads the Mac mini's news lines by ssh and posts those it could not deliver into the socket file of the Lead that runs there; `plist` prints its LaunchAgent (his own user, every 60 s), which runs from the installed copy, since macOS refuses a launchd job `~/Desktop`, `~/Documents` and `~/Downloads`; each `run` pass first brings that copy to `origin/main`, as the Mac mini's sweep does for `~/WORKSPACES`; `check` fails when a path of the job or of the installed plist sits under those folders or the loaded job's last exit code is not 0, says, in the job's environment, whether ssh and the read of the news work, sets the first cursor and relays nothing; the header of `bin/lib/relay.mjs` has the rest |
-| `bin/factory-reader` | The stream reader's pass (#339): `bin/factory-reader` reads what the Leads and the seats wrote since the last pass and tells Colly, through the events file, what code cannot see; `--try <file> [--side pi\|codex]` sends one stream file once and prints the answer and the quote check, writing nothing; the sweep starts a pass every 15 minutes |
-| `bin/lib/reader.mjs` | The reader's code: the reduction to the assistant's text and the tool names, the two commands, the cursors, the quote check; the header has the rest |
+| `bin/factory-reader` | The stream reader's pass (#339): `bin/factory-reader` reads what the Leads and the seats wrote since the last pass and tells Colly, through the events file, what code cannot see (a seat's `StructuredOutput` report included); `--try <file> [--side pi\|codex]` sends one stream file once and prints the answer and the quote check, writing nothing; the sweep starts a pass every 15 minutes |
+| `bin/lib/reader.mjs` | The reader's code: the reduction to the assistant's text, the tool names and a seat's `StructuredOutput` report, the two commands, the cursors, the quote check; the header has the rest |
 | `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, or `codex`) and, for each side, its model and effort |
 | `bin/lib/streams.mjs` | Finds the two kinds of stream the reader reads, a seat's `run-<tag>.jsonl` and a Lead's `transcripts/<session>.jsonl` |
 | `bin/lib/redact.mjs` | The one redaction: the events' patterns (#309) and seatwork's, used by `bin/lib/events.mjs` and the reader |

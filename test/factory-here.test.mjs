@@ -300,6 +300,54 @@ test('gh passes stdin to the remote gh and keeps its exit code', () => {
   }
 });
 
+// `factory linear` on the MacBook (#404): the host's own bin/factory is a fake in ~/WORKSPACES that records its arguments and stdin.
+function hostFactory(s) {
+  mkdirSync(join(s.home, 'WORKSPACES/bin'), { recursive: true });
+  const file = join(s.home, 'WORKSPACES/bin/factory');
+  writeFileSync(file, `#!/bin/sh
+: > "$FAKE/host.args"
+for a; do printf '%s\\0' "$a" >> "$FAKE/host.args"; done
+cat > "$FAKE/host.stdin"
+exit "$(cat "$FAKE/host.exit" 2>/dev/null || echo 0)"
+`);
+  chmodSync(file, 0o755);
+}
+
+test('linear refuses a usage error on the MacBook before any ssh, and a body that names a file', () => {
+  const s = world();
+  try {
+    hostFactory(s);
+    for (const args of [['linear'], ['linear', 'nope'], ['linear', 'take', 'FAC-12'], ['linear', 'take', 'bad key', '--team', 'lead'], ['linear', 'comment', 'FAC-12', '--team', 'lead', '--body-file', 'note.md'], ['linear', 'take', 'FAC-12', '--team', 'two-words']]) {
+      const r = s.fac(args);
+      assert.equal(r.code, 2, `${args}: ${r.out}`);
+    }
+    assert.equal(s.calls(), '', 'no ssh call');
+    assert.equal(s.read('host.args'), '');
+  } finally {
+    s.done();
+  }
+});
+
+test('linear hands a title with quotes and a dollar sign to the host unchanged, with the body on stdin and the host\'s exit code', () => {
+  const s = world();
+  try {
+    hostFactory(s);
+    const title = `it's "quoted" $HOME \`x\` a;b|c`;
+    const body = 'Nội dung\n$HOME `x` \'quoted\'\n';
+    const args = ['linear', 'create', '--team-key', 'FAC', '--title', title, '--status', 'Triage', '--body-file', '-'];
+    s.w('host.exit', '1');
+    const r = s.fac(args, body);
+    assert.equal(r.code, 1, r.out);
+    assert.deepEqual(s.nuls('host.args'), args);
+    assert.equal(s.read('host.stdin'), body);
+    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '/);
+    s.w('ssh-down', '');
+    assert.equal(s.fac(['linear', 'read', 'FAC-12']).code, 255, 'ssh\'s own exit code when it cannot reach the host');
+  } finally {
+    s.done();
+  }
+});
+
 test('gh refuses gh auth other than status, before any ssh', () => {
   const s = world();
   try {

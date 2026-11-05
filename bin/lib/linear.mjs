@@ -247,15 +247,16 @@ export function createLinear({
     return appId;
   }
 
-  async function commentCreate({ issueId, body, team: given }) {
-    const input = { issueId, body, ...asTeam(given) };
+  /** `createdAt`, when given, dates the comment (bin/factory-move gives a moved comment its GitHub date). */
+  async function commentCreate({ issueId, body, team: given, createdAt }) {
+    const input = { issueId, body, ...(createdAt ? { createdAt } : {}), ...asTeam(given) };
     return request('mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id } } }', { input });
   }
 
   /** `delegate: true` sets the app as the new issue's delegate. */
   async function issueCreate({ delegate = false, team: given, ...fields }) {
     const input = { ...fields, ...asTeam(given), ...(delegate ? { delegateId: await appUserId() } : {}) };
-    return request('mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier } } }', { input });
+    return request('mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }', { input });
   }
 
   /** The app is the delegate of an issue a Lead holds. */
