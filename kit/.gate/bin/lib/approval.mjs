@@ -51,6 +51,9 @@ const git = (args, input) => execFileSync('git', args, { input, encoding: 'utf8'
 /** The patch-id of a commit's own change, its diff from its merge-base with the base; '' when it cannot be read. */
 const patchOf = (commit) => {
   try {
+    if (!/^[0-9a-f]{40}$/.test(commit)) return '';
+    try { git(['cat-file', '-e', `${commit}^{commit}`]); }
+    catch { git(['fetch', '--no-tags', 'origin', commit]); }
     const fork = git(['merge-base', base, commit]).trim();
     return git(['patch-id', '--verbatim'], git(['diff', '--binary', '--no-renames', fork, commit])).split(' ')[0].trim();
   } catch {

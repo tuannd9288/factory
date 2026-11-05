@@ -170,7 +170,7 @@ test('the owner script shows every change it would make, and makes none without 
     const out = w.owner(['tuannd9288/app', '--id', '1234']);
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /PUT repos\/tuannd9288\/app\/collaborators\/tuan9288-agent \{"permission":"push"\}/);
-    assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-branches".*"~ALL".*"non_fast_forward"/);
+    assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-branches".*"~DEFAULT_BRANCH".*"non_fast_forward"/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-tags","target":"tag".*"~ALL".*"creation".*"update".*"deletion"/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-bootstrap"/);
     assert.match(out.out, /PUT repos\/tuannd9288\/app\/environments\/reviewer \{"deployment_branch_policy":\{"protected_branches":false,"custom_branch_policies":true\}\}/);
@@ -729,7 +729,7 @@ test('a setting that does not read back as set leaves the onboarding incomplete'
 test('the factory\'s rulesets: no rewrite on any branch, and one approval of the last push on main before the kit', () => {
   const read = (name) => JSON.parse(readFileSync(join(factory, 'bin/rulesets', name), 'utf8'));
   const branches = read('branches.json');
-  assert.deepEqual(branches.conditions.ref_name.include, ['~ALL']);
+  assert.deepEqual(branches.conditions.ref_name.include, ['~DEFAULT_BRANCH', 'refs/heads/main', 'refs/heads/claim/**']);
   assert.deepEqual(branches.rules, [{ type: 'non_fast_forward' }]);
   assert.deepEqual(branches.bypass_actors, []);
   const tags = read('tags.json');
@@ -789,6 +789,26 @@ test('the factory\'s tools run the same started through a symlinked directory, a
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('forcePush defaults to pstack, and off protects all branches', async () => {
+  const { wanted, gateState } = await import('../bin/lib/owner.mjs');
+  for (const forcePush of [undefined, 'pstack', 'off']) {
+    const want = wanted({ kitLanded: true, branch: 'main', forcePush });
+    assert.deepEqual(want.rulesets[0].conditions.ref_name.include,
+      forcePush === 'off' ? ['~ALL'] : ['~DEFAULT_BRANCH', 'refs/heads/main', 'refs/heads/claim/**']);
+    assert.ok(want.rulesets.find((r) => r.name === 'factory-claims').rules.some((r) => r.type === 'non_fast_forward'));
+    assert.ok(want.rulesets.find((r) => r.name === 'factory-tags').rules.some((r) => r.type === 'update'));
+  }
+  const calls = [];
+  const read = (args) => {
+    calls.push(args);
+    if (args[0] === 'variable') return [];
+    if (args[1].includes('driver.json')) return { content: Buffer.from('{"forcePush":"off"}').toString('base64') };
+    const error = new Error('missing'); error.stderr = '(HTTP 404)'; throw error;
+  };
+  assert.equal(gateState('o/r', 'candidate', read).forcePush, 'off');
+  assert.ok(calls.some((args) => args[1] === 'repos/o/r/contents/.gate/driver.json?ref=main'));
 });
 
 for (const merge of [undefined, 'squash', 'merge']) {
