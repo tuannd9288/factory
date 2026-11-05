@@ -202,6 +202,15 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   https://github.com/tuannd9288/factory/issues/375 (its body and comments) and
   https://github.com/tuannd9288/factory/issues/399 (its body) and
   https://github.com/tuannd9288/factory/issues/408 (its body).
+- **At a snag, port or park, 2026-10-31 and 2026-11-05.** At a snag, a bug or a security finding, check how piggery,
+  agent-orchestrator or pstack handles it, and port that faithfully. If none of them handles it, record it (an issue in
+  Triage, with one comment saying why) and park it; build no new machinery for it. His words, relayed by Colly and the
+  factory-repo session, on 2026-10-31 in the evening: "các phần chặn hay gì đấy mà vướng thì xem piggery hoặc
+  agent-orchestrator hoặc pstack xử lý như thế nào để áp dụng cho factory, nếu các phần kia không có thì factory có thể
+  tạm gác lại chứ không overthinking, overengineering." On 2026-11-05: "Trước đấy tau đã nói các vấn đề lỗi này kia
+  hay bảo mật,... thì mày xem các repo tham khảo để có cách xử lý, nếu không thì chỉ ghi nhận để xử lý sau thôi -> Mày
+  xem có phần này không?" First applied to #264: none of the reference systems keeps a verifier's login from local
+  candidate code, so it is parked. Source: https://github.com/tuannd9288/factory/issues/264#issuecomment-6649309056.
 - **`gh api`, 2026-11-02.** Agents may use `gh api` to read. A write through it (changing settings, branch rules,
   variables, deleting) still needs his approval. Nothing in settings blocks it. The factory-repo session's reading of
   which is which: a read is a GET or a GraphQL query, and a REST read with parameters passes `-X GET`, since `-f` and
