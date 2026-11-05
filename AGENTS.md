@@ -44,7 +44,9 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **agent-desk and Claude Code, 2026-10-21 and 2026-10-27.** agent-desk stays parked. Every lead, worker and reviewer
   of the factory's own team runs through Claude Code, apart from pstack's other-family steps, which D2 sends to Codex
   (the live verifier's entry below); another team may bring its own harness (#131). The instruction file is for any
-  harness, and `ship` and the live verifier are the pstack team's, in `packs/pstack/` (#132). Sources: `1b319ee`;
+  harness, and `ship` and the live verifier are the pstack team's, in `packs/pstack/` (#132). On 2026-11-05 (#375, 07:46
+  +07, relayed by Colly and the factory-repo session) the Human allowed Peers to run on Codex (GPT-6 Astra) for parallel
+  release-1 work, with each brief reviewed by the Lead. Sources: `1b319ee`;
   https://github.com/tuannd9288/factory/issues/131 (its body, Limits) and
   https://github.com/tuannd9288/factory/issues/132 (its body).
 - **seatwork, 2026-10-21.** seatwork may be used freely, its code and its text alike. Source: the page "Factory của
@@ -422,7 +424,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; `--check` is its canary on Claude Code's session format; the header says what it charges a task from; for a repository on Linear (#406) a task is a team issue that left Triage, joined to its pull requests by `Issue: <KEY>`, and the enforcer lookup reads the team's issues |
-| `bin/factory-move` | `bin/factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--limit N]` (#406): moves a repository's open GitHub issues to its Linear team, once, as the Factory app; a dry run prints the plan, `--apply` writes, a map file lets a second run resume, and each GitHub issue gets "Moved to <KEY>" and is closed as not planned, never deleted; not a `factory linear` verb; the header of `bin/lib/move.mjs` has the rest |
+| `bin/factory-move` | `bin/factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--limit N] [--project <name> --in-project <n>,…]` (#406): moves a repository's open GitHub issues to its Linear team, once, as the Factory app; a dry run prints the plan, `--apply` writes, a map file lets a second run resume, and each GitHub issue gets "Moved to <KEY>" and is closed as not planned, never deleted; not a `factory linear` verb; the header of `bin/lib/move.mjs` has the rest |
 | `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH): the table of profiles, accounts and quota, and `login`, `store`, `use` and `logout`, which only the Human runs (#177, #178); its header has the rest |
 | `bin/factory top` | The read-only view of every session and repository (#174, #286); the header of `bin/lib/top.mjs` has the rest |
 | `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest. `factory lead <repo> [--team <name>] --here [-- <claude arguments>]` (#349) is the MacBook's own Lead, with no `gh` login and no git credential of the Human's; a push to GitHub over HTTPS fails, and git over ssh is off |
