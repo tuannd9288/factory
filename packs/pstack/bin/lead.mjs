@@ -22,7 +22,7 @@ import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugi
 import { onLinear } from '../../../bin/lib/linear-repos.mjs';
 import { TEAM, firstFree } from '../../../bin/lib/names.mjs';
 import { pickTeam } from '../../../bin/lib/team-names.mjs';
-import { refusal } from '../../../bin/lib/repos.mjs';
+import { FACTORY_REPO, refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
@@ -449,14 +449,17 @@ function main(argv, env) {
   const name = leadName(runDir, state);
   if (env.HERDR_PANE_ID) renamePane(runDir, name, env.HERDR_PANE_ID);
 
-  const setup = spawnSync('.gate/bin/setup', [], { cwd, stdio: 'inherit' });
-  if (setup.error) {
-    process.stderr.write(`bin/lead: .gate/bin/setup: ${setup.error.message}\n`);
-    return 1;
-  }
-  if (setup.status !== 0) {
-    process.stderr.write(`bin/lead: .gate/bin/setup failed in ${cwd}\n`);
-    return setup.status ?? 1;
+  // The factory clone has the gate's source in kit/, not an installed gate.
+  if (repo !== FACTORY_REPO) {
+    const setup = spawnSync('.gate/bin/setup', [], { cwd, stdio: 'inherit' });
+    if (setup.error) {
+      process.stderr.write(`bin/lead: .gate/bin/setup: ${setup.error.message}\n`);
+      return 1;
+    }
+    if (setup.status !== 0) {
+      process.stderr.write(`bin/lead: .gate/bin/setup failed in ${cwd}\n`);
+      return setup.status ?? 1;
+    }
   }
 
   // Local scope records the install in the git-ignored .claude/settings.local.json, so the committed pin stays as it is. A failed

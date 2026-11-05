@@ -101,6 +101,34 @@ function world(body, { settings = PSTACK } = {}) {
   }
 }
 
+test('factory starts a second team in its own clone without a gate (#375)', () => world((w) => {
+  const repo = join(w.tree, 'factory');
+  const start = (...args) => spawnSync(process.execPath,
+    [join(w.tree, 'packs/pstack/bin/lead.mjs'), 'factory', ...args],
+    { encoding: 'utf8', env: w.env(), timeout: 20000 });
+  assert.match(start('--dry-run').stderr, /not a folder of its own/);
+  mkdirSync(repo);
+  assert.match(start('--dry-run').stderr, /no \.git/);
+  mkdirSync(join(repo, '.git'));
+  assert.match(start('--dry-run').stderr, /no \.envrc/);
+  writeFileSync(join(repo, '.envrc'), 'export CLAUDE_CONFIG_DIR=x\n');
+  mkdirSync(join(w.home, 'factory-runs/factory-first'), { recursive: true });
+  w.row('test-account', 'fake-token');
+  const accounts = join(w.home, '.local/state/factory/accounts');
+  writeFileSync(accounts, 'factory/factory-second=test-account\n');
+  const dry = start('--team', 'second', '--new', '--dry-run');
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.equal(dry.stdout.split('\n')[0], repo);
+  assert.match(dry.stdout, /^team: second$/m);
+  assert.deepEqual(w.log(), []);
+  const run = start('--team', 'second', '--new');
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(w.log().at(-1).cwd, repo);
+  assert.equal(w.log().at(-1).team, 'factory-second');
+  assert.ok(!existsSync(join(repo, '.gate')));
+  assert.ok(!w.ran());
+}));
+
 describe('lead --dry-run', () => {
   test('prints the plugin root and the hook command, and runs nothing', () => world((w) => {
     const r = w.lead(['--dry-run']);
