@@ -47,7 +47,7 @@ async function world(body, { pass = FAKE_PASS } = {}) {
   const start = async (extra = {}) => {
     let up;
     const ready = new Promise((done) => (up = done));
-    const finished = run({ state, runs, human: 'nobody', passFile: new URL(`file://${join(dir, 'pass.mjs')}`), post, log: () => {}, signals: false, onStart: up, ...extra });
+    const finished = run({ state, runs, human: 'nobody', passFile: new URL(`file://${join(dir, 'pass.mjs')}`), post, log: () => {}, signals: false, startSource: () => null, onStart: up, ...extra });
     const api = await Promise.race([ready, finished.then(() => null)]);
     daemons.push({ api, finished });
     return { api, finished };
@@ -179,7 +179,7 @@ test('a daemon whose checkout moved under it, with no message from its pass, sto
 
 test('a socket path of 104 bytes or more is refused before anything is made', async () => {
   const state = join(tmpdir(), 'x'.repeat(100));
-  await assert.rejects(run({ state, signals: false }), /longer than 103 bytes/);
+  await assert.rejects(run({ state, signals: false, startSource: () => null }), /longer than 103 bytes/);
   assert.equal(existsSync(state), false);
   assert.deepEqual(await ask(join(state, 'daemon.sock'), { verb: 'ping' }), { ok: false, why: 'path too long' });
 });
