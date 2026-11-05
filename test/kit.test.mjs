@@ -528,6 +528,8 @@ describe('review, verdict, tier and rounds', () => {
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
         '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
         '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
+        '  *HEAD_REF_FORCE_PUSHED_EVENT*) cat "$FAKE/forced.json" 2>/dev/null || echo \'{"data":{"repository":{"pullRequest":{"baseRefOid":"base","timelineItems":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}\' ;;',
+        '  *compare/base...old*) cat "$FAKE/overwritten.json" ;;',
         // #379: the pull request's comments, kept in $FAKE/comments.json by comments.mjs; a write fails while nowrite exists.
         '  *issues/7/comments*|*issues/comments/*) node "$FAKE/comments.mjs" "$@" ;;',
         // #374: each review request is logged; the one for the login in norequest, when that exists, fails.
@@ -1883,6 +1885,34 @@ console.log('{}');
     out = job('rounds', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 1, out.out);
   });
+  test('rounds keeps overwritten red heads and counts each SHA once', () => {
+    const red = (oid) => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name: 'verify', conclusion: 'FAILURE' }] } }] } } });
+    write(fake, {
+      'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes: [red('a')] } } } } }),
+      'forced.json': JSON.stringify({ data: { repository: { pullRequest: { baseRefOid: 'base', timelineItems: { pageInfo: { hasNextPage: false }, nodes: [{ beforeCommit: { oid: 'old' } }, { beforeCommit: { oid: 'old' } }] } } } } }),
+      'overwritten.json': JSON.stringify({ total_commits: 3, commits: [{ sha: 'a' }, { sha: 'b' }, { sha: 'c' }] }),
+      'verify.json': JSON.stringify({ total_count: 1, check_runs: [{ id: 123, name: 'verify', conclusion: 'failure', app: { slug: 'github-actions' } }] }),
+    });
+    const out = job('rounds', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /three red rounds/);
+  });
+
+  test('approval survives a rewritten head only for an unchanged patch', () => {
+    labels();
+    reviews([]);
+    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+    reviews([review('tuannd9288', 'APPROVED', first.head)]);
+    git(r.repo, 'commit', '--amend', '-qm', 'rewritten head');
+    const rewritten = git(r.repo, 'rev-parse', 'HEAD');
+    assert.notEqual(rewritten, first.head);
+    git(trusted, 'fetch', '-q', r.repo, 'rv');
+    assert.equal(again('tier', rewritten, pr).code, 0);
+    const changed = commit(r.repo, { 'AGENTS.md': '# app\nChanged patch.\n' });
+    git(trusted, 'fetch', '-q', r.repo, 'rv');
+    assert.equal(again('tier', changed, pr).code, 1);
+  });
+
   test('a tier-3 approval holds on a head that only took main in, and not once the patch changes', () => {
     labels();
     reviews([]);
@@ -1925,6 +1955,7 @@ console.log('{}');
     });
     test(`${method}: rounds reads the PR heads, not the landing commit`, () => {
       const red = (oid) => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name: 'verify', conclusion: 'FAILURE' }] } }] } } });
+      write(fake, { 'forced.json': JSON.stringify({ data: { repository: { pullRequest: { baseRefOid: 'base', timelineItems: { pageInfo: { hasNextPage: false }, nodes: [] } } } } }) });
       write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: {
         mergeCommit: { oid: 'landed', parents: { totalCount: method === 'squash' ? 1 : 2 } },
         commits: { pageInfo: { hasPreviousPage: false }, nodes: [red('a'), red('b')] },
@@ -2546,4 +2577,28 @@ describe('workflows and ruleset', () => {
     assert.equal(rule.parameters.dismiss_stale_reviews_on_push, false);
     assert.equal(rule.parameters.require_last_push_approval, false);
   });
+});
+
+test('approval fetches an overwritten review commit absent from a fresh checkout', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'approval-rewrite-'));
+  const origin = join(dir, 'origin');
+  const fresh = join(dir, 'fresh');
+  mkdirSync(origin);
+  try {
+    git(origin, 'init', '-q', '-b', 'main');
+    const base = commit(origin, { 'file': 'base\n' });
+    git(origin, 'switch', '-qc', 'own');
+    const approved = commit(origin, { 'file': 'changed\n' }, 'approved');
+    git(origin, 'commit', '--amend', '-qm', 'rewritten');
+    const head = git(origin, 'rev-parse', 'HEAD');
+    git(dir, 'clone', '--no-local', '--single-branch', '-q', origin, fresh);
+    assert.notEqual(run(fresh, 'git', ['cat-file', '-e', approved]).code, 0);
+    write(fresh, { 'owners': '* @owner\n' });
+    const judge = (sha) => spawnSync(process.execPath, [join(factory, 'kit/.gate/bin/lib/approval.mjs'), '--owners', 'owners', '--author', 'writer', '--head', sha, '--base', base], {
+      cwd: fresh, encoding: 'utf8', input: JSON.stringify([{ user: { login: 'owner' }, state: 'APPROVED', submitted_at: '2026-11-05', commit_id: approved }]),
+    });
+    assert.equal(judge(head).status, 0);
+    const changed = commit(fresh, { 'file': 'different\n' });
+    assert.equal(judge(changed).status, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

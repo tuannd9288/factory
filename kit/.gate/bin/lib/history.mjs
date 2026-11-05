@@ -36,6 +36,8 @@ const LABELS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$o
 timelineItems(first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes{... on LabeledEvent{createdAt actor{login} label{name}}}}}}}`;
 const ROUNDS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
 commits(last:100){pageInfo{hasPreviousPage} nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{databaseId name conclusion}}}}}}}}}}`;
+const FORCED = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){baseRefOid
+timelineItems(first:100,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){pageInfo{hasNextPage} nodes{... on HeadRefForcePushedEvent{beforeCommit{oid}}}}}}}`;
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE']);
 const ENTIRE = 'Entire Gates';
 
@@ -199,7 +201,23 @@ try {
       api(`${base}/check-runs/${c.databaseId}/annotations?per_page=100`).some((n) => n.title === 'review-result' && n.annotation_level === 'notice' && /^unavailable: /.test(String(n.message)));
     const commits = pull(ROUNDS).commits;
     if (commits.pageInfo?.hasPreviousPage !== false) throw new Error('the commits are more than one page, or GitHub sent no pageInfo');
-    const red = commits.nodes.filter(({ commit }) =>
+    // A force-push removes commits from the PR connection, but its timeline keeps the old tip.
+    const past = pull(FORCED);
+    if (past.timelineItems?.pageInfo?.hasNextPage !== false) throw new Error('the force-push history is more than one page, or unreadable');
+    const nodes = new Map(commits.nodes.map((n) => [n.commit.oid, n]));
+    for (const event of past.timelineItems.nodes) {
+      const tip = event.beforeCommit?.oid;
+      if (!tip) throw new Error('a force-push has no readable old head');
+      const comparison = api(`${base}/compare/${past.baseRefOid}...${tip}?per_page=100`);
+      if (!Array.isArray(comparison.commits) || comparison.total_commits !== comparison.commits.length) throw new Error('the overwritten commits are more than one page, or unreadable');
+      for (const { sha } of comparison.commits) {
+        if (nodes.has(sha)) continue;
+        const listing = api(`${base}/commits/${sha}/check-runs?filter=all&per_page=100`);
+        if (!Array.isArray(listing.check_runs) || listing.total_count !== listing.check_runs.length) throw new Error('the overwritten checks are more than one page, or unreadable');
+        nodes.set(sha, { commit: { oid: sha, checkSuites: { nodes: listing.check_runs.map((c) => ({ app: c.app, checkRuns: { nodes: [{ ...c, databaseId: c.id, conclusion: c.conclusion?.toUpperCase() }] } })) } } });
+      }
+    }
+    const red = [...nodes.values()].filter(({ commit }) =>
       commit.checkSuites.nodes.some((s) => s.app?.slug === 'github-actions' && s.checkRuns.nodes.some((c) => checks.has(c.name) && RED.has(c.conclusion) && !onlyUnavailable(c))),
     );
     console.log(red.length);
