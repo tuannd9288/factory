@@ -4,9 +4,12 @@
 // default (FULL). No client opens the database (store.go:2): the readers ask the daemon over its socket (bin/lib/daemon.mjs), and when it is down
 // they say so. Migrations run one transaction a step, after a VACUUM INTO backup of an existing database that has a step to take, the last
 // three backups kept (store.go:141-251). `meta.schema_version` is the version; a step is never edited once applied: add the next one.
-// Slice 1 holds what the daemon newly owns:
+// The store holds:
 //   offsets  how far the daemon has read into a file, by name ('sessions.jsonl': bytes). It is the daemon's own read position; what keeps a
 //            seat from waking twice is the state file queue-seats.news, as before (bin/lib/news-wake.mjs).
+//            linear:<KEY> is each Linear team's newest handled event time in milliseconds, initially now minus ten minutes.
+//   linear_events  one row per Linear comment id or issue id plus updatedAt, with kind, issue identifier, team key, actor id and time (ms).
+//                  Each new event and its team's monotonic offset are committed in the same transaction.
 //   posts    each seat end the daemon took: when it arrived (ms), the verb, the run and tag, the session, when its wake went out (woke_at, ms) or
 //            why it did not (why), and the seq of the events line. Slice 4 measures a seat's end to its Lead's wake from this table.
 // One module wraps node:sqlite, so a Node upgrade that changes it fails here, in the store's test.
@@ -122,8 +125,10 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
   return {
     file,
     version: () => Number(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value),
-    /** The bytes of `name` read so far, 0 when none. */
+    /** The named cursor: bytes for files, milliseconds for linear:<KEY>; 0 when absent. */
     offset: (name) => Number(getOffset.get(name)?.value ?? 0),
+    /** Seeds a cursor only on first observation; reconnects and restarts preserve it. */
+    initOffset: (name, value) => void q('INSERT INTO offsets (name, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (name) DO NOTHING').run(name, value, now()),
     setOffset: (name, value) => void setOffset.run(name, value, now()),
     /** Records a post that arrived (now, in ms, unless `at` says); returns its id. */
     post: ({ verb, run = null, tag = null, session = null, at = now() }) => Number(addPost.run(at, verb, run, tag, session).lastInsertRowid),
@@ -137,7 +142,7 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
       try {
         const added = q('INSERT OR IGNORE INTO linear_events VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(key, kind, id, issueIdentifier, teamKey, actorId, time).changes > 0;
-        if (added) setOffset.run('linear', Math.max(time, Number(getOffset.get('linear')?.value ?? 0)), now());
+        if (added) setOffset.run(`linear:${teamKey}`, Math.max(time, Number(getOffset.get(`linear:${teamKey}`)?.value ?? 0)), now());
         db.exec('COMMIT');
         return added;
       } catch (error) {

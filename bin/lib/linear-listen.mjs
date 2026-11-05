@@ -1,7 +1,6 @@
 // #414 part A: the daemon's read-only Linear source. Catch-up and the buffered stream share
 // one recording function; the store commits the deduplication row and cursor together.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readRegistry, TEAM_KEY } from './linear-repos.mjs';
 import { CONDITION, createLinear, isAuthFailure } from './linear.mjs';
 import { record } from './events.mjs';
 
@@ -11,14 +10,16 @@ const ISSUE = 'id identifier updatedAt team { key }';
 const fields = { commentCreated: COMMENT, issueUpdated: ISSUE };
 const authClose = (code) => [4002, 4401, 4403].includes(code);
 
+export const SOURCE_SCOPE = 'linear-source';
+// A distinct key prevents a request failure from taking over the source's condition.
+export const SOURCE_CONDITION = `${CONDITION} source`;
+const RECHECK_MS = 5 * 60_000;
+
 export function linearTeams(state) {
-  let repos = {};
-  try {
-    repos = JSON.parse(readFileSync(join(state, 'linear', 'repos.json'), 'utf8'));
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-  return [...new Set(['INN', ...Object.values(repos).map((r) => r?.key).filter((k) => typeof k === 'string' && k.length)])];
+  const repos = readRegistry(state);
+  return [...new Set(['INN', ...Object.values(repos)
+    .filter((r) => r && typeof r.key === 'string' && TEAM_KEY.test(r.key) && typeof r.teamId === 'string')
+    .map((r) => r.key)])];
 }
 
 function eventOf(kind, node) {
@@ -35,12 +36,13 @@ export function handleLinearEvent(store, event) {
 }
 
 /** Read every page before moving the cursor; sort across both connections, not per page. */
-async function catchUp(fetchCatchUp, teams, since) {
+async function catchUp(fetchCatchUp, teams, store) {
   const events = [];
-  for (const [collection, kind, filterType] of [
+  for (const key of teams) for (const [collection, kind, filterType] of [
     ['comments', 'commentCreated', 'CommentFilter'], ['issues', 'issueUpdated', 'IssueFilter'],
   ]) {
-    const team = { key: { in: teams } };
+    const team = { key: { in: [key] } };
+    const since = store.offset(`linear:${key}`) - 60_000;
     const filter = { updatedAt: { gte: new Date(since).toISOString() },
       ...(collection === 'comments' ? { issue: { team } } : { team }) };
     const query = `query($filter: ${filterType}!, $after: String) {
@@ -55,7 +57,7 @@ async function catchUp(fetchCatchUp, teams, since) {
       if (!Array.isArray(page?.nodes) || !page.pageInfo) throw new Error('invalid catch-up page');
       for (const node of page.nodes) {
         const event = eventOf(kind, node);
-        if (event && teams.includes(event.teamKey)) events.push(event);
+        if (event && event.teamKey === key) events.push(event);
       }
       if (!page.pageInfo.hasNextPage) break;
       if (!page.pageInfo.endCursor || page.pageInfo.endCursor === after) throw new Error('invalid catch-up cursor');
@@ -65,83 +67,117 @@ async function catchUp(fetchCatchUp, teams, since) {
   return events.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
 }
 
-/** Starts asynchronously, after the daemon listens. All network seams are injectable.
- * fetchCatchUp has createLinear.request's signature: (query, variables) -> GraphQL data.
- * stop invalidates pending work before the daemon closes its store. */
+/** Starts asynchronously after the daemon listens. The API object and both network seams
+ * are injectable. Authentication retries use mint({ failed }) from the shared token source.
+ * Waiting for credentials is resumable; stop() permanently cancels all work and timers. */
 export function startLinearSource({ state, store, WebSocket = globalThis.WebSocket,
-  getToken, fetchCatchUp, teams, log = console.log,
+  linear, getToken, mintToken, fetchCatchUp, log = console.log, now = Date.now,
   schedule = setTimeout, cancel = clearTimeout } = {}) {
-  let client;
-  const api = () => (client ??= createLinear({ state }));
+  const api = () => (linear ??= createLinear({ state }));
   getToken ??= () => api().token();
+  mintToken ??= (failed) => api().mint({ failed });
   fetchCatchUp ??= (query, variables) => api().request(query, variables);
   let stopped = false;
+  let waiting = false;
   let socket = null;
   let timer = null;
+  let heartbeat = null;
+  let pongTimer = null;
   let generation = 0;
   let failures = 0;
+  let shutdowns = 0;
   let backoff = 1000;
   let started = false;
+  let needsMint = false;
+  let missingLogged = false;
+  let registryLogged = false;
+  let teams = [];
+  const failedTokens = new Set();
+  const readTeams = () => {
+    try {
+      teams = linearTeams(state);
+      registryLogged = false;
+    } catch {
+      teams = ['INN'];
+      if (!registryLogged) log('daemon: Linear team registry could not be read; watching INN only');
+      registryLogged = true;
+    }
+    for (const key of teams) store.initOffset(`linear:${key}`, now() - 10 * 60_000);
+    return teams;
+  };
+  const catchUpNow = () => catchUp(fetchCatchUp, readTeams(), store);
+  const clearHeartbeat = () => {
+    cancel(heartbeat);
+    cancel(pongTimer);
+    heartbeat = pongTimer = null;
+  };
   const stop = () => {
     stopped = true;
     generation += 1;
     cancel(timer);
+    clearHeartbeat();
     socket?.close();
+  };
+  const condition = (raised) => {
+    try {
+      record({ state, found: raised ? [{ key: SOURCE_CONDITION, scope: SOURCE_SCOPE, top: true,
+        text: 'Linear source stopped after three authentication failures' }] : [],
+      read: new Set([SOURCE_SCOPE]), now: now() });
+    } catch {
+      log('daemon: Linear source could not write its authentication condition');
+    }
+  };
+  const recheck = () => {
+    waiting = true;
+    timer = schedule(() => { void connect(); }, RECHECK_MS);
   };
   const retry = (code) => {
     if (stopped) return;
-    if (authClose(code)) failures += 1;
-    else failures = 0;
+    failures = authClose(code) ? failures + 1 : 0;
+    shutdowns = code === 1001 ? shutdowns + 1 : 0;
     if (failures >= 3) {
-      stop();
-      try {
-        record({ state, found: [{ key: CONDITION, scope: 'linear', top: true,
-          text: 'Linear source stopped after three authentication failures' }], read: new Set() });
-      } catch {
-        log('daemon: Linear source could not write its authentication condition');
-      }
+      condition(true);
+      recheck();
       return;
     }
-    const delay = code === 1001 ? 0 : backoff;
-    if (code !== 1001) backoff = Math.min(60_000, backoff * 2);
+    const delay = code === 1001 && shutdowns === 1 ? 0 : backoff;
+    if (delay) backoff = Math.min(60_000, backoff * 2);
     timer = schedule(() => { void connect(); }, delay);
   };
   async function connect() {
     if (stopped) return;
     const mine = ++generation;
     const current = () => !stopped && mine === generation;
+    readTeams();
     let token;
     try {
-      teams ??= linearTeams(state);
+      token = needsMint && !waiting ? (await mintToken([...failedTokens])).token : await getToken();
     } catch {
-      log('daemon: Linear source not started: team registry could not be read');
-      stop();
-      return;
-    }
-    try {
-      if (!teams.length) {
-        log('daemon: Linear source not started: no team');
-        stop();
-        return;
-      }
-      token = await getToken();
-    } catch {
-      // Never print an exception from a token provider (it might contain credentials).
+      // Never print exceptions from a token provider: they may contain credentials.
     }
     if (!current()) return;
-    if (!token) {
-      log('daemon: Linear source not started: no token');
-      stop();
+    if (!token || failedTokens.has(token)) {
+      if (!missingLogged && failures < 3) log('daemon: Linear source not started: no usable token');
+      missingLogged = true;
+      recheck();
       return;
     }
+    if (waiting) failures = 0;
+    waiting = false;
+    missingLogged = false;
+    needsMint = false;
     try {
       if (!started) {
-        const events = await catchUp(fetchCatchUp, teams, store.offset('linear'));
+        const events = await catchUpNow();
         if (!current()) return;
         for (const event of events) handleLinearEvent(store, event);
         started = true;
       }
-      const ws = new WebSocket('wss://api.linear.app/graphql', 'graphql-transport-ws');
+      // Node's built-in WebSocket accepts WebSocketInit as its second argument.
+      const Authorization = `Bearer ${token}`;
+      const ws = new WebSocket('wss://api.linear.app/graphql', {
+        protocols: ['graphql-transport-ws'], headers: { Authorization },
+      });
       socket = ws;
       let catching = true;
       let acknowledged = false;
@@ -150,12 +186,27 @@ export function startLinearSource({ state, store, WebSocket = globalThis.WebSock
       const disconnect = (code) => {
         if (!current()) return;
         generation += 1;
+        clearHeartbeat();
+        if (authClose(code)) {
+          failedTokens.add(token);
+          needsMint = true;
+        }
         ws.close();
+        socket = null;
         retry(code);
       };
+      const ping = () => {
+        if (!current()) return;
+        try {
+          pongTimer = schedule(() => disconnect(1006), 10_000);
+          send({ type: 'ping' });
+          heartbeat = schedule(ping, 30_000);
+        } catch {
+          disconnect(1006);
+        }
+      };
       ws.addEventListener('open', () => {
-        if (current()) send({ type: 'connection_init', payload: { token } });
-        token = null;
+        if (current()) send({ type: 'connection_init', payload: { Authorization } });
       });
       ws.addEventListener('close', (event) => disconnect(event.code));
       ws.addEventListener('error', () => disconnect(1006));
@@ -165,13 +216,23 @@ export function startLinearSource({ state, store, WebSocket = globalThis.WebSock
         try { message = JSON.parse(event.data); } catch { disconnect(1002); return; }
         try {
           if (message.type === 'ping') return send({ type: 'pong', ...(message.payload ? { payload: message.payload } : {}) });
+          if (message.type === 'pong') {
+            cancel(pongTimer);
+            pongTimer = null;
+            return;
+          }
           if (message.type === 'connection_ack' && !acknowledged) {
             acknowledged = true;
-            send({ type: 'ping' });
+            backoff = 1000;
+            shutdowns = 0;
+            failures = 0;
+            failedTokens.clear();
+            condition(false);
+            heartbeat = schedule(ping, 30_000);
             for (const [kind, selection] of Object.entries(fields)) {
               send({ id: kind, type: 'subscribe', payload: { query: `subscription { ${kind} { ${selection} } }` } });
             }
-            void catchUp(fetchCatchUp, teams, store.offset('linear')).then((events) => {
+            void catchUpNow().then((events) => {
               if (!current()) return;
               for (const e of events) handleLinearEvent(store, e);
               pending.sort((a, b) => a.time - b.time);
@@ -188,8 +249,6 @@ export function startLinearSource({ state, store, WebSocket = globalThis.WebSock
             for (const kind of Object.keys(fields)) {
               const e = eventOf(kind, message.payload?.data?.[kind]);
               if (!e || !teams.includes(e.teamKey)) continue;
-              failures = 0;
-              backoff = 1000;
               if (catching) pending.push(e);
               else handleLinearEvent(store, e);
             }
@@ -203,5 +262,5 @@ export function startLinearSource({ state, store, WebSocket = globalThis.WebSock
     }
   }
   const ready = connect();
-  return { stop, ready, get stopped() { return stopped; } };
+  return { stop, ready, get stopped() { return stopped; }, get waiting() { return waiting; } };
 }
