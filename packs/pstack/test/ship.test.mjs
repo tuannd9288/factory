@@ -112,7 +112,7 @@ function world({ driver = true, liveVerify = true, stacks, merge } = {}) {
   git(repo, 'push', '-q', 'origin', 'main');
   git(repo, 'fetch', '-q', 'origin');
   git(repo, 'switch', '-q', '-c', 'work');
-  commit(repo, { 'cli.js': 'console.log(2);\n' }, 'Print two');
+  commit(repo, { 'cli.js': 'console.log(2);\n' }, 'fix(cli): print two');
   git(repo, 'push', '-q', 'origin', 'work');
   if (liveVerify) {
     writeFileSync(join(repo, 'scripts/live-verify'), FAKE_LIVE_VERIFY);
@@ -196,7 +196,7 @@ describe('opening the pull request', () => {
     const create = w.calls().find((c) => c.startsWith('pr create'));
     assert.match(create, /--base main/);
     assert.match(create, /--head work/);
-    assert.match(create, /--title Print two/);
+    assert.match(create, /--title fix\(cli\): print two/);
     assert.match(create, /--body-file /);
     assert.equal(w.read('created-body'), BODY);
     assert.equal(w.read('lv-calls'), '', 'it opens, and goes no further in the same run');
@@ -204,21 +204,21 @@ describe('opening the pull request', () => {
 
   test('takes the title from the last subject without its trailing issue number, and --title as given', () => {
     let w = world();
-    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Print three (#12)');
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'fix(cli): print three (#12)');
     git(w.repo, 'push', '-q', 'origin', 'work');
     w.passed();
     assert.equal(w.ship().code, 0);
-    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Print three --body-file /);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title fix\(cli\): print three --body-file /);
     w = world();
     w.passed();
     assert.equal(w.ship().code, 0);
-    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Print two --body-file /);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title fix\(cli\): print two --body-file /);
     w = world();
-    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Print three (#12)');
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'fix(cli): print three (#12)');
     git(w.repo, 'push', '-q', 'origin', 'work');
     w.passed();
-    assert.equal(w.ship(['--body-file', join(w.dir, 'body.md'), '--title', 'Given (#12)']).code, 0);
-    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title Given \(#12\) --body-file /);
+    assert.equal(w.ship(['--body-file', join(w.dir, 'body.md'), '--title', 'fix(cli): use given (#12)']).code, 0);
+    assert.match(w.calls().find((c) => c.startsWith('pr create')), /--title fix\(cli\): use given \(#12\) --body-file /);
   });
 
   test('refuses a body that still holds the template\'s placeholder', () => {
@@ -507,7 +507,7 @@ describe('pushing', () => {
     const w = world();
     assert.equal(w.ship().code, 1, 'no stamps: refused');
     git(w.repo, 'push', '-q', 'origin', 'work');
-    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'More');
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'fix(cli): print more');
     git(w.repo, 'push', '-q', 'origin', 'work');
     w.passed();
     assert.equal(w.ship().code, 0);
@@ -697,7 +697,7 @@ describe('the remote branch', () => {
 
   test('lets the pull request open once HEAD is pushed', () => {
     const w = world();
-    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'Pushed');
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'fix(cli): print three');
     git(w.repo, 'push', '-q', 'origin', 'work');
     w.passed();
     const out = w.ship();
@@ -874,7 +874,7 @@ describe('stacked pull requests', () => {
     const w = world({ merge: 'merge' });
     const parent = w.head();
     git(w.repo, 'branch', 'parent');
-    commit(w.repo, { 'child.js': 'child\n' }, 'Child');
+    commit(w.repo, { 'child.js': 'child\n' }, 'feat(cli): add child');
     git(w.repo, 'push', '-q', 'origin', 'work');
     w.passed();
     assert.equal(w.ship(['--base', 'parent', '--body-file', join(w.dir, 'body.md')]).code, 0);
@@ -916,7 +916,7 @@ describe('stacked pull requests', () => {
 for (const merge of [undefined, 'squash', 'merge']) {
   test(`arms with ${merge ?? 'default squash'} from origin/main, ignoring the candidate's method`, () => {
     const w = world({ merge });
-    commit(w.repo, { '.gate/driver.json': JSON.stringify({ merge: merge === 'merge' ? 'squash' : 'merge' }) }, 'Change candidate method');
+    commit(w.repo, { '.gate/driver.json': JSON.stringify({ merge: merge === 'merge' ? 'squash' : 'merge' }) }, 'chore(gate): change candidate method');
     git(w.repo, 'push', '-q', 'origin', 'work');
     w.passed();
     assert.equal(w.ship().code, 0);
@@ -931,7 +931,7 @@ test('squash restacks the child past the merged parent head and asks for a lease
   const w = world({ merge: 'squash' });
   const parent = w.head();
   git(w.repo, 'branch', 'parent');
-  commit(w.repo, { 'child.js': 'child\n' }, 'Child');
+  commit(w.repo, { 'child.js': 'child\n' }, 'feat(cli): add child');
   git(w.repo, 'push', '-q', 'origin', 'work');
   const child = w.head();
   w.passed();
@@ -963,14 +963,29 @@ for (const merge of ['squash', 'merge']) {
   test(`${merge}: title validation includes the squash PR suffix`, () => {
     const w = world({ merge });
     w.passed();
-    assert.equal(w.ship(['--title', 'x'.repeat(68), '--body-file', join(w.dir, 'body.md')]).code, 0);
+    assert.equal(w.ship(['--title', 'fix(cli): ' + 'x'.repeat(58), '--body-file', join(w.dir, 'body.md')]).code, 0);
     const out = w.ship();
     assert.equal(out.code, merge === 'squash' ? 1 : 0, out.out);
     if (merge === 'squash') {
       assert.match(out.out, /at most 72/);
       assert.ok(!w.calls().some((c) => c.includes('--auto')));
-      w.pr({ title: 'x'.repeat(67) });
+      w.pr({ title: 'fix(cli): ' + 'x'.repeat(57) });
       assert.equal(w.ship().code, 0);
     }
   });
 }
+
+test('squash refuses malformed titles before opening or arming a pull request', () => {
+  const w = world({ merge: 'squash' });
+  w.passed();
+  for (const title of ['Update the queue', 'unknown(queue): update it', 'fix(queue): update it.', 'fix(queue): ' + 'x'.repeat(62)]) {
+    const out = w.ship(['--title', title, '--body-file', join(w.dir, 'body.md')]);
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /refused title/);
+  }
+  assert.ok(!w.calls().some((c) => c.startsWith('pr create')));
+  assert.equal(w.ship().code, 0);
+  w.pr({ title: 'Update the queue' });
+  assert.match(w.ship().out, /refused title/);
+  assert.ok(!w.calls().some((c) => c.includes('--auto')));
+});

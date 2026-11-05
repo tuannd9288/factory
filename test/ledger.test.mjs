@@ -506,3 +506,14 @@ for (const method of ['squash', 'merge']) {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+for (const title of ['Revert "fix(queue): update stale pull requests"', 'revert: fix(queue): update stale pull requests', 'revert(queue): "fix(queue): update stale pull requests"']) {
+  test(`ledger and digest find the original PR for ${title}`, () => {
+    const rows = revertRows(
+      mergedPR(1, 'fix(queue): update stale pull requests', '2026-10-15T10:00:00Z'),
+      mergedPR(2, title, '2026-10-16T10:00:00Z'),
+    );
+    assert.deepEqual(countOf(rows), { n: 1, k: 1, m: 1, reverted: ['o/r#1'] });
+    assert.match(digest(rows, revertPeriod), /Reverted PRs: o\/r#1/);
+  });
+}

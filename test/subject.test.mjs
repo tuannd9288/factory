@@ -219,3 +219,24 @@ for (const method of ['squash', 'merge']) {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+test('pull request titles use Conventional Commits and allow reverts', async () => {
+  const { titleProblem } = await import(join(factory, 'kit/.gate/bin/lib/subject.mjs'));
+  for (const title of ['fix(queue): update stale pull requests', 'Revert "fix(queue): update stale pull requests"', 'revert: fix(queue): update stale pull requests'])
+    assert.equal(titleProblem(title), null, title);
+  for (const title of ['Update the queue', 'unknown(queue): update it', 'fix(queue): update it.', 'fix(queue): ' + 'x'.repeat(62)])
+    assert.ok(titleProblem(title), title);
+});
+
+test('the gate subjects check refuses a malformed PR title from the event', () => {
+  const r = repoWithKit();
+  try {
+    const event = join(r.repo, 'event.json');
+    for (const title of ['fix(queue): update stale pull requests', 'Update stale pull requests', 'Revert "fix(queue): update stale pull requests"']) {
+      writeFileSync(event, JSON.stringify({ pull_request: { title } }));
+      const out = script(r.repo, 'verify', ['--only', 'subjects'], { GATE_BASE: 'origin/main', GITHUB_EVENT_PATH: event });
+      assert.equal(out.code, title.startsWith('Update') ? 1 : 0, out.out);
+      if (out.code) assert.match(out.out, /type\(scope\): subject/);
+    }
+  } finally { r.cleanup(); }
+});

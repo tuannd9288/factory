@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { driverAt } from './driver.mjs';
-import { subjectProblem } from '../../.gate/bin/lib/subject.mjs';
+import { subjectProblem, titleProblem } from '../../.gate/bin/lib/subject.mjs';
 
 // The template's issue lines. A body for a repository on Linear carries `Fixes <KEY>` and `Issue: <KEY>` in their place and passes (#404).
 const PLACEHOLDER = '<issue labelled task>';
@@ -64,8 +64,8 @@ function open(branch, head, args, merge) {
     return say(1, `refused: red-check passed by the body's "${noRed}"; the body file lacks that line`);
   // The title carries no issue number: Linear shows the pull request's own, and the issue is in the body.
   const title = args.title ?? git(['log', '-1', '--format=%s']).replace(/ \(#\d+\)$/, '');
-  const problem = subjectProblem(title);
-  if (merge === 'squash' && problem) return say(1, `refused title: ${problem}`);
+  const problem = titleProblem(title);
+  if (problem) return say(1, `refused title: ${problem}`);
   const url = gh(['pr', 'create', '--base', args.base ?? 'main', '--head', branch, '--title', title, '--body-file', bodyFile]).trim().split('\n').pop();
   return say(0, `opened #${/(\d+)$/.exec(url)?.[1] ?? '?'} ${url}`);
 }
@@ -152,8 +152,8 @@ function step(pr, head, branch, stacks, merge) {
     // live-verify --covered compares the new base/head patch-id with the old verdict on the next run.
     return say(0, `retargeted #${n} to main and merged origin/main; push HEAD, then run ship again`);
   }
-  const titleProblem = subjectProblem(pr.title) || subjectProblem(`${pr.title} (#${n})`);
-  if (merge === 'squash' && (!pr.title || titleProblem)) return say(1, `refused title for #${n}: ${titleProblem || 'the title is missing'}`);
+  const problem = titleProblem(pr.title) || (merge === 'squash' && subjectProblem(`${pr.title} (#${n})`));
+  if (problem) return say(1, `refused title for #${n}: ${problem}`);
   const driver = driverOf(pr);
   if (driver === undefined) return say(2, `could not read .gate/driver.json: the base ${String(pr.baseRefOid).slice(0, 7)} is not here and could not be fetched`);
   const covered = () => (driver ? spawnSync('scripts/live-verify', ['--covered', String(n)], { stdio: 'ignore' }).status === 0 : noteOf(n).stands);

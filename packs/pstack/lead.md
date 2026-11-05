@@ -87,7 +87,7 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    turn with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was
    opened (the reviewer's raise, a `needs-human` label). The body also carries <!--github-->`Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`,<!--/github--><!--linear-->`Fixes <KEY>`, so Linear closes the issue on merge, `Issue: <KEY>`
-   and `Team: {{TEAM}}` (no `Claim:`: a repository on Linear has no claim),<!--/linear--> outside that block. The title carries no issue number (`ship`
+   and `Team: {{TEAM}}` (no `Claim:`: a repository on Linear has no claim),<!--/linear--> outside that block. The title uses Conventional Commits `type(scope): subject`, no trailing period, at most 72 characters; type is `feat`, `fix`, `docs`, `refactor`, `test`, `chore` or `perf`; scope is the area; subject is short, imperative and names a real symbol when one carries the change. It carries no issue number (`ship`
    drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a

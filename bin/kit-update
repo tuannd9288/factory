@@ -205,7 +205,7 @@ modnote=""
 grep -qx '.claude/settings.json' "$lists/updated" && note=" The repository's \`.claude/settings.json\` is updated: the kit's new deny lines are inserted as text, every other byte kept."
 grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.github/CODEOWNERS\` is its own, so it is kept: the kit's new lines do not reach this file."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
-gh pr create --repo "$slug" --head "$branch" --title "Bring the kit up to factory main $sha7" --body "$(cat <<BODY
+gh pr create --repo "$slug" --head "$branch" --title "chore(kit): update to factory main $sha7" --body "$(cat <<BODY
 $tldr
 
 <details>
