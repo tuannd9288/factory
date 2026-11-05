@@ -1,10 +1,13 @@
-// #414 part A: the daemon's read-only Linear source. Catch-up and the buffered stream share
+// #414: the daemon's read-only Linear source. Catch-up and the buffered stream share
 // one recording function; the store commits the deduplication row and cursor together.
 import { readRegistry, TEAM_KEY } from './linear-repos.mjs';
 import { CONDITION, createLinear, isAuthFailure } from './linear.mjs';
-import { record } from './events.mjs';
+import { join } from 'node:path';
+import { commentsOfIssue, holderOf } from './linear-cli.mjs';
+import { post as postAsync, wakeLine } from './wake.mjs';
+import { record, appendStart } from './events.mjs';
 
-const COMMENT = 'id createdAt user { id } issue { identifier team { key } }';
+const COMMENT = 'id createdAt user { id } botActor { type } issue { identifier team { key } }';
 // Issue has no update actor in the schema. Do not mistake its creator for its editor.
 const ISSUE = 'id identifier updatedAt team { key }';
 const fields = { commentCreated: COMMENT, issueUpdated: ISSUE };
@@ -27,12 +30,33 @@ function eventOf(kind, node) {
   const time = Date.parse(kind === 'commentCreated' ? node?.createdAt : node?.updatedAt);
   if (!node?.id || !issue?.identifier || !issue?.team?.key || !Number.isFinite(time)) return null;
   return { kind, id: node.id, issueIdentifier: issue.identifier, teamKey: issue.team.key,
-    actorId: kind === 'commentCreated' ? node.user?.id ?? null : null, time };
+    actorId: kind === 'commentCreated' ? node.user?.id ?? null : null,
+    self: kind === 'commentCreated' && !node.user && node.botActor?.type === 'oauthClient', time };
 }
 
-/** The seam for subsequent parts. Part A only records; false means it was already handled. */
-export function handleLinearEvent(store, event) {
-  return store.linearEvent(event);
+/** Port of comment-wake.mjs:73-95: skip self, find the holder, commit the cursor before
+ * waking, then append the event. No store transaction is held across the async post or the events file's lock. */
+export async function handleLinearEvent(store, event, { state, runs, linear, post = postAsync, now = Date.now,
+  log = console.log } = {}) {
+  if (event.kind !== 'commentCreated' || event.self || event.teamKey === 'INN') return store.linearEvent(event);
+  const repo = Object.entries(readRegistry(state)).find(([, r]) => r?.key === event.teamKey && typeof r.teamId === 'string')?.[0];
+  if (!repo) return store.linearEvent(event);
+  // As with the GitHub holder lookup, a failed read must leave the cursor unchanged.
+  const team = holderOf(await commentsOfIssue(linear, event.issueIdentifier));
+  if (!store.linearEvent(event)) return false;
+  if (!team) return true;
+  try {
+    const where = `${repo}-${team}`;
+    const r = await post(join(runs, where, 'socket'), wakeLine(repo, event.issueIdentifier));
+    if (r.posted) store.linearWake(event.id, now() - event.time);
+    appendStart({ state, kind: 'comment',
+      key: `comment ${repo}#${event.issueIdentifier} ${event.id}`,
+      text: `new comment on ${repo}#${event.issueIdentifier}; Lead ~/factory-runs/${where}: ${r.posted ? 'woken' : `not woken (${r.why}); the comment waits on Linear`}`,
+    });
+  } catch {
+    log(`daemon: the wake for ${repo}#${event.issueIdentifier} failed`);
+  }
+  return true;
 }
 
 /** Read every page before moving the cursor; sort across both connections, not per page. */
@@ -70,10 +94,11 @@ async function catchUp(fetchCatchUp, teams, store) {
 /** Starts asynchronously after the daemon listens. The API object and both network seams
  * are injectable. Authentication retries use mint({ failed }) from the shared token source.
  * Waiting for credentials is resumable; stop() permanently cancels all work and timers. */
-export function startLinearSource({ state, store, WebSocket = globalThis.WebSocket,
+export function startLinearSource({ state, store, runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'), post = postAsync, WebSocket = globalThis.WebSocket,
   linear, getToken, mintToken, fetchCatchUp, log = console.log, now = Date.now,
   schedule = setTimeout, cancel = clearTimeout } = {}) {
   const api = () => (linear ??= createLinear({ state }));
+  const handle = (event) => handleLinearEvent(store, event, { state, runs, linear: { request: (...args) => api().request(...args) }, post, now, log });
   getToken ??= () => api().token();
   mintToken ??= (failed) => api().mint({ failed });
   fetchCatchUp ??= (query, variables) => api().request(query, variables);
@@ -170,7 +195,7 @@ export function startLinearSource({ state, store, WebSocket = globalThis.WebSock
       if (!started) {
         const events = await catchUpNow();
         if (!current()) return;
-        for (const event of events) handleLinearEvent(store, event);
+        for (const event of events) await handle(event);
         started = true;
       }
       // Node's built-in WebSocket accepts WebSocketInit as its second argument.
@@ -232,11 +257,11 @@ export function startLinearSource({ state, store, WebSocket = globalThis.WebSock
             for (const [kind, selection] of Object.entries(fields)) {
               send({ id: kind, type: 'subscribe', payload: { query: `subscription { ${kind} { ${selection} } }` } });
             }
-            void catchUpNow().then((events) => {
+            void catchUpNow().then(async (events) => {
               if (!current()) return;
-              for (const e of events) handleLinearEvent(store, e);
+              for (const e of events) await handle(e);
               pending.sort((a, b) => a.time - b.time);
-              for (const e of pending) handleLinearEvent(store, e);
+              for (const e of pending) await handle(e);
               catching = false;
             }).catch(() => { disconnect(1006); });
           }
@@ -250,7 +275,7 @@ export function startLinearSource({ state, store, WebSocket = globalThis.WebSock
               const e = eventOf(kind, message.payload?.data?.[kind]);
               if (!e || !teams.includes(e.teamKey)) continue;
               if (catching) pending.push(e);
-              else handleLinearEvent(store, e);
+              else void handle(e).catch(() => disconnect(1006));
             }
           }
         } catch {
