@@ -53,12 +53,13 @@ test('a migration is one transaction a step: a failing step leaves the version a
     const file = join(dir, 'factory.db');
     openStore(file).close();
     const bad = [...MIGRATIONS, 'CREATE TABLE extra (a INTEGER); INSERT INTO nowhere VALUES (1);'];
-    assert.throws(() => openStore(file, { migrations: bad }), /migrate to v2/);
+    assert.throws(() => openStore(file, { migrations: bad }), new RegExp(`migrate to v${MIGRATIONS.length + 1}`));
     const db = new DatabaseSync(file);
-    assert.equal(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value, '1');
+    assert.equal(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value, String(MIGRATIONS.length));
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='extra'").get().n, 0, 'half a step stayed');
     db.close();
-    assert.equal(readdirSync(join(dir, 'backups')).filter((n) => /^pre-v1-2-\d{4}-\d{2}-\d{2}\.db$/.test(n)).length, 1);
+    const backupName = new RegExp(`^pre-v${MIGRATIONS.length}-${MIGRATIONS.length + 1}-\\d{4}-\\d{2}-\\d{2}\\.db$`);
+    assert.equal(readdirSync(join(dir, 'backups')).filter((n) => backupName.test(n)).length, 1);
   }));
 
 test('a good new step is applied once, keeps the rows, and only the newest three backups stay', () =>

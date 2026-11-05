@@ -30,6 +30,15 @@ export const MIGRATIONS = [
      seq INTEGER
    );
    CREATE INDEX posts_run_tag ON posts (run, tag);`,
+  `CREATE TABLE linear_events (
+     event_key TEXT PRIMARY KEY,
+     kind TEXT NOT NULL,
+     id TEXT NOT NULL,
+     issue_identifier TEXT NOT NULL,
+     team_key TEXT NOT NULL,
+     actor_id TEXT,
+     time INTEGER NOT NULL
+   );`,
 ];
 
 const KEEP_BACKUPS = 3;
@@ -121,6 +130,22 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
     /** Settles a post: `wokeAt` (ms) when its wake went out, else `why` it did not; `seq` is the events line it wrote, if any. */
     settle: (id, { wokeAt = null, why = null, seq = null }) => void settle.run(wokeAt, why, seq, id),
     posts: () => allPosts.all().map((r) => ({ ...r })),
+    /** Linear's own ids deduplicate stream and catch-up; the cursor commits with the row. */
+    linearEvent: ({ kind, id, issueIdentifier, teamKey, actorId = null, time }) => {
+      const key = kind === 'commentCreated' ? id : `${id}:${time}`;
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const added = q('INSERT OR IGNORE INTO linear_events VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(key, kind, id, issueIdentifier, teamKey, actorId, time).changes > 0;
+        if (added) setOffset.run('linear', Math.max(time, Number(getOffset.get('linear')?.value ?? 0)), now());
+        db.exec('COMMIT');
+        return added;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
+    linearEvents: () => q('SELECT * FROM linear_events ORDER BY time, event_key').all().map((r) => ({ ...r })),
     /** What the connection runs with, as the settings above name them. */
     settings: () => ({
       journal_mode: db.prepare('PRAGMA journal_mode').get().journal_mode,

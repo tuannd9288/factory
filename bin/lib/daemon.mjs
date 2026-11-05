@@ -49,6 +49,7 @@ import { MAX_LINE, fits, socketPath } from './daemon-proto.mjs';
 import { holderOf, releaseLock, takeLock } from './queue.mjs';
 import { wakeOnSeatEnds } from './news-wake.mjs';
 import { openStore } from './store.mjs';
+import { startLinearSource } from './linear-listen.mjs';
 import { postSync } from './wake.mjs';
 
 export const PASS_MS = 60_000;
@@ -240,6 +241,7 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     if (d.stopping) return;
     d.stopping = true;
     log(`daemon: stopping: ${why}`);
+    d.linear?.stop();
     clearTimeout(d.timer);
     clearInterval(d.lease);
     const close = () => {
@@ -292,6 +294,7 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     releaseLock(lockFile, lock.token);
     throw error;
   }
+  d.linear = startLinearSource({ state, store, log });
   if (signals) for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => stop(`signal ${sig}`));
   log(`daemon: listening on ${sock} (pid ${process.pid}, head ${String(LOADED ?? 'unknown').slice(0, 7)})`);
   // The lease: the job pings once a minute, so a daemon nobody pings (its job booted out) stops by itself, by the path of SIGTERM.
