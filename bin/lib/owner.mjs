@@ -267,6 +267,10 @@ export function parseArguments(argv) {
 
 const show = (c) => c.shown ?? `${c.method} ${c.path}${c.body ? ` ${JSON.stringify(c.body)}` : ''}`;
 
+export function linearCodeStep(slug) {
+  return `onboard-owner: Human's manual step: open https://github.com/settings/installations, then Linear Code → Configure → tick ${slug} → Save`;
+}
+
 function main(argv) {
   const { slug, id, apply, merge, problem } = parseArguments(argv);
   if (problem || !/^[\w.-]+\/[\w.-]+$/.test(slug ?? '') || !/^\d+$/.test(id ?? '')) {
@@ -350,6 +354,7 @@ function main(argv) {
   if (!calls.length) console.log('  nothing to change');
   if (!apply) {
     if (calls.length) console.log('onboard-owner: dry run: nothing changed; rerun with --apply to make these changes');
+    if (!merge) console.log(linearCodeStep(slug));
     return 0;
   }
   for (const c of calls) {
@@ -381,6 +386,7 @@ function main(argv) {
     console.log('onboard-owner: next: the team that claimed the issue runs bin/onboard, ' +
       'which opens the kit pull request');
   else console.log(`onboard-owner: the kit's gate is in force on ${branch}`);
+  console.log(linearCodeStep(slug));
   return 0;
 }
 
