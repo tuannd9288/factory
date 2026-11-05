@@ -18,7 +18,8 @@ import { checkoutRoot } from './checkout.mjs';
 import { quotaRows } from './quota.mjs';
 import { post, wakeLine } from './wake.mjs';
 import { liveOfAccount } from './seat.mjs';
-import { quote } from '../../packs/pstack/bin/lead.mjs';
+import { quote, roleOf } from '../../packs/pstack/bin/lead.mjs';
+import { onLinear } from './linear-repos.mjs';
 import { DEFAULT_TEAM, TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { leadTeams } from './top.mjs';
@@ -498,6 +499,20 @@ function leadHere(repo, team, passed, env) {
     return 1;
   }
   const { state } = contextOf(env);
+  const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/lead.md');
+  let roleText;
+  try {
+    const linear = onLinear(repo, state);
+    roleText = existsSync(rolePath) ? roleOf(readFileSync(rolePath, 'utf8'), Boolean(linear))
+      .replaceAll('{{TEAM}}', team).replaceAll('{{TEAMKEY}}', () => linear?.key ?? '') : '';
+  } catch (e) {
+    console.error(`bin/factory: lead --here: ${e.message}`);
+    return 2;
+  }
+  if (!roleText.trim()) {
+    console.error(`bin/factory: lead --here: ${rolePath} is missing or empty`);
+    return 2;
+  }
   const parent = join(state, 'lead-here');
   const empty = join(parent, 'gh-empty');
   try {
@@ -533,7 +548,7 @@ function leadHere(repo, team, passed, env) {
     },
     permissions: { deny: ['Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
-  const r = spawnSync('claude', ['--name', `${repo}-${team}`, '--settings', JSON.stringify(settings), ...passed], { stdio: 'inherit', env });
+  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, '--settings', JSON.stringify(settings), ...passed], { stdio: 'inherit', env });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
