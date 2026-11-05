@@ -47,7 +47,7 @@ async function world(body, { pass = FAKE_PASS } = {}) {
   const start = async (extra = {}) => {
     let up;
     const ready = new Promise((done) => (up = done));
-    const finished = run({ state, runs, human: 'nobody', passFile: new URL(`file://${join(dir, 'pass.mjs')}`), post, log: () => {}, signals: false, startSource: () => null, onStart: up, ...extra });
+    const finished = run({ state, runs, human: 'nobody', passFile: new URL(`file://${join(dir, 'pass.mjs')}`), post, log: () => {}, signals: false, startSource: () => null, pushRecords: () => {}, onStart: up, ...extra });
     const api = await Promise.race([ready, finished.then(() => null)]);
     daemons.push({ api, finished });
     return { api, finished };
