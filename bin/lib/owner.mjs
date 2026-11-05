@@ -72,9 +72,13 @@ const sorted = (r) => ({ ...r, rules: [...(r.rules ?? [])].sort((a, b) => a.type
  * (every branch with forcePush off), one on every tag that refuses creation, update and deletion but for a repository admin, one on the claim refs
  * (claim/<n>) that refuses deletion and rewrite for everyone, and a bootstrap one on main that asks the Human to approve
  * the last push; after, the kit's gate in place of the bootstrap one, in its Entire variant when the reviewer is entire. */
-export function wanted({ kitLanded, branch, reviewer, forcePush }) {
+export function wanted({ kitLanded, branch, reviewer, mergeMethod = 'squash', forcePush }) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
-  const gate = () => (reviewer === 'entire' ? entireGate(read(FILES.gate)) : read(FILES.gate));
+  const gate = () => {
+    const value = reviewer === 'entire' ? entireGate(read(FILES.gate)) : read(FILES.gate);
+    value.rules.find((r) => r.type === 'pull_request').parameters.allowed_merge_methods = [mergeMethod];
+    return value;
+  };
   const branches = read(FILES.branches);
   if (!forcePushOn({ forcePush })) branches.conditions.ref_name.include = ['~ALL'];
   return {
@@ -228,8 +232,11 @@ export function gateState(slug, branch, read = gh, fileAt = undefined) {
     const file = maybe(at(path), read);
     return typeof file?.content === 'string' ? Buffer.from(file.content, 'base64').toString('utf8') : null;
   };
-  const driverFile = maybe(`repos/${slug}/contents/.gate/driver.json?ref=main`, read);
-  const driver = driverFile === null ? {} : JSON.parse(Buffer.from(driverFile.content, 'base64').toString('utf8'));
+  const driverText = fileAt ? fileAt('.gate/driver.json') : (() => {
+    const file = maybe(`repos/${slug}/contents/.gate/driver.json?ref=main`, read);
+    return file === null ? null : Buffer.from(file.content, 'base64').toString('utf8');
+  })();
+  const driver = driverText ? JSON.parse(driverText) : {};
   forcePushOn(driver);
   const forcePush = driver.forcePush;
   const files = {};
@@ -237,13 +244,14 @@ export function gateState(slug, branch, read = gh, fileAt = undefined) {
     const text = (fileAt ?? viaApi)(path);
     if (typeof text === 'string') files[path] = text;
   }
+  const mergeMethod = driver.merge === 'merge' ? 'merge' : 'squash';
   const settings = valuesIn(files);
   const variables = variablesOf(slug, read);
   const old = typeof files[TRUSTED] === 'string' && readsVariables(files[TRUSTED]);
   // On a main where the kit has landed, a gate-trusted.yml that is absent, or holds no reviewer line in the kit's form, is not
   // "no reviewer": the reviewer is unknown, and the ruleset it chooses would be the wrong one (#333, #335's round 2).
   const unreadable = kitLanded && !old && settings.reviewer === undefined;
-  return { forcePush, kitLanded, files, settings, variables, old, unreadable, reviewer: settings.reviewer ?? (old ? (variables.GATE_REVIEWER ?? '') : '') };
+  return { forcePush, kitLanded, files, settings, variables, old, unreadable, mergeMethod, reviewer: settings.reviewer ?? (old ? (variables.GATE_REVIEWER ?? '') : '') };
 }
 
 /** The arguments of bin/onboard-owner: { slug, id, apply, merge }, or { problem } for a usage error. */
@@ -294,7 +302,7 @@ function main(argv) {
   const { repo } = who;
   const branch = repo.default_branch;
   // The reviewer as main holds it; a runner that breaks the rule is the evidence's and the doctor's to name.
-  const { kitLanded, settings, old, reviewer, unreadable, forcePush } = gateState(slug, branch);
+  const { kitLanded, settings, old, reviewer, unreadable, mergeMethod, forcePush } = gateState(slug, branch);
   if (unreadable) {
     console.error(`onboard-owner: ${TRUSTED} on ${branch} cannot be read as the kit's file with its reviewer line, so the reviewer is not known and the gate's ruleset cannot be chosen: nothing changes`);
     return 2;
@@ -310,7 +318,7 @@ function main(argv) {
       return 2;
     }
   }
-  const kit = wanted({ kitLanded, branch, reviewer, forcePush });
+  const kit = wanted({ kitLanded, branch, reviewer, mergeMethod, forcePush });
   const names = new Set([...kit.rulesets.map((r) => r.name), ...kit.drop]);
   const now = current(slug, agent, names);
   // The gate's two review parameters are the merge switch (#333): the position --merge names, else the live ruleset's own,

@@ -1925,6 +1925,36 @@ console.log('{}');
     assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/);
   });
 
+  for (const method of ['squash', 'merge']) {
+    test(`${method}: approval survives an unchanged patch moved onto main`, () => {
+      labels();
+      reviews([]);
+      const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
+      reviews([review('tuannd9288', 'APPROVED', first.head)]);
+      git(r.repo, 'switch', '-q', 'main');
+      commit(r.repo, { 'method.txt': method }, 'Main advances');
+      git(r.repo, 'push', '-q', 'origin', 'main');
+      git(trusted, 'fetch', '-q', 'origin');
+      git(r.repo, 'switch', '-q', 'rv');
+      if (method === 'squash') git(r.repo, 'rebase', 'main');
+      else git(r.repo, 'merge', '-q', '--no-edit', 'main');
+      git(trusted, 'fetch', '-q', r.repo, 'rv');
+      const out = again('tier', git(r.repo, 'rev-parse', 'HEAD'), pr);
+      assert.equal(out.code, 0, out.out);
+    });
+    test(`${method}: rounds reads the PR heads, not the landing commit`, () => {
+      const red = (oid) => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name: 'verify', conclusion: 'FAILURE' }] } }] } } });
+      write(fake, { 'forced.json': JSON.stringify({ data: { repository: { pullRequest: { baseRefOid: 'base', timelineItems: { pageInfo: { hasNextPage: false }, nodes: [] } } } } }) });
+      write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: {
+        mergeCommit: { oid: 'landed', parents: { totalCount: method === 'squash' ? 1 : 2 } },
+        commits: { pageInfo: { hasPreviousPage: false }, nodes: [red('a'), red('b')] },
+      } } } }) });
+      const out = job('rounds', { 'src/math.js': MUL }, pr);
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, /2 head commits judged red/);
+    });
+  }
+
   // The Claude Code reviewer through .gate/bin/review, and verdict reading review's result: one reviewer call per pull request.
   const FAKE_CLAUDE = (f) => `#!/usr/bin/env node
 const fs = require('fs');

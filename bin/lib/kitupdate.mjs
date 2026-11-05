@@ -61,7 +61,9 @@ export function plan({ factory, commit, repo, base, name, human, modules, given 
   const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: lost, writes: [], removes: [] };
   // The gate's settings: each as an option gives it, else as the base's workflows hold it, else the kit's default.
   const baseValues = valuesIn(Object.fromEntries(WORKFLOWS.filter((p) => at.get(p)?.mode === '100644').map((p) => [p, text(repo, at.get(p).oid)])));
-  const values = { ...baseValues, ...given };
+  const driver = at.get('.gate/driver.json');
+  const mergeMethod = driver && JSON.parse(text(repo, driver.oid)).merge === 'merge' ? 'merge' : 'squash';
+  const values = { ...baseValues, ...given, mergeMethod };
   const from = Object.fromEntries(GATE_SETTINGS.map((s) => [s.key, given[s.key] !== undefined ? 'given' : baseValues[s.key] !== undefined ? "the base's" : "the kit's default"]));
   const rendering = (path, want) => render(path, text(factory, want.oid), { ...values, human });
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {

@@ -125,8 +125,8 @@ function settingProblems({ slug, files, settings, old, variables }) {
 
 function checkSettings(ctx) {
   const reads = 'repo rulesets env collab invites kit vars workflows';
-  const { slug, agent, branch, kitLanded, reviewer, forcePush } = ctx;
-  const kit = wanted({ kitLanded: true, branch, reviewer, forcePush });
+  const { slug, agent, branch, kitLanded, reviewer, mergeMethod, forcePush } = ctx;
+  const kit = wanted({ kitLanded: true, branch, reviewer, mergeMethod, forcePush });
   const names = new Set([...kit.rulesets.map((r) => r.name), ...kit.drop]);
   const have = current(slug, agent, names, get);
   // The gate's two review parameters are the merge switch (#333), the Human's to move: whatever they hold is as wanted.
@@ -204,8 +204,9 @@ function checkEvidence(ctx) {
   if (!kit) return { ok: false, result: 'no merged pull request has a head branch starting factory/kit', reads };
   const oid = kit.mergeCommit.oid;
   const parents = git(['-C', ctx.clone, 'rev-list', '--parents', '-n', '1', oid]).stdout.trim().split(' ');
-  if (parents.length !== 3) return { ok: false, result: `pull request #${kit.number}: ${oid.slice(0, 7)} is not a merge commit of a base and a head`, reads };
-  const [, base, head] = parents;
+  if (parents.length !== 2 && parents.length !== 3) return { ok: false, result: `pull request #${kit.number}: ${oid.slice(0, 7)} is neither a squash nor a merge commit`, reads };
+  const [, base] = parents;
+  const head = parents.length === 3 ? parents[2] : oid;
   const commitFile = entryOf(ctx.clone, head, '.gate/kit-commit');
   const commit = regular(commitFile) ? /^([0-9a-f]{40})\n$/.exec(commitFile.bytes.toString('utf8'))?.[1] : undefined;
   if (!commit) return { ok: false, result: `pull request #${kit.number}: .gate/kit-commit at its head is not one factory commit`, reads };

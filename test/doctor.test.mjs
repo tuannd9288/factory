@@ -454,3 +454,25 @@ test('kit-evidence is called with --human, as bin/onboard and bin/kit-update cal
     assert.match(readFileSync(args, 'utf8'), new RegExp(` --human ${human}$`, 'm'));
   }
 });
+
+for (const method of ['squash', 'merge']) {
+  test(`verify and kit evidence accept a kit landed by ${method}`, () => {
+    const work = join(dir, `method-${method}`);
+    git(dir, 'clone', '-q', target, work);
+    git(work, 'checkout', '-q', '-B', 'main', `${kitMerge}^1`);
+    if (method === 'squash') {
+      git(work, 'merge', '--squash', `${kitMerge}^2`);
+      commit(work, {}, 'Install kit (#5)');
+    } else git(work, 'merge', '--no-ff', '-m', 'Install kit', `${kitMerge}^2`);
+    const head = git(work, 'rev-parse', 'HEAD');
+    const url = join(dir, `method-${method}.git`);
+    git(dir, 'clone', '-q', '--bare', work, url);
+    const r = doctor({ url, held: state(head, {
+      prs: [{ number: 5, headRefName: 'factory/kit', mergeCommit: { oid: head }, mergedAt: '2026-10-01T00:00:00Z' }],
+      checks: { 5: [{ name: 'verify', state: 'SUCCESS' }] },
+    }) });
+    assert.equal(r.code, 0, r.out);
+    assert.equal(mark(r.lines.verify), 'ok');
+    assert.equal(mark(r.lines['kit-evidence']), 'ok');
+  });
+}

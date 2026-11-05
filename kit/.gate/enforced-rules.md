@@ -7,7 +7,7 @@ as `prose` and gets one, or is deleted, within 30 days.
 | Rule | Enforced by |
 |---|---|
 | `AGENTS.md` has the kit's Gate block at its start (after an optional title line), is at most 150 lines and 32 KiB, and `CLAUDE.md` starts with the line `@AGENTS.md` or is a relative symlink to it | `.gate/bin/verify` (`instructions`); `.gate/bin/verify-trusted` reads the candidate's git objects, and a changed block passes only as a kit update the factory's `main` vouches for |
-| Land by a merge commit, through auto-merge | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
+| Land through auto-merge: `merge` in `.gate/driver.json` on main defaults to `squash`; `merge` keeps merge commits | the ruleset (`allowed_merge_methods`); a direct merge shows in the ledger as the Human's touch |
 | `forcePush` in origin/main’s `.gate/driver.json` defaults to `pstack`: rewrite only your own PR branch with `--force-with-lease`, never main; `off` forbids rewriting pushed commits; never `--force`, `+<ref>` or `--mirror` | seat and Lead push hooks; `factory-branches` protects the default branch and claims (all branches at `off`), and `factory-tags` protects tags |
 | Secrets only in the environment `reviewer`, never at repository level: every branch's jobs read those | prose; the weekly digest lists repository-level secrets |
 | Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or `AGENTS.md`, and review reads it | the reviewer |

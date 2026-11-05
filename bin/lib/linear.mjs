@@ -17,11 +17,12 @@
 //   (token() may mint, then the first send, the send with a token another caller stored, the retry's mint and the send with its token).
 //   A symlinked tokens/linear-app is refused: nothing is read from it or written to it.
 //   Nothing printed, thrown or written holds the secret or a token: messages are built from a status and a code, and scrubbed of the values in play.
-//   Writes show their team: every comment and issue passes createAsUser (the team's name) and, once an icon is hosted (ICON_URL), displayIconUrl,
-//   so Linear shows "<team> (via Factory)". `delegateToApp` sets the app as an issue's delegate (`delegateId`, the app's own user id).
+//   Writes show their team: every comment and issue passes createAsUser (the team's full name) and, once an icon is hosted (ICON_URL), displayIconUrl,
+//   so Linear shows "<repo>-<team> (via Factory)". `delegateToApp` sets the app as an issue's delegate (`delegateId`, the app's own user id).
 import { lstatSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readActive, record } from './events.mjs';
+import { parseTeam } from './names.mjs';
 import { redact } from './redact.mjs';
 import { APP_FOLDERS, appDir, readTokenFile, writeAppFile } from './token.mjs';
 
@@ -235,7 +236,7 @@ export function createLinear({
 
   const teamOf = (given) => {
     const name = given ?? team;
-    if (!name) throw fail('a write needs the team name (FACTORY_TEAM, or the team argument)');
+    if (!parseTeam(name) && !/^[^\s]+ \(via GitHub\)$/.test(name ?? '')) throw fail('a write needs the full team name <repo>-<team> (FACTORY_TEAM, or the team argument)');
     return name;
   };
   const asTeam = (given) => ({ createAsUser: teamOf(given), ...(iconUrl ? { displayIconUrl: iconUrl } : {}) });

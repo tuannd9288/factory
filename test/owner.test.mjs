@@ -810,3 +810,17 @@ test('forcePush defaults to pstack, and off protects all branches', async () => 
   assert.equal(gateState('o/r', 'candidate', read).forcePush, 'off');
   assert.ok(calls.some((args) => args[1] === 'repos/o/r/contents/.gate/driver.json?ref=main'));
 });
+
+for (const merge of [undefined, 'squash', 'merge']) {
+  test(`the live ruleset follows main's merge method: ${merge ?? 'default squash'}`, () => {
+    const files = onMain({ reviewer: 'claude' });
+    if (merge) files['.gate/driver.json'] = JSON.stringify({ merge });
+    const w = world({ kitLanded: true, files });
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+      assert.equal(out.code, 0, out.out);
+      assert.deepEqual(gateOf(w).rules.find((r) => r.type === 'pull_request').parameters.allowed_merge_methods, [merge ?? 'squash']);
+      assert.equal(w.gitCalls(), '');
+    } finally { w.cleanup(); }
+  });
+}

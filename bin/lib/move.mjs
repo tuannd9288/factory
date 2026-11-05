@@ -140,6 +140,7 @@ const done = (data, what) => {
 };
 
 export function createMove({ gh = ghRun, api, state, home = process.env.HOME, runs = join(home, 'factory-runs') }) {
+  let fullTeam = null;
   /** A GraphQL read; a number goes as -F, a string as -f, a null is left out. */
   const graphql = (query, vars) => {
     const args = ['api', 'graphql', '-f', `query=${query}`];
@@ -195,6 +196,7 @@ export function createMove({ gh = ghRun, api, state, home = process.env.HOME, ru
     if (apply && !rewrites) throw new Usage('--apply requires --rewrites');
     const [owner, name] = repo.split('/');
     const leadTeam = pickTeam(name, { state, home, runs });
+    fullTeam = `${name}-${leadTeam}`;
     let entry;
     try {
       entry = onLinear(repo, state);
@@ -281,7 +283,7 @@ export function createMove({ gh = ghRun, api, state, home = process.env.HOME, ru
       };
       await copyFrom(comments.get(issue.number));
       if (stateOf(issue).hold && !e.held) {
-        await announceTakeOn(api, e.id, e.key, leadTeam);
+        await announceTakeOn(api, e.id, e.key, fullTeam);
         e.held = true;
         save();
       }
@@ -366,7 +368,7 @@ export function createMove({ gh = ghRun, api, state, home = process.env.HOME, ru
     const stay = issue.parent !== null && !moves(issue.parent);
     const made = done(await api.issueCreate({
       teamId: team.id, title: issue.title, description: descriptionOf(issue, { parentStays: stay }), stateId: status.id, createdAt: issue.createdAt,
-      ...(parent?.id ? { parentId: parent.id } : {}), ...(project ? { projectId: project.id } : {}), delegate: STATUS[issue.board ?? 'Triage'].hold, team: team.name,
+      ...(parent?.id ? { parentId: parent.id } : {}), ...(project ? { projectId: project.id } : {}), delegate: STATUS[issue.board ?? 'Triage'].hold, team: fullTeam,
     }), 'issueCreate');
     if (!made.issue?.id) throw new Refused('Linear did not name the issue it created');
     return { key: made.issue.identifier, id: made.issue.id, url: made.issue.url, parentOf: issue.parent, comments: 0, parent: Boolean(parent?.id), source: sourceOf(issue.title, issue.body, issue.rewrite), ...(project ? { project: true } : {}), held: false, ghComment: false, closed: false };

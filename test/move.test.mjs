@@ -174,7 +174,8 @@ test('the status map: Triage, no item, Todo and In Progress, the last held by th
   assert.equal(byNumber(w, 4).input.delegateId, 'app-user-1');
   const held = w.lcomments[byNumber(w, 4).id].find((c) => c.body === `Taken by team ${freeWord('proj', [])}.`);
   assert.ok(held, 'the holder comment of #404\'s code');
-  assert.equal(held.input.createAsUser, freeWord('proj', []));
+  assert.equal(held.input.createAsUser, `proj-${freeWord('proj', [])}`);
+  for (const n of [1, 2, 3, 4, 5]) assert.equal(byNumber(w, n).input.createAsUser, `proj-${freeWord('proj', [])}`, 'a moved issue shows the Lead\'s team, not the Linear team\'s name');
   assert.equal(w.lcomments[byNumber(w, 3).id].length, 0);
 });
 
@@ -654,3 +655,4 @@ test('a collapse line at re-read reports and retains the twin, defers updates an
   assert.equal(w.issues[0].closed, true);
   assert.ok(w.updates.some((u) => u.id === twin.id && u.input.description === description(1, 'fixed body')));
 });
+

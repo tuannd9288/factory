@@ -69,8 +69,8 @@ export async function renameTeam(repo, old, next, { apply = false, home = proces
       if (!page) throw new Error('Linear did not list the issues');
       for (const issue of page.nodes) {
         if (holderOf(await commentsOfIssue(api, issue.identifier)) !== old) continue;
-        moves.push({ label: `Linear ${issue.identifier}: release ${old}`, apply: () => announceReleaseOn(api, issue.id, issue.identifier, old) });
-        moves.push({ label: `Linear ${issue.identifier}: take ${next}`, apply: () => announceTakeOn(api, issue.id, issue.identifier, next) });
+        moves.push({ label: `Linear ${issue.identifier}: release ${old}`, apply: () => announceReleaseOn(api, issue.id, issue.identifier, `${repo}-${old}`) });
+        moves.push({ label: `Linear ${issue.identifier}: take ${next}`, apply: () => announceTakeOn(api, issue.id, issue.identifier, `${repo}-${next}`) });
       }
       after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
     } while (after);
