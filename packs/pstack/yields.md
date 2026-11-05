@@ -14,9 +14,8 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
 - **Force-push** (`shipping.md:8`, `babysit.md:10`, `autopilot-full.md:12`: `--force-with-lease`). The factory never
   rewrites a pushed branch: `factory-branches` refuses a non-fast-forward push on every branch, and `bin/seat` denies every
   `git push` (`Bash(git push:*)` in `bin/lib/seat.mjs`). Fix forward with a new commit.
-- **Stacked pull requests** (`opening-a-pr.md:28`, `autopilot-stack.md:6`, `multi-phase-plan.md:57`: a base that is the
-  parent's branch; `shipping.md:8`: retarget to trunk with `gh pr edit --base`). `scripts/ship` opens with `--base main`
-  and refuses to arm any other base (`refused to arm #<n>: its base is <base>, not main`): no stack.
+- **Stacked pull requests** (`opening-a-pr.md:28-32`, `shipping.md` step 4, `autopilot-stack.md`): `stacks` in `.gate/driver.json` on `origin/main` defaults to `pstack`; `off` keeps the old refusal, and restacking merges `origin/main` into the child after retargeting to `main`.
+  The Human, 2026-11-05: "Thứ nhất PR Chồng PR là đúng, áp dụng cách đấy -> Factory đang làm lệch đi, hoặc là nó phải có công tắc. Trước tau nói cái nào khác thì đề xuất gạt công tắc mặc định giống pstack đầu tiên mà sao giờ vẫn lệch?"
 - **Merge by hand** (`shipping.md:8`: `gh pr merge <pr> --squash`). `factory-gate` allows merge commits only
   (`kit/.gate/ruleset.json:18`), and `scripts/ship` arms `--auto --merge`; nobody merges by hand.
 - **The pull request's title and body** (`opening-a-pr.md:11`, `:13`: a Conventional Commits title, a body that becomes
@@ -47,9 +46,8 @@ changes nothing; its apply mode changes a repository only through pull requests 
   `~/factory-runs/<repo>-<team>/transcripts/`, which seats are denied. That a profile keeps them under `projects/`,
   where the Lead's hook copies from, was checked by the Lead's live run on 2.1.308 (#185, issuecomment-6545015874,
   item d). `recall` and `reflect` themselves have not yet run on the copies (#185, acceptance 5).
-- **Rules.** The factory writes no rules into any profile; `setup-pstack`, their only writer, is not used. So nothing
-  the factory runs writes the adapter's `~/.claude/rules/pstack-models.md`; without it, a role uses its skill's default
-  slug (`docs/harness/claude-code.md:37`). A project's `.claude/rules/` loads in a seat session on 2.1.308: a probe's
+- **Rules.** The launcher writes `rules/pstack-models.md` into each Lead profile at every start, with the skill
+  defaults mapped by the adapter; a change of model is the Human's. A project's `.claude/rules/` loads in a seat session on 2.1.308: a probe's
   session quoted a marker line from `.claude/rules/factory-probe.md` with no tool call (#203's `run-rules-1.jsonl`). A
   profile's own `rules/` is per the docs, not probed: a probe would need a write into a profile's folder, which no agent
   makes.

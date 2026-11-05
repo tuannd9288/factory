@@ -1,7 +1,7 @@
 // packs/pstack/bin/lead (#163): what the launcher refuses and the arguments it gives claude. No live claude, no network.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -67,7 +67,7 @@ describe('leadArgs', () => {
   const root = '/fx/WORKSPACES';
   const roleText = '# the role\nline two';
   const node = '/opt/homebrew/bin/node';
-  const { cwd, argv } = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node });
+  const { cwd, argv } = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node });
   const after = (flag) => argv[argv.indexOf(flag) + 1];
   const list = (flag) => {
     const out = [];
@@ -94,7 +94,7 @@ describe('leadArgs', () => {
   test('--resume <id> only when a session id is given, never --continue', () => {
     const id = '11111111-1111-4111-8111-111111111111';
     assert.ok(!argv.includes('--resume') && !argv.includes('--continue'));
-    const withId = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id }).argv;
+    const withId = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, resume: id }).argv;
     assert.equal(withId[withId.indexOf('--resume') + 1], id);
     assert.ok(!withId.includes('--continue'));
   });
@@ -102,7 +102,7 @@ describe('leadArgs', () => {
   test('a resume\'s message is claude\'s prompt argument, right after --resume <id> and before every option that takes a list (#316)', () => {
     const id = '11111111-1111-4111-8111-111111111111';
     const message = '[factory] your role changed:\n# the role';
-    const withMessage = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id, message }).argv;
+    const withMessage = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, resume: id, message }).argv;
     const at = withMessage.indexOf('--resume');
     assert.equal(withMessage[at + 1], id);
     assert.equal(withMessage[at + 2], message);
@@ -110,20 +110,20 @@ describe('leadArgs', () => {
     assert.ok(at + 2 < withMessage.indexOf('--allowedTools') && at + 2 < withMessage.indexOf('--disallowedTools'));
     assert.equal(withMessage[at + 3], '--allowedTools');
     assert.equal(withMessage[withMessage.indexOf('--append-system-prompt') + 1], roleText, 'the role text stays a system prompt');
-    const without = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id }).argv;
+    const without = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, resume: id }).argv;
     assert.equal(without[without.indexOf('--resume') + 2], '--allowedTools');
-    assert.ok(!leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, message }).argv.includes(message), 'a new session gets no message');
+    assert.ok(!leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, message }).argv.includes(message), 'a new session gets no message');
   });
 
   test('a new session\'s id goes as --session-id before the list options, and never with --resume (#316)', () => {
     const id = '33333333-3333-4333-8333-333333333333';
-    const fresh = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, sessionId: id }).argv;
+    const fresh = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, sessionId: id }).argv;
     assert.equal(fresh[fresh.indexOf('--session-id') + 1], id);
     assert.equal(fresh[fresh.indexOf('--session-id') + 2], '--allowedTools');
     assert.ok(!fresh.includes('--resume'));
-    const resumed = leadArgs({ repo: 'zalo-gateway', home, root, roleText, node, resume: id, sessionId: id }).argv;
+    const resumed = leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node, resume: id, sessionId: id }).argv;
     assert.ok(!resumed.includes('--session-id'));
-    assert.ok(!leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).argv.includes('--session-id'));
+    assert.ok(!leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node }).argv.includes('--session-id'));
   });
 
   test('the allow list is exactly the Lead\'s, with no blanket gh or git', () => {
@@ -179,7 +179,7 @@ describe('leadArgs', () => {
     const command = `'${node}' '${root}/packs/pstack/bin/transcript-copy.mjs' '${home}/factory-runs/zalo-gateway-lead/transcripts'`;
     assert.deepEqual(Object.keys(hooks).sort(), ['Notification', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit']);
     for (const event of Object.keys(hooks)) assert.deepEqual(hooks[event], [{ hooks: [{ type: 'command', command }] }]);
-    assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).hook, command);
+    assert.equal(leadArgs({ repo: 'zalo-gateway', team: 'lead', home, root, roleText, node }).hook, command);
   });
 
   test('a team names the session and the hook\'s folder, <repo>-<team>; with none the team is lead, today\'s <repo>-lead (#196)', () => {
@@ -204,7 +204,7 @@ describe('leadArgs', () => {
       const source = join(config, 'projects/p/s.jsonl');
       writeFileSync(source, 'line\n');
       assert.equal(statSync(join(real, 'packs/pstack/bin/transcript-copy.mjs')).mode & 0o111, 0);
-      const { hook } = leadArgs({ repo: 'r', home: odd, root: real, roleText, node: process.execPath });
+      const { hook } = leadArgs({ repo: 'r', team: 'lead', home: odd, root: real, roleText, node: process.execPath });
       const r = spawnSync('sh', ['-c', hook], { input: JSON.stringify({ transcript_path: source }), encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_CONFIG_DIR: config } });
       assert.equal(r.status, 0, r.stderr);
       assert.equal(readFileSync(join(odd, 'factory-runs/r-lead/transcripts/s.jsonl'), 'utf8'), 'line\n');
@@ -256,4 +256,53 @@ describe('exitCodeOf', () => {
   test('neither is 1', () => {
     assert.equal(exitCodeOf({ status: null, signal: null }), 1);
   });
+});
+
+test('the model rule copies mapped defaults on every start without changing other config files', async () => {
+  const { writeModels } = await import('../bin/lead.mjs');
+  const config = tmp();
+  const root = fileURLToPath(new URL('../../..', import.meta.url));
+  try {
+    mkdirSync(join(config, 'rules'));
+    const others = ['.claude.json', 'settings.json', 'rules/other.md'];
+    for (const name of others) writeFileSync(join(config, name), 'keep me\n', { mode: 0o600 });
+    const before = others.map((name) => ({ bytes: readFileSync(join(config, name)), stat: statSync(join(config, name)) }));
+    const file = join(config, 'rules/pstack-models.md');
+    writeModels(config, root);
+    const first = readFileSync(file);
+    assert.deepEqual(first, readFileSync(join(root, 'packs/pstack/pstack-models.md')));
+    assert.deepEqual(first.toString().split('\n').filter((line) => line && !line.startsWith('#')), [
+      'feature, refactoring: inherit-parent',
+      'bug-fix: inherit-parent',
+      'perf-issue: inherit-parent',
+      'hillclimb: inherit-parent',
+      'judgment and prose: opus xhigh',
+      'hardest tasks: opus xhigh',
+      'how explorer: inherit-parent',
+      'how explainer: opus xhigh',
+      'why investigators: inherit-parent',
+      'why synthesizer: opus xhigh',
+      'reflect tooling: inherit-parent',
+      'reflect judgment, divergent, synthesizer: opus xhigh',
+      'arena runners: opus xhigh, inherit-parent',
+      'arena cross-judge pool: opus xhigh, inherit-parent',
+      'swarm workers: inherit-parent',
+      'architect runners: opus xhigh, inherit-parent',
+      'interrogate reviewers: opus xhigh, inherit-parent',
+    ]);
+    writeModels(config, root);
+    assert.deepEqual(readFileSync(file), first);
+    writeFileSync(file, 'stale rule\n');
+    writeModels(config, root);
+    assert.deepEqual(readFileSync(file), first, 'each start replaces the whole rule');
+    assert.deepEqual(readdirSync(config).sort(), ['.claude.json', 'rules', 'settings.json']);
+    assert.deepEqual(readdirSync(join(config, 'rules')).sort(), ['other.md', 'pstack-models.md']);
+    for (const [i, name] of others.entries()) {
+      assert.deepEqual(readFileSync(join(config, name)), before[i].bytes);
+      const after = statSync(join(config, name));
+      for (const key of ['mode', 'ino', 'size', 'mtimeMs', 'ctimeMs']) assert.equal(after[key], before[i].stat[key], name);
+    }
+  } finally {
+    rmSync(config, { recursive: true, force: true });
+  }
 });

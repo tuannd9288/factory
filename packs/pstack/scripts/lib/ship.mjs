@@ -63,7 +63,7 @@ function open(branch, head, args) {
     return say(1, `refused: red-check passed by the body's "${noRed}"; the body file lacks that line`);
   // The title carries no issue number: Linear shows the pull request's own, and the issue is in the body.
   const title = args.title ?? git(['log', '-1', '--format=%s']).replace(/ \(#\d+\)$/, '');
-  const url = gh(['pr', 'create', '--base', 'main', '--head', branch, '--title', title, '--body-file', bodyFile]).trim().split('\n').pop();
+  const url = gh(['pr', 'create', '--base', args.base ?? 'main', '--head', branch, '--title', title, '--body-file', bodyFile]).trim().split('\n').pop();
   return say(0, `opened #${/(\d+)$/.exec(url)?.[1] ?? '?'} ${url}`);
 }
 
@@ -121,10 +121,27 @@ function postNote(n, head) {
   }
 }
 
-function step(pr, head, branch) {
+function step(pr, head, branch, stacks) {
   const n = pr.number;
   const short = head.slice(0, 7);
   const armed = Boolean(pr.autoMergeRequest);
+  if (stacks && pr.baseRefName !== 'main') {
+    if (armed) {
+      gh(['pr', 'merge', String(n), '--disable-auto']);
+      return say(0, `disarmed #${n}: its base is ${pr.baseRefName}, not main`);
+    }
+    const parents = JSON.parse(gh(['pr', 'list', '--head', pr.baseRefName, '--base', 'main', '--state', 'merged', '--json', 'headRefOid']));
+    if (!parents.length) return say(0, `#${n} waits for its parent ${pr.baseRefName}; nothing was armed`);
+    git(['fetch', '--quiet', 'origin', 'main']);
+    if (!parents.some((p) => quietGit(['merge-base', '--is-ancestor', p.headRefOid, 'origin/main'])))
+      return say(0, `#${n} waits for its parent ${pr.baseRefName} in origin/main; nothing was armed`);
+    if (head !== pr.headRefOid) return say(1, `refused: HEAD ${short} is not the pull request's head; pull or push so they agree`);
+    if (git(['status', '--porcelain'])) return say(1, 'refused: commit or remove what git status shows before restacking');
+    gh(['pr', 'edit', String(n), '--base', 'main']);
+    git(['merge', '--no-ff', '--no-edit', 'origin/main']);
+    // live-verify --covered compares the new base/head patch-id with the old verdict on the next run.
+    return say(0, `retargeted #${n} to main and merged origin/main; push HEAD, then run ship again`);
+  }
   const driver = driverOf(pr);
   if (driver === undefined) return say(2, `could not read .gate/driver.json: the base ${String(pr.baseRefOid).slice(0, 7)} is not here and could not be fetched`);
   const covered = () => (driver ? spawnSync('scripts/live-verify', ['--covered', String(n)], { stdio: 'ignore' }).status === 0 : noteOf(n).stands);
@@ -189,6 +206,7 @@ function parse(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i += 2) {
     if (argv[i] === '--body-file' && argv[i + 1]) out.bodyFile = argv[i + 1];
+    else if (argv[i] === '--base' && argv[i + 1]) out.base = argv[i + 1];
     else if (argv[i] === '--title' && argv[i + 1]) out.title = argv[i + 1];
     else return null;
   }
@@ -197,13 +215,19 @@ function parse(argv) {
 
 function main(argv) {
   const args = parse(argv);
-  if (!args) return say(2, 'usage: scripts/ship [--body-file <file>] [--title <title>]');
+  if (!args) return say(2, 'usage: scripts/ship [--body-file <file>] [--title <title>] [--base <parent-branch>]');
   const branch = git(['branch', '--show-current']);
   if (!branch) return say(1, 'refused: HEAD is on no branch');
   if (branch === 'main') return say(1, 'refused: the branch is main; work on a branch of its own');
   const head = git(['rev-parse', 'HEAD']);
   const [pr] = JSON.parse(gh(['pr', 'list', '--head', branch, '--state', 'open', '--json', FIELDS]));
-  return pr ? step(pr, head, branch) : open(branch, head, args);
+  // Only trunk's policy counts; the candidate cannot enable stacks for itself.
+  let stacks = true;
+  if (quietGit(['cat-file', '-e', 'origin/main:.gate/driver.json']))
+    stacks = JSON.parse(git(['show', 'origin/main:.gate/driver.json'])).stacks !== 'off';
+  if (!pr && !stacks && args.base && args.base !== 'main')
+    return say(1, `refused to open: its base is ${args.base}, not main`);
+  return pr ? step(pr, head, branch, stacks) : open(branch, head, args);
 }
 
 try {
