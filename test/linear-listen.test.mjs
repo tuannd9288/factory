@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { startLinearSource, SOURCE_CONDITION, SOURCE_SCOPE } from '../bin/lib/linear-listen.mjs';
@@ -288,6 +288,12 @@ test('connect refreshes tokens, repeated closes back off, ack resets and heartbe
 
 test('an empty real token store starts nothing, polls quietly and resumes when a token appears', async (t) => {
   const f = fixture(t);
+  const originalHostUser = process.env.FACTORY_HOST_USER;
+  process.env.FACTORY_HOST_USER = userInfo().username;
+  t.after(() => {
+    if (originalHostUser === undefined) delete process.env.FACTORY_HOST_USER;
+    else process.env.FACTORY_HOST_USER = originalHostUser;
+  });
   const agentProfiles = join(f.state, 'empty-profiles');
   let networkCalls = 0;
   const linear = createLinear({ state: f.state, agentProfiles, now: () => f.now,
@@ -384,6 +390,12 @@ test('the source answers ping while the async wake is pending', async (t) => {
 
 test('INN answers use backed editors and write once across close, catch-up and restart on the host', async (t) => {
   const f = fixture(t);
+  const originalHostUser = process.env.FACTORY_HOST_USER;
+  process.env.FACTORY_HOST_USER = userInfo().username;
+  t.after(() => {
+    if (originalHostUser === undefined) delete process.env.FACTORY_HOST_USER;
+    else process.env.FACTORY_HOST_USER = originalHostUser;
+  });
   const calls = [];
   const linear = { request: async (query, variables) => {
     calls.push({ query, variables });
