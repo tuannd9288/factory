@@ -155,7 +155,10 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   Colly's translation). On #132's instruction layer he answered the three questions of the decision page
   (https://claude.ai/artifact/SLNEk1B5nTict8swrmbBqD) with "Theo đề xuất của mày",
   and so took Colly's recommendations: the composed root `AGENTS.md` stays at most 150 lines and gains a 32 KiB cap (K1);
-  neither `ARCHITECTURE.md` nor `docs/` is required (K2); the Gate block states the gate's obligations directly, and
+  neither `ARCHITECTURE.md` nor `docs/` is required (K2; INN-23 A, 2026-11-04 23:37:50 +07, #422: a repository's product
+  description is pstack's Feature Map, files in the repository, one short file per feature, from the user's side,
+  updated in the same pull request as the code; flow diagrams are drawn only for a complex flow; Linear Documents hold
+  only writing he reads; the work comes after release 1); the Gate block states the gate's obligations directly, and
   `CLAUDE.md` is `@AGENTS.md`, an addendum allowed, or a relative symlink to `AGENTS.md` (K3). He had asked for it after the
   review: "Cho Astra review lại rồi đề xuất cho đúng thiết kế". Its pack and harness parts are in the two entries of
   2026-10-21 and 2026-10-22 above. 2a and H4 stay as they are, and so does "Cho file một phần đuôi của repo
