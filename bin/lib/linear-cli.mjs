@@ -6,7 +6,7 @@
 //                                               comment after the last "Released by team" one, and a take is refused when it is another team's
 //   release <KEY> --team <team>                 the holder only: the delegate cleared, the first `unstarted` status, a "Released by team" comment
 //   read <KEY>                                  title, description, status, delegate, assignee and every comment, as JSON
-//   comment <KEY> --team <team> --body-file -   one comment, shown as "<team> (via Factory)"
+//   comment <KEY> --team <team> --body-file -   one comment, shown as "<repo>-<team> (via Factory)"
 //   ask <KEY> --team <team> --body-file -       status Needs Human, the Human assigned, one comment (the question and its tick boxes)
 //   answered <KEY> --team <team>                the assignee removed, the issue back in the first `started` status
 //   list --team-key <KEY> [--status <type>]...  the team's open issues (default types triage, backlog, unstarted, started); a read
@@ -23,7 +23,7 @@
 import { join } from 'node:path';
 import { createLinear } from './linear.mjs';
 import { TEAM_KEY, onLinear, readRegistry, registryFile, updateRegistry } from './linear-repos.mjs';
-import { TEAM } from './names.mjs';
+import { TEAM, parseTeam } from './names.mjs';
 
 export const NEEDS_HUMAN = 'Needs Human';
 const FIRST_TEAM = 'FAC';
@@ -125,8 +125,9 @@ export async function commentsOfIssue(api, key) {
 
 /** The holder comment of a take, and the read-back after it: when another named team's comment came first, refuse. A read-back with no
  * holder (its own comment not yet visible) is success. Used by `take`, by `create --delegate` and by bin/factory-move (#406). */
-export async function announceTakeOn(api, issueId, key, team) {
-  const commentId = done(await api.commentCreate({ issueId, body: `${TAKEN} ${team}.`, team }), 'commentCreate').comment?.id ?? null;
+export async function announceTakeOn(api, issueId, key, fullTeam) {
+  const { team } = parseTeam(fullTeam);
+  const commentId = done(await api.commentCreate({ issueId, body: `${TAKEN} ${team}.`, team: fullTeam }), 'commentCreate').comment?.id ?? null;
   const first = holderOf(await commentsOfIssue(api, key));
   if (first && first !== team) throw new Refused(`${key} is held by team ${first}, whose take came first; take another issue`);
   return commentId;
@@ -140,8 +141,9 @@ export function createCli({ api, state, readStdin }) {
 
   /** A write or a list acts only on the team of a repository in the registry, so a Lead cannot touch INN or any other team. */
   const inScope = (teamKey) => {
-    const keys = Object.values(readRegistry(state)).map((e) => e?.key);
-    if (!keys.includes(teamKey)) throw new Refused(`team ${teamKey} is not the team of a repository on Linear (not in the registry); nothing was done`);
+    const repo = Object.entries(readRegistry(state)).find(([, e]) => e?.key === teamKey)?.[0];
+    if (!repo) throw new Refused(`team ${teamKey} is not the team of a repository on Linear (not in the registry); nothing was done`);
+    return repo;
   };
 
   /** The issue with its team; with `scoped`, refused unless its team is a repository's. */
@@ -170,7 +172,7 @@ export function createCli({ api, state, readStdin }) {
   }
 
   const commentsOf = (key) => commentsOfIssue(api, key);
-  const announceTake = (issueId, key, team) => announceTakeOn(api, issueId, key, team);
+  const announceTake = (issueId, key, team) => announceTakeOn(api, issueId, key, `${inScope(key.split('-')[0])}-${team}`);
 
   /** The lock of a repository with no gate to claim in (#407 makes the gate read Linear). An issue is held by the team of the earliest
    * holder comment. Another team's issue is refused with nothing written, whether the app is still its delegate or not: that team takes
@@ -201,7 +203,7 @@ export function createCli({ api, state, readStdin }) {
     const to = issue.team.states.nodes.filter((s) => s.type === 'unstarted').sort((a, b) => a.position - b.position)[0];
     if (!to) throw new Refused(`team ${issue.team.key} has no status of type unstarted`);
     done(await update(issue.id, { delegateId: null, stateId: to.id }), 'issueUpdate');
-    const c = done(await api.commentCreate({ issueId: issue.id, body: `${RELEASED} ${team}.`, team }), 'commentCreate');
+    const c = done(await api.commentCreate({ issueId: issue.id, body: `${RELEASED} ${team}.`, team: `${inScope(issue.team.key)}-${team}` }), 'commentCreate');
     return { ok: true, key, status: to.name, delegate: null, team, commentId: c.comment?.id ?? null };
   }
 
@@ -240,7 +242,7 @@ export function createCli({ api, state, readStdin }) {
   async function comment({ args: [key], flags }) {
     const body = await bodyForComment();
     const issue = await issueTeam(key);
-    const c = done(await api.commentCreate({ issueId: issue.id, body, team: flags['--team'] }), 'commentCreate');
+    const c = done(await api.commentCreate({ issueId: issue.id, body, team: `${inScope(issue.team.key)}-${flags['--team']}` }), 'commentCreate');
     return { ok: true, key, commentId: c.comment?.id ?? null };
   }
 
@@ -250,7 +252,7 @@ export function createCli({ api, state, readStdin }) {
     const to = stateNamed(issue, NEEDS_HUMAN);
     const assigneeId = await human();
     done(await update(issue.id, { stateId: to.id, assigneeId }), 'issueUpdate');
-    const c = done(await api.commentCreate({ issueId: issue.id, body, team: flags['--team'] }), 'commentCreate');
+    const c = done(await api.commentCreate({ issueId: issue.id, body, team: `${inScope(issue.team.key)}-${flags['--team']}` }), 'commentCreate');
     return { ok: true, key, status: to.name, assigned: 'human', commentId: c.comment?.id ?? null };
   }
 
@@ -270,7 +272,7 @@ export function createCli({ api, state, readStdin }) {
     const status = team.states.nodes.find((s) => s.name === flags['--status']);
     if (!status) throw new Refused(`team ${teamKey} has no status named ${flags['--status']}`);
     const delegate = flags['--delegate'] === true;
-    const r = done(await api.issueCreate({ teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate, team: flags['--team'] }), 'issueCreate');
+    const r = done(await api.issueCreate({ teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate, team: flags['--team'] ? `${inScope(teamKey)}-${flags['--team']}` : undefined }), 'issueCreate');
     // An issue created with the app as its delegate is held by the creating team, as a take would say.
     if (delegate) await announceTake(r.issue.id, r.issue.identifier, flags['--team']);
     return { ok: true, key: r.issue?.identifier ?? null, status: status.name, delegate: delegate ? 'app' : null };

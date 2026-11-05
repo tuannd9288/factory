@@ -101,7 +101,7 @@ test('take sets the app as delegate and the first started status, and names no a
   assert.equal(ms.length, 2);
   assert.equal(inputOf(ms[1]).issueId, 'issue-uuid-1');
   assert.match(inputOf(ms[1]).body, /lead/);
-  assert.equal(inputOf(ms[1]).createAsUser, 'lead');
+  assert.equal(inputOf(ms[1]).createAsUser, 'factory-lead');
 });
 
 const at = (n) => `2026-11-04T00:${String(n).padStart(2, '0')}:00Z`;
@@ -194,9 +194,9 @@ test('create --delegate needs --team and posts the holder comment a take posts; 
   assert.equal(r.code, 0, JSON.stringify(r));
   assert.deepEqual(linear.stored.map((c) => c.body), ['Taken by team lead.']);
   const posted = linear.mutations().find((m) => m.query.includes('commentCreate'));
-  assert.equal(inputOf(posted).createAsUser, 'lead');
+  assert.equal(inputOf(posted).createAsUser, 'factory-lead');
   const created = linear.mutations().filter((m) => m.query.includes('issueCreate')).at(-1);
-  assert.equal(inputOf(created).createAsUser, 'lead', 'the issue shows the Lead\'s team, not the Linear team\'s name');
+  assert.equal(inputOf(created).createAsUser, 'factory-lead', 'the issue shows the Lead\'s team, not the Linear team\'s name');
   assert.equal(holderOf(linear.stored), 'lead');
 });
 
@@ -226,6 +226,7 @@ test('release by the holder clears the delegate, moves to the first unstarted st
   assert.equal(inputOf(ms[0]).delegateId, null);
   assert.equal(inputOf(ms[0]).stateId, 's-todo');
   assert.equal(inputOf(ms[1]).body, 'Released by team lead.');
+  assert.equal(inputOf(ms[1]).createAsUser, 'factory-lead');
   assert.equal(linear.issue.delegate, null);
   assert.equal(holderOf(linear.stored), null);
   assert.equal((await run(['take', 'FAC-12', '--team', 'other'])).code, 0, 'a later take counts only the comments after the release');
@@ -292,7 +293,7 @@ test('comment posts one comment from the team, with the body from stdin', async 
   const [m] = linear.mutations();
   assert.equal(inputOf(m).issueId, 'issue-uuid-1');
   assert.equal(inputOf(m).body, 'the body\n');
-  assert.equal(inputOf(m).createAsUser, 'lead');
+  assert.equal(inputOf(m).createAsUser, 'factory-lead');
 });
 
 test('ask moves to Needs Human, assigns the one owner, and posts one comment', async () => {
@@ -303,6 +304,7 @@ test('ask moves to Needs Human, assigns the one owner, and posts one comment', a
   assert.equal(ms.length, 2);
   assert.equal(inputOf(ms[0]).stateId, 's-nh');
   assert.equal(inputOf(ms[0]).assigneeId, 'owner-1');
+  assert.equal(inputOf(ms[1]).createAsUser, 'factory-lead');
   assert.equal(ms.filter((m) => m.query.includes('commentCreate')).length, 1);
   assert.ok(linear.calls.some((c) => c.query.includes('owner: { eq: true }') && c.query.includes('app: { eq: false }')));
 });
@@ -504,4 +506,12 @@ test('two onboards at once both reach the registry, and the lock is gone after',
   assert.equal(onLinear('repob', state).key, 'BBB');
   assert.equal(onLinear('factory', state).key, 'FAC');
   assert.equal(existsSync(join(state, 'linear', 'repos.lock')), false);
+});
+
+test('comment uses the registered repository and nickname, including a hyphenated repository', async () => {
+  const { run, linear, state } = setup();
+  writeFileSync(registryFile(state), JSON.stringify({ 'sample-service': { key: 'FAC', teamId: 'team-fac' } }));
+  const r = await run(['comment', 'FAC-12', '--team', 'otter', '--body-file', '-']);
+  assert.equal(r.code, 0);
+  assert.equal(inputOf(linear.mutations()[0]).createAsUser, 'sample-service-otter');
 });

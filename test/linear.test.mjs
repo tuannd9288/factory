@@ -321,3 +321,14 @@ test('the app\'s folder is no Claude account: tokenAccounts and accountList skip
   assert.notEqual(accountRefusal('linear-app'), null);
   assert.deepEqual(readdirSync(tokenDir(f.agentProfiles)).sort(), ['linear-app', 'real-account']);
 });
+
+test('a bare team name is refused before a Linear request', async () => {
+  const f = fixture();
+  await configure(f);
+  const linear = fakeLinear();
+  const { api } = await make(f, linear, { team: 'lead' });
+  await assert.rejects(api.commentCreate({ issueId: 'issue-1', body: 'hello' }), /full team name/);
+  await assert.rejects(api.issueCreate({ teamId: 'team-1', title: 'T', team: 'lead' }), /full team name/);
+  assert.equal(linear.calls.length, 0);
+  assert.equal(linear.mints.length, 0);
+});

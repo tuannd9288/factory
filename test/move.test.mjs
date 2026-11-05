@@ -140,7 +140,8 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
   writeAppFile(agentProfiles, 'linear-app', 'client-id', 'invented-client-id-0001');
   writeAppFile(agentProfiles, 'linear-app', 'client-secret', SECRET);
   w.api = createLinear({ agentProfiles, state: w.state, fetchFn: (...a) => w.fetchFn(...a), raise: () => {} });
-  w.run = (over = {}, log) => createMove({ gh: w.gh, api: w.api, state: w.state }).run({ repo: REPO, teamKey: 'FAC', board: BOARD, apply: true, limit: Infinity, rewrites: w.rewrites, ...over }, log);
+  w.env = { FACTORY_TEAM: `${REPO.split('/')[1]}-otter` };
+  w.run = (over = {}, log) => createMove({ gh: w.gh, api: w.api, state: w.state, env: w.env }).run({ repo: REPO, teamKey: 'FAC', board: BOARD, apply: true, limit: Infinity, rewrites: w.rewrites, ...over }, log);
   w.map = () => JSON.parse(readFileSync(mapFile(w.state, REPO), 'utf8'));
   return w;
 }
@@ -155,7 +156,7 @@ test('the dry run writes nothing, on either side, and prints one plan line for e
   assert.equal(existsSync(mapFile(w.state, REPO)), false);
   assert.equal(r.lines.length, 5);
   assert.equal(r.lines[0], '#1 | Issue 1 | Triage | holder none | parent none | 2 comments');
-  assert.equal(r.lines[3], '#4 | Issue 4 | In Progress | holder lead | parent #1 (moves) | 1 comments');
+  assert.equal(r.lines[3], '#4 | Issue 4 | In Progress | holder otter | parent #1 (moves) | 1 comments');
   assert.equal(r.lines[4], '#5 | Issue 5 | Triage | holder none | parent #99 (stays on GitHub) | 0 comments');
 });
 
@@ -169,10 +170,10 @@ test('the status map: Triage, no item, Todo and In Progress, the last held by th
   assert.equal(stateOf(4), 's-prog');
   for (const n of [1, 2, 3, 5]) assert.equal('delegateId' in byNumber(w, n).input, false);
   assert.equal(byNumber(w, 4).input.delegateId, 'app-user-1');
-  const held = w.lcomments[byNumber(w, 4).id].find((c) => c.body === 'Taken by team lead.');
+  const held = w.lcomments[byNumber(w, 4).id].find((c) => c.body === 'Taken by team otter.');
   assert.ok(held, 'the holder comment of #404\'s code');
-  assert.equal(held.input.createAsUser, 'lead');
-  for (const n of [1, 2, 3, 4, 5]) assert.equal(byNumber(w, n).input.createAsUser, 'lead', 'a moved issue shows the Lead\'s team, not the Linear team\'s name');
+  assert.equal(held.input.createAsUser, `${REPO.split('/')[1]}-otter`);
+  for (const n of [1, 2, 3, 4, 5]) assert.equal(byNumber(w, n).input.createAsUser, `${REPO.split('/')[1]}-otter`, 'a moved issue shows the Lead\'s team, not the Linear team\'s name');
   assert.equal(w.lcomments[byNumber(w, 3).id].length, 0);
 });
 
@@ -334,7 +335,7 @@ test('no token appears in the output or the error of a failed run', async () => 
   console.log = (...a) => lines.push(a.join(' '));
   let code;
   try {
-    code = await main([REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--apply', '--rewrites', w.rewrites], { FACTORY_STATE: w.state, HOME: w.state }, { api: w.api, gh: w.gh });
+    code = await main([REPO, '--team-key', 'FAC', '--board', 'ownr/7', '--apply', '--rewrites', w.rewrites], { ...w.env, FACTORY_STATE: w.state, HOME: w.state }, { api: w.api, gh: w.gh });
   } finally {
     console.log = real;
   }
@@ -651,4 +652,11 @@ test('a collapse line at re-read reports and retains the twin, defers updates an
   assert.equal(w.map().issues['1'].project, true);
   assert.equal(w.issues[0].closed, true);
   assert.ok(w.updates.some((u) => u.id === twin.id && u.input.description === description(1, 'fixed body')));
+});
+
+test('move refuses without FACTORY_TEAM before any write', async () => {
+  const w = world();
+  delete w.env.FACTORY_TEAM;
+  await assert.rejects(w.run(), /FACTORY_TEAM/);
+  assert.equal(w.writes.length, 0);
 });
