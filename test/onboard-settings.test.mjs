@@ -85,3 +85,15 @@ describe('bin/onboard and .claude/settings.json', () => {
     }
   });
 });
+
+for (const merge of ['squash', 'merge']) {
+  test(`onboard lays a ruleset for main's ${merge} method`, () => {
+    const s = seeded({ '.gate/driver.json': JSON.stringify({ merge }) });
+    try {
+      const out = s.onboard();
+      assert.equal(out.code, 0, out.out);
+      const rules = JSON.parse(s.read('.gate/ruleset.json')).rules;
+      assert.deepEqual(rules.find((r) => r.type === 'pull_request').parameters.allowed_merge_methods, [merge]);
+    } finally { s.cleanup(); }
+  });
+}

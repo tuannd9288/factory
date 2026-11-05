@@ -673,15 +673,17 @@ export function clonesUnder(root, skip = () => {}) {
   return out;
 }
 
-/** A merged head's patch-id in a clone, as scripts/live-verify computes it: its diff from its merge-base with the
- * main it merged into; null when the clone lacks either commit. */
-function patchIn(dir) {
+/** A merged PR's patch-id: a squash is its diff from the old main; a merge keeps the original head's diff from
+ * its fork. A fresh clone of main need not hold a squashed PR's old head. */
+export function patchIn(dir) {
   const git = (args, input) => execFileSync('git', ['-C', dir, ...args], { input, encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['pipe', 'pipe', 'ignore'] });
   return (merge, head) => {
     if (!dir || !merge || !head) return null;
     try {
-      const fork = git(['merge-base', `${merge}^1`, head]).trim();
-      return git(['patch-id', '--verbatim'], git(['diff', '--binary', '--no-renames', fork, head])).split(' ')[0].trim() || null;
+      const parents = git(['rev-list', '--parents', '-n', '1', merge]).trim().split(' ');
+      const squash = parents.length === 2;
+      const fork = squash ? parents[1] : git(['merge-base', `${merge}^1`, head]).trim();
+      return git(['patch-id', '--verbatim'], git(['diff', '--binary', '--no-renames', fork, squash ? merge : head])).split(' ')[0].trim() || null;
     } catch {
       return null;
     }

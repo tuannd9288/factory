@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const MAX = 72;
 const PLACEHOLDER = /^(WIP|wip)|^(fix|update|changes|\.)$/;
-// Nothing here is ever squashed or rebased, so a fixup or squash subject would land on main as it stands.
+// Every authored commit must name its change, including commits in a pull request that will be squashed.
 const AUTOSQUASH = /^(fixup|squash)! /;
 
 /** The rule a subject breaks, as a sentence, or null. */
@@ -20,7 +20,7 @@ export function subjectProblem(raw) {
   if (!subject) return 'the subject line is empty';
   const length = [...subject].length;
   if (length > MAX) return `the subject has ${length} characters; at most ${MAX}`;
-  if (AUTOSQUASH.test(subject)) return `say what the commit changes: '${subject.split(' ')[0]}' commits are never squashed here, so it would land as it is`;
+  if (AUTOSQUASH.test(subject)) return `say what the commit changes: '${subject.split(' ')[0]}' subjects do not name the change`;
   if (PLACEHOLDER.test(subject)) return `say what the commit changes, not '${subject}'`;
   return null;
 }

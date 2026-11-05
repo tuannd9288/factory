@@ -29,7 +29,7 @@ if (a[0] === 'pr' && a[1] === 'create') {
   fs.copyFileSync(a[a.indexOf('--body-file') + 1], sh + '/created-body');
   const head = fs.readFileSync(sh + '/head', 'utf8').trim();
   const base = fs.readFileSync(sh + '/base', 'utf8').trim();
-  fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, url: 'https://github.com/o/app/pull/7', baseRefName: a[a.indexOf('--base') + 1], baseRefOid: base, headRefOid: head, labels: [], autoMergeRequest: null, statusCheckRollup: [] }));
+  fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, title: a[a.indexOf('--title') + 1], url: 'https://github.com/o/app/pull/7', baseRefName: a[a.indexOf('--base') + 1], baseRefOid: base, headRefOid: head, labels: [], autoMergeRequest: null, statusCheckRollup: [] }));
   out('https://github.com/o/app/pull/7\n');
 }
 // The comments are $SH/comments.json; a comment gh posts is by the pull request's author ($SH/author, else agent).
@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
-function world({ driver = true, liveVerify = true, stacks } = {}) {
+function world({ driver = true, liveVerify = true, stacks, merge } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
   directories.push(dir);
   const repo = join(dir, 'app');
@@ -100,9 +100,9 @@ function world({ driver = true, liveVerify = true, stacks } = {}) {
   cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
   // main's driver, which ship reads at the base: filled by default, the pack's empty one when `driver` is false.
   if (driver) writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ name: 'cli', start: '', drive: 'node cli.js', network: false }));
-  if (stacks) {
+  if (stacks || merge) {
     const file = join(repo, '.gate/driver.json');
-    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stacks }));
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stacks, merge }));
   }
   mkdirSync(sh);
   git(repo, 'init', '-q', '-b', 'main');
@@ -275,7 +275,7 @@ describe('the steps after it opened', () => {
     assert.match(out.out, /^live-verify: PASS on #7$/m);
     assert.match(out.out, /^ship: armed #7: a live PASS covers HEAD [0-9a-f]{7}$/m);
     assert.equal(w.read('lv-calls'), '--covered 7\n7\n');
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'), w.calls().join('\n'));
+    assert.ok(w.calls().includes('pr merge 7 --auto --squash'), w.calls().join('\n'));
     out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: #7 is armed and a live verdict covers it; nothing to do$/m);
@@ -287,7 +287,7 @@ describe('the steps after it opened', () => {
     writeFileSync(join(w.sh, 'verdict'), 'PASS+NOTES\n');
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
+    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
   });
 
   test('refuses to arm on FAIL, and on BLOCKED, and says what to do', () => {
@@ -356,7 +356,7 @@ describe('the steps after it opened', () => {
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.equal(w.read('lv-calls'), '--covered 7\n');
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
+    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
   });
 
   test('disarms an armed pull request first when HEAD has a commit the pull request lacks', () => {
@@ -386,7 +386,7 @@ describe('the steps after it opened', () => {
     out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.equal(w.calls().at(-1), 'pr merge 7 --auto --merge');
+    assert.equal(w.calls().at(-1), 'pr merge 7 --auto --squash');
   });
 
   test('stops while the pull request carries needs-human', () => {
@@ -406,7 +406,7 @@ describe('the steps after it opened', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: armed #7/m);
     assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
+    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
     w.pr({ statusCheckRollup: [{ name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     out = w.ship();
     assert.equal(out.code, 0, out.out);
@@ -469,7 +469,7 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: armed #7/m);
     assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
+    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
     out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
@@ -740,7 +740,7 @@ describe('a repository with no driver on main', () => {
     assert.equal(out.code, 0, out.out);
     assert.equal(posts(w).length, 1, w.calls().join('\n'));
     assert.equal(notes(w)[0].body.split('\n')[0], noteFor(w.head()));
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'), w.calls().join('\n'));
+    assert.ok(w.calls().includes('pr merge 7 --auto --squash'), w.calls().join('\n'));
   });
 
   test('posts one note for the head, never runs live-verify, arms, and the next run does neither again', () => {
@@ -751,7 +751,7 @@ describe('a repository with no driver on main', () => {
     assert.equal(posts(w).length, 1, w.calls().join('\n'));
     assert.match(posts(w)[0], /^pr comment 7 --body-file /);
     assert.equal(notes(w)[0].body.split('\n')[0], noteFor(w.head()));
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'), w.calls().join('\n'));
+    assert.ok(w.calls().includes('pr merge 7 --auto --squash'), w.calls().join('\n'));
     out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.equal(posts(w).length, 1, 'no second note');
@@ -765,7 +765,7 @@ describe('a repository with no driver on main', () => {
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.equal(posts(w).length, 0);
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
+    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
   });
 
   test('ignores a note by another login: it posts its own', () => {
@@ -871,7 +871,7 @@ describe('stacked pull requests', () => {
   });
 
   test('retargets after the parent merges and merges main without rewriting the child', () => {
-    const w = world();
+    const w = world({ merge: 'merge' });
     const parent = w.head();
     git(w.repo, 'branch', 'parent');
     commit(w.repo, { 'child.js': 'child\n' }, 'Child');
@@ -912,3 +912,65 @@ describe('stacked pull requests', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr create')));
   });
 });
+
+for (const merge of [undefined, 'squash', 'merge']) {
+  test(`arms with ${merge ?? 'default squash'} from origin/main, ignoring the candidate's method`, () => {
+    const w = world({ merge });
+    commit(w.repo, { '.gate/driver.json': JSON.stringify({ merge: merge === 'merge' ? 'squash' : 'merge' }) }, 'Change candidate method');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    w.pr({ statusCheckRollup: [{ name: 'tier', conclusion: 'SUCCESS' }] });
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.ok(w.calls().includes(`pr merge 7 --auto --${merge ?? 'squash'}`));
+  });
+}
+
+test('squash restacks the child past the merged parent head and asks for a lease push', () => {
+  const w = world({ merge: 'squash' });
+  const parent = w.head();
+  git(w.repo, 'branch', 'parent');
+  commit(w.repo, { 'child.js': 'child\n' }, 'Child');
+  git(w.repo, 'push', '-q', 'origin', 'work');
+  const child = w.head();
+  w.passed();
+  assert.equal(w.ship(['--base', 'parent', '--body-file', join(w.dir, 'body.md')]).code, 0);
+  w.pr({ baseRefOid: parent });
+  const other = join(w.dir, 'other');
+  git(w.dir, 'clone', '-q', join(w.dir, 'origin.git'), other);
+  git(other, 'switch', '-q', '-c', 'parent', parent);
+  const tip = commit(other, { 'parent.js': 'later\n' }, 'Parent advances');
+  git(other, 'push', '-q', 'origin', 'HEAD:refs/pull/6/head');
+  git(other, 'switch', '-q', 'main');
+  git(other, 'merge', '--squash', 'parent');
+  commit(other, {}, 'Land parent (#6)');
+  git(other, 'push', '-q', 'origin', 'main');
+  assert.notEqual(run(w.repo, 'git', ['cat-file', '-e', `${tip}^{commit}`], quiet).code, 0);
+  writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
+  const out = w.ship();
+  assert.equal(out.code, 0, out.out);
+  assert.match(out.out, /push with --force-with-lease/);
+  assert.ok(w.calls().includes('pr edit 7 --base main'));
+  assert.equal(git(w.repo, 'rev-parse', 'HEAD^'), git(w.repo, 'rev-parse', 'origin/main'));
+  assert.equal(git(w.repo, 'diff', '--name-only', 'origin/main', 'HEAD'), 'child.js');
+  assert.equal(git(w.repo, 'show', 'HEAD:parent.js'), 'later');
+  assert.equal(git(w.repo, 'ls-remote', 'origin', 'refs/heads/work').split(/\s/)[0], child);
+  assert.ok(!w.calls().some((c) => c.includes('--auto')));
+});
+
+for (const merge of ['squash', 'merge']) {
+  test(`${merge}: title validation includes the squash PR suffix`, () => {
+    const w = world({ merge });
+    w.passed();
+    assert.equal(w.ship(['--title', 'x'.repeat(68), '--body-file', join(w.dir, 'body.md')]).code, 0);
+    const out = w.ship();
+    assert.equal(out.code, merge === 'squash' ? 1 : 0, out.out);
+    if (merge === 'squash') {
+      assert.match(out.out, /at most 72/);
+      assert.ok(!w.calls().some((c) => c.includes('--auto')));
+      w.pr({ title: 'x'.repeat(67) });
+      assert.equal(w.ship().code, 0);
+    }
+  });
+}

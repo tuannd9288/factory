@@ -271,7 +271,7 @@ while IFS= read -r path; do
   cp -p "$factory/kit/$path" "$path"
   # CODEOWNERS gets its owner, and the three workflows the gate's settings (bin/lib/gate-settings.mjs).
   case "$path" in
-    .github/CODEOWNERS | .github/workflows/main.yml | .github/workflows/gate.yml | .github/workflows/gate-trusted.yml)
+    .gate/ruleset.json | .github/CODEOWNERS | .github/workflows/main.yml | .github/workflows/gate.yml | .github/workflows/gate-trusted.yml)
       node "$factory/bin/lib/gate-settings.mjs" render "$path" --human "$human" ${settings[@]+"${settings[@]}"} ;;
   esac
 done <"$lists/kit"

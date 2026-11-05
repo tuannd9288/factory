@@ -7,10 +7,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { driverAt } from './driver.mjs';
+import { subjectProblem } from '../../.gate/bin/lib/subject.mjs';
 
 // The template's issue lines. A body for a repository on Linear carries `Fixes <KEY>` and `Issue: <KEY>` in their place and passes (#404).
 const PLACEHOLDER = '<issue labelled task>';
-const FIELDS = 'number,url,baseRefName,baseRefOid,headRefOid,labels,autoMergeRequest,statusCheckRollup';
+const FIELDS = 'number,title,url,baseRefName,baseRefOid,headRefOid,labels,autoMergeRequest,statusCheckRollup';
 // gh pr merge --auto merges these outright, whatever the repository's auto-merge setting.
 const READY = ['CLEAN', 'HAS_HOOKS', 'UNSTABLE'];
 
@@ -36,7 +37,7 @@ function behind(branch, head) {
   return `${at}, which HEAD ${head.slice(0, 7)} does not contain; pull first`;
 }
 
-function open(branch, head, args) {
+function open(branch, head, args, merge) {
   const short = head.slice(0, 7);
   const stamps = join(git(['rev-parse', '--absolute-git-dir']), 'factory');
   const dirty = 'if the work tree is not clean, commit or remove what `git status` shows';
@@ -63,6 +64,8 @@ function open(branch, head, args) {
     return say(1, `refused: red-check passed by the body's "${noRed}"; the body file lacks that line`);
   // The title carries no issue number: Linear shows the pull request's own, and the issue is in the body.
   const title = args.title ?? git(['log', '-1', '--format=%s']).replace(/ \(#\d+\)$/, '');
+  const problem = subjectProblem(title);
+  if (merge === 'squash' && problem) return say(1, `refused title: ${problem}`);
   const url = gh(['pr', 'create', '--base', args.base ?? 'main', '--head', branch, '--title', title, '--body-file', bodyFile]).trim().split('\n').pop();
   return say(0, `opened #${/(\d+)$/.exec(url)?.[1] ?? '?'} ${url}`);
 }
@@ -121,7 +124,7 @@ function postNote(n, head) {
   }
 }
 
-function step(pr, head, branch, stacks) {
+function step(pr, head, branch, stacks, merge) {
   const n = pr.number;
   const short = head.slice(0, 7);
   const armed = Boolean(pr.autoMergeRequest);
@@ -133,15 +136,24 @@ function step(pr, head, branch, stacks) {
     const parents = JSON.parse(gh(['pr', 'list', '--head', pr.baseRefName, '--base', 'main', '--state', 'merged', '--json', 'headRefOid']));
     if (!parents.length) return say(0, `#${n} waits for its parent ${pr.baseRefName}; nothing was armed`);
     git(['fetch', '--quiet', 'origin', 'main']);
-    if (!parents.some((p) => quietGit(['merge-base', '--is-ancestor', p.headRefOid, 'origin/main'])))
+    if (merge === 'merge' && !parents.some((p) => quietGit(['merge-base', '--is-ancestor', p.headRefOid, 'origin/main'])))
       return say(0, `#${n} waits for its parent ${pr.baseRefName} in origin/main; nothing was armed`);
     if (head !== pr.headRefOid) return say(1, `refused: HEAD ${short} is not the pull request's head; pull or push so they agree`);
     if (git(['status', '--porcelain'])) return say(1, 'refused: commit or remove what git status shows before restacking');
+    if (merge === 'squash') {
+      if (!quietGit(['cat-file', '-e', `${parents[0].headRefOid}^{commit}`]))
+        git(['fetch', '--quiet', 'origin', parents[0].headRefOid]);
+      git(['rebase', '--onto', 'origin/main', parents[0].headRefOid]);
+      gh(['pr', 'edit', String(n), '--base', 'main']);
+      return say(0, `retargeted #${n} to main and rebased onto origin/main; push with --force-with-lease, then run ship again`);
+    }
     gh(['pr', 'edit', String(n), '--base', 'main']);
     git(['merge', '--no-ff', '--no-edit', 'origin/main']);
     // live-verify --covered compares the new base/head patch-id with the old verdict on the next run.
     return say(0, `retargeted #${n} to main and merged origin/main; push HEAD, then run ship again`);
   }
+  const titleProblem = subjectProblem(pr.title) || subjectProblem(`${pr.title} (#${n})`);
+  if (merge === 'squash' && (!pr.title || titleProblem)) return say(1, `refused title for #${n}: ${titleProblem || 'the title is missing'}`);
   const driver = driverOf(pr);
   if (driver === undefined) return say(2, `could not read .gate/driver.json: the base ${String(pr.baseRefOid).slice(0, 7)} is not here and could not be fetched`);
   const covered = () => (driver ? spawnSync('scripts/live-verify', ['--covered', String(n)], { stdio: 'ignore' }).status === 0 : noteOf(n).stands);
@@ -193,7 +205,7 @@ function step(pr, head, branch, stacks) {
   if (READY.includes(JSON.parse(gh(['pr', 'view', String(n), '--json', 'mergeStateStatus'])).mergeStateStatus))
     return say(1, `stopped on #${n}: it is ready to merge and not armed; the Human merges it`);
   try {
-    gh(['pr', 'merge', String(n), '--auto', '--merge']);
+    gh(['pr', 'merge', String(n), '--auto', `--${merge}`]);
   } catch (error) {
     if (!String(error.stderr).includes('Auto merge is not allowed for this repository')) throw error;
     return say(1, `stopped on #${n}: auto-merge is off on this repository; the Human merges it`);
@@ -222,12 +234,13 @@ function main(argv) {
   const head = git(['rev-parse', 'HEAD']);
   const [pr] = JSON.parse(gh(['pr', 'list', '--head', branch, '--state', 'open', '--json', FIELDS]));
   // Only trunk's policy counts; the candidate cannot enable stacks for itself.
-  let stacks = true;
-  if (quietGit(['cat-file', '-e', 'origin/main:.gate/driver.json']))
-    stacks = JSON.parse(git(['show', 'origin/main:.gate/driver.json'])).stacks !== 'off';
+  const policy = quietGit(['cat-file', '-e', 'origin/main:.gate/driver.json'])
+    ? JSON.parse(git(['show', 'origin/main:.gate/driver.json'])) : {};
+  const stacks = policy.stacks !== 'off';
+  const merge = policy.merge === 'merge' ? 'merge' : 'squash';
   if (!pr && !stacks && args.base && args.base !== 'main')
     return say(1, `refused to open: its base is ${args.base}, not main`);
-  return pr ? step(pr, head, branch, stacks) : open(branch, head, args);
+  return pr ? step(pr, head, branch, stacks, merge) : open(branch, head, args, merge);
 }
 
 try {

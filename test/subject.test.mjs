@@ -19,8 +19,8 @@ const BAD = [
   ['update', /not 'update'/],
   ['changes', /not 'changes'/],
   ['.', /not '\.'/],
-  ['fixup! Add the queue', /never squashed/],
-  ['squash! Add the queue', /never squashed/],
+  ['fixup! Add the queue', /subjects do not name the change/],
+  ['squash! Add the queue', /subjects do not name the change/],
 ];
 const GOOD = ['x'.repeat(72), 'Fix the queue', 'Update the ledger', 'Changes the digest to Vietnamese', 'fixup the queue'];
 
@@ -56,7 +56,7 @@ describe('the hook and verify on a repository with the kit', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, new RegExp(`${sha.slice(0, 7)}\\w*: the subject has 99 characters; at most 72`));
     assert.match(out.out, /fixup! Add b/);
-    assert.match(out.out, /never squashed/);
+    assert.match(out.out, /subjects do not name the change/);
     assert.doesNotMatch(out.out, /Add c/);
     git(r.repo, 'reset', '-q', '--hard', 'origin/main');
   });
@@ -199,3 +199,23 @@ describe('what the subject is, and when the script runs', () => {
     }
   });
 });
+
+for (const method of ['squash', 'merge']) {
+  test(`${method}: subjects checks the commits that actually land`, () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subject-method-'));
+    try {
+      git(dir, 'init', '-q', '-b', 'main');
+      const base = commit(dir, { a: 'base\n' }, 'Start');
+      git(dir, 'switch', '-q', '-c', 'topic');
+      commit(dir, { b: 'change\n' }, 'Add b');
+      git(dir, 'switch', '-q', 'main');
+      if (method === 'squash') {
+        git(dir, 'merge', '--squash', 'topic');
+        commit(dir, {}, `${'x'.repeat(68)} (#7)`);
+      } else git(dir, 'merge', '--no-ff', '-m', 'WIP', 'topic');
+      const out = run(dir, process.execPath, [join(factory, 'kit/.gate/bin/lib/subject.mjs'), '--base', base]);
+      assert.equal(out.code, method === 'squash' ? 1 : 0, out.out);
+      if (method === 'squash') assert.match(out.out, /73 characters; at most 72/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}
