@@ -304,7 +304,7 @@ that approval it requests the code owners' review on GitHub, so the pull request
 - His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
   `reviewer` environment, "Allow auto-merge"), which Colly then applies on his login; and the reviewer's secret, where a
   repository uses the kit's Claude reviewer.
-- Logging into a repository's profile and the verifier's Codex profile. An agent never logs in or switches accounts.
+- Logging into the verifier's Codex profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.
 
@@ -506,8 +506,7 @@ onboarded repository to a newer factory commit; its refusals, what it replaces a
 the header of `bin/kit-update`.
 
 Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
-and proposes `.gate/load-bearing`. The Human logs into the profile in a new pane opened in the repository
-(`echo $CLAUDE_CONFIG_DIR`, then `claude`).
+and proposes `.gate/load-bearing`.
 
 The queue's job, its install, its lock and its checkout rules are in `bin/factory-queue`'s header. A rollback is a revert pull
 request through the gate. Only when the gate itself is broken does the Human turn the ruleset off, after taking auto-merge off
