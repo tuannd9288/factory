@@ -1,3 +1,4 @@
+import { pushHook } from '../../../bin/lib/force-push.mjs';
 // packs/pstack/bin/lead (#163): starts the pstack Lead of one team of a repository (#196: --team, default lead; the session is named
 // <repo>-<team> and its folder is ~/factory-runs/<repo>-<team>/; the account row is the team's, factory/<repo>-<team>). This file holds the pure parts (the arguments of
 // claude, the enabled plugins, the refusals) and the start. Nobody logs in (#179): the Lead needs the row factory/<repo>-<team> in the
@@ -136,7 +137,7 @@ export function leadArgs({ repo, team = DEFAULT_TEAM, home, root, roleText, node
       '--permission-mode', 'auto',
       '--add-dir', join(home, 'factory-runs'),
       '--name', `${repo}-${team}`,
-      '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])) }),
+      '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: { ...Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])), PreToolUse: pushHook(false, node) } }),
       // The prompt argument goes right after the id: --allowedTools and --disallowedTools take every word up to the next option.
       ...(resume ? ['--resume', resume, ...(message ? [message] : [])] : sessionId ? ['--session-id', sessionId] : []),
       '--allowedTools', ...allowOf(root),

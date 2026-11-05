@@ -11,9 +11,7 @@ skills but `setup-pstack` refuse the model's own call; its agents `poteto-agent`
 playbook differs from the factory, the gate's rule wins. These are the places (upstream lines at `4dd1d05`, under
 `skills/poteto-mode/playbooks/` unless a path says otherwise):
 
-- **Force-push** (`shipping.md:8`, `babysit.md:10`, `autopilot-full.md:12`: `--force-with-lease`). The factory never
-  rewrites a pushed branch: `factory-branches` refuses a non-fast-forward push on every branch, and `bin/seat` denies every
-  `git push` (`Bash(git push:*)` in `bin/lib/seat.mjs`). Fix forward with a new commit.
+- **Force-push** (`shipping.md:8`, `babysit.md:10`, `autopilot-full.md:12`): `forcePush` in origin/main’s `.gate/driver.json` defaults to `pstack`: only your own PR branch with `--force-with-lease`, never main or from a babysit; `off` forbids rewrites (the Human, #436, 2026-11-05).
 - **Stacked pull requests** (`opening-a-pr.md:28`, `autopilot-stack.md:6`, `multi-phase-plan.md:57`: a base that is the
   parent's branch; `shipping.md:8`: retarget to trunk with `gh pr edit --base`). `scripts/ship` opens with `--base main`
   and refuses to arm any other base (`refused to arm #<n>: its base is <base>, not main`): no stack.

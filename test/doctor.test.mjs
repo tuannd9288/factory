@@ -34,6 +34,7 @@ const repo = 'repos/' + state.repo.full_name;
 if (path === 'user') out({ login: state.login });
 if (path === repo) out(state.repo);
 if (path.startsWith(repo + '/contents/.gate/kit-files')) state.kitLanded ? out({ path: '.gate/kit-files' }) : missing();
+if (path === repo + '/contents/.gate/driver.json?ref=main') missing();
 if (path === repo + '/collaborators/' + state.agent + '/permission') out({ permission: state.collaborator ?? 'none' });
 if (path === repo + '/invitations') out(state.invitations ?? []);
 if (path.startsWith(repo + '/rulesets') && !/rulesets\/\d+/.test(path)) out(state.rulesets.map(({ id, name }) => ({ id, name })));

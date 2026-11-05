@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enabledPlugins, exitCodeOf, findNode, leadArgs, refusal } from '../bin/lead.mjs';
+import { pushHook } from '../../../bin/lib/force-push.mjs';
 import { secretsRead } from '../../../bin/lib/seat.mjs';
 import { matches, rulesAfter } from '../../../test/bash-rule.mjs';
 import { FORMS, HARMLESS } from '../../../test/login-forms.mjs';
@@ -177,6 +178,8 @@ describe('leadArgs', () => {
   test('--settings holds the same hook on SessionStart, UserPromptSubmit, Notification, Stop and SessionEnd, run through node with each part quoted', () => {
     const { hooks } = JSON.parse(after('--settings'));
     const command = `'${node}' '${root}/packs/pstack/bin/transcript-copy.mjs' '${home}/factory-runs/zalo-gateway-lead/transcripts'`;
+    assert.deepEqual(hooks.PreToolUse, pushHook(false, node));
+    delete hooks.PreToolUse;
     assert.deepEqual(Object.keys(hooks).sort(), ['Notification', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit']);
     for (const event of Object.keys(hooks)) assert.deepEqual(hooks[event], [{ hooks: [{ type: 'command', command }] }]);
     assert.equal(leadArgs({ repo: 'zalo-gateway', home, root, roleText, node }).hook, command);

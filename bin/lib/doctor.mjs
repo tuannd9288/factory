@@ -125,8 +125,8 @@ function settingProblems({ slug, files, settings, old, variables }) {
 
 function checkSettings(ctx) {
   const reads = 'repo rulesets env collab invites kit vars workflows';
-  const { slug, agent, branch, kitLanded, reviewer } = ctx;
-  const kit = wanted({ kitLanded: true, branch, reviewer });
+  const { slug, agent, branch, kitLanded, reviewer, forcePush } = ctx;
+  const kit = wanted({ kitLanded: true, branch, reviewer, forcePush });
   const names = new Set([...kit.rulesets.map((r) => r.name), ...kit.drop]);
   const have = current(slug, agent, names, get);
   // The gate's two review parameters are the merge switch (#333), the Human's to move: whatever they hold is as wanted.

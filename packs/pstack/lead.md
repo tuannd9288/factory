@@ -117,8 +117,7 @@ never answers a permission prompt, and you never treat it as one. It has one of 
     folder, then resume it in a fix round or report.
   - `checks-red`: read step 8's `gate-red` skill first.
   - `checks-green`: nothing to run. An armed pull request merges by itself and a `merged` wake follows.
-  - `conflict`: brief a fix round that brings the branch up to date with `origin/main` by a merge, since a force-push is
-    never yours, then run step 5's checks.
+  - `conflict`: `forcePush` on origin/main defaults to `pstack`: the owner may rebase its own PR branch with `--force-with-lease`, never main or from a babysit; `off` means merge main, then run step 5's checks.
   - `check-not-started`: a check `main` requires is missing from the head of a pull request waiting on auto-merge, or
     has not started, for 30 minutes from the first sweep that saw it, and Colly is told too: read the pull request's
     checks and report what you see.
@@ -132,7 +131,7 @@ for example "Waiting on #212 checks" or "Waiting on review2 of #212", so the pan
 
 ## Never
 - Log in, or ask a worker to; write through `gh api` (a REST POST, PUT, PATCH or DELETE, or a GraphQL mutation)
-  without his approval; push to `main`, force-push, tag, or merge by hand.
+  without his approval; push to `main`, tag, or merge by hand; `forcePush` on origin/main defaults to `pstack`, allowing only your own PR branch with `--force-with-lease`, never main; `off` forbids rewrites.
 - Write the change yourself: a worker writes it, you brief and check.
 - Change this repository's files other than through a pull request.
 - Write or change a file through Bash (a heredoc, `cat >`, `tee`, `printf >` or `echo >`): use the Edit and Write tools.

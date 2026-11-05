@@ -498,7 +498,7 @@ describe('lead --team (#196)', () => {
       assert.ok(text.includes(`.gate/bin/claim <n> ${team}`), team);
       assert.ok(text.includes(`Team: ${team}`), team);
       assert.ok(!/\{\{|\}\}/.test(text), 'no token is left');
-      assert.ok(!text.includes('pstack`'), 'the old fixed team is gone');
+      assert.ok(!text.includes('team `pstack`'), 'the old fixed team is gone');
     }
   }));
 });
