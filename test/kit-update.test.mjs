@@ -68,7 +68,7 @@ describe('bin/kit-update', () => {
       // The commit and the pull request.
       assert.equal(git(w.repo, 'log', '-1', '--format=%s', rev), `Bring the kit up to factory main ${sha7}`);
       assert.match(git(w.repo, 'log', '-1', '--format=%b', rev), new RegExp(full));
-      assert.equal(readFileSync(w.title, 'utf8'), `Bring the kit up to factory main ${sha7}`);
+      assert.equal(readFileSync(w.title, 'utf8'), `chore(kit): update to factory main ${sha7}`);
       // The body opens with the Human's summary (#386, #411), the Vietnamese block then the English one; the agents' detail follows
       // in one <details> block, the header lines after it.
       const [tldr, tldrEn, open, ...afterTldr] = text.split('\n\n');
@@ -324,3 +324,18 @@ describe('bin/kit-update, after review', () => {
     }
   });
 });
+
+for (const merge of [undefined, 'squash', 'merge']) {
+  test(`kit-update renders the ruleset from main: ${merge ?? 'default squash'}`, () => {
+    const w = world();
+    try {
+      w.repoCommit({ '.gate/driver.json': JSON.stringify({ merge }) });
+      w.facCommit({ 'kit/.gate/new-method-test.txt': 'new kit\n' });
+      const out = w.update(['app']);
+      assert.equal(out.code, 0, out.out);
+      const rules = JSON.parse(w.show('HEAD', '.gate/ruleset.json')).rules;
+      assert.deepEqual(rules.find((r) => r.type === 'pull_request').parameters.allowed_merge_methods, [merge ?? 'squash']);
+      assert.match(out.out, /kit-evidence: PASS/);
+    } finally { w.cleanup(); }
+  });
+}

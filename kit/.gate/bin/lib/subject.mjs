@@ -3,6 +3,7 @@
 // dependency is installed.
 //   node subject.mjs <message file>   the hook: the first line that is not a comment is the subject
 //   node subject.mjs --base [<rev>]   the commits in <rev>..HEAD with fewer than two parents (default: merge-base with main)
+// --base also checks the PR title when GITHUB_EVENT_PATH names a pull request event.
 // Exit 0 clean, 1 on a subject that breaks a rule, 2 when it could not run.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -10,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 const MAX = 72;
 const PLACEHOLDER = /^(WIP|wip)|^(fix|update|changes|\.)$/;
-// Nothing here is ever squashed or rebased, so a fixup or squash subject would land on main as it stands.
+// Every authored commit must name its change, including commits in a pull request that will be squashed.
 const AUTOSQUASH = /^(fixup|squash)! /;
 
 /** The rule a subject breaks, as a sentence, or null. */
@@ -20,8 +21,26 @@ export function subjectProblem(raw) {
   if (!subject) return 'the subject line is empty';
   const length = [...subject].length;
   if (length > MAX) return `the subject has ${length} characters; at most ${MAX}`;
-  if (AUTOSQUASH.test(subject)) return `say what the commit changes: '${subject.split(' ')[0]}' commits are never squashed here, so it would land as it is`;
+  if (AUTOSQUASH.test(subject)) return `say what the commit changes: '${subject.split(' ')[0]}' subjects do not name the change`;
   if (PLACEHOLDER.test(subject)) return `say what the commit changes, not '${subject}'`;
+  return null;
+}
+
+/** The original title in a GitHub or Conventional Commits revert, if it names one. */
+export function revertedTitle(title) {
+  return /^Revert "(.+)"$/.exec(title)?.[1]
+    ?? /^revert(?:\([^()\s]+\))?: (?:"(.+)"|(.+))$/.exec(title)?.slice(1).find((s) => s !== undefined);
+}
+
+/** PR titles become squash subjects; ordinary commits keep subjectProblem's rule. */
+export function titleProblem(raw) {
+  const problem = subjectProblem(raw);
+  if (problem) return problem;
+  const title = raw.trim();
+  if (title.endsWith('.')) return 'the title must have no trailing period';
+  if (revertedTitle(title) !== undefined) return null;
+  if (!/^(feat|fix|docs|refactor|test|chore|perf)\([^()\s]+\): \S[^\r\n]*$/.test(title))
+    return 'use type(scope): subject; type is feat, fix, docs, refactor, test, chore or perf';
   return null;
 }
 
@@ -61,10 +80,14 @@ function defaultBase() {
 
 function main(argv) {
   if (argv[0] === '--base') {
+    const pr = process.env.GITHUB_EVENT_PATH
+      ? JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')).pull_request : null;
+    const titleError = pr ? titleProblem(pr.title) : null;
+    if (titleError) console.log(`title: ${titleError}`);
     const bad = badSubjects(argv[1] || defaultBase());
     for (const c of bad) console.log(`${c.sha}: ${c.problem}\n    ${c.subject}`);
     if (bad.length) console.log(`subjects: ${bad.length} commit(s) with a subject that breaks a rule`);
-    return bad.length ? 1 : 0;
+    return bad.length || titleError ? 1 : 0;
   }
   if (!argv[0]) {
     console.log('commit-msg: no message file');

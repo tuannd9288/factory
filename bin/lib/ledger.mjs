@@ -3,6 +3,7 @@
 // issue labelled task, from its assignment (the label) to its close, with every pull request that closes it; a pull
 // request that closes no task is a task of its own, from its opening. Cost is API-equivalent usage, never cash.
 // See bin/factory-ledger for the arguments.
+import { revertedTitle } from '../../kit/.gate/bin/lib/subject.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -391,11 +392,11 @@ const STATE = { landed: 'merged', open: 'open', abandoned: 'abandoned' };
 
 /** The pull requests of this repository that a merged pull request reverts: the `Reverts #N` and `Reverts <repo>#N`
  * lines of its body, which win when there is any (a line for another repository leaves none); else the one merged
- * pull request, before it, whose title is the revert's `Revert "<title>"`, the latest if several. */
+ * pull request, before it, whose title is named by GitHub's `Revert "<title>"` or Conventional Commits' `revert: <title>`, the latest if several. */
 function revertsOf(repo, pr, merged) {
   const lines = [...(pr.body ?? '').matchAll(/^[ \t]*Reverts[ \t]+(?:([\w.-]+\/[\w.-]+))?#(\d+)[ \t]*\.?[ \t]*$/gm)];
   if (lines.length) return lines.filter((m) => !m[1] || m[1].toLowerCase() === repo.toLowerCase()).map((m) => Number(m[2]));
-  const title = /^Revert "(.*)"$/s.exec(pr.title)?.[1];
+  const title = revertedTitle(pr.title);
   if (title === undefined) return [];
   const hit = merged.filter((o) => o.title === title && o.number !== pr.number && Date.parse(o.merged) <= Date.parse(pr.merged)).sort((a, b) => b.merged.localeCompare(a.merged))[0];
   return hit ? [hit.number] : [];
@@ -552,7 +553,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     'Task: an issue labelled task, from the label to the close, with every PR that closes it; a PR that closes no task is a task of its own, from its opening.',
     'API cost: the cost of the bin/seat sessions that ran on the PR\'s branch, as their records name the repository and branch, plus the tokens of the --profile-dir folders by the same branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
     'Cash: the Claude subscription, paid monthly, not split by task; the verifier\'s Codex subscription is the same. The ledger sees no other cash.',
-    'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N"; only when its body has no "Reverts" line at all, for any repository, is its title Revert "<title of a merged PR>" read; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
+    'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N"; only when its body has no "Reverts" line at all, for any repository, is its title Revert "<title of a merged PR>" or revert(scope): <title of a merged PR> (scope optional) read; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
     'Human touched: the Human reviewed it, the label needs-human, or a merge by the Human\'s own login that was not made by auto-merge (a merge by the agents\' login is a team merge).',
   );
   return `${lines.join('\n')}\n`;
@@ -673,15 +674,17 @@ export function clonesUnder(root, skip = () => {}) {
   return out;
 }
 
-/** A merged head's patch-id in a clone, as scripts/live-verify computes it: its diff from its merge-base with the
- * main it merged into; null when the clone lacks either commit. */
-function patchIn(dir) {
+/** A merged PR's patch-id: a squash is its diff from the old main; a merge keeps the original head's diff from
+ * its fork. A fresh clone of main need not hold a squashed PR's old head. */
+export function patchIn(dir) {
   const git = (args, input) => execFileSync('git', ['-C', dir, ...args], { input, encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['pipe', 'pipe', 'ignore'] });
   return (merge, head) => {
     if (!dir || !merge || !head) return null;
     try {
-      const fork = git(['merge-base', `${merge}^1`, head]).trim();
-      return git(['patch-id', '--verbatim'], git(['diff', '--binary', '--no-renames', fork, head])).split(' ')[0].trim() || null;
+      const parents = git(['rev-list', '--parents', '-n', '1', merge]).trim().split(' ');
+      const squash = parents.length === 2;
+      const fork = squash ? parents[1] : git(['merge-base', `${merge}^1`, head]).trim();
+      return git(['patch-id', '--verbatim'], git(['diff', '--binary', '--no-renames', fork, squash ? merge : head])).split(' ')[0].trim() || null;
     } catch {
       return null;
     }

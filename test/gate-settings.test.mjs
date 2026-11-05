@@ -123,3 +123,12 @@ test('the command line bin/onboard uses: check exits 2 with the problem, render 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+for (const mergeMethod of ['squash', 'merge']) {
+  test(`renders only ${mergeMethod} in a kit ruleset and reads it back`, () => {
+    const path = '.gate/ruleset.json';
+    const text = render(path, kit(path), { mergeMethod });
+    assert.deepEqual(JSON.parse(text).rules.find((r) => r.type === 'pull_request').parameters.allowed_merge_methods, [mergeMethod]);
+    assert.deepEqual(valuesOf(path, text), { mergeMethod });
+  });
+}

@@ -285,7 +285,12 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
     } else {
       const from = blob(factory, want.oid);
       // The kit filled in with the settings the head's own text holds: a head that holds anything more fails.
-      const to = render(path, from, { human, ...valuesOf(path, blob(repo, have.oid)) });
+      const values = { human, ...valuesOf(path, blob(repo, have.oid)) };
+      if (path === '.gate/ruleset.json') {
+        const driver = at.get('.gate/driver.json');
+        values.mergeMethod = driver && JSON.parse(blob(repo, driver.oid)).merge === 'merge' ? 'merge' : 'squash';
+      }
+      const to = render(path, from, values);
       if (blob(repo, have.oid) !== to) fails.push(`differs: ${path} (content)`);
       else {
         filled.add(path);
