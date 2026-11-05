@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sandbox } from './factory-world.mjs';
 
+const EMPTY = JSON.stringify({ now: 1, sessions: [], repos: [], accounts: [], load: [0], cores: 1, github: { ok: true, at: 1, repos: {} }, queue: { failed: [] }, events: [], today: { merged: 0, cost: [], waitedMs: 0 } });
+
 const SSH = (s) => s.calls().split('\n').filter((l) => l.startsWith('ssh '));
 
 test('on the factory host, top --once prints one frame and exits 0', () => {
@@ -22,27 +24,28 @@ test('on the factory host, top --once prints one frame and exits 0', () => {
   }
 });
 
-test('on the MacBook, top --once runs the same command on the host over ssh, with no -t', () => {
+test('on the MacBook, top --once reads a snapshot over ssh and renders locally, with no -t', () => {
   const s = sandbox();
   try {
-    s.w('ssh-factory.json', '[]');
+    s.w('ssh-factory.json', EMPTY);
     s.fac('top', '--once');
-    assert.deepEqual(SSH(s), ["ssh -o ConnectTimeout=10 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory top --once'"]);
+    assert.equal(SSH(s).length, 1);
+    assert.match(SSH(s)[0], /ssh -o ConnectTimeout=10 .*node --input-type=module.*snapshot/);
+    assert.doesNotMatch(SSH(s)[0], / -t /);
   } finally {
     s.done();
   }
 });
 
-test('on the MacBook, top alone asks ssh for a terminal (-t); --width N goes through', () => {
+test('on the MacBook, top alone requires a local terminal; --width N renders locally', () => {
   const s = sandbox();
   try {
-    s.w('ssh-factory.json', '[]');
+    s.w('ssh-factory.json', EMPTY);
     s.fac('top');
     s.fac('top', '--once', '--width', '90');
-    assert.deepEqual(SSH(s), [
-      "ssh -o ConnectTimeout=10 -t factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory top'",
-      "ssh -o ConnectTimeout=10 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory top --once --width 90'",
-    ]);
+    assert.equal(SSH(s).length, 1);
+    assert.match(SSH(s)[0], /snapshot/);
+    assert.doesNotMatch(SSH(s)[0], / -t /);
   } finally {
     s.done();
   }
@@ -65,7 +68,7 @@ test('top takes --once and --width N (digits) and nothing else: the usage, exit 
 test('--line and --brief run on the host over ssh with no -t, with their own option passed through (#365)', () => {
   const s = sandbox();
   try {
-    s.w('ssh-factory.json', '[]');
+    s.w('ssh-factory.json', EMPTY);
     s.fac('top', '--line');
     s.fac('top', '--line', '--width', '60');
     s.fac('top', '--brief', '--after', '12');
@@ -95,9 +98,10 @@ test('--line and --brief take only their own option (digits): the usage, exit 2,
 test('--full goes through ssh to the host, and on the host it prints the full columns header', () => {
   const s = sandbox();
   try {
-    s.w('ssh-factory.json', '[]');
+    s.w('ssh-factory.json', EMPTY);
     s.fac('top', '--once', '--full');
-    assert.deepEqual(SSH(s), ["ssh -o ConnectTimeout=10 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory top --once --full'"]);
+    assert.equal(SSH(s).length, 1);
+    assert.match(SSH(s)[0], /snapshot/);
   } finally {
     s.done();
   }

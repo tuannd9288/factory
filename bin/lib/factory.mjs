@@ -656,7 +656,7 @@ function movedOld(agentProfiles, state) {
 }
 
 /** `factory top` (#174): the read-only view of every session and repository (bin/lib/top.mjs). On the factory host it runs
- * here; on the MacBook it runs the same command there by ssh, with a terminal (-t) for the live view only. Only `--once` and
+ * here; on the MacBook it reads a snapshot by ssh and draws locally with the MacBook sessions. Only `--once` and
  * `--full` (each at most once) and `--width N` (digits) are taken, checked before any ssh. `--once` prints one frame with no keys
  * line, and in colour only when its output is a terminal that has colours (NO_COLOR, NODE_DISABLE_COLORS and FORCE_COLOR apply).
  * `--line [--width N]` and `--brief [--after N]` (#365) print the status line and the start hook's text of `factory colly`, and take
@@ -680,7 +680,27 @@ async function top(args, env) {
       return 1;
     }
   }
-  return onHostBySsh('top', args, live, env);
+  if (text) return onHostBySsh('top', args, live, env);
+  const view = await import('./top.mjs');
+  const code = "const {snapshot}=await import('./bin/lib/top.mjs'); console.log(JSON.stringify(await snapshot({shared:true})))";
+  const remote = () => {
+    const r = call('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(`cd ~/WORKSPACES && node --input-type=module -e ${quote(code)}`)}`], { env, timeout: 60_000 });
+    if (r.code !== 0) throw new Error(r.error || 'Mac mini snapshot unavailable');
+    return JSON.parse(r.stdout);
+  };
+  try {
+    await view.main(args, { snapshot: () => view.macbookSnapshot(remote, {
+      home: env.HOME,
+      authStatus: (folder) => {
+        const r = call('claude', ['auth', 'status'], { env, extra: { CLAUDE_CONFIG_DIR: folder }, timeout: timeoutMs(env) });
+        return r.code === 0 ? readClaude(r.stdout) : null;
+      },
+    }) });
+    return 0;
+  } catch (e) {
+    console.error(`bin/factory: top: ${String(e.message).split('\n')[0]}`);
+    return 1;
+  }
 }
 
 /** `factory login <account>`: checks the name, runs `claude setup-token` on the terminal's own streams (so what it prints goes to

@@ -219,22 +219,22 @@ test('the frame: a header in plain words, what waits on you, one block per team,
   assert.equal(lines[5], 'tuannd9288/factory');
   // One block per team, the worst state first: alpha waits on the Human, beta is stuck, the Lead's own team is idle.
   const at = (re) => lines.findIndex((l) => re.test(l));
-  const [alpha, beta, lead] = [at(/^ {2}team alpha$/), at(/^ {2}team beta$/), at(/^ {2}aardvark +Lead lead +○ idle +\?/)];
+  const [alpha, beta, lead] = [at(/^ {2}team alpha$/), at(/^ {2}team beta$/), at(/^ {2}aardvark +Lead lead +○ idle +claude/)];
   assert.ok(5 < alpha && alpha < beta && beta < lead, `${alpha} ${beta} ${lead}`);
   // The issue row: its state first, then #n, team, step, the pull request with its checks, the title last.
   const group = at(/#174 /);
   assert.match(lines[group], /^ {4}! on you #174 alpha +PR open +PR #260 verify✓ review… verdict– tier✗ factory top, the repo view$/);
   assert.ok(alpha < group && group < beta);
   const worker = at(/^ {6}badger +worker +● working /);
-  const reviewer = at(/^ {6}beaver +reviewer +✓ done +53m +\$1\.50/);
+  const reviewer = at(/^ {6}beaver +reviewer +✓ done .*acct-two +53m +\$1\.50/);
   assert.ok(group < worker && worker < reviewer, 'working before done, under the issue');
   assert.ok(beta < at(/^ {4}× stuck +#170 /));
   assert.ok(at(/^ {4}× stuck +#170 /) < at(/^ {6}170-worker +worker +× out of quota .*until 13:00$/));
-  assert.ok(!lines.some((l) => /HARNESS|claude -p|CTX|TOKENS/.test(l)), 'the engineering columns are behind a key');
+  assert.ok(lines.some((l) => /claude -p.*acct-two/.test(l)), 'harness, model and account are visible without a key');
   const accounts = lines.findIndex((l) => l === 'Accounts');
   assert.deepEqual(lines.slice(accounts + 1, accounts + 3), [
-    '  a  acct-one  5h 100% resets 13:00 · 7d 20% resets 11-01 13:00 · factory-lead',
-    '  b  acct-two  5h ? · 7d ? · factory-b',
+    '  a  acct-one  5h 100% resets 13:00 · 7d 20% resets 11-01 13:00 · read 11:50 · factory-lead',
+    '  b  acct-two  5h unread · 7d unread · read ? · no quota report · factory-b',
   ]);
   assert.doesNotMatch(lines.slice(accounts, accounts + 3).join('\n'), /seat/);
   assert.equal(lines.at(-1), 'Today  1 pull request merged · workers and reviewers cost $1.60 on account b · waited on you 1h30');
@@ -248,7 +248,7 @@ test('--full adds the engineering columns to every session row, and a header for
   const head = lines.find((l) => l.startsWith('NAME'));
   for (const col of ['ROLE', 'STATE', 'COST', 'HARNESS', 'MODEL', 'SEAT', 'CTX', 'TURNS', 'TOKENS', 'CWD', 'BRANCH']) assert.ok(head.includes(col), col);
   const worker = lines.find((l) => /^ {6}badger /.test(l));
-  assert.match(worker, /worker +● working .* claude -p +sonnet-5-5 medium +2 /);
+  assert.match(worker, /worker +● working +claude -p +sonnet-5-5 medium +acct-two .*2 /);
   assert.match(worker, /issue-174-top/);
   assert.ok(!render(snap, { width: 200 }).split('\n').some((l) => l.startsWith('NAME')));
 });
@@ -490,8 +490,8 @@ test('a run with no repository takes it from its folder\'s name: issue-<n> is th
   const lines = text.split('\n');
   assert.ok(!lines.some((l) => /^\?$|team \?/.test(l)), 'no block of ?');
   assert.ok(!lines[1].includes('[? '), 'no tab of ?');
-  const unplaced = lines.findIndex((l) => l === '  2 sessions with no repository');
-  assert.ok(unplaced > lines.findLastIndex((l) => /^tuannd9288\//.test(l)) && unplaced === lines.indexOf('Accounts') - 1, 'the line ends the repositories, before Accounts');
+  const unplaced = lines.findIndex((l) => l === '  no repository');
+  assert.ok(unplaced > lines.findLastIndex((l) => /^tuannd9288\//.test(l)) && unplaced === lines.indexOf('Accounts') - 3, 'the line ends the repositories, before Accounts');
   assert.ok(!render(snap, { width: 200, tab: 1 }).includes('no repository'), 'only All shows it');
 });
 
@@ -982,7 +982,7 @@ test('at 45 columns a row\'s name keeps 8 cells: a long note is cut or dropped f
   const { cells, render } = await top();
   const lines = render(snap, { width: 45 }).split('\n');
   for (const l of lines) assert.ok(cells(l) <= 45, l);
-  assert.match(lines.find((l) => /^ {6}hippo/.test(l)), /^ {6}hippopo… +✓ done/, 'eight cells of the name, ellipsis included');
+  assert.match(lines.find((l) => /^ {6}hippo/.test(l)), /^ {6}hippopota… +✓ done/, 'ten cells of the name, ellipsis included');
   assert.match(lines.find((l) => /^ {2}aardvark/.test(l)), /^ {2}aardvark +! waiting/);
 });
 
@@ -1044,4 +1044,69 @@ test('the live loop reads until ten minutes pass without a key (#396)', async ()
   assert.equal(readDue({ lastKeyAt, now: lastKeyAt + 10 * min }), false);
   assert.equal(readDue({ lastKeyAt, now: lastKeyAt + 30 * min }), false);
   assert.equal(readDue({ lastKeyAt: lastKeyAt + 30 * min, now: lastKeyAt + 30 * min }), true);
+});
+
+test('#460 agent rows name their account and stale quota is unread after rereading', async () => {
+  const w = world();
+  try {
+    const { snapshot, render } = await top();
+    const snap = await withPath(w.bin, () => snapshot(w.opts));
+    assert.equal(snap.sessions.find((s) => s.name === 'badger').account, 'acct-two');
+    assert.equal(snap.sessions.find((s) => s.name === 'aardvark').account, 'acct-one');
+    const file = join(w.opts.runs, 'issue-170/run-worker.jsonl');
+    utimesSync(file, NOW / 1000 - 601, NOW / 1000 - 601);
+    const stale = await withPath(w.bin, () => snapshot(w.opts));
+    assert.equal(stale.accounts.find((a) => a.name === 'acct-one').seven_day, null);
+    assert.match(render(stale, { width: 240 }), /unread.*older than 10 minutes/);
+    writeFileSync(file, init(null) + limit('allowed', NOW / 1000 + 3600));
+    utimesSync(file, NOW / 1000, NOW / 1000);
+    const fresh = await withPath(w.bin, () => snapshot(w.opts));
+    assert.equal(fresh.accounts.find((a) => a.name === 'acct-one').seven_day.use, 0.2);
+    assert.match(render(fresh, { width: 240 }), /badger.*worker.*working.*claude.*sonnet.*acct-two/);
+    assert.match(render(fresh, { width: 240 }), /read 12:00/);
+  } finally { rmSync(w.root, { recursive: true, force: true }); }
+});
+
+test('#460 MacBook Claude sessions use each config folder login and remain separate agents', async () => {
+  const { macbookSnapshot, render } = await top();
+  const w = world();
+  try {
+    const remote = (await frame(w)).snap;
+    const folders = [];
+    const snap = await macbookSnapshot(async () => remote, {
+      home: '/fixture/home',
+      processes: () => [
+        { pid: 10, command: 'claude --model opus', ageMs: 2000 },
+        { pid: 11, command: 'claude --name factory-lead --model sonnet', ageMs: 3000 },
+        { pid: 12, command: 'sh -c claude --name ignored-lead' },
+      ],
+      config: (pid) => pid === 10 ? {} : { CLAUDE_CONFIG_DIR: '/fixture/spare' },
+      authStatus: async (folder) => {
+        folders.push(folder);
+        return { loggedIn: true, account: folder.endsWith('.claude') ? 'invented-default' : 'invented-spare' };
+      },
+    });
+    assert.deepEqual(folders, ['/fixture/home/.claude', '/fixture/spare']);
+    assert.deepEqual(snap.sessions.slice(-2).map((s) => s.account), ['invented-default', 'invented-spare']);
+    const text = render(snap, { width: 240 });
+    assert.match(text, /Colly 10.*claude.*opus.*invented-default/);
+    assert.match(text, /factory-lead.*claude.*sonnet.*invented-spare/);
+    assert.match(text, /invented-default.*5h unread.*7d unread/);
+  } finally { rmSync(w.root, { recursive: true, force: true }); }
+});
+
+test('#460 running Codex and verifier processes get individual rows', async () => {
+  const w = world();
+  try {
+    writeFileSync(join(w.opts.state, 'accounts'), 'factory/verifier=invented-verifier\n/fixture/seat/codex=invented-codex\n');
+    const { snapshot, render } = await top();
+    const snap = await withPath(w.bin, () => snapshot({ ...w.opts,
+      processes: () => [{ pid: 20, command: '/fixture/bin/codex exec' }, { pid: 21, command: 'codex exec' }],
+      config: (pid) => ({ CODEX_HOME: pid === 20 ? '/fixture/seat/codex' : '/fixture/verifier/codex' }),
+    }));
+    const text = render(snap, { width: 240 });
+    assert.match(text, /codex 20.*worker.*codex.*invented-codex/);
+    assert.match(text, /verifier 21.*verifier.*codex.*invented-verifier/);
+    assert.match(text, /invented-verifier.*5h unread.*7d unread/);
+  } finally { rmSync(w.root, { recursive: true, force: true }); }
 });

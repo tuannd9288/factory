@@ -18,7 +18,7 @@
 // terminal that has it (`render`'s `color` option; `main` reads it from the terminal once); a row too wide drops whole columns (S_STEPS).
 // What waits on the Human comes first (pull requests to approve, a Lead at a prompt or a login, alerts), then one block per
 // repository with the Lead of each team, issues and workers, the accounts with local reset times, and Today; it is live on a
-// terminal; on the MacBook it runs on the Mac mini by ssh. Every session has an animal name from Ubuntu's release code names (bin/lib/names.mjs): bin/seat writes
+// terminal; on the MacBook it reads the Mac mini snapshot by ssh and adds local sessions before drawing. Every session has an animal name from Ubuntu's release code names (bin/lib/names.mjs): bin/seat writes
 // run-<tag>.name, a Lead keeps ~/factory-runs/<repo>-<team>/name and its Herdr pane carries it. A Lead's state is its newest hook
 // event in <repo>-<team>/state.json (packs/pstack/bin/transcript-copy.mjs).
 import { execFile, execFileSync } from 'node:child_process';
@@ -32,7 +32,7 @@ import { REQUIRED, clonesUnder, costOf, lastRecords as lastOfSession, readSessio
 import { quotaRows, windowsOf } from './quota.mjs';
 import { PRESETS, SEATS, liveCount, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
-import { accountList, seatAccounts } from './token.mjs';
+import { accountList, readAccounts, seatAccounts } from './token.mjs';
 import { teamRows } from './teams.mjs';
 
 const run = promisify(execFile);
@@ -150,6 +150,43 @@ function psList() {
   } catch {
     return [];
   }
+}
+
+/** Read only the config-folder selectors from a process environment; never retain the rest. */
+function configOf(pid) {
+  try {
+    const text = execFileSync('/bin/ps', ['eww', '-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
+    return Object.fromEntries(['CLAUDE_CONFIG_DIR', 'CODEX_HOME'].flatMap((key) => {
+      const match = new RegExp(`(?:^|\\s)${key}=(.*?)(?= [A-Za-z_][A-Za-z_0-9]*=|$)`).exec(text.trim());
+      return match ? [[key, match[1]]] : [];
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/** MacBook sessions belong to their own config folder's login, never the Mac mini's accounts file. */
+export async function macbookSnapshot(remote, { home, authStatus, processes = psList, config = configOf }) {
+  const snap = await remote();
+  const accounts = new Map();
+  const sessions = [];
+  for (const proc of processes()) {
+    if (!/^(?:\S*\/)?claude(?:\s|$)/.test(proc.command)) continue;
+    const env = config(proc.pid);
+    const folder = env ? env.CLAUDE_CONFIG_DIR || join(home, '.claude') : null;
+    if (!accounts.has(folder)) {
+      let auth = null;
+      try { auth = folder ? await authStatus(folder) : null; } catch { /* An unread login must not hide the other agents. */ }
+      accounts.set(folder, { name: auth?.loggedIn && auth.account ? auth.account : 'unread (Claude login unavailable)', letter: '–', users: ['MacBook'], five_hour: null, seven_day: null, asOf: null, missing: 'no quota report for this config folder' });
+    }
+    const account = accounts.get(folder);
+    const lead = leadOf(proc.command);
+    const model = /(?:^|\s)(?:--model|-m)\s+(\S+)/.exec(proc.command)?.[1] ?? null;
+    sessions.push({ ...shape({ ...parseLog(''), model }, { role: lead ? 'lead' : 'colly', name: lead ? `${lead.repo}-${lead.team}` : `Colly ${proc.pid}`, team: lead?.team ?? null, issue: null, folder: null, seat: null, live: true, mtime: snap.now, start: snap.now - (proc.ageMs ?? 0), cwd: null, repo: null, branch: null, harness: 'claude', now: snap.now }), account: account.name });
+  }
+  snap.sessions.push(...sessions);
+  snap.accounts.push(...accounts.values());
+  return snap;
 }
 
 /** The repository and team a process is the Lead of, or null: a `claude` command with `--name <repo>-<team>` (packs/pstack/bin/lead),
@@ -288,7 +325,7 @@ export function sessionRecords(state, cache = null) {
 
 /** Every session: the run folders' logs, and each Lead's process with its transcript copies. `cache` (snapshot's) keeps each log's
  * parse and the records between calls; a log that is gone is dropped from it at the end of the pass. */
-export function gatherSessions({ runs, state, now, root = null, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn, origins = new Map(), cache = null }) {
+export function gatherSessions({ runs, state, now, root = null, clones = new Map(), live = runLive, processes = psList, branchOf = branchIn, originOf = originIn, origins = new Map(), cache = null, config = configOf }) {
   const oldLogs = cache?.logs ?? null;
   const seenLogs = cache ? new Map() : null;
   // A work folder's origin, asked of git once for as long as `origins` lives (the caller clears it at each GitHub refresh).
@@ -297,6 +334,8 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     return origins.get(cwd);
   };
   const records = lastRecords(sessionRecords(state, cache));
+  const seatRows = seatAccounts(state);
+  const teams = teamRows(state, root ?? undefined);
   const out = [];
   for (const folder of existsSync(runs) ? readdirSync(runs).sort() : []) {
     const dir = join(runs, folder);
@@ -327,12 +366,22 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
       out.push(shape(p, {
         record, role, name: readText(join(dir, `run-${tag}.name`)).trim() || `${issue ?? folder}-${tag}`, issue: issue ? Number(issue) : null, folder, seat, live: isLive,
         mtime: st.mtimeMs, start: record?.start ? Date.parse(record.start) : st.birthtimeMs, cwd,
-        repo: record?.repo ?? (cwd ? originCached(cwd) : null) ?? repoOfCwd(cwd, clones), branch: record?.branch ?? (isLive ? branchOf(cwd) : null), harness: 'claude -p', now,
+        repo: record?.repo ?? (cwd ? originCached(cwd) : null) ?? repoOfCwd(cwd, clones), branch: record?.branch ?? (isLive ? branchOf(cwd) : null), harness: record?.harness ?? 'claude -p', now,
       }));
+      out.at(-1).account = readText(join(dir, `run-${tag}.account`)).trim() || record?.account || seatRows[seat] || null;
     }
   }
   for (const proc of processes()) {
     const found = leadOf(proc.command);
+    if (/^(?:\S*\/)?codex(?:\s|$)/.test(proc.command)) {
+      const env = config(proc.pid);
+      const verifier = /(?:^|\/)verifier\/codex$/.test(env?.CODEX_HOME ?? '');
+      const profile = env?.CODEX_HOME ?? '';
+      const rows = readAccounts(state);
+      const account = rows[verifier ? 'factory/verifier' : profile] ?? null;
+      out.push({ ...shape(parseLog(''), { record: null, role: verifier ? 'verifier' : 'worker', name: `${verifier ? 'verifier' : 'codex'} ${proc.pid}`, issue: null, folder: null, seat: null, live: true, mtime: now, start: now - (proc.ageMs ?? 0), cwd: null, repo: null, branch: null, harness: 'codex', now }), account });
+      continue;
+    }
     if (!found) continue;
     const { repo: repoName, team } = found;
     const leadDir = join(runs, `${repoName}-${team}`);
@@ -355,6 +404,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
       mtime: newest?.mtimeMs ?? now, start: null, cwd, repo, branch: branchOf(cwd), harness: 'claude', now,
       override: leadStateOf({ event, command: proc.command, ageMs: proc.ageMs, now }), pane: readText(join(leadDir, 'pane')).trim() || null,
     }));
+    out.at(-1).account = teams.find((t) => t.name === `${repoName}-${team}`)?.account ?? null;
   }
   // One run folder is one issue, and one issue sits under one repository: a run with none takes the one its folder's other runs have.
   for (const s of out) {
@@ -627,7 +677,7 @@ export async function snapshot(opts = {}) {
   const clones = opts.clones ?? clonesUnder(root);
   const cache = opts.cache ?? {};
   if (!cache.origins || now - cache.origins.at >= GH_MS) cache.origins = { at: now, map: new Map() };
-  const sessions = gatherSessions({ runs, state, now, root, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map, cache: opts.cache ? cache : null });
+  const sessions = gatherSessions({ runs, state, now, root, clones, live: opts.live, processes: opts.processes, branchOf: opts.branchOf, originOf: opts.originOf, origins: cache.origins.map, cache: opts.cache ? cache : null, config: opts.config });
   // Every repository a session names has its issues read too, not only the clones.
   const repos = [...new Set([...(opts.repos ?? clones.keys()), ...sessions.map((s) => s.repo).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r ?? ''))])];
   const github = await gatherGithub({ repos, clones, state, claims: opts.claims, now, cache, shared: Boolean(opts.shared), offline: Boolean(opts.offline) });
@@ -639,7 +689,7 @@ export async function snapshot(opts = {}) {
     return { repo, groups, other: mine.filter((s) => s.issue === null), ghStatus: gh?.failedAt ? { failedAt: gh.failedAt, goodAt: gh.goodAt } : null };
   });
   const agentProfiles = opts.agentProfiles ?? process.env.AGENT_PROFILES ?? join(home, '.agent-profiles');
-  const accounts = accountRows({ state, runs, agentProfiles, root });
+  const accounts = accountRows({ state, runs, agentProfiles, root, now });
   return {
     now, state, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), events: eventsOf(state), accounts,
     seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: sessionRecords(state, opts.cache ? cache : null), accounts, seatRows: seatAccounts(state) }),
@@ -653,18 +703,20 @@ const seatCounts = (sessions) => Object.fromEntries(Object.keys(SEATS).map((n) =
 
 /** The lettered accounts (token.mjs's accountList, which `bin/factory` lists too) with the quota of each from its own newest event
  * (quotaRows, one row for each account, #311), and who uses each: its teams, `<repo>-<team>`. */
-function accountRows({ state, runs, agentProfiles, root }) {
-  const teams = teamRows(state, root);
+function accountRows({ state, runs, agentProfiles, root, now }) {
+  const listed = accountList({ state, agentProfiles });
+  const teams = teamRows(state, root ?? undefined);
   let quota = [];
   try {
-    quota = quotaRows({ runs, state, root });
+    quota = quotaRows({ runs, state, root, accounts: listed.map((a) => a.name) });
   } catch {
-    // no quota to show: every window is ?
+    // No quota report could be read; no number is retained.
   }
-  return accountList({ state, agentProfiles }).map(({ name, letter }) => {
+  return listed.map(({ name, letter }) => {
     const q = quota.find((x) => x.account === name && x.asOf);
     const users = teams.filter((t) => t.account === name).map((t) => t.name);
-    return { letter, name, five_hour: q?.windows?.five_hour ?? null, seven_day: q?.windows?.seven_day ?? null, users };
+    const fresh = q?.asOf != null && now - q.asOf <= 600_000;
+    return { letter, name, five_hour: fresh ? q.windows?.five_hour ?? null : null, seven_day: fresh ? q.windows?.seven_day ?? null : null, asOf: q?.asOf ?? null, missing: fresh ? 'window not reported' : q?.asOf ? 'latest report older than 10 minutes' : 'no quota report', users };
   });
 }
 
@@ -777,12 +829,12 @@ const stateOfRow = (s) => SESSION_STATES[s.state] ?? { mark: '○', word: String
 // rounds only, so a resumed session's row mixes two spans; a live `~$` estimate counts this log alone.
 // The columns of a session row: key, header, widest. NOTE is the free-text cell that ends the row; the others, #174's
 // engineering columns, come with `c` or --full. When a row does not fit, columns go whole in the order of S_STEPS.
-const S_BASE = [['name', 'NAME', 18], ['role', 'ROLE', 10], ['state', 'STATE', 14], ['for', 'FOR', 17], ['cost', 'COST', 8], ['note', 'NOTE', 40]];
-const S_FULL = [['harness', 'HARNESS', 9], ['model', 'MODEL', 18], ['seat', 'SEAT', 5], ['ctx', 'CTX', 8], ['turns', 'TURNS', 6], ['tokens', 'TOKENS ↓/↑', 14], ['cwd', 'CWD', 24], ['branch', 'BRANCH', 40]];
-// NAME shrinks only to 8 cells of the name itself: its cell holds the indent too (at most NAME_INDENT), so the column goes to 8 + that.
+const S_BASE = [['name', 'NAME', 18], ['role', 'ROLE', 10], ['state', 'STATE', 14], ['harness', 'HARNESS', 9], ['model', 'MODEL', 18], ['account', 'ACCOUNT', 32], ['for', 'FOR', 17], ['cost', 'COST', 8], ['note', 'NOTE', 40]];
+const S_FULL = [['seat', 'SEAT', 5], ['ctx', 'CTX', 8], ['turns', 'TURNS', 6], ['tokens', 'TOKENS ↓/↑', 14], ['cwd', 'CWD', 24], ['branch', 'BRANCH', 40]];
+// NAME shrinks only to 10 cells of the name itself: its cell holds the indent too (at most NAME_INDENT), so the column goes to 10 + that.
 // What is still too wide then is NOTE's to give up: it is cut, or dropped.
 const NAME_INDENT = 6;
-const S_STEPS = ['branch', 'cwd', 'tokens', 'turns', 'ctx', 'seat', 'model', 'harness', 'cost', 'role', 'for', ['name', 8 + NAME_INDENT]];
+const S_STEPS = ['branch', 'cwd', 'tokens', 'turns', 'ctx', 'seat', 'model', 'harness', 'cost', 'role', 'for', ['name', 10 + NAME_INDENT]];
 // The columns of an issue row, and what goes first: the title is the free-text cell and is cut; the state and #n stay.
 const I_COLS = [['state', '', 13], ['num', '', 6], ['team', '', 12], ['step', '', 9], ['pr', '', 9], ['checks', '', 34], ['title', '', 80]];
 const I_STEPS = ['team', 'step', 'checks', 'pr'];
@@ -831,7 +883,7 @@ function sessionCells(s, now, indent) {
   return {
     name: `${' '.repeat(indent)}${s.name}`, role: s.role === 'lead' ? `Lead ${s.team}` : s.role, state: `${st.mark} ${st.word}`, for: span, cost,
     note: [s.state === 'stopped' ? `until ${local(s.until, now)}` : null, s.waitNote, s.rounds > 1 ? `${s.rounds} rounds` : null].filter(Boolean).join(', '),
-    harness: s.harness, model, seat: s.seat ?? '?', ctx: kilo(s.ctx), turns: String(s.turns ?? '?'),
+    harness: s.harness, model, account: s.account ?? 'unread', seat: s.seat ?? '?', ctx: kilo(s.ctx), turns: String(s.turns ?? '?'),
     tokens: s.tokensIn === null ? '?' : `${kilo(s.tokensIn)}/${kilo(s.tokensOut)}`, cwd: tail(s.cwd), branch: s.branch ?? '?',
   };
 }
@@ -979,7 +1031,7 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
   // frames or tabs. A session row's name cell holds its indent: a Lead 2, a session under an issue 6, one under no issue 4.
   const everyone = mergeRounds(sessions);
   const sNatural = naturalOf([...S_BASE, ...(full ? S_FULL : [])], everyone.map((v) => sessionCells(v, now, v.role === 'lead' ? 2 : v.issue === null ? 4 : 6)), full);
-  const sKept = planCols([...S_BASE, ...(full ? S_FULL : [])], sNatural, S_STEPS, width, ['name', 'state']);
+  const sKept = planCols([...S_BASE, ...(full ? S_FULL : [])], sNatural, S_STEPS, width, ['name', 'state', 'account']);
   const allGroups = snap.repos.flatMap((r) => r.groups);
   const iKept = planCols(I_COLS, naturalOf(I_COLS, allGroups.map((g) => issueCells(g, issueState(g, mergeRounds(g.sessions)))), false), I_STEPS, width - 4, ['state', 'num']);
   const sLine = (v, indent) => rowOf(sKept, sessionCells(v, now, indent), { state: tint(stateOfRow(v).code) });
@@ -1059,15 +1111,15 @@ export function render(input, { width = 120, tab = 0, rows = null, full = false,
     lines.push(...foldedLines(folded, older));
   }
   lines.push(...quiet);
-  // A session no repository could be found for is no block and no tab: All counts it in one line.
-  const unplaced = t.kind === 'all' ? sessions.filter((s) => !s.repo && s.state !== 'gone').length : 0;
-  if (unplaced) lines.push(`  ${unplaced} ${unplaced === 1 ? 'session' : 'sessions'} with no repository`);
+  // A session no repository could be found for is no block and no tab: All shows its own row.
+  const unplaced = t.kind === 'all' ? sessions.filter((s) => !s.repo && s.state !== 'gone') : [];
+  if (unplaced.length) lines.push('  no repository', ...unplaced.map((s) => sLine(s, 2)));
   const tree = lines.splice(top);
-  const win = (label, w) => (w ? `${label} ${Math.round(w.use * 1000) / 10}%${w.resetsAt == null ? '' : resetPassed(w.resetsAt, now) ? ' (reset since)' : ` resets ${local(w.resetsAt * 1000, now)}`}` : `${label} ?`);
+  const win = (label, w) => (w ? `${label} ${Math.round(w.use * 1000) / 10}%${w.resetsAt == null ? '' : resetPassed(w.resetsAt, now) ? ' (reset since)' : ` resets ${local(w.resetsAt * 1000, now)}`}` : `${label} unread`);
   const nameW = Math.max(0, ...snap.accounts.map((a) => a.name.length));
   const { merged, cost, waitedMs } = snap.today;
   const bottom = [
-    ...(snap.accounts.length ? ['Accounts', ...snap.accounts.flatMap((a) => wrapped([win('5h', a.five_hour), win('7d', a.seven_day), a.users.join(', ') || 'no row'], { first: `  ${a.letter}  ${a.name.padEnd(nameW)}  `, next: '     ' }))] : []),
+    ...(snap.accounts.length ? ['Accounts', ...snap.accounts.flatMap((a) => wrapped([win('5h', a.five_hour), win('7d', a.seven_day), `read ${local(a.asOf, now)}`, ...(!a.five_hour || !a.seven_day ? [a.missing ?? 'window not reported'] : []), a.users.join(', ') || 'no row'], { first: `  ${a.letter}  ${a.name.padEnd(nameW)}  `, next: '     ' }))] : []),
     ...wrapped([
       `${merged} pull request${merged === 1 ? '' : 's'} merged`,
       'workers and reviewers cost',
@@ -1231,8 +1283,9 @@ async function loop(opts) {
     }
     busy = true;
     try {
-      snap = await snapshot({ ...opts, cache, now: Date.now(), shared: true });
+      snap = await (opts.snapshot ?? snapshot)({ ...opts, cache, now: Date.now(), shared: true });
     } catch (error) {
+      if (snap) snap.accounts = snap.accounts.map((a) => ({ ...a, five_hour: null, seven_day: null, missing: 'snapshot read failed' }));
       out.write(`\x1b[Hfactory top: ${firstLine(error)}\x1b[K`);
     } finally {
       busy = false;
@@ -1273,7 +1326,7 @@ async function loop(opts) {
 /** Colour is decided once: on a terminal that has colours, which hasColors reads from NO_COLOR, NODE_DISABLE_COLORS and FORCE_COLOR. */
 const colorOf = () => Boolean(process.stdout.isTTY && typeof process.stdout.hasColors === 'function' && process.stdout.hasColors());
 
-export async function main(argv) {
+export async function main(argv, opts = {}) {
   const width = argv.includes('--width') ? Number(argv[argv.indexOf('--width') + 1]) : null;
   const color = colorOf();
   if (argv.includes('--line') || argv.includes('--brief')) {
@@ -1285,12 +1338,12 @@ export async function main(argv) {
     return;
   }
   if (argv.includes('--once')) {
-    const snap = await snapshot({});
+    const snap = await (opts.snapshot ?? snapshot)({});
     process.stdout.write(`${render(snap, { width: width ?? process.stdout.columns ?? 200, full: argv.includes('--full'), color })}\n`);
     return;
   }
   if (!process.stdin.isTTY) throw new Error('needs a terminal; use --once for one frame');
-  await loop({ full: argv.includes('--full'), color });
+  await loop({ ...opts, full: argv.includes('--full'), color });
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
