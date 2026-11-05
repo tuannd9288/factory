@@ -6,6 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { commit, git, quiet } from './helpers.mjs';
 import * as ledger from '../bin/lib/ledger.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,7 +26,7 @@ test('a queue run that fails before its repository loop leaves queue-run.failed 
     chmodSync(join(dir, 'gh'), 0o755);
     const state = join(dir, 'state');
     mkdirSync(join(dir, 'runs'));
-    const sweep = (env = {}) => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), ...env } });
+    const sweep = (env = {}) => spawnSync(join(factory, 'bin/factory-queue'), ['sweep', '--repo', 'o/app'], { encoding: 'utf8', env: { ...process.env, ...quiet, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), ...env } });
     const report = join(state, 'queue-run.failed');
     let out = sweep({ Q_LOGIN: 'tuannd9288' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
@@ -71,9 +72,13 @@ function ledgerRun(dir, list) {
   writeFileSync(join(dir, 'list.json'), JSON.stringify(list));
   writeFileSync(join(dir, 'calls'), '');
   mkdirSync(join(dir, 'root'), { recursive: true });
+  git(join(dir, 'root'), 'init', '-q', '-b', 'main');
+  commit(join(dir, 'root'), { 'README.md': '# factory\n' }, 'start');
+  git(dir, 'clone', '-q', '--bare', join(dir, 'root'), join(dir, 'origin.git'));
+  git(join(dir, 'root'), 'remote', 'add', 'origin', join(dir, 'origin.git'));
   const out = spawnSync(join(factory, 'bin/factory-ledger'), ['--repo', 'o/app', '--since', '2026-10-17', '--until', '2026-10-24', '--post', 'o/factory'], {
     encoding: 'utf8',
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'), FACTORY_PROFILE_DIRS: '' },
+    env: { ...process.env, ...quiet, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'), FACTORY_PROFILE_DIRS: '' },
   });
   return { out, calls: readFileSync(join(dir, 'calls'), 'utf8') };
 }
@@ -89,7 +94,7 @@ test('--post creates the digest when no issue has its title, ignoring fuzzy near
   });
 });
 
-test('a second --post for one period updates the issue it finds, open or closed, by the exact title', () => {
+test('a first claimed post updates a pre-existing issue it finds, open or closed, by the exact title', () => {
   withDir((dir) => {
     const { out, calls } = ledgerRun(dir, [{ number: 3, title: 'Weekly digest 2026-10-10 → 2026-10-17', state: 'OPEN' }, { number: 7, title: TITLE, state: 'CLOSED' }]);
     assert.equal(out.status, 0, out.stdout + out.stderr);

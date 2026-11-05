@@ -24,6 +24,13 @@ checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.ga
    (`/repo-refresh`), as the skill's own rule says, and step 5's `skillOverrides` is what keeps it user-only;
    `.claude/` is tier 3.
 
+## Pull request readiness
+
+The Human can choose `drafts: "landable"` in `.gate/driver.json` on main to keep
+pull requests in draft until verification passes and there is no conflict.
+The default, `pstack`, opens ready (pstack `opening-a-pr.md:30`). With `landable`, the queue marks a draft
+ready and arms auto-merge once `verify` passed and it has no conflict, and turns it back to a draft when either fails (#455).
+
 ## The live verifier's login
 
 For a repository that installs `live-verify`: the live verifier runs on one Codex profile for every repository,
