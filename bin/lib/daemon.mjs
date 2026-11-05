@@ -294,7 +294,7 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     releaseLock(lockFile, lock.token);
     throw error;
   }
-  d.linear = startSource({ state, store, log });
+  d.linear = startSource({ state, store, runs, log });
   if (signals) for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => stop(`signal ${sig}`));
   log(`daemon: listening on ${sock} (pid ${process.pid}, head ${String(LOADED ?? 'unknown').slice(0, 7)})`);
   // The lease: the job pings once a minute, so a daemon nobody pings (its job booted out) stops by itself, by the path of SIGTERM.

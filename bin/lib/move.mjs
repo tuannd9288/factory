@@ -1,13 +1,12 @@
 // `bin/factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--rewrites <dir>] [--only <n>,...] [--limit N]` (#406, sublayer 1b): moves a repository's
 // open GitHub issues to its Linear team, once. It runs on the factory host: GitHub through the `gh` runner (a read, then one comment and one
 // close for each issue), Linear through createLinear (bin/lib/linear.mjs), as the Factory app. It is not a `factory linear` verb.
-// FACTORY_TEAM must hold the Lead's full name, <repo>-<team>, before the run.
 // Without --apply it is a dry run: it reads everything, writes nothing and prints the plan, one line for each issue. --limit N moves only the
 // first N issues not moved yet, by number. The repository must be in the registry (bin/lib/linear-repos.mjs) with the team key given.
 //   board Status   FAC status    holder
 //   Triage         Triage        none        (an issue with no board item is Triage too)
 //   Todo           Todo          none
-//   In Progress    In Progress   the app as delegate, and the comment "Taken by team <team>." from FACTORY_TEAM (bin/lib/linear-cli.mjs)
+//   In Progress    In Progress   the app as delegate, and the comment "Taken by team <nickname>." (bin/lib/linear-cli.mjs)
 // Any other board Status refuses the whole run, before any write, naming the issue. FAC's statuses are found by name on the team.
 // --rewrites <dir> requires a validated <number>.md template above collapsible Agent notes containing the original description; --apply requires it.
 // --only <n>,<n>,... preserves the given order with --limit, and a requested project gains the team while keeping its other teams.
@@ -35,9 +34,9 @@ import { fileURLToPath } from 'node:url';
 import { createLinear } from './linear.mjs';
 import { announceTakeOn, commentsOfIssue, isHolderLine } from './linear-cli.mjs';
 import { TEAM_KEY, onLinear } from './linear-repos.mjs';
-import { parseTeam } from './names.mjs';
 import { redact } from './redact.mjs';
 
+import { pickTeam } from './team-names.mjs';
 const CALL_MS = 120_000;
 const STATUS = {
   Triage: { fac: 'Triage', hold: false },
@@ -140,9 +139,8 @@ const done = (data, what) => {
   return data[what];
 };
 
-export function createMove({ gh = ghRun, api, state, env = process.env }) {
-  const fullTeam = env.FACTORY_TEAM;
-  const lead = parseTeam(fullTeam);
+export function createMove({ gh = ghRun, api, state, home = process.env.HOME, runs = join(home, 'factory-runs') }) {
+  let fullTeam = null;
   /** A GraphQL read; a number goes as -F, a string as -f, a null is left out. */
   const graphql = (query, vars) => {
     const args = ['api', 'graphql', '-f', `query=${query}`];
@@ -195,9 +193,10 @@ export function createMove({ gh = ghRun, api, state, env = process.env }) {
   }
 
   async function run({ repo, teamKey, board, apply, limit, project: projectName = null, inProject = [], rewrites, only }, log = () => {}) {
-    if (!lead) throw new Refused('FACTORY_TEAM must name the full team <repo>-<team>; nothing was written');
     if (apply && !rewrites) throw new Usage('--apply requires --rewrites');
     const [owner, name] = repo.split('/');
+    const leadTeam = pickTeam(name, { state, home, runs });
+    fullTeam = `${name}-${leadTeam}`;
     let entry;
     try {
       entry = onLinear(repo, state);
@@ -250,7 +249,7 @@ export function createMove({ gh = ghRun, api, state, env = process.env }) {
     const toCopy = (i) => comments.get(i.number).filter((c) => !MOVED_TO.test(c.body));
     const lines = todo.map((i) => {
       const parent = i.parent === null ? 'none' : `#${i.parent} (${moves(i.parent) ? 'moves' : 'stays on GitHub'})`;
-      return `#${i.number} | ${i.title} | ${stateOf(i).fac} | holder ${stateOf(i).hold ? lead.team : 'none'} | parent ${parent} | ${toCopy(i).length} comments${project ? ` | project ${projectOf(i.number) ? project.name : 'none'}` : ''}`;
+      return `#${i.number} | ${i.title} | ${stateOf(i).fac} | holder ${stateOf(i).hold ? leadTeam : 'none'} | parent ${parent} | ${toCopy(i).length} comments${project ? ` | project ${projectOf(i.number) ? project.name : 'none'}` : ''}`;
     });
     for (const i of candidates.filter((i) => i.skip)) lines.push(`#${i.number} | ${i.skip}`);
     const addTeam = project && !project.teams.nodes.some((t) => t.id === team.id);
@@ -390,7 +389,7 @@ export async function main(argv, env = process.env, { api, gh } = {}) {
   }
   const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
   try {
-    const out = await createMove({ gh, api: api ?? createLinear({ state }), state, env }).run(opts, (line) => console.log(line));
+    const out = await createMove({ gh, api: api ?? createLinear({ state }), state, home: env.HOME, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs') }).run(opts, (line) => console.log(line));
     if (!out.applied) for (const l of out.lines) console.log(l);
     console.log(JSON.stringify({ ok: true, applied: out.applied, count: out.count }));
     return 0;

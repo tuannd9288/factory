@@ -67,11 +67,9 @@ seat's run shows it reading `docs/harness/claude-code.md` and `references/explai
 Cursor's names as the adapter says; before that, the plugin was cached under the profile, which `secretsRead` denies, and the
 model mapped them itself (#193's seat run). The factory does not use these parts:
 
-- `/setup-pstack`: it writes `~/.claude/rules/pstack-models.md`, which the factory's deny rules hide; whether Claude
-  Code loads a profile's own `$CLAUDE_CONFIG_DIR/rules/` instead is not checked (#182). Without that file, once a
-  session reads the adapter, each pstack role runs on its skill's default slug as the adapter maps it: a Claude slug
-  to its `model` and `effort`, a `grok-*` or `gpt-*` slug to the session model. So every step that asks for another
-  model family runs on Claude until #182 sends it to Codex.
+- `/setup-pstack`: the launcher now writes `$CLAUDE_CONFIG_DIR/rules/pstack-models.md` at every start, with the
+  skill defaults mapped by the adapter; a change of model is the Human's; whether Claude
+  Code loads a profile's own `$CLAUDE_CONFIG_DIR/rules/` instead is not checked (#182).
 - Autopilot's owners and swarm of verifiers: the adapter runs a Cursor cloud agent as a worktree subagent of the
   session, outside `bin/seat` (#182). Shipping's one verifier per pull request is taken, on the Codex CLI instead
   (`packs/pstack/scripts/live-verify`, `packs/pstack/yields.md`); its verdict is no gate

@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { freeWord } from '../../../bin/lib/team-names.mjs';
 
 const real = fileURLToPath(new URL('../../..', import.meta.url));
 const PSTACK = JSON.parse(readFileSync(join(real, 'packs/pstack/settings.json'), 'utf8'));
@@ -45,10 +46,13 @@ function world(body, { settings = PSTACK } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'lead-start-'))); // the launcher finds its tree by realpath
   const w = { root, home: join(root, 'home'), tree: join(root, 'WORKSPACES'), bin: join(root, 'bin') };
   for (const d of [w.home, w.bin, join(w.tree, 'bin'), join(w.tree, 'packs/pstack/bin')]) mkdirSync(d, { recursive: true });
+  cpSync(join(real, 'kit/.gate'), join(w.tree, 'kit/.gate'), { recursive: true });
+  cpSync(join(real, 'packs/pstack/scripts/lib'), join(w.tree, 'packs/pstack/scripts/lib'), { recursive: true });
   cpSync(join(real, 'bin/lib'), join(w.tree, 'bin/lib'), { recursive: true });
   cpSync(join(real, 'packs/pstack/bin/lead.mjs'), join(w.tree, 'packs/pstack/bin/lead.mjs'));
   cpSync(join(real, 'packs/pstack/bin/transcript-copy.mjs'), join(w.tree, 'packs/pstack/bin/transcript-copy.mjs')); // copied into the run folder (#257)
   cpSync(join(real, 'packs/pstack/settings.json'), join(w.tree, 'packs/pstack/settings.json')); // the factory's pin
+  cpSync(join(real, 'packs/pstack/pstack-models.md'), join(w.tree, 'packs/pstack/pstack-models.md'));
   writeFileSync(join(w.tree, 'packs/pstack/lead.md'), '# role\n');
   const repo = join(w.tree, 'zalo');
   mkdirSync(join(repo, '.git'), { recursive: true });
@@ -62,10 +66,11 @@ function world(body, { settings = PSTACK } = {}) {
   w.config = join(w.home, '.agent-profiles/o/zalo/claude');
   w.pluginRoot = join(w.home, '.local/share/factory/plugins/o/zalo/claude');
   w.env = (extra = {}) => ({ PATH: `${w.bin}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: w.home, FAKE_CONFIG: w.config, ...extra });
-  w.lead = (args = [], extra = {}) => {
+  w.start = (args = [], extra = {}) => {
     const r = spawnSync(process.execPath, [join(w.tree, 'packs/pstack/bin/lead.mjs'), 'zalo', ...args], { encoding: 'utf8', env: w.env(extra), timeout: 20000 });
     return { code: r.status, out: r.stdout, err: r.stderr };
   };
+  w.lead = (args = [], extra = {}) => w.start([...(args.includes('--team') || args.includes('--new-team') ? [] : ['--team', 'lead']), ...args], extra);
   // a transcript copy as bin/transcript-copy.mjs leaves it, with the given mtime (seconds)
   w.copy = (name, mtime, repo = 'zalo') => {
     const dir = join(w.home, 'factory-runs', `${repo}-lead`, 'transcripts');
@@ -152,6 +157,12 @@ describe('lead resumes by default', () => {
     assert.ok(!r.out.includes('--resume'));
     assert.equal(w.lead().code, 0);
     assert.equal(resumed(w.log().at(-1)), null);
+    const rule = join(w.config, 'rules/pstack-models.md');
+    const first = readFileSync(rule);
+    assert.deepEqual(first, readFileSync(join(real, 'packs/pstack/pstack-models.md')));
+    assert.equal(w.lead().code, 0);
+    assert.deepEqual(readFileSync(rule), first);
+
   }));
 
   test('--new starts a new session although a copy exists', () => world((w) => {
@@ -467,7 +478,7 @@ describe('lead --team (#196)', () => {
     assert.equal(w.log().at(-1).team, 'zalo-b');
   }));
 
-  test('with no --team the team is lead: zalo-lead, as today, and the dry run says so (#196)', () => world((w) => {
+  test('an explicitly named existing team keeps its name and the dry run says so (#196)', () => world((w) => {
     assert.match(w.lead(['--dry-run']).out, /^team: lead$/m);
     assert.equal(w.lead().code, 0);
     assert.equal(nameOf(w.log().at(-1)), 'zalo-lead');
@@ -610,7 +621,7 @@ describe('lead onboarding key (#179)', () => {
     assert.equal(w.lead().code, 0);
     assert.deepEqual(JSON.parse(readFileSync(file(w), 'utf8')), { hasCompletedOnboarding: true });
     assert.equal((statSync(file(w)).mode & 0o777).toString(8), '600');
-    assert.deepEqual(readdirSync(w.config), ['.claude.json'], 'no temporary file is left');
+    assert.deepEqual(readdirSync(w.config).sort(), ['.claude.json', 'rules'], 'no temporary file is left');
   }));
 
   test('a file that holds other keys keeps them and its mode (#179)', () => world((w) => {
@@ -659,7 +670,7 @@ describe('lead start', () => {
     for (const c of calls.slice(0, 2)) assert.deepEqual([c.config, c.cache], [install, w.pluginRoot]);
     assert.equal(calls[2].cache, w.pluginRoot);
     assert.ok(calls[2].argv.includes('--settings'));
-    assert.deepEqual(readdirSync(w.config), ['.claude.json'], 'the profile got the onboarding key and nothing else');
+    assert.deepEqual(readdirSync(w.config).sort(), ['.claude.json', 'rules'], 'the profile got the onboarding key and model rules');
   }));
 
   test('a failed install stops the start, with the reason', () => world((w) => {
@@ -678,3 +689,24 @@ describe('lead start', () => {
     assert.ok(!existsSync(join(w.home, '.local/share')));
   }, { settings: { enabledPlugins: { 'other@mk': true } } }));
 });
+
+
+test('nickname selection at the launcher: none, one, several, and --new-team (#416)', () => world((w) => {
+  const accounts = join(w.home, '.local/state/factory/accounts');
+  writeFileSync(accounts, '');
+  const nickname = freeWord('zalo', []);
+  const fresh = w.start(['--dry-run']);
+  assert.equal(fresh.code, 2);
+  assert.ok(fresh.err.includes(`no row factory/zalo-${nickname}`));
+  writeFileSync(accounts, `factory/zalo-${nickname}=ann\n`);
+  assert.match(w.start(['--dry-run']).out, new RegExp(`^team: ${nickname}$`, 'm'));
+  writeFileSync(accounts, `factory/zalo-${nickname}=ann\nfactory/zalo-otter=ann\n`);
+  const multiple = w.start(['--dry-run']);
+  assert.equal(multiple.code, 2);
+  assert.ok(multiple.err.includes('has several teams:'));
+  assert.ok(multiple.err.includes(nickname) && multiple.err.includes('otter'));
+  assert.match(w.start(['--team', 'otter', '--dry-run']).out, /^team: otter$/m);
+  const next = w.start(['--new-team', '--dry-run']);
+  assert.equal(next.code, 2);
+  assert.ok(next.err.includes(`no row factory/zalo-${freeWord('zalo', [nickname, 'otter'])}`));
+}));

@@ -55,7 +55,7 @@ test('leadArgs points both hooks at the copy, and the copy copies a transcript w
     const home = join(dir, 'home');
     const run = join(home, 'factory-runs', 'r-lead');
     const hookScript = copyHook({ root, runDir: run });
-    const { hook, argv } = leadArgs({ repo: 'r', home, root, roleText: 'x', node: process.execPath, hookScript });
+    const { hook, argv } = leadArgs({ repo: 'r', team: 'lead', home, root, roleText: 'x', node: process.execPath, hookScript });
     assert.ok(hook.includes(hookScript));
     assert.ok(!hook.includes('packs/pstack/bin/transcript-copy.mjs'));
     const { hooks } = JSON.parse(argv[argv.indexOf('--settings') + 1]);
