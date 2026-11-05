@@ -224,6 +224,12 @@ test('a run\'s own .account file wins over its seat\'s row (#311)', () => world(
   assert.equal(w.start('worker', ['--tag', 'y'], { FACTORY_TEAM: 'probe-alpha' }).code, 2);
 }));
 
+test('a missing team row names Colly on the Human\'s spoken word in the refusal (#365)', () => world((w) => {
+  const r = w.start('worker', [], { FACTORY_TEAM: 'probe-gamma' });
+  assert.equal(r.code, 2);
+  assert.match(r.err, /the Human or Colly on his spoken word sets one with `factory use probe-gamma <letter>` \(INN-30, 2026-11-05\)/);
+}));
+
 test('chooseSeat takes the first seat of the list, judges the account, and never moves a session to another seat or account (#311)', async () => {
   const { chooseSeat } = await import('../bin/lib/seat.mjs');
   await world((w) => {
