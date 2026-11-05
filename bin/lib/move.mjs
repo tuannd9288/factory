@@ -18,12 +18,15 @@
 // On GitHub, once the Linear side is complete (created, comments, holder): one comment "Moved to <KEY>: <URL>", then the issue is closed as
 // not planned. Nothing is deleted.
 // Resuming: $FACTORY_STATE/linear/moved/<owner>-<repo>.json records each step as it is done, written atomically after every step:
-//   { version: 1, issues: { "<number>": { key, id, url, parentOf, comments, parent, held, ghComment, closed } } }
-// `comments` counts the comments written, `parent` is whether `parentId` is set. A second run finishes what a first left half done and
+//   { version: 1, issues: { "<number>": { key, id, url, parentOf, comments, parent, source, held, ghComment, closed } } }
+// `comments` counts the comments written, `parent` is whether `parentId` is set, `source` hashes the title and body FAC was written from.
+// Just before the GitHub comment the issue is read again: later comments are copied, and a changed title or body updates the FAC issue,
+// before the close. An entry with a field of the wrong type is a corrupt map. A second run finishes what a first left half done and
 // repeats no write. When the file is lost, an issue is looked for in the team by its first description line before one is created, and
 // adopted; a map file that exists and does not parse refuses the run.
 // Exit 0 done, 1 refused or failed (the reason is the first line of the message, never a token), 2 usage.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,7 +52,7 @@ nodes{number title body createdAt url author{login} labels(first:100){nodes{name
 projectItems(first:20){nodes{project{number owner{... on User{login} ... on Organization{login}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}
 pageInfo{hasNextPage endCursor}}}}`;
 const COMMENTS = `query($owner:String!,$name:String!,$n:Int!,$after:String){repository(owner:$owner,name:$name){issue(number:$n){
-comments(first:100,after:$after){nodes{author{login} createdAt body} pageInfo{hasNextPage endCursor}}}}}`;
+title body comments(first:100,after:$after){nodes{author{login} createdAt body} pageInfo{hasNextPage endCursor}}}}}`;
 const STATES = 'states(first: 100) { nodes { id name type position } }';
 
 function ghRun(args) {
@@ -86,7 +89,18 @@ export function parse(argv) {
   };
 }
 
-export const mapFile = (state, repo) => join(state, 'linear', 'moved', `${repo.replace('/', '-')}.json`);
+/** What FAC was last written from: the title and the body, as one hash. */
+const sourceOf = (title, body) => createHash('sha1').update(JSON.stringify([title, body])).digest('hex');
+
+/** Whether a map entry has the fields the run reads, each of its type; a hand-edited one that does not is a corrupt map. */
+const entryOk = (e) => Boolean(e) && typeof e === 'object' && !Array.isArray(e)
+  && ['key', 'id', 'url'].every((k) => typeof e[k] === 'string')
+  && Number.isInteger(e.comments) && e.comments >= 0
+  && ['parent', 'held', 'ghComment', 'closed'].every((k) => typeof e[k] === 'boolean')
+  && (e.project === undefined || typeof e.project === 'boolean') && (e.source === undefined || typeof e.source === 'string')
+  && (e.parentOf === undefined || e.parentOf === null || Number.isInteger(e.parentOf));
+
+export const mapFile =(state, repo) => join(state, 'linear', 'moved', `${repo.replace('/', '-')}.json`);
 
 /** The map as { version, issues }: empty when there is no file; throws when the file is there and does not read or parse. */
 export function readMap(file) {
@@ -103,7 +117,7 @@ export function readMap(file) {
   } catch {
     m = null;
   }
-  if (!m || typeof m !== 'object' || Array.isArray(m) || !m.issues || typeof m.issues !== 'object' || Array.isArray(m.issues)) {
+  if (!m || typeof m !== 'object' || Array.isArray(m) || !m.issues || typeof m.issues !== 'object' || Array.isArray(m.issues) || !Object.values(m.issues).every(entryOk)) {
     throw new Refused(`the map file ${file} exists but does not parse as a map; nothing was changed`);
   }
   return m;
@@ -145,16 +159,17 @@ export function createMove({ gh = ghRun, api, state }) {
     return out.sort((a, b) => a.number - b.number);
   }
 
-  /** Every comment of the issue, oldest first, as { login, createdAt, body }. */
-  function readComments(owner, name, n) {
-    const out = [];
+  /** The issue as it is now: its title, its body and every comment, oldest first, as { login, createdAt, body }. */
+  function readIssue(owner, name, n) {
+    const comments = [];
     let after = null;
+    let node;
     do {
-      const page = graphql(COMMENTS, { owner, name, n, after }).repository.issue.comments;
-      for (const c of page.nodes) out.push({ login: c.author?.login ?? 'ghost', createdAt: c.createdAt, body: c.body ?? '' });
-      after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+      node = graphql(COMMENTS, { owner, name, n, after }).repository.issue;
+      for (const c of node.comments.nodes) comments.push({ login: c.author?.login ?? 'ghost', createdAt: c.createdAt, body: c.body ?? '' });
+      after = node.comments.pageInfo.hasNextPage ? node.comments.pageInfo.endCursor : null;
     } while (after);
-    return out;
+    return { title: node.title, body: node.body ?? '', comments };
   }
 
   const descriptionOf = (issue, { parentStays }) => {
@@ -203,7 +218,7 @@ export function createMove({ gh = ghRun, api, state }) {
     const moves = (n) => open.has(n) || Boolean(map.issues[n]?.key);
     const projectOf = (n) => (project && inSet.has(n) ? project : null);
     const todo = issues.filter((i) => !map.issues[i.number]?.closed).slice(0, limit);
-    const comments = new Map(todo.map((i) => [i.number, readComments(owner, name, i.number)]));
+    const comments = new Map(todo.map((i) => [i.number, readIssue(owner, name, i.number).comments]));
     const toCopy = (i) => comments.get(i.number).filter((c) => !MOVED_TO.test(c.body));
     const lines = todo.map((i) => {
       const parent = i.parent === null ? 'none' : `#${i.parent} (${moves(i.parent) ? 'moves' : 'stays on GitHub'})`;
@@ -218,29 +233,44 @@ export function createMove({ gh = ghRun, api, state }) {
     const moved = [];
     for (const issue of todo) {
       const status = team.states.nodes.find((s) => s.name === stateOf(issue).fac);
-      const copy = toCopy(issue);
       let e = map.issues[issue.number];
       if (!e?.key) {
-        e = (await adopt(issue, team, comments.get(issue.number))) ?? (await create(issue, status, team, map, moves, projectOf(issue.number)));
+        e = (await adopt(issue, team, comments.get(issue.number), issue.parent !== null && !moves(issue.parent))) ?? (await create(issue, status, team, map, moves, projectOf(issue.number)));
         map.issues[issue.number] = e;
         save();
       }
-      for (let k = e.comments; k < copy.length; k++) {
-        done(await api.commentCreate({ issueId: e.id, body: copy[k].body, createdAt: copy[k].createdAt, team: `${copy[k].login} (via GitHub)` }), 'commentCreate');
-        e.comments = k + 1;
-        save();
-      }
+      // The comments beyond those already copied, from a list of GitHub comments, oldest first.
+      const copyFrom = async (list) => {
+        const copy = list.filter((c) => !MOVED_TO.test(c.body));
+        for (let k = e.comments; k < copy.length; k++) {
+          done(await api.commentCreate({ issueId: e.id, body: copy[k].body, createdAt: copy[k].createdAt, team: `${copy[k].login} (via GitHub)` }), 'commentCreate');
+          e.comments = k + 1;
+          save();
+        }
+      };
+      await copyFrom(comments.get(issue.number));
       if (stateOf(issue).hold && !e.held) {
         await announceTakeOn(api, e.id, e.key, LEAD_TEAM);
         e.held = true;
         save();
       }
-      if (!e.ghComment && !comments.get(issue.number).some((c) => c.body.startsWith(`Moved to ${e.key}: `))) {
-        gh(['api', '-X', 'POST', `repos/${repo}/issues/${issue.number}/comments`, '-f', `body=Moved to ${e.key}: ${e.url}`]);
-      }
-      e.ghComment = true;
-      save();
       if (!e.closed) {
+        // The run read the issue at its start, and a resumed twin may be older still: read it again before it is closed.
+        const now = readIssue(owner, name, issue.number);
+        await copyFrom(now.comments);
+        const source = sourceOf(now.title, now.body);
+        if (source !== e.source) {
+          const stays = issue.parent !== null && !moves(issue.parent);
+          done(await api.request('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }',
+            { id: e.id, input: { title: now.title, description: descriptionOf({ ...issue, title: now.title, body: now.body }, { parentStays: stays }) } }), 'issueUpdate');
+          e.source = source;
+          save();
+        }
+        if (!e.ghComment && !now.comments.some((c) => c.body.startsWith(`Moved to ${e.key}: `))) {
+          gh(['api', '-X', 'POST', `repos/${repo}/issues/${issue.number}/comments`, '-f', `body=Moved to ${e.key}: ${e.url}`]);
+        }
+        e.ghComment = true;
+        save();
         gh(['api', '-X', 'PATCH', `repos/${repo}/issues/${issue.number}`, '-f', 'state=closed', '-f', 'state_reason=not_planned']);
         e.closed = true;
         save();
@@ -273,16 +303,16 @@ export function createMove({ gh = ghRun, api, state }) {
   }
 
   /** The issue's FAC twin that a lost map file did not record: found by its first description line, exactly. */
-  async function adopt(issue, team, ghComments) {
+  async function adopt(issue, team, ghComments, stays) {
     const line = `Moved from ${issue.url}`;
-    const found = (await api.request('query($filter: IssueFilter) { issues(filter: $filter, first: 50) { nodes { id identifier url description } } }',
+    const found = (await api.request('query($filter: IssueFilter) { issues(filter: $filter, first: 50) { nodes { id identifier url title description } } }',
       { filter: { team: { key: { eq: team.key } }, description: { contains: line } } }))?.issues?.nodes ?? [];
     const twin = found.find((n) => String(n.description ?? '').split('\n')[0] === line);
     if (!twin) return null;
     const there = await commentsOfIssue(api, twin.identifier);
     return {
       key: twin.identifier, id: twin.id, url: twin.url, parentOf: issue.parent, comments: there.filter((c) => !c.body.split('\n').some(isHolderLine)).length,
-      parent: false, held: there.some((c) => c.body.split('\n').some(isHolderLine)), ghComment: ghComments.some((c) => c.body.startsWith(`Moved to ${twin.identifier}: `)), closed: false,
+      parent: false, source: twin.title === issue.title && twin.description === descriptionOf(issue, { parentStays: stays }) ? sourceOf(issue.title, issue.body) : '', held: there.some((c) => c.body.split('\n').some(isHolderLine)), ghComment: ghComments.some((c) => c.body.startsWith(`Moved to ${twin.identifier}: `)), closed: false,
     };
   }
 
@@ -294,7 +324,7 @@ export function createMove({ gh = ghRun, api, state }) {
       ...(parent?.id ? { parentId: parent.id } : {}), ...(project ? { projectId: project.id } : {}), delegate: STATUS[issue.board ?? 'Triage'].hold, team: team.name,
     }), 'issueCreate');
     if (!made.issue?.id) throw new Refused('Linear did not name the issue it created');
-    return { key: made.issue.identifier, id: made.issue.id, url: made.issue.url, parentOf: issue.parent, comments: 0, parent: Boolean(parent?.id), ...(project ? { project: true } : {}), held: false, ghComment: false, closed: false };
+    return { key: made.issue.identifier, id: made.issue.id, url: made.issue.url, parentOf: issue.parent, comments: 0, parent: Boolean(parent?.id), source: sourceOf(issue.title, issue.body), ...(project ? { project: true } : {}), held: false, ghComment: false, closed: false };
   }
 
   return { run };

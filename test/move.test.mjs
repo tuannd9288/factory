@@ -64,7 +64,8 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
       const n = Number(flag('n'));
       const all = w.comments[n] ?? [];
       const at = flag('after') ? Number(flag('after')) : 0;
-      return JSON.stringify({ data: { repository: { issue: { comments: { nodes: all.slice(at, at + 1), pageInfo: { hasNextPage: at + 1 < all.length, endCursor: String(at + 1) } } } } } });
+      const now = w.issues.find((i) => i.number === n);
+      return JSON.stringify({ data: { repository: { issue: { title: now.title, body: now.body, comments: { nodes: all.slice(at, at + 1), pageInfo: { hasNextPage: at + 1 < all.length, endCursor: String(at + 1) } } } } } });
     }
     const n = Number(/issues\/(\d+)/.exec(args.join(' '))[1]);
     if (w.fail()) throw Object.assign(new Error('Command failed'), { stderr: 'gh: refused (HTTP 502)' });
@@ -91,6 +92,8 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
     const mutation = q.includes('mutation');
     if (mutation && w.fail()) return json(200, { errors: [{ message: w.faultMessage ?? 'Linear refused the write' }] });
     if (q.includes('issueCreate')) {
+      w.afterRead?.(); // something happens on GitHub after the run's first reads
+      w.afterRead = null;
       const key = `FAC-${w.created.length + 1}`;
       const rec = { id: `uuid-${w.created.length + 1}`, identifier: key, url: `https://linear.app/x/issue/${key}`, input: v.input };
       w.created.push(rec);
@@ -110,7 +113,7 @@ function world({ issues = defaultIssues(), comments = defaultComments(), pageSiz
     }
     if (q.includes('issues(')) {
       const needle = v.filter.description.contains;
-      return json(200, { data: { issues: { nodes: w.created.filter((c) => c.input.description.includes(needle)).map((c) => ({ id: c.id, identifier: c.identifier, url: c.url, description: c.input.description })) } } });
+      return json(200, { data: { issues: { nodes: w.created.filter((c) => c.input.description.includes(needle)).map((c) => ({ id: c.id, identifier: c.identifier, url: c.url, title: c.input.title, description: c.input.description })) } } });
     }
     if (q.includes('comments(')) {
       const rec = w.created.find((c) => c.identifier === v.id);
@@ -303,7 +306,9 @@ test('--limit moves only the first N issues not moved yet, by number', async () 
 test('the map records each step in the shape the header names', async () => {
   const w = world();
   await w.run();
-  assert.deepEqual(w.map().issues['4'], { key: 'FAC-4', id: 'uuid-4', url: 'https://linear.app/x/issue/FAC-4', parentOf: 1, comments: 1, parent: true, held: true, ghComment: true, closed: true });
+  const { source, ...four } = w.map().issues['4'];
+  assert.deepEqual(four, { key: 'FAC-4', id: 'uuid-4', url: 'https://linear.app/x/issue/FAC-4', parentOf: 1, comments: 1, parent: true, held: true, ghComment: true, closed: true });
+  assert.equal(typeof source, 'string');
   assert.equal(w.map().version, 1);
 });
 
@@ -392,4 +397,49 @@ test('a later run adds the project to an issue made without it, closed on GitHub
   const again = w.writes.length;
   await w.run(PROJECT);
   assert.equal(w.writes.length, again, 'nothing more to do');
+});
+
+const edit = (w) => {
+  w.comments[1].push({ author: { login: 'octo-late' }, createdAt: '2026-11-05T01:00:00Z', body: 'a late comment' });
+  w.issues[0].title = 'New title';
+  w.issues[0].body = 'edited body';
+};
+
+test('a comment and a body edit that arrive after the first read reach FAC, before the GitHub issue closes', async () => {
+  const w = world({ issues: [defaultIssues()[0]] });
+  w.afterRead = () => edit(w);
+  await w.run();
+  const one = byNumber(w, 1);
+  assert.equal(w.lcomments[one.id].at(-1).input.body, 'a late comment');
+  assert.equal(w.lcomments[one.id].at(-1).input.createAsUser, 'octo-late (via GitHub)');
+  assert.deepEqual(w.updates, [{ id: one.id, input: { title: 'New title', description: `Moved from https://github.com/${REPO}/issues/1\n**Sublayer:** 1c\n\nedited body` } }]);
+  const at = (prefix) => w.writes.findIndex((x) => x.startsWith(prefix));
+  assert.ok(at('linear:comment:uuid-1:a late comment') < at('gh:comment:1:'));
+  assert.ok(at('linear:update:uuid-1') < at('gh:comment:1:'));
+  assert.equal(w.writes.indexOf('gh:close:1'), at('gh:comment:1:') + 1);
+});
+
+test('a resumed run reads the issue again too: what changed while it was stopped reaches FAC', async () => {
+  const w = world({ issues: [defaultIssues()[0]] });
+  const clean = world({ issues: [defaultIssues()[0]] });
+  await clean.run();
+  w.failAt = clean.writes.findIndex((x) => x.startsWith('gh:comment'));
+  await assert.rejects(w.run());
+  edit(w);
+  await w.run();
+  assert.equal(w.created.length, 1);
+  assert.equal(w.lcomments[byNumber(w, 1).id].at(-1).input.body, 'a late comment');
+  assert.equal(w.updates.length, 1);
+  assert.ok(w.issues[0].closed);
+});
+
+test('a map entry with a field of the wrong type is a corrupt map', async () => {
+  for (const bad of [{ comments: 'x' }, { comments: -1 }, { held: 'no' }, { key: 5 }]) {
+    const w = world();
+    mkdirSync(join(w.state, 'linear', 'moved'), { recursive: true });
+    const entry = { key: 'FAC-1', id: 'u', url: 'x', comments: 0, parent: false, held: false, ghComment: false, closed: false, ...bad };
+    writeFileSync(mapFile(w.state, REPO), JSON.stringify({ version: 1, issues: { 1: entry } }));
+    await assert.rejects(w.run(), /does not parse as a map/);
+    assert.deepEqual(w.writes, []);
+  }
 });
