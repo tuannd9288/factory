@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
 import { coverage } from '../../packs/pstack/scripts/lib/verdict.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { createLinear } from './linear.mjs';
+import { onLinear } from './linear-repos.mjs';
 import { job, plist } from './queue.mjs';
 import { enforcerIndex, findingsSection, repeatedKinds } from './findings.mjs';
 import { lastRecords, readSessions } from './records.mjs';
@@ -417,6 +419,9 @@ export function revertCount(rows, { since, until }) {
   return { n: plain.length, k: reverted.length, m: during.filter(([key]) => reverts.has(key)).length, reverted };
 }
 
+/** How a row's number reads after its repository: `#12` for a GitHub issue or pull request, ` FAC-12` for a task on Linear (#406). */
+const at = (number) => (typeof number === 'string' ? ` ${number}` : `#${number}`);
+
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
 
@@ -463,7 +468,7 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, findings = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, findings = null, unread = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -480,7 +485,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     '',
   ];
   const waiting = rows.filter((r) => r.state === 'open' && (r.tier === 3 || r.touchedWhy.includes('needs-human')));
-  if (waiting.length) for (const r of waiting) lines.push(`- ${r.repo}#${r.number} ${r.title} — ${r.tier === 3 ? "tier 3, awaiting the Human's approval" : 'needs-human'}`);
+  if (waiting.length) for (const r of waiting) lines.push(`- ${r.repo}${at(r.number)} ${r.title} — ${r.tier === 3 ? "tier 3, awaiting the Human's approval" : 'needs-human'}`);
   else lines.push('- None.');
   lines.push(
     '',
@@ -519,9 +524,10 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
   for (const r of rows) {
     const cost = r.cost === null ? `? (${r.costNote})` : `$${r.cost.toFixed(2)}${r.costNote ? ` (${r.costNote})` : ''}`;
     lines.push(
-      `| ${r.repo.split('/')[1]} | [#${r.number}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `yes (${r.touchedWhy})` : 'no'} | ${STATE[r.state]} |`,
+      `| ${r.repo.split('/')[1]} | [${at(r.number).trim()}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `yes (${r.touchedWhy})` : 'no'} | ${STATE[r.state]} |`,
     );
   }
+  if (unread?.size) lines.push('', ...[...unread].map(([repo, why]) => `- ${repo}: could not read its Linear issues (${why}); its task list above is missing and its enforcer lookup was skipped.`));
   if (sessions) {
     const { lines: ran, total } = sessionLines(sessions, since, until);
     const uncharged = unchargedSessions(sessions, since, until);
@@ -585,17 +591,62 @@ export function mergedPullLookup(run = gh) {
 }
 
 /** The issue of a repository whose body has the line `Kind: <kind>`, open or closed, as { number, state }, or null: the one read
- * of enforcer issues (#408), which the move to Linear points at Linear (#405). A repository's issues are read once; run is the
- * `gh` runner. */
-export function enforcerLookup(run = gh) {
+ * of enforcer issues (#408). A repository's issues are read once; run is the `gh` runner. For a repository on Linear (#406) `linear(repo)`
+ * gives the team's issues as { key, description, closed }, read beforehand by enforcerIssues, and `number` is the issue's key. */
+export function enforcerLookup(run = gh, { linear = () => null } = {}) {
   const byRepo = new Map();
   return (repo, kind) => {
     if (!byRepo.has(repo)) {
-      const all = JSON.parse(run(['api', '--paginate', '--slurp', `repos/${repo}/issues?state=all&per_page=100`])).flat();
-      byRepo.set(repo, enforcerIndex(all.filter((i) => !i.pull_request)));
+      const issues = linear(repo);
+      if (issues) {
+        byRepo.set(repo, enforcerIndex(issues.map((i) => ({ number: i.key, state: i.closed ? 'closed' : 'open', body: i.description }))));
+      } else {
+        const all = JSON.parse(run(['api', '--paginate', '--slurp', `repos/${repo}/issues?state=all&per_page=100`])).flat();
+        byRepo.set(repo, enforcerIndex(all.filter((i) => !i.pull_request)));
+      }
     }
     return byRepo.get(repo).get(kind) ?? null;
   };
+}
+
+/** Every issue of a Linear team that matches `filter`, with the fields `pick` names, across pages. */
+async function linearIssues(api, teamKey, filter, fields) {
+  const out = [];
+  let after = null;
+  do {
+    const page = (await api.request(`query($filter: IssueFilter, $after: String) { issues(filter: $filter, first: 100, after: $after) { nodes { ${fields} } pageInfo { hasNextPage endCursor } } }`,
+      { filter: { team: { key: { eq: teamKey } }, ...filter }, after }))?.issues;
+    if (!page) throw new Error('Linear did not answer the list of issues');
+    out.push(...page.nodes);
+    after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+  } while (after);
+  return out;
+}
+
+/** The issues of a Linear team whose description names a `Kind:` line, as { key, description, closed }: what enforcerLookup reads for a
+ * repository on Linear. Closed is a completed or canceled status. */
+export async function enforcerIssues(api, teamKey) {
+  const nodes = await linearIssues(api, teamKey, { description: { contains: 'Kind:' } }, 'identifier description state { type }');
+  return nodes.map((n) => ({ key: n.identifier, description: n.description ?? '', closed: ['completed', 'canceled'].includes(n.state?.type) }));
+}
+
+/** The issue key a pull request body names on its line `Issue: <KEY>` (prbody.mjs reads only `#N`), or null. */
+export const linearIssueOf = (body) => /^Issue:[ \t]*([A-Z][A-Z0-9]{1,9}-[1-9]\d*)[ \t]*\r?$/m.exec(String(body ?? ''))?.[1] ?? null;
+
+/** The task rows of a repository on Linear (#406): an issue of the team that left Triage, from `startedAt` (else `createdAt`) to
+ * `completedAt` or `canceledAt`, with the row of every pull request whose body has `Issue: <KEY>`. `allPulls` are the repository's pull
+ * requests as { number, body }; `pullRow(number)` is the row of one. Gives { rows, keys }: the rows alive in [from, to], and every task's key. */
+export async function linearTaskRows({ repo, api, teamKey, allPulls, pullRow, from, to }) {
+  const tasks = await linearIssues(api, teamKey, { state: { type: { neq: 'triage' } } }, 'identifier title url createdAt startedAt completedAt canceledAt');
+  const rows = [];
+  for (const t of tasks) {
+    const start = t.startedAt ?? t.createdAt;
+    const end = t.completedAt ?? t.canceledAt ?? null;
+    if (!inWindow(start, end, from, to)) continue;
+    const prs = allPulls.filter((p) => linearIssueOf(p.body) === t.identifier).map((p) => pullRow(p.number));
+    rows.push(taskRow(repo, { number: t.identifier, title: t.title, url: t.url, createdAt: start, state: end ? 'CLOSED' : 'OPEN', timelineItems: { nodes: [] } }, prs));
+  }
+  return { rows, keys: new Set(tasks.map((t) => t.identifier)) };
 }
 
 /** The factory's clones under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose
@@ -689,7 +740,7 @@ function digestJob(argv) {
 
 const DIGEST_REPO = 'tuannd9288/better-factory';
 
-function main(argv) {
+async function main(argv) {
   if (argv[0] === 'plist') return digestJob(argv.slice(1));
   const opts = { repos: [], since: null, until: null, mode: 'digest', post: null, check: false, latest: 50, profileDirs: (process.env.FACTORY_PROFILE_DIRS ?? '').split(':').filter(Boolean), quota: false, statusFiles: (process.env.FACTORY_STATUSLINE ?? '').split(':').filter(Boolean) };
   for (let i = 0; i < argv.length; i += 1) {
@@ -750,6 +801,14 @@ function main(argv) {
   const seat = seatCosts(sessions);
   const recorded = new Set(sessions.map((r) => r.session).filter(Boolean));
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
+  let linear = null;
+  const linearApi = () => (linear ??= createLinear({ state }));
+  const unread = new Map();
+  const unreadBecause = (repo, error) => {
+    const why = String(error?.message ?? error).split('\n')[0].slice(0, 200);
+    if (!unread.has(repo)) unread.set(repo, why);
+    console.error(`ledger: ${repo}: its Linear issues could not be read: ${why}`);
+  };
   const clones = clonesUnder(root, (folder, why) => console.error(`ledger: skipped ${folder}: ${why}`));
   if (!opts.repos.length) opts.repos = [...clones.keys()];
   if (!opts.repos.length) throw new Error(`no repository under ${root}; pass --repo owner/name`);
@@ -770,15 +829,35 @@ function main(argv) {
       }
       return pulls.get(n);
     };
-    for (const i of list('issues?labels=task&state=all&per_page=100')) {
-      if (i.pull_request) continue;
-      const node = graphql(ISSUE, i.number).issue;
-      const row = taskRow(repo, node, node.closedByPullRequestsReferences.nodes.map((p) => pull(p.number).row));
-      if (inWindow(row.created, node.closedAt, from, to)) rows.push(row);
+    // A repository on Linear (#406) has its tasks there, joined to pull requests by their `Issue: <KEY>` line.
+    // A registry or a Linear read that fails leaves this repository's tasks out and says so; the rest of the digest is written.
+    let team = null;
+    try {
+      team = onLinear(repo, state);
+    } catch (error) {
+      unreadBecause(repo, error);
+    }
+    let tasks = null;
+    if (team) {
+      const allPulls = JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/pulls?state=all&per_page=100`])).flat();
+      try {
+        tasks = await linearTaskRows({ repo, api: linearApi(), teamKey: team.key, allPulls, pullRow: (n) => pull(n).row, from, to });
+        rows.push(...tasks.rows);
+      } catch (error) {
+        unreadBecause(repo, error);
+      }
+    } else if (!unread.has(repo)) {
+      for (const i of list('issues?labels=task&state=all&per_page=100')) {
+        if (i.pull_request) continue;
+        const node = graphql(ISSUE, i.number).issue;
+        const row = taskRow(repo, node, node.closedByPullRequestsReferences.nodes.map((p) => pull(p.number).row));
+        if (inWindow(row.created, node.closedAt, from, to)) rows.push(row);
+      }
     }
     for (const p of list('pulls?state=all&per_page=100&sort=created&direction=desc')) {
       const { node, row } = pull(p.number);
-      if (!node.closingIssuesReferences.nodes.some((i) => i.labels.nodes.some((l) => l.name === 'task'))) rows.push(row);
+      const ofTask = tasks ? tasks.keys.has(linearIssueOf(node.body)) : !unread.has(repo) && node.closingIssuesReferences.nodes.some((i) => i.labels.nodes.some((l) => l.name === 'task'));
+      if (!ofTask) rows.push(row);
     }
   }
   rows.sort((a, b) => a.created.localeCompare(b.created));
@@ -800,11 +879,25 @@ function main(argv) {
   const report = inspect(folders, { latest: opts.latest });
   let findings;
   try {
-    findings = repeatedKinds(sessions, { mergedOf: mergedPullLookup(), enforcerOf: enforcerLookup() });
+    const onTeam = new Map();
+    for (const repo of opts.repos) {
+      try {
+        const team = unread.has(repo) ? null : onLinear(repo, state);
+        if (team) onTeam.set(repo, await enforcerIssues(linearApi(), team.key));
+      } catch (error) {
+        unreadBecause(repo, error);
+      }
+    }
+    // A repository whose Linear issues could not be read is not looked up on GitHub instead: the lookup fails for it alone.
+    const linear = (repo) => {
+      if (unread.has(repo)) throw new Error(`its Linear issues could not be read: ${unread.get(repo)}`);
+      return onTeam.get(repo) ?? null;
+    };
+    findings = repeatedKinds(sessions, { mergedOf: mergedPullLookup(), enforcerOf: enforcerLookup(gh, { linear }) });
   } catch (error) {
     findings = { error: `The findings could not be read (${String(error.stderr || error.message).trim().split('\n')[0]}).` };
   }
-  const text = digest(rows, { ...opts, secrets, findings, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(state) });
+  const text = digest(rows, { ...opts, secrets, findings, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(state) });
   if (!opts.post) {
     process.stdout.write(text);
     return;
@@ -827,7 +920,7 @@ function main(argv) {
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    main(process.argv.slice(2));
+    await main(process.argv.slice(2));
   } catch (error) {
     const why = String(error.stderr || error.message).trim();
     console.error(`factory-ledger: ${why}`);

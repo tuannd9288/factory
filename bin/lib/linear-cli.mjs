@@ -105,6 +105,33 @@ export function holderOf(comments) {
   return who;
 }
 
+const done = (data, what) => {
+  if (!data?.[what]?.success) throw new Refused(`Linear did not confirm ${what}`);
+  return data[what];
+};
+
+/** Every comment of an issue, oldest first, as { body, createdAt }. */
+export async function commentsOfIssue(api, key) {
+  const all = [];
+  let after = null;
+  do {
+    const page = (await api.request('query($id: String!, $after: String) { issue(id: $id) { comments(first: 100, after: $after) { nodes { body createdAt } pageInfo { hasNextPage endCursor } } } }', { id: key, after }))?.issue?.comments;
+    if (!page) throw new Refused(`Linear did not give the comments of ${key}`);
+    all.push(...page.nodes);
+    after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+  } while (after);
+  return all;
+}
+
+/** The holder comment of a take, and the read-back after it: when another named team's comment came first, refuse. A read-back with no
+ * holder (its own comment not yet visible) is success. Used by `take`, by `create --delegate` and by bin/factory-move (#406). */
+export async function announceTakeOn(api, issueId, key, team) {
+  const commentId = done(await api.commentCreate({ issueId, body: `${TAKEN} ${team}.`, team }), 'commentCreate').comment?.id ?? null;
+  const first = holderOf(await commentsOfIssue(api, key));
+  if (first && first !== team) throw new Refused(`${key} is held by team ${first}, whose take came first; take another issue`);
+  return commentId;
+}
+
 const STATES = 'states(first: 100) { nodes { id name type position } }';
 const firstStarted = (states) => states.filter((s) => s.type === 'started' && s.name !== NEEDS_HUMAN).sort((a, b) => a.position - b.position)[0];
 
@@ -135,11 +162,6 @@ export function createCli({ api, state, readStdin }) {
     return s;
   };
   const update = (id, input) => q('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier } } }', { id, input });
-  const done = (data, what) => {
-    if (!data?.[what]?.success) throw new Refused(`Linear did not confirm ${what}`);
-    return data[what];
-  };
-
   /** The Human: the one workspace owner who is not an app. Any other count refuses and names the count. */
   async function human() {
     const nodes = (await q('query { users(filter: { owner: { eq: true }, app: { eq: false } }, first: 10) { nodes { id } } }'))?.users?.nodes ?? [];
@@ -147,27 +169,8 @@ export function createCli({ api, state, readStdin }) {
     return nodes[0].id;
   }
 
-  /** Every comment of an issue, oldest first, as { body, createdAt }. */
-  async function commentsOf(key) {
-    const all = [];
-    let after = null;
-    do {
-      const page = (await q('query($id: String!, $after: String) { issue(id: $id) { comments(first: 100, after: $after) { nodes { body createdAt } pageInfo { hasNextPage endCursor } } } }', { id: key, after }))?.issue?.comments;
-      if (!page) throw new Refused(`Linear did not give the comments of ${key}`);
-      all.push(...page.nodes);
-      after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
-    } while (after);
-    return all;
-  }
-
-  /** The holder comment of a take, and the read-back after it: when another named team's comment came first, refuse. A read-back with no
-   * holder (its own comment not yet visible) is success. Used by `take` and by `create --delegate`. */
-  async function announceTake(issueId, key, team) {
-    const commentId = done(await api.commentCreate({ issueId, body: `${TAKEN} ${team}.`, team }), 'commentCreate').comment?.id ?? null;
-    const first = holderOf(await commentsOf(key));
-    if (first && first !== team) throw new Refused(`${key} is held by team ${first}, whose take came first; take another issue`);
-    return commentId;
-  }
+  const commentsOf = (key) => commentsOfIssue(api, key);
+  const announceTake = (issueId, key, team) => announceTakeOn(api, issueId, key, team);
 
   /** The lock of a repository with no gate to claim in (#407 makes the gate read Linear). An issue is held by the team of the earliest
    * holder comment. Another team's issue is refused with nothing written, whether the app is still its delegate or not: that team takes
