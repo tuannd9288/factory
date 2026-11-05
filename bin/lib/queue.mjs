@@ -29,7 +29,7 @@
 // socket, no gh call; the start of a check-not-started condition wakes that pull request's Lead too. The merged ones are the 10 most
 // recently updated of the merged pull requests, the query having no order by merge time.
 // The news wake also reads every repository that has a team row (teamRows, bin/lib/teams.mjs) and is not taken in, the factory's own
-// among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and the factory's approval re-run (#456): no branch
+// among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and the factory's draft readiness (#455) and approval re-run (#456): no branch
 // update, no tier re-run, no comment wake (no claim is held there), no #309 condition, no switch watch beyond watchOwn's. Not with --repo.
 // The rules it read for the factory's own repository are handed to watchOwn, so they are read once in a sweep.
 // A pull request of the factory's own repository finds its Lead by its `Team:` line (`Team: lead` is `factory-lead`).
@@ -341,15 +341,30 @@ function sweep(repo, reads, state, switches, { self, folder, runs, clone }) {
   } catch (error) {
     console.log(`queue: the news of ${repo} was not handled: ${String(error.message).split('\n')[0]}`);
   }
+  draftReadiness(repo, prs, clone);
+  const { ran, position } = followSwitch(repo, state, rules, prs);
+  if (position) switches.set(repo, watchSwitch({ state, repo, position }));
+  for (const { number, jobId } of pickReruns(prs).filter((p) => !ran.has(p.number))) rerun(repo, number, jobId, "after its approval or Entire's check");
+  const pr = pickUpdate(prs, required, position);
+  if (!pr) return;
+  gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
+  console.log(`queue: updated ${repo}#${pr.number} to its base`);
+}
+
+function draftReadiness(repo, prs, clone) {
   // Like ship, only origin/main's policy counts, never the candidate's driver file.
   let policy = {};
   if (clone && spawnSync('git', ['-C', clone, 'cat-file', '-e', 'origin/main:.gate/driver.json'], { stdio: 'ignore' }).status === 0)
     policy = JSON.parse(execFileSync('git', ['-C', clone, 'show', 'origin/main:.gate/driver.json'], { encoding: 'utf8' }));
-  const merge = policy.merge === 'merge' ? 'merge' : 'squash';
-  if (policy.drafts === 'landable') {
+  let merge = policy.merge == null ? null : policy.merge === 'merge' ? 'merge' : 'squash';
+  if ((policy.drafts ?? 'landable') === 'landable') {
     for (const pr of prs) {
       const conflict = pr.mergeable === 'CONFLICTING';
       if (pr.isDraft && pr.checks.verify?.state === 'SUCCESS' && !conflict) {
+        if (merge === null) {
+          const allowed = JSON.parse(gh(['repo', 'view', repo, '--json', 'squashMergeAllowed,mergeCommitAllowed']));
+          merge = !allowed.squashMergeAllowed && allowed.mergeCommitAllowed ? 'merge' : 'squash';
+        }
         gh(['pr', 'ready', String(pr.number), '--repo', repo]);
         gh(['pr', 'merge', String(pr.number), '--repo', repo, '--auto', `--${merge}`]);
       } else if (!pr.isDraft && (RED.has(pr.checks.verify?.state) || conflict)) {
@@ -358,13 +373,6 @@ function sweep(repo, reads, state, switches, { self, folder, runs, clone }) {
       }
     }
   }
-  const { ran, position } = followSwitch(repo, state, rules, prs);
-  if (position) switches.set(repo, watchSwitch({ state, repo, position }));
-  for (const { number, jobId } of pickReruns(prs).filter((p) => !ran.has(p.number))) rerun(repo, number, jobId, "after its approval or Entire's check");
-  const pr = pickUpdate(prs, required, position);
-  if (!pr) return;
-  gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
-  console.log(`queue: updated ${repo}#${pr.number} to its base`);
 }
 
 /** The repositories with a team row (teamRows) that are not taken in, for the news wake alone (#370): { repo (owner/name), folder }, the
@@ -387,15 +395,16 @@ export function leadOnly({ state, root, taken, swept = [], origin = ownRepo }) {
 }
 
 /** The sweep of a repository that is not taken in, for the news wake alone (#370): the rules' required checks and the same one query, then
- * wakeOnNews, and the factory's approval re-run (#456). No branch update, tier re-run, comment wake, condition for the events or switch watch. Returns the claim
+ * wakeOnNews, and the factory's draft readiness (#455) and approval re-run (#456). No branch update, tier re-run, comment wake, condition for the events or switch watch. Returns the claim
  * holders it read, for a seat's run that names no team. The rules it read are put in `rulesRead` (repo -> pages), for watchOwn, so the
  * factory's own rules are read once in a sweep. */
-function sweepNews(repo, folder, state, runs, rulesRead) {
+function sweepNews(repo, folder, state, runs, rulesRead, root) {
   const rules = pagesOf(rulesIn(repo));
   rulesRead.set(repo, rules);
   const required = requiredIn(rules);
   const { prs, merged, comments } = openPulls(repo);
   if (folder === FACTORY_REPO) {
+    draftReadiness(repo, prs, root);
     for (const { number, jobId } of pickReruns(prs, 'approval')) rerun(repo, number, jobId, 'after its approval', false, 'approval');
   }
   wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });
@@ -805,7 +814,7 @@ export function runPass({ repos = [], human, state }) {
       const root = process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..');
       for (const { repo, folder } of leadOnly({ state, root, taken: new Set([...clones.values()].map((d) => basename(d))) })) {
         try {
-          heldBy.set(folder, sweepNews(repo, folder, state, runs, rulesRead));
+          heldBy.set(folder, sweepNews(repo, folder, state, runs, rulesRead, root));
         } catch (error) {
           console.log(`queue: the news of ${repo} was not read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
         }

@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory } from './helpers.mjs';
+import { factory, git, commit } from './helpers.mjs';
 import { readLines } from '../bin/lib/events.mjs';
 import { leadOnly } from '../bin/lib/queue.mjs';
 import { wakeOnNews } from '../bin/lib/news-wake.mjs';
@@ -28,16 +28,21 @@ function world() {
   const dir = mkdtempSync(join(tmpdir(), 'lead-only-'));
   const [root, state, runs] = [join(dir, 'root'), join(dir, 'state'), join(dir, 'runs')];
   for (const d of [root, state, runs]) mkdirSync(d);
-  const git = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
-  git('init', '-q');
-  git('remote', 'add', 'origin', 'https://github.com/o/factory.git');
+  const localGit = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+  localGit('init', '-q');
+  localGit('remote', 'add', 'origin', 'https://github.com/o/factory.git');
   writeFileSync(join(state, 'accounts'), 'factory/factory-lead=acct\n');
-  writeFileSync(join(dir, 'gh'), ['#!/bin/sh', 'printf \'%s\\n\' "$(printf \'%s\' "$*" | tr \'\\n\' \' \')" >>"$Q/calls"', 'case "$*" in', '  "api user"*) echo agent-bot ;;', '  *rules/branches*) printf "["; cat "$Q/rules.json"; printf "]" ;;', '  *graphql*) cat "$Q/prs.json" ;;', '  "run rerun "*) exit 0 ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
+  writeFileSync(join(dir, 'gh'), ['#!/bin/sh', 'printf \'%s\\n\' "$(printf \'%s\' "$*" | tr \'\\n\' \' \')" >>"$Q/calls"', 'case "$*" in', '  "api user"*) echo agent-bot ;;', '  *rules/branches*) printf "["; cat "$Q/rules.json"; printf "]" ;;', '  "repo view "*) cat "$Q/methods.json" ;;', '  *graphql*) cat "$Q/prs.json" ;;', '  "run rerun "*|"pr ready "*|"pr merge "*) exit 0 ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
   chmodSync(join(dir, 'gh'), 0o755);
   writeFileSync(join(dir, 'rules.json'), JSON.stringify(rules));
+  writeFileSync(join(dir, 'methods.json'), JSON.stringify({ squashMergeAllowed: true, mergeCommitAllowed: true }));
   const put = (nodes) => writeFileSync(join(dir, 'prs.json'), JSON.stringify({ data: { repository: { pullRequests: { nodes } } } }));
   return {
     dir, root, state, put,
+    policy: (drafts) => {
+      commit(root, { '.gate/driver.json': JSON.stringify({ drafts }) }, 'policy');
+      git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    },
     sweep: (args = ['sweep', '--once']) => {
       writeFileSync(join(dir, 'calls'), '');
       const out = spawnSync(join(factory, 'bin/factory-queue'), args, { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, Q: dir, FACTORY_STATE: state, FACTORY_RUNS: runs, FACTORY_ROOT: root, FACTORY_CHECKOUT: '' } });
@@ -63,6 +68,7 @@ test('the repositories with a team row that are not taken in are named, the fact
 test('such a repository gets news wakes and nothing else from the sweep', () => {
   const w = world();
   try {
+    w.policy('pstack');
     w.put([pull(7, { mergeable: 'MERGEABLE' })]);
     const first = w.sweep();
     assert.equal(readLines(w.state).filter((e) => e.type === 'start').length, 0, first.out);
@@ -153,3 +159,44 @@ for (const method of ['squash', 'merge']) {
     } finally { w.cleanup(); }
   });
 }
+
+for (const policy of ['absent', 'no-key', 'pstack']) {
+  test(`factory lead-only readiness follows ${policy} policy`, () => {
+    const w = world();
+    try {
+      if (policy !== 'absent') w.policy(policy === 'no-key' ? undefined : policy);
+      w.put([
+        pull(1, { isDraft: true }),
+        pull(2, { mergeable: 'CONFLICTING' }),
+        pull(3, { commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [run('verify', 'FAILURE')] } } } }] } }),
+      ]);
+      const r = w.sweep();
+      assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), policy === 'pstack' ? [] : [
+        'pr ready 1 --repo o/factory',
+        'pr merge 1 --repo o/factory --auto --squash',
+        'pr ready 2 --repo o/factory --undo',
+        'pr ready 3 --repo o/factory --undo',
+      ], r.out);
+    } finally { w.cleanup(); }
+  });
+}
+
+test('factory with no driver uses its allowed merge method once per sweep, only when arming', () => {
+  const w = world();
+  try {
+    writeFileSync(join(w.dir, 'methods.json'), JSON.stringify({ squashMergeAllowed: false, mergeCommitAllowed: true }));
+    w.put([pull(1, { isDraft: true, mergeable: 'CONFLICTING' })]);
+    assert.deepEqual(w.sweep().calls.filter((c) => c.startsWith('repo view')), []);
+    w.put([pull(1, { isDraft: true }), pull(2, { isDraft: true })]);
+    const r = w.sweep();
+    assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
+      'pr ready 1 --repo o/factory',
+      'pr merge 1 --repo o/factory --auto --merge',
+      'pr ready 2 --repo o/factory',
+      'pr merge 2 --repo o/factory --auto --merge',
+    ], r.out);
+    assert.deepEqual(r.calls.filter((c) => c.startsWith('repo view')), [
+      'repo view o/factory --json squashMergeAllowed,mergeCommitAllowed',
+    ]);
+  } finally { w.cleanup(); }
+});

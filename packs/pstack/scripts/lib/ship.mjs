@@ -237,6 +237,7 @@ function main(argv) {
   // Only trunk's policy counts; the candidate cannot enable stacks for itself.
   const policy = quietGit(['cat-file', '-e', 'origin/main:.gate/driver.json'])
     ? JSON.parse(git(['show', 'origin/main:.gate/driver.json'])) : {};
+  policy.drafts ??= 'landable';
   const stacks = policy.stacks !== 'off';
   const merge = policy.merge === 'merge' ? 'merge' : 'squash';
   if (!pr && !stacks && args.base && args.base !== 'main')
