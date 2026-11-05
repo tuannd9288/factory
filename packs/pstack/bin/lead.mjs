@@ -227,6 +227,21 @@ export function markOnboarded(config) {
   }
 }
 
+/** Copy pstack's mapped skill defaults into the Lead profile on every start (#436). Model changes are the Human's. */
+export function writeModels(config, root) {
+  const file = join(config, 'rules/pstack-models.md');
+  const text = readFileSync(join(root, 'packs/pstack/pstack-models.md'));
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw new Error(`could not write ${file}: ${e.code ?? e.message}`);
+  }
+}
+
 /** The role text's hash (#316): SHA-256 hex of the exact string that goes to --append-system-prompt. */
 export const roleHash = (roleText) => createHash('sha256').update(roleText).digest('hex');
 
@@ -417,6 +432,7 @@ function main(argv, env) {
   const token = t.token;
   try {
     markOnboarded(config);
+    writeModels(config, root);
   } catch (e) {
     process.stderr.write(`bin/lead: ${e.message}\n`);
     return 2;

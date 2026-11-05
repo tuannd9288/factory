@@ -21,7 +21,7 @@ function fixture(t) {
   mkdirSync(join(state, 'linear'));
   writeFileSync(join(state, 'linear', 'repos.json'), JSON.stringify({ repo: { key: 'FAC', teamId: 'team-fac' } }));
   const f = { state, store: openStore(join(state, 'factory.db')), sockets: [], timers: [], logs: [], queries: [], sources: [],
-    comments: [], issues: [], tokens: 0, fetch: null, now: 600_000 };
+    comments: [], issues: [], holderComments: [], posts: [], tokens: 0, fetch: null, now: 600_000 };
   class FakeWebSocket {
     constructor(url, options) {
       assert.equal(url, 'wss://api.linear.app/graphql');
@@ -44,7 +44,9 @@ function fixture(t) {
   }
   f.start = (options = {}) => {
     const source = startLinearSource({ state, store: f.store, WebSocket: FakeWebSocket,
-      now: () => f.now,
+      now: () => f.now, runs: join(state, 'runs'),
+      linear: { request: async () => ({ issue: { comments: page(f.holderComments) } }) },
+      post: async (file, line) => { f.posts.push({ file, line }); return { posted: true }; },
       mintToken: async () => ({ token: `private-token-${++f.tokens}` }),
       getToken: async () => `private-token-${++f.tokens}`,
       fetchCatchUp: async (query, variables) => {
@@ -118,6 +120,7 @@ test('a stream event is recorded once, after every catch-up page and only for se
   assert.equal(f.store.offset('linear:FAC'), 3000);
   ws.next('commentCreated', comment('live-only', 5));
   ws.next('commentCreated', comment('live-only', 5));
+  await tick();
   assert.equal(f.store.linearEvents().filter((r) => r.id === 'live-only').length, 1);
   assert.equal(f.store.offset('linear:FAC'), 5000);
 });
@@ -169,6 +172,7 @@ test('restart catches up from the persisted cursor without duplicates', async (t
   f.sockets[0].open();
   await tick();
   f.sockets[0].next('commentCreated', comment('before', 5));
+  await tick();
   first.stop();
   f.store.close();
   f.store = openStore(join(f.state, 'factory.db'));
@@ -195,7 +199,7 @@ test('authentication failures mint, pause, preserve the condition across other c
     fetchFn: async (url) => {
       const body = url.endsWith('/oauth/token')
         ? { access_token: `private-token-${++mints + 1}`, expires_in: 30 * 86400 }
-        : { data: { viewer: { id: 'app' } } };
+        : { data: { viewer: { id: 'app' }, issue: { comments: page([]) } } };
       return { status: 200, text: async () => JSON.stringify(body) };
     } });
   const source = f.start({ linear, getToken: undefined, mintToken: undefined });
@@ -296,11 +300,81 @@ test('an empty real token store starts nothing, polls quietly and resumes when a
   assert.equal(networkCalls, 0);
   assert.deepEqual(f.logs, ['daemon: Linear source not started: no usable token']);
   writeAppFile(agentProfiles, 'linear-app', 'access.json', JSON.stringify({ token: 'private-token-added', expiresAt: f.now + 86400_000 }));
-  f.comments.push(comment('before-token', 30));
+  f.comments.push(comment('before-token', 30, 'INN'));
   const ws = await f.reconnect(300_000);
   ws.open();
   await tick();
   assert.equal(source.waiting, false);
   assert.deepEqual(f.store.linearEvents().map((r) => r.id), ['before-token']);
   assert.equal(networkCalls, 0);
+});
+
+
+test('a held Linear comment wakes once across stream, catch-up and restart and stores its delay', async (t) => {
+  const f = fixture(t);
+  f.holderComments = [{ body: 'Taken by team alpha.', createdAt: time(1) }];
+  const source = f.start();
+  await source.ready;
+  const ws = f.sockets[0];
+  ws.open();
+  await tick();
+  const node = comment('held-comment', 599);
+  ws.next('commentCreated', node);
+  await tick();
+  assert.equal(f.posts.length, 1);
+  assert.equal(f.posts[0].file, join(f.state, 'runs', 'repo-alpha', 'socket'));
+  assert.match(JSON.parse(f.posts[0].line).message.content, /new comment on repo#FAC-1; re-read the issue\./);
+  assert.equal(f.store.linearEvents()[0].wake_delay_ms, 1000);
+  f.comments.push(node);
+  ws.emit('close', { code: 1001 });
+  const next = await f.reconnect(0);
+  next.open();
+  await tick();
+  source.stop();
+  f.store.close();
+  f.store = openStore(join(f.state, 'factory.db'));
+  await f.start().ready;
+  assert.equal(f.store.linearEvents()[0].wake_delay_ms, 1000);
+  assert.equal(f.posts.length, 1);
+  const lines = readFileSync(join(f.state, 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).filter((e) => e.kind === 'comment');
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].key, 'comment repo#FAC-1 held-comment');
+  assert.match(lines[0].text, /Lead ~\/factory-runs\/repo-alpha: woken$/);
+});
+
+test('own app comments, unheld issues and INN do not wake', async (t) => {
+  const f = fixture(t);
+  f.holderComments = [{ body: 'Taken by team alpha.', createdAt: time(1) }];
+  f.comments = [{ ...comment('self', 2), user: null, botActor: { type: 'oauthClient' } }, comment('inn', 2, 'INN')];
+  await f.start().ready;
+  assert.equal(f.posts.length, 0);
+  f.holderComments.push({ body: 'Released by team alpha.', createdAt: time(3) });
+  const ws = f.sockets[0];
+  ws.open();
+  await tick();
+  ws.next('commentCreated', comment('unheld', 4));
+  await tick();
+  assert.equal(f.posts.length, 0);
+  assert.ok(f.store.linearEvents().every((e) => e.wake_delay_ms === null));
+});
+
+
+test('the source answers ping while the async wake is pending', async (t) => {
+  const f = fixture(t);
+  f.holderComments = [{ body: 'Taken by team alpha.', createdAt: time(1) }];
+  let finish;
+  await f.start({ post: () => new Promise((resolve) => { finish = resolve; }) }).ready;
+  const ws = f.sockets[0];
+  ws.open();
+  await tick();
+  ws.next('commentCreated', comment('pending', 599));
+  await tick();
+  assert.equal(typeof finish, 'function');
+  ws.message({ type: 'ping', payload: { duringWake: true } });
+  assert.deepEqual(ws.sent.at(-1), { type: 'pong', payload: { duringWake: true } });
+  finish({ posted: false, why: 'no file' });
+  await tick();
+  assert.equal(f.store.linearEvents()[0].wake_delay_ms, null);
+  const lines = readFileSync(join(f.state, 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.match(lines.find((line) => line.kind === 'comment').text, /not woken \(no file\); the comment waits on Linear/);
 });

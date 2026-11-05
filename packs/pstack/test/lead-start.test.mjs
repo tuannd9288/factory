@@ -52,6 +52,7 @@ function world(body, { settings = PSTACK } = {}) {
   cpSync(join(real, 'packs/pstack/bin/lead.mjs'), join(w.tree, 'packs/pstack/bin/lead.mjs'));
   cpSync(join(real, 'packs/pstack/bin/transcript-copy.mjs'), join(w.tree, 'packs/pstack/bin/transcript-copy.mjs')); // copied into the run folder (#257)
   cpSync(join(real, 'packs/pstack/settings.json'), join(w.tree, 'packs/pstack/settings.json')); // the factory's pin
+  cpSync(join(real, 'packs/pstack/pstack-models.md'), join(w.tree, 'packs/pstack/pstack-models.md'));
   writeFileSync(join(w.tree, 'packs/pstack/lead.md'), '# role\n');
   const repo = join(w.tree, 'zalo');
   mkdirSync(join(repo, '.git'), { recursive: true });
@@ -156,6 +157,12 @@ describe('lead resumes by default', () => {
     assert.ok(!r.out.includes('--resume'));
     assert.equal(w.lead().code, 0);
     assert.equal(resumed(w.log().at(-1)), null);
+    const rule = join(w.config, 'rules/pstack-models.md');
+    const first = readFileSync(rule);
+    assert.deepEqual(first, readFileSync(join(real, 'packs/pstack/pstack-models.md')));
+    assert.equal(w.lead().code, 0);
+    assert.deepEqual(readFileSync(rule), first);
+
   }));
 
   test('--new starts a new session although a copy exists', () => world((w) => {
@@ -614,7 +621,7 @@ describe('lead onboarding key (#179)', () => {
     assert.equal(w.lead().code, 0);
     assert.deepEqual(JSON.parse(readFileSync(file(w), 'utf8')), { hasCompletedOnboarding: true });
     assert.equal((statSync(file(w)).mode & 0o777).toString(8), '600');
-    assert.deepEqual(readdirSync(w.config), ['.claude.json'], 'no temporary file is left');
+    assert.deepEqual(readdirSync(w.config).sort(), ['.claude.json', 'rules'], 'no temporary file is left');
   }));
 
   test('a file that holds other keys keeps them and its mode (#179)', () => world((w) => {
@@ -663,7 +670,7 @@ describe('lead start', () => {
     for (const c of calls.slice(0, 2)) assert.deepEqual([c.config, c.cache], [install, w.pluginRoot]);
     assert.equal(calls[2].cache, w.pluginRoot);
     assert.ok(calls[2].argv.includes('--settings'));
-    assert.deepEqual(readdirSync(w.config), ['.claude.json'], 'the profile got the onboarding key and nothing else');
+    assert.deepEqual(readdirSync(w.config).sort(), ['.claude.json', 'rules'], 'the profile got the onboarding key and model rules');
   }));
 
   test('a failed install stops the start, with the reason', () => world((w) => {

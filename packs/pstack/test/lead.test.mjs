@@ -1,7 +1,7 @@
 // packs/pstack/bin/lead (#163): what the launcher refuses and the arguments it gives claude. No live claude, no network.
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -256,4 +256,53 @@ describe('exitCodeOf', () => {
   test('neither is 1', () => {
     assert.equal(exitCodeOf({ status: null, signal: null }), 1);
   });
+});
+
+test('the model rule copies mapped defaults on every start without changing other config files', async () => {
+  const { writeModels } = await import('../bin/lead.mjs');
+  const config = tmp();
+  const root = fileURLToPath(new URL('../../..', import.meta.url));
+  try {
+    mkdirSync(join(config, 'rules'));
+    const others = ['.claude.json', 'settings.json', 'rules/other.md'];
+    for (const name of others) writeFileSync(join(config, name), 'keep me\n', { mode: 0o600 });
+    const before = others.map((name) => ({ bytes: readFileSync(join(config, name)), stat: statSync(join(config, name)) }));
+    const file = join(config, 'rules/pstack-models.md');
+    writeModels(config, root);
+    const first = readFileSync(file);
+    assert.deepEqual(first, readFileSync(join(root, 'packs/pstack/pstack-models.md')));
+    assert.deepEqual(first.toString().split('\n').filter((line) => line && !line.startsWith('#')), [
+      'feature, refactoring: inherit-parent',
+      'bug-fix: inherit-parent',
+      'perf-issue: inherit-parent',
+      'hillclimb: inherit-parent',
+      'judgment and prose: opus xhigh',
+      'hardest tasks: opus xhigh',
+      'how explorer: inherit-parent',
+      'how explainer: opus xhigh',
+      'why investigators: inherit-parent',
+      'why synthesizer: opus xhigh',
+      'reflect tooling: inherit-parent',
+      'reflect judgment, divergent, synthesizer: opus xhigh',
+      'arena runners: opus xhigh, inherit-parent',
+      'arena cross-judge pool: opus xhigh, inherit-parent',
+      'swarm workers: inherit-parent',
+      'architect runners: opus xhigh, inherit-parent',
+      'interrogate reviewers: opus xhigh, inherit-parent',
+    ]);
+    writeModels(config, root);
+    assert.deepEqual(readFileSync(file), first);
+    writeFileSync(file, 'stale rule\n');
+    writeModels(config, root);
+    assert.deepEqual(readFileSync(file), first, 'each start replaces the whole rule');
+    assert.deepEqual(readdirSync(config).sort(), ['.claude.json', 'rules', 'settings.json']);
+    assert.deepEqual(readdirSync(join(config, 'rules')).sort(), ['other.md', 'pstack-models.md']);
+    for (const [i, name] of others.entries()) {
+      assert.deepEqual(readFileSync(join(config, name)), before[i].bytes);
+      const after = statSync(join(config, name));
+      for (const key of ['mode', 'ino', 'size', 'mtimeMs', 'ctimeMs']) assert.equal(after[key], before[i].stat[key], name);
+    }
+  } finally {
+    rmSync(config, { recursive: true, force: true });
+  }
 });

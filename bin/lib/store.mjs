@@ -9,6 +9,7 @@
 //            seat from waking twice is the state file queue-seats.news, as before (bin/lib/news-wake.mjs).
 //            linear:<KEY> is each Linear team's newest handled event time in milliseconds, initially now minus ten minutes.
 //   linear_events  one row per Linear comment id or issue id plus updatedAt, with kind, issue identifier, team key, actor id and time (ms).
+//                  wake_delay_ms measures comment creation to a successful wake for slice 4.
 //                  Each new event and its team's monotonic offset are committed in the same transaction.
 //   posts    each seat end the daemon took: when it arrived (ms), the verb, the run and tag, the session, when its wake went out (woke_at, ms) or
 //            why it did not (why), and the seq of the events line. Slice 4 measures a seat's end to its Lead's wake from this table.
@@ -42,6 +43,7 @@ export const MIGRATIONS = [
      actor_id TEXT,
      time INTEGER NOT NULL
    );`,
+  `ALTER TABLE linear_events ADD COLUMN wake_delay_ms INTEGER;`,
 ];
 
 const KEEP_BACKUPS = 3;
@@ -140,7 +142,7 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
       const key = kind === 'commentCreated' ? id : `${id}:${time}`;
       db.exec('BEGIN IMMEDIATE');
       try {
-        const added = q('INSERT OR IGNORE INTO linear_events VALUES (?, ?, ?, ?, ?, ?, ?)')
+        const added = q('INSERT OR IGNORE INTO linear_events (event_key, kind, id, issue_identifier, team_key, actor_id, time) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(key, kind, id, issueIdentifier, teamKey, actorId, time).changes > 0;
         if (added) setOffset.run(`linear:${teamKey}`, Math.max(time, Number(getOffset.get(`linear:${teamKey}`)?.value ?? 0)), now());
         db.exec('COMMIT');
@@ -150,6 +152,8 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
         throw error;
       }
     },
+    /** Delay from comment creation to a successful async wake, in milliseconds. */
+    linearWake: (id, delay) => void q('UPDATE linear_events SET wake_delay_ms = ? WHERE event_key = ?').run(delay, id),
     linearEvents: () => q('SELECT * FROM linear_events ORDER BY time, event_key').all().map((r) => ({ ...r })),
     /** What the connection runs with, as the settings above name them. */
     settings: () => ({

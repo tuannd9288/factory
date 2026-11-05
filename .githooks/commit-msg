@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# The factory repository's own commit hook (#368): only the subject check of the kit, never its pre-commit, whose gate is not here.
+exec node "$(git rev-parse --show-toplevel)/kit/.gate/bin/lib/subject.mjs" "$1"
