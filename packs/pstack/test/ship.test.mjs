@@ -1,6 +1,6 @@
 // scripts/ship (#85): one command that opens the pull request only after a local pass and then takes step 4's next step,
 // against a fake gh and a fake scripts/live-verify, in a copy of the kit and the pstack pack with a real bare origin.
-import { describe, test } from 'node:test';
+import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -72,9 +72,16 @@ process.exit(verdict === 'FAIL' ? 1 : 2);
 
 const BODY = '**Tóm tắt cho anh**\n- **Anh quyết:** x\n- **Đề xuất:** Approve.\n- **Rủi ro:** y\n\n**TL;DR**\n- **You decide:** x\n- **Recommendation:** Approve.\n- **Risk:** y\n\n<details>\n<summary>The change in detail</summary>\n\n- Purpose: names the operation\n\n</details>\n\nCloses #3\n';
 
+const directories = [];
+
+afterEach(() => {
+  for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
 function world({ driver = true, liveVerify = true } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
+  directories.push(dir);
   const repo = join(dir, 'app');
   const sh = join(dir, 'sh');
   cpSync(join(factory, 'kit'), repo, { recursive: true });
@@ -128,6 +135,18 @@ function world({ driver = true, liveVerify = true } = {}) {
   };
   return w;
 }
+
+test('removes every world when its test ends', async (t) => {
+  const dirs = [];
+  t.after(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+  await t.test('creates two worlds', () => {
+    dirs.push(world().dir, world().dir);
+    for (const dir of dirs) assert.ok(existsSync(dir));
+  });
+  for (const dir of dirs) assert.ok(!existsSync(dir), `world remains: ${dir}`);
+});
 
 describe('opening the pull request', () => {
   test('is refused without a red-check stamp, and for one against another base', () => {
