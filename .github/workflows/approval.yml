@@ -1,0 +1,42 @@
+# The same patch approval as the served repositories' tier job, re-run by the queue after approval.
+# Only the base's script and CODEOWNERS run; the candidate is fetched as git objects.
+name: approval
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: approval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  approval:
+    name: approval
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE: ${{ github.event.pull_request.base.sha }}
+      HEAD: ${{ github.event.pull_request.head.sha }}
+      PR: ${{ github.event.pull_request.number }}
+      AUTHOR: ${{ github.event.pull_request.user.login }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Fetch the candidate's commits, with no work tree
+        run: git -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch --no-tags --quiet origin "$HEAD"
+      - name: Require approval of the head or its unchanged patch
+        run: |
+          reviews=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews")
+          printf '%s' "$reviews" | node kit/.gate/bin/lib/approval.mjs --owners .github/CODEOWNERS --author "$AUTHOR" --head "$HEAD" --base "$BASE"

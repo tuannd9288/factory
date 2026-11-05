@@ -11,16 +11,17 @@ const ENTIRE = 'Entire Gates';
  * someone other than its author approved on the head commit after that check started, so an approval landing while
  * the job ran is not lost, or (#155) whose Entire Gates check, of an App other than Actions, concluded after it
  * started. The tier check itself decides whether the approver may approve, and what Entire's conclusion means; it
- * pins Entire's App, so a copy of that name only costs one re-run. */
-export function pickReruns(prs) {
+ * pins Entire's App, so a copy of that name only costs one re-run. The factory's approval check uses the same
+ * review rule, without Entire. */
+export function pickReruns(prs, check = 'tier') {
   return prs
-    .filter((p) => RED.has(p.checks.tier?.state) && p.checks.tier.jobId)
+    .filter((p) => RED.has(p.checks[check]?.state) && p.checks[check].jobId)
     .filter(
       (p) =>
-        p.approvals.some((a) => a.login !== p.author && a.oid === p.head && a.at > p.checks.tier.startedAt) ||
-        (Boolean(p.apps?.[ENTIRE]?.completedAt) && p.apps[ENTIRE].completedAt > p.checks.tier.startedAt),
+        p.approvals.some((a) => a.login !== p.author && a.oid === p.head && a.at > p.checks[check].startedAt) ||
+        (check === 'tier' && Boolean(p.apps?.[ENTIRE]?.completedAt) && p.apps[ENTIRE].completedAt > p.checks[check].startedAt),
     )
-    .map((p) => ({ number: p.number, jobId: p.checks.tier.jobId }));
+    .map((p) => ({ number: p.number, jobId: p.checks[check].jobId }));
 }
 
 /** Whether the required check `name` of `p` failed: an Actions check by its conclusion; another App's by anything but success while it is

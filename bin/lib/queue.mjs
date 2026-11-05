@@ -29,7 +29,7 @@
 // socket, no gh call; the start of a check-not-started condition wakes that pull request's Lead too. The merged ones are the 10 most
 // recently updated of the merged pull requests, the query having no order by merge time.
 // The news wake also reads every repository that has a team row (teamRows, bin/lib/teams.mjs) and is not taken in, the factory's own
-// among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and nothing else: no branch
+// among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and the factory's approval re-run (#456): no branch
 // update, no tier re-run, no comment wake (no claim is held there), no #309 condition, no switch watch beyond watchOwn's. Not with --repo.
 // The rules it read for the factory's own repository are handed to watchOwn, so they are read once in a sweep.
 // A pull request of the factory's own repository finds its Lead by its `Team:` line (`Team: lead` is `factory-lead`).
@@ -306,16 +306,16 @@ function followSwitch(repo, state, rules, all) {
   return { ran, position };
 }
 
-/** Re-runs one tier job and says so; a re-run GitHub refuses (a run over 30 days old, one still in progress) is told in one
+/** Re-runs one approval or tier job and says so; a re-run GitHub refuses (a run over 30 days old, one still in progress) is told in one
  * line, unless `quiet` says it was told already, and returns false, and never stops the sweep. */
-function rerun(repo, number, jobId, why, quiet = false) {
+function rerun(repo, number, jobId, why, quiet = false, check = 'tier') {
   try {
     gh(['run', 'rerun', '--job', jobId, '--repo', repo]);
   } catch (error) {
-    if (!quiet) console.log(`queue: could not re-run the tier check of ${repo}#${number} ${why}: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
+    if (!quiet) console.log(`queue: could not re-run the ${check} check of ${repo}#${number} ${why}: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
     return false;
   }
-  console.log(`queue: re-ran the tier check of ${repo}#${number} ${why}`);
+  console.log(`queue: re-ran the ${check} check of ${repo}#${number} ${why}`);
   return true;
 }
 
@@ -387,7 +387,7 @@ export function leadOnly({ state, root, taken, swept = [], origin = ownRepo }) {
 }
 
 /** The sweep of a repository that is not taken in, for the news wake alone (#370): the rules' required checks and the same one query, then
- * wakeOnNews. No branch update, no tier re-run, no comment wake, no condition for the events and no switch watch. Returns the claim
+ * wakeOnNews, and the factory's approval re-run (#456). No branch update, tier re-run, comment wake, condition for the events or switch watch. Returns the claim
  * holders it read, for a seat's run that names no team. The rules it read are put in `rulesRead` (repo -> pages), for watchOwn, so the
  * factory's own rules are read once in a sweep. */
 function sweepNews(repo, folder, state, runs, rulesRead) {
@@ -395,6 +395,9 @@ function sweepNews(repo, folder, state, runs, rulesRead) {
   rulesRead.set(repo, rules);
   const required = requiredIn(rules);
   const { prs, merged, comments } = openPulls(repo);
+  if (folder === FACTORY_REPO) {
+    for (const { number, jobId } of pickReruns(prs, 'approval')) rerun(repo, number, jobId, 'after its approval', false, 'approval');
+  }
   wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });
   return holders(comments.claims?.nodes);
 }
