@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory } from './helpers.mjs';
+import { commit, factory, git, quiet } from './helpers.mjs';
 import { lines } from '../bin/lib/alerts.mjs';
 
 const FAKE_GH = '#!/bin/sh\necho "$*" >>"$Q/calls"\ncase "$*" in\n  "repo view"*) echo "{\\"visibility\\":\\"$VIS\\"}" ;;\n  "api --paginate"*) echo "[[]]" ;;\n  "api repos/o/app/actions/secrets") echo \'{"secrets":[]}\' ;;\n  "issue list"*) echo "[]" ;;\n  "issue create"*) [ -n "$FAIL_CREATE" ] && { echo "HTTP 502" >&2; exit 1; }; echo https://github.com/o/better-factory/issues/99 ;;\n  "label create"*) ;;\n  *) exit 1 ;;\nesac\n';
@@ -19,8 +19,12 @@ function withMachine(body) {
     chmodSync(join(dir, 'bin/gh'), 0o755);
     writeFileSync(join(dir, 'calls'), '');
     mkdirSync(join(dir, 'root'));
+    git(join(dir, 'root'), 'init', '-q', '-b', 'main');
+    commit(join(dir, 'root'), { 'README.md': '# factory\n' }, 'start');
+    git(dir, 'clone', '-q', '--bare', join(dir, 'root'), join(dir, 'origin.git'));
+    git(join(dir, 'root'), 'remote', 'add', 'origin', join(dir, 'origin.git'));
     const state = join(dir, 'state');
-    const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: dir, Q: dir, VIS: 'PRIVATE', FAIL_CREATE: '', FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), FACTORY_PROFILE_DIRS: '' };
+    const env = { ...process.env, ...quiet, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: dir, Q: dir, VIS: 'PRIVATE', FAIL_CREATE: '', FACTORY_ROOT: join(dir, 'root'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'), FACTORY_PROFILE_DIRS: '' };
     const run = (args, more = {}) => spawnSync(join(factory, 'bin/factory-ledger'), ['--repo', 'o/app', '--since', '2026-10-17', '--until', '2026-10-24', ...args], { encoding: 'utf8', env: { ...env, ...more } });
     body({ run, report: join(state, 'digest.failed'), state });
   } finally {
@@ -45,6 +49,7 @@ test('a failing gh issue create leaves digest.failed, and a later successful pos
     const bad = run(['--post', 'o/better-factory'], { FAIL_CREATE: '1' });
     assert.equal(bad.status, 1, bad.stdout + bad.stderr);
     assert.match(readFileSync(report, 'utf8'), /^20\d\d-\d\d-\d\dT\S+ .*HTTP 502/);
+    // #366: the node that took the period's claim posts again after its own failed post.
     const good = run(['--post', 'o/better-factory']);
     assert.equal(good.status, 0, good.stdout + good.stderr);
     assert.ok(!existsSync(report), 'a post that went through clears it');
