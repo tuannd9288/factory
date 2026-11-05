@@ -132,6 +132,13 @@ export async function announceTakeOn(api, issueId, key, team) {
   return commentId;
 }
 
+/** Release only the holder comment; a team rename keeps the issue's status and delegate. */
+export async function announceReleaseOn(api, issueId, key, team) {
+  const who = holderOf(await commentsOfIssue(api, key));
+  if (who !== team) throw new Refused(`${key} is not held by team ${team}`);
+  return done(await api.commentCreate({ issueId, body: `${RELEASED} ${team}.`, team }), 'commentCreate');
+}
+
 const STATES = 'states(first: 100) { nodes { id name type position } }';
 const firstStarted = (states) => states.filter((s) => s.type === 'started' && s.name !== NEEDS_HUMAN).sort((a, b) => a.position - b.position)[0];
 
@@ -201,7 +208,7 @@ export function createCli({ api, state, readStdin }) {
     const to = issue.team.states.nodes.filter((s) => s.type === 'unstarted').sort((a, b) => a.position - b.position)[0];
     if (!to) throw new Refused(`team ${issue.team.key} has no status of type unstarted`);
     done(await update(issue.id, { delegateId: null, stateId: to.id }), 'issueUpdate');
-    const c = done(await api.commentCreate({ issueId: issue.id, body: `${RELEASED} ${team}.`, team }), 'commentCreate');
+    const c = await announceReleaseOn(api, issue.id, key, team);
     return { ok: true, key, status: to.name, delegate: null, team, commentId: c.comment?.id ?? null };
   }
 

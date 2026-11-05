@@ -10,9 +10,8 @@ export const ANIMALS = [
 ];
 
 /** A Lead's team (#196): a letter, then at most 31 lowercase letters and digits. No `-` and no `/`, so `<repo>-<team>` splits at its
- * last `-`; a letter first, so it never matches a Lead's issue folder `<repo>-<n>`. The default team is `lead`. */
+ * last `-`; a letter first, so it never matches a Lead's issue folder `<repo>-<n>`. Without --team, use the only team, pick a nickname when none exists, and refuse when several exist. */
 export const TEAM = /^[a-z][a-z0-9]{0,31}$/;
-export const DEFAULT_TEAM = 'lead';
 
 /** `<repo>-<team>` (#311) split at its last `-`: { repo, team }, or null. The repo is a plain folder name (GitHub's characters, no `..`,
  * no `-` at its end); the team is in the TEAM grammar. Whether the repo is onboarded is not asked here. */
