@@ -573,3 +573,81 @@ test('a refused projectUpdate writes no issue', async () => {
   await assert.rejects(w.run(PROJECT));
   assert.deepEqual(w.writes, []);
 });
+
+test('a lost map never adopts a provenance line quoted in another issue copied body', async () => {
+  const quote = `Moved from https://github.com/${REPO}/issues/2`;
+  const w = world({ issues: [gi(1, { body: `Example:\n\`\`\`\n${quote}\n\`\`\`` }), gi(2)], comments: {} });
+  await w.run({ only: [1] });
+  const original = structuredClone(w.created[0]);
+  rmSync(mapFile(w.state, REPO));
+  await w.run({ only: [2] });
+  assert.equal(w.created.length, 2);
+  assert.deepEqual(w.created[0], original);
+  assert.deepEqual(w.updates, []);
+  assert.equal(w.map().issues['2'].id, w.created[1].id);
+});
+
+test('adoption accepts only line zero or the first non-blank line after the first exact Agent notes marker', async () => {
+  const line = `Moved from https://github.com/${REPO}/issues/1`;
+  for (const [description, matches] of [
+    [`${line}\n\nold body`, true],
+    [`Rewrite\r\n+++ Agent notes\r\n\r\n \t\r\n${line}\r\n\r\nbody`, true],
+    [`Rewrite\n${line}\n+++ Agent notes\n\nMoved from another URL`, false],
+    [`Rewrite\n+++ Agent notes\n\nOther line\n${line}`, false],
+    [`Rewrite\n+++ Agent notes\n\nOther line\n+++\n+++ Agent notes\n${line}`, false],
+    [`Rewrite\n+++ Agent notes extra\n${line}`, false],
+  ]) {
+    const w = world({ issues: [gi(1)], comments: {} });
+    w.created.push({ id: 'existing', identifier: 'FAC-50', url: 'u', input: { title: 'Issue 1', description } });
+    w.lcomments.existing = [];
+    await w.run();
+    assert.equal(w.created.length, matches ? 1 : 2, description);
+    assert.equal(w.map().issues['1'].id === 'existing', matches, description);
+  }
+});
+
+test('two --only runs attach parentId whichever run moves the parent', async () => {
+  for (const order of [[4, 1], [1, 4]]) {
+    const w = world();
+    await w.run({ only: [order[0]] });
+    await w.run({ only: [order[1]] });
+    const child = byNumber(w, 4);
+    const parent = byNumber(w, 1);
+    assert.equal(w.map().issues['4'].parent, true);
+    if (order[0] === 4) {
+      assert.deepEqual(w.updates, [{ id: child.id, input: { parentId: parent.id } }]);
+    } else {
+      assert.equal(child.input.parentId, parent.id);
+    }
+  }
+});
+
+test('a collapse line at re-read reports and retains the twin, defers updates and close, and can resume', async () => {
+  const w = world({ issues: [gi(1, { parent: { number: 2 } }), gi(2)], comments: {} });
+  w.afterRead = () => { w.issues[0].body = 'changed\n+++ nested'; };
+  const logs = [];
+  const result = await w.run({}, (line) => logs.push(line));
+  const twin = byNumber(w, 1);
+  const expected = `#1 | original body has a line starting +++ | twin ${twin.identifier} exists and was not updated`;
+  assert.ok(logs.includes(expected));
+  assert.ok(result.lines.includes(expected));
+  assert.equal(w.map().issues['1'].id, twin.id);
+  assert.equal(w.map().issues['1'].closed, false);
+  assert.equal(w.issues[0].closed, undefined);
+  assert.ok(w.writes.every((line) => !/^gh:(?:comment|close):1(?::|$)/.test(line)));
+  assert.deepEqual(w.updates, []);
+  const before = [...w.writes];
+  const dry = await w.run({ apply: false, project: 'Release 1', inProject: [1] });
+  assert.ok(dry.lines.includes(expected));
+  await w.run({ project: 'Release 1', inProject: [1] });
+  assert.deepEqual(w.writes, before);
+  w.issues[0].body = 'fixed body';
+  await w.run({ only: [1], project: 'Release 1', inProject: [1] });
+  assert.equal(w.created.length, 2);
+  assert.equal(w.map().issues['1'].id, twin.id);
+  assert.equal(w.map().issues['1'].closed, true);
+  assert.equal(w.map().issues['1'].parent, true);
+  assert.equal(w.map().issues['1'].project, true);
+  assert.equal(w.issues[0].closed, true);
+  assert.ok(w.updates.some((u) => u.id === twin.id && u.input.description === description(1, 'fixed body')));
+});

@@ -23,7 +23,7 @@
 // `comments` counts the comments written, `parent` is whether `parentId` is set, `source` hashes the title, body and rewrite FAC was written from.
 // Just before the GitHub comment the issue is read again: later comments are copied, and a changed title or body updates the FAC issue,
 // before the close. An entry with a field of the wrong type is a corrupt map. A second run finishes what a first left half done and
-// repeats no write. When the file is lost, an issue is looked for in the team by an exact description line before one is created, and
+// repeats no write. When the file is lost, an issue is looked for in the team by its provenance line (first, or first non-blank after `+++ Agent notes`) before one is created, and
 // adopted; a map file that exists and does not parse refuses the run.
 // Exit 0 done, 1 refused or failed (the reason is the first line of the message, never a token), 2 usage.
 import { execFileSync } from 'node:child_process';
@@ -203,6 +203,7 @@ export function createMove({ gh = ghRun, api, state }) {
     if (entry?.key !== teamKey) throw new Refused(`${repo} is not in the registry with team ${teamKey}; run factory linear onboard first; nothing was done`);
     const file = mapFile(state, repo);
     const map = readMap(file);
+    const collapseReason = (n) => `original body has a line starting +++${map.issues[n]?.key ? ` | twin ${map.issues[n].key} exists and was not updated` : ''}`;
     const all = await readIssues(owner, name, board);
     if (only) for (const n of only) {
       if (!all.some((i) => i.number === n)) throw new Refused(`issue #${n} is not an open issue; nothing was written`);
@@ -223,7 +224,7 @@ export function createMove({ gh = ghRun, api, state }) {
         at = next;
       }
       if (/^\+\+\+/m.test(i.rewrite)) throw new Refused(`invalid rewrite ${path}: line starts +++`);
-      if (/^\+\+\+/m.test(i.body)) i.skip = 'original body has a line starting +++';
+      if (/^\+\+\+/m.test(i.body)) i.skip = collapseReason(i.number);
     }
     for (const i of issues) {
       if (i.board !== null && !Object.hasOwn(STATUS, i.board)) throw new Refused(`issue #${i.number} has the board status "${i.board}", which has no place in FAC; nothing was written`);
@@ -286,7 +287,13 @@ export function createMove({ gh = ghRun, api, state }) {
       if (!e.closed) {
         // The run read the issue at its start, and a resumed twin may be older still: read it again before it is closed.
         const now = readIssue(owner, name, issue.number);
-        if (/^\+\+\+/m.test(now.body)) { log(`#${issue.number} | original body has a line starting +++`); continue; }
+        if (/^\+\+\+/m.test(now.body)) {
+          issue.skip = collapseReason(issue.number);
+          const line = `#${issue.number} | ${issue.skip}`;
+          lines[lines.findIndex((l) => l.startsWith(`#${issue.number} |`))] = line;
+          log(line);
+          continue;
+        }
         await copyFrom(now.comments);
         const source = sourceOf(now.title, now.body, issue.rewrite);
         if (source !== e.source) {
@@ -310,7 +317,7 @@ export function createMove({ gh = ghRun, api, state }) {
     }
     // A child that moved before its parent gets its parentId once the parent is in the map.
     for (const [n, e] of Object.entries(map.issues)) {
-      if ((only && !only.includes(Number(n))) || issues.some((i) => i.number === Number(n) && i.skip)) continue;
+      if (issues.some((i) => i.number === Number(n) && i.skip)) continue;
       const parent = e.parentOf === null || e.parentOf === undefined ? null : map.issues[e.parentOf];
       if (e.key && !e.parent && parent?.id) {
         done(await api.request('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }', { id: e.id, input: { parentId: parent.id } }), 'issueUpdate');
@@ -331,15 +338,20 @@ export function createMove({ gh = ghRun, api, state }) {
         }
       }
     }
-    return { ok: true, applied: true, count: moved.length, moved };
+    return { ok: true, applied: true, count: moved.length, moved, lines };
   }
 
-  /** The issue's FAC twin that a lost map file did not record: found by an exact line anywhere in its description. */
+  /** The issue's FAC twin that a lost map file did not record: found by the provenance line in the old or new layout. */
   async function adopt(issue, team, ghComments, stays) {
     const line = `Moved from ${issue.url}`;
     const found = (await api.request('query($filter: IssueFilter) { issues(filter: $filter, first: 50) { nodes { id identifier url title description } } }',
       { filter: { team: { key: { eq: team.key } }, description: { contains: line } } }))?.issues?.nodes ?? [];
-    const twin = found.find((n) => String(n.description ?? '').split(/\r?\n/).includes(line));
+    const twin = found.find((n) => {
+      const lines = String(n.description ?? '').split(/\r?\n/);
+      if (lines[0] === line) return true;
+      const notes = lines.indexOf('+++ Agent notes');
+      return notes !== -1 && lines.slice(notes + 1).find((l) => l.trim() !== '') === line;
+    });
     if (!twin) return null;
     const there = await commentsOfIssue(api, twin.identifier);
     return {
