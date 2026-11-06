@@ -18,7 +18,7 @@ test('with no arguments, on the MacBook: one row for each profile, with the acco
     s.w('claude-.claude-acc2.json', claudeJson('bob.example@other.example', 'pro'));
     s.w('codex-default', '');
     s.w('gh-macbook', 'ghann');
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.equal(r.code, 0, r.out);
     for (const p of ['macbook/claude', 'macbook/claude-acc2', 'macbook/claude-acc3', 'macbook/claude-acc4', 'macbook/claude-acc5', 'macbook/codex', 'macbook/gh']) assert.ok(rowOf(r.out, p), `${p} in\n${r.out}`);
     assert.match(rowOf(r.out, 'macbook/claude '), /ann\.example/);
@@ -26,7 +26,7 @@ test('with no arguments, on the MacBook: one row for each profile, with the acco
     assert.match(rowOf(r.out, 'macbook/claude-acc2'), /bob\.example/);
     assert.match(rowOf(r.out, 'macbook/gh'), /ghann/);
     assert.ok(!r.out.includes('factory/'), 'no factory row on the MacBook');
-    const j = s.fac('--json');
+    const j = s.fac('account', 'list', '--json');
     assert.equal(j.code, 0, j.out);
     for (const out of [r.out, j.out]) for (const secret of [EMAIL, 'secret-corp', ORG, 'Secret Corp', 'orgId']) assert.ok(!out.includes(secret), `${secret} leaked`);
     assert.equal(JSON.parse(j.out).find((x) => x.profile === 'macbook/claude').account, 'ann.example');
@@ -41,13 +41,13 @@ test('on the MacBook, a plain run lists the Mac mini\'s rows too, as --all does;
     const rows = [{ place: 'factory', profile: 'factory/seat-2', role: 'worker', kind: 'Claude', loggedIn: true, account: 'ann.example', accountFrom: 'read', plan: 'max', five_hour: null, seven_day: null, asOf: null, live: 0, shared: [], login: 'x', note: '' }];
     s.w('ssh-factory.json', JSON.stringify(rows));
     s.w('claude-default.json', claudeJson(EMAIL));
-    const plain = s.fac();
+    const plain = s.fac('account', 'list');
     assert.equal(plain.code, 0, plain.out);
     assert.ok(rowOf(plain.out, 'factory/seat-2'), `the Mac mini's rows in\n${plain.out}`);
     assert.ok(rowOf(plain.out, 'macbook/claude '), plain.out);
-    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory --json'/);
-    assert.equal(JSON.parse(s.fac('--json').out).some((x) => x.profile === 'factory/seat-2'), true);
-    assert.equal(s.fac('--all').code, 0);
+    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory account list --json'/);
+    assert.equal(JSON.parse(s.fac('account', 'list', '--json').out).some((x) => x.profile === 'factory/seat-2'), true);
+    assert.equal(s.fac('account', 'list', '--all').code, 0);
   } finally {
     s.done();
   }
@@ -57,7 +57,7 @@ test('on the factory host, --all is still refused', () => {
   const s = sandbox();
   try {
     s.onHost();
-    const r = s.fac('--all');
+    const r = s.fac('account', 'list', '--all');
     assert.equal(r.code, 2, r.out);
     assert.match(r.out, /--all runs on the MacBook/);
   } finally {
@@ -72,9 +72,9 @@ test('the MacBook\'s spare Claude rows are the .claude-acc<N> folders that exist
     writeFileSync(join(s.home, '.claude-acc5'), 'a file, not a folder');
     mkdirSync(join(s.home, '.claude-accx'));
     s.w('claude-.claude-acc2.json', claudeJson('bob.example@other.example', 'pro'));
-    const rows = JSON.parse(s.fac('--json').out).map((x) => x.profile).filter((p) => p.startsWith('macbook/claude-acc'));
+    const rows = JSON.parse(s.fac('account', 'list', '--json').out).map((x) => x.profile).filter((p) => p.startsWith('macbook/claude-acc'));
     assert.deepEqual(rows, ['macbook/claude-acc2', 'macbook/claude-acc7', 'macbook/claude-acc10'], 'sorted by number, only folders');
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.match(rowOf(r.out, 'macbook/claude-acc2'), /bob\.example/);
     assert.equal(rowOf(r.out, 'macbook/claude-acc3'), undefined);
     assert.doesNotMatch(s.calls(), /\.claude-acc(3|4|5)\b/);
@@ -88,7 +88,7 @@ test('the MacBook\'s spare Claude rows are the .claude-acc<N> folders that exist
 test('a word that is neither a flag nor a subcommand is refused with the usage', () => {
   const s = sandbox();
   try {
-    for (const args of [['status'], ['--nope'], ['login'], ['login', 'a', 'b'], ['store'], ['login', 'ann', '--no-setup', '--x']]) {
+    for (const args of [['status'], ['--nope'], ['account', 'add'], ['account', 'add', 'a', 'b'], ['store'], ['account', 'add', 'ann', '--no-setup', '--x']]) {
       const r = s.fac(...args);
       assert.notEqual(r.code, 0, args.join(' '));
       assert.match(r.out, /usage: bin\/factory/, args.join(' '));
@@ -102,7 +102,7 @@ test('a profile that is not logged in shows its login command', () => {
   const s = sandbox();
   try {
     spares(s, 3);
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.match(r.out, /claude-use login 3/);
     assert.match(r.out, /codex-use login/);
   } finally {
@@ -114,10 +114,10 @@ test('with no team row in the accounts file the list shows no team and no seat, 
   const s = sandbox();
   try {
     s.onHost();
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.equal(r.code, 0, r.out);
     assert.doesNotMatch(r.out, /seat|factory\/factory-/);
-    assert.deepEqual(JSON.parse(s.fac('--json').out).map((x) => x.profile), ['factory/verifier', 'factory/gh']);
+    assert.deepEqual(JSON.parse(s.fac('account', 'list', '--json').out).map((x) => x.profile), ['factory/verifier', 'factory/gh']);
   } finally {
     s.done();
   }
@@ -129,7 +129,7 @@ test('the account comes from the local accounts file or FACTORY_SEAT_ACCOUNTS wh
     spares(s, 3, 4);
     s.w('claude-default.json', claudeJson(EMAIL));
     writeFileSync(join(s.state, 'accounts'), 'macbook/claude-acc3=ann.example\nmacbook/codex=zed.example\n');
-    const j = JSON.parse(s.fac('--json').out);
+    const j = JSON.parse(s.fac('account', 'list', '--json').out);
     const by = (p) => j.find((x) => x.profile === p);
     assert.equal(by('macbook/claude-acc3').account, 'ann.example');
     assert.equal(by('macbook/claude-acc3').accountFrom, 'expected');
@@ -150,12 +150,12 @@ test('the table stays under 105 columns when "shared with" names four long profi
     spares(s, 2, 3, 4, 5);
     s.w('claude-default.json', claudeJson(EMAIL));
     writeFileSync(join(s.state, 'accounts'), [2, 3, 4, 5].map((n) => `macbook/claude-acc${n}=ann.example`).join('\n'));
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     const table = r.out.split('\n\n')[0].split('\n');
     assert.ok(table.length > 5, r.out);
     for (const line of table) assert.ok(line.length <= 105, `${line.length} columns: ${line}`);
     assert.match(rowOf(r.out, 'macbook/claude '), /macbook\/claude-acc2 \+3/);
-    const shared = JSON.parse(s.fac('--json').out).find((x) => x.profile === 'macbook/claude').shared;
+    const shared = JSON.parse(s.fac('account', 'list', '--json').out).find((x) => x.profile === 'macbook/claude').shared;
     assert.deepEqual(shared, [2, 3, 4, 5].map((n) => `macbook/claude-acc${n}`));
   } finally {
     s.done();
@@ -189,11 +189,11 @@ test('on the factory account: a team row is its account\'s token file\'s mode an
     writeFileSync(join(runs, 'run-worker.jsonl'), `{"type":"system","subtype":"init"}\n${readFileSync(fileURLToPath(new URL('./fixtures/quota/real-event.jsonl', import.meta.url)), 'utf8')}`);
     writeFileSync(join(runs, 'run-worker.seat'), '2\n');
     writeFileSync(join(runs, 'run-worker.account'), 'seat.two\n');
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.equal(r.code, 0, r.out);
-    const rows = JSON.parse(s.fac('--json').out);
+    const rows = JSON.parse(s.fac('account', 'list', '--json').out);
     const by = (p) => rows.find((x) => x.profile === p);
-    assert.deepEqual(rows.map((x) => x.profile).filter((p) => p !== 'factory/verifier' && p !== 'factory/gh'), ['factory/alpha-lead', 'factory/factory-lead'], 'the rows of onboarded repositories and of the factory, and no seat row, no beta, no lead-x');
+    assert.deepEqual(rows.filter((x) => x.role !== 'node token').map((x) => x.profile).filter((p) => p !== 'factory/verifier' && p !== 'factory/gh'), ['factory/alpha-lead', 'factory/factory-lead'], 'the rows of onboarded repositories and of the factory, and no seat row, no beta, no lead-x');
     assert.equal(by('factory/alpha-lead').loggedIn, true);
     assert.equal(by('factory/alpha-lead').account, 'seat.one');
     assert.match(by('factory/alpha-lead').note, /600/);
@@ -224,14 +224,14 @@ test('the list shows a lettered account for each token file: the mode and the da
     chmodSync(join(dir, 'bob'), 0o644);
     utimesSync(join(dir, 'ann'), new Date('2026-10-26T00:00:00Z'), new Date('2026-10-26T00:00:00Z'));
     writeFileSync(join(dir, '.ann.123.tmp'), 'half-written');
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     const ann = r.out.split('\n').find((l) => /^\s*a\s+ann\b/.test(l));
     const bob = r.out.split('\n').find((l) => /^\s*b\s+bob\b/.test(l));
-    assert.match(ann, /mode 600, modified 2026-10-26/);
+    assert.match(ann, /mode 600, added unknown; expiry unknown/);
     assert.doesNotMatch(ann, /should be/);
     assert.match(bob, /mode 644 \(should be 600\)/);
     assert.ok(!r.out.includes('half-written') && !r.out.includes('sub'));
-    const all = `${r.out}\n${s.fac('--json').out}`;
+    const all = `${r.out}\n${s.fac('account', 'list', '--json').out}`;
     for (const token of Object.values(tokens)) for (let i = 0; i + 8 <= token.length; i += 1) assert.ok(!all.includes(token.slice(i, i + 8)), `a slice of a token at ${i}`);
   } finally {
     s.done();
@@ -244,7 +244,7 @@ test('one hung vendor call cannot hang the table', () => {
     s.w('hang-claude', '');
     s.w('codex-default', '');
     s.env.FACTORY_TIMEOUT_MS = '300';
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.equal(r.code, 0, r.out);
     assert.match(rowOf(r.out, 'macbook/claude '), /timed out/);
     assert.match(rowOf(r.out, 'macbook/codex'), /yes/);
@@ -261,12 +261,12 @@ test('--all merges the macbook rows, the factory rows over ssh and the piggery r
     s.w('codex-piggery-codex', '');
     const factoryRows = [{ place: 'factory', profile: 'factory/seat-2', role: 'worker', kind: 'Claude', loggedIn: true, account: 'ann.example', accountFrom: 'read', plan: 'max', five_hour: null, seven_day: null, asOf: null, live: 0, shared: [], login: 'x', note: '' }];
     s.w('ssh-factory.json', JSON.stringify(factoryRows));
-    const r = s.fac('--all');
+    const r = s.fac('account', 'list', '--all');
     assert.equal(r.code, 0, r.out);
     for (const p of ['macbook/claude ', 'factory/seat-2', 'piggery/claude', 'piggery/codex']) assert.ok(rowOf(r.out, p), `${p} in\n${r.out}`);
-    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory --json'/);
+    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory account list --json'/);
     assert.match(s.calls(), /ssh .*tuannguyen@tuans-mac-mini/);
-    const j = JSON.parse(s.fac('--all', '--json').out);
+    const j = JSON.parse(s.fac('account', 'list', '--all', '--json').out);
     const by = (p) => j.find((x) => x.profile === p);
     assert.deepEqual([...by('macbook/claude').shared].sort(), ['factory/seat-2', 'piggery/claude']);
     for (const secret of [EMAIL, ORG]) assert.ok(!r.out.includes(secret));
@@ -280,7 +280,7 @@ test('--all: a place it cannot reach is one row with the last line of the ssh er
   try {
     s.w('ssh-factory.error', 'ssh: connect to host tuans-mac-mini port 22: Operation timed out\nPermission denied (publickey).\n');
     s.w('ssh-tuannguyen.error', 'ssh: Could not resolve hostname tuans-mac-mini\n');
-    const r = s.fac('--all');
+    const r = s.fac('account', 'list', '--all');
     assert.equal(r.code, 0, r.out);
     assert.match(rowOf(r.out, 'factory'), /Permission denied \(publickey\)\./);
     assert.match(rowOf(r.out, 'piggery'), /Could not resolve hostname/);
@@ -297,7 +297,7 @@ test('the factory rows are read from the far side\'s stdout only', () => {
     const rows = [{ place: 'factory', profile: 'factory/seat-2', role: 'worker', kind: 'Claude', loggedIn: true, account: 'ann.example', accountFrom: 'read', plan: 'max', five_hour: null, seven_day: null, asOf: null, live: 0, shared: [], login: 'x', note: '' }];
     s.w('ssh-factory.json', JSON.stringify(rows));
     s.w('ssh-factory.stderr', '[warning] Permanently added the host to the list of known hosts.\n');
-    const j = JSON.parse(s.fac('--all', '--json').out);
+    const j = JSON.parse(s.fac('account', 'list', '--all', '--json').out);
     assert.equal(j.find((x) => x.profile === 'factory/seat-2')?.loggedIn, true, 'the rows were read');
     assert.ok(!j.some((x) => x.unreachable && x.place === 'factory'));
   } finally {
@@ -316,7 +316,7 @@ if [ "$c" = claude ]; then CLAUDE_CONFIG_DIR="$FAKE/piggery-claude" exec claude 
 `);
     s.w('claude-piggery-claude.json', claudeJson('pig.one@secret-corp.example', 'max'));
     s.w('ssh-factory.error', 'ssh: Could not resolve hostname tuans-mac-mini\n');
-    const rows = JSON.parse(s.fac('--all', '--json').out);
+    const rows = JSON.parse(s.fac('account', 'list', '--all', '--json').out);
     const pig = rows.find((x) => x.profile === 'piggery/claude');
     assert.equal(pig.loggedIn, true);
     assert.equal(pig.account, 'pig.one');
@@ -332,7 +332,7 @@ test('piggery\'s Codex row: exit 0 is yes, 1 is NO, and any other exit is "?" wi
   try {
     s.w('ssh-factory.error', 'ssh: Could not resolve hostname tuans-mac-mini\n');
     s.w('claude-piggery-claude.json', claudeJson('pig.one@secret-corp.example', 'max'));
-    const codex = () => JSON.parse(s.fac('--all', '--json').out).find((x) => x.profile === 'piggery/codex');
+    const codex = () => JSON.parse(s.fac('account', 'list', '--all', '--json').out).find((x) => x.profile === 'piggery/codex');
     assert.equal(codex().loggedIn, false);
     s.w('codex-piggery-codex', '');
     assert.equal(codex().loggedIn, true);
@@ -340,7 +340,7 @@ test('piggery\'s Codex row: exit 0 is yes, 1 is NO, and any other exit is "?" wi
     const row = codex();
     assert.equal(row.loggedIn, null);
     assert.match(row.note, /pig exited 127/);
-    assert.match(rowOf(s.fac('--all').out, 'piggery/codex'), /\?.*pig exited 127/);
+    assert.match(rowOf(s.fac('account', 'list', '--all').out, 'piggery/codex'), /\?.*pig exited 127/);
   } finally {
     s.done();
   }
@@ -362,7 +362,7 @@ exec "$0.real" "$@"
     s.w('claude-claude.json', claudeJson(EMAIL));
     s.w('gh-macbook', 'humangh');
     for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) s.env[name] = 'fake-credential';
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.equal(r.code, 0, r.out);
     const log = readFileSync(join(s.fake, 'env.log'), 'utf8');
     assert.match(log, /^claude /m);
@@ -382,7 +382,7 @@ test('no part of a seat\'s token reaches the table or the JSON', () => {
     chmodSync(join(s.tokens(), 'ann'), 0o600);
     writeFileSync(join(s.state, 'accounts'), 'factory/seat-1=ann\n');
     s.onHost();
-    const out = `${s.fac().out}\n${s.fac('--json').out}`;
+    const out = `${s.fac('account', 'list').out}\n${s.fac('account', 'list', '--json').out}`;
     assert.match(out, /mode 600/);
     for (let i = 0; i + 8 <= token.length; i += 1) assert.ok(!out.includes(token.slice(i, i + 8)), `a slice of the token at ${i}`);
   } finally {

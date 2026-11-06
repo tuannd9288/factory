@@ -45,8 +45,8 @@ test('colly isolates GitHub and grants only use and lead, with the pack role req
     assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)']);
     assert.deepEqual(settings.permissions.deny, [
       'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
-      'Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*factory logout*)',
-      'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)', 'Bash(*lib/factory.mjs logout*)',
+      'Bash(*factory account*)', 'Bash(*factory store*)',
+      'Bash(*lib/factory.mjs account*)', 'Bash(*lib/factory.mjs store*)',
     ]);
     result = { status: 7 };
     assert.equal(await main(['colly'], env), 7);
