@@ -13,7 +13,8 @@
 #   factory lead <repo> [--team <name>] --here [-- <claude arguments>]  on the MacBook only (#349): claude in this terminal and folder as
 #                                  the Lead of <repo>, with an empty GH_CONFIG_DIR, empty GH_TOKEN and GITHUB_TOKEN, the agents' git identity
 #                                  (read from the Mac mini's git settings), no git credential helper, a push to GitHub over HTTPS that
-#                                  fails and git over ssh off, set through --settings; what follows -- goes to claude
+#                                  fails and git over ssh off, set through --settings; on the team's own profile and token, in auto mode with
+#                                  the Mac mini trusted by the classifier, and the folder trusted in the profile (#366); what follows -- goes to claude
 #   factory gh <gh arguments>      on the MacBook: gh on the Mac mini by ssh under the agents' login, in a new temporary folder there, removed after, stdin
 #                                  and exit code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
 #                                  --body-file, --notes-file, --env-file, --input, --field or -F (pass it on stdin: --body-file -, -F name=@-,

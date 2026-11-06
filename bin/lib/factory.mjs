@@ -10,7 +10,7 @@
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -459,6 +459,17 @@ const GIT_CONFIG = [
   ...['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].map((from) => [`url.${PUSH_BASE}.pushInsteadOf`, from]),
 ];
 
+// What the auto-mode classifier of a MacBook Lead is told is inside its boundary (#366): it trusts only the working folder and its
+// remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat goes through
+// that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
+// "$defaults" keeps the built-in entries, which a list without it replaces.
+const AUTO_MODE_ENVIRONMENT = [
+  '$defaults',
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, use, wake, account list), its workers with /Users/factory/WORKSPACES/bin/seat, and reads of that account's git settings.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). On this MacBook, factory gh runs gh on ${HOST} under the agents' GitHub login, and factory linear, factory use and factory wake run there too, each over ssh factory@${HOST}.`,
+  `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh, and pushes go from ${HOST}.`,
+];
+
 /** Where the socket of the MacBook Lead of a repository's team is recorded (#351), beside `lead-here`'s other files. */
 export const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}-${team}.socket`);
 
@@ -527,12 +538,38 @@ function copySocketHook(state) {
   return to;
 }
 
+/** A fresh profile asks at its first start whether to trust the folder, and stops there (#366). So, as agent-orchestrator does before
+ * each launch (ensureClaudeLaunchConfigForOS in backend/internal/adapters/agent/claudecode/claudecode.go, at 9dc1c14), the profile's
+ * <config>/.claude.json gets projects[<folder>].hasTrustDialogAccepted = true for the folder the Lead starts in, by its real path, the key
+ * Claude Code reads (2.1.319, 2026-11-06: a key under /var/... for a folder whose real path is /private/var/... still asks). Only that key
+ * is added, every other key and the file's mode kept, through a temporary file and a rename; nothing is written when it is already true.
+ * markOnboarded runs first, so the file exists and holds a JSON object. */
+function markTrusted(config, folder) {
+  const file = join(config, '.claude.json');
+  const json = JSON.parse(readFileSync(file, 'utf8'));
+  const projects = json.projects && typeof json.projects === 'object' && !Array.isArray(json.projects) ? json.projects : {};
+  const entry = projects[folder] && typeof projects[folder] === 'object' ? projects[folder] : {};
+  if (entry.hasTrustDialogAccepted === true) return;
+  const mode = statSync(file).mode & 0o777;
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify({ ...json, projects: { ...projects, [folder]: { ...entry, hasTrustDialogAccepted: true } } }, null, 2)}\n`, { mode, flag: 'wx' });
+    chmodSync(tmp, mode);
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
 /** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
  * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
  * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
  * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
  * prompt, a push URL that cannot be reached for GitHub's HTTPS addresses, and an ssh command that only fails (a push goes from the
- * Mac mini); `gh auth` and `security` (the Keychain) are denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
+ * Mac mini); `gh auth` and `security` (the Keychain) are denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes.
+ * The session runs on the team's own profile and token, in auto mode with the factory host and its commands inside the classifier's
+ * boundary (AUTO_MODE_ENVIRONMENT), and the folder it starts in is trusted in that profile, so a first start asks nothing (#366). */
 function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -558,6 +595,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   try {
     mkdirSync(config, { recursive: true, mode: 0o700 });
     markOnboarded(config);
+    markTrusted(config, realpathSync(cwd));
   } catch {
     console.error('bin/factory: lead --here: could not prepare the local profile');
     return 1;
@@ -603,8 +641,10 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 1;
   }
   const record = [{ hooks: [{ type: 'command', command: [process.execPath, hook, wakeFile(state, repo, team)].map(quote).join(' ') }] }];
-  const copy = { hooks: [{ type: 'command', command: `CLAUDE_CONFIG_DIR=${quote(env.CLAUDE_CONFIG_DIR || join(env.HOME, '.claude'))} ${[process.execPath, transcriptHook, join(runDir, 'transcripts')].map(quote).join(' ')}` }] };
+  // The session writes its transcript under the profile it runs on, the only folder transcript-copy.mjs copies from.
+  const copy = { hooks: [{ type: 'command', command: `CLAUDE_CONFIG_DIR=${quote(config)} ${[process.execPath, transcriptHook, join(runDir, 'transcripts')].map(quote).join(' ')}` }] };
   const settings = {
+    autoMode: { environment: AUTO_MODE_ENVIRONMENT },
     hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },
     env: {
       GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '',
@@ -613,7 +653,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
       GIT_CONFIG_COUNT: String(GIT_CONFIG.length),
       ...Object.fromEntries(GIT_CONFIG.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
     },
-    permissions: { deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
+    // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
+    permissions: { defaultMode: 'auto', deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -629,8 +670,13 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 1;
   }
-  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, '--settings', JSON.stringify(settings),
-    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: { ...env, CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: token.token }, cwd });
+  // Auto mode, as the Mac mini's Lead and the seats start (#273), unless what follows -- names a mode. A key or a plugin cache in the
+  // caller's shell would override the team's token or point at another profile's plugins, so neither reaches claude.
+  const mode = passed.some((a) => a === '--permission-mode' || a.startsWith('--permission-mode=')) ? [] : ['--permission-mode', 'auto'];
+  const childEnv = { ...env, CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: token.token };
+  for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
+  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, ...mode, '--settings', JSON.stringify(settings),
+    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: childEnv, cwd });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
     return 1;

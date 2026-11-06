@@ -143,6 +143,45 @@ test('lead --here passes what follows -- to claude, and the team to --name', () 
   }
 });
 
+test('lead --here starts in auto mode, with the factory host in the classifier\'s environment beside its defaults (#366)', () => {
+  const s = world();
+  try {
+    s.identity();
+    assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here']).code, 0);
+    const args = s.nuls('claude.args');
+    assert.equal(args[args.indexOf('--permission-mode') + 1], 'auto');
+    const { environment } = settingsOf(args).autoMode;
+    assert.ok(environment.includes('$defaults'), 'a list without "$defaults" replaces the built-in entries');
+    assert.ok(environment.some((e) => e !== '$defaults' && e.includes('factory@tuans-mac-mini')), environment.join('\n'));
+    // A mode given after -- is the only one claude gets.
+    assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here', '--', '--permission-mode', 'plan']).code, 0);
+    assert.deepEqual(s.nuls('claude.args').filter((a) => a === '--permission-mode' || a === 'auto'), ['--permission-mode']);
+  } finally {
+    s.done();
+  }
+});
+
+test('lead --here trusts the folder it starts in, by its real path, in the team\'s profile, and keeps the file\'s other keys (#366)', () => {
+  const s = world();
+  try {
+    s.identity();
+    const file = join(s.dir, 'profiles/leads/alpha-beta/claude/.claude.json');
+    const folder = realpathSync(s.dir);
+    mkdirSync(join(s.dir, 'profiles/leads/alpha-beta/claude'), { recursive: true });
+    writeFileSync(file, JSON.stringify({ numStartups: 3, projects: { '/elsewhere': { hasTrustDialogAccepted: false }, [folder]: { allowedTools: ['Read'] } } }));
+    chmodSync(file, 0o640);
+    assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here'], undefined, s.dir).code, 0);
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), {
+      numStartups: 3, hasCompletedOnboarding: true,
+      projects: { '/elsewhere': { hasTrustDialogAccepted: false }, [folder]: { allowedTools: ['Read'], hasTrustDialogAccepted: true } },
+    });
+    assert.equal(statSync(file).mode & 0o777, 0o640);
+    assert.deepEqual(readdirSync(join(s.dir, 'profiles/leads/alpha-beta/claude')), ['.claude.json'], 'no temporary file is left');
+  } finally {
+    s.done();
+  }
+});
+
 test('a restored Lead session returns through the launcher with its settings and role (#366)', () => {
   const s = world();
   try {
@@ -731,7 +770,8 @@ test('lead --here copies its transcript with the pack hook so the reader can dis
     assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here']).code, 0);
     const { hooks } = settingsOf(s.nuls('claude.args'));
     const command = hooks.Stop[0].hooks[0].command;
-    const config = join(s.home, '.claude');
+    // The session writes its transcript under the team's profile, whatever CLAUDE_CONFIG_DIR the caller's shell has (#366).
+    const config = join(s.dir, 'profiles/leads/alpha-beta/claude');
     const source = join(config, 'projects/fixture/0a1b2c3d-1111-2222-3333-444455556666.jsonl');
     mkdirSync(join(config, 'projects/fixture'), { recursive: true });
     const content = '{"type":"assistant","message":{"content":"Done","stop_reason":"end_turn"}}\n';
