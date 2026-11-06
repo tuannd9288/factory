@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runPass } from '../bin/lib/reader.mjs';
+import { runPass, watchSilence } from '../bin/lib/reader.mjs';
 
 test('Watcher sends new Codex limit lines through the provider seam once', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'watcher-'));
@@ -110,12 +110,16 @@ test('a finished Lead silent for 15 minutes fires once, names quiet seats, and r
     put(lead, line('Finished the first task.'), t);
     put(join(runs, 'quiet/run.jsonl'), 'quiet seat\n', t);
     put(join(runs, 'active/run.jsonl'), 'active seat\n', t + window / 2);
-    const provider = async () => ({ ok: true, stdout: '{"events":[]}' });
-    const pass = (now) => runPass({ state, runs, now, env: {}, provider });
+    const reader = await runPass({ state, runs, now: t + window, env: {}, provider: async () => {
+      assert.fail('the initial model pass must only set its cursors');
+    } });
+    assert.equal(reader.events, 0, 'reader passes never emit silence events');
+    assert.ok(!existsSync(join(state, 'reader/silence.json')));
+    const pass = (now) => ({ events: watchSilence({ state, runs, now }) });
     assert.equal((await pass(t + window - 1)).events, 0);
     const fired = await pass(t + window);
     assert.equal(fired.events, 1);
-    assert.equal(fired.calls, 0, 'silence alone costs no model tokens');
+    assert.equal(readFileSync(join(state, 'reader/started'), 'utf8'), `${t + window}\n`, 'silence checks never start a model pass');
     const events = () => readFileSync(join(state, 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).filter((e) => e.kind === 'watch_fired');
     assert.match(events()[0].quote, /Finished the first task/);
     assert.deepEqual(events()[0].seats, ['quiet/run.jsonl']);

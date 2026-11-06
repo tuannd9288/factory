@@ -1,7 +1,8 @@
 // Watcher (#476), using #339's existing pi / Antigravity Flash model path.
 // pi receives complete redacted stream records; codex retains its existing reduction.
 // New lines alone cost model tokens. The existing sweep invokes this pass every 15 minutes.
-// Independently, a finished Lead turn silent for 15 minutes emits one watch_fired event,
+// Each sweep checks silence under queue.lock, independently of the model pass: a finished
+// Lead turn silent for 15 minutes emits one watch_fired event,
 // quoting its last record and listing seats silent in that window. Colly judges remaining work.
 // Piggery watch.go:26-28,79-81,136-177@67c083e supplies incident deduplication (no default);
 // 15 minutes follows captions 11:46-11:57. The finished-turn predicate is review round 1's adaptation.
@@ -334,7 +335,11 @@ const eventText = (e) => `${flat(e.session)} ${e.kind}: "${flat(e.quote)}" (${fl
 // Piggery has no silent_for default: watch.go:26-28 rejects a missing value.
 export const SILENT_FOR_MS = 15 * 60_000;
 
-function watchSilence({ state, dir, streams, now }) {
+// Only the sweep calls this in production, under queue.lock; reader passes never write silence events.
+export function watchSilence({ state, runs, now = Date.now() }) {
+  const dir = join(state, 'reader');
+  mkdirSync(dir, { recursive: true });
+  const streams = listStreams(runs, state);
   const file = join(dir, 'silence.json');
   let previous = {};
   try { previous = JSON.parse(readFileSync(file, 'utf8')); }
@@ -425,7 +430,6 @@ async function readAndSend({ state, dir, runs, setting, home, env, timeoutMs, no
     if (error.code !== 'ENOENT') throw error;
   }
   const streams = listStreams(runs, state);
-  result.events += watchSilence({ state, dir, streams, now });
   if (cursors === null) {
     // The first pass ever: every stream that exists starts at its end.
     cursors = Object.fromEntries(streams.map((s) => [s.key, wholeLines(s.file, 0).end]));

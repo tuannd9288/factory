@@ -33,7 +33,7 @@
 // update, no tier re-run, no comment wake (no claim is held there), no #309 condition, no switch watch beyond watchOwn's. Not with --repo.
 // The rules it read for the factory's own repository are handed to watchOwn, so they are read once in a sweep.
 // A pull request of the factory's own repository finds its Lead by its `Team:` line (`Team: lead` is `factory-lead`).
-// After that, still under the lock, it starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
+// After that, still under the lock, it checks Lead silence on every sweep, then starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
@@ -52,6 +52,7 @@ import { clonesUnder } from './ledger.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
+import { watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
 import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
@@ -652,6 +653,21 @@ function startReaderPass(state) {
   }
 }
 
+/** Every sweep checks silence under queue.lock; a failure never changes the sweep's result. */
+function checkSilence(state) {
+  const failure = join(state, 'queue-silence.failed');
+  try {
+    watchSilence({ state, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
+    rmSync(failure, { force: true });
+  } catch (error) {
+    try {
+      mkdirSync(state, { recursive: true });
+      writeFileSync(failure, `${new Date().toISOString()} checking silence raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    } catch { /* A failure to record the error must not fail the sweep or retain its lock. */ }
+    console.error(`queue: silence: ${error.message}`);
+  }
+}
+
 const LABEL = 'io.github.tuannd9288.factory.queue';
 
 /** The first executable `name` on a PATH, or null. */
@@ -830,6 +846,7 @@ export function runPass({ repos = [], human, state }) {
     return { ...out, code: failed ? 1 : 0, heldBy };
   } finally {
     recordEvents(state, reads, switches);
+    checkSilence(state);
     startReaderPass(state);
     releaseLock(held, mine.token);
   }

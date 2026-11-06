@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -875,5 +875,49 @@ test('factory-reader --try refuses a side that is not pi or codex', () => {
     const r = spawnSync(join(factory, 'bin/factory-reader'), ['--try', file, '--side', 'agy'], { encoding: 'utf8', env: { ...process.env, FACTORY_STATE: join(dir, 'state') } });
     assert.notEqual(r.status, 0);
     assert.ok(!existsSync(join(dir, 'state')));
+  });
+});
+
+
+test('each sweep reports a Lead silent for 16 minutes even between model passes, once; failures stay local', async () => {
+  await withDir(async (dir) => {
+    const w = world(dir);
+    const minute = 60_000;
+    w.put(w.leadFile(), '');
+    await w.pass({ now: T0 });
+    appendFileSync(w.leadFile(), JSON.stringify({ type: 'assistant', message: { content: 'Finished the task.', stop_reason: 'end_turn' } }) + '\n');
+    utimesSync(w.leadFile(), (T0 + minute) / 1000, (T0 + minute) / 1000);
+    // The next model pass is only 14 minutes after the turn end.
+    await w.pass({ now: T0 + 15 * minute });
+    assert.equal(w.events().filter((e) => e.kind === 'watch_fired').length, 0);
+    writeFileSync(join(dir, 'bin/gh'), '#!/bin/sh\necho agent-bot\n');
+    chmodSync(join(dir, 'bin/gh'), 0o755);
+    mkdirSync(join(dir, 'root'));
+    mkdirSync(join(dir, 'home'));
+    const sweep = (now) => spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { runPass } from ${JSON.stringify(pathToFileURL(join(factory, 'bin/lib/queue.mjs')).href)};
+      Date.now = () => ${now};
+      process.exitCode = runPass({ state: process.env.FACTORY_STATE, human: 'human' }).code;
+    `], { encoding: 'utf8', env: { ...w.env, HOME: join(dir, 'home'), FACTORY_STATE: w.state, FACTORY_RUNS: w.runs,
+      FACTORY_ROOT: join(dir, 'root'), FACTORY_CHECKOUT: '', AGENT_PROFILES: join(dir, 'profiles') } });
+    const first = sweep(T0 + 17 * minute);
+    assert.equal(first.status, 0, first.stdout + first.stderr);
+    assert.equal(w.events().filter((e) => e.kind === 'watch_fired').length, 1);
+    const next = sweep(T0 + 18 * minute);
+    assert.equal(next.status, 0, next.stdout + next.stderr);
+    assert.equal(w.events().filter((e) => e.kind === 'watch_fired').length, 1);
+    assert.equal(w.calls().length, 1, 'sweeps between reader passes call no model');
+    // A detached model pass must not be a second silence writer.
+    await w.pass({ now: T0 + 18 * minute });
+    assert.equal(w.events().filter((e) => e.kind === 'watch_fired').length, 1);
+    writeFileSync(join(w.state, 'reader/silence.json'), '{broken');
+    const failed = sweep(T0 + 19 * minute);
+    assert.equal(failed.status, 0, failed.stdout + failed.stderr);
+    assert.match(readFileSync(join(w.state, 'queue-silence.failed'), 'utf8'), /SyntaxError/);
+    assert.ok(!existsSync(join(w.state, 'queue.lock')));
+    rmSync(join(w.state, 'reader/silence.json'));
+    assert.equal(sweep(T0 + 20 * minute).status, 0);
+    assert.ok(!existsSync(join(w.state, 'queue-silence.failed')));
+    assert.equal(w.events().filter((e) => e.kind === 'watch_fired').length, 1);
   });
 });
