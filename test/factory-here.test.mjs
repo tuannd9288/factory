@@ -8,7 +8,8 @@ import { createServer } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { freeWord } from '../bin/lib/team-names.mjs';
+import { tokenStoreDeny } from '../bin/lib/seat.mjs';
+import { freeWord, teamsOf } from '../bin/lib/team-names.mjs';
 import { factory } from './helpers.mjs';
 
 // Each fake writes what it got to $FAKE: its arguments one per NUL (<name>.args), and gh its stdin and exits with gh.exit.
@@ -56,8 +57,8 @@ function world() {
     chmodSync(join(bin, name), 0o755);
   }
   const env = { FAKE: fake, HOME: home, PATH: `${bin}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_RUNS: join(home, 'factory-runs'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_ROOT: join(home, 'WORKSPACES'), FACTORY_HOST_USER: 'nobody-here' };
-  mkdirSync(join(dir, 'profiles/tokens'), { recursive: true });
-  writeFileSync(join(dir, 'profiles/tokens/fixture'), 'fixture-token');
+  mkdirSync(join(env.AGENT_PROFILES, 'tokens'), { recursive: true });
+  writeFileSync(join(env.AGENT_PROFILES, 'tokens/fixture'), 'made-up-node-token');
   const w = (name, text) => writeFileSync(join(fake, name), text);
   const read = (name) => (existsSync(join(fake, name)) ? readFileSync(join(fake, name), 'utf8') : '');
   const nuls = (name) => read(name).split('\0').slice(0, -1);
@@ -68,7 +69,7 @@ function world() {
       writeFileSync(join(state, 'accounts'), `factory/${args[1]}-${team}=fixture\n`);
     }
     const { NODE_TEST_CONTEXT, ...outer } = process.env;
-    const r = spawnSync(join(factory, 'bin/factory'), args, { cwd, encoding: 'utf8', env: { ...outer, ...env }, input });
+    const r = spawnSync(process.execPath, ['--', join(factory, 'bin/lib/factory.mjs'), ...args], { cwd, encoding: 'utf8', env: { ...outer, ...env }, input });
     return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
   return {
@@ -80,6 +81,18 @@ function world() {
 }
 
 const settingsOf = (args) => JSON.parse(args[args.indexOf('--settings') + 1]);
+
+test('the shared fixture adds no account team before a Lead is launched', () => {
+  const s = world();
+  try {
+    s.onHost();
+    const runs = join(s.home, 'factory-runs');
+    mkdirSync(join(runs, 'alpha-lead'), { recursive: true });
+    assert.deepEqual(teamsOf('alpha', {
+      home: s.home, state: s.state, runs, root: join(s.home, 'WORKSPACES'), processes: () => [],
+    }), ['lead']);
+  } finally { s.done(); }
+});
 
 test('lead --here starts claude here with the empty gh folder, the agents\' git identity, no credential helper and gh auth denied', () => {
   const s = world();
@@ -103,7 +116,7 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_CONFIG_KEY_2: push, GIT_CONFIG_VALUE_2: 'git@github.com:',
       GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
     });
-    assert.deepEqual(permissions.deny, ['Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)']);
+    assert.deepEqual(permissions.deny, [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${join(s.dir, 'profiles')}/**)`, 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)']);
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
     assert.equal(statSync(empty).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(empty), []);

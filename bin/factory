@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The one command for the Human's agent accounts (#177; its list is #173's).
-#   factory [--all] [--json]       every agent profile's login, account and plan in a table, each account's quota in a second one; on the Mac mini
+#   factory account list [--all] [--json]       every agent profile's login, account and plan in a table, each account's quota in a second one; on the Mac mini
 #                                  the rows are the teams, numbered and the accounts lettered, with 5h, 7d, reset and the rows that share each (#178)
-#   factory login <account> [--no-setup]   runs `claude setup-token`, takes the token from a hidden prompt, stores it
-#   factory store <account>        on the Mac mini: reads one token from stdin and stores it (what login runs over ssh)
+#   factory account add <account> [--node <node>] [--no-setup]   runs `claude setup-token`, takes the token from a hidden prompt, stores it
+#   factory store <account>        on this node: reads one token from stdin and stores it (what account add runs over ssh)
 #   factory use [<row|repo-team> [<letter>]]  on the Mac mini: the row's account in the accounts file becomes the letter's (the team's next seat
 #                                  session takes it); <repo>-<team> makes the row of a team of an onboarded repository or of the factory, and that team's running
 #                                  Lead alone is restarted once Herdr reports it idle (#179, #196, #311)
@@ -23,7 +23,7 @@
 #                                  the issue (the message itself is a comment there) and types nothing into its pane; on the Mac mini it posts to the socket
 #                                  its hook recorded in ~/factory-runs/<repo>-<team>/socket; on the MacBook to the socket `lead --here` recorded when that
 #                                  team's Lead runs there, else the same command runs on the Mac mini by ssh; exit 0 posted, 1 not posted (with the reason), 2 usage
-#   factory logout <account>       on the Mac mini: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
+#   factory account remove <account>       on this node: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
 # it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes each account's quota from the run logs of its sessions. On the
 # MacBook a plain run is --all (still accepted; refused on the host), and its spare Claude rows are the ~/.claude-acc<N> folders that exist. --all
@@ -33,15 +33,15 @@
 # "<profile>=<name>" a line, local to the machine, mode 600: on the Mac mini the one source of a row's account. Only `use` changes it,
 # run by the Human or Colly on his spoken word (INN-30, 2026-11-05).
 # A call that takes longer than FACTORY_TIMEOUT_MS (default 15000) is shown as timed out.
-# Tokens are stored at ~/.agent-profiles/tokens/<account> (mode 600, in a folder of mode 700); only the Human runs login (bin/install-factory
+# Tokens are stored at ~/.agent-profiles/tokens/<account> (mode 600, in a folder of mode 700); only the Human runs account add (bin/install-factory
 # puts this command on his PATH, as a symlink into the machine's installed copy of the factory, which follows main and is followed here, #390).
 # On the Mac mini the table is the numbered rows (one for each team $FACTORY_STATE/accounts names, factory/<repo>-<team> of an
 # onboarded repository or of `factory`, sorted; no seat row; the verifier) and the lettered accounts (every account the file
 # names and every file of ~/.agent-profiles/tokens/, read by name and by mode and date only), each with its 5h, 7d, reset, the
 # rows that share it, and `?` where no run of the account reported; a row whose account has no token file is red with the line to
 # run. $FACTORY_STATE/accounts (<profile>=<account> a line, mode 600, written through a temporary file and a rename) is the one
-# source of a row's account (#178). `factory use <row> <letter>` rewrites it (from the MacBook, `use` and `logout` run on the Mac
-# mini over ssh, their arguments checked first, `ssh -t` when `use` lacks one; with an argument missing: on a terminal the list
+# source of a row's account (#178). `factory use <row> <letter>` rewrites it (from the MacBook, `use` runs on the Mac
+# mini over ssh, its arguments checked first, `ssh -t` when `use` lacks one; with an argument missing: on a terminal the list
 # and a question, else the list and exit 2); the verifier's row is refused; `<repo>-<team>` in a row's place names a team of an
 # onboarded repository, or of `factory`, and makes its row when there is none (`use lead-<repo>` is gone); only that team's Lead,
 # if it runs (a `claude` process with `--name <repo>-<team>`, the shared Lead process rule), is restarted, once Herdr reports it
@@ -51,14 +51,19 @@
 # does one that Claude Code's exit dialog for background work holds after `/exit` (Herdr reports it `blocked`): `use` sends Esc,
 # starts nothing, and says the Lead keeps running on its old account until its next start while its new workers start on the new
 # one (#315); the team's next seat session takes the new account.
-# `factory logout <account>` moves tokens/<account> to ~/.agent-profiles/archive/tokens/<UTC stamp>-<account> (folder 700, by
+# `factory account remove <account>` moves tokens/<account> to ~/.agent-profiles/archive/tokens/<UTC stamp>-<account> (folder 700, by
 # rename, never deleting it); its rows then start nothing. Seat 1's old seats/1/oauth-token moves to archive/seat-1/ at the next
-# `login` or `use` once seat 1's account has a token.
-# `factory login <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into
-# (--no-setup skips setup-token) and stores it at ~/.agent-profiles/tokens/<account> (mode 600, folder 700): on the Mac mini
-# directly, from the MacBook over ssh's stdin to `factory store <account>`, never in an argument. Only the Human runs `login`,
-# `store` and `logout`. Colly may run `use` and `lead` on his spoken word (INN-30, 2026-11-05).
-# Every bin/seat role and every Lead keep their deny on all five, unchanged (#177, #178).
+# `account add` or `use` once seat 1's account has a token.
+# `factory account add <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into
+# (--no-setup skips setup-token). --node defaults to this machine; macbook and tuans-mac-mini name the nodes.
+# For another node, ssh sends the token only on stdin to its factory store; no token goes in arguments or files outside the store.
+# Each node owns its store. Leads and seats use only their node's tokens. account remove archives only the local token.
+# account add records the UTC added date in tokens/.<account>.added (mode 600), with no token in that file.
+# account list shows the added date and its one-year expiry per node (Anthropic authentication page, captured 2026-11-06, line 295).
+# It warns within seven days of expiry and when expired; tokens without an added date show "expiry unknown".
+# Dates are UTC; a February 29 anniversary becomes February 28. Replacing a token updates its added date; remove archives both.
+# Only the Human runs account and store; Colly may run use and lead (INN-30). Seats and Leads deny add, remove, store and use.
+# The old login/logout verbs refuse in one line naming account add/remove; the old table invocation names account list.
 # `factory lead`: the team is a letter then at most 31 lowercase letters and digits, chosen from the existing teams or the nickname list, and is the team of its
 # claims and pull requests; on the Mac mini it runs packs/pstack/bin/lead, on the MacBook it runs that by ssh (the start is
 # described in that file's header).
