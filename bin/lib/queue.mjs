@@ -360,6 +360,10 @@ function draftReadiness(repo, prs, clone) {
   let merge = policy.merge == null ? null : policy.merge === 'merge' ? 'merge' : 'squash';
   if ((policy.drafts ?? 'landable') === 'landable') {
     for (const pr of prs) {
+      // Only a pull request on main, the base the rulesets guard: a stacked child armed here merges into its parent with no review
+      // (#455, 2026-11-06 17:06 +07). As in pstack's ship, a child waits unarmed until its parent lands and it is retargeted to main;
+      // until then the queue neither readies, arms, drafts nor disarms it.
+      if (pr.base !== BASE) continue;
       const conflict = pr.mergeable === 'CONFLICTING';
       if (pr.isDraft && pr.checks.verify?.state === 'SUCCESS' && !conflict) {
         if (merge === null) {

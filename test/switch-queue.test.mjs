@@ -511,7 +511,7 @@ test('at none the queue updates no pull request that lacks an approval of someon
   for (const position of ['1-2', 'all', undefined]) assert.equal(pickUpdate([behind(1)], [], position)?.number, 1, String(position));
 });
 
-for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweeps every PR: green drafts become ready and armed, ready PRs that are not green or conflict become drafts`, () => {
+for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweeps every PR: green drafts become ready and armed, ready PRs that are not green or conflict become drafts, and one on another base than main is left as it is (#455)`, () => {
   const w = world();
   try {
     w.policy(drafts);
@@ -528,8 +528,10 @@ for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweep
       [true, null, 'MERGEABLE'],
       [true, 'SUCCESS', 'UNKNOWN'],
       [false, null, 'MERGEABLE'],
-    ].map(([draft, verify, mergeable], i) => {
-      const p = pull(i + 1, { draft, labels: [], auto: false });
+      // A stacked child: green and conflict-free, but on its parent's branch, which no ruleset guards.
+      [true, 'SUCCESS', 'MERGEABLE', 'issue-366-macbook-lead'],
+    ].map(([draft, verify, mergeable, base = 'main'], i) => {
+      const p = pull(i + 1, { draft, labels: [], auto: false, base });
       p.mergeable = mergeable;
       const checks = p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes;
       if (verify) checks.push({ ...checks[0], id: `V_${i}`, name: 'verify', status: verify === 'PENDING' ? 'IN_PROGRESS' : 'COMPLETED', conclusion: verify });
