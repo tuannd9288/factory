@@ -27,6 +27,7 @@ function world() {
       // The claim refs of named issues, asked apart from the query (#351); $Q/lookup.json is its answer.
       '  *qualifiedName*) if [ -e "$Q/lookupfail" ]; then echo "HTTP 502" >&2; exit 1; fi; cat "$Q/lookup.json" ;;',
       '  *graphql*) if [ -e "$Q/fail" ]; then echo "HTTP 502" >&2; exit 1; fi; cat "$Q/graphql.json" ;;',
+      '  "pr ready"*) ;;',
       '  *) exit 1 ;;',
       'esac',
       '',
