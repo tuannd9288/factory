@@ -3,8 +3,15 @@
 // process; on the MacBook bin/lib/factory.mjs runs the same command on the host by ssh. No free-form GraphQL is offered.
 //   take <KEY> --team <team>                    the app becomes the delegate, no person is assigned, the issue moves to its team's first `started`
 //                                               status, and one comment "Taken by team <team> on <node>." names the holder; the holder is the earliest such
-//                                               comment after the last "Released by team" one, and a take is refused when it is another team's
+//                                               comment after the last "Released by team" one, and a take is refused when it is another team's,
+//                                               and for an issue in a `triage` or `backlog` status: a Lead takes work only from Todo (INN-34)
 //   release <KEY> --team <team>                 the holder only: the delegate cleared, the first `unstarted` status, a "Released by team" comment
+//   Triage (FAC-45, INN-34; Linear's own actions, linear.app/docs/triage), each only for an issue in a `triage` status, its reason on stdin:
+//   accept <KEY> --team <team> --body-file -    to the team's default status, which must be of type `backlog`, then the reason as a comment
+//   decline <KEY> --team <team> --body-file -   to the first `canceled` status, then the reason as a comment
+//   duplicate <KEY> --of <KEY> --team <team> --body-file -   a `duplicate` relation from the issue to the one it repeats, on a repository's
+//                                               team; Linear moves the issue to its Duplicate status, and the verb sets the first `duplicate`
+//                                               status itself only when the read-back shows Linear did not (`movedByLinear`); then the comment
 //   read <KEY>                                  title, description, status, delegate, assignee and every comment, as JSON
 //   comment <KEY> --team <team> --body-file -   one comment, shown as "<repo>-<team> (via Factory)"
 //   ask <KEY> --team <team> --body-file -       status Needs Human, the Human assigned, one comment (the question and its tick boxes)
@@ -19,7 +26,7 @@
 //   Colly reads only tokens/colly in the factory token store (the Human stores it with `factory store colly`); no key argument or environment.
 //   onboard <repo> --key <KEY> --name <name>    the repository's team (copied from FAC) and its Needs Human status, and the registry
 // One JSON object on stdout. Exit 0 done, 1 Linear refused or failed (the reason is in `error`, never a token), 2 usage.
-// Scope: take, comment, ask, answered, create and list act only on a team that is in the registry, never on INN or any other team; read does
+// Scope: take, comment, ask, answered, the triage verbs, create and list act only on a team that is in the registry, never on INN or any other team; read does
 // not. `--team` is a team name of the factory's grammar (bin/lib/names.mjs). A corrupt registry file refuses every verb that reads it.
 // The Human is found, never stored: the one workspace owner who is not an app; any other count refuses.
 // The registry, $FACTORY_STATE/linear/repos.json { "<repo>": { key, teamId } }, is written only by `onboard`, atomically; a repository
@@ -52,6 +59,9 @@ const SHAPES = {
   ask: { args: 1, flags: { '--team': 'value', '--body-file': 'value' } },
   answered: { args: 1, flags: { '--team': 'value' } },
   release: { args: 1, flags: { '--team': 'value' } },
+  accept: { args: 1, flags: { '--team': 'value', '--body-file': 'value' } },
+  decline: { args: 1, flags: { '--team': 'value', '--body-file': 'value' } },
+  duplicate: { args: 1, flags: { '--of': 'value', '--team': 'value', '--body-file': 'value' } },
   create: { args: 0, flags: { '--team': 'value', '--team-key': 'value', '--title': 'value', '--status': 'value', '--body-file': 'value', '--delegate': 'bool', ...FILING_FIELDS } },
   onboard: { args: 1, flags: { '--key': 'value', '--name': 'value' } },
   list: { args: 0, flags: { '--team-key': 'value', '--status': 'repeat' } },
@@ -62,6 +72,7 @@ const REQUIRED = {
   'decision-create': ['--title', '--status', '--body-file', '--assignee-id', '--label-id', '--project-id', '--due-date'],
   'decision-close': ['--body-file'],
   take: ['--team'], comment: ['--team', '--body-file'], ask: ['--team', '--body-file'], answered: ['--team'], release: ['--team'],
+  accept: ['--team', '--body-file'], decline: ['--team', '--body-file'], duplicate: ['--of', '--team', '--body-file'],
   create: ['--team-key', '--title', '--status', '--body-file'], onboard: ['--key', '--name'], list: ['--team-key'],
 };
 
@@ -87,6 +98,7 @@ export function parse(argv) {
   if (verb === 'create' && flags['--delegate'] && !('--team' in flags)) throw new Usage('create: --delegate needs --team, the team that holds the issue');
   if ('--body-file' in flags && flags['--body-file'] !== '-') throw new Usage(`${verb}: the body comes on stdin: --body-file -`);
   if (verb === 'onboard' ? !WORD.test(args[0]) : shape.args === 1 && !KEY.test(args[0])) throw new Usage(`${verb}: ${args[0]} is not a ${verb === 'onboard' ? 'repository name' : 'issue key such as FAC-12'}`);
+  if ('--of' in flags && (!KEY.test(flags['--of']) || flags['--of'] === args[0])) throw new Usage(`${verb}: --of is the key of another issue, such as FAC-12`);
   if ('--team' in flags && !TEAM.test(flags['--team'])) throw new Usage(`${verb}: --team is a team name: a lowercase letter, then at most 31 lowercase letters and digits`);
   for (const f of ['--team-key', '--key']) if (f in flags && !TEAM_KEY.test(flags[f])) throw new Usage(`${verb}: ${f} is a team key such as FAC`);
   if (verb === 'list') for (const t of flags['--status'] ?? []) if (!OPEN_TYPES.includes(t)) throw new Usage(`list: --status is one of ${OPEN_TYPES.join(', ')}`);
@@ -166,7 +178,7 @@ export function createCli({ api, collyApi, state, readStdin }) {
 
   /** The issue with its team; with `scoped`, refused unless its team is a repository's. */
   async function issueTeam(key, { scoped = true } = {}) {
-    const issue = (await q(`query($id: String!) { issue(id: $id) { id identifier delegate { id } team { id key ${STATES} } } }`, { id: key }))?.issue;
+    const issue = (await q(`query($id: String!) { issue(id: $id) { id identifier state { name type } delegate { id } team { id key defaultIssueState { id name type } ${STATES} } } }`, { id: key }))?.issue;
     if (!issue) throw new Refused(`Linear has no issue ${key}`);
     if (scoped) inScope(issue.team.key);
     return issue;
@@ -179,6 +191,11 @@ export function createCli({ api, collyApi, state, readStdin }) {
   const started = (issue) => {
     const s = firstStarted(issue.team.states.nodes);
     if (!s) throw new Refused(`team ${issue.team.key} has no status of type started`);
+    return s;
+  };
+  const firstOfType = (issue, type) => {
+    const s = issue.team.states.nodes.filter((x) => x.type === type).sort((a, b) => a.position - b.position)[0];
+    if (!s) throw new Refused(`team ${issue.team.key} has no status of type ${type}`);
     return s;
   };
   const update = (id, input) => q('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier } } }', { id, input });
@@ -199,6 +216,7 @@ export function createCli({ api, collyApi, state, readStdin }) {
   async function take({ args: [key], flags }) {
     const team = flags['--team'];
     const issue = await issueTeam(key);
+    if (['triage', 'backlog'].includes(issue.state?.type)) throw new Refused(`${key} is in ${issue.state.name}, which no Lead takes; take an issue from Todo; nothing was written`);
     const to = started(issue);
     const delegateId = await api.appUserId();
     const who = holderOf(await commentsOf(key));
@@ -218,8 +236,7 @@ export function createCli({ api, collyApi, state, readStdin }) {
     const issue = await issueTeam(key);
     const who = holderOf(await commentsOf(key));
     if (who !== team) throw new Refused(who ? `${key} is held by team ${who}, not ${team}; only the holder releases it` : `${key} is held by no team; nothing to release`);
-    const to = issue.team.states.nodes.filter((s) => s.type === 'unstarted').sort((a, b) => a.position - b.position)[0];
-    if (!to) throw new Refused(`team ${issue.team.key} has no status of type unstarted`);
+    const to = firstOfType(issue, 'unstarted');
     done(await update(issue.id, { delegateId: null, stateId: to.id }), 'issueUpdate');
     const c = await announceReleaseOn(api, issue.id, key, `${inScope(issue.team.key)}-${team}`);
     return { ok: true, key, status: to.name, delegate: null, team, commentId: c.comment?.id ?? null };
@@ -279,6 +296,45 @@ export function createCli({ api, collyApi, state, readStdin }) {
     const to = started(issue);
     done(await update(issue.id, { assigneeId: null, stateId: to.id }), 'issueUpdate');
     return { ok: true, key, status: to.name, assignee: null };
+  }
+
+  /** Triage (FAC-45): the issue, refused unless it is in a `triage` status, so no verb moves scheduled or running work. */
+  async function inTriage(key) {
+    const issue = await issueTeam(key);
+    if (issue.state?.type !== 'triage') throw new Refused(`${key} is in ${issue.state?.name ?? 'no status'}, not in Triage; only an issue in Triage is triaged; nothing was written`);
+    return issue;
+  }
+  const reason = async (issue, body, flags) => done(await api.commentCreate({ issueId: issue.id, body, team: `${inScope(issue.team.key)}-${flags['--team']}` }), 'commentCreate').comment?.id ?? null;
+
+  async function accept({ args: [key], flags }) {
+    const body = await bodyForComment();
+    const issue = await inTriage(key);
+    const to = issue.team.defaultIssueState;
+    if (to?.type !== 'backlog') throw new Refused(`team ${issue.team.key}'s default status is ${to ? `${to.name}, of type ${to.type}` : 'not set'}, not of type backlog; nothing was written`);
+    done(await update(issue.id, { stateId: to.id }), 'issueUpdate');
+    return { ok: true, key, status: to.name, commentId: await reason(issue, body, flags) };
+  }
+
+  async function decline({ args: [key], flags }) {
+    const body = await bodyForComment();
+    const issue = await inTriage(key);
+    const to = firstOfType(issue, 'canceled');
+    done(await update(issue.id, { stateId: to.id }), 'issueUpdate');
+    return { ok: true, key, status: to.name, commentId: await reason(issue, body, flags) };
+  }
+
+  async function duplicate({ args: [key], flags }) {
+    const body = await bodyForComment();
+    const issue = await inTriage(key);
+    const of = await issueTeam(flags['--of']);
+    done(await q('mutation($input: IssueRelationCreateInput!) { issueRelationCreate(input: $input) { success } }', { input: { issueId: issue.id, relatedIssueId: of.id, type: 'duplicate' } }), 'issueRelationCreate');
+    let status = (await q('query($id: String!) { issue(id: $id) { state { name type } } }', { id: issue.id }))?.issue?.state ?? null;
+    const movedByLinear = status?.type === 'duplicate';
+    if (!movedByLinear) {
+      status = firstOfType(issue, 'duplicate');
+      done(await update(issue.id, { stateId: status.id }), 'issueUpdate');
+    }
+    return { ok: true, key, duplicateOf: of.identifier, status: status.name, movedByLinear, commentId: await reason(issue, body, flags) };
   }
 
   async function create({ flags, verb }) {
@@ -381,7 +437,7 @@ export function createCli({ api, collyApi, state, readStdin }) {
     };
   }
 
-  const verbs = { 'decision-create': create, 'decision-close': closeDecision, take, release, read, comment, ask, answered, create, onboard, list };
+  const verbs = { 'decision-create': create, 'decision-close': closeDecision, take, release, accept, decline, duplicate, read, comment, ask, answered, create, onboard, list };
   /** Runs one verb; { code, out } with `out` the JSON object. */
   return async function run(argv) {
     let parsed;
@@ -411,6 +467,6 @@ export async function main(argv, env = process.env, { api, readStdin = () => (pr
   const run = createCli({ api: api ?? createLinear({ state }), collyApi: createLinear({ state, agentProfiles: env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'), colly: true }), state, readStdin });
   const { code, out } = await run(argv);
   console.log(JSON.stringify(out));
-  if (code === 2) console.error('usage: factory linear take|release|read|list|comment|ask|answered|create|onboard|decision-create|decision-close ... (see bin/lib/linear-cli.mjs)');
+  if (code === 2) console.error('usage: factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard|decision-create|decision-close ... (see bin/lib/linear-cli.mjs)');
   return code;
 }
