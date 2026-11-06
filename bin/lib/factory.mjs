@@ -689,7 +689,9 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
       ...Object.fromEntries(gitConfig.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
     },
     // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
-    permissions: { defaultMode: 'auto', deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
+    // env and printenv as for every role and seat (#181): the session's environment holds the team's Claude token and, with a stored
+    // agents token, GH_TOKEN.
+    permissions: { defaultMode: 'auto', deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
