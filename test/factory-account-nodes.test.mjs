@@ -38,10 +38,10 @@ test('account add defaults locally and sends only the selected node its token', 
     s.env.FACTORY_HOST_USER = 'nobody-here';
     const listed = s.fac('account', 'list');
     assert.equal(listed.code, 0, listed.out);
-    assert.match(listed.out, /macbook  fixture.*expiry unknown/);
-    assert.match(listed.out, /tuans-mac-mini  fixture.*expiry unknown/);
-    assert.ok(listed.out.includes(`added ${added}; expiry unknown`));
-    assert.doesNotMatch(listed.out, /expires|warning/i);
+    assert.match(listed.out, /macbook  fixture.*expiry \d{4}-\d{2}-\d{2}/);
+    assert.match(listed.out, /tuans-mac-mini  fixture.*expiry \d{4}-\d{2}-\d{2}/);
+    assert.ok(listed.out.includes(`added ${added}; expiry `));
+    assert.doesNotMatch(listed.out, /warning/i);
     for (const secret of [local, remote]) assert.ok(!listed.out.includes(secret));
     for (const [old, next] of [['login', 'add'], ['logout', 'remove']]) {
       const refused = s.fac(old, 'fixture');
@@ -74,7 +74,7 @@ test('an older token has an unknown added date until replaced; metadata never be
     assert.notEqual(added, '2000-01-01');
     const rows = JSON.parse(s.fac('account', 'list', '--json').stdout).filter((r) => r.role === 'node token');
     assert.equal(rows.length, 1);
-    assert.ok(rows[0].note.includes(`added ${added}; expiry unknown`));
+    assert.ok(rows[0].note.includes(`added ${added}; expiry `));
     writeFileSync(join(s.tokens(), 'legacy'), 'made-up-old-token');
     const legacy = JSON.parse(s.fac('account', 'list', '--json').stdout).find((r) => r.account === 'legacy');
     assert.match(legacy.note, /added unknown; expiry unknown/);

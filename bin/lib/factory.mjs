@@ -105,7 +105,7 @@ const readGh = (text) => {
 const readCodex = (code) => ({ loggedIn: code === 0 ? true : code === 1 ? false : null, account: null, plan: null });
 
 /** An account's token stat and date-only sidecar: { ok, note }; the token content is never read. */
-function tokenState(agentProfiles, account) {
+function tokenState(agentProfiles, account, now = Date.now()) {
   let s;
   try {
     s = statSync(join(tokenDir(agentProfiles), account));
@@ -113,7 +113,19 @@ function tokenState(agentProfiles, account) {
     return { ok: false, note: 'no token file' };
   }
   const mode = (s.mode & 0o777).toString(8);
-  return { ok: true, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, added ${tokenAdded(agentProfiles, account)}; expiry unknown` };
+  const added = tokenAdded(agentProfiles, account);
+  const expiry = new Date(`${added}T00:00:00Z`);
+  let expiryNote = 'expiry unknown';
+  if (Number.isFinite(expiry.getTime()) && expiry.toISOString().slice(0, 10) === added) {
+    // Anthropic authentication page, captured 2026-11-06, line 295: setup-token makes a one-year OAuth token.
+    const month = expiry.getUTCMonth();
+    expiry.setUTCFullYear(expiry.getUTCFullYear() + 1);
+    if (expiry.getUTCMonth() !== month) expiry.setUTCDate(0); // February 29 -> February 28.
+    const remaining = expiry.getTime() - now;
+    const warning = remaining <= 0 ? 'WARNING: expired' : remaining <= 7 * 86400000 ? 'WARNING: expires within 7 days' : '';
+    expiryNote = `expiry ${expiry.toISOString().slice(0, 10)}${warning ? `; ${warning}` : ''}`;
+  }
+  return { ok: true, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, added ${added}; ${expiryNote}` };
 }
 
 /** The profile's login state by its own vendor command: { loggedIn: true|false|null, account, plan, note }. A row of the accounts
@@ -295,7 +307,7 @@ export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }
   const heads = accounts.map(({ name, letter }) => {
     const members = rows.filter((r) => r.n && r.account === name);
     const q = members.filter((r) => r.asOf).sort((a, b) => b.asOf - a.asOf)[0];
-    const t = tokenState(agentProfiles, name);
+    const t = tokenState(agentProfiles, name, now);
     return { name, letter, members, q, t };
   });
   const nameW = Math.max(0, ...heads.map((h) => h.name.length));
