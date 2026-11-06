@@ -138,9 +138,12 @@ describe('leadArgs', () => {
       'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
       'Bash(factory linear:*)',
       'Bash(' + root + '/bin/seat:*)',
-      'Bash(' + root + '/bin/brief-check:*)',
     ]);
     for (const bad of ['Bash(gh:*)', 'Bash(git:*)']) assert.ok(!list('--allowedTools').includes(bad));
+  });
+
+  test('the removed brief checker has no execution grant (#482)', () => {
+    assert.ok(!list('--allowedTools').includes('Bash(' + root + '/bin/brief-check:*)'));
   });
 
   test('the Lead edits a pull request\'s body through scripts/pr-body, never gh pr edit (#386)', () => {

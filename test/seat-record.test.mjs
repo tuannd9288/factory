@@ -85,7 +85,7 @@ test('two result events: turns and duration summed, cost and subtype from the la
   assert.equal(rec.duration_ms, 1734);
   assert.equal(rec.total_cost_usd, 2.5);
   assert.equal(rec.ended, 'error_max_turns');
-  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [], foundOutside: [] });
+  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsLead: [], foundOutside: [] });
 }));
 
 test('a report that lists work found outside the task leaves it in the record as given (#338)', () => world(async (w) => {
@@ -94,5 +94,5 @@ test('a report that lists work found outside the task leaves it in the record as
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
   const [rec] = w.records();
-  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [], foundOutside: [found] });
+  assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsLead: [], foundOutside: [found] });
 }));

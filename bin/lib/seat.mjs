@@ -19,16 +19,16 @@ import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } f
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. `foundOutside` lists the bugs and
  * improvements it found outside its task, one line each, for the Lead to file (#338). `findings` is a reviewer's list of what it
- * found, each with its kind (#408); every other role returns an empty list. */
+ * found, each with its kind (#408); every other role returns an empty list. `needsLead` returns questions to the Lead. */
 export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['conclusion', 'evidence', 'couldNotRead', 'needsHuman', 'foundOutside', 'findings'],
+  required: ['conclusion', 'evidence', 'couldNotRead', 'needsLead', 'foundOutside', 'findings'],
   properties: {
     conclusion: { type: 'string' },
     evidence: { type: 'array', items: { type: 'string' } },
     couldNotRead: { type: 'array', items: { type: 'string' } },
-    needsHuman: { type: 'array', items: { type: 'string' } },
+    needsLead: { type: 'array', items: { type: 'string' } },
     foundOutside: { type: 'array', items: { type: 'string' } },
     findings: {
       type: 'array',

@@ -22,14 +22,19 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w origin/main`.
 3. Save the issue in the run folder: <!--github-->read it with `gh issue view <n> --json body,comments` and write that output to
    `~/factory-runs/<repo>-<n>/issue.json`.<!--/github--><!--linear-->read it with `factory linear read <KEY>` and write that output, which holds
-   every comment with its author and time, to `~/factory-runs/<repo>-<n>/issue.md`.<!--/linear--> Write a brief beside it: the goal, the acceptance, the files the worker may
+   every comment with its author and time, to `~/factory-runs/<repo>-<n>/issue.md`.<!--/linear--> Write a brief beside it using the fields in
+   `bin/brief-template.md` of the factory checkout: what to build, why, constraints checked, assumptions still open,
+   what was decided and what the receiver may challenge. Write one direct order from you, with no quotes of the owner,
+   no attached messages from above you, and no mention of the Human, Colly, a Supervisor or SLP to a seat. Include the acceptance, the files the worker may
    change, the exact commands it runs to check, and that it commits but never pushes. Name each check command whole,
    each run on its own after a separate `cd <worktree>`, with no `env` prefix, pipe or `;`: the tests of the part
    changed as `.gate/bin/verify --tests <files>`, which runs them inside the script (`npm`, `npx` and `env` are denied),
    and `.gate/bin/verify --fast` on the staged files before each commit. Never write "check it against" a script: the
    session then builds its own command, a deny rule refuses it, and it stops with no test run (#256). Tell the worker to
    list in `foundOutside` each bug or improvement it finds outside the issue, with where, and to fix none of them on the
-   branch. Work the issue needs is not a finding; the worker does it.
+   branch. Work the issue needs is not a finding; the worker does it. Tell every seat to stop on a refused action,
+   report its exact message to you and never retry it in another form, with another tool or a script. You handle
+   approvals; seat briefs do not describe them.
 4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
    `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
    the background: end the turn. A `seat-ended` wake says it ended; only then check, with Grep, once,
@@ -64,7 +69,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    two-minute limit. The full suite runs on CI, as the required `verify`. On a red, brief a fix round to the
    same worker: step 4's command with the fix brief, plus `--tag fix<k> --resume <session> --seat <seat>`; end the turn,
    and on its wake find the record with `"tag":"fix<k>"` the same way, and sort its `foundOutside` as in step 4.
-6. Have a peer reviewer read the change before you push; it writes no code. Write its brief beside the worker's: the
+6. Have a peer reviewer read the change before you push; it writes no code. Write its brief beside the worker's, using
+   step 3's fields and direct-order rule: the
    issue's acceptance, the worktree, that it reads `git diff origin/main...HEAD` there, the test commands it may run,
    named as in step 3 (`.gate/bin/verify --tests <files>` and `.gate/bin/red-check --base origin/main`; `--fast`
    checks only staged files, and a committed change has none), or that it runs none, since step 5 ran them, that it
@@ -144,10 +150,9 @@ on disk, never only in your context (#185).
 - **The Human's words.** <!--github-->Put each answer he gives you along the way on its issue at once, verbatim and in double quotes,
   in his language, with `gh issue comment`<!--/github--><!--linear-->An answer he wrote as a comment on the issue is already the record:
   do not post it again. An answer he gave elsewhere, for example relayed by Colly, you put on the issue at once, verbatim and in double quotes,
-  in his language, with `factory linear comment <KEY> --team {{TEAM}} --body-file -`<!--/linear--> (#90). A brief that rests on his words quotes them from those comments: save
-  the comments as `relay.md` beside the brief, end the brief with the line `## Colly's message, attached as data` and the
-  relay below it, and run `/Users/factory/WORKSPACES/bin/brief-check <brief> <relay.md>` before the worker starts; on a
-  failure, fix the brief.
+  in his language, with `factory linear comment <KEY> --team {{TEAM}} --body-file -`<!--/linear--> (#90). Keep the date and where
+  he gave the answer with each decision on the issue or its INN item. When you need his exact words, read that record
+  yourself. Brief from step 3's fields, without quoting the owner or attaching the record.
 - **When to hand over.** Judge it yourself, when you find yourself fixing the same thing again and again or losing the
   thread; Colly may also tell you to, from the context in its brief. There is no number.
 - **How.** Follow pstack's Pause safely playbook, with these changes:

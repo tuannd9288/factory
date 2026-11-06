@@ -50,20 +50,20 @@ process.stdin.on('end', () => {
   line({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-sonnet-5-5' });
   line({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { seven_day: { utilization: 0.12 } } } });
   if (e.FAKE_MODE === 'hang') {
-    const timer = setInterval(() => { if (fs.existsSync(e.FAKE_RELEASE)) { clearInterval(timer); line({ type: 'result', subtype: 'success', session_id: sid, num_turns: Number(e.FAKE_TURNS ?? 99), duration_ms: 1, total_cost_usd: Number(e.FAKE_COST ?? 9.99), modelUsage: { 'claude-sonnet-5-5': {} }, structured_output: { conclusion: sid, evidence: [], couldNotRead: [], needsHuman: [], foundOutside: [] } }); process.exit(0); } }, 20);
+    const timer = setInterval(() => { if (fs.existsSync(e.FAKE_RELEASE)) { clearInterval(timer); line({ type: 'result', subtype: 'success', session_id: sid, num_turns: Number(e.FAKE_TURNS ?? 99), duration_ms: 1, total_cost_usd: Number(e.FAKE_COST ?? 9.99), modelUsage: { 'claude-sonnet-5-5': {} }, structured_output: { conclusion: sid, evidence: [], couldNotRead: [], needsLead: [], foundOutside: [] } }); process.exit(0); } }, 20);
     return;
   }
   if (e.FAKE_MODE === 'noresult') process.exit(3);
   if (e.FAKE_MODE === 'split') {
     // One result line in two writes, cut inside the two bytes of a.
-    const text = JSON.stringify({ type: 'result', subtype: 'success', session_id: sid, num_turns: 1, duration_ms: 1, total_cost_usd: 1, structured_output: { conclusion: 'L\\u00e0m (Recommended) \\u2014 ng\\u01b0\\u1ee1ng 70%', evidence: [], couldNotRead: [], needsHuman: [], foundOutside: [] } }) + '\\n';
+    const text = JSON.stringify({ type: 'result', subtype: 'success', session_id: sid, num_turns: 1, duration_ms: 1, total_cost_usd: 1, structured_output: { conclusion: 'L\\u00e0m (Recommended) \\u2014 ng\\u01b0\\u1ee1ng 70%', evidence: [], couldNotRead: [], needsLead: [], foundOutside: [] } }) + '\\n';
     const buf = Buffer.from(text);
     const cut = buf.indexOf(Buffer.from('\\u00e0')) + 1;
     process.stdout.write(buf.subarray(0, cut));
     setTimeout(() => { process.stdout.write(buf.subarray(cut)); process.exit(0); }, 100);
     return;
   }
-  const report = { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsHuman: [], foundOutside: e.FAKE_FOUND ? [e.FAKE_FOUND] : [] };
+  const report = { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsLead: [], foundOutside: e.FAKE_FOUND ? [e.FAKE_FOUND] : [] };
   line({ type: 'result', subtype: 'success', is_error: false, session_id: sid, num_turns: 7, duration_ms: 1234, total_cost_usd: Number(e.FAKE_COST ?? 1.25), modelUsage: { 'claude-sonnet-5-5': {} }, structured_output: report });
   if (e.FAKE_MODE === 'two') {
     line({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-sonnet-5-5' });

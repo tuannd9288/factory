@@ -12,7 +12,7 @@ const rec = (repo, branch, kinds, extra = {}) => {
   const findings = kinds === null ? {} : { findings: kinds.map((kind) => ({ kind, claim: `claim ${n}`, blocking: false })) };
   return {
     session: `s${n}`, role: 'reviewer', tag: `review${n}`, run: '/r', repo, branch, start: `2026-11-0${1 + (n % 7)}T00:00:00Z`, end: `2026-11-0${1 + (n % 7)}T00:10:00Z`,
-    structured: { conclusion: 'PASS', evidence: [], couldNotRead: [], needsHuman: [], foundOutside: [], ...findings }, ...extra,
+    structured: { conclusion: 'PASS', evidence: [], couldNotRead: [], needsLead: [], foundOutside: [], ...findings }, ...extra,
   };
 };
 const PRS = { 'o/app\nb1': 11, 'o/app\nb2': 12, 'o/app\nb3': null, 'o/app\nb4': 14, 'o/lib\nc1': 21 };
