@@ -59,12 +59,17 @@ test('colly isolates GitHub and grants only use and lead, with the pack role req
     assert.equal(await main(['colly'], { ...env, FACTORY_HOST_USER: userInfo().username }), 2);
     assert.equal(await main(['colly', '--unknown'], env), 2);
     assert.equal(calls.length, count);
+    for (const flags of [['--line', '--once'], ['--line', '--after', '1'], ['--brief', '--width', '80'], ['--line', '--brief'], ['--brief', '--after', '1x']]) {
+      assert.equal(await main(['colly', ...flags], env), 2);
+      assert.equal(calls.length, count);
+    }
     result = { status: 0 };
     for (const flags of [['--line'], ['--line', '--width', '80'], ['--brief'], ['--brief', '--after', '5']]) {
       assert.equal(await main(['colly', ...flags], env), 0);
       const colly = calls.at(-1);
-      assert.equal(await main(['top', ...flags], env), 0);
-      assert.deepEqual(colly, calls.at(-1));
+      assert.equal(colly.cmd, 'ssh');
+      assert.ok(!colly.args.includes('-t'));
+      assert.ok(colly.args.at(-1).includes(`factory colly ${flags.join(' ')}`));
     }
   } finally {
     t.mock.restoreAll();

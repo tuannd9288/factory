@@ -295,7 +295,7 @@ const accountOf = (file, seatRows) => {
 };
 
 /** The rate_limit_info that the newest log of the account reporting a seven-day use gives (its last rate_limit_event), with the
- * log's time, or null. The one reader of an account's quota: accountOut, the ledger's table, `factory` and `factory top` all use it. */
+ * log's time, or null. The one reader of an account's quota: accountOut, the ledger's table, `factory` all use it. */
 export function accountEvent(runs, account, seatRows = {}) {
   const logs = runFiles(runs, '.jsonl').filter((f) => accountOf(f, seatRows) === account).map((f) => ({ f, t: statSync(f).mtimeMs })).sort((a, b) => b.t - a.t);
   for (const { f, t } of logs) {

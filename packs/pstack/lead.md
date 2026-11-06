@@ -149,7 +149,7 @@ on disk, never only in your context (#185).
   relay below it, and run `/Users/factory/WORKSPACES/bin/brief-check <brief> <relay.md>` before the worker starts; on a
   failure, fix the brief.
 - **When to hand over.** Judge it yourself, when you find yourself fixing the same thing again and again or losing the
-  thread; Colly may also tell you to, from the context `factory top` shows. There is no number.
+  thread; Colly may also tell you to, from the context in its brief. There is no number.
 - **How.** Follow pstack's Pause safely playbook, with these changes:
   - it is not only on an explicit word: your own judgement above starts it too;
   - make no commit to pause: the kit refuses a `wip` subject, and a worker's commits are already on its branch, so name

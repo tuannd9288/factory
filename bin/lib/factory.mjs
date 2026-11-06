@@ -23,7 +23,7 @@ import { onLinear } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
-import { leadTeams } from './top.mjs';
+import { leadTeams } from './colly-status.mjs';
 import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
@@ -205,7 +205,7 @@ export function readPlace(place, ctx) {
   });
 }
 
-// accountList moved to token.mjs, so that top.mjs can use it without importing this file, which `bin/factory` runs as its main module.
+// accountList moved to token.mjs, so that colly-status.mjs can use it without importing this file, which `bin/factory` runs as its main module.
 export { accountList };
 
 /** Rows of piggery's two profiles through pig on the Mac mini, by ssh. */
@@ -341,9 +341,6 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory store <account>   (on the Mac mini; reads the token from stdin; \`store linear-app <client-id|client-secret>\` likewise)
        bin/factory use [<row|repo-team> [<letter>]]   (the row's account becomes the letter's; <repo>-<team> makes a team's row, and that team's running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
-       bin/factory top [--once] [--width N] [--full]
-       bin/factory top --line [--width N]   (one line: what waits on the Human, teams, alerts)
-       bin/factory top --brief [--after <seq>]   (the start hook's text for Colly; ends with the last seq)
        bin/factory colly   (starts Colly in this pane on the MacBook)
        bin/factory colly --line [--width N]
        bin/factory colly --brief [--after <seq>]
@@ -602,7 +599,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
 /** Colly's current-pane launch (#365): the pack supplies the approved role; GitHub writes go through `factory gh`.
  * INN-30 permits use and lead; login, store and logout remain denied. */
 function colly(args, env) {
-  if (args.includes('--line') || args.includes('--brief')) return top(args, env);
+  if (args.includes('--line') || args.includes('--brief')) return collyStatus(args, env);
   if (args.length) {
     console.error(USAGE);
     return 2;
@@ -747,32 +744,23 @@ function movedOld(agentProfiles, state) {
   return to ? `moved seat 1's old token file to ${to}` : null;
 }
 
-/** `factory top` (#174): the read-only view of every session and repository (bin/lib/top.mjs). On the factory host it runs
- * here; on the MacBook it runs the same command there by ssh, with a terminal (-t) for the live view only. Only `--once` and
- * `--full` (each at most once) and `--width N` (digits) are taken, checked before any ssh. `--once` prints one frame with no keys
- * line, and in colour only when its output is a terminal that has colours (NO_COLOR, NODE_DISABLE_COLORS and FORCE_COLOR apply).
- * `--line [--width N]` and `--brief [--after N]` (#365) print the status line and the start hook's text of `factory colly`, and take
- * nothing else; they never ask for a terminal. */
-async function top(args, env) {
-  const text = args.includes('--line') || args.includes('--brief');
-  const live = !text && !args.includes('--once');
-  const rest = args.filter((a) => a !== '--once' && a !== '--full');
-  const width = rest.length === 2 && rest[0] === '--width' && /^\d+$/.test(rest[1]);
+/** Colly's status line and start-hook text, locally or on the factory host. */
+async function collyStatus(args, env) {
   const textOk = (flag, opt) => args.filter((a) => a === flag).length === 1 && (args.length === 1 || (args.length === 3 && args[0] === flag && args[1] === opt && /^\d+$/.test(args[2])));
-  if (text ? !(textOk('--line', '--width') || textOk('--brief', '--after')) : ['--once', '--full'].some((f) => args.filter((a) => a === f).length > 1) || (rest.length && !width)) {
+  if (!(textOk('--line', '--width') || textOk('--brief', '--after'))) {
     console.error(USAGE);
     return 2;
   }
   if (placeOf(env) === 'factory') {
     try {
-      await (await import('./top.mjs')).main(args);
+      await (await import('./colly-status.mjs')).main(args);
       return 0;
     } catch (e) {
-      console.error(`bin/factory: top: ${String(e.message).split('\n')[0]}`);
+      console.error(`bin/factory: colly: ${String(e.message).split('\n')[0]}`);
       return 1;
     }
   }
-  return onHostBySsh('top', args, live, env);
+  return onHostBySsh('colly', args, false, env);
 }
 
 /** `factory login <account>`: checks the name, runs `claude setup-token` on the terminal's own streams (so what it prints goes to
@@ -943,7 +931,7 @@ const startNote = (repo, flag) => (repo === FACTORY_REPO ? '' : ` (factory lead 
 async function restartLead(repo, team, account, ctx, oldAccount) {
   const hasToken = tokenState(ctx.agentProfiles, account).ok;
   const flag = ` --team ${team}`;
-  // `factory top`'s rule: a claude process with --name <repo>-<team>. A recorded pane may hold something else by now.
+  // The Lead process rule: a claude process with --name <repo>-<team>. A recorded pane may hold something else by now.
   if (!leadTeams(repo).includes(team)) {
     console.log(`the Lead of ${repo} (team ${team}) is not running; it takes ${account} at its next start${startNote(repo, flag)}`);
     if (!hasToken) console.log(`${account} has no token file yet: that next start is refused until factory login ${account}`);
@@ -1104,7 +1092,10 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'store') return store(rest, env);
   if (cmd === 'use') return use(rest, env, io);
   if (cmd === 'logout') return logout(rest, env);
-  if (cmd === 'top') return top(rest, env);
+  if (cmd === 'top') {
+    console.error("factory top was removed. Use Linear's project 'Factory release 1'.");
+    return 2;
+  }
   if (cmd === 'colly') return colly(rest, env);
   if (cmd === 'lead') return lead(rest, env);
   if (cmd === 'gh') return ghCmd(rest, env);

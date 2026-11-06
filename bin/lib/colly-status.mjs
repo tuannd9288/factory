@@ -1,49 +1,24 @@
-// `factory top` (#174): one terminal view of every session the factory runs and the state of every repository it works on,
-// repo -> issue -> session, modelled on `piggery top`. It changes nothing and keeps no store: it reads the run folders'
-// stream-json logs and pid files, bin/seat's sessions.jsonl, the state folder's queue and *.failed files, the claim refs,
-// and gh porcelain (never `gh api`). A field the data does not give is shown as `?`.
-// #286: what waits on the Human first, one block per repository (the Lead of each team in it), the accounts (factory.mjs's list, each account's quota) and Today.
-// It runs as `factory top [--once] [--width N] [--full]` (bin/lib/factory.mjs); `node bin/lib/top.mjs --once` prints one frame as well.
-// #365: two more modes print plain text from the same snapshot and the same list of what waits on the Human, and exit 0:
-// `--line [--width N]` (else COLUMNS, else 80) is the status line under Colly's prompt (pull requests to approve, Leads waiting, alerts, teams
-// working; whole parts drop from the right to fit), and `--brief [--after <seq>]` is the text of Colly's start hook (what waits, each
-// team with its issues, the `start` events after <seq> or the newest few, then `seq <n>`, the highest seq in events.jsonl). Neither moves
-// #309's cursor. GitHub's last read is kept in $FACTORY_STATE/top-github.json (a temporary file, then a rename) and reused for a minute by
-// every process, the live view included, so a line run each minute calls GitHub once a minute at most. Each mode has one deadline
-// (LINE_MS, BRIEF_MS); when it passes the text is made from the file's last read, whatever its age (`?` where there is none) and the
-// process ends. `--brief` cuts its events block when long; its `seq` is then the last event printed, so the Monitor started with
-// `--after <seq>` delivers the rest, and otherwise the highest seq.
-// `c` (or --full) adds #174's engineering columns. Layout (#174): what waits on the Human first, then each repository by team (the Lead's
-// row, its issues, the sessions under each), then the accounts and Today; a state is a mark and a word, with basic SGR colour on a
-// terminal that has it (`render`'s `color` option; `main` reads it from the terminal once); a row too wide drops whole columns (S_STEPS).
-// What waits on the Human comes first (pull requests to approve, a Lead at a prompt or a login, alerts), then one block per
-// repository with the Lead of each team, issues and workers, the accounts with local reset times, and Today; it is live on a
-// terminal; on the MacBook it runs on the Mac mini by ssh. Every session has an animal name from Ubuntu's release code names (bin/lib/names.mjs): bin/seat writes
-// run-<tag>.name, a Lead keeps ~/factory-runs/<repo>-<team>/name and its Herdr pane carries it. A Lead's state is its newest hook
-// event in <repo>-<team>/state.json (packs/pstack/bin/transcript-copy.mjs).
+// Colly status text and shared session readers (#429).
+// --line and --brief share top-github.json, preserving the existing cache and deadlines.
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { cpus, homedir, loadavg } from 'node:os';
+import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
-import { REQUIRED, clonesUnder, costOf, lastRecords as lastOfSession, readSessions } from './ledger.mjs';
-import { quotaRows, windowsOf } from './quota.mjs';
-import { PRESETS, SEATS, liveCount, resetPassed, runLive } from './seat.mjs';
+import { REQUIRED, clonesUnder, costOf, readSessions } from './ledger.mjs';
+import { windowsOf } from './quota.mjs';
+import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
-import { accountList, seatAccounts } from './token.mjs';
-import { teamRows } from './teams.mjs';
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
-const LOCAL_MS = 2000;
 const GH_MS = 60_000;
 const CALL_MS = 15_000;
 const WORKING_MS = 120_000;
 const GONE_MS = 24 * 3600_000;
 const LOGIN_MS = 60_000;
-const DONE_MAX = 40;
 const ROLE_ORDER = ['lead', 'worker', 'reviewer', 'researcher'];
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -162,7 +137,7 @@ export function leadOf(command) {
 /** The teams whose Lead runs on a repository, sorted. */
 export const leadTeams = (repo, processes = psList) => [...new Set(processes().map((p) => leadOf(p.command)).filter((l) => l?.repo === repo).map((l) => l.team))].sort();
 
-/** Whether a Lead of a repository runs: the one rule `top` and `factory use` share (#179). */
+/** Whether a Lead of a repository runs: the rule used by `factory use` (#179). */
 export const leadRunning = (repo, processes = psList) => leadTeams(repo, processes).length > 0;
 
 function branchIn(cwd) {
@@ -209,13 +184,6 @@ function stateOf(p, { live, ageMs, record, now }) {
 const pad2 = (n) => String(n).padStart(2, '0');
 const startOfDay = (ms) => new Date(ms).setHours(0, 0, 0, 0);
 const hm = (ms) => `${pad2(new Date(ms).getHours())}:${pad2(new Date(ms).getMinutes())}`;
-
-/** Whether a session is listed in a frame: it is not gone, and it is live or last wrote on the local day that starts at `day`. */
-const isListed = (s, day) => s.state !== 'gone' && (s.live || s.lastAt >= day);
-
-/** When an issue is listed while open, with `busy` for a claim or an open pull request: `active` on All, where a session counts only
- * if it is listed today; `recent` on a repository's tab, where #174's rule holds and a session of the last 24 hours counts. */
-const shownOf = (sessions, day, busy) => ({ active: busy || sessions.some((s) => isListed(s, day)), recent: busy || sessions.some((s) => s.state !== 'gone') });
 
 /** A time as local HH:MM, or MM-DD HH:MM when it is not on the day of now; ? for none. */
 export function local(ms, now) {
@@ -582,11 +550,11 @@ const MARK = (c) => {
 };
 
 /** A group per issue: its claim, step, pull request with the required checks, and who it waits on. */
-function groupOf(repo, number, gh, sessions, day) {
+function groupOf(repo, number, gh, sessions) {
   // No GitHub data at all for this repository: nothing is filled in.
   if (!gh || gh.unknown) {
     return {
-      number, title: '?', done: false, ...shownOf(sessions, day, false), team: null, step: '?', pr: null, unknown: true,
+      number, title: '?', done: false, team: null, step: '?', pr: null, unknown: true,
       waiting: sessions.some((s) => s.live) ? 'the team' : '?', sessions,
     };
   }
@@ -610,14 +578,13 @@ function groupOf(repo, number, gh, sessions, day) {
   return {
     number, title: issue?.title ?? '?',
     done: closed,
-    ...shownOf(sessions, day, Boolean(held) || Boolean(pr && !merged)),
     team: held ?? /^Team: (\S+)/m.exec(pr?.body ?? '')?.[1] ?? null,
     step, pr: pr ? { number: pr.number, title: pr.title, checks: Object.fromEntries(Object.entries(checks).map(([k, c]) => [k, MARK(c)])) } : null,
     waiting, sessions,
   };
 }
 
-/** Everything one frame shows, read now. `cache` keeps GitHub's last read between calls. */
+/** The sessions, issues and waits for Colly, read now. `cache` keeps GitHub's last read between calls. */
 export async function snapshot(opts = {}) {
   const home = process.env.HOME ?? homedir();
   const now = opts.now ?? Date.now();
@@ -635,83 +602,14 @@ export async function snapshot(opts = {}) {
     const mine = sessions.filter((s) => s.repo === repo);
     const gh = github.repos[repo];
     const numbers = new Set([...(gh?.issues ?? []).map((i) => i.number), ...mine.map((s) => s.issue).filter((n) => n !== null)]);
-    const groups = [...numbers].sort((a, b) => a - b).map((n) => groupOf(repo, n, gh, mine.filter((s) => s.issue === n), startOfDay(now)));
+    const groups = [...numbers].sort((a, b) => a - b).map((n) => groupOf(repo, n, gh, mine.filter((s) => s.issue === n)));
     return { repo, groups, other: mine.filter((s) => s.issue === null), ghStatus: gh?.failedAt ? { failedAt: gh.failedAt, goodAt: gh.goodAt } : null };
   });
-  const agentProfiles = opts.agentProfiles ?? process.env.AGENT_PROFILES ?? join(home, '.agent-profiles');
-  const accounts = accountRows({ state, runs, agentProfiles, root });
   return {
-    now, state, load: opts.load ?? loadavg(), cores: opts.cores ?? cpus().length, sessions, repos: byRepo, github, queue: queueOf(state), events: eventsOf(state), accounts,
-    seats: opts.live ? seatCounts(sessions) : seatsLive(runs), today: todayOf({ now, repos: byRepo, github, records: sessionRecords(state, opts.cache ? cache : null), accounts, seatRows: seatAccounts(state) }),
+    now, state, sessions, repos: byRepo, github, queue: queueOf(state), events: eventsOf(state),
   };
 }
 
-/** The seats' live sessions as bin/seat counts them (liveCount). */
-const seatsLive = (runs) => Object.fromEntries(Object.keys(SEATS).map((n) => [n, { live: liveCount(runs, Number(n)) }]));
-
-const seatCounts = (sessions) => Object.fromEntries(Object.keys(SEATS).map((n) => [n, { live: sessions.filter((s) => s.live && s.seat === n).length }]));
-
-/** The lettered accounts (token.mjs's accountList, which `bin/factory` lists too) with the quota of each from its own newest event
- * (quotaRows, one row for each account, #311), and who uses each: its teams, `<repo>-<team>`. */
-function accountRows({ state, runs, agentProfiles, root }) {
-  const teams = teamRows(state, root);
-  let quota = [];
-  try {
-    quota = quotaRows({ runs, state, root });
-  } catch {
-    // no quota to show: every window is ?
-  }
-  return accountList({ state, agentProfiles }).map(({ name, letter }) => {
-    const q = quota.find((x) => x.account === name && x.asOf);
-    const users = teams.filter((t) => t.account === name).map((t) => t.name);
-    return { letter, name, five_hour: q?.windows?.five_hour ?? null, seven_day: q?.windows?.seven_day ?? null, users };
-  });
-}
-
-const HUMAN_LABELS = new Set(['tier-3', 'needs-human']);
-
-/** Today (the local day of now): the pull requests merged, the cost of the sessions.jsonl records that ended today for each account
- * letter (a Lead's cost is in no record), and the time pull requests waited on the Human, clipped to today. A pull request waited
- * from the newest finish of its required checks other than `tier` until it merged, or until now while it waits. */
-export function todayOf({ now, repos, github, records, accounts, seatRows = {} }) {
-  const day = startOfDay(now);
-  let merged = 0;
-  let waitedMs = 0;
-  for (const r of repos) {
-    const gh = github.repos[r.repo];
-    for (const pr of gh && !gh.unknown ? gh.prs : []) {
-      if (pr.mergedAt && Date.parse(pr.mergedAt) >= day) merged += 1;
-      const open = pr.state === 'OPEN';
-      const human = open ? r.groups.some((g) => g.pr?.number === pr.number && g.waiting === 'the Human') : Boolean(pr.mergedAt) && (pr.labels ?? []).some((l) => HUMAN_LABELS.has(l.name));
-      const finished = gh.required.filter((n) => n !== 'tier').flatMap((n) => (pr.statusCheckRollup ?? []).filter((c) => c.name === n).map((c) => Date.parse(c.completedAt))).filter(Number.isFinite);
-      if (!human || !finished.length) continue;
-      waitedMs += Math.max(0, Math.min(now, open ? now : Date.parse(pr.mergedAt)) - Math.max(day, ...finished));
-    }
-  }
-  const cost = new Map();
-  for (const x of lastOfSession(records)) {
-    if (!(Date.parse(x.end) >= day) || typeof x.total_cost_usd !== 'number') continue;
-    const account = x.account ?? seatRows[x.seat]; // a record from before #311 has no account: its seat's old row
-    const letter = accounts.find((a) => a.name === account)?.letter ?? '?';
-    cost.set(letter, (cost.get(letter) ?? 0) + x.total_cost_usd);
-  }
-  return { merged, cost: [...cost].sort(([a], [b]) => a.localeCompare(b)).map(([letter, usd]) => [letter, Math.round(usd * 100) / 100]), waitedMs };
-}
-
-/** A span as 45s, 12m, 3h05 or 5d; a negative one (a log written after the snapshot's clock) is 0s; not a number is ?. */
-export const age = (ms) => {
-  if (typeof ms !== 'number' || Number.isNaN(ms)) return '?';
-  const s = Math.floor(Math.max(0, ms) / 1000);
-  if (s < 90) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 90) return `${m}m`;
-  const h = Math.floor(m / 60);
-  return h < 48 ? `${h}h${String(m % 60).padStart(2, '0')}` : `${Math.floor(h / 24)}d`;
-};
-const kilo = (n) => (n === null || n === undefined ? '?' : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
-
-// Widths are counted in terminal cells (#174): a wide character is two, a combining or zero-width one none, an SGR sequence none.
-// Text is walked by code point, so a surrogate pair is never cut.
 const WIDE = [[0x1100, 0x115f], [0x2e80, 0x303e], [0x3041, 0x33ff], [0x3400, 0x4dbf], [0x4e00, 0xa4cf], [0xac00, 0xd7a3], [0xf900, 0xfaff], [0xfe10, 0xfe19], [0xfe30, 0xfe6f], [0xff01, 0xff60], [0xffe0, 0xffe6], [0x1f300, 0x1f64f], [0x1f680, 0x1f6ff], [0x1f900, 0x1f9ff], [0x20000, 0x3fffd]];
 const NONE = [[0, 0x1f], [0x7f, 0x9f], [0x300, 0x36f], [0x200b, 0x200f], [0x2060, 0x2064], [0x20d0, 0x20ff], [0xfe00, 0xfe0f], [0x1f3fb, 0x1f3ff], [0xe0100, 0xe01ef]];
 const within = (ranges, c) => ranges.some(([a, b]) => c >= a && c <= b);
@@ -751,187 +649,14 @@ export function cutWord(s, n) {
   return `${kept.trimEnd()}…`;
 }
 
-const pad = (s, n) => s + ' '.repeat(Math.max(0, n - cells(s)));
-
-// Colour is basic SGR only, so the terminal's theme picks the hues (#174): yellow means only "waits on you".
-const BOLD = '1';
-const YELLOW = '1;33';
-const GREEN = '32';
-const RED = '31';
-const DIM = '2';
-
-// A session's state is a mark and a word, so the word carries it without colour; `rank` orders a block: waiting on the Human,
-// stuck, working, idle, done.
-const SESSION_STATES = {
-  waiting: { mark: '!', word: 'waiting', code: YELLOW, rank: 0 },
-  failed: { mark: '×', word: 'failed', code: RED, rank: 1 },
-  stopped: { mark: '×', word: 'out of quota', code: RED, rank: 1 },
-  working: { mark: '●', word: 'working', code: GREEN, rank: 2 },
-  idle: { mark: '○', word: 'idle', code: null, rank: 3 },
-  done: { mark: '✓', word: 'done', code: DIM, rank: 4 },
-  gone: { mark: '✓', word: 'gone', code: DIM, rank: 4 },
-};
-const stateOfRow = (s) => SESSION_STATES[s.state] ?? { mark: '○', word: String(s.state), code: null, rank: 3 };
-
-// COST is the session's total across resumes (the last result's total_cost_usd), while TOKENS and TURNS count this log's
-// rounds only, so a resumed session's row mixes two spans; a live `~$` estimate counts this log alone.
-// The columns of a session row: key, header, widest. NOTE is the free-text cell that ends the row; the others, #174's
-// engineering columns, come with `c` or --full. When a row does not fit, columns go whole in the order of S_STEPS.
-const S_BASE = [['name', 'NAME', 18], ['role', 'ROLE', 10], ['state', 'STATE', 14], ['for', 'FOR', 17], ['cost', 'COST', 8], ['note', 'NOTE', 40]];
-const S_FULL = [['harness', 'HARNESS', 9], ['model', 'MODEL', 18], ['seat', 'SEAT', 5], ['ctx', 'CTX', 8], ['turns', 'TURNS', 6], ['tokens', 'TOKENS ↓/↑', 14], ['cwd', 'CWD', 24], ['branch', 'BRANCH', 40]];
-// NAME shrinks only to 8 cells of the name itself: its cell holds the indent too (at most NAME_INDENT), so the column goes to 8 + that.
-// What is still too wide then is NOTE's to give up: it is cut, or dropped.
-const NAME_INDENT = 6;
-const S_STEPS = ['branch', 'cwd', 'tokens', 'turns', 'ctx', 'seat', 'model', 'harness', 'cost', 'role', 'for', ['name', 8 + NAME_INDENT]];
-// The columns of an issue row, and what goes first: the title is the free-text cell and is cut; the state and #n stay.
-const I_COLS = [['state', '', 13], ['num', '', 6], ['team', '', 12], ['step', '', 9], ['pr', '', 9], ['checks', '', 34], ['title', '', 80]];
-const I_STEPS = ['team', 'step', 'checks', 'pr'];
-const GAP = 1;
-const MIN_FREE = 12;
-const tail = (cwd) => (cwd ? cwd.split(sep).filter(Boolean).slice(-2).join('/') : '?');
-
-/** The columns a row set keeps in `room` cells. `natural` is each column's widest cell (0: nothing to show). Columns go whole in the
- * order of `steps` (a [key, n] step shrinks one to n cells) until the last column, which takes what is left and is cut, has
- * min(its width, MIN_FREE); the `keep` columns are never dropped. */
-function planCols(cols, natural, steps, room, keep) {
-  let kept = cols.filter(([key]) => natural[key] > 0).map(([key, head]) => ({ key, head, w: natural[key] }));
-  if (!kept.length) return kept;
-  const used = () => kept.slice(0, -1).reduce((n, c) => n + c.w + GAP, 0);
-  for (const step of steps) {
-    if (room - used() >= Math.min(kept.at(-1).w, MIN_FREE)) break;
-    if (typeof step === 'string') kept = kept.filter((c) => c.key !== step);
-    else for (const c of kept) if (c.key === step[0]) c.w = Math.min(c.w, step[1]);
-  }
-  for (let i = kept.findLastIndex((c) => !keep.includes(c.key)); room - used() < 2 && i > 0; i = kept.findLastIndex((c) => !keep.includes(c.key))) kept.splice(i, 1);
-  const last = kept.at(-1);
-  last.w = Math.max(0, Math.min(last.w, room - used()));
-  return kept;
-}
-
-const naturalOf = (cols, all, heads) => Object.fromEntries(cols.map(([key, head, cap]) => [key, Math.min(cap, Math.max(heads ? cells(head) : 0, ...all.map((c) => cells(c[key] ?? ''))))]));
-
-/** One row: the kept columns padded to their widths, the last one cut at a word boundary; `style` colours a cell by its key. */
-function rowOf(kept, cell, style = {}, indent = 0) {
-  const parts = kept.map((c, i) => {
-    const last = i === kept.length - 1;
-    const text = last ? cutWord(cell[c.key] ?? '', c.w) : clip(cell[c.key] ?? '', c.w);
-    const painted = style[c.key] && text ? style[c.key](text) : text;
-    return last ? painted : pad(painted, c.w);
-  });
-  return ' '.repeat(indent) + parts.join(' '.repeat(GAP)).trimEnd();
-}
-
-/** The cells of a session row, as plain text. The name cell holds the row's indent, so that a header sits over every level. */
-function sessionCells(s, now, indent) {
-  const model = s.model ? `${s.model.replace(/^claude-/, '')} ${s.effort ?? '?'}` : '?';
-  const cost = s.cost !== null ? `$${s.cost.toFixed(2)}` : s.estCost !== null && s.estCost !== undefined ? `~$${s.estCost.toFixed(2)}` : '?';
-  // A Lead is shown since its newest hook event; any other session by how long it has run (or ran).
-  const span = s.role === 'lead' ? (s.stateAt ? `since ${local(s.stateAt, now)}` : '?') : s.startedAt ? age((s.live ? now : s.lastAt) - s.startedAt) : '?';
-  const st = stateOfRow(s);
-  return {
-    name: `${' '.repeat(indent)}${s.name}`, role: s.role === 'lead' ? `Lead ${s.team}` : s.role, state: `${st.mark} ${st.word}`, for: span, cost,
-    note: [s.state === 'stopped' ? `until ${local(s.until, now)}` : null, s.waitNote, s.rounds > 1 ? `${s.rounds} rounds` : null].filter(Boolean).join(', '),
-    harness: s.harness, model, seat: s.seat ?? '?', ctx: kilo(s.ctx), turns: String(s.turns ?? '?'),
-    tokens: s.tokensIn === null ? '?' : `${kilo(s.tokensIn)}/${kilo(s.tokensOut)}`, cwd: tail(s.cwd), branch: s.branch ?? '?',
-  };
-}
-
-/** The sessions of one run folder as the rows they show: a worker's fix rounds resume one session, so the worker rounds of one
- * name in one folder are one row, counted in `rounds`, with the newest round's state (a live one first) and the first start. */
-function mergeRounds(list) {
-  const out = [];
-  const seen = new Map();
-  for (const s of list) {
-    const prior = s.role === 'worker' ? seen.get(`${s.folder}\0${s.name}`) : null;
-    if (!prior) {
-      const row = { ...s, rounds: 1 };
-      out.push(row);
-      if (s.role === 'worker') seen.set(`${s.folder}\0${s.name}`, row);
-      continue;
-    }
-    const newer = s.live !== prior.live ? s.live : s.lastAt >= prior.lastAt;
-    const starts = [prior.startedAt, s.startedAt].filter(Number.isFinite);
-    Object.assign(prior, newer ? s : {}, { rounds: prior.rounds + 1, startedAt: starts.length ? Math.min(...starts) : null });
-  }
-  return out;
-}
-
-const roleRank = (s) => (ROLE_ORDER.includes(s.role) ? ROLE_ORDER.indexOf(s.role) : ROLE_ORDER.length);
-/** A block's order: waiting on the Human, stuck, working, idle, done; then by role and name. */
-const byState = (a, b) => stateOfRow(a).rank - stateOfRow(b).rank || roleRank(a) - roleRank(b) || a.name.localeCompare(b.name, 'en', { numeric: true });
-
-/** An issue's state, with its mark and word: who it waits on, or that it is stuck, or done. `all` is its session rows. */
-function issueState(g, all) {
-  if (g.done) return { mark: '✓', word: g.step === 'merged' ? 'merged' : 'closed', code: DIM, rank: 4 };
-  if (g.waiting === 'the Human') return { mark: '!', word: 'on you', code: YELLOW, rank: 0 };
-  const newest = all.filter((v) => v.state !== 'gone').sort((a, b) => b.lastAt - a.lastAt)[0];
-  if ((!g.pr || g.step === 'merged') && newest && !all.some((v) => v.live) && (newest.state === 'failed' || newest.state === 'stopped')) return { mark: '×', word: 'stuck', code: RED, rank: 1 };
-  if (g.waiting === 'the reviewer') return { mark: '●', word: 'on reviewer', code: GREEN, rank: 2 };
-  if (g.waiting === 'the team') return { mark: '●', word: 'on team', code: GREEN, rank: 2 };
-  if (g.waiting === '?') return { mark: '○', word: '?', code: null, rank: 3 };
-  // An open issue whose pull request merged, with nothing live or failed on it, is done for now: this replaces only "idle".
-  if (g.step === 'merged') return { mark: '✓', word: 'merged', code: DIM, rank: 4 };
-  return { mark: '○', word: 'idle', code: null, rank: 3 };
-}
-
-/** An issue's state as the rows of its own sessions give it (the page's use of issueState). */
-export const issueStateOf = (g) => issueState(g, mergeRounds(g.sessions));
-
-/** The cells of an issue row: its state first, then #n, team, step, the pull request with its checks, and the title last. */
-function issueCells(g, st) {
-  return {
-    state: `${st.mark} ${st.word}`, num: `#${g.number}`, team: g.unknown ? '?' : (g.team ?? '–'), step: g.step,
-    pr: g.pr ? `PR #${g.pr.number}` : g.unknown ? 'PR ?' : 'no PR',
-    checks: g.pr ? Object.entries(g.pr.checks).map(([k, v]) => `${k}${v}`).join(' ') : '',
-    title: g.title,
-  };
-}
-
-/** Items packed into lines of at most `width` cells, never broken inside an item: an item that does not fit starts the next line, behind
- * `next`. An item is its text, or { text, lead, code }: `lead` joins it to the one before (` · ` unless said). An item alone wider
- * than the line is cut. */
-function wrapItems(items, width, { first = '', next = first, lead: sep = ' · ', paint = (_, t) => t } = {}) {
-  const lines = [];
-  let line = first;
-  let plain = first;
-  let fresh = true;
-  for (const it of items) {
-    const { text, lead = sep, code = null } = typeof it === 'string' ? { text: it } : it;
-    if (!fresh && cells(plain) + cells(lead) + cells(text) > width) {
-      lines.push(line);
-      line = next;
-      plain = next;
-      fresh = true;
-    }
-    const piece = (fresh ? '' : lead) + text;
-    const shown = cells(plain) + cells(piece) > width ? cutWord(piece, Math.max(0, width - cells(plain))) : piece;
-    line += code ? paint(code, shown) : shown;
-    plain += shown;
-    fresh = false;
-  }
-  lines.push(line);
-  return lines;
-}
-
-/** The tabs: All, one for each repository (name and the sessions it shows), Done (the issues). */
-export function tabsOf(snap) {
-  const shown = (r) => mergeRounds(r.groups.filter((g) => !g.done).flatMap((g) => g.sessions).concat(r.other)).filter((s) => s.state !== 'gone');
-  return [
-    { label: 'All', kind: 'all' },
-    ...snap.repos.map((r) => ({ label: `${r.repo.split('/').pop()} ${shown(r).length}`, kind: 'repo', repo: r.repo })),
-    { label: `Done ${snap.repos.reduce((n, r) => n + r.groups.filter((g) => g.done).length, 0)}`, kind: 'done' },
-  ];
-}
-
 const EVENT_VERBS = { 'check-not-started': 'check', 'waiting-on-human': 'answer', 'gh-refused': 'alert', 'switch-moved': 'alert' };
 
 /** A string from a log, a folder or GitHub, less its control characters, so none can reach the terminal as an escape sequence. */
 const clean = (s) => s.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
 const cleanDeep = (v) => (typeof v === 'string' ? clean(v) : Array.isArray(v) ? v.map(cleanDeep) : v && Object.getPrototypeOf(v) === Object.prototype ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, cleanDeep(x)])) : v);
 
-/** What waits on the Human, as { kind, verb, text, url } in the frame's order: pull requests to approve, Leads at a prompt or a login,
- * the sweep's conditions, the `*.failed` files. The frame, `--line`, `--brief` and the page's view model all read it, so they never
- * disagree. `snap` is clean (render's), or its strings are escaped by the caller (the page's). */
+/** What waits on the Human, as { kind, verb, text, url } in display order: pull requests to approve, Leads at a prompt or a login,
+ * the sweep's conditions, the `*.failed` files. Both `--line` and `--brief` read it after cleaning strings. */
 export function waitsOf(snap) {
   const { sessions, queue, now } = snap;
   return [
@@ -943,147 +668,7 @@ export function waitsOf(snap) {
 }
 
 /** `snap` with every data field cleaned of control characters. */
-const cleanSnap = (input) => ({ ...input, sessions: cleanDeep(input.sessions), repos: cleanDeep(input.repos), accounts: cleanDeep(input.accounts), queue: cleanDeep(input.queue), events: cleanDeep(input.events ?? []), github: { ...input.github, error: clean(input.github.error ?? '') } });
-
-/** One frame as text, each line at most `width` cells. tab indexes tabsOf(snap). It is a pure function: `color` (basic SGR) and `keys`
- * (the keys line, which `--once` leaves out) are options, and every data field is cleaned of control characters before it is styled. */
-export function render(input, { width = 120, tab = 0, rows = null, full = false, color = false, keys = false } = {}) {
-  const paint = (code, text) => (color && code && text ? `\x1b[${code}m${text}\x1b[0m` : text);
-  const tint = (code) => (code ? (text) => paint(code, text) : undefined);
-  const snap = cleanSnap(input);
-  const { sessions, queue, github, now } = snap;
-  const day = startOfDay(now);
-  const count = (st) => sessions.filter((s) => s.state === st).length;
-  const q = queue.lastSweep ? `queue ${queue.queueFailed ? 'failed, last ok' : 'ok'} ${local(Date.parse(queue.lastSweep), now)}` : 'queue ?';
-  const ghText = github.ok ? `gh ok ${age(now - github.at)} ago` : `gh failed (${github.error})`;
-  const tabs = tabsOf(snap);
-  const t = tabs[tab] ?? tabs[0];
-  const wrapped = (items, opts) => wrapItems(items, width, { paint, ...opts });
-  const lines = [
-    ...wrapped([
-      `Mac mini  load ${snap.load[0].toFixed(1)} of ${snap.cores} cores`, { text: `${count('working')} working`, lead: '  ·  ' }, { text: `${count('idle')} idle`, lead: ' · ' },
-      { text: `${count('waiting')} agent${count('waiting') === 1 ? '' : 's'} waiting`, lead: ' · ' }, hm(now), q, `alerts ${queue.failed.length}`, ghText,
-    ], { lead: '  ·  ' }),
-    ...wrapped(tabs.map((x, i) => `${i === tab ? '▸' : ''}[${i + 1} ${x.label}]`), { lead: ' ' }),
-  ];
-  // What waits on the Human, one line each: what he does, and where. A line too wide loses its tail (the URL) first, then its text is cut.
-  const item = (verb, text, url = '') => {
-    const lead = `  ${verb.padEnd(7)}  `;
-    const whole = `${lead}${text}${url ? `  ${url}` : ''}`;
-    return paint(YELLOW, cells(whole) <= width ? whole : `${lead}${cutWord(text, Math.max(0, width - cells(lead)))}`);
-  };
-  const waits = waitsOf(snap).map((w) => item(w.verb, w.text, w.url));
-  lines.push(...(waits.length ? [paint(YELLOW, 'Waiting on you'), ...waits] : ['Nothing waits on you']));
-
-  // The columns are planned once for the frame, over every row that could print (the folded ones too), so they do not jump between
-  // frames or tabs. A session row's name cell holds its indent: a Lead 2, a session under an issue 6, one under no issue 4.
-  const everyone = mergeRounds(sessions);
-  const sNatural = naturalOf([...S_BASE, ...(full ? S_FULL : [])], everyone.map((v) => sessionCells(v, now, v.role === 'lead' ? 2 : v.issue === null ? 4 : 6)), full);
-  const sKept = planCols([...S_BASE, ...(full ? S_FULL : [])], sNatural, S_STEPS, width, ['name', 'state']);
-  const allGroups = snap.repos.flatMap((r) => r.groups);
-  const iKept = planCols(I_COLS, naturalOf(I_COLS, allGroups.map((g) => issueCells(g, issueState(g, mergeRounds(g.sessions)))), false), I_STEPS, width - 4, ['state', 'num']);
-  const sLine = (v, indent) => rowOf(sKept, sessionCells(v, now, indent), { state: tint(stateOfRow(v).code) });
-  const iLine = (g, st, indent) => rowOf(iKept, issueCells(g, st), { state: tint(st.code) }, indent);
-  if (full && sKept.length) lines.push(rowOf(sKept, Object.fromEntries(sKept.map((c) => [c.key, c.head]))));
-  const top = lines.length;
-  // A repository's line: its name in bold, then what follows it, as whole items that wrap onto an indented line, never cut inside one.
-  const head = (repo, ...parts) => wrapped([{ text: repo, code: BOLD }, ...parts.filter(Boolean).map((text, i) => ({ text, lead: i ? ', ' : '  ' }))], { next: '  ' });
-  const foldedLines = (folded, older) => [...(folded ? [`  ${folded} ended before today`] : []), ...(older ? [`  ${older} older`] : [])];
-  const quiet = [];
-  for (const r of snap.repos) {
-    if (t.kind === 'repo' && r.repo !== t.repo) continue;
-    const st = r.ghStatus;
-    const status = st ? `gh failed ${local(st.failedAt, now)}, ${st.goodAt ? `showing ${local(st.goodAt, now)}` : 'nothing read yet'}` : '';
-    // A session that is live or last wrote today is listed; the others of the whole block fold into one line at its end.
-    let folded = 0;
-    const listedNow = (all) => {
-      folded += all.filter((x) => !isListed(x, day)).length;
-      return all.filter((x) => isListed(x, day)).sort(byState);
-    };
-    if (t.kind === 'done') {
-      // The newest DONE_MAX closed issues; the rest fold into "N older".
-      const closed = r.groups.filter((g) => g.done).sort((a, b) => b.number - a.number);
-      const shownGroups = closed.slice(0, DONE_MAX);
-      if (!closed.length) continue;
-      lines.push(...head(r.repo, status));
-      for (const g of shownGroups) {
-        const all = mergeRounds(g.sessions);
-        lines.push(iLine(g, issueState(g, all), 2));
-        for (const v of listedNow(all)) lines.push(sLine(v, 4));
-      }
-      lines.push(...foldedLines(folded, closed.length - shownGroups.length));
-      continue;
-    }
-    // On the other tabs the issues with nothing going on fold into "N older".
-    const shown = t.kind === 'repo' ? 'recent' : 'active';
-    const older = r.groups.filter((g) => !g.done && !g[shown]).length;
-    const entries = r.groups.filter((g) => !g.done && g[shown]).map((g) => {
-      const all = mergeRounds(g.sessions);
-      const teams = all.map((v) => parseTeam(v.recordTeam)?.team).filter(Boolean);
-      return { g, st: issueState(g, all), rows: listedNow(all), team: g.team ?? teams[0] ?? null };
-    });
-    const leads = mergeRounds(r.other.filter((s) => s.role === 'lead')).sort(byState);
-    const strays = listedNow(mergeRounds(r.other.filter((s) => s.role !== 'lead')));
-    if (!leads.length && !entries.length && !strays.length && !st) {
-      if (folded || older) quiet.push(...head(r.repo, folded ? `${folded} ended before today` : '', older ? `${older} older` : ''));
-      continue;
-    }
-    lines.push(...head(r.repo, status));
-    // One block per team: its Lead row, then its issues, each with its sessions. An issue with no claim goes under the team of its
-    // sessions' record, else under "no team".
-    const byRank = (a, b) => a.st.rank - b.st.rank || a.g.number - b.g.number;
-    const blocks = [...new Set([...leads.map((l) => l.team), ...entries.map((e) => e.team).filter(Boolean)])].map((team) => {
-      const lead = leads.find((l) => l.team === team) ?? null;
-      const mine = entries.filter((e) => e.team === team).sort(byRank);
-      return { team, lead, mine, rank: Math.min(lead ? stateOfRow(lead).rank : 9, ...mine.map((e) => e.st.rank)) };
-    }).sort((a, b) => a.rank - b.rank || a.team.localeCompare(b.team));
-    const issues = (list) => {
-      for (const e of list) {
-        lines.push(iLine(e.g, e.st, 4));
-        for (const v of e.rows) lines.push(sLine(v, 6));
-      }
-    };
-    for (const b of blocks) {
-      lines.push(b.lead ? sLine(b.lead, 2) : `  team ${b.team}`);
-      issues(b.mine);
-    }
-    const unteamed = entries.filter((e) => !e.team).sort(byRank);
-    if (unteamed.length) {
-      lines.push('  no team');
-      issues(unteamed);
-    }
-    if (strays.length) {
-      lines.push('  no issue');
-      for (const v of strays) lines.push(sLine(v, 4));
-    }
-    lines.push(...foldedLines(folded, older));
-  }
-  lines.push(...quiet);
-  // A session no repository could be found for is no block and no tab: All counts it in one line.
-  const unplaced = t.kind === 'all' ? sessions.filter((s) => !s.repo && s.state !== 'gone').length : 0;
-  if (unplaced) lines.push(`  ${unplaced} ${unplaced === 1 ? 'session' : 'sessions'} with no repository`);
-  const tree = lines.splice(top);
-  const win = (label, w) => (w ? `${label} ${Math.round(w.use * 1000) / 10}%${w.resetsAt == null ? '' : resetPassed(w.resetsAt, now) ? ' (reset since)' : ` resets ${local(w.resetsAt * 1000, now)}`}` : `${label} ?`);
-  const nameW = Math.max(0, ...snap.accounts.map((a) => a.name.length));
-  const { merged, cost, waitedMs } = snap.today;
-  const bottom = [
-    ...(snap.accounts.length ? ['Accounts', ...snap.accounts.flatMap((a) => wrapped([win('5h', a.five_hour), win('7d', a.seven_day), a.users.join(', ') || 'no row'], { first: `  ${a.letter}  ${a.name.padEnd(nameW)}  `, next: '     ' }))] : []),
-    ...wrapped([
-      `${merged} pull request${merged === 1 ? '' : 's'} merged`,
-      'workers and reviewers cost',
-      ...(cost.length ? cost.map(([letter, usd], i) => ({ text: `$${usd.toFixed(2)} on account ${letter}`, lead: i ? ', ' : ' ' })) : [{ text: 'nothing yet', lead: ' ' }]),
-      `waited on you ${age(waitedMs)}`,
-    ], { first: 'Today  ', next: '  ' }),
-    ...(keys ? wrapped(['keys:', '1-9 or Tab switch tabs,', 'c full columns,', 'q quits'], { lead: ' ' }) : []),
-  ];
-  // With the terminal's rows, everything but the team blocks stays and the blocks are cut to fit, a row saying how much was left
-  // out; without them (--once) the whole frame is printed.
-  const room = rows ? rows - lines.length - bottom.length - 1 : tree.length;
-  if (rows && tree.length > room) {
-    return [...lines, ...tree.slice(0, Math.max(0, room)), cutWord(`… ${tree.length - Math.max(0, room)} more rows (a repository's tab shows fewer); 1-9 or Tab tabs, c full columns, q quits`, width), ...bottom].join('\n');
-  }
-  return [...lines, ...tree, ...bottom].join('\n');
-}
+const cleanSnap = (input) => ({ ...input, sessions: cleanDeep(input.sessions), repos: cleanDeep(input.repos), queue: cleanDeep(input.queue), events: cleanDeep(input.events ?? []), github: { ...input.github, error: clean(input.github.error ?? '') } });
 
 /** The teams that work now, as a set of `<repo>/<team>`: a Lead that runs, and a live session of a seat, under the team its record or
  * its issue's claim names (else its issue). */
@@ -1098,7 +683,7 @@ function teamsWorking(snap) {
   return keys;
 }
 
-/** `factory top --line` (#365): the one line under Colly's prompt, in at most `width` cells, plain text. Counts of what waits on the
+/** `factory colly --line` (#365): the one line under Colly's prompt, in at most `width` cells, plain text. Counts of what waits on the
  * Human (pull requests to approve, Leads at a prompt or a login, alerts) and of the teams at work; a part that is zero is left out, and
  * with GitHub unread and nothing cached the pull requests are `?`. A line too wide loses whole parts from the right. */
 export function lineOf(input, { width = 80 } = {}) {
@@ -1139,13 +724,13 @@ function teamLines(snap) {
       const lead = leads.find((l) => l.team === team);
       const mine = held.filter((g) => g.team === team).sort((a, b) => a.number - b.number);
       const issues = mine.slice(0, 4).map((g) => `#${g.number} ${clip(g.title, 40)}`).join(', ') + (mine.length > 4 ? `, +${mine.length - 4}` : '');
-      lines.push(`  ${r.repo.split('/')[1]} ${team}: ${lead ? `Lead ${stateOfRow(lead).word}` : 'no Lead running'}${issues ? `; ${issues}` : '; no issue held'}`);
+      lines.push(`  ${r.repo.split('/')[1]} ${team}: ${lead ? `Lead ${({ waiting: 'waiting', failed: 'failed', stopped: 'out of quota', working: 'working', idle: 'idle', done: 'done', gone: 'gone' }[lead.state] ?? String(lead.state))}` : 'no Lead running'}${issues ? `; ${issues}` : '; no issue held'}`);
     }
   }
   return lines;
 }
 
-/** `factory top --brief` (#365): the text of Colly's start hook. What waits on the Human (the frame's first block), the teams of each
+/** `factory colly --brief` (#365): the text of Colly's start hook. What waits on the Human, the teams of each
  * repository with the issues they hold, and the `start` events after `after` (the newest few with none), read as bin/factory-events does
  * without --follow and never touching its cursor. The last line is `seq <n>`, which the hook keeps so that Colly's
  * Monitor starts with `--after <n>`: the highest seq in the events file (0 with none), or, when the events block is cut, the seq of the
@@ -1173,7 +758,7 @@ export async function briefOf(input, { after = null } = {}) {
   ].join('\n');
 }
 
-// The overall deadlines of the two text modes (#365), in milliseconds; the frame's calls each keep CALL_MS.
+// The overall deadlines of the two text modes (#365), in milliseconds; each GitHub call keeps CALL_MS.
 export const LINE_MS = 10_000;
 export const BRIEF_MS = 20_000;
 
@@ -1197,85 +782,8 @@ export async function textOf(mode, { width = 80, after = null, deadlineMs = mode
   return { text: await make(await snapshot({ shared: true, ...opts, offline: true })), late: true };
 }
 
-// The live loop reads nothing once nobody has pressed a key for this long (#396).
-export const IDLE_MS = 600_000;
-
-/** Whether the live loop's tick reads: yes until `IDLE_MS` has passed since the last key. */
-export const readDue = ({ lastKeyAt, now }) => now - lastKeyAt < IDLE_MS;
-
-async function loop(opts) {
-  const out = process.stdout;
-  const cache = {};
-  let snap = null;
-  let tab = 0;
-  let full = Boolean(opts.full);
-  let busy = false;
-  let lastKeyAt = Date.now();
-  let paused = false;
-  const draw = () => {
-    if (!snap && !paused) return;
-    const width = out.columns ?? 120;
-    const note = cutWord(`paused: no key for ${IDLE_MS / 60_000} min, nothing is read; any key resumes`, width);
-    const frame = snap ? render(snap, { width, tab, rows: paused && out.rows ? out.rows - 1 : out.rows ?? null, full, color: opts.color, keys: true }) : null;
-    const text = (paused ? (frame === null ? note : `${note}\n${frame}`) : frame).split('\n').map((l) => `${l}\x1b[K`).join('\n');
-    out.write(`\x1b[H${text}\x1b[J`);
-  };
-  const tick = async () => {
-    if (busy) return;
-    if (!readDue({ lastKeyAt, now: Date.now() })) {
-      if (!paused) {
-        paused = true;
-        draw();
-      }
-      return;
-    }
-    busy = true;
-    try {
-      snap = await snapshot({ ...opts, cache, now: Date.now(), shared: true });
-    } catch (error) {
-      out.write(`\x1b[Hfactory top: ${firstLine(error)}\x1b[K`);
-    } finally {
-      busy = false;
-    }
-    draw();
-  };
-  const timer = setInterval(tick, LOCAL_MS);
-  let closed = false;
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    clearInterval(timer);
-    if (process.stdin.isTTY) process.stdin.setRawMode(false);
-    process.stdin.pause();
-    out.write('\x1b[?25h\x1b[?1049l');
-  };
-  process.on('exit', close);
-  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(0));
-  out.write('\x1b[?1049h\x1b[?25l');
-  if (process.stdin.isTTY) process.stdin.setRawMode(true);
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', (key) => {
-    if (key === 'q' || key === '\x03') return process.exit(0);
-    lastKeyAt = Date.now();
-    if (paused) {
-      paused = false;
-      tick();
-    }
-    const count = snap ? tabsOf(snap).length : 1;
-    if (key === 'c') full = !full;
-    else if (key === '\t') tab = (tab + 1) % count;
-    else if (/^[1-9]$/.test(key) && Number(key) <= count) tab = Number(key) - 1;
-    draw();
-  });
-  await tick();
-}
-
-/** Colour is decided once: on a terminal that has colours, which hasColors reads from NO_COLOR, NODE_DISABLE_COLORS and FORCE_COLOR. */
-const colorOf = () => Boolean(process.stdout.isTTY && typeof process.stdout.hasColors === 'function' && process.stdout.hasColors());
-
 export async function main(argv) {
   const width = argv.includes('--width') ? Number(argv[argv.indexOf('--width') + 1]) : null;
-  const color = colorOf();
   if (argv.includes('--line') || argv.includes('--brief')) {
     const i = argv.indexOf('--after');
     const mode = argv.includes('--line') ? 'line' : 'brief';
@@ -1284,19 +792,12 @@ export async function main(argv) {
     process.stdout.write(`${text}\n`, () => late && process.exit(0));
     return;
   }
-  if (argv.includes('--once')) {
-    const snap = await snapshot({});
-    process.stdout.write(`${render(snap, { width: width ?? process.stdout.columns ?? 200, full: argv.includes('--full'), color })}\n`);
-    return;
-  }
-  if (!process.stdin.isTTY) throw new Error('needs a terminal; use --once for one frame');
-  await loop({ full: argv.includes('--full'), color });
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch((error) => {
-    console.error(`factory top: ${firstLine(error)}`);
+    console.error(`factory colly: ${firstLine(error)}`);
     process.exitCode = 1;
   });
 }

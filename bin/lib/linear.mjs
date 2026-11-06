@@ -13,7 +13,7 @@
 //   a token is replaced for every caller long before it ends. A host with no credentials stored is not an error: renew says 'unconfigured'.
 //   An authentication failure (HTTP 401, or an error whose code says authentication, or a message that says "authenticate"): the caller re-reads
 //   the store and retries once with a token another caller stored there; if it still fails, it mints once under the lock and retries once; if that
-//   fails too it raises the condition `linear-auth-failed` (a `start` line in events.jsonl and a line in `factory top`, bin/lib/events.mjs) and
+//   fails too it raises the condition `linear-auth-failed` (a `start` line in events.jsonl and a line in `factory colly --brief`, bin/lib/events.mjs) and
 //   throws. A refused mint raises it too. Any success after that clears it. Nothing here loops: a request makes three sends and two mints at most
 //   (token() may mint, then the first send, the send with a token another caller stored, the retry's mint and the send with its token).
 //   A symlinked tokens/linear-app is refused: nothing is read from it or written to it.
