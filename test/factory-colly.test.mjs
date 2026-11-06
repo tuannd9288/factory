@@ -11,6 +11,19 @@ import { fileURLToPath } from 'node:url';
 import { quote } from '../packs/pstack/bin/lead.mjs';
 import { main } from '../bin/lib/factory.mjs';
 
+/** Whether a Bash(...) rule matches a command, by the three rules of Claude Code's permissions page ("Wildcard patterns", read 2026-11-06):
+ * a `*` matches any text, spaces included; a trailing `*` with a space before it, the rule's only `*`, also matches the bare command; `:*` at
+ * the end is the same as ` *`. A rule with no `*` matches one exact command. */
+function bashMatches(rule, command) {
+  const body = /^Bash\((.*)\)$/s.exec(rule)?.[1];
+  if (body === undefined) return false;
+  const pattern = body.endsWith(':*') ? `${body.slice(0, -2)} *` : body;
+  const esc = (s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  const parts = pattern.split('*');
+  const source = parts.length === 2 && pattern.endsWith(' *') ? `${esc(pattern.slice(0, -2))}( .*)?` : parts.map(esc).join('.*');
+  return new RegExp(`^${source}$`, 's').test(command);
+}
+
 test('colly isolates GitHub and grants only use and lead, with the pack role required', async (t) => {
   const state = fs.mkdtempSync(join(tmpdir(), 'factory-colly-'));
   const env = { HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', GH_TOKEN: 'inherited', GITHUB_TOKEN: 'inherited' };
@@ -46,13 +59,21 @@ test('colly isolates GitHub and grants only use and lead, with the pack role req
     assert.equal(settings.env.GITHUB_TOKEN, '');
     assert.deepEqual(fs.readdirSync(settings.env.GH_CONFIG_DIR), []);
     assert.equal(fs.statSync(settings.env.GH_CONFIG_DIR).mode & 0o777, 0o700);
-    assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)']);
+    assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)']);
     assert.deepEqual(settings.permissions.deny, [
       'Read(~/.agent-profiles/**)', `Read(/${join(state, '.agent-profiles')}/**)`,
       'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
-      'Bash(*factory account*)', 'Bash(*factory store*)',
-      'Bash(*lib/factory.mjs account*)', 'Bash(*lib/factory.mjs store*)',
+      'Bash(*factory account add*)', 'Bash(*factory account remove*)', 'Bash(*factory store*)',
+      'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs account remove*)', 'Bash(*lib/factory.mjs store*)',
     ]);
+    // #365: the rules as Claude Code reads them. Deny is checked before allow, so a command runs without asking only when an allow rule
+    // matches and no deny rule does.
+    const { allow, deny } = settings.permissions;
+    const allowed = (command) => allow.some((r) => bashMatches(r, command)) && !deny.some((r) => bashMatches(r, command));
+    for (const command of ['factory account list', 'factory account list --json', 'bin/factory account list --all', 'factory use 3 b', 'factory lead factory --here'])
+      assert.ok(allowed(command), command);
+    for (const command of ['factory account add colly', 'factory account remove ann', 'factory store ann', 'bin/factory account add ann --node macbook', 'node bin/lib/factory.mjs account remove ann', 'node bin/lib/factory.mjs store ann'])
+      assert.ok(deny.some((r) => bashMatches(r, command)), command);
     result = { status: 7 };
     assert.equal(await main(['colly'], env), 7);
     result = { error: { code: 'ENOENT' } };

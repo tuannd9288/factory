@@ -788,14 +788,15 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
     env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '' },
     permissions: {
       defaultMode: 'auto',
-      allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)'],
-      // The token store holds the teams' Claude tokens and the agents' GitHub token: Colly never reads one (INN-31 3A). Not
-      // tokenStoreDeny as a whole, which denies factory use, a command INN-30 allows Colly.
+      // Colly sees the accounts table on every node, which prints no token (#365, his requirement of 2026-11-06).
+      allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)'],
+      // The token store holds the teams' Claude tokens and the agents' GitHub token: Colly never reads one (INN-31 3A), nor adds,
+      // removes or stores one. Not tokenStoreDeny as a whole, which denies factory use, a command INN-30 allows Colly.
       deny: [
         'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`,
         'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
-        'Bash(*factory account*)', 'Bash(*factory store*)',
-        'Bash(*lib/factory.mjs account*)', 'Bash(*lib/factory.mjs store*)',
+        'Bash(*factory account add*)', 'Bash(*factory account remove*)', 'Bash(*factory store*)',
+        'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs account remove*)', 'Bash(*lib/factory.mjs store*)',
       ],
     },
   };
