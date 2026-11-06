@@ -1,7 +1,8 @@
 // bin/factory (#173, #177, #178, #311): the account list of every agent profile and quota, and `account add`,
 // `store`, `use` and `account remove`. On the Mac mini the rows are numbered (each team the accounts file names, the verifier) and the accounts
 // lettered; `use` rewrites the accounts file (`use <repo>-<team>` makes a team's row; that team's running Lead alone is restarted once
-// Herdr reports it idle, #179, #196; `lead <repo> [--team <name>]` starts one team's) and `account remove` moves a token into the archive; `account add` and
+// Herdr reports it idle, #179, #196; `lead <repo> [--team <name>]` starts one team's); on the MacBook `use` writes the MacBook's own file for a
+// team it has a row for, or with --node macbook, and restarts nothing (#366); `account remove` moves a token into the archive; `account add` and
 // `store` put a token in the factory's token store. The list runs only the vendors' own status commands (codex login status,
 // gh auth status; on the MacBook claude auth status too), reads quota through quotaRows(), and keeps from each answer
 // only the logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and recorded added date).
