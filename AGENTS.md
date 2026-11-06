@@ -199,8 +199,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - This folder stays out of every sync between the Macs. Code moves only through GitHub.
 - `.gitignore` admits only the factory's own files, so every repository folder is ignored.
 - A change to `kit/` changes every repository's gate at its next kit pull request: it is tier 3 here.
-- Before any brief, the Lead posts the Human's words verbatim, with their source, on the issue, in a comment marked
-  "relayed by Colly"; the brief carries them, and `bin/brief-check <brief> <relay>` is the check (#90).
+- The Lead keeps each of the Human's decisions on the issue, with its date and where he gave it. A brief is one direct
+  order in the fields of `bin/brief-template.md` and quotes no one above its sender (#482, #486).
 - The weekly digest is `bin/factory-ledger --post tuannd9288/better-factory --last-week`: it posts even when the canary
   (`--check`) finds a field missing or stale, saying so in one line. `--post` refuses a repository that is not
   `PRIVATE`, since the digest lists private repositories' tasks (#209). `bin/factory-ledger plist --daemon --repo
@@ -216,7 +216,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   `CLAUDE.md`, as every factory worktree is. The kit's Gate block holds both; its reviewer reports such a bug in
   `forIssue`, which never blocks, and the Lead files the issue.
 - The factory's own Lead on the MacBook starts with `factory lead factory --here`, reads and writes GitHub with `factory gh`
-  (on the Mac mini, under the agents' login), and pushes from the factory host; its commits carry the agents' name. The
+  under the agents' login and pushes, on the Mac mini, or on the MacBook itself once his `factory store` has put the agents'
+  GitHub token there (#366); its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
 - Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
@@ -239,8 +240,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory-move` | `bin/factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--limit N] [--project <name> --in-project <n>,…]` (#406): moves a repository's open GitHub issues to its Linear team, once, as the Factory app; a dry run prints the plan, `--apply` writes, a map file lets a second run resume, and each GitHub issue gets "Moved to <KEY>" and is closed as not planned, never deleted; not a `factory linear` verb; the header of `bin/lib/move.mjs` has the rest |
 | `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH): the table of profiles, accounts and quota, and `login`, `store`, `use` and `logout`, which only the Human runs (#177, #178); its header has the rest |
 | `bin/factory top` | The read-only view of every session and repository (#174, #286); the header of `bin/lib/top.mjs` has the rest |
-| `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest. `factory lead <repo> [--team <name>] --here [-- <claude arguments>]` (#349) is the MacBook's own Lead, with no `gh` login and no git credential of the Human's; a push to GitHub over HTTPS fails, and git over ssh is off |
-| `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` on the Mac mini under the agents' login, by ssh; on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
+| `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest. `factory lead <repo> [--team <name>] --here [-- <claude arguments>]` (#349) is the MacBook's own Lead, with no `gh` login and no git credential of the Human's; with no agents' GitHub token on the MacBook a push to GitHub fails and git over ssh is off, and with one stored by his `factory store` the push runs on the MacBook itself (#366) |
+| `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` under the agents' login, on the Mac mini by ssh, or on the MacBook itself once his `factory store` has put the agents' GitHub token there (#366); on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
 | `bin/factory linear` | `factory linear <verb>` (#404): a Lead's steps on a repository on Linear, as the Factory app: `take`, `release`, `read`, `list`, `comment`, `ask`, `answered`, `create` and `onboard`, one JSON object out; on the MacBook it runs on the Mac mini by ssh, a body on stdin; `onboard` makes the repository's team (copied from FAC) and its Needs Human status and records it in `$FACTORY_STATE/linear/repos.json`, which `bin/lib/linear-repos.mjs` reads and which picks the Linear form of `packs/pstack/lead.md`; the header of `bin/lib/linear-cli.mjs` has the rest |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH from each machine's installed copy of the factory (#390): `$FACTORY_CHECKOUT`, `~/WORKSPACES` on the Mac mini, `${XDG_DATA_HOME:-~/.local/share}/factory/checkout` on the MacBook (`installedRoot`), outside the folders macOS refuses a launchd job and never set by a dev clone's branch or edits, which change nothing that runs. Run from a clone that is not that copy, it clones the copy (main only, an empty `credential.helper`) or brings it to `origin/main` by `followMain`'s rules, then runs the copy's own `bin/install-factory`, which makes `~/.local/bin/factory` a symlink to the copy's `bin/factory` and replaces only a symlink whose target ends in `/bin/factory`; on the MacBook it also writes the relay's LaunchAgent, loads it anew and runs `bin/factory-relay check`. His one line after a change here is `~/.local/share/factory/checkout/bin/install-factory` when the copy exists, else `bin/install-factory` from any clone; it can be run again |
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
@@ -256,7 +257,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, or `codex`) and, for each side, its model and effort |
 | `bin/lib/streams.mjs` | Finds the two kinds of stream the reader reads, a seat's `run-<tag>.jsonl` and a Lead's `transcripts/<session>.jsonl` |
 | `bin/lib/redact.mjs` | The one redaction: the events' patterns (#309) and seatwork's, used by `bin/lib/events.mjs` and the reader |
-| `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
+| `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
 | `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
