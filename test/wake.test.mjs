@@ -1,5 +1,9 @@
 // #351: the wake line and its post to a Claude Code inbox socket (bin/lib/wake.mjs), against a real unix socket served in a temporary
 // folder. Nothing else is connected to.
+import fs from 'node:fs';
+import net from 'node:net';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -7,7 +11,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { post, postSync, recordedPath, wakeLine } from '../bin/lib/wake.mjs';
+import { alive, post, postSync, recordedPath, wakeLine } from '../bin/lib/wake.mjs';
 
 /** A listener on `path` that keeps what each connection sent. */
 function serve(path) {
@@ -149,4 +153,58 @@ test('a socket file nothing listens on is refused', async () => {
     writeFileSync(file, `${sock}\n`);
     assert.deepEqual(await post(file, 'x\n'), { posted: false, why: 'refused' });
   });
+});
+
+
+test('alive validates the record and connects without writing, destroying live, refused and timed-out connections', async (t) => {
+  let path;
+  let socketFile = true;
+  let owner = process.getuid();
+  let event = 'connect';
+  const connections = [];
+  t.mock.method(fs, 'readFileSync', () => {
+    if (path === undefined) throw new Error('missing record');
+    return path;
+  });
+  t.mock.method(fs, 'lstatSync', () => {
+    if (socketFile === null) throw new Error('missing socket');
+    return { isSocket: () => socketFile, uid: owner };
+  });
+  t.mock.method(net, 'createConnection', (address) => {
+    assert.equal(address, '/fixture/inbox.sock');
+    const socket = new EventEmitter();
+    socket.destroyed = false;
+    socket.destroy = () => { socket.destroyed = true; };
+    socket.write = socket.end = () => assert.fail('alive must not write or end with data');
+    connections.push(socket);
+    if (event) process.nextTick(() => socket.emit(event));
+    return socket;
+  });
+  syncBuiltinESMExports();
+  try {
+    for (path of [undefined, '', '\n', 'relative.sock']) assert.equal(await alive('/fixture/record'), false);
+    path = '/fixture/inbox.sock';
+    for (socketFile of [null, false]) assert.equal(await alive('/fixture/record'), false);
+    socketFile = true;
+    owner += 1;
+    assert.equal(await alive('/fixture/record'), false);
+    assert.equal(connections.length, 0);
+    owner = process.getuid();
+    for (path of ['/fixture/inbox.sock\n', 'uds:/fixture/inbox.sock\n']) {
+      assert.equal(await alive('/fixture/record'), true);
+      assert.equal(connections.at(-1).destroyed, true);
+    }
+    event = 'error';
+    assert.equal(await alive('/fixture/record'), false);
+    assert.equal(connections.at(-1).destroyed, true);
+    event = null;
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const pending = alive('/fixture/record');
+    t.mock.timers.tick(3000);
+    assert.equal(await pending, false);
+    assert.equal(connections.at(-1).destroyed, true);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
 });

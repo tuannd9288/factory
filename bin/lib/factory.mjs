@@ -9,14 +9,14 @@
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkoutRoot } from './checkout.mjs';
 import { quotaRows } from './quota.mjs';
-import { post, wakeLine } from './wake.mjs';
+import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount } from './seat.mjs';
 import { quote, roleOf } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
@@ -598,7 +598,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
 
 /** Colly's current-pane launch (#365): the pack supplies the approved role; GitHub writes go through `factory gh`.
  * INN-30 permits use and lead; login, store and logout remain denied. */
-function colly(args, env) {
+async function colly(args, env) {
   if (args.includes('--line') || args.includes('--brief')) return collyStatus(args, env);
   if (args.length) {
     console.error(USAGE);
@@ -607,6 +607,24 @@ function colly(args, env) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: colly runs on the MacBook');
     return 2;
+  }
+  const { state } = contextOf(env);
+  const parent = join(state, 'colly');
+  const socket = join(parent, 'socket');
+  // Connect without writing to the recorded inbox. A stale record is not a live session.
+  if (await alive(socket)) {
+    let pane = '';
+    try { pane = readFileSync(join(parent, 'pane'), 'utf8').trim(); } catch {}
+    console.log(`Colly is already running in ${pane ? `pane ${pane}` : 'a pane (not recorded)'}`);
+    if (pane) {
+      for (const dir of (env.PATH ?? '').split(':').filter(Boolean)) {
+        const herdr = join(dir, 'herdr');
+        try { accessSync(herdr, constants.X_OK); } catch { continue; }
+        spawnSync(herdr, ['agent', 'focus', pane], { stdio: 'ignore', env });
+        break;
+      }
+    }
+    return 0;
   }
   const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/colly/colly.md');
   let roleText;
@@ -620,7 +638,6 @@ function colly(args, env) {
     console.error(`bin/factory: colly: ${rolePath} is missing or empty`);
     return 2;
   }
-  const parent = join(contextOf(env).state, 'colly');
   const empty = join(parent, 'gh-empty');
   try {
     mkdirSync(empty, { recursive: true, mode: 0o700 });
@@ -634,7 +651,30 @@ function colly(args, env) {
     console.error(`bin/factory: colly: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
     return 1;
   }
+  let hook;
+  try {
+    hook = copySocketHook(state);
+    writeFileSync(join(parent, 'pane'), `${env.HERDR_PANE_ID ?? ''}\n`, { mode: 0o600 });
+  } catch (e) {
+    console.error(`bin/factory: colly: ${e.message}`);
+    return 1;
+  }
+  const record = { type: 'command', command: [process.execPath, hook, socket].map(quote).join(' ') };
+  // The wrapper is carried in the settings, so its bytes stay with this session, like the hash-named socket hook.
+  // SessionStart additionalContext uses the same documented shape as alerts.mjs.
+  // bin/factory is a Bash wrapper; run its Node entry point directly with this session's Node.
+  const factory = fileURLToPath(import.meta.url);
+  const brief = `const {spawnSync}=require('node:child_process');
+const r=spawnSync(process.execPath,[${JSON.stringify(factory)},'colly','--brief'],{encoding:'utf8'});
+if(r.status===0) process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:r.stdout}}));
+else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
   const settings = {
+    hooks: {
+      SessionStart: [{ hooks: [record, { type: 'command', command: [process.execPath, '-e', brief].map(quote).join(' ') }] }],
+      SessionEnd: [{ hooks: [record] }],
+    },
+    // Claude Code status line docs, captured 2026-11-03, line 67: refreshInterval re-runs the command every N seconds.
+    statusLine: { type: 'command', command: [process.execPath, factory, 'colly', '--line'].map(quote).join(' '), refreshInterval: 60 },
     env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '' },
     permissions: {
       allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)'],
