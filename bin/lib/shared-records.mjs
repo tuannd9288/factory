@@ -10,6 +10,10 @@ import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+export function nodeName() {
+  return hostname().split('.')[0].toLowerCase();
+}
+
 const exec = promisify(execFile);
 // Same private destination as ledger.mjs's DIGEST_REPO; the digest itself is unchanged.
 const REMOTE = 'https://github.com/tuannd9288/better-factory.git';
@@ -54,7 +58,7 @@ function appendMissing(base, source) {
 
 /** One daemon owns this writer. Calls during a push request another pass, so a seat ending during I/O is not missed. All failures leave
  * the outbox intact and are retried at the next seat end or daemon wake. remote and node are injectable for local bare-repository tests. */
-export function recordsWriter({ state, runs, remote = REMOTE, node = hostname().split('.')[0].toLowerCase(), log = console.log }) {
+export function recordsWriter({ state, runs, remote = REMOTE, node = nodeName(), log = console.log }) {
   const clone = join(state, 'shared-records.git');
   let busy = null;
   let again = false;
