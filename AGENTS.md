@@ -293,7 +293,7 @@ What step 2 sets and reads back is in the header of `bin/onboard-owner`; what st
 onboarded repository to a newer factory commit; its refusals, what it replaces and the gate's judgment of its pull request are in
 the header of `bin/kit-update`.
 
-Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
+Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks),
 and proposes `.gate/load-bearing`.
 
 The queue's job, its install, its lock and its checkout rules are in `bin/factory-queue`'s header. A rollback is a revert pull

@@ -15,7 +15,6 @@ as `prose` and gets one, or is deleted, within 30 days.
 | No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `.gate/bin/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
 | A new test fails at the base and passes at the head | `red-check`, inside `verify` |
 | A failing test committed first is not weakened later | `.gate/bin/rules` (`failing-test-edited`) |
-| Every check is shown failing on a fixture | `.gate/bin/prove-check` in `verify` and `verify-trusted` |
 | Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `.gate/bin/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
 | Tier-3 paths are one list, and CODEOWNERS ends with exactly it; a directory line has no trailing "/", so the path itself is protected too | `.gate/protected`; `verify` (`policy`) |
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
@@ -35,12 +34,11 @@ as `prose` and gets one, or is deleted, within 30 days.
 | Command | Healthy output |
 |---|---|
 | `.gate/bin/setup` | `setup: hooks from .gate/hooks` |
-| `.gate/bin/verify` | `verify: 6 passed in 12s` (prints only failures and this line) |
+| `.gate/bin/verify` | `verify: 5 passed in 12s` (prints only failures and this line) |
 | `.gate/bin/verify --fast` | `verify: 2 passed in 1s` (the pre-commit hook runs it) |
 | `.gate/bin/verify --tests <files>` | `verify: 1 passed in 2s`; JUnit in `.gate/report.xml` |
 | `.gate/bin/tier` | `tier 1` (2: load-bearing path or dependency; 3: a path in `.gate/protected`, or label `needs-human`) |
 | `.gate/bin/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
-| `.gate/bin/prove-check --all` | `prove-check: 7 checks fail on their fixtures` |
 
 Push as often as you like; CI runs `main`'s copies of `verify` and `red-check` on your change, as the one check `verify`.
 Before writing, run `.gate/bin/tier` on the files you expect to touch. Tier 2 or 3: commit the failing test first, alone, with

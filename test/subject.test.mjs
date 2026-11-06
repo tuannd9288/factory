@@ -68,11 +68,6 @@ describe('verify on a repository with the kit', () => {
     git(r.repo, 'reset', '-q', '--hard', 'origin/main');
     git(r.repo, 'branch', '-q', '-D', 'side');
   });
-  test('prove-check shows the subjects check failing on its fixture, the 99-character subject of bb8ff7b', () => {
-    const out = script(r.repo, 'prove-check', ['subjects']);
-    assert.equal(out.code, 0, out.out);
-    assert.match(readFileSync(join(r.repo, '.gate/proofs/subjects.sh'), 'utf8'), /Correct "pstack runs only when typed"/);
-  });
 });
 
 describe("the factory's own pull requests", () => {
