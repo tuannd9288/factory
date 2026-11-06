@@ -9,9 +9,12 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
 `<KEY>` is the same key.
 <!--/linear-->
 1. <!--github-->Take an issue labelled `task`: read it with `gh issue view <n>`, then claim it with `.gate/bin/claim <n> {{TEAM}}`. A
-   refused claim belongs to another team; take another issue.<!--/github--><!--linear-->List your team's work with
-   `factory linear list --team-key {{TEAMKEY}} --status unstarted`, and clear its Triage the same way with `--status triage`; take an issue
-   that has no delegate. Read it with `factory linear read <KEY>`, then run `factory linear take <KEY> --team {{TEAM}}`: it makes the Factory
+   refused claim belongs to another team; take another issue.<!--/github--><!--linear-->Triage is your team's inbox: list it with
+   `factory linear list --team-key {{TEAMKEY}} --status triage` and settle each issue with `factory linear accept <KEY>` (to Backlog),
+   `factory linear decline <KEY>` (to Canceled) or `factory linear duplicate <KEY> --of <the KEY it repeats>`, each with
+   `--team {{TEAM}} --body-file -` and the reason on stdin. Then list your team's work with
+   `factory linear list --team-key {{TEAMKEY}} --status unstarted` and take an issue that has no delegate: work comes only from Todo,
+   never from Triage or Backlog. Read it with `factory linear read <KEY>`, then run `factory linear take <KEY> --team {{TEAM}}`: it makes the Factory
    app the issue's delegate, moves it to In Progress, assigns no person and comments which team took it. That is the lock: until the gate reads
    Linear (#407) a repository on Linear has no claim. A refused `take` means another Lead holds the issue; take another issue. The holder is
    the earliest "Taken by team <team>." comment after the last "Released by team" one, because the delegate is the one app of every team: after

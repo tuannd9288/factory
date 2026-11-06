@@ -369,7 +369,7 @@ const USAGE = `usage: bin/factory account list [--all] [--json]
        bin/factory lead <repo> [--team <name> | --new-team] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
        bin/factory lead --resume-session <id> [--check]
        bin/factory gh <gh arguments>   (under the agents' login: here, with this node's stored agents GitHub token; otherwise, on the MacBook, on the Mac mini)
-       bin/factory linear take|release|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
+       bin/factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
