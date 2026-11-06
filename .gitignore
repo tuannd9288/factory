@@ -3,7 +3,6 @@
 !/.gitattributes
 !/.gitignore
 !/.github/
-!/.githooks/
 !/AGENTS.md
 !/NOTICE
 !/bin/
