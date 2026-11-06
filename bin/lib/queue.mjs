@@ -367,7 +367,7 @@ function draftReadiness(repo, prs, clone) {
         }
         gh(['pr', 'ready', String(pr.number), '--repo', repo]);
         gh(['pr', 'merge', String(pr.number), '--repo', repo, '--auto', `--${merge}`]);
-      } else if (!pr.isDraft && (RED.has(pr.checks.verify?.state) || conflict)) {
+      } else if (!pr.isDraft && (pr.checks.verify?.state !== 'SUCCESS' || conflict)) {
         gh(['pr', 'ready', String(pr.number), '--repo', repo, '--undo']);
         pr.isDraft = true;
       }

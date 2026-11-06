@@ -44,7 +44,7 @@ test('colly isolates GitHub and grants only use and lead, with the pack role req
     assert.equal(fs.statSync(settings.env.GH_CONFIG_DIR).mode & 0o777, 0o700);
     assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)']);
     assert.deepEqual(settings.permissions.deny, [
-      'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
+      'Bash(gh auth:*)', 'Bash(*gh pr create*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
       'Bash(*factory account*)', 'Bash(*factory store*)',
       'Bash(*lib/factory.mjs account*)', 'Bash(*lib/factory.mjs store*)',
     ]);

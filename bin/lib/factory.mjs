@@ -609,7 +609,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
       GIT_CONFIG_COUNT: String(GIT_CONFIG.length),
       ...Object.fromEntries(GIT_CONFIG.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
     },
-    permissions: { deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
+    permissions: { deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(gh auth:*)', 'Bash(*gh pr create*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -677,7 +677,7 @@ function colly(args, env) {
     permissions: {
       allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)'],
       deny: [
-        'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
+        'Bash(gh auth:*)', 'Bash(*gh pr create*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
         'Bash(*factory account*)', 'Bash(*factory store*)',
         'Bash(*lib/factory.mjs account*)', 'Bash(*lib/factory.mjs store*)',
       ],

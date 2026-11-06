@@ -160,7 +160,7 @@ for (const method of ['squash', 'merge']) {
   });
 }
 
-for (const policy of ['absent', 'no-key', 'pstack']) {
+for (const policy of ['absent', 'no-key', 'landable', 'pstack']) {
   test(`factory lead-only readiness follows ${policy} policy`, () => {
     const w = world();
     try {
@@ -169,6 +169,9 @@ for (const policy of ['absent', 'no-key', 'pstack']) {
         pull(1, { isDraft: true }),
         pull(2, { mergeable: 'CONFLICTING' }),
         pull(3, { commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [run('verify', 'FAILURE')] } } } }] } }),
+        pull(4, { commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ ...run('verify', null), status: 'IN_PROGRESS' }] } } } }] } }),
+        pull(5, { commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }),
+        pull(6), // Green and conflict-free: stays ready.
       ]);
       const r = w.sweep();
       assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), policy === 'pstack' ? [] : [
@@ -176,6 +179,8 @@ for (const policy of ['absent', 'no-key', 'pstack']) {
         'pr merge 1 --repo o/factory --auto --squash',
         'pr ready 2 --repo o/factory --undo',
         'pr ready 3 --repo o/factory --undo',
+        'pr ready 4 --repo o/factory --undo',
+        'pr ready 5 --repo o/factory --undo',
       ], r.out);
     } finally { w.cleanup(); }
   });

@@ -160,7 +160,7 @@ describe('leadArgs', () => {
   test('the deny list holds claude, codex, herdr and the secrets', () => {
     const deny = list('--disallowedTools');
     assert.ok(secretsRead.length > 0);
-    for (const d of ['Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
+    for (const d of ['Bash(*gh pr create*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
   });
 
   test('the deny list refuses reading the environment, the tokens folder and the archive folder (#178)', () => {
