@@ -70,9 +70,9 @@ for a; do case "$a" in *@*) user=\${a%%@*};; esac; done
 if [ -f "$FAKE/ssh-$user.error" ]; then cat "$FAKE/ssh-$user.error" >&2; exit 255; fi
 cmd=$(printf '%s' "$last" | sed -n "s/^zsh -lc '\\(.*\\)'$/\\1/p")
 case "$cmd" in
-  *"factory store "*|*"factory use"*|*"factory logout "*)
+  *"factory store "*|*"factory use"*|*"factory account remove "*)
     rest=\${cmd#\\~/WORKSPACES/bin/factory}
-    FACTORY_HOST_USER="$FAR_USER" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" exec "$FACTORY_BIN" $rest;;
+    FACTORY_HOST_USER="$FAR_USER" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" exec "$NODE_BIN" -- "$FACTORY_BIN" $rest;;
 esac
 if [ -f "$FAKE/ssh-factory.stderr" ]; then cat "$FAKE/ssh-factory.stderr" >&2; fi
 if [ "$user" = factory ]; then cat "$FAKE/ssh-factory.json"; exit 0; fi
@@ -93,7 +93,8 @@ export function sandbox() {
   }
   const env = {
     FAKE: fake,
-    FACTORY_BIN: join(factory, 'bin/factory'),
+    FACTORY_BIN: join(factory, 'bin/lib/factory.mjs'),
+    NODE_BIN: process.execPath,
     HOME: home,
     PATH: `${bin}:${process.env.PATH}`,
     FACTORY_STATE: state,
@@ -109,7 +110,7 @@ export function sandbox() {
   const w = (name, text) => writeFileSync(join(fake, name), text);
   const exec = (args, input) => {
     const { NODE_TEST_CONTEXT, ...outer } = process.env;
-    const r = spawnSync(join(factory, 'bin/factory'), args, { cwd: factory, encoding: 'utf8', env: { ...outer, ...env }, input });
+    const r = spawnSync(process.execPath, ['--', join(factory, 'bin/lib/factory.mjs'), ...args], { cwd: factory, encoding: 'utf8', env: { ...outer, ...env }, input });
     return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
   };
   const calls = () => (existsSync(join(fake, 'calls.log')) ? readFileSync(join(fake, 'calls.log'), 'utf8') : '');

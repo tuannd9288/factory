@@ -72,8 +72,8 @@ export function newestSession(dir) {
 
 // The Lead's grants (lead.md): it reads, claims, makes worktrees, pushes its own HEAD, files, comments on and edits issues,
 // ships pull requests through scripts/ship (which runs gh for it), rewrites a pull request's body through scripts/pr-body
-// (#386; never `gh pr edit`, which also changes labels, base and reviewers), comments on them, starts workers through bin/seat and
-// checks their briefs with bin/brief-check (#185). In auto mode a write to GitHub that no rule names is refused by the
+// (#386; never `gh pr edit`, which also changes labels, base and reviewers), comments on them and starts workers through bin/seat.
+// In auto mode a write to GitHub that no rule names is refused by the
 // classifier (#277). lead.md tells it to write no change itself; the grants alone do not stop it. It may read with
 // gh api and needs the Human's approval to write through it (his answer 2026-11-02 15:09:43, #343); no setting blocks
 // gh api.
@@ -87,7 +87,6 @@ const allowOf = (root) => [
   'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
   'Bash(factory linear:*)',
   `Bash(${join(root, 'bin/seat')}:*)`,
-  `Bash(${join(root, 'bin/brief-check')}:*)`,
 ];
 // The Lead writes only in ~/factory-runs: a leading // makes each rule an absolute path.
 const denyOf = (cwd) => [
@@ -427,7 +426,7 @@ function main(argv, env) {
   const tokenPath = join(tokenDir(profiles), account);
   const t = readTokenFile(tokenPath);
   if (t.error) {
-    process.stderr.write(`bin/lead: ${t.error === 'missing' ? `the account ${account} has no token file ${tokenPath}; the Human runs \`factory login ${account}\`` : `the token file ${tokenPath} is empty or not printable ASCII`}\n`);
+    process.stderr.write(`bin/lead: ${t.error === 'missing' ? `the account ${account} has no token file ${tokenPath}; the Human runs \`factory account add ${account}\`` : `the token file ${tokenPath} is empty or not printable ASCII`}\n`);
     return 2;
   }
   const token = t.token;

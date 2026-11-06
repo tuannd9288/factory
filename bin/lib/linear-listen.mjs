@@ -5,7 +5,6 @@ import { CONDITION, createLinear, isAuthFailure } from './linear.mjs';
 import { join } from 'node:path';
 import { commentsOfIssue, holderOf } from './linear-cli.mjs';
 import { post as postAsync, wakeLine } from './wake.mjs';
-import { placeOf } from './factory.mjs';
 import { record, appendStart, innAnswer } from './events.mjs';
 
 const COMMENT = 'id createdAt user { id } botActor { type } issue { identifier team { key } }';
@@ -39,7 +38,7 @@ function eventOf(kind, node) {
 const picks = (description) => [...String(description ?? '').matchAll(/^\s*- \[x\]\s+\*\*([A-Z])\b/gim)].map((m) => m[1].toUpperCase());
 
 async function handleInn(store, event, { state, linear, now }) {
-  if (placeOf() !== 'factory' || event.self || store.linearSeen(event)) return store.linearEvent(event);
+  if (event.self || store.linearSeen(event)) return store.linearEvent(event);
   const previous = event.kind === 'issueUpdated' ? store.linearPrevious(event.id) : null;
   const gained = picks(event.description).filter((p) => !picks(previous?.description).includes(p));
   if (event.kind === 'issueUpdated' && (!gained.length || previous?.time >= event.time)) return store.linearEvent(event);

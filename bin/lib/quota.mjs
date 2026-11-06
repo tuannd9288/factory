@@ -1,9 +1,9 @@
 // The quota windows (#63, K2 option B): what Claude Code itself reports, and nothing else. Source 1 is the rate_limit_event of
-// a stream-json log, source 3 the status line's rate_limits (#62). Nothing here reads a credential, a
+// a stream-json log, source 3 the status line's rate_limits (#62); Codex refusals use its JSON errors (#474). Nothing here reads a credential, a
 // profile or the network; a window that was not reported is null, never a guess.
-import { readFileSync, statSync } from 'node:fs';
-import { basename } from 'node:path';
-import { accountEvent, resetPassed } from './seat.mjs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { accountEvent, resetPassed, runFiles } from './seat.mjs';
 import { teamAccounts } from './teams.mjs';
 import { seatAccounts } from './token.mjs';
 
@@ -60,6 +60,33 @@ export function lastStatusLine(file) {
   return null;
 }
 
+/** Codex has no factory seat launcher. Read a supplied JSON log path, with the same .account and .seat
+ * sidecars as bin/seat: run.jsonl needs run.account and run.seat, written by the Lead for that run.
+ * Missing identity is reported as "not recorded". Never infer an account from a directory or read a profile. */
+export function codexRow(file) {
+  let records;
+  try {
+    records = readFileSync(file, 'utf8').split('\n').flatMap((line) => {
+      try { return [JSON.parse(line)]; } catch { return []; }
+    });
+  } catch { return null; }
+  if (!records.some((r) => ['thread.started', 'turn.started', 'turn.completed', 'turn.failed', 'error'].includes(r.type))) return null;
+  const metadata = (ext) => {
+    try { return readFileSync(file.replace(/\.jsonl$/, ext), 'utf8').trim() || 'not recorded'; }
+    catch { return 'not recorded'; }
+  };
+  const account = metadata('.account');
+  const seat = metadata('.seat');
+  const last = records.findLast((r) => ['turn.completed', 'turn.failed', 'error'].includes(r.type));
+  const message = last?.type === 'turn.completed' ? '' : String(last?.error?.message ?? last?.message ?? last?.error ?? '');
+  const rejected = /usage limit/i.test(message);
+  const capacity = /model.*at capacity/i.test(message) && !rejected;
+  return { file, account, seat, profile: `account ${account}, seat ${seat}`, source: 'Codex',
+    windows: { five_hour: null, seven_day: null, rejected, status: capacity ? 'capacity' : null, type: null },
+    resetsAt: num(last?.error?.resets_at ?? last?.resets_at), message,
+    asOf: statSync(file).mtimeMs };
+}
+
 /** The rows of the table (#311): one for each account (`account <name>`) from the runs under runs (source 1), then one for each
  * status-line file (source 3). The accounts are given, else those of the teams the accounts file in state names (root is where the
  * onboarded repositories are). A run with no .account file is read through its seat's old row. A row's windows are null when nothing
@@ -71,6 +98,14 @@ export function quotaRows({ runs, state = null, root, accounts = null, statusFil
     const e = accountEvent(runs, account, seatRows);
     return { profile: `account ${account}`, source: 'rate_limit_event', account, windows: e ? windowsOf(e.info) : null, resetsAt: num(e?.info.resetsAt), asOf: e?.asOf ?? null, missing: 'no session has run on it' };
   });
+  // Both the factory's run folders and hand-run <repo>/<seat>/run.jsonl folders. No profile traversal.
+  let folders = [];
+  try { folders = readdirSync(runs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(runs, d.name)); } catch {}
+  const files = new Set([...runFiles(runs, '.jsonl'), ...folders.flatMap((dir) => runFiles(dir, '.jsonl'))]);
+  for (const file of files) {
+    const row = codexRow(file);
+    if (row) rows.push(row);
+  }
   for (const file of statusFiles) {
     const s = lastStatusLine(file);
     rows.push({ profile: `status line ${basename(file)}`, source: 'status line', account: null, windows: s?.windows ?? null, asOf: s?.asOf ?? null, missing: 'no record with rate_limits' });
@@ -114,6 +149,14 @@ export function alertLines(rows, { now = Date.now() } = {}) {
   for (const r of rows) {
     const w = r.windows;
     if (!w) continue;
+    if (r.source === 'Codex') {
+      if (w.status === 'capacity') out.push(`factory: capacity: ${r.profile}: Model at capacity; retry later`);
+      else if (w.rejected && !over(r, now)) {
+        const reset = r.resetsAt != null ? ` (resets ${fmt(r.resetsAt * 1000)} UTC)` : `: ${r.message}`;
+        out.push(`factory: quota: ${r.profile}: usage limit rejected${reset}`);
+      }
+      continue;
+    }
     const when = (x) => (x?.resetsAt != null ? ` (resets ${fmt(x.resetsAt * 1000)} UTC)` : '');
     // The rejected or warned window is the event's rateLimitType; one of another type has no window of its own, and falls back to the event's resetsAt.
     const flagged = w.rejected || w.status === 'allowed_warning';
