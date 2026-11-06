@@ -273,6 +273,12 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     w.set({ actionsPolicies: [echo(['workflow_dispatch', 'push'])] });
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
     assert.deepEqual(w.writes(), [`api -X PUT -H X-GitHub-Api-Version: 2026-03-10 repos/tuannd9288/app/actions/policies/${id} --input -`]);
+    // FAC-48: a policy set outside this script (the direct POSTs on three repositories, 2026-11-07) is found by name, read by its id,
+    // and holds, with no PUT.
+    w.set({ actionsPolicies: [{ ...w.state().actionsPolicies[0], id: 11817 }] });
+    w.clear();
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), [], 'a policy that already holds, under an id this script did not make');
   } finally {
     w.cleanup();
   }
