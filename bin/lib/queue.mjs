@@ -56,6 +56,7 @@ import { watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
 import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
+import { installedRoot, nodeLogin, placeOf } from './node.mjs';
 
 const CALL_MS = 60_000;
 
@@ -704,13 +705,16 @@ export function job(repos, env = process.env, daemon = false, as = {}) {
   if (!found || realpathSync(found) !== realpathSync(node))
     throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);
   const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN', ...keep].filter((k) => env[k]).map((k) => [k, env[k]]));
+  // #366: off the factory host the sweep follows the node's installed copy (#390), which checkoutRoot knows only by this name. No token is ever
+  // here: the daemon reads the node's own (bin/lib/node.mjs).
+  const copy = placeOf(env) === 'factory' ? {} : { FACTORY_CHECKOUT: installedRoot(env) };
   return {
     label,
     interval: calendar ? null : interval,
     calendar,
     program: [join(factory, tool), ...(verb ? [verb] : []), ...args, ...repos.flatMap((repo) => ['--repo', repo])],
     cwd: factory,
-    env: { PATH: path, ...kept, ...(daemon ? { HOME: env.HOME } : {}) },
+    env: { PATH: path, ...kept, ...copy, ...(daemon ? { HOME: env.HOME } : {}) },
     log: join(env.HOME, 'Library/Logs/factory', log),
     // #24: a LaunchDaemon runs as the account that printed it, the agents' own, with that account's HOME.
     user: daemon ? userInfo().username : null,
@@ -756,8 +760,14 @@ ${j.calendar
  * every job (HOME, USER, TMPDIR), and nothing of this shell's. It makes the log's folder, which launchd needs. */
 async function check(repos, human) {
   const j = job(repos);
-  const env = { HOME: process.env.HOME, USER: process.env.USER ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', ...j.env };
   const say = (line) => console.log(`check: ${line}`);
+  // #366: off the factory host the job's sweep runs as the agents, with the node's own token, as the daemon does (bin/lib/node.mjs).
+  const agents = nodeLogin(process.env, process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'));
+  if (agents.refusal) {
+    say(`not ready: ${agents.refusal}`);
+    return 1;
+  }
+  const env = { HOME: process.env.HOME, USER: process.env.USER ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', ...j.env, ...agents.env };
   mkdirSync(dirname(j.log), { recursive: true });
   const who = spawnSync('gh', ['api', 'user', '--jq', '.login'], { env, encoding: 'utf8', timeout: CALL_MS });
   const login = who.status === 0 ? who.stdout.trim() : '';
