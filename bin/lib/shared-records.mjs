@@ -4,8 +4,13 @@
 // against origin before retrying. refs/factory/pushed records the last acknowledged tip. Origin's rows settle an uncertain push too.
 // Only rows.jsonl is published. Costs are already in sessions.jsonl; the ledger's quota reader (seat.accountEvent) reads rate_limit_event
 // lines from run*.jsonl one level under FACTORY_RUNS. No assistant text, transcripts, sidecars or profile files are copied.
+// FAC-38: the writer runs in the daemon at each ping, pass and seat end, so it works in proportion to what is new. shared-records.cursors.json
+// holds, for the outbox head it was written at, the size of the local copy of that head's rows (shared-records.rows) and how far each file was
+// taken (whole lines). A file that grew is read from there; one that did not is not opened; nothing is fetched while the head is the pushed
+// one, and a head that only adds commits to the pushed tip, which origin still has, is pushed without reading origin's rows. When the cursors
+// do not match the head (the first run, a crash between the two writes, a file that shrank), every file and the head's rows are read once.
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, truncateSync, writeFileSync, appendFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -18,26 +23,59 @@ const exec = promisify(execFile);
 // Same private destination as ledger.mjs's DIGEST_REPO; the digest itself is unchanged.
 const REMOTE = 'https://github.com/tuannd9288/better-factory.git';
 const lines = (text) => text.split('\n').filter((line) => line.trim());
+const sizeOf = (file) => {
+  try {
+    return statSync(file).size;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+};
 
-function localRows(state, runs, node) {
+/** The whole lines of `file` from byte `at` to its last newline, and the position after them; null when the file is shorter than `at`. */
+function linesFrom(file, at) {
+  const size = sizeOf(file);
+  if (size === null || size === at) return { lines: [], end: at };
+  if (size < at) return null;
+  const buf = Buffer.alloc(size - at);
+  const fd = openSync(file, 'r');
+  try {
+    for (let got = 0, n; got < buf.length; got += n) if (!(n = readSync(fd, buf, got, buf.length - got, at + got))) break;
+  } finally {
+    closeSync(fd);
+  }
+  const end = buf.lastIndexOf(10) + 1;
+  return { lines: lines(buf.toString('utf8', 0, end)), end: at + end };
+}
+
+/** The rows of the local files past the positions in `from` (by file: 'sessions.jsonl', '<folder>/<run*.jsonl>'), and the new positions; a
+ * file that is gone keeps its position. null when a file is shorter than its position, so the caller reads every file again. */
+function localRows(state, runs, node, from = {}) {
   const out = [];
-  const sessions = join(state, 'sessions.jsonl');
-  for (const row of existsSync(sessions) ? lines(readFileSync(sessions, 'utf8')) : []) {
+  const files = { ...from };
+  const sessions = linesFrom(join(state, 'sessions.jsonl'), from['sessions.jsonl'] ?? 0);
+  if (!sessions) return null;
+  for (const row of sessions.lines) {
     JSON.parse(row); // Never advance past a damaged session record.
     out.push(`{"v":1,"node":${JSON.stringify(node)},"kind":"session","row":${row}}`);
   }
+  if (sessions.end) files['sessions.jsonl'] = sessions.end;
   for (const folder of existsSync(runs) ? readdirSync(runs, { withFileTypes: true }) : []) {
     if (!folder.isDirectory()) continue;
     for (const name of readdirSync(join(runs, folder.name))) {
       if (!name.startsWith('run') || !name.endsWith('.jsonl')) continue;
-      for (const line of lines(readFileSync(join(runs, folder.name, name), 'utf8'))) {
+      const key = `${folder.name}/${name}`;
+      const log = linesFrom(join(runs, key), from[key] ?? 0);
+      if (!log) return null;
+      for (const line of log.lines) {
         if (!line.includes('"type":"rate_limit_event"')) continue; // seat.accountEvent's selector, verbatim
-        try { JSON.parse(line); } catch { continue; } // A partial stream line is read again on the next wake.
-        out.push(`{"v":1,"node":${JSON.stringify(node)},"kind":"log","run":${JSON.stringify(`${folder.name}/${name}`)},"line":${line}}`);
+        try { JSON.parse(line); } catch { continue; }
+        out.push(`{"v":1,"node":${JSON.stringify(node)},"kind":"log","run":${JSON.stringify(key)},"line":${line}}`);
       }
+      if (log.end) files[key] = log.end;
     }
   }
-  return out;
+  return { rows: out, files };
 }
 
 // Count occurrences, not just values: two equal lines in one log are still two source rows. Keeping the full local history also keeps
@@ -73,11 +111,24 @@ export function recordsWriter({ state, runs, remote = REMOTE, node = nodeName(),
     }
   };
   const rowsAt = async (sha) => sha ? lines(await git('show', `${sha}:rows.jsonl`)) : [];
-  const commit = async (rows, parent, ref) => {
-    const file = join(state, 'shared-records.rows');
-    writeFileSync(`${file}.tmp`, `${rows.join('\n')}\n`);
-    renameSync(`${file}.tmp`, file);
-    const blob = await git('hash-object', '-w', file);
+  const isAncestor = async (a, b) => {
+    try {
+      await git('merge-base', '--is-ancestor', a, b);
+      return true;
+    } catch (error) {
+      if (error.code === 1) return false;
+      throw error;
+    }
+  };
+  const rowsFile = join(state, 'shared-records.rows');
+  const cursorsFile = join(state, 'shared-records.cursors.json');
+  const writeRows = (rows) => {
+    writeFileSync(`${rowsFile}.tmp`, `${rows.join('\n')}\n`);
+    renameSync(`${rowsFile}.tmp`, rowsFile);
+  };
+  /** Commits shared-records.rows as rows.jsonl on `parent` and moves `ref` to it. */
+  const commitFile = async (parent, ref) => {
+    const blob = await git('hash-object', '-w', rowsFile);
     await git('read-tree', '--empty');
     await git('update-index', '--add', '--cacheinfo', `100644,${blob},rows.jsonl`);
     const tree = await git('write-tree');
@@ -85,30 +136,79 @@ export function recordsWriter({ state, runs, remote = REMOTE, node = nodeName(),
     await git('update-ref', ref, sha);
     return sha;
   };
+  const commit = async (rows, parent, ref) => {
+    writeRows(rows);
+    return commitFile(parent, ref);
+  };
+  const readCursors = () => {
+    try {
+      const c = JSON.parse(readFileSync(cursorsFile, 'utf8'));
+      return typeof c?.head === 'string' && Number.isInteger(c.rowsBytes) && c.files && typeof c.files === 'object' ? c : null;
+    } catch {
+      return null;
+    }
+  };
+  const saveCursors = (head, files) => {
+    writeFileSync(`${cursorsFile}.tmp`, `${JSON.stringify({ head, rowsBytes: sizeOf(rowsFile), files })}\n`);
+    renameSync(`${cursorsFile}.tmp`, cursorsFile);
+  };
+  let configured = null;
   const push = async () => {
     if (!existsSync(clone)) {
-      if (!localRows(state, runs, node).length) return;
+      if (!localRows(state, runs, node)?.rows.length) return;
       mkdirSync(state, { recursive: true });
       await exec('git', ['init', '--bare', clone]);
+      configured = null;
     }
-    // Persist the node name: a host rename must not send the old outbox to another branch.
-    const saved = await git('config', '--get', 'factory.node').catch((error) => { if (error.code !== 1) throw error; });
-    if (saved) node = saved;
-    const ref = `refs/heads/records/${node}`;
-    await git('check-ref-format', ref);
-    if (!saved) await git('config', 'factory.node', node);
-    await git('config', 'remote.origin.url', remote);
-    await git('config', 'remote.origin.fetch', `${ref}:refs/remotes/origin/records/${node}`);
-    await git('config', 'remote.origin.tagOpt', '--no-tags');
+    if (!configured) {
+      // Persist the node name: a host rename must not send the old outbox to another branch.
+      const saved = await git('config', '--get', 'factory.node').catch((error) => { if (error.code !== 1) throw error; });
+      if (saved) node = saved;
+      const ref = `refs/heads/records/${node}`;
+      await git('check-ref-format', ref);
+      if (!saved) await git('config', 'factory.node', node);
+      await git('config', 'remote.origin.url', remote);
+      await git('config', 'remote.origin.fetch', `${ref}:refs/remotes/origin/records/${node}`);
+      await git('config', 'remote.origin.tagOpt', '--no-tags');
+      configured = ref;
+    }
+    const ref = configured;
     let head = await tip(ref);
-    const old = await rowsAt(head);
-    const pending = appendMissing(old, localRows(state, runs, node));
-    if (pending.length !== old.length) head = await commit(pending, head, ref);
+    const cursors = readCursors();
+    const fresh = head && cursors?.head === head && (sizeOf(rowsFile) ?? -1) >= cursors.rowsBytes ? localRows(state, runs, node, cursors.files) : null;
+    let files;
+    if (fresh) {
+      // The local copy of the head's rows, cut back to what the head holds, and the new rows after it.
+      truncateSync(rowsFile, cursors.rowsBytes);
+      if (fresh.rows.length) {
+        appendFileSync(rowsFile, `${fresh.rows.join('\n')}\n`);
+        head = await commitFile(head, ref);
+      }
+      files = fresh.files;
+    } else {
+      const old = await rowsAt(head);
+      const all = localRows(state, runs, node);
+      const pending = appendMissing(old, all.rows);
+      files = all.files;
+      if (pending.length !== old.length) head = await commit(pending, head, ref);
+      else if (head) writeRows(old);
+    }
     if (!head) return;
+    saveCursors(head, files);
+    const pushed = await tip('refs/factory/pushed');
+    if (head === pushed) return;
     const advertised = await git('ls-remote', '--heads', 'origin', ref);
+    const remoteTip = advertised.split('\n').map((line) => line.split('\t')).find(([, name]) => name === ref)?.[0] ?? null;
+    if (pushed && remoteTip === pushed && await isAncestor(pushed, head)) {
+      // Origin still has the tip it acknowledged, and the head only adds to it.
+      await git('push', '--porcelain', 'origin', `${head}:${ref}`);
+      await git('update-ref', 'refs/factory/pushed', head);
+      return;
+    }
+    const pending = await rowsAt(head);
     let parent = null;
     let published = [];
-    if (advertised.split('\n').some((line) => line.split('\t')[1] === ref)) {
+    if (remoteTip) {
       await git('fetch', '--no-tags', 'origin', ref);
       parent = await git('rev-parse', 'FETCH_HEAD');
       published = await rowsAt(parent);
@@ -117,9 +217,14 @@ export function recordsWriter({ state, runs, remote = REMOTE, node = nodeName(),
     if (merged.length === published.length) {
       await git('update-ref', ref, parent);
       await git('update-ref', 'refs/factory/pushed', parent);
+      writeRows(published);
+      saveCursors(parent, files);
       return;
     }
-    if (parent !== await tip(`${head}^`) || merged.join('\n') !== pending.join('\n')) head = await commit(merged, parent, ref);
+    if (parent !== await tip(`${head}^`) || merged.join('\n') !== pending.join('\n')) {
+      head = await commit(merged, parent, ref);
+      saveCursors(head, files);
+    }
     await git('push', '--porcelain', 'origin', `${head}:${ref}`);
     await git('update-ref', 'refs/factory/pushed', head);
   };
