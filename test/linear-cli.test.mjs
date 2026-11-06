@@ -18,8 +18,14 @@ const SECRET = 'invented-client-secret-0001';
 /** A fake Linear with one team FAC; `teams` is the workspace's teams by key. */
 function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFails = false, failIssueUpdate = false } = {}) {
   const f = { calls: [], appId: 'app-user-1', stored: [], teams: {}, pages: null, failComment: false, onComment: null };
-  f.teams.FAC = { id: 'team-fac', key: 'FAC', name: 'Factory', states: { nodes: [st('s-triage', 'Triage', 'triage', 0), st('s-nh', 'Needs Human', 'started', 1), st('s-todo', 'Todo', 'unstarted', 2), st('s-prog', 'In Progress', 'started', 3), st('s-done', 'Done', 'completed', 4)] } };
-  f.issue = { id: 'issue-uuid-1', identifier: 'FAC-12', team: f.teams.FAC };
+  f.teams.FAC = { id: 'team-fac', key: 'FAC', name: 'Factory', states: { nodes: [st('s-triage', 'Triage', 'triage', 0), st('s-nh', 'Needs Human', 'started', 1), st('s-todo', 'Todo', 'unstarted', 2), st('s-prog', 'In Progress', 'started', 3), st('s-done', 'Done', 'completed', 4),
+    st('s-backlog', 'Backlog', 'backlog', 5), st('s-canceled', 'Canceled', 'canceled', 6), st('s-dup', 'Duplicate', 'duplicate', 7)] } };
+  f.teams.FAC.defaultIssueState = st('s-backlog', 'Backlog', 'backlog', 5);
+  f.issue = { id: 'issue-uuid-1', identifier: 'FAC-12', state: { name: 'Todo', type: 'unstarted' }, team: f.teams.FAC };
+  /** Other issues by key; any key not here is f.issue. */
+  f.byKey = {};
+  /** Whether a duplicate relation moves the issue to Duplicate by itself, as linear.app/docs/issue-property says it does. */
+  f.duplicateMoves = true;
   f.mutations = () => f.calls.filter((c) => c.query.includes('mutation'));
   f.fetchFn = async (url, init) => {
     if (url.endsWith('/oauth/token')) return json(200, { access_token: TOKEN, expires_in: 2_592_000, scope: 'read' });
@@ -51,6 +57,10 @@ function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFa
       f.onComment?.(v.input.body);
       return json(200, { data: { commentCreate: { success: true, comment: { id: `c-${f.stored.length}` } } } });
     }
+    if (q.includes('issueRelationCreate')) {
+      if (f.duplicateMoves) f.issue.state = { name: 'Duplicate', type: 'duplicate' };
+      return json(200, { data: { issueRelationCreate: { success: true } } });
+    }
     if (q.includes('issueCreate')) return json(200, { data: { issueCreate: { success: true, issue: { id: 'new-1', identifier: 'FAC-99' } } } });
     if (q.includes('issues(')) {
       const pages = f.listPages ?? [[]];
@@ -63,7 +73,7 @@ function fake({ owners = ['owner-1'], copyBringsNeedsHuman = false, teamCreateFa
       return json(200, { data: { issue: { identifier: 'FAC-12', title: 'T', description: 'D', url: 'https://linear.app/x/FAC-12', state: { name: 'Todo', type: 'unstarted' }, delegate: null, assignee: { id: 'owner-1', name: 'Owner' },
         comments: { nodes: page[at].nodes, pageInfo: { hasNextPage: at + 1 < page.length, endCursor: String(at + 1) } } } } });
     }
-    if (q.includes('issue(id')) return json(200, { data: { issue: f.issue } });
+    if (q.includes('issue(id')) return json(200, { data: { issue: f.byKey[v.id] ?? f.issue } });
     return json(200, { data: {} });
   };
   return f;
@@ -245,6 +255,70 @@ test('release is refused for a team that is not the holder, and for an issue nob
   assert.equal(r.code, 1);
   assert.match(r.out.error, /held by team lead, not other/);
   assert.equal(linear.mutations().length, before);
+});
+
+test('take refuses an issue in Triage or Backlog and writes nothing: a Lead takes work only from Todo (INN-34)', async () => {
+  const { run, linear } = setup();
+  for (const state of [{ name: 'Triage', type: 'triage' }, { name: 'Backlog', type: 'backlog' }]) {
+    linear.issue.state = state;
+    const r = await run(['take', 'FAC-12', '--team', 'lead']);
+    assert.equal(r.code, 1, state.name);
+    assert.match(r.out.error, new RegExp(`FAC-12 is in ${state.name}, which no Lead takes`));
+  }
+  assert.equal(linear.mutations().length, 0);
+});
+
+const triage = (verb, ...more) => [verb, 'FAC-12', ...more, '--team', 'lead', '--body-file', '-'];
+
+test('accept moves an issue in Triage to the team\'s default status and decline to its canceled status, each then posting the reason', async () => {
+  for (const [verb, stateId, status] of [['accept', 's-backlog', 'Backlog'], ['decline', 's-canceled', 'Canceled']]) {
+    const { run, linear, stdin } = setup();
+    linear.issue.state = { name: 'Triage', type: 'triage' };
+    stdin.text = `Why ${verb}ed.\n`;
+    const r = await run(triage(verb));
+    assert.equal(r.code, 0, JSON.stringify(r));
+    assert.equal(r.out.status, status);
+    const [move, why] = linear.mutations();
+    assert.equal(move.variables.id, 'issue-uuid-1');
+    assert.deepEqual(inputOf(move), { stateId }, `${verb}: only the status changes`);
+    assert.deepEqual(inputOf(why), { issueId: 'issue-uuid-1', body: `Why ${verb}ed.\n`, createAsUser: 'factory-lead' });
+    assert.equal(linear.mutations().length, 2);
+  }
+});
+
+test('duplicate relates the issue to the one it repeats, as Linear marks a duplicate, then posts the reason; it sets Duplicate only when Linear did not', async () => {
+  for (const moves of [true, false]) {
+    const { run, linear } = setup();
+    linear.duplicateMoves = moves;
+    linear.issue.state = { name: 'Triage', type: 'triage' };
+    linear.byKey['FAC-7'] = { id: 'issue-uuid-7', identifier: 'FAC-7', state: { name: 'Todo', type: 'unstarted' }, team: linear.teams.FAC };
+    const r = await run(triage('duplicate', '--of', 'FAC-7'));
+    assert.equal(r.code, 0, JSON.stringify(r));
+    assert.deepEqual([r.out.duplicateOf, r.out.status, r.out.movedByLinear], ['FAC-7', 'Duplicate', moves]);
+    const ms = linear.mutations();
+    assert.deepEqual(inputOf(ms[0]), { issueId: 'issue-uuid-1', relatedIssueId: 'issue-uuid-7', type: 'duplicate' }, 'the triaged issue is the duplicate');
+    assert.match(ms[0].query, /issueRelationCreate/);
+    if (moves) assert.equal(ms.length, 2, 'the relation and the reason, no status change of its own');
+    else assert.deepEqual(inputOf(ms[1]), { stateId: 's-dup' });
+    assert.equal(inputOf(ms.at(-1)).body, 'the body\n');
+  }
+});
+
+test('the triage verbs refuse an issue outside Triage, a default status not of type backlog, and a duplicate of another team\'s issue, writing nothing', async () => {
+  const { run, linear } = setup();
+  for (const verb of ['accept', 'decline']) {
+    const r = await run(triage(verb));
+    assert.equal(r.code, 1, verb);
+    assert.match(r.out.error, /FAC-12 is in Todo, not in Triage/);
+  }
+  assert.equal((await run(triage('duplicate', '--of', 'FAC-12'))).code, 2, 'not a duplicate of itself');
+  linear.issue.state = { name: 'Triage', type: 'triage' };
+  linear.teams.FAC.defaultIssueState = st('s-todo', 'Todo', 'unstarted', 2);
+  assert.match((await run(triage('accept'))).out.error, /default status is Todo, of type unstarted, not of type backlog/, 'accept never schedules work');
+  linear.teams.INN = { id: 'team-inn', key: 'INN', name: 'InnoStack', states: { nodes: [] } };
+  linear.byKey['INN-22'] = { id: 'inn-uuid', identifier: 'INN-22', team: linear.teams.INN };
+  assert.match((await run(triage('duplicate', '--of', 'INN-22'))).out.error, /team INN is not the team of a repository on Linear/);
+  assert.equal(linear.mutations().length, 0);
 });
 
 test('read gives the issue and every comment with its author, across pages', async () => {
