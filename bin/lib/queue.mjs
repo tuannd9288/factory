@@ -360,6 +360,10 @@ function draftReadiness(repo, prs, clone) {
   let merge = policy.merge == null ? null : policy.merge === 'merge' ? 'merge' : 'squash';
   if ((policy.drafts ?? 'landable') === 'landable') {
     for (const pr of prs) {
+      // Only a pull request on main, the base the rulesets guard: a stacked child armed here merges into its parent with no review
+      // (#455, 2026-11-06 17:06 +07). As in pstack's ship, a child waits unarmed until its parent lands and it is retargeted to main;
+      // until then the queue neither readies, arms, drafts nor disarms it.
+      if (pr.base !== BASE) continue;
       const conflict = pr.mergeable === 'CONFLICTING';
       if (pr.isDraft && pr.checks.verify?.state === 'SUCCESS' && !conflict) {
         if (merge === null) {
@@ -368,7 +372,7 @@ function draftReadiness(repo, prs, clone) {
         }
         gh(['pr', 'ready', String(pr.number), '--repo', repo]);
         gh(['pr', 'merge', String(pr.number), '--repo', repo, '--auto', `--${merge}`]);
-      } else if (!pr.isDraft && (RED.has(pr.checks.verify?.state) || conflict)) {
+      } else if (!pr.isDraft && (pr.checks.verify?.state !== 'SUCCESS' || conflict)) {
         gh(['pr', 'ready', String(pr.number), '--repo', repo, '--undo']);
         pr.isDraft = true;
       }

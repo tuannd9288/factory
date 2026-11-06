@@ -196,7 +196,9 @@ test('no loop: equal record and position re-run nothing, a re-run is not repeate
   const w = world();
   try {
     w.rules('1-2');
-    w.pulls([pull(7, { conclusion: 'SUCCESS', record: '1-2' })]);
+    // A green verify keeps the ready pull request ready, so the sweep's calls are only the record's.
+    const green = (p) => { const c = p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes; c.push({ ...c[0], id: 'V_7', name: 'verify', conclusion: 'SUCCESS' }); return p; };
+    w.pulls([green(pull(7, { conclusion: 'SUCCESS', record: '1-2' }))]);
     const quiet = w.sweep();
     assert.deepEqual(quiet.reruns, []);
     assert.equal(quiet.calls.length, 4, `the first sweep reads the record once: ${quiet.calls.join(' | ')}`);
@@ -509,7 +511,7 @@ test('at none the queue updates no pull request that lacks an approval of someon
   for (const position of ['1-2', 'all', undefined]) assert.equal(pickUpdate([behind(1)], [], position)?.number, 1, String(position));
 });
 
-for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweeps every PR: green drafts become ready and armed, red or conflicting ready PRs become drafts`, () => {
+for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweeps every PR: green drafts become ready and armed, ready PRs that are not green or conflict become drafts, and one on another base than main is left as it is (#455)`, () => {
   const w = world();
   try {
     w.policy(drafts);
@@ -525,8 +527,11 @@ for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweep
       [false, 'PENDING', 'MERGEABLE'],
       [true, null, 'MERGEABLE'],
       [true, 'SUCCESS', 'UNKNOWN'],
-    ].map(([draft, verify, mergeable], i) => {
-      const p = pull(i + 1, { draft, labels: [], auto: false });
+      [false, null, 'MERGEABLE'],
+      // A stacked child: green and conflict-free, but on its parent's branch, which no ruleset guards.
+      [true, 'SUCCESS', 'MERGEABLE', 'issue-366-macbook-lead'],
+    ].map(([draft, verify, mergeable, base = 'main'], i) => {
+      const p = pull(i + 1, { draft, labels: [], auto: false, base });
       p.mergeable = mergeable;
       const checks = p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes;
       if (verify) checks.push({ ...checks[0], id: `V_${i}`, name: 'verify', status: verify === 'PENDING' ? 'IN_PROGRESS' : 'COMPLETED', conclusion: verify });
@@ -540,8 +545,10 @@ for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweep
       'pr merge 1 --repo o/app --auto --squash',
       'pr ready 5 --repo o/app --undo',
       'pr ready 6 --repo o/app --undo',
+      'pr ready 8 --repo o/app --undo',
       'pr ready 10 --repo o/app',
       'pr merge 10 --repo o/app --auto --squash',
+      'pr ready 11 --repo o/app --undo',
     ]);
   } finally {
     w.cleanup();
