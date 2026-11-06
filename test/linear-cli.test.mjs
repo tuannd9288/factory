@@ -604,6 +604,7 @@ test('decision items file all fields and close with a comment using only the sto
     const team = { id: 'team-inn', key: 'INN', states: { nodes: [st('todo', 'Pending', 'unstarted', 0), st('done', 'Finished', 'completed', 1)] } };
     let data;
     if (call.query.includes('teams(')) data = { teams: { nodes: [team] } };
+    else if (call.query.includes('users(')) data = { users: { nodes: [{ id: 'owner-sample' }] } };
     else if (call.query.includes('issueCreate')) data = { issueCreate: { success: true, issue: { id: 'decision-1', identifier: 'INN-7' } } };
     else if (call.query.includes('issueUpdate')) data = { issueUpdate: { success: true } };
     else if (call.query.includes('commentCreate')) data = { commentCreate: { success: true, comment: { id: 'comment-1' } } };
@@ -620,6 +621,12 @@ test('decision items file all fields and close with a comment using only the sto
     assert.deepEqual(calls.find(c => c.query.includes('issueCreate')).variables.input, {
       teamId: 'team-inn', title: 'Sample decision', description: body, stateId: 'todo', assigneeId: 'person-sample', labelIds: ['label-sample'], projectId: 'project-sample', dueDate: '2026-12-01',
     });
+    assert.equal(calls.some(c => c.query.includes('users(')), false, 'a given assignee is used as it is');
+    const bare = await run(['decision-create', '--title', 'Bare decision', '--status', 'Pending', '--body-file', '-']);
+    assert.equal(bare.code, 0, JSON.stringify(bare.out));
+    assert.deepEqual(calls.filter(c => c.query.includes('issueCreate')).at(-1).variables.input, {
+      teamId: 'team-inn', title: 'Bare decision', description: body, stateId: 'todo', assigneeId: 'owner-sample',
+    }, 'with none of the four, the Human found as ask finds him, and no label, project or due date');
     body = 'The blue sample was chosen.';
     assert.equal((await run(['decision-close', 'INN-7', '--body-file', '-'])).code, 0);
     assert.deepEqual(calls.find(c => c.query.includes('issueUpdate')).variables, { id: 'decision-1', input: { stateId: 'done' } });
