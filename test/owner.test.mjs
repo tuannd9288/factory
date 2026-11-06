@@ -101,7 +101,9 @@ if (path.startsWith(repo + '/actions/policies')) {
     if (kept('policy')) state.actionsPolicies[i] = { ...state.actionsPolicies[i], ...body };
     done(state.actionsPolicies[i]);
   }
-  done({ total_count: state.actionsPolicies.length, policies: state.actionsPolicies });
+  // As GitHub answers (tuannd9288/factory, 2026-11-07): a policy read by its id carries its conditions and rules, a list entry does not.
+  if (id) { const p = state.actionsPolicies.find((x) => x.id === Number(id)); p ? done(p) : missing(); }
+  done({ total_count: state.actionsPolicies.length, policies: state.actionsPolicies.map(({ conditions, rules, ...entry }) => entry) });
 }
 const env = repo + '/environments/reviewer';
 if (path === env) {
@@ -271,6 +273,12 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     w.set({ actionsPolicies: [echo(['workflow_dispatch', 'push'])] });
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
     assert.deepEqual(w.writes(), [`api -X PUT -H X-GitHub-Api-Version: 2026-03-10 repos/tuannd9288/app/actions/policies/${id} --input -`]);
+    // FAC-48: a policy set outside this script (the direct POSTs on three repositories, 2026-11-07) is found by name, read by its id,
+    // and holds, with no PUT.
+    w.set({ actionsPolicies: [{ ...w.state().actionsPolicies[0], id: 11817 }] });
+    w.clear();
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), [], 'a policy that already holds, under an id this script did not make');
   } finally {
     w.cleanup();
   }
