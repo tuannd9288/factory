@@ -12,7 +12,7 @@ import { GATE, MAIN, TRUSTED, render } from '../bin/lib/gate-settings.mjs';
 /** The three gate workflows as main holds them once bin/onboard filled them in with `values` (#335). */
 const onMain = (values) => Object.fromEntries([MAIN, GATE, TRUSTED].map((p) => [p, render(p, readFileSync(join(factory, 'kit', p), 'utf8'), values)]));
 /** A gate-trusted.yml as the kit had it before #335: its reviewer is the repository variable's. */
-const OLD_TRUSTED = "jobs:\n  review:\n    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '\"ubuntu-latest\"') }}\n    steps:\n      - run: .gate/bin/review review\n        env:\n          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}\n";
+const OLD_TRUSTED = "on:\n  pull_request_target:\n    types: [opened]\n\njobs:\n  review:\n    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '\"ubuntu-latest\"') }}\n    steps:\n      - run: .gate/bin/review review\n        env:\n          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}\n";
 
 // A fake gh that answers the REST calls bin/onboard-owner makes from $GH_STATE and logs each call to $GH_CALLS.
 // `ignore` names a kind of write the fake accepts and drops, so a setting does not read back as set.
@@ -25,6 +25,7 @@ let method = 'GET', path = '', input;
 for (let i = 1; i < args.length; i++) {
   if (args[i] === '-X' || args[i] === '--method') method = args[++i];
   else if (args[i] === '--input') input = args[++i];
+  else if (args[i] === '-H') i++;
   else if (!args[i].startsWith('-') && !path) path = args[i];
 }
 const body = input === '-' ? JSON.parse(fs.readFileSync(0, 'utf8')) : undefined;
@@ -46,10 +47,12 @@ if (path === repo && method === 'PATCH') {
 }
 if (path === repo) done(state.repo);
 if (path.startsWith(repo + '/contents/.gate/kit-files')) state.kitLanded ? done({ path: '.gate/kit-files' }) : missing();
-// #335: a file on main, as the contents API gives it, base64.
+// #335: a file on main, as the contents API gives it, base64; #337: a folder of them, as a list.
 if (path.startsWith(repo + '/contents/')) {
   const file = decodeURIComponent(path.slice((repo + '/contents/').length).split('?')[0]);
   const text = (state.files ?? {})[file];
+  const inside = Object.keys(state.files ?? {}).filter((p) => p.startsWith(file + '/') && !p.slice(file.length + 1).includes('/'));
+  if (text === undefined && inside.length) done(inside.map((p) => ({ type: 'file', name: p.split('/').pop(), path: p })));
   text === undefined ? missing() : done({ path: file, encoding: 'base64', content: Buffer.from(text).toString('base64') });
 }
 if (path === repo + '/collaborators/' + agent + '/permission') {
@@ -85,6 +88,20 @@ if (path === repo + '/rules/branches/main') {
   if (!args.includes('--paginate') || !args.includes('--slurp')) { process.stderr.write('fake gh: the rules are asked without --paginate --slurp\n'); process.exit(1); }
   const list = state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules.map((x) => ({ ...x, ruleset_id: r.id })));
   done([list]);
+}
+// #337: the repository's Actions event policies, whose endpoints are documented for one API version, which a call must name.
+if (path.startsWith(repo + '/actions/policies')) {
+  if (!args.includes('X-GitHub-Api-Version: 2026-03-10')) { process.stderr.write('fake gh: an Actions policies call without its API version\n'); process.exit(1); }
+  state.actionsPolicies ??= [];
+  const id = /actions\/policies\/(\d+)$/.exec(path)?.[1];
+  if (method === 'POST') { const p = { id: state.next++, target: 'actions', source_type: 'repository', ...body }; if (kept('policy')) state.actionsPolicies.push(p); done(p); }
+  if (id && method === 'PUT') {
+    const i = state.actionsPolicies.findIndex((p) => p.id === Number(id));
+    if (i < 0) missing();
+    if (kept('policy')) state.actionsPolicies[i] = { ...state.actionsPolicies[i], ...body };
+    done(state.actionsPolicies[i]);
+  }
+  done({ total_count: state.actionsPolicies.length, policies: state.actionsPolicies });
 }
 const env = repo + '/environments/reviewer';
 if (path === env) {
@@ -204,12 +221,18 @@ test('the owner script applies, reads back what it set, and on a second run chan
   }
 });
 
-test('once the kit is on main, the owner script puts the gate\'s ruleset in, then takes the bootstrap one out', () => {
+test('once the kit is on main, the owner script puts the gate\'s ruleset in, then takes the bootstrap one out, and sets the Actions event policy main\'s workflows need (#337)', () => {
   const w = world();
   try {
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.state().actionsPolicies ?? [], [], 'no policy before the kit is on main');
     w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
     w.clear();
+    // The policy allows the one workflow on main that runs on pull_request_target the events its on: block names.
+    const policy = { name: 'factory gate: pull_request_target', enforcement: 'active', conditions: { workflow_path: { include: [TRUSTED], exclude: [] } }, rules: [{ type: 'restrict_action_events', parameters: { allowed_events: ['pull_request_target'] } }] };
+    const dry = w.owner(['tuannd9288/app', '--id', '1234']);
+    assert.ok(dry.out.includes(`change  Actions event policy "${policy.name}": POST repos/tuannd9288/app/actions/policies ${JSON.stringify(policy)}`), dry.out);
+    assert.deepEqual(w.writes(), []);
     const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 0, out.out);
     const writes = w.writes();
@@ -217,6 +240,37 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     const drop = writes.findIndex((l) => / -X DELETE repos\/tuannd9288\/app\/rulesets\/\d+/.test(l));
     assert.ok(gate >= 0 && drop > gate, writes.join('\n'));
     assert.deepEqual(w.state().rulesets.map((r) => r.name).sort(), ['factory-branches', 'factory-claims', 'factory-gate', 'factory-tags']);
+    assert.ok(writes.includes('api -X POST -H X-GitHub-Api-Version: 2026-03-10 repos/tuannd9288/app/actions/policies --input -'), writes.join('\n'));
+    const [{ id, target, source_type, ...set }] = w.state().actionsPolicies;
+    assert.deepEqual(set, policy);
+    assert.match(out.out, /read back: every setting as planned/);
+    // A second run changes nothing; a policy that drifted is put back by its id.
+    w.clear();
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), []);
+    w.set({ actionsPolicies: [{ ...w.state().actionsPolicies[0], rules: [{ type: 'restrict_action_events', parameters: { allowed_events: ['pull_request'] } }] }] });
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), [`api -X PUT -H X-GitHub-Api-Version: 2026-03-10 repos/tuannd9288/app/actions/policies/${id} --input -`]);
+    assert.deepEqual(w.state().actionsPolicies[0].rules, policy.rules);
+    // GitHub's echo may drop the empty exclude and give the lists in another order: the same policy plans no PUT, and a
+    // different event still plans one. Two workflows on pull_request_target and two events, so an order can differ.
+    const kit = onMain({ reviewer: 'claude' });
+    const two = { ...kit, [GATE]: kit[GATE].replace(/^on:\n {2}pull_request:\n/m, 'on:\n  pull_request_target:\n'), [TRUSTED]: kit[TRUSTED].replace(/^on:\n/m, 'on:\n  workflow_dispatch:\n') };
+    assert.ok(two[GATE] !== kit[GATE] && two[TRUSTED] !== kit[TRUSTED]);
+    w.set({ files: two });
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    const live = w.state().actionsPolicies[0];
+    assert.deepEqual([...live.conditions.workflow_path.include].sort(), [GATE, TRUSTED].sort());
+    assert.deepEqual(live.rules[0].parameters.allowed_events, ['pull_request_target', 'workflow_dispatch']);
+    const { exclude, ...path } = live.conditions.workflow_path;
+    const echo = (events) => ({ ...live, conditions: { workflow_path: { ...path, include: [...path.include].reverse() } }, rules: [{ type: 'restrict_action_events', parameters: { allowed_events: events } }] });
+    w.set({ actionsPolicies: [echo(['workflow_dispatch', 'pull_request_target'])] });
+    w.clear();
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), [], 'the same policy in another order, without its empty exclude');
+    w.set({ actionsPolicies: [echo(['workflow_dispatch', 'push'])] });
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), [`api -X PUT -H X-GitHub-Api-Version: 2026-03-10 repos/tuannd9288/app/actions/policies/${id} --input -`]);
   } finally {
     w.cleanup();
   }
@@ -467,6 +521,36 @@ const setReview = (w, count, owner) =>
   w.set({ rulesets: w.state().rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_approving_review_count: count, require_code_owner_review: owner } } : x)) })) });
 const POSITIONS = [['all', 0, false], ['1-2', 0, true], ['none', 1, true]];
 
+test('the factory\'s own repository gets only the Actions event policy its workflows on pull_request_target need, and no kit setting (#337)', () => {
+  // Its main as this checkout holds it: approval.yml runs on pull_request_target, verify.yml on pull_request and push.
+  const files = Object.fromEntries(['.github/workflows/approval.yml', '.github/workflows/verify.yml'].map((p) => [p, readFileSync(join(factory, p), 'utf8')]));
+  const own = { id: 50, name: 'factory', target: 'branch', enforcement: 'active', rules: [] };
+  const w = world({ repo: { id: 1234, full_name: 'tuannd9288/factory', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: false }, files, rulesets: [own] });
+  const me = ['tuannd9288/factory', '--id', '1234'];
+  try {
+    const dry = w.owner(me);
+    assert.equal(dry.code, 0, dry.out);
+    assert.deepEqual(dry.out.split('\n').filter((l) => l.startsWith('  change  ')).map((l) => l.slice(0, l.indexOf('": ') + 1)), ['  change  Actions event policy "factory gate: pull_request_target"'], dry.out);
+    assert.deepEqual(w.writes(), []);
+    const out = w.owner([...me, '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(w.writes(), ['api -X POST -H X-GitHub-Api-Version: 2026-03-10 repos/tuannd9288/factory/actions/policies --input -']);
+    const [{ conditions, rules }] = w.state().actionsPolicies;
+    assert.deepEqual(conditions.workflow_path, { include: ['.github/workflows/approval.yml'], exclude: [] });
+    assert.deepEqual(rules, [{ type: 'restrict_action_events', parameters: { allowed_events: ['pull_request_target'] } }]);
+    assert.deepEqual(w.state().rulesets, [own], 'its own ruleset stays, and no kit ruleset goes there');
+    assert.equal(w.state().repo.allow_auto_merge, false);
+    assert.match(out.out, /read back: the Actions event policy as planned/);
+    w.clear();
+    assert.equal(w.owner([...me, '--apply']).code, 0);
+    assert.deepEqual(w.writes(), []);
+    assert.equal(w.owner([...me, '--merge', 'all', '--apply']).code, 2);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('a gate put in new starts at 1-2, and the run names the position it reads, the bootstrap ruleset\'s being none (#333)', () => {
   const w = inForce();
   try {
@@ -700,6 +784,19 @@ test('on a main where the kit has landed, a gate-trusted.yml that cannot be read
     } finally {
       w.cleanup();
     }
+  }
+  // Nor is a guess made at the events an Actions event policy must allow (#337): an on: block not in the kit's form stops it too.
+  const kit = onMain({ reviewer: 'claude' });
+  const inline = { ...kit, [TRUSTED]: kit[TRUSTED].replace(/^on:\n {2}pull_request_target:\n {4}types: .*$/m, 'on: [pull_request_target]') };
+  assert.notEqual(inline[TRUSTED], kit[TRUSTED]);
+  const w = world({ kitLanded: true, collaborator: 'write', files: inline });
+  try {
+    const out = w.owner([...ME, '--apply']);
+    assert.equal(out.code, 2, out.out);
+    assert.match(out.out, /gate-trusted\.yml on main has no on: block in the kit's form/);
+    assert.deepEqual(w.writes(), []);
+  } finally {
+    w.cleanup();
   }
 });
 

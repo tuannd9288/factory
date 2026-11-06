@@ -5,7 +5,8 @@
 // pull_request_target runs. Changing one is a pull request under /.github: tier 3, the Human's approval. Until #335 they
 // were repository variables, which change without a pull request.
 //   bin/onboard fills them in, bin/kit-update carries them from the base, bin/kit-evidence names them and checks the runner
-//   rule, and bin/onboard-owner and bin/onboard-doctor read them back from main.
+//   rule, and bin/onboard-owner and bin/onboard-doctor read them back from main. From the same files, eventsOf and targetOf read
+//   the events each workflow runs on, for the Actions event policy bin/onboard-owner sets (#337).
 //   node bin/lib/gate-settings.mjs check [options]                  the options' problems, exit 2 on any
 //   node bin/lib/gate-settings.mjs render <path> --human <login> [options]   fills in the kit file at <path>, in place
 // The options: --reviewer stub|claude|entire ('' for none), and --runner, --pr-runner, --trusted-runner <json>
@@ -103,6 +104,40 @@ export function valuesOf(path, text) {
 /** The settings of a set of workflow files ({ path: text }), each from the file that holds it. */
 export function valuesIn(files) {
   return Object.assign({}, ...WORKFLOWS.filter((p) => typeof files[p] === 'string').map((p) => valuesOf(p, files[p])));
+}
+
+/** The events a workflow runs on, from its `on:` block in the kit's form: one top-level `on:` line, then one line for each
+ * event at two spaces (`  push:`), with its own settings deeper. Null for a file in any other form (`on: [push]`, `"on":`, two
+ * `on:` blocks), which the caller refuses rather than guess at (#337). */
+export function eventsOf(text) {
+  const lines = text.split('\n');
+  const at = lines.flatMap((l, i) => (l === 'on:' ? [i] : []));
+  if (at.length !== 1) return null;
+  const events = [];
+  for (const line of lines.slice(at[0] + 1)) {
+    if (line.trim() === '' || /^\s*#/.test(line)) continue;
+    if (!line.startsWith(' ')) break;
+    const event = /^ {2}([a-z_]+):\s*$/.exec(line)?.[1];
+    if (event) events.push(event);
+    else if (!/^ {4,}\S/.test(line) || !events.length) return null;
+  }
+  return events.length ? events : null;
+}
+
+/** What a repository's Actions event policy allows (#337), from its workflow files ({ path: text }): `include`, the files that
+ * run on pull_request_target, and `events`, every event those files run on, since the policy allows a matching workflow those
+ * events alone. Both sorted. { unreadable: path } for the first file whose `on:` block is not in the kit's form. */
+export function targetOf(files) {
+  const include = [];
+  const events = new Set();
+  for (const [path, text] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
+    const on = eventsOf(text);
+    if (!on) return { unreadable: path };
+    if (!on.includes('pull_request_target')) continue;
+    include.push(path);
+    for (const e of on) events.add(e);
+  }
+  return { include, events: [...events].sort() };
 }
 
 /** Whether a workflow's text reads a gate variable, as the kit did before #335. */
