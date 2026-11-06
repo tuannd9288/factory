@@ -38,8 +38,9 @@ test('account add defaults locally and sends only the selected node its token', 
     s.env.FACTORY_HOST_USER = 'nobody-here';
     const listed = s.fac('account', 'list');
     assert.equal(listed.code, 0, listed.out);
-    assert.match(listed.out, /macbook  fixture.*expiry \d{4}-\d{2}-\d{2}/);
-    assert.match(listed.out, /tuans-mac-mini  fixture.*expiry \d{4}-\d{2}-\d{2}/);
+    // Each node's account carries its letter there, a spare's included, so `factory use <row> <letter>` finds it in the table (#365 B5).
+    assert.match(listed.out, /macbook  fixture \(a\).*expiry \d{4}-\d{2}-\d{2}/);
+    assert.match(listed.out, /tuans-mac-mini  fixture \(a\).*expiry \d{4}-\d{2}-\d{2}/);
     assert.ok(listed.out.includes(`added ${added}; expiry `));
     assert.doesNotMatch(listed.out, /warning/i);
     for (const secret of [local, remote]) assert.ok(!listed.out.includes(secret));
