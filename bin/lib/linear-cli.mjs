@@ -13,8 +13,9 @@
 //   create --team-key <KEY> --title <t> --status <name> --body-file - [--delegate --team <team>]   an issue with an explicit status, never Triage
 //                                               by accident; --delegate (which needs --team) also posts the holder comment a take posts
 //   comment and ask refuse a body with a line that reads as a holder or release comment (those are for take, release and create)
-//   decision-create --title <t> --status <name> --body-file - --assignee-id <id> --label-id <id> --project-id <id> --due-date <YYYY-MM-DD>
-//                                               files on INN as Colly; --label-id may repeat. create also accepts these four optional fields.
+//   decision-create --title <t> --status <name> --body-file - [--assignee-id <id>] [--label-id <id>]... [--project-id <id>] [--due-date <YYYY-MM-DD>]
+//                                               files on INN as Colly, assigned to --assignee-id or else to the Human, found as `ask` finds him
+//                                               (through Colly's key); a label, project or due date is sent only when given. create also accepts these four.
 //   decision-close <INN-key> --body-file -     posts the closing comment, then moves to the first completed state, as Colly
 //   Colly reads only tokens/colly in the factory token store (the Human stores it with `factory store colly`); no key argument or environment.
 //   onboard <repo> --key <KEY> --name <name>    the repository's team (copied from FAC) and its Needs Human status, and the registry
@@ -59,7 +60,7 @@ const SHAPES = {
 /** The status types of the shared view 'Active (all teams)': what `list` shows unless `--status` narrows it. */
 export const OPEN_TYPES = ['triage', 'backlog', 'unstarted', 'started'];
 const REQUIRED = {
-  'decision-create': ['--title', '--status', '--body-file', '--assignee-id', '--label-id', '--project-id', '--due-date'],
+  'decision-create': ['--title', '--status', '--body-file'],
   'decision-close': ['--body-file'],
   take: ['--team'], comment: ['--team', '--body-file'], ask: ['--team', '--body-file'], answered: ['--team'], release: ['--team'],
   create: ['--team-key', '--title', '--status', '--body-file'], onboard: ['--key', '--name'], list: ['--team-key'],
@@ -182,9 +183,9 @@ export function createCli({ api, collyApi, state, readStdin }) {
     return s;
   };
   const update = (id, input) => q('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier } } }', { id, input });
-  /** The Human: the one workspace owner who is not an app. Any other count refuses and names the count. */
-  async function human() {
-    const nodes = (await q('query { users(filter: { owner: { eq: true }, app: { eq: false } }, first: 10) { nodes { id } } }'))?.users?.nodes ?? [];
+  /** The Human: the one workspace owner who is not an app, read through `client`. Any other count refuses and names the count. */
+  async function human(client = api) {
+    const nodes = (await client.request('query { users(filter: { owner: { eq: true }, app: { eq: false } }, first: 10) { nodes { id } } }'))?.users?.nodes ?? [];
     if (nodes.length !== 1) throw new Refused(`expected exactly one workspace owner who is not an app, found ${nodes.length}; nothing was written`);
     return nodes[0].id;
   }
@@ -296,6 +297,8 @@ export function createCli({ api, collyApi, state, readStdin }) {
     for (const [flag, field] of [['--assignee-id', 'assigneeId'], ['--label-id', 'labelIds'], ['--project-id', 'projectId'], ['--due-date', 'dueDate']]) {
       if (flag in flags) fields[field] = flags[flag];
     }
+    // A decision item is his to answer: with no --assignee-id it goes to the Human, read with Colly's key, never the Factory app's.
+    if (decision && !('--assignee-id' in flags)) fields.assigneeId = await human(client);
     const r = done(await client.issueCreate({ ...fields, teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate, team: flags['--team'] ? `${inScope(teamKey)}-${flags['--team']}` : undefined }), 'issueCreate');
     // An issue created with the app as its delegate is held by the creating team, as a take would say.
     if (delegate) await announceTake(r.issue.id, r.issue.identifier, flags['--team']);
