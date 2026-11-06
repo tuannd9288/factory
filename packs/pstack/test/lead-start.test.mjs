@@ -587,11 +587,11 @@ describe('lead token (#179)', () => {
     assert.deepEqual([w.log(), w.herdr()], [[], []]);
   }));
 
-  test('a row whose account has no token file refuses the start with exit 2 and names factory login (#179)', () => world((w) => {
+  test('a row whose account has no token file refuses the start with exit 2 and names factory account add (#179)', () => world((w) => {
     w.row('bob');
     const r = w.lead();
     assert.equal(r.code, 2);
-    assert.match(r.err, /factory login bob/);
+    assert.match(r.err, /factory account add bob/);
     assert.ok(!w.ran() && !existsSync(w.config), 'refused before setup');
     assert.ok(!w.log().some((c) => c.argv[0] === '--model'), 'claude was not started');
   }));

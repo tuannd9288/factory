@@ -1,4 +1,4 @@
-// #177: the hidden prompt of `factory login`, driven with a stand-in for a raw-mode terminal. In raw mode the terminal sends
+// #177: the hidden prompt of `factory account add`, driven with a stand-in for a raw-mode terminal. In raw mode the terminal sends
 // Return as "\r" (ICRNL is off), and a paste may bring its own line ends. No real terminal runs here: none could be
 // started without a pty tool, which the factory does not take as a dependency.
 import { test } from 'node:test';
