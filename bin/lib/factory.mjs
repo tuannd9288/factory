@@ -700,7 +700,7 @@ async function colly(args, env) {
     console.error('bin/factory: colly runs on the MacBook');
     return 2;
   }
-  const { state } = contextOf(env);
+  const { state, agentProfiles } = contextOf(env);
   const parent = join(state, 'colly');
   const socket = join(parent, 'socket');
   // Connect without writing to the recorded inbox. A stale record is not a live session.
@@ -789,7 +789,10 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
     permissions: {
       defaultMode: 'auto',
       allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)'],
+      // The token store holds the teams' Claude tokens and the agents' GitHub token: Colly never reads one (INN-31 3A). Not
+      // tokenStoreDeny as a whole, which denies factory use, a command INN-30 allows Colly.
       deny: [
+        'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`,
         'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
         'Bash(*factory account*)', 'Bash(*factory store*)',
         'Bash(*lib/factory.mjs account*)', 'Bash(*lib/factory.mjs store*)',
