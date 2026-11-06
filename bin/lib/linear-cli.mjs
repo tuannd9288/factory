@@ -2,7 +2,7 @@
 // It runs on the factory host and calls Linear itself through createLinear (bin/lib/linear.mjs, #403), which reads the app's token in this
 // process; on the MacBook bin/lib/factory.mjs runs the same command on the host by ssh. No free-form GraphQL is offered.
 //   take <KEY> --team <team>                    the app becomes the delegate, no person is assigned, the issue moves to its team's first `started`
-//                                               status, and one comment "Taken by team <team>." names the holder; the holder is the earliest such
+//                                               status, and one comment "Taken by team <team> on <node>." names the holder; the holder is the earliest such
 //                                               comment after the last "Released by team" one, and a take is refused when it is another team's
 //   release <KEY> --team <team>                 the holder only: the delegate cleared, the first `unstarted` status, a "Released by team" comment
 //   read <KEY>                                  title, description, status, delegate, assignee and every comment, as JSON
@@ -25,6 +25,7 @@
 // The registry, $FACTORY_STATE/linear/repos.json { "<repo>": { key, teamId } }, is written only by `onboard`, atomically; a repository
 // not in it is on GitHub. `onLinear(repo)` reads it.
 import { join } from 'node:path';
+import { nodeName } from './shared-records.mjs';
 import { createLinear } from './linear.mjs';
 import { TEAM_KEY, onLinear, readRegistry, registryFile, updateRegistry } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
@@ -95,14 +96,14 @@ export function parse(argv) {
 
 const TAKEN = 'Taken by team';
 const RELEASED = 'Released by team';
-const TAKEN_LINE = new RegExp(`^${TAKEN} ([a-z][a-z0-9]{0,31})\\.\\s*$`);
-const RELEASED_LINE = new RegExp(`^${RELEASED} ([a-z][a-z0-9]{0,31})(?:\\.|\\s\\()`);
+const TAKEN_LINE = new RegExp(`^${TAKEN} ([a-z][a-z0-9]{0,31})(?: on \\S+)?\\.\\s*$`);
+const RELEASED_LINE = new RegExp(`^${RELEASED} ([a-z][a-z0-9]{0,31})(?: on \\S+)?(?:\\.|\\s\\()`);
 
 /** Whether a line reads as a holder or a release comment line. */
 export const isHolderLine = (line) => TAKEN_LINE.test(line) || RELEASED_LINE.test(line);
 
 /** The team that holds an issue, or null: the earliest "Taken by team X." comment after the last "Released by team Y" one, from comments of
- * { body, createdAt } in any order. The delegate is the one shared app for every team, so only these comments say which team holds it. */
+ * { body, createdAt } in any order. Both forms, with a node or without (node unknown), name the same team. The delegate is the one shared app for every team, so only these comments say which team holds it. */
 export function holderOf(comments) {
   const ordered = comments.map((c, i) => ({ c, i })).sort((a, b) => (a.c.createdAt < b.c.createdAt ? -1 : a.c.createdAt > b.c.createdAt ? 1 : a.i - b.i));
   let who = null;
@@ -136,7 +137,7 @@ export async function commentsOfIssue(api, key) {
  * holder (its own comment not yet visible) is success. Used by `take`, by `create --delegate` and by bin/factory-move (#406). */
 export async function announceTakeOn(api, issueId, key, fullTeam) {
   const { team } = parseTeam(fullTeam);
-  const commentId = done(await api.commentCreate({ issueId, body: `${TAKEN} ${team}.`, team: fullTeam }), 'commentCreate').comment?.id ?? null;
+  const commentId = done(await api.commentCreate({ issueId, body: `${TAKEN} ${team} on ${nodeName()}.`, team: fullTeam }), 'commentCreate').comment?.id ?? null;
   const first = holderOf(await commentsOfIssue(api, key));
   if (first && first !== team) throw new Refused(`${key} is held by team ${first}, whose take came first; take another issue`);
   return commentId;
@@ -147,7 +148,7 @@ export async function announceReleaseOn(api, issueId, key, fullTeam) {
   const { team } = parseTeam(fullTeam);
   const who = holderOf(await commentsOfIssue(api, key));
   if (who !== team) throw new Refused(`${key} is not held by team ${team}`);
-  return done(await api.commentCreate({ issueId, body: `${RELEASED} ${team}.`, team: fullTeam }), 'commentCreate');
+  return done(await api.commentCreate({ issueId, body: `${RELEASED} ${team} on ${nodeName()}.`, team: fullTeam }), 'commentCreate');
 }
 
 const STATES = 'states(first: 100) { nodes { id name type position } }';

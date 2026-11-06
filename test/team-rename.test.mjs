@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { nodeName } from '../bin/lib/shared-records.mjs';
 import { join } from 'node:path';
 import { renameTeam } from '../bin/lib/team-rename.mjs';
 import { holderOf } from '../bin/lib/linear-cli.mjs';
@@ -55,7 +56,7 @@ test('Linear holder moves through the CLI functions without changing issue statu
   assert.equal(comments.length, 1);
   await renameTeam('factory', 'lead', 'otter', { ...o, apply: true });
   assert.equal(holderOf(comments), 'otter');
-  assert.deepEqual(comments.map((c) => c.body), ['Taken by team lead.', 'Released by team lead.', 'Taken by team otter.']);
+  assert.deepEqual(comments.map((c) => c.body), ['Taken by team lead.', `Released by team lead on ${nodeName()}.`, `Taken by team otter on ${nodeName()}.`]);
   assert.deepEqual(comments.slice(1).map((c) => c.team), ['factory-lead', 'factory-otter'], 'each write shows the full team name (#441)');
 });
 
