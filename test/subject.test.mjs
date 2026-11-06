@@ -1,4 +1,4 @@
-// The commit subject rules: one source (kit/.gate/bin/lib/subject.mjs) read by the commit-msg hook and by verify's
+// The commit subject rules: one source (kit/.gate/bin/lib/subject.mjs) read by verify's
 // `subjects` check, which also runs on the factory's own pull requests.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,21 +32,17 @@ describe('the subject rules', () => {
   });
 });
 
-describe('the hook and verify on a repository with the kit', () => {
+describe('verify on a repository with the kit', () => {
   let r;
   before(() => (r = repoWithKit()));
   after(() => r.cleanup());
-  const hooked = (args) => run(r.repo, 'git', args, { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@l', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@l' });
   const subjects = () => script(r.repo, 'verify', ['--only', 'subjects'], { GATE_BASE: 'origin/main' });
 
-  test('the hook still refuses what it refused, and now a fixup! or squash! subject', () => {
-    write(r.repo, { 'README.md': '# app\n\nx\n' });
-    git(r.repo, 'add', '-A');
-    for (const subject of ['x'.repeat(73), 'WIP', 'wip', 'fix', 'update', 'changes', '.', BB8FF7B, 'fixup! Explain the app', 'squash! Explain the app'])
-      assert.equal(hooked(['commit', '-qm', subject]).code, 1, subject);
-    assert.equal(hooked(['commit', '-q', '--allow-empty-message', '-m', '']).code, 1, 'empty');
-    assert.equal(hooked(['commit', '-qm', 'Explain the app in the README']).code, 0);
-    git(r.repo, 'reset', '-q', '--hard', 'origin/main');
+  test('the rules refuse a long, empty or placeholder subject, and a fixup! or squash! one', async () => {
+    const { subjectProblem } = await import(join(factory, 'kit/.gate/bin/lib/subject.mjs'));
+    for (const subject of ['x'.repeat(73), 'WIP', 'wip', 'fix', 'update', 'changes', '.', BB8FF7B, 'fixup! Explain the app', 'squash! Explain the app', ''])
+      assert.ok(subjectProblem(subject), JSON.stringify(subject));
+    assert.equal(subjectProblem('Explain the app in the README'), null);
   });
   test('verify fails a commit whose subject breaks a rule, naming the commit and the rule', () => {
     const sha = commit(r.repo, { 'a.txt': 'a\n' }, BB8FF7B);
@@ -111,33 +107,13 @@ describe('what the subject is, and when the script runs', () => {
     writeFileSync(file, text);
     return file;
   };
-  const hook = (file) => run(factory, join(factory, 'kit/.gate/hooks/commit-msg'), [file]);
-
-  test('the subject is git\'s: blank and comment lines skipped, the first paragraph joined by spaces', async () => {
-    const { subjectOf } = await import(join(factory, 'kit/.gate/bin/lib/subject.mjs'));
-    assert.equal(subjectOf('\n\nAdd g\n\nbody\n'), 'Add g');
-    assert.equal(subjectOf('# a comment\nAdd g\n# another\nmore\n\nbody'), 'Add g more');
-    assert.equal(subjectOf('First line of\nthe subject\n\nbody'), 'First line of the subject');
-    assert.equal(subjectOf(''), '');
-  });
-  test('the hook passes a message that opens with a blank line, and fails a two-line subject that is too long joined', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'subject-msg-'));
-    try {
-      assert.equal(hook(msg(dir, '\nAdd g\n')).code, 0);
-      const out = hook(msg(dir, `${'a'.repeat(40)}\n${'b'.repeat(40)}\n\nbody\n`));
-      assert.equal(out.code, 1, out.out);
-      assert.match(out.out, /81 characters; at most 72/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  test('run through a symlinked path the script still judges, rather than exiting 0 unrun', () => {
+  test('run through a symlinked path the script still runs, rather than exiting 0 unrun', () => {
     const dir = mkdtempSync(join(tmpdir(), 'subject-link-'));
     try {
       symlinkSync(join(factory, 'kit/.gate/bin/lib'), join(dir, 'lib'));
-      const out = run(factory, 'node', [join(dir, 'lib/subject.mjs'), msg(dir, 'WIP\n')]);
-      assert.equal(out.code, 1, out.out);
-      assert.match(out.out, /not 'WIP'/);
+      const out = run(factory, 'node', [join(dir, 'lib/subject.mjs')]);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, /usage: node subject\.mjs --base/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

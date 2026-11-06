@@ -2443,13 +2443,6 @@ describe('hooks', () => {
   after(() => r.cleanup());
   const hooked = (args) => run(r.repo, 'git', args, { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@l', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@l' });
 
-  test('commit-msg refuses an empty, long or placeholder subject', () => {
-    write(r.repo, { 'README.md': '# app\n\nx\n' });
-    git(r.repo, 'add', '-A');
-    assert.equal(hooked(['commit', '-qm', 'x'.repeat(73)]).code, 1);
-    assert.equal(hooked(['commit', '-qm', 'WIP']).code, 1);
-    assert.equal(hooked(['commit', '-qm', 'Explain the app in the README']).code, 0);
-  });
   test('pre-commit refuses a staged focused test', () => {
     write(r.repo, { 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
     git(r.repo, 'add', '-A');
