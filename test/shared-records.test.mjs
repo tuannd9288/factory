@@ -98,3 +98,62 @@ test('seat ends backfill records, retry rejected pushes on wake, and recover a l
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// FAC-38: the daemon flushes at every ping, pass and seat end, so a flush must cost what is new, not the node's whole history.
+test('a flush reads only what is new: bytes it took are not read again, and nothing is fetched while the head is the pushed one (FAC-38)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'records-'));
+  const state = join(dir, 'state');
+  const runs = join(dir, 'runs');
+  const remote = join(dir, 'remote.git');
+  const bin = join(dir, 'bin');
+  mkdirSync(state);
+  mkdirSync(join(runs, 'app-task'), { recursive: true });
+  mkdirSync(bin);
+  git(dir, 'init', '--bare', remote);
+  // Every git the writer runs is logged, then run.
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  const calls = join(dir, 'git.log');
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> '${calls}'\nexec '${real}' "$@"\n`);
+  chmodSync(join(bin, 'git'), 0o755);
+  const saved = { ...process.env };
+  Object.assign(process.env, { PATH: `${bin}:${process.env.PATH}`, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' });
+  // The writer's own git commands (it names its clone with --git-dir; this test's reads use -C), by subcommand.
+  const gitRan = () => {
+    const ran = readFileSync(calls, 'utf8').split('\n').filter((l) => l.startsWith('--git-dir ')).map((l) => l.split(' ')[2]);
+    writeFileSync(calls, '');
+    return ran;
+  };
+  const rate = (n) => `{"type":"rate_limit_event","rate_limit_info":{"n":"${n}"}}`;
+  // A stream line, and a rate limit line of the same length, so the log can be rewritten in place.
+  const other = `{"type":"assistant","message":{"n":"${'x'.repeat(40)}"}}`;
+  const twin = rate('y'.repeat(other.length - rate('').length));
+  assert.equal(twin.length, other.length);
+  const log = join(runs, 'app-task/run-w.jsonl');
+  const errors = [];
+  const flush = recordsWriter({ state, runs, remote, node: 'test-node', log: (s) => errors.push(s) });
+  const rows = () => git(remote, 'show', 'records/test-node:rows.jsonl').split('\n').map(JSON.parse);
+  try {
+    writeFileSync(join(state, 'sessions.jsonl'), `${JSON.stringify({ tag: 'a' })}\n${JSON.stringify({ tag: 'b' })}\n`);
+    writeFileSync(log, `${rate(1)}\n${other}\n`);
+    await flush();
+    assert.deepEqual(errors, []);
+    assert.equal(rows().length, 3);
+    gitRan();
+    // The stream line it took is rewritten in place into a rate limit line: a flush that read it again would publish it.
+    writeFileSync(log, `${rate(1)}\n${twin}\n`);
+    await flush();
+    assert.deepEqual(errors, []);
+    assert.equal(rows().length, 3, 'bytes already taken are not read again');
+    assert.deepEqual(gitRan().filter((c) => ['show', 'fetch', 'ls-remote'].includes(c)), [], 'nothing new: no history is read and origin is not asked');
+    appendFileSync(log, `${rate(2)}\n`);
+    await flush();
+    assert.deepEqual(errors, []);
+    assert.deepEqual(rows().at(-1).line, JSON.parse(rate(2)));
+    assert.equal(rows().length, 4, 'only the appended line is new');
+    assert.deepEqual(gitRan().filter((c) => ['show', 'fetch'].includes(c)), [], 'a head that only adds to the pushed tip is pushed without reading rows');
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
