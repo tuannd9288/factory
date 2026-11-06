@@ -1,8 +1,8 @@
-// The ledger for a repository on Linear (#406): the enforcer lookup and the digest's task list read the team's issues, and join a task to
-// its pull requests by the `Issue: <KEY>` line. A repository that is not on Linear keeps its GitHub reads. No network: `api` is a fake.
+// The ledger for a repository on Linear (#406): the digest's task list reads the team's issues, and joins a task to its pull
+// requests by the `Issue: <KEY>` line. A repository that is not on Linear keeps its GitHub reads. No network: `api` is a fake.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { digest, enforcerIssues, enforcerLookup, linearIssueOf, linearTaskRows } from '../bin/lib/ledger.mjs';
+import { digest, linearIssueOf, linearTaskRows } from '../bin/lib/ledger.mjs';
 
 const FROM = Date.parse('2026-11-01T00:00:00Z');
 const TO = Date.parse('2026-11-07T23:59:59Z');
@@ -20,30 +20,6 @@ function fakeApi(pages) {
     },
   };
 }
-
-test('the enforcer lookup for a repository on Linear reads the team\'s Kind: lines, open or closed, and gives the key and the state', async () => {
-  const api = fakeApi([
-    [{ identifier: 'FAC-12', description: 'Moved from x\n\nKind: k-one', state: { type: 'completed' } }, { identifier: 'FAC-9', description: '**Kind:** `k-two`', state: { type: 'canceled' } }],
-    [{ identifier: 'FAC-30', description: 'Kind: k-one', state: { type: 'started' } }, { identifier: 'FAC-3', description: 'Kind: k-one', state: { type: 'started' } }],
-  ]);
-  const issues = await enforcerIssues(api, 'FAC');
-  assert.deepEqual(api.asked[0], { team: { key: { eq: 'FAC' } }, description: { contains: 'Kind:' } });
-  const asked = [];
-  const lookup = enforcerLookup((args) => asked.push(args), { linear: (repo) => (repo === 'o/on' ? issues : null) });
-  assert.deepEqual(lookup('o/on', 'k-one'), { number: 'FAC-3', state: 'open' }, 'an open issue before a closed one, then the lower number, by number and not by text');
-  assert.deepEqual(lookup('o/on', 'k-two'), { number: 'FAC-9', state: 'closed' });
-  assert.equal(lookup('o/on', 'k-none'), null);
-  assert.deepEqual(asked, [], 'GitHub is not asked for it');
-});
-
-test('the enforcer lookup for a repository not on Linear is unchanged: GitHub, once', () => {
-  const asked = [];
-  const pages = [[{ number: 1, state: 'closed', body: 'Kind: k-one' }, { number: 2, state: 'open', body: 'Kind: k-two', pull_request: {} }], [{ number: 3, state: 'open', body: 'Kind: k-one' }]];
-  const lookup = enforcerLookup((args) => (asked.push(args), JSON.stringify(pages)), { linear: () => null });
-  assert.deepEqual(lookup('o/r', 'k-one'), { number: 3, state: 'open' });
-  assert.equal(lookup('o/r', 'k-two'), null);
-  assert.equal(asked.length, 1);
-});
 
 test('the Issue: line is read in its key form, one line at the start of a line', () => {
   assert.equal(linearIssueOf('Summary\n\nIssue: FAC-12\nClaim: x'), 'FAC-12');
@@ -99,20 +75,7 @@ test('a page of issues is followed to its end', async () => {
 test('a repository whose Linear issues could not be read gets a line in the digest, and the rest of the digest is written', () => {
   const other = { ...prRow(7, { title: 'Other repo task' }), repo: 'o/gh', number: 7, url: 'u/7', state: 'landed', merged: '2026-11-04T00:00:00Z', hours: 1 };
   const text = digest([other], { since: '2026-11-01', until: '2026-11-07', unread: new Map([['o/on', 'Linear answered HTTP 401: no data']]) });
-  assert.match(text, /- o\/on: could not read its Linear issues \(Linear answered HTTP 401: no data\); its task list above is missing and its enforcer lookup was skipped\./);
+  assert.match(text, /- o\/on: could not read its Linear issues \(Linear answered HTTP 401: no data\); its task list above is missing/);
   assert.match(text, /Other repo task/);
   assert.doesNotMatch(digest([other], { since: '2026-11-01', until: '2026-11-07' }), /could not read its Linear issues/);
-});
-
-test('the enforcer lookup of a repository that could not be read fails for it alone, and does not fall back to GitHub', () => {
-  const asked = [];
-  const lookup = enforcerLookup((args) => (asked.push(args), '[[]]'), {
-    linear: (repo) => {
-      if (repo === 'o/on') throw new Error('its Linear issues could not be read: boom');
-      return null;
-    },
-  });
-  assert.throws(() => lookup('o/on', 'k-one'), /could not be read/);
-  assert.equal(lookup('o/gh', 'k-one'), null);
-  assert.equal(asked.length, 1, 'GitHub was asked for the other repository only');
 });
