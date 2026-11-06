@@ -24,7 +24,7 @@ import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
-import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
+import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readSecret, readTokenFile, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -338,7 +338,7 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
 const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory login <account> [--no-setup]
        bin/factory login linear-app <client-id|client-secret>   (the Factory app's Linear credentials, #403; no setup-token)
-       bin/factory store <account>   (on the Mac mini; reads the token from stdin; \`store linear-app <client-id|client-secret>\` likewise)
+       bin/factory store <account>   (reads the token from stdin; agents GitHub token on either node; \`store linear-app <client-id|client-secret>\` likewise)
        bin/factory use [<row|repo-team> [<letter>]]   (the row's account becomes the letter's; <repo>-<team> makes a team's row, and that team's running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
        bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
        bin/factory colly   (starts Colly in this pane on the MacBook)
@@ -347,7 +347,7 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]
        bin/factory lead <repo> [--team <name> | --new-team] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
        bin/factory lead --resume-session <id> [--check]
-       bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)
+       bin/factory gh <gh arguments>   (local with a stored agents GitHub token, otherwise the existing host route)
        bin/factory linear take|release|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
 
@@ -417,9 +417,25 @@ function lead(all, env) {
   return r.status ?? 1;
 }
 
-/** The agents' git name and e-mail, read on the factory host as the host's user, from its own git settings: no account is named in
- * this repository (#349). { name, email }, or null when ssh fails or either is empty. */
-function hostIdentity(env) {
+/** The node's agents' GitHub token, using the same account default as onboard. */
+function nodeGithubToken(env) {
+  if (placeOf(env) === 'factory') return undefined;
+  return readTokenFile(join(tokenDir(contextOf(env).agentProfiles), env.FACTORY_AGENT ?? 'tuan9288-agent')).token;
+}
+
+/** The agents' git identity from GitHub with the local token, otherwise over ssh (#349, #366). */
+function hostIdentity(env, token) {
+  if (token) {
+    const r = spawnSync('gh', ['api', '-X', 'GET', 'user'], {
+      encoding: 'utf8', env: { ...env, GH_TOKEN: token, GITHUB_TOKEN: '' }, timeout: 30000, killSignal: 'SIGKILL',
+    });
+    if (r.error || r.status !== 0) return null;
+    try {
+      const { login, id } = JSON.parse(r.stdout);
+      return typeof login === 'string' && login.trim() && Number.isSafeInteger(id) && id > 0
+        ? { name: login, email: `${id}+${login}@users.noreply.github.com` } : null;
+    } catch { return null; }
+  }
   const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc 'echo "name:$(git config --global user.name)"; echo "email:$(git config --global user.email)"'`], { encoding: 'utf8', env, timeout: 30000, killSignal: 'SIGKILL' });
   if (r.error || r.status !== 0) return null;
   const name = /^name:(.+)$/m.exec(r.stdout)?.[1].trim();
@@ -506,20 +522,20 @@ function copySocketHook(state) {
   return to;
 }
 
-/** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
- * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
- * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
- * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
- * prompt, a push URL that cannot be reached for GitHub's HTTPS addresses, and an ssh command that only fails (a push goes from the
- * Mac mini); `gh auth` and `security` (the Keychain) are denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
+/** A Lead in this terminal and folder. With the node's agents token, gh and GitHub pushes run locally and the git identity is
+ * read from GitHub with that token (#366). The token goes only in the child's environment; settings never contain it. Without it, retain the ssh
+ * identity and blocked pushes (#349). The empty gh folder and gh auth/Keychain denials keep the Human's login out of the session. */
 function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
     return 2;
   }
-  const id = hostIdentity(env);
+  const token = nodeGithubToken(env);
+  const id = hostIdentity(env, token);
   if (!id) {
-    console.error("bin/factory: lead --here: could not read the factory host's git user.name and user.email; nothing was started");
+    console.error(token
+      ? "bin/factory: lead --here: could not read the agents' GitHub identity; nothing was started"
+      : "bin/factory: lead --here: could not read the factory host's git user.name and user.email; nothing was started");
     return 1;
   }
   const { state } = contextOf(env);
@@ -562,14 +578,19 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 1;
   }
   const record = [{ hooks: [{ type: 'command', command: [process.execPath, hook, wakeFile(state, repo, team)].map(quote).join(' ') }] }];
+  const gitConfig = token ? [
+    ['credential.helper', ''],
+    ['credential.https://github.com.helper', '!f() { if [ "$1" = get ]; then printf "%s\\n" "username=x-access-token" "password=$GH_TOKEN"; fi; }; f'],
+    ...['git@github.com:', 'ssh://git@github.com/'].map((from) => ['url.https://github.com/.insteadOf', from]),
+  ] : GIT_CONFIG;
   const settings = {
     hooks: { SessionStart: record, SessionEnd: record },
     env: {
-      GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '',
+      GH_CONFIG_DIR: empty, ...(token ? {} : { GH_TOKEN: '' }), GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
-      GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND,
-      GIT_CONFIG_COUNT: String(GIT_CONFIG.length),
-      ...Object.fromEntries(GIT_CONFIG.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
+      GIT_TERMINAL_PROMPT: '0', ...(token ? {} : { GIT_SSH_COMMAND }),
+      GIT_CONFIG_COUNT: String(gitConfig.length),
+      ...Object.fromEntries(gitConfig.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
     },
     permissions: { deny: ['Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
@@ -588,7 +609,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 1;
   }
   const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, '--settings', JSON.stringify(settings),
-    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env, cwd });
+    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: token ? { ...env, GH_TOKEN: token, GITHUB_TOKEN: '' } : env, cwd });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
@@ -660,9 +681,10 @@ const SAFE_WORD = /^[A-Za-z0-9_.,:/@%+-][A-Za-z0-9_.,:/=@%+-]*$/;
  * `-t` or `--show-token`, which print a token; `--recover`; and a file given with `--body-file`, `--notes-file`, `--env-file`,
  * `--input`, `--field` or `-F` (alone or in a cluster of short flags), which names a file on this Mac and not on the Mac mini, so
  * the file must come on stdin (`-`, `@-`). */
-function ghRefusal(args) {
+function ghRefusal(args, local = false) {
   if (args[0] === 'auth' && args[1] !== 'status') return 'gh auth is refused here; only gh auth status runs';
   if (args[0] === 'auth' && args.slice(2).some((a) => /^--show-token(=.*)?$/s.test(a) || /^-[A-Za-z]*t[A-Za-z]*(=.*)?$/s.test(a))) return 'gh auth status -t / --show-token is refused here; it prints a token';
+  if (local) return null;
   const api = args[0] === 'api';
   const stdinHint = 'the Mac mini cannot read a file on this Mac; pass it on stdin with - (--body-file -, --input -) or @- (-F name=@-)';
   const fieldFile = (v) => {
@@ -691,10 +713,19 @@ function ghRefusal(args) {
  * agents' login; stdin passes through, the exit code is gh's. The command first makes a new temporary folder on the host with
  * `mktemp -d` and enters it, so that a relative path in an argument names nothing, and removes it after gh, keeping gh's exit
  * code. Each argument is quoted for `zsh -lc`, and the whole line once
- * more for the remote login shell. On the factory host it runs gh itself. */
+ * more for the remote login shell. A stored agents token instead runs gh locally, in GH_TOKEN only (#366); local files work.
+ * On the factory host it runs gh itself unchanged, regardless of the token store. */
 function ghCmd(args, env) {
-  if (placeOf(env) === 'factory') {
-    const r = spawnSync('gh', args, { stdio: 'inherit', env });
+  const token = nodeGithubToken(env);
+  if (token) {
+    const refused = ghRefusal(args, true);
+    if (refused) {
+      console.error(`bin/factory: gh: ${refused}`);
+      return 2;
+    }
+  }
+  if (token || placeOf(env) === 'factory') {
+    const r = spawnSync('gh', args, { stdio: 'inherit', env: token ? { ...env, GH_TOKEN: token, GITHUB_TOKEN: '' } : env });
     if (r.error) {
       console.error(`bin/factory: gh: ${r.error.code ?? 'error'}`);
       return 1;
@@ -828,7 +859,7 @@ function appSlot(words) {
   return words.length === 2 && APP_FOLDERS.includes(words[0]) && ['client-id', 'client-secret'].includes(words[1]) ? { app: words[0], file: words[1] } : null;
 }
 
-/** `factory store <account>`, on the Mac mini: one token from stdin, never from a terminal, written to the store. */
+/** `factory store <account>`: one token from stdin, never from a terminal. The agents' GitHub token may be stored on either node. */
 async function store(args, env) {
   const app = appSlot(args);
   if (!app && args.length !== 1) {
@@ -840,7 +871,7 @@ async function store(args, env) {
     console.error(`bin/factory: ${refused}`);
     return 2;
   }
-  if (placeOf(env) !== 'factory') {
+  if (placeOf(env) !== 'factory' && args[0] !== (env.FACTORY_AGENT ?? 'tuan9288-agent')) {
     console.error('bin/factory: store runs on the Mac mini, the factory host, as the factory user');
     return 2;
   }
