@@ -609,6 +609,34 @@ test('lead --here has a hook on SessionStart and SessionEnd that records and rem
   }
 });
 
+test('lead --here\'s status line keeps the newest five-hour and seven-day quota for its team, from a hash-named copy, and prints nothing (#365 B5)', () => {
+  const s = world();
+  try {
+    s.identity();
+    assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here']).code, 0);
+    const { command } = settingsOf(s.nuls('claude.args')).statusLine;
+    assert.match(command, /\/factory-runs\/alpha-beta\/hooks\/statusline-hook-[0-9a-f]{7}\.mjs'/, command);
+    const file = join(s.home, 'factory-runs/alpha-beta/statusline.jsonl');
+    const run = (input) => spawnSync('sh', ['-c', command], { input, encoding: 'utf8', env: { PATH: process.env.PATH } });
+    // Claude Code's status-line input carries more than the quota; only the two windows are kept.
+    const windows = { five_hour: { used_percentage: 12, resets_at: 1793970000 }, seven_day: { used_percentage: 3, resets_at: 1794500000 } };
+    let r = run(JSON.stringify({ session_id: 'made-up-session', model: { id: 'made-up-model' }, rate_limits: { ...windows, extra: { note: 'made-up-extra' } } }));
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, '', 'the pane shows no status line');
+    const kept = JSON.parse(readFileSync(file, 'utf8'));
+    assert.deepEqual(Object.keys(kept).sort(), ['at', 'rate_limits']);
+    assert.deepEqual(kept.rate_limits, windows);
+    // An input with no quota, or none that parses, leaves the newest one there.
+    for (const input of [JSON.stringify({ session_id: 'made-up-session' }), 'not json']) {
+      r = run(input);
+      assert.equal(r.status, 0);
+      assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).rate_limits, windows);
+    }
+  } finally {
+    s.done();
+  }
+});
+
 test('lead --here\'s hook runs a copy of socket-hook.mjs under the state folder named by a hash of its bytes, reused by the next start (#390)', () => {
   const s = world();
   try {

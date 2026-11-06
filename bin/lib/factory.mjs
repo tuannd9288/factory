@@ -16,7 +16,7 @@ import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkoutRoot } from './checkout.mjs';
-import { quotaRows } from './quota.mjs';
+import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
 import { markOnboarded, quote, roleOf, copyHook } from '../../packs/pstack/bin/lead.mjs';
@@ -49,9 +49,16 @@ const collyProfile = (state) => join(state, 'colly', 'profile');
 
 /** The profiles of a place, from the committed list. On the Mac mini the Lead rows are the ones the accounts file names. A row with
  * `byFile` has its account from that file, and its login state is the token file of that account. */
-export function profilesOf(place, { home, agentProfiles, state, root }) {
+export function profilesOf(place, { home, agentProfiles, state, root, runs }) {
   if (place === 'macbook') {
+    // #365 (B5): the MacBook's own teams, its accounts file's `factory/<repo>-<team>` lines, sorted, numbered as `factory use` numbers them
+    // here (hereListing). Their profile names the place, as every row's does; `key` is the line the account is read from.
+    const teams = Object.keys(readAccounts(state)).filter((key) => key.startsWith('factory/') && parseTeam(key.slice('factory/'.length))).sort();
     return [
+      ...teams.map((key) => {
+        const t = parseTeam(key.slice('factory/'.length));
+        return { profile: `macbook/${t.repo}-${t.team}`, key, role: `Lead of ${t.repo}, team ${t.team}`, kind: 'claude', byFile: true, numbered: true, statusFile: statusFile(runs, t.repo, t.team) };
+      }),
       // Colly's own factory profile (INN-31 3A, #365); Colly writes to GitHub only through factory gh, so it has no gh row.
       claude('macbook/claude', 'Colly', { CLAUDE_CONFIG_DIR: collyProfile(state) }, 'factory colly, then /login'),
       ...spareFolders(home).map((n) => claude(`macbook/claude-acc${n}`, 'spare Claude', { CLAUDE_CONFIG_DIR: join(home, `.claude-acc${n}`) }, `claude-use login ${n}`)),
@@ -136,7 +143,7 @@ function tokenState(agentProfiles, account, now = Date.now()) {
  * file is logged in when its account has a token file; it runs no command. */
 function check(p, ctx) {
   if (p.byFile) {
-    const account = ctx.accounts[p.profile] ?? null;
+    const account = ctx.accounts[p.key ?? p.profile] ?? null;
     if (!account) return { loggedIn: false, account: null, plan: null, note: 'no row in the accounts file' };
     const t = tokenState(ctx.agentProfiles, account);
     return { loggedIn: t.ok, account, plan: null, note: t.note };
@@ -194,14 +201,16 @@ export function readPlace(place, ctx) {
       quota = [];
     }
   }
-  const accounts = place === 'factory' ? readAccounts(ctx.state) : {};
+  // The MacBook reads its own accounts file and letters its own token files, as `factory use` does there (#365, B5).
+  const accounts = readAccounts(ctx.state);
   const seatRows = place === 'factory' ? seatAccounts(ctx.state) : {};
-  const letters = place === 'factory' ? new Map(accountList(ctx).map((a) => [a.name, a.letter])) : new Map();
+  const letters = new Map((place === 'factory' ? accountList(ctx) : nodeAccountList(ctx.agentProfiles)).map((a) => [a.name, a.letter]));
   let numbered = 0;
   const rows = profilesOf(place, ctx).map((p) => {
     const c = check(p, { ...ctx, accounts });
     const n = p.numbered ? (numbered += 1) : null;
-    const q = c.account ? quota.find((x) => x.account === c.account) : null;
+    // A MacBook team's quota is what its Lead's status line kept (#365 B5); a Mac mini team's, its account's newest run report.
+    const q = p.statusFile ? lastStatusLine(p.statusFile) : c.account ? quota.find((x) => x.account === c.account) : null;
     let live = null;
     // Only a team's row runs sessions; the gh row and the MacBook's rows name an account but run none.
     if (p.byFile && c.account) {
@@ -306,7 +315,7 @@ const red = (text) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[31m
 
 /** The lines of the lettered accounts (Mac mini): for each, its 5h and 7d use with the reset, the token file, and the numbers of the
  * rows that name it. The quota is the newest a run of that account reported; "?" where none did. */
-export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }) {
+export function accountsText(rows, accounts, { now = Date.now(), agentProfiles, title = 'ACCOUNTS' }) {
   const win = (w) => (w ? windowCell(w, now) : '?');
   const heads = accounts.map(({ name, letter }) => {
     const members = rows.filter((r) => r.n && r.account === name);
@@ -317,7 +326,7 @@ export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }
   const nameW = Math.max(0, ...heads.map((h) => h.name.length));
   const rowsOf = (h) => (h.members.length ? `rows ${h.members.map((r) => r.n).join(', ')}` : 'no row');
   const rowsW = Math.max(0, ...heads.map((h) => rowsOf(h).length));
-  const lines = ['ACCOUNTS'];
+  const lines = [title];
   for (const h of heads) {
     const text = `  ${h.letter}  ${pad(h.name, nameW)}  5H ${pad(win(h.q?.five_hour), 17)}  7D ${pad(win(h.q?.seven_day), 17)}  ${pad(rowsOf(h), rowsW)}  ${h.t.note}`;
     lines.push(h.t.ok ? text : red(text));
@@ -339,7 +348,8 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
   for (const r of rows.filter((x) => x.unreachable)) out.push(`${r.profile}  ${r.note}`);
   if (accounts?.length) out.push('', ...accounts);
   const tokens = rows.filter((r) => r.role === 'node token');
-  if (tokens.length) out.push('', 'TOKENS BY NODE', ...tokens.map((r) => `  ${r.place === 'factory' ? HOST : r.place}  ${r.account}  ${r.note}`));
+  // Each account's letter, a spare's too, so `factory use <row> <letter>` finds it here (#365 B5).
+  if (tokens.length) out.push('', 'TOKENS BY NODE', ...tokens.map((r) => `  ${r.place === 'factory' ? HOST : r.place}  ${r.account}${r.letter ? ` (${r.letter})` : ''}  ${r.note}`));
   // One row for each account, not for each team: teams on one account share it.
   const quota = normal.filter((r) => (r.five_hour || r.seven_day || r.asOf) && r.account && r.account !== 'unknown').filter((r, i, all) => all.findIndex((o) => o.account === r.account) === i);
   if (quota.length) {
@@ -496,6 +506,9 @@ const AUTO_MODE_ENVIRONMENT = [
 /** Where the socket of the MacBook Lead of a repository's team is recorded (#351), beside `lead-here`'s other files. */
 export const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}-${team}.socket`);
 
+/** Where a MacBook Lead's status line keeps the newest quota Claude Code showed it (#365 B5, bin/lib/statusline-hook.mjs). */
+const statusFile = (runs, repo, team) => join(runs, `${repo}-${team}`, 'statusline.jsonl');
+
 /** `factory wake <repo> --issue <n> [--team <name>]` (#351): posts one line into the Lead's Claude Code inbox socket, which says to re-read
  * the issue and carries nothing else (bin/lib/wake.mjs); the message itself is a comment on the issue. On the factory host the socket is the
  * one `<runs>/<repo>-<team>/socket` records; on the MacBook it is the one `factory lead --here` recorded when the Lead of that team runs there,
@@ -546,12 +559,13 @@ async function wake(args, env) {
   return 1;
 }
 
-/** Copies socket-hook.mjs to <state>/hooks/socket-hook-<sha7 of its bytes>.mjs unless a copy is there (reused, never written again), and
- * returns the path. A changed script has another name, so an earlier copy stays for the Leads that run it; it imports only node: modules. */
-function copySocketHook(state) {
-  const from = resolve(fileURLToPath(import.meta.url), '../socket-hook.mjs');
+/** Copies bin/lib/<name>.mjs (socket-hook, statusline-hook) to <dir>/<name>-<sha7 of its bytes>.mjs unless a copy is there (reused, never
+ * written again), and returns the path. A changed script has another name, so an earlier copy stays for the Leads that run it; each
+ * imports only node: modules. */
+function copyLibHook(dir, name) {
+  const from = resolve(fileURLToPath(import.meta.url), `../${name}.mjs`);
   const bytes = readFileSync(from);
-  const to = join(state, 'hooks', `socket-hook-${createHash('sha256').update(bytes).digest('hex').slice(0, 7)}.mjs`);
+  const to = join(dir, `${name}-${createHash('sha256').update(bytes).digest('hex').slice(0, 7)}.mjs`);
   if (!existsSync(to)) {
     mkdirSync(dirname(to), { recursive: true });
     const tmp = `${to}.${process.pid}.tmp`;
@@ -660,11 +674,12 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   }
   // Keep the local wake socket and install the pack's transcript/state copier (#476). They run a copy of the script named by its
   // hash, so a pull that changes the installed one leaves a live Lead's hook as it was (#257, #390).
-  let hook, transcriptHook;
+  let hook, transcriptHook, statusHook;
   const runDir = join(contextOf(env).runs, `${repo}-${team}`);
   try {
-    hook = copySocketHook(state);
+    hook = copyLibHook(join(state, 'hooks'), 'socket-hook');
     transcriptHook = copyHook({ root: resolve(fileURLToPath(import.meta.url), '../../..'), runDir });
+    statusHook = copyLibHook(join(runDir, 'hooks'), 'statusline-hook');
     mkdirSync(join(contextOf(env).runs, `${repo}-${team}`), { recursive: true });
   } catch (e) {
     console.error(`bin/factory: lead --here: ${e.message}`);
@@ -683,6 +698,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   const settings = {
     autoMode: { environment: AUTO_MODE_ENVIRONMENT },
     hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },
+    // The team's quota for `factory account list` on this node (#365 B5): the newest rate_limits Claude Code shows the status line.
+    statusLine: { type: 'command', command: [process.execPath, statusHook, statusFile(contextOf(env).runs, repo, team)].map(quote).join(' ') },
     // The settings never hold the token: with it, GH_TOKEN comes from the process environment below and is not emptied here.
     env: {
       GH_CONFIG_DIR: empty, ...(token ? {} : { GH_TOKEN: '' }), GITHUB_TOKEN: '',
@@ -798,7 +815,7 @@ async function colly(args, env) {
   }
   let hook;
   try {
-    hook = copySocketHook(state);
+    hook = copyLibHook(join(state, 'hooks'), 'socket-hook');
     writeFileSync(join(parent, 'pane'), `${env.HERDR_PANE_ID ?? ''}\n`, { mode: 0o600 });
   } catch (e) {
     console.error(`bin/factory: colly: ${e.message}`);
@@ -1414,9 +1431,12 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
     return 0;
   }
   const rows = readPlace(place, ctx);
+  // The MacBook's own lettered accounts, with the quota its teams' Leads reported, before the other places' rows join (#365 B5).
+  const lettered = nodeAccountList(ctx.agentProfiles);
+  const accounts = lettered.length ? accountsText(rows.filter((r) => r.place === 'macbook'), lettered, { ...ctx, title: 'ACCOUNTS ON macbook' }) : null;
   if (all) rows.push(...readFactory(ctx), ...readPiggery(ctx));
   finish(rows, expectedAccounts(env, ctx.state));
-  console.log(argv.includes('--json') ? JSON.stringify(rows) : tableText(rows));
+  console.log(argv.includes('--json') ? JSON.stringify(rows) : tableText(rows, { accounts }));
   return 0;
 }
 

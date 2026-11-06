@@ -2,7 +2,7 @@
 // live runs, and every name below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EMAIL, ORG, claudeJson, rowOf, sandbox } from './factory-world.mjs';
@@ -29,6 +29,38 @@ test('with no arguments, on the MacBook: one row for each profile, with the acco
     assert.equal(j.code, 0, j.out);
     for (const out of [r.out, j.out]) for (const secret of [EMAIL, 'secret-corp', ORG, 'Secret Corp', 'orgId']) assert.ok(!out.includes(secret), `${secret} leaked`);
     assert.equal(JSON.parse(j.out).find((x) => x.profile === 'macbook/claude').account, 'ann.example');
+  } finally {
+    s.done();
+  }
+});
+
+test('on the MacBook its own teams are rows with their account\'s letter and the quota their Lead\'s status line kept; each account has its letter, and the host shows no MacBook row (#365 B5)', () => {
+  const s = sandbox();
+  try {
+    // The MacBook's own team, as `factory use` writes it there, its token and a spare's, and the newest status line its Lead kept.
+    writeFileSync(join(s.state, 'accounts'), 'factory/factory-lead=ann\n');
+    mkdirSync(s.tokens(), { recursive: true });
+    const tokens = { ann: 'sk-ant-oat01-MadeUpAnnTokenQ7xP2mK9vL4n', cid: 'sk-ant-oat01-MadeUpCidTokenB3dF6gH9jK2m' };
+    for (const [name, token] of Object.entries(tokens)) writeFileSync(join(s.tokens(), name), token, { mode: 0o600 });
+    const status = join(s.env.FACTORY_RUNS, 'factory-lead/statusline.jsonl');
+    mkdirSync(join(s.env.FACTORY_RUNS, 'factory-lead'), { recursive: true });
+    const reset = Math.floor(Date.now() / 1000) + 3600;
+    writeFileSync(status, `${JSON.stringify({ at: new Date().toISOString(), rate_limits: { five_hour: { used_percentage: 12, resets_at: reset }, seven_day: { used_percentage: 3, resets_at: reset } } })}\n`);
+    let r = s.fac('account', 'list');
+    assert.equal(r.code, 0, r.out);
+    const line = (re) => r.out.split('\n').find((l) => re.test(l));
+    assert.match(rowOf(r.out, '1  macbook/factory-lead') ?? '', /Lead of factory, team lead.*ann \(a\)/, r.out);
+    assert.match(line(/^\s*a\s+ann\b/) ?? '', /5H 12%.*7D 3%.*rows 1/, r.out);
+    assert.match(line(/^\s*b\s+cid\b/) ?? '', /5H \?.*7D \?.*no row/, 'a spare: its letter, and no quota');
+    assert.match(r.out, /macbook  cid \(b\)/);
+    const all = `${r.out}\n${s.fac('account', 'list', '--json').out}`;
+    for (const token of Object.values(tokens)) for (let i = 0; i + 8 <= token.length; i += 1) assert.ok(!all.includes(token.slice(i, i + 8)), `a slice of a token at ${i}`);
+    // With no status line kept, the quota is not known.
+    rmSync(status);
+    r = s.fac('account', 'list');
+    assert.match(line(/^\s*a\s+ann\b/) ?? '', /5H \?.*7D \?/, r.out);
+    s.onHost();
+    assert.doesNotMatch(s.fac('account', 'list').out, /macbook\/factory-lead/);
   } finally {
     s.done();
   }
