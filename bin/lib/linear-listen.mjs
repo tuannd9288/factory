@@ -5,11 +5,12 @@ import { CONDITION, createLinear, isAuthFailure } from './linear.mjs';
 import { join } from 'node:path';
 import { commentsOfIssue, holderOf } from './linear-cli.mjs';
 import { post as postAsync, wakeLine } from './wake.mjs';
-import { record, appendStart } from './events.mjs';
+import { placeOf } from './factory.mjs';
+import { record, appendStart, innAnswer } from './events.mjs';
 
 const COMMENT = 'id createdAt user { id } botActor { type } issue { identifier team { key } }';
 // Issue has no update actor in the schema. Do not mistake its creator for its editor.
-const ISSUE = 'id identifier updatedAt team { key }';
+const ISSUE = 'id identifier updatedAt description team { key }';
 const fields = { commentCreated: COMMENT, issueUpdated: ISSUE };
 const authClose = (code) => [4002, 4401, 4403].includes(code);
 
@@ -30,15 +31,66 @@ function eventOf(kind, node) {
   const time = Date.parse(kind === 'commentCreated' ? node?.createdAt : node?.updatedAt);
   if (!node?.id || !issue?.identifier || !issue?.team?.key || !Number.isFinite(time)) return null;
   return { kind, id: node.id, issueIdentifier: issue.identifier, teamKey: issue.team.key,
+    ...(kind === 'issueUpdated' ? { description: node.description ?? null } : {}),
     actorId: kind === 'commentCreated' ? node.user?.id ?? null : null,
     self: kind === 'commentCreated' && !node.user && node.botActor?.type === 'oauthClient', time };
+}
+
+const picks = (description) => [...String(description ?? '').matchAll(/^\s*- \[x\]\s+\*\*([A-Z])\b/gim)].map((m) => m[1].toUpperCase());
+
+async function handleInn(store, event, { state, linear, now }) {
+  if (placeOf() !== 'factory' || event.self || store.linearSeen(event)) return store.linearEvent(event);
+  const previous = event.kind === 'issueUpdated' ? store.linearPrevious(event.id) : null;
+  const gained = picks(event.description).filter((p) => !picks(previous?.description).includes(p));
+  if (event.kind === 'issueUpdated' && (!gained.length || previous?.time >= event.time)) return store.linearEvent(event);
+  const owners = (await linear.request('query { users(filter: { owner: { eq: true }, app: { eq: false } }, first: 10) { nodes { id } } }'))?.users?.nodes ?? [];
+  const human = owners.length === 1 ? owners[0].id : null;
+  if (event.kind === 'commentCreated') {
+    if (human && event.actorId === human) innAnswer({ state, event, now: now() });
+    return store.linearEvent(event);
+  }
+  // Only editors in the interval that gained the tick can back this answer. A history
+  // entry's actor is not its description editor (the INN-17 finding).
+  const inUpdate = (at) => previous
+    ? Date.parse(at) > previous.time && Date.parse(at) <= event.time
+    : Date.parse(at) === event.time;
+  let source = null;
+  let after = null;
+  let document;
+  do {
+    const data = await linear.request(`query($id: String!, $after: String) { issue(id: $id) {
+      documentContent { id }
+      history(first: 100, after: $after) { nodes { updatedDescription createdAt descriptionUpdatedBy { id } }
+        pageInfo { hasNextPage endCursor } }
+    } }`, { id: event.id, after });
+    document = data?.issue?.documentContent;
+    const history = data?.issue?.history;
+    if (human && history?.nodes?.some((h) => h.updatedDescription && inUpdate(h.createdAt) && h.descriptionUpdatedBy?.some((u) => u.id === human))) {
+      source = 'IssueHistory.descriptionUpdatedBy';
+      break;
+    }
+    if (!history?.pageInfo?.hasNextPage) break;
+    if (!history.pageInfo.endCursor || history.pageInfo.endCursor === after) throw new Error('invalid history cursor');
+    after = history.pageInfo.endCursor;
+  } while (true);
+  if (!source && document?.id) {
+    const data = await linear.request(`query($id: String!) {
+      documentContentHistory(id: $id) { actorIds contentDataSnapshotAt }
+    }`, { id: document.id });
+    if (human && data?.documentContentHistory?.some((h) => inUpdate(h.contentDataSnapshotAt) && h.actorIds?.includes(human))) source = 'documentContentHistory.actorIds';
+  }
+  // Write the durable condition first: a retry after an interrupted store commit
+  // sees the same condition key and cannot append a second start.
+  innAnswer({ state, event, pick: gained.join(', '), source, now: now() });
+  return store.linearEvent(event);
 }
 
 /** Port of comment-wake.mjs:73-95: skip self, find the holder, commit the cursor before
  * waking, then append the event. No store transaction is held across the async post or the events file's lock. */
 export async function handleLinearEvent(store, event, { state, runs, linear, post = postAsync, now = Date.now,
   log = console.log } = {}) {
-  if (event.kind !== 'commentCreated' || event.self || event.teamKey === 'INN') return store.linearEvent(event);
+  if (event.teamKey === 'INN') return handleInn(store, event, { state, linear, now });
+  if (event.kind !== 'commentCreated' || event.self) return store.linearEvent(event);
   const repo = Object.entries(readRegistry(state)).find(([, r]) => r?.key === event.teamKey && typeof r.teamId === 'string')?.[0];
   if (!repo) return store.linearEvent(event);
   // As with the GitHub holder lookup, a failed read must leave the cursor unchanged.
@@ -98,7 +150,13 @@ export function startLinearSource({ state, store, runs = process.env.FACTORY_RUN
   linear, getToken, mintToken, fetchCatchUp, log = console.log, now = Date.now,
   schedule = setTimeout, cancel = clearTimeout } = {}) {
   const api = () => (linear ??= createLinear({ state }));
-  const handle = (event) => handleLinearEvent(store, event, { state, runs, linear: { request: (...args) => api().request(...args) }, post, now, log });
+  // Description comparisons must see the preceding committed update, including live bursts.
+  let handling = Promise.resolve();
+  const handle = (event) => {
+    const next = handling.then(() => handleLinearEvent(store, event, { state, runs, linear: { request: (...args) => api().request(...args) }, post, now, log }));
+    handling = next.catch(() => {});
+    return next;
+  };
   getToken ??= () => api().token();
   mintToken ??= (failed) => api().mint({ failed });
   fetchCatchUp ??= (query, variables) => api().request(query, variables);

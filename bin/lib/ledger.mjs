@@ -2,10 +2,11 @@
 // weekly digest built from those rows, every rate with its count and its 95% Wilson interval. A task is an
 // issue labelled task, from its assignment (the label) to its close, with every pull request that closes it; a pull
 // request that closes no task is a task of its own, from its opening. Cost is API-equivalent usage, never cash.
+// Posted digests read records/* in better-factory; local rows and quota commands keep their local sources.
 // See bin/factory-ledger for the arguments.
 import { revertedTitle } from '../../kit/.gate/bin/lib/subject.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -469,7 +470,7 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, findings = null, unread = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, findings = null, unread = null, shared = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -534,6 +535,13 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     const uncharged = unchargedSessions(sessions, since, until);
     lines.push('', '## Sessions (bin/seat)', '', ...(ran.length ? [...ran, `- Total: $${total.toFixed(2)} over ${ran.length} ${ran.length === 1 ? 'session' : 'sessions'} (the last record of each; a resumed session's cost is cumulative, so its records are not added)`] : ['- None.']));
     if (uncharged.count) lines.push(`- ${uncharged.count} ${uncharged.count === 1 ? 'session' : 'sessions'} ($${uncharged.dollars.toFixed(2)} at API prices) charged to no task, because the record names no repository and branch`);
+  }
+  if (shared) {
+    lines.push('', '## Reporting nodes', '', ...shared.nodes.map((n) => `- ${n.node}: last reported ${n.reported}${n.silent ? '; silent since the week started — this week may be incomplete' : ''}`));
+    if (shared.late.length) {
+      lines.push('', '## Late', '', ...shared.late.map((r) => `- Late: ${r.node}, ${r.role} ${r.tag}, ended ${r.end}, ${typeof r.total_cost_usd === 'number' ? `$${r.total_cost_usd.toFixed(2)}` : '$?'}`),
+        `- Late total: $${shared.late.reduce((sum, r) => sum + (r.total_cost_usd ?? 0), 0).toFixed(2)}`);
+    }
   }
   if (quota) lines.push('', ...(quota.error ? ['## Quota windows (what Claude Code itself reports)', '', `- ${quota.error}`] : quotaSection(quota.rows, { now: quota.now })), '', '## Role, model and seat (bin/seat)', '', ...roleMapLines(keptSessions(sessions ?? [], since, until), accounts));
   if (findings) lines.push('', ...findingsSection(findings));
@@ -787,6 +795,82 @@ function digestJob(argv) {
 
 const DIGEST_REPO = 'tuannd9288/better-factory';
 
+/** #366: the issue's shared-records contract (no multi-node reader in the references).
+ * Fetch into a disposable bare repository so a failed fetch can never use yesterday's local files.
+ * The returned cursor is saved only after posting; keep the period's starting tips for an edit/retry. */
+export function sharedRecords(state, since, until, remote = `https://github.com/${DIGEST_REPO}.git`) {
+  const cursorFile = join(state, 'digest-records.json');
+  const saved = existsSync(cursorFile) ? JSON.parse(readFileSync(cursorFile, 'utf8')) : { tips: null };
+  const period = `${since}_${until}`;
+  const previous = saved.period === period ? saved.previous : saved.tips;
+  const dir = mkdtempSync(join(tmpdir(), 'digest-records-'));
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    git('init', '--bare', '--quiet');
+    git('fetch', '--quiet', '--no-tags', remote, 'refs/heads/records/*:refs/heads/records/*');
+    const branches = git('for-each-ref', '--format=%(refname) %(objectname) %(committerdate:iso-strict)', 'refs/heads/records/').trim().split('\n').filter(Boolean);
+    if (!branches.length) throw new Error('no records branches');
+    const tips = {};
+    const sessions = [], late = [], nodes = [], quotas = [];
+    for (const branch of branches) {
+      const [ref, tip, reported] = branch.split(' ');
+      const node = ref.slice('refs/heads/records/'.length);
+      tips[node] = tip;
+      nodes.push({ node, reported, silent: Date.parse(reported) < Date.parse(`${since}T00:00:00Z`) });
+      const all = git('show', `${tip}:rows.jsonl`);
+      const old = previous?.[node] ? git('show', `${previous[node]}:rows.jsonl`) : '';
+      if (previous?.[node]) git('merge-base', '--is-ancestor', previous[node], tip);
+      if (!all.startsWith(old)) throw new Error(`${node}: records are not append-only`);
+      const decode = (text) => text.split('\n').filter(Boolean).map((line) => {
+        const r = JSON.parse(line);
+        if (r.v !== 1 || r.node !== node || !['session', 'log'].includes(r.kind)) throw new Error(`${node}: invalid records row`);
+        return r;
+      });
+      const rows = decode(all);
+      const folder = join(dir, 'input');
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, 'sessions.jsonl'), rows.filter((r) => r.kind === 'session').map((r) => JSON.stringify(r.row)).join('\n'));
+      const records = readSessions(folder);
+      const identify = (r) => ({ ...r, node, session: `${node}:${r.session ?? `${r.run}#${r.tag}`}` });
+      sessions.push(...records.map(identify));
+      const before = new Map(lastRecords(decode(old).filter((r) => r.kind === 'session').map((r) => r.row)).map((r) => [r.session ?? `${r.run}#${r.tag}`, r]));
+      for (const r of lastRecords(decode(all.slice(old.length)).filter((r) => r.kind === 'session').map((r) => r.row))) {
+        if (!previous || Date.parse(r.end) >= Date.parse(`${since}T00:00:00Z`)) continue;
+        const prior = before.get(r.session ?? `${r.run}#${r.tag}`);
+        late.push({ ...identify(r), total_cost_usd: typeof r.total_cost_usd === 'number' ? r.total_cost_usd - (prior?.total_cost_usd ?? 0) : null, late: true });
+      }
+      // Reconstruct only the shared log lines and record metadata for the existing quota parser.
+      const runs = join(folder, 'runs');
+      rmSync(runs, { recursive: true, force: true });
+      const logs = new Map();
+      for (const r of rows.filter((r) => r.kind === 'log')) {
+        if (typeof r.run !== 'string' || isAbsolute(r.run) || r.run.split('/').includes('..') || !r.line || typeof r.line !== 'object' || Array.isArray(r.line)) throw new Error(`${node}: invalid log row`);
+        const lines = logs.get(r.run) ?? [];
+        lines.push(JSON.stringify(r.line));
+        logs.set(r.run, lines);
+      }
+      let n = 0;
+      for (const [run, lines] of logs) {
+        const record = records.findLast((r) => basename(run) === `run-${r.tag}.jsonl` && (r.run === dirname(run) || r.run?.endsWith(`/${dirname(run)}`)));
+        const file = join(runs, String(n++), basename(run));
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, `${lines.join('\n')}\n`);
+        if (record?.account) writeFileSync(file.replace(/\.jsonl$/, '.account'), record.account);
+        const time = new Date(record?.end ?? reported);
+        utimesSync(file, time, time);
+      }
+      quotas.push(...quotaRows({ runs, accounts: [...new Set(records.map((r) => r.account).filter(Boolean))] }).map((r) => ({ ...r, profile: `${node}: ${r.profile}` })));
+    }
+    for (const node of Object.keys(saved.tips ?? {})) if (!tips[node]) throw new Error(`${node}: records branch is missing`);
+    if (!sessions.length) throw new Error('no session rows');
+    return { sessions, late, nodes, quota: { rows: quotas, now: Date.now() }, cursor: { period, previous, tips } };
+  } catch (error) {
+    throw new Error(`Shared records unavailable or incomplete; nothing posted: ${error.message}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 async function main(argv) {
   if (argv[0] === 'plist') return digestJob(argv.slice(1));
   const opts = { repos: [], since: null, until: null, mode: 'digest', post: null, check: false, latest: 50, profileDirs: (process.env.FACTORY_PROFILE_DIRS ?? '').split(':').filter(Boolean), quota: false, statusFiles: (process.env.FACTORY_STATUSLINE ?? '').split(':').filter(Boolean) };
@@ -845,7 +929,8 @@ async function main(argv) {
   }
   const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
   if (opts.post && !claimDigest(root, state, opts.since, opts.until)) return;
-  const sessions = readSessions(state);
+  const shared = opts.post || opts.lastWeek ? sharedRecords(state, opts.since, opts.until) : null;
+  const sessions = shared?.sessions ?? readSessions(state);
   const seat = seatCosts(sessions);
   const recorded = new Set(sessions.map((r) => r.session).filter(Boolean));
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
@@ -866,7 +951,7 @@ async function main(argv) {
   const to = Date.parse(`${opts.until}T23:59:59Z`);
   for (const repo of opts.repos) {
     const [owner, name] = repo.split('/');
-    const costs = repoCosts({ extra: opts.profileDirs, root, name, seat: seat.get(repo), recorded });
+    const costs = repoCosts({ extra: shared ? [] : opts.profileDirs, root, name, seat: seat.get(repo), recorded });
     const graphql = (query, n) => JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `n=${n}`])).data.repository;
     const list = (path) => JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repo}/${path}`])).flat().filter((x) => inWindow(x.created_at, x.closed_at, from, to));
     const pulls = new Map();
@@ -924,7 +1009,7 @@ async function main(argv) {
       secrets.set(repo, null);
     }
   }
-  const report = inspect(folders, { latest: opts.latest });
+  const report = inspect(shared ? [] : folders, { latest: opts.latest });
   let findings;
   try {
     const onTeam = new Map();
@@ -945,7 +1030,7 @@ async function main(argv) {
   } catch (error) {
     findings = { error: `The findings could not be read (${String(error.stderr || error.message).trim().split('\n')[0]}).` };
   }
-  const text = digest(rows, { ...opts, secrets, findings, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: unplaced(opts.profileDirs), sessions, quota: quotaNow(), accounts: accountsOf(state) });
+  const text = digest(rows, { ...opts, secrets, findings, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared });
   if (!opts.post) {
     process.stdout.write(text);
     return;
@@ -962,6 +1047,7 @@ async function main(argv) {
   if (found.length > 1) throw new Error(`${found.length} issues in ${opts.post} are titled "${title}": ${found.map((i) => `#${i.number}`).join(', ')}; none updated`);
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
+  if (shared) writeFileSync(join(state, 'digest-records.json'), `${JSON.stringify(shared.cursor)}\n`);
   rmSync(join(state, 'digest.failed'), { force: true });
 }
 

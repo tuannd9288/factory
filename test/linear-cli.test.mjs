@@ -515,3 +515,46 @@ test('comment uses the registered repository and nickname, including a hyphenate
   assert.equal(r.code, 0);
   assert.equal(inputOf(linear.mutations()[0]).createAsUser, 'sample-service-otter');
 });
+
+
+test('decision items file all fields and close with a comment using only the stored Colly key', async () => {
+  const { writeToken } = await import('../bin/lib/token.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'decision-'));
+  const key = 'invented-colly-key';
+  writeToken(root, 'colly', key);
+  const calls = [];
+  const fetchFn = async (_url, init) => {
+    const call = JSON.parse(init.body);
+    calls.push({ ...call, authorization: init.headers.authorization });
+    const team = { id: 'team-inn', key: 'INN', states: { nodes: [st('todo', 'Pending', 'unstarted', 0), st('done', 'Finished', 'completed', 1)] } };
+    let data;
+    if (call.query.includes('teams(')) data = { teams: { nodes: [team] } };
+    else if (call.query.includes('issueCreate')) data = { issueCreate: { success: true, issue: { id: 'decision-1', identifier: 'INN-7' } } };
+    else if (call.query.includes('issueUpdate')) data = { issueUpdate: { success: true } };
+    else if (call.query.includes('commentCreate')) data = { commentCreate: { success: true, comment: { id: 'comment-1' } } };
+    else data = { issue: { id: 'decision-1', identifier: 'INN-7', team } };
+    return json(200, { data });
+  };
+  {
+    const collyApi = createLinear({ agentProfiles: root, colly: true, fetchFn });
+    let body = 'Choose the blue sample.';
+    const run = createCli({ api: { request() { throw new Error('Factory app must not be used'); } }, collyApi, state: root, readStdin: async () => body });
+    const filed = await run(['decision-create', '--title', 'Sample decision', '--status', 'Pending', '--body-file', '-', '--assignee-id', 'person-sample', '--label-id', 'label-sample', '--project-id', 'project-sample', '--due-date', '2026-12-01']);
+    assert.equal(filed.code, 0, JSON.stringify(filed.out));
+    assert.equal(filed.out.key, 'INN-7');
+    assert.deepEqual(calls.find(c => c.query.includes('issueCreate')).variables.input, {
+      teamId: 'team-inn', title: 'Sample decision', description: body, stateId: 'todo', assigneeId: 'person-sample', labelIds: ['label-sample'], projectId: 'project-sample', dueDate: '2026-12-01',
+    });
+    body = 'The blue sample was chosen.';
+    assert.equal((await run(['decision-close', 'INN-7', '--body-file', '-'])).code, 0);
+    assert.deepEqual(calls.find(c => c.query.includes('issueUpdate')).variables, { id: 'decision-1', input: { stateId: 'done' } });
+    assert.deepEqual(calls.find(c => c.query.includes('commentCreate')).variables.input, { issueId: 'decision-1', body });
+    assert.ok(calls.every(c => c.authorization === `Bearer ${key}`));
+    const before = calls.length;
+    assert.equal((await run(['decision-close', 'FAC-7', '--body-file', '-'])).code, 1);
+    assert.equal(calls.length, before);
+    writeFileSync(join(root, 'tokens', 'colly'), '');
+    assert.equal((await run(['decision-close', 'INN-7', '--body-file', '-'])).code, 1);
+    assert.equal(calls.length, before, 'a missing Colly key never falls back to Factory credentials');
+  }
+});

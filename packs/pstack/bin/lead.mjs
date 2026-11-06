@@ -363,7 +363,7 @@ function main(argv, env) {
   const row = `factory/${repo}-${team}`;
   const account = readAccounts(state)[row] ?? null;
   if (!account) {
-    process.stderr.write(`bin/lead: no row ${row} in the accounts file; the Human runs \`factory use ${repo}-${team} <letter>\` (\`factory\` lists the letters)\n`);
+    process.stderr.write(`bin/lead: no row ${row} in the accounts file; the Human or Colly on his spoken word runs \`factory use ${repo}-${team} <letter>\` (INN-30, 2026-11-05) (\`factory\` lists the letters)\n`);
     return 2;
   }
   if (accountRefusal(account)) {

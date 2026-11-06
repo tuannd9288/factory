@@ -1,5 +1,6 @@
 // The factory's one way to reach Linear as the "Factory" app (#403, sublayer 1b): the only code that talks to Linear's API. The Lead's reads and
 // writes (#404), the sweep's readers (#405) and the daemon's listener (#414) all come through here.
+// Decision verbs (#365, sublayer 1e) use Colly instead: read tokens/colly for each request, with no mint or Factory fallback.
 //   One token source. Two tokens minted from one app can revoke each other (seen 2026-11-04: a read-scoped token died when another was minted,
 //   4002 "You need to authenticate"), so there is one token, minted with one fixed set of scopes (SCOPES), and every caller reads it from the
 //   store for each request; none keeps its own copy.
@@ -12,7 +13,7 @@
 //   a token is replaced for every caller long before it ends. A host with no credentials stored is not an error: renew says 'unconfigured'.
 //   An authentication failure (HTTP 401, or an error whose code says authentication, or a message that says "authenticate"): the caller re-reads
 //   the store and retries once with a token another caller stored there; if it still fails, it mints once under the lock and retries once; if that
-//   fails too it raises the condition `linear-auth-failed` (a `start` line in events.jsonl and a line in `factory top`, bin/lib/events.mjs) and
+//   fails too it raises the condition `linear-auth-failed` (a `start` line in events.jsonl and a line in `factory colly --brief`, bin/lib/events.mjs) and
 //   throws. A refused mint raises it too. Any success after that clears it. Nothing here loops: a request makes three sends and two mints at most
 //   (token() may mint, then the first send, the send with a token another caller stored, the retry's mint and the send with its token).
 //   A symlinked tokens/linear-app is refused: nothing is read from it or written to it.
@@ -24,7 +25,7 @@ import { join } from 'node:path';
 import { readActive, record } from './events.mjs';
 import { parseTeam } from './names.mjs';
 import { redact } from './redact.mjs';
-import { APP_FOLDERS, appDir, readTokenFile, writeAppFile } from './token.mjs';
+import { APP_FOLDERS, appDir, readTokenFile, tokenDir, writeAppFile } from './token.mjs';
 
 export const APP = APP_FOLDERS[0];
 export const TOKEN_URL = 'https://api.linear.app/oauth/token';
@@ -60,6 +61,7 @@ export function createLinear({
   team = process.env.FACTORY_TEAM,
   iconUrl = ICON_URL,
   raise = null,
+  colly = false,
 } = {}) {
   const folder = appDir(agentProfiles, APP);
   const lockDir = join(folder, 'mint.lock');
@@ -212,6 +214,19 @@ export function createLinear({
 
   /** One GraphQL request; the `data` of the answer. */
   async function request(query, variables = {}) {
+    // Colly's key is stored by the Human with `factory store colly`. Never mint or fall back to Factory credentials.
+    if (colly) {
+      const { token: key } = readTokenFile(join(tokenDir(agentProfiles), 'colly'));
+      if (!key) throw new Error('the Colly app key is not stored or is unreadable');
+      let r;
+      try {
+        r = await send(key, query, variables);
+      } catch {
+        throw new Error('the Colly request did not reach Linear');
+      }
+      if (r.status >= 400 || r.body?.errors?.length) throw new Error(`Linear refused the Colly request (HTTP ${r.status})`);
+      return r.body?.data;
+    }
     const used = await token();
     const tried = [used];
     const done = (r) => {
@@ -239,7 +254,7 @@ export function createLinear({
     if (!parseTeam(name) && !/^[^\s]+ \(via GitHub\)$/.test(name ?? '')) throw fail('a write needs the full team name <repo>-<team> (FACTORY_TEAM, or the team argument)');
     return name;
   };
-  const asTeam = (given) => ({ createAsUser: teamOf(given), ...(iconUrl ? { displayIconUrl: iconUrl } : {}) });
+  const asTeam = (given) => colly ? {} : ({ createAsUser: teamOf(given), ...(iconUrl ? { displayIconUrl: iconUrl } : {}) });
 
   /** The app's own user id (the delegate), read once for each token. */
   async function appUserId() {

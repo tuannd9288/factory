@@ -12,7 +12,7 @@ import { sandbox } from './factory-world.mjs';
 
 const ANN = 'sk-ant-oat01-ANNANNANNANN1234567890abcd';
 const BOB = 'sk-ant-oat01-BOBBOBBOBBOB1234567890efgh';
-// The onboarded repository of every sandbox. `factory top` finds a Lead as a `claude --name <repo>-<team>` process in the machine's whole
+// The onboarded repository of every sandbox. the shared status reader finds a Lead as a `claude --name <repo>-<team>` process in the machine's whole
 // process table, so the name is this run's own: the process id is unique among the processes alive at once, which two runs of this file
 // at once are (#313). One name for the whole file run, since each test stops its fake Leads in done().
 const REPO = `alpha${process.pid}`;
@@ -182,7 +182,7 @@ const withPane = (s, pane = 'p-7', { event = 'Stop', repo = REPO, running = true
   const folder = `${repo}-${team}`;
   mkdirSync(join(s.env.FACTORY_RUNS, folder), { recursive: true });
   if (pane) writeFileSync(join(s.env.FACTORY_RUNS, `${folder}/pane`), `${pane}\n`);
-  // what the Lead's hooks leave (#286); a Lead runs only while its process does, as `factory top` finds it: claude --name <repo>-<team>
+  // what the Lead's hooks leave (#286); a Lead runs only while its process does, as the shared status reader finds it: claude --name <repo>-<team>
   if (event) writeFileSync(join(s.env.FACTORY_RUNS, `${folder}/state.json`), `${JSON.stringify({ event, type: null, at: new Date().toISOString() })}\n`);
   if (running) s.kids.push(spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', '--', 'claude', '--name', folder], { stdio: 'ignore' }));
 };

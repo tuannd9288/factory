@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { ROOT } from './checkout.mjs';
 import { parseTeam, TEAM } from './names.mjs';
 import { teamsOf } from './team-names.mjs';
-import { leadTeams, readProcesses } from './top.mjs';
+import { leadTeams, readProcesses } from './colly-status.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { createLinear } from './linear.mjs';
 import { announceReleaseOn, announceTakeOn, commentsOfIssue, holderOf } from './linear-cli.mjs';

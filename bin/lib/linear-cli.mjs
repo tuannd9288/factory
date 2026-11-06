@@ -13,6 +13,10 @@
 //   create --team-key <KEY> --title <t> --status <name> --body-file - [--delegate --team <team>]   an issue with an explicit status, never Triage
 //                                               by accident; --delegate (which needs --team) also posts the holder comment a take posts
 //   comment and ask refuse a body with a line that reads as a holder or release comment (those are for take, release and create)
+//   decision-create --title <t> --status <name> --body-file - --assignee-id <id> --label-id <id> --project-id <id> --due-date <YYYY-MM-DD>
+//                                               files on INN as Colly; --label-id may repeat. create also accepts these four optional fields.
+//   decision-close <INN-key> --body-file -     posts the closing comment, then moves to the first completed state, as Colly
+//   Colly reads only tokens/colly in the factory token store (the Human stores it with `factory store colly`); no key argument or environment.
 //   onboard <repo> --key <KEY> --name <name>    the repository's team (copied from FAC) and its Needs Human status, and the registry
 // One JSON object on stdout. Exit 0 done, 1 Linear refused or failed (the reason is in `error`, never a token), 2 usage.
 // Scope: take, comment, ask, answered, create and list act only on a team that is in the registry, never on INN or any other team; read does
@@ -37,20 +41,25 @@ export { onLinear, readRegistry, registryFile };
 class Usage extends Error {}
 class Refused extends Error {}
 
+const FILING_FIELDS = { '--assignee-id': 'value', '--label-id': 'repeat', '--project-id': 'value', '--due-date': 'value' };
 const SHAPES = {
+  'decision-create': { args: 0, flags: { '--title': 'value', '--status': 'value', '--body-file': 'value', ...FILING_FIELDS } },
+  'decision-close': { args: 1, flags: { '--body-file': 'value' } },
   take: { args: 1, flags: { '--team': 'value' } },
   read: { args: 1, flags: {} },
   comment: { args: 1, flags: { '--team': 'value', '--body-file': 'value' } },
   ask: { args: 1, flags: { '--team': 'value', '--body-file': 'value' } },
   answered: { args: 1, flags: { '--team': 'value' } },
   release: { args: 1, flags: { '--team': 'value' } },
-  create: { args: 0, flags: { '--team': 'value', '--team-key': 'value', '--title': 'value', '--status': 'value', '--body-file': 'value', '--delegate': 'bool' } },
+  create: { args: 0, flags: { '--team': 'value', '--team-key': 'value', '--title': 'value', '--status': 'value', '--body-file': 'value', '--delegate': 'bool', ...FILING_FIELDS } },
   onboard: { args: 1, flags: { '--key': 'value', '--name': 'value' } },
   list: { args: 0, flags: { '--team-key': 'value', '--status': 'repeat' } },
 };
 /** The status types of the shared view 'Active (all teams)': what `list` shows unless `--status` narrows it. */
 export const OPEN_TYPES = ['triage', 'backlog', 'unstarted', 'started'];
 const REQUIRED = {
+  'decision-create': ['--title', '--status', '--body-file', '--assignee-id', '--label-id', '--project-id', '--due-date'],
+  'decision-close': ['--body-file'],
   take: ['--team'], comment: ['--team', '--body-file'], ask: ['--team', '--body-file'], answered: ['--team'], release: ['--team'],
   create: ['--team-key', '--title', '--status', '--body-file'], onboard: ['--key', '--name'], list: ['--team-key'],
 };
@@ -144,7 +153,7 @@ export async function announceReleaseOn(api, issueId, key, fullTeam) {
 const STATES = 'states(first: 100) { nodes { id name type position } }';
 const firstStarted = (states) => states.filter((s) => s.type === 'started' && s.name !== NEEDS_HUMAN).sort((a, b) => a.position - b.position)[0];
 
-export function createCli({ api, state, readStdin }) {
+export function createCli({ api, collyApi, state, readStdin }) {
   const q = (query, vars) => api.request(query, vars);
 
   /** A write or a list acts only on the team of a repository in the registry, so a Lead cannot touch INN or any other team. */
@@ -271,19 +280,37 @@ export function createCli({ api, state, readStdin }) {
     return { ok: true, key, status: to.name, assignee: null };
   }
 
-  async function create({ flags }) {
+  async function create({ flags, verb }) {
+    const decision = verb === 'decision-create';
+    const client = decision ? collyApi : api;
     const body = await bodyOf();
-    const teamKey = flags['--team-key'];
-    inScope(teamKey);
-    const team = (await q(`query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key name ${STATES} } } }`, { key: teamKey }))?.teams?.nodes?.[0];
+    const teamKey = decision ? 'INN' : flags['--team-key'];
+    if (!decision) inScope(teamKey);
+    const team = (await client.request(`query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id key name ${STATES} } } }`, { key: teamKey }))?.teams?.nodes?.[0];
     if (!team) throw new Refused(`Linear has no team with key ${teamKey}`);
     const status = team.states.nodes.find((s) => s.name === flags['--status']);
     if (!status) throw new Refused(`team ${teamKey} has no status named ${flags['--status']}`);
     const delegate = flags['--delegate'] === true;
-    const r = done(await api.issueCreate({ teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate, team: flags['--team'] ? `${inScope(teamKey)}-${flags['--team']}` : undefined }), 'issueCreate');
+    const fields = {};
+    for (const [flag, field] of [['--assignee-id', 'assigneeId'], ['--label-id', 'labelIds'], ['--project-id', 'projectId'], ['--due-date', 'dueDate']]) {
+      if (flag in flags) fields[field] = flags[flag];
+    }
+    const r = done(await client.issueCreate({ ...fields, teamId: team.id, title: flags['--title'], description: body, stateId: status.id, delegate, team: flags['--team'] ? `${inScope(teamKey)}-${flags['--team']}` : undefined }), 'issueCreate');
     // An issue created with the app as its delegate is held by the creating team, as a take would say.
     if (delegate) await announceTake(r.issue.id, r.issue.identifier, flags['--team']);
     return { ok: true, key: r.issue?.identifier ?? null, status: status.name, delegate: delegate ? 'app' : null };
+  }
+
+  async function closeDecision({ args: [key] }) {
+    if (!key.startsWith('INN-')) throw new Refused('decision-close acts only on INN');
+    const body = await bodyOf();
+    const issue = (await collyApi.request(`query($id: String!) { issue(id: $id) { id team { key ${STATES} } } }`, { id: key }))?.issue;
+    if (!issue || issue.team.key !== 'INN') throw new Refused(`Linear has no INN issue ${key}`);
+    const to = issue.team.states.nodes.filter(s => s.type === 'completed').sort((a, b) => a.position - b.position)[0];
+    if (!to) throw new Refused('INN has no completed state');
+    const c = done(await collyApi.commentCreate({ issueId: issue.id, body }), 'commentCreate');
+    done(await collyApi.request('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }', { id: issue.id, input: { stateId: to.id } }), 'issueUpdate');
+    return { ok: true, key, status: to.name, commentId: c.comment?.id ?? null };
   }
 
   async function list({ flags }) {
@@ -353,7 +380,7 @@ export function createCli({ api, state, readStdin }) {
     };
   }
 
-  const verbs = { take, release, read, comment, ask, answered, create, onboard, list };
+  const verbs = { 'decision-create': create, 'decision-close': closeDecision, take, release, read, comment, ask, answered, create, onboard, list };
   /** Runs one verb; { code, out } with `out` the JSON object. */
   return async function run(argv) {
     let parsed;
@@ -380,9 +407,9 @@ async function stdinText() {
 /** The command on the factory host: prints the JSON, returns the exit code. A tty on stdin gives an empty body, which a verb that needs one refuses. */
 export async function main(argv, env = process.env, { api, readStdin = () => (process.stdin.isTTY ? Promise.resolve('') : stdinText()) } = {}) {
   const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
-  const run = createCli({ api: api ?? createLinear({ state }), state, readStdin });
+  const run = createCli({ api: api ?? createLinear({ state }), collyApi: createLinear({ state, agentProfiles: env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'), colly: true }), state, readStdin });
   const { code, out } = await run(argv);
   console.log(JSON.stringify(out));
-  if (code === 2) console.error('usage: factory linear take|release|read|list|comment|ask|answered|create|onboard ... (see bin/lib/linear-cli.mjs)');
+  if (code === 2) console.error('usage: factory linear take|release|read|list|comment|ask|answered|create|onboard|decision-create|decision-close ... (see bin/lib/linear-cli.mjs)');
   return code;
 }

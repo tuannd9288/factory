@@ -19,7 +19,7 @@
 // check-not-started condition to its `onStart`, which wakes that pull request's Lead. The two writers are two processes, so each write takes $FACTORY_STATE/events.lock, a lock
 // of that write alone, and `seq` stays unique and increasing across both.
 // Only record and appendStart write: $FACTORY_STATE/events-active.json remembers which conditions hold and since when,
-// and a repository the sweep could not read keeps its conditions, since only a read that succeeded can end one. `factory top` and
+// and a repository the sweep could not read keeps its conditions, since only a read that succeeded can end one. `factory colly --brief` and
 // `bin/factory-events` only read. `bin/factory-events [--follow]` prints the start lines after its cursor ($FACTORY_STATE/events.cursor);
 // only --follow moves the cursor and then follows the file, and no run prints a clear line. A text holds no token and no e-mail address.
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -29,7 +29,7 @@ import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountOut } from './seat.mjs';
 import { accountList, seatAccounts } from './token.mjs';
-import { leadOf, leadStateOf, readProcesses } from './top.mjs';
+import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
 
 /** How long a required check may sit unstarted before it is told: half as much again as the slowest normal wait seen on 2026-11-02
  * (1,208 s on a busy self-hosted runner, from the run's creation), so only a real stall passes it. */
@@ -84,7 +84,7 @@ export function checksNotStarted({ repo, prs, required }) {
 }
 
 /** Condition 2, for one repository: a pull request labelled tier-3 or needs-human whose tier check completed without success (the rule
- * `factory top` uses, which lists it itself), and an open issue labelled needs-human (read by the sweep's one query). */
+ * `factory colly --brief` uses, which lists it itself), and an open issue labelled needs-human (read by the sweep's one query). */
 export function humanWaits({ repo, prs, issues }) {
   return [
     ...prs
@@ -153,6 +153,16 @@ export function switchMoves({ repo, move, now }) {
   const seen = Date.parse(move?.at);
   if (!move || !(now - seen < SWITCH_HOLD_MS)) return [];
   return [{ key: `switch-moved ${repo} ${move.at}`, scope: `switch ${repo}`, top: true, url: `https://github.com/${repo}/rules`, text: `${repo} merge switch moved from ${move.from} to ${move.to}, seen by the sweep at ${localStamp(seen)}` }];
+}
+
+/** INN answers are permanent conditions keyed by the source event, on the factory host only.
+ * Keeping the scope unread preserves the start across catch-up and daemon restarts. */
+export function innAnswer({ state, event, pick, source, now }) {
+  const key = event.kind === 'commentCreated' ? event.id : `${event.id}:${event.time}`;
+  const answer = event.kind === 'commentCreated' ? 'his comment'
+    : source ? `his pick ${pick} (${source})` : `pick ${pick}; ticker is not confirmed; not his answer`;
+  return record({ state, found: [{ key: `inn-answer ${key}`, scope: 'inn-answer',
+    text: `${event.issueIdentifier}: ${answer}` }], read: new Set(), now });
 }
 
 const emptyActive = () => ({ seq: 0, conditions: {} });

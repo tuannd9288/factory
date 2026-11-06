@@ -1,4 +1,4 @@
-// #333: the sweep reports each move of a repository's merge switch (#309's events, `factory top`). A position file for each
+// #333: the sweep reports each move of a repository's merge switch (#309's events, the shared status reader). A position file for each
 // repository holds the last position and move; a move is a condition held for 24 hours. No network: a fake gh serves the rules.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -116,15 +116,15 @@ test('a repository whose switch was not read keeps its condition as it was', () 
     assert.equal(lines(state).at(-1), `clear switch-moved o/app ${move.at}`);
   }));
 
-test('factory top lists the move as an alert with the repository, both positions and the rules page, and drops it once it clears', async () =>
+test('Colly brief lists the move as an alert with the repository, both positions and the rules page, and drops it once it clears', async () =>
   withDir(async (dir) => {
-    const top = await import('../bin/lib/top.mjs');
+    const top = await import('../bin/lib/colly-status.mjs');
     const state = join(dir, 'state');
     for (const d of ['root']) mkdirSync(join(dir, d));
     const move = { from: '1-2', to: 'all', at: new Date(T0).toISOString() };
     const frame = async (now) => {
       const snap = await top.snapshot({ now, runs: join(dir, 'runs'), state, root: join(dir, 'root'), clones: new Map(), repos: [], live: () => false, processes: () => [], load: [0, 0, 0], cores: 1, agentProfiles: join(dir, 'profiles') });
-      return top.render(snap, { width: 200 });
+      return top.briefOf(snap, { after: Number.MAX_SAFE_INTEGER });
     };
     watch(dir, state, new Map([['o/app', move]]), T0);
     assert.match(await frame(T0 + 60_000), /Waiting on you\n(?:.*\n)*? {2}alert +o\/app merge switch moved from 1-2 to all, seen by the sweep at \S+ \S+ {2}https:\/\/github\.com\/o\/app\/rules/);

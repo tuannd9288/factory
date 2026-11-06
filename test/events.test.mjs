@@ -1,5 +1,5 @@
 // #309: the queue's sweep writes one line to $FACTORY_STATE/events.jsonl when one of its conditions begins and one when it ends;
-// bin/factory-events prints the lines that begin one; `factory top` lists the new conditions under "Waiting on you". A fake gh and
+// bin/factory-events prints the lines that begin one; the shared status reader lists the new conditions under "Waiting on you". A fake gh and
 // fixture folders; every tool started gets a state folder of its own, and nothing is written outside it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -544,7 +544,7 @@ test('--after takes a whole number of 0 or more; anything else is a usage error'
 
 test('the Leads are read with the reader that throws when ps fails, not the one that shows none', async () => {
   const e = await events();
-  const top = await import('../bin/lib/top.mjs');
+  const top = await import('../bin/lib/colly-status.mjs');
   assert.equal(e.defaultProcesses, top.readProcesses);
   assert.throws(() => top.readProcesses(['/nonexistent/ps']), /ps is not on this host/);
   assert.throws(() => top.readProcesses(['/usr/bin/false']));
@@ -584,16 +584,16 @@ test('bin/factory-events finds node itself under the PATH of a non-login ssh com
   });
 });
 
-test('factory top lists a condition-1 line with the repository, the pull request and the check, and drops it once the condition clears', async () => {
+test('Colly brief lists a condition-1 line with the repository, the pull request and the check, and drops it once the condition clears', async () => {
   const e = await events();
-  const top = await import('../bin/lib/top.mjs');
+  const top = await import('../bin/lib/colly-status.mjs');
   await withDir(async (dir) => {
     const state = join(dir, 'state');
     for (const d of ['runs', 'root', 'profiles']) mkdirSync(join(dir, d));
     const now = Date.parse('2026-11-02T11:00:00Z');
     const frame = async () => {
       const snap = await top.snapshot({ now, runs: join(dir, 'runs'), state, root: join(dir, 'root'), clones: new Map(), repos: [], live: () => false, processes: () => [], load: [0, 0, 0], cores: 1, agentProfiles: join(dir, 'profiles') });
-      return top.render(snap, { width: 200 });
+      return top.briefOf(snap, { after: Number.MAX_SAFE_INTEGER });
     };
     const seen = (prs, at) => record(e, state, e.checksNotStarted({ repo: 'o/app', prs, required: ['verify'] }), new Set(['o/app']), at);
     seen([pr()], now - 2 * e.NOT_STARTED_MS);

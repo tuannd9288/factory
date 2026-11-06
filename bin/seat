@@ -31,8 +31,9 @@
 # account's runs has status `rejected`, until that event's `resetsAt`; the session is then refused, naming the account and the
 # reset, and never runs on another seat or account. No share of a window and no number of live sessions stops a session (#194,
 # #280): how many sessions run at once is the Lead's call. When the machine's load is above its cores
-# (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Nothing picks or switches an account by itself; only the Human's
-# `factory use` does. A session the limit cut off is resumed by the Lead after that reset, which the refusal names and `factory`
+# (`sysctl -n vm.loadavg hw.ncpu`), start fewer workers. Nothing picks or switches an account by itself; the Human or Colly on his
+# spoken word runs `factory use` (INN-30, 2026-11-05). A session the limit cut off is resumed by the Lead after that reset,
+# which the refusal names and `factory`
 # shows, with `bin/seat <role> <brief> --run <folder> --work <folder> --resume <session id> --seat <n>`; nothing resumes it in
 # the background.
 # Every seat runs in auto mode with no role allow list and every deny rule, `env` and `printenv` included, and holds the team's
