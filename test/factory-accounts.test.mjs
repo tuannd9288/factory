@@ -554,11 +554,12 @@ test('use refuses the verifier\'s row, an unknown row or letter, and a row that 
     const verifier = s.fac('use', '3', 'a');
     assert.equal(verifier.code, 2, verifier.out);
     assert.match(verifier.out, /Codex/);
-    for (const args of [['9', 'a'], ['1', 'z'], ['x', 'a'], ['1', '1'], ['0', 'a'], ['1', 'a', 'extra']]) {
+    for (const args of [['9', 'a'], ['1', 'z'], ['x', 'a'], ['1', '1'], ['0', 'a'], ['1', 'a', 'extra'], ['--node', 'macbook', '1', 'a']]) {
       const r = s.fac('use', ...args);
       assert.equal(r.code, 2, args.join(' ') + r.out);
     }
     assert.equal(readFileSync(join(s.state, 'accounts'), 'utf8'), before, 'nothing changed');
+    assert.doesNotMatch(s.calls(), /ssh/);
   } finally {
     s.done();
   }
@@ -606,9 +607,12 @@ test('use with an argument missing, on a terminal, prints the list and asks for 
   }
 });
 
-// From the MacBook the commands run on the Mac mini over ssh, as login does; the fake ssh runs the far side for real in $FAKE/far.
+// From the MacBook the commands run on the Mac mini over ssh, as login does; the fake ssh runs the far side for real in $FAKE/far,
+// with its own accounts file.
+const farAccounts = (s) => join(s.fake, 'far/state/accounts');
 function far(s, tokens = { ann: ANN, bob: BOB }) {
-  writeFileSync(join(s.state, 'accounts'), `factory/${REPO}-lead=ann\nfactory/factory-lead=ann\n`, { mode: 0o600 });
+  mkdirSync(join(s.fake, 'far/state'), { recursive: true });
+  writeFileSync(farAccounts(s), `factory/${REPO}-lead=ann\nfactory/factory-lead=ann\n`, { mode: 0o600 });
   onboarded(s, REPO);
   const dir = s.tokens(join(s.fake, 'far/.agent-profiles'));
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -624,12 +628,47 @@ test('from the MacBook, use runs on the Mac mini over ssh with its arguments, a 
     assert.equal(r.code, 0, r.out);
     assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory use 2 b'/);
     assert.doesNotMatch(s.calls(), /ssh .* -t /);
-    assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), /factory\/factory-lead=bob/);
+    assert.match(readFileSync(farAccounts(s), 'utf8'), /factory\/factory-lead=bob/);
     assert.match(r.out, /factory\/factory-lead now uses bob/);
     const named = s.fac('use', `${REPO}-lead`, 'b');
     assert.equal(named.code, 0, named.out);
     assert.match(s.calls(), new RegExp(`factory use ${REPO}-lead b'`));
-    assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), new RegExp(`factory/${REPO}-lead=bob`));
+    assert.match(readFileSync(farAccounts(s), 'utf8'), new RegExp(`factory/${REPO}-lead=bob`));
+    assert.ok(!existsSync(join(s.state, 'accounts')), 'the MacBook\'s own file is not written');
+  } finally {
+    s.done();
+  }
+});
+
+test('on the MacBook, use writes a team of its own accounts file there, by no ssh, restarting nothing, and the --here Lead then starts on it (#366)', () => {
+  const s = box();
+  try {
+    far(s);
+    // The MacBook's own store holds bob alone, so its only letter is a; its file was written by hand.
+    mkdirSync(s.tokens(), { recursive: true, mode: 0o700 });
+    writeFileSync(join(s.tokens(), 'bob'), `${BOB}\n`, { mode: 0o600 });
+    const mine = join(s.state, 'accounts');
+    const line = (account) => `# by hand\nmacbook/claude=colly\nfactory/factory-lead=${account}\n  factory/${REPO}-lead = ann \n`;
+    writeFileSync(mine, line('ann'), { mode: 0o600 });
+    const r = s.fac('use', 'factory-lead', 'a');
+    assert.equal(r.code, 0, r.out);
+    assert.equal(readFileSync(mine, 'utf8'), line('bob'), 'only its own line changed');
+    assert.doesNotMatch(s.calls(), /ssh/);
+    assert.deepEqual(herdrCalls(s), []);
+    // --node overrides the file both ways: a local team goes to the Mac mini, and a new MacBook team gets its first line here.
+    const sent = s.fac('use', '--node', 'tuans-mac-mini', 'factory-lead', 'b');
+    assert.equal(sent.code, 0, sent.out);
+    assert.equal(readFileSync(mine, 'utf8'), line('bob'));
+    assert.match(readFileSync(farAccounts(s), 'utf8'), /^factory\/factory-lead=bob$/m);
+    s.w('ssh-factory.json', 'name:Agent Ann\nemail:agent.ann@example.invalid\n');
+    s.w('claude-claude.json', '{}');
+    assert.equal(s.fac('lead', 'factory', '--team', 'new', '--here').code, 2, 'no line for the team yet');
+    const made = s.fac('use', 'factory-new', 'a', '--node', 'macbook');
+    assert.equal(made.code, 0, made.out);
+    assert.equal(readFileSync(mine, 'utf8'), `${line('bob')}factory/factory-new=bob\n`);
+    const started = s.fac('lead', 'factory', '--team', 'new', '--here');
+    assert.equal(started.code, 0, started.out);
+    assert.ok(s.calls().includes(' --name factory-new '), 'claude ran as the Lead of factory-new');
   } finally {
     s.done();
   }
@@ -639,11 +678,13 @@ test('from the MacBook, use checks its arguments first: a bad row, letter or cou
   const s = box();
   try {
     far(s);
-    for (const args of [['x', 'b'], ['0', 'b'], ['1', '1'], ['1', 'B'], ['1', 'a', 'extra'], ['1; ls', 'a']]) {
+    for (const args of [['x', 'b'], ['0', 'b'], ['1', '1'], ['1', 'B'], ['1', 'a', 'extra'], ['1; ls', 'a'], ['--node'], ['--node', 'elsewhere', '1', 'a'],
+      ['--node', 'macbook', '--node', 'macbook', 'factory-new', 'a'], ['--node', 'macbook', '1; ls', 'a'], ['--node', 'macbook', 'factory-new', 'z']]) {
       const r = s.fac('use', ...args);
       assert.equal(r.code, 2, args.join(' ') + r.out);
     }
     assert.doesNotMatch(s.calls(), /ssh/);
+    assert.ok(!existsSync(join(s.state, 'accounts')));
   } finally {
     s.done();
   }
