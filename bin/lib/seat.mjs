@@ -84,7 +84,8 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
 export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
 // No agent runs `factory login` or `factory store` (#177): the Human alone puts a token in the store. The leading `*` takes
 // `factory` by name, by a relative or an absolute path and after other words; the two library rules close the `node` grant.
-// `factory use` and `factory logout` (#178) are the Human's too: the first moves a row to another account, the second removes one.
+// `factory logout` stays the Human's alone. Colly may run `factory use` and `factory lead` on his spoken word
+// (INN-30, 2026-11-05); every bin/seat role and every Lead keep their deny on all five, unchanged.
 export const tokenStoreDeny = [
   'Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)',
   'Bash(*factory use*)', 'Bash(*factory logout*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs logout*)',
@@ -436,7 +437,7 @@ export function launch(argv, env = process.env) {
   // default or to another signed-in account (service.go:268-282, 376-416) are not taken: nothing picks an account by itself.
   if (!repoOk(parsed.repo, env.FACTORY_ROOT ?? ROOT)) throw new Refused(`the repository ${parsed.repo} of the team ${team} is not an onboarded repository or the factory, so ${team} is no team`);
   const account = readAccounts(state)[`factory/${team}`];
-  if (!account) throw new Refused(`the team ${team} has no row factory/${team} in the accounts file ${join(state, 'accounts')}; the Human sets one with \`factory use ${team} <letter>\``);
+  if (!account) throw new Refused(`the team ${team} has no row factory/${team} in the accounts file ${join(state, 'accounts')}; the Human or Colly on his spoken word sets one with \`factory use ${team} <letter>\` (INN-30, 2026-11-05)`);
   if (accountRefusal(account)) throw new Refused(`the account of the row factory/${team} is not a plain account name`);
   const tag = o.tag ?? (o.resume ? basename(brief, extname(brief)) : o.role);
   // run-<tag>.claim.pid is the claim of a start of <tag>, so a tag of that shape, in any case on a disk that ignores case, would
