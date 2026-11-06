@@ -296,11 +296,11 @@ test('the model rule copies mapped defaults on every start without changing othe
       'why synthesizer: opus xhigh',
       'reflect tooling: inherit-parent',
       'reflect judgment, divergent, synthesizer: opus xhigh',
-      'arena runners: opus xhigh, inherit-parent',
-      'arena cross-judge pool: opus xhigh, inherit-parent',
+      'arena runners: opus xhigh, codex high',
+      'arena cross-judge pool: codex high',
       'swarm workers: inherit-parent',
-      'architect runners: opus xhigh, inherit-parent',
-      'interrogate reviewers: opus xhigh, inherit-parent',
+      'architect runners: opus xhigh, codex high',
+      'interrogate reviewers: opus xhigh, codex high',
     ]);
     writeModels(config, root);
     assert.deepEqual(readFileSync(file), first);
