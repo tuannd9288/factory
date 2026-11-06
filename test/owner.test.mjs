@@ -252,6 +252,25 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
     assert.deepEqual(w.writes(), [`api -X PUT -H X-GitHub-Api-Version: 2026-03-10 repos/tuannd9288/app/actions/policies/${id} --input -`]);
     assert.deepEqual(w.state().actionsPolicies[0].rules, policy.rules);
+    // GitHub's echo may drop the empty exclude and give the lists in another order: the same policy plans no PUT, and a
+    // different event still plans one. Two workflows on pull_request_target and two events, so an order can differ.
+    const kit = onMain({ reviewer: 'claude' });
+    const two = { ...kit, [GATE]: kit[GATE].replace(/^on:\n {2}pull_request:\n/m, 'on:\n  pull_request_target:\n'), [TRUSTED]: kit[TRUSTED].replace(/^on:\n/m, 'on:\n  workflow_dispatch:\n') };
+    assert.ok(two[GATE] !== kit[GATE] && two[TRUSTED] !== kit[TRUSTED]);
+    w.set({ files: two });
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    const live = w.state().actionsPolicies[0];
+    assert.deepEqual([...live.conditions.workflow_path.include].sort(), [GATE, TRUSTED].sort());
+    assert.deepEqual(live.rules[0].parameters.allowed_events, ['pull_request_target', 'workflow_dispatch']);
+    const { exclude, ...path } = live.conditions.workflow_path;
+    const echo = (events) => ({ ...live, conditions: { workflow_path: { ...path, include: [...path.include].reverse() } }, rules: [{ type: 'restrict_action_events', parameters: { allowed_events: events } }] });
+    w.set({ actionsPolicies: [echo(['workflow_dispatch', 'pull_request_target'])] });
+    w.clear();
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), [], 'the same policy in another order, without its empty exclude');
+    w.set({ actionsPolicies: [echo(['workflow_dispatch', 'push'])] });
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), [`api -X PUT -H X-GitHub-Api-Version: 2026-03-10 repos/tuannd9288/app/actions/policies/${id} --input -`]);
   } finally {
     w.cleanup();
   }

@@ -183,6 +183,18 @@ export function plan(slug, agent, have, want) {
   return calls;
 }
 
+/** A policy as the comparison reads it: its three lists (include, exclude, allowed_events) as sets, sorted, and a missing exclude
+ * as the empty one sent, so GitHub's echo of the same policy in another order, or without the empty list, is no difference. */
+const asSets = (p) => {
+  const sort = (list) => (Array.isArray(list) ? [...list].sort() : list);
+  const path = p.conditions?.workflow_path ?? {};
+  return {
+    ...p,
+    conditions: { ...p.conditions, workflow_path: { ...path, include: sort(path.include), exclude: sort(path.exclude ?? []) } },
+    rules: (p.rules ?? []).map((r) => (r.type === 'restrict_action_events' ? { ...r, parameters: { ...r.parameters, allowed_events: sort(r.parameters?.allowed_events) } } : r)),
+  };
+};
+
 /** The call that brings the Actions event policy (#337) from have to want: made when absent, put back by its id when it differs. */
 export function policyCalls(slug, have, want) {
   const body = want.actionsPolicy;
@@ -190,7 +202,7 @@ export function policyCalls(slug, have, want) {
   const what = `Actions event policy "${POLICY_NAME}"`;
   const path = `repos/${slug}/actions/policies`;
   if (!have.actionsPolicy) return [{ what, method: 'POST', path, body, version: POLICY_VERSION }];
-  return holds(body, have.actionsPolicy) ? [] : [{ what, method: 'PUT', path: `${path}/${have.actionsPolicy.id}`, body, version: POLICY_VERSION }];
+  return holds(asSets(body), asSets(have.actionsPolicy)) ? [] : [{ what, method: 'PUT', path: `${path}/${have.actionsPolicy.id}`, body, version: POLICY_VERSION }];
 }
 
 /** The repository's own Actions event policy of that name, or null: none, or no policies list at all (a 404). */
