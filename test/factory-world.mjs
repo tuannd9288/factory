@@ -1,5 +1,6 @@
 // The world of bin/factory's tests: fake claude, codex, gh, direnv, pig and ssh on PATH, and fixture folders. Nothing live runs,
-// and every name below is invented. The fake ssh runs `factory store` of the Mac mini for real, in a home of its own ($FAKE/far).
+// and every name below is invented. The fake ssh runs `factory store` of the Mac mini for real, in a home and a state folder of its own
+// ($FAKE/far, $FAKE/far/state), so each node has its own accounts file and token store.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
@@ -72,7 +73,7 @@ cmd=$(printf '%s' "$last" | sed -n "s/^zsh -lc '\\(.*\\)'$/\\1/p")
 case "$cmd" in
   *"factory store "*|*"factory use"*|*"factory account remove "*)
     rest=\${cmd#\\~/WORKSPACES/bin/factory}
-    FACTORY_HOST_USER="$FAR_USER" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" exec "$NODE_BIN" -- "$FACTORY_BIN" $rest;;
+    FACTORY_HOST_USER="$FAR_USER" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" FACTORY_STATE="$FAKE/far/state" exec "$NODE_BIN" -- "$FACTORY_BIN" $rest;;
 esac
 if [ -f "$FAKE/ssh-factory.stderr" ]; then cat "$FAKE/ssh-factory.stderr" >&2; fi
 if [ "$user" = factory ]; then cat "$FAKE/ssh-factory.json"; exit 0; fi

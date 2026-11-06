@@ -104,12 +104,12 @@ test('an account name outside ^[a-z0-9][a-z0-9._-]*$, or with .., is refused bef
   }
 });
 
-test('an empty token, and a token of more than one line, are refused after the read, and nothing is written or replaced', () => {
+test('an empty token is refused after the read, and nothing is written or replaced', () => {
   const s = sandbox();
   try {
     s.onHost();
     assert.equal(s.facIn(`${KILL}\n`, 'account', 'add', 'ann', '--no-setup').code, 0);
-    for (const input of ['', '\n', '\n\n', '   \n', `${TOKEN}\n\n`, `${TOKEN}\n${KILL}\n`, `${TOKEN}\r\n${KILL}`, `\n${TOKEN}\n`, `first\n${TOKEN}`]) {
+    for (const input of ['', '\n', '\n\n', '   \n', ' \t\r\n']) {
       for (const name of ['ann', 'bob']) {
         const r = s.facIn(input, 'account', 'add', name, '--no-setup');
         assert.notEqual(r.code, 0, JSON.stringify(input));
@@ -158,7 +158,7 @@ test('on the MacBook with setup-token: it runs here, then the token goes over ss
 test('on the MacBook, a name or a token that is refused never reaches ssh; an ssh that fails says why and leaks no token', () => {
   const s = sandbox();
   try {
-    for (const [input, name] of [[`${TOKEN}\n`, '../x'], ['', 'ann'], [`${TOKEN}\n${KILL}\n`, 'ann']]) {
+    for (const [input, name] of [[`${TOKEN}\n`, '../x'], ['', 'ann'], [' \t\r\n', 'ann']]) {
       assert.notEqual(s.facIn(input, 'account', 'add', '--node', 'tuans-mac-mini', name, '--no-setup').code, 0);
     }
     assert.ok(!s.calls().includes('ssh '), s.calls());
@@ -182,7 +182,7 @@ test('store: reads the token from stdin on either node, with the same refusals',
     rmSync(s.tokens(), { recursive: true });
     s.onHost();
     for (const name of ['../x', 'A', '-x', 'a/b']) assert.notEqual(s.facIn(`${TOKEN}\n`, 'store', name).code, 0, name);
-    for (const input of ['', '\n', `${TOKEN}\n${KILL}\n`]) assert.notEqual(s.facIn(input, 'store', 'ann').code, 0, JSON.stringify(input));
+    for (const input of ['', '\n', ' \t\r\n']) assert.notEqual(s.facIn(input, 'store', 'ann').code, 0, JSON.stringify(input));
     assert.ok(!existsSync(s.tokens()));
     const ok = s.facIn(`${TOKEN}\n`, 'store', 'ann');
     assert.equal(ok.code, 0, ok.out);
@@ -198,16 +198,16 @@ test('store: reads the token from stdin on either node, with the same refusals',
   }
 });
 
-test('spaces and tabs around a pasted token are trimmed; whitespace inside it is refused and nothing is written', () => {
+test('a token pasted from a wrapped line, with line breaks, spaces and tabs in it, is stored whole by account add and by store from a pipe (#366)', () => {
   const s = sandbox();
   try {
     s.onHost();
-    const bad = s.facIn(`${TOKEN} ${KILL}\n`, 'account', 'add', 'bob', '--no-setup');
-    assert.notEqual(bad.code, 0);
-    assert.ok(!existsSync(s.tokens()));
-    const ok = s.facIn(`  \t${TOKEN}\t \r\n`, 'account', 'add', 'ann', '--no-setup');
-    assert.equal(ok.code, 0, ok.out);
-    assert.equal(readFileSync(join(s.tokens(), 'ann'), 'utf8'), `${TOKEN}\n`);
+    const wrapped = `  \t${TOKEN.slice(0, 20)}\r\n  ${TOKEN.slice(20, 30)} ${TOKEN.slice(30)}\t \r\n`;
+    for (const [name, args] of [['ann', ['account', 'add', 'ann', '--no-setup']], ['bob', ['store', 'bob']]]) {
+      const r = s.facIn(wrapped, ...args);
+      assert.equal(r.code, 0, r.out);
+      assert.equal(readFileSync(join(s.tokens(), name), 'utf8'), `${TOKEN}\n`, args[0]);
+    }
   } finally {
     s.done();
   }

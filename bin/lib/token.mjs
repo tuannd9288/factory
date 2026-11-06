@@ -18,17 +18,11 @@ export const accountRefusal = (name) => {
     : 'the account name is refused: lowercase letters, digits, ".", "_" and "-", starting with a letter or digit, and no ".."';
 };
 
-/** { token } from what stdin held: a carriage return is a line end (a terminal in raw mode sends Return as one), a single trailing
- * newline is removed and spaces and tabs around the token are trimmed; or { error } for an empty token, more than one line, or
- * whitespace inside the token. */
+/** { token } from what stdin held, with every whitespace character taken out: a token has none, so the line breaks and spaces that a
+ * wrapped terminal line puts inside a paste are not part of it (#366); or { error } when nothing is left. */
 export function tokenOf(text) {
-  let token = text.replace(/\r\n?/g, '\n');
-  if (token.endsWith('\n')) token = token.slice(0, -1);
-  if (!token.trim()) return { error: 'the token is empty' };
-  if (token.includes('\n')) return { error: 'the token is more than one line' };
-  token = token.replace(/^[ \t]+|[ \t]+$/g, '');
-  if (/\s/.test(token)) return { error: 'the token has whitespace inside it' };
-  return { token };
+  const token = text.replace(/\s+/g, '');
+  return token ? { token } : { error: 'the token is empty' };
 }
 
 export const tokenDir = (agentProfiles) => join(agentProfiles, 'tokens');
@@ -144,6 +138,9 @@ export function accountList({ state, agentProfiles }) {
   return names.map((name, i) => ({ name, letter: letterOf(i) }));
 }
 
+/** The lettered accounts of a node that is not the factory host (#366): its own token files alone, sorted (INN-31 1B). */
+export const nodeAccountList = (agentProfiles) => tokenAccounts(agentProfiles).map((name, i) => ({ name, letter: letterOf(i) }));
+
 /** The accounts file (#178), $FACTORY_STATE/accounts: "<profile>=<account>" a line, the one source of every row's account. It is
  * read as { profile: account }; a comment, a blank line or a line with no name is skipped. No file is no rows. */
 export function readAccounts(state) {
@@ -229,30 +226,66 @@ export function retireSeat1File(agentProfiles, state, at = new Date()) {
   return archive(agentProfiles, 'seat-1', old, 'oauth-token', at);
 }
 
-/** All of stdin, as text. On a terminal, with echo off, up to the first Enter; the text after it in the same paste is kept, so a
- * paste of more than one line is refused like any other. Not a terminal: stdin as it is, which is how a pipe or a test feeds it. */
-export function readSecret(stdin = process.stdin, prompt = process.stderr) {
+// Bracketed paste (xterm's mode 2004): a terminal that has it, once the mode is on, sends a paste between these two markers.
+const PASTE_ON = '\x1b[?2004h';
+const PASTE_OFF = '\x1b[?2004l';
+const PASTE_START = '\x1b[200~';
+const PASTE_END = '\x1b[201~';
+
+/** How long the keys must stay quiet after an Enter before the read ends, for a terminal that does not bracket a paste: a paste comes
+ * as one burst, whose chunks follow one another within milliseconds, and 200 ms is well above that while still unnoticed after Enter. */
+export const QUIET_MS = 200;
+
+/** What the keys so far hold: { text }, line breaks included; { enter } when they end with an Enter outside a paste, or with a paste
+ * whose last character is a line break; or { interrupted } for a Ctrl-C anywhere. The keys are read again from the start at each chunk,
+ * so a marker split across two chunks is still found. */
+function keysOf(raw) {
+  let text = '';
+  let pasting = false;
+  let enter = false;
+  for (let i = 0; i < raw.length;) {
+    if (raw.startsWith(PASTE_START, i) || raw.startsWith(PASTE_END, i)) {
+      pasting = raw.startsWith(PASTE_START, i);
+      enter = !pasting && /[\r\n]$/.test(text);
+      i += PASTE_START.length;
+      continue;
+    }
+    const ch = raw[i++];
+    if (ch === '\u0003') return { interrupted: true };
+    enter = !pasting && (ch === '\r' || ch === '\n');
+    if (pasting || enter) text += ch;
+    else text = ch === '\u007f' || ch === '\b' ? text.slice(0, -1) : text + ch;
+  }
+  return { text, enter: enter && !pasting };
+}
+
+/** All of stdin, as text. On a terminal, with echo off and bracketed paste on: every key up to an Enter after which nothing more
+ * comes for `quietMs`, so a paste whose line breaks fall between chunks is read whole, and none of it is left in the terminal for
+ * the shell to read after the command exits (#366); a bracketed paste ends only at its end marker, however slowly its chunks come.
+ * Not a terminal: stdin as it is, which is how a pipe or a test feeds it. */
+export function readSecret(stdin = process.stdin, prompt = process.stderr, quietMs = QUIET_MS) {
   if (!stdin.isTTY) return readAll(stdin);
   return new Promise((resolve, reject) => {
-    prompt.write('Paste the token and press Enter (nothing is shown): ');
+    prompt.write(`${PASTE_ON}Paste the token and press Enter (nothing is shown): `);
     stdin.setRawMode(true);
     stdin.setEncoding('utf8');
     stdin.resume();
-    let text = '';
+    let raw = '';
+    let timer = null;
     const end = (settle) => {
+      clearTimeout(timer);
       stdin.off('data', onData);
       stdin.setRawMode(false);
       stdin.pause();
-      prompt.write('\n');
+      prompt.write(`${PASTE_OFF}\n`);
       settle();
     };
     function onData(chunk) {
-      for (let i = 0; i < chunk.length; i += 1) {
-        const ch = chunk[i];
-        if (ch === '\r' || ch === '\n') return end(() => resolve(text + chunk.slice(i)));
-        if (ch === '\u0003') return end(() => reject(new Error('interrupted')));
-        text = ch === '\u007f' || ch === '\b' ? text.slice(0, -1) : text + ch;
-      }
+      clearTimeout(timer);
+      raw += chunk;
+      const keys = keysOf(raw);
+      if (keys.interrupted) return end(() => reject(new Error('interrupted')));
+      if (keys.enter) timer = setTimeout(() => end(() => resolve(keys.text)), quietMs);
     }
     stdin.on('data', onData);
   });
