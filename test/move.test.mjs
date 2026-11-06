@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { nodeName } from '../bin/lib/shared-records.mjs';
 import { join } from 'node:path';
 import { freeWord } from '../bin/lib/team-names.mjs';
 import { createLinear } from '../bin/lib/linear.mjs';
@@ -172,7 +173,7 @@ test('the status map: Triage, no item, Todo and In Progress, the last held by th
   assert.equal(stateOf(4), 's-prog');
   for (const n of [1, 2, 3, 5]) assert.equal('delegateId' in byNumber(w, n).input, false);
   assert.equal(byNumber(w, 4).input.delegateId, 'app-user-1');
-  const held = w.lcomments[byNumber(w, 4).id].find((c) => c.body === `Taken by team ${freeWord('proj', [])}.`);
+  const held = w.lcomments[byNumber(w, 4).id].find((c) => c.body === `Taken by team ${freeWord('proj', [])} on ${nodeName()}.`);
   assert.ok(held, 'the holder comment of #404\'s code');
   assert.equal(held.input.createAsUser, `proj-${freeWord('proj', [])}`);
   for (const n of [1, 2, 3, 4, 5]) assert.equal(byNumber(w, n).input.createAsUser, `proj-${freeWord('proj', [])}`, 'a moved issue shows the Lead\'s team, not the Linear team\'s name');
