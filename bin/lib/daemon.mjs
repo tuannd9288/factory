@@ -23,6 +23,8 @@
 //   #351's: a post into the Lead's recorded inbox socket (bin/lib/wake.mjs), the same line and text. This is the factory's counterpart of
 //   piggery's `cmd.Wait` (driver/local/runner.go:331-344): piggery's daemon owns the worker's process; here bin/seat does, and tells the daemon.
 //   #366: the same record scan feeds the shared-records outbox at startup, each seat end, ping and pass. A failed push stays local for retry.
+//   It reads only what is new since its last write (bin/lib/shared-records.mjs, FAC-38). After each pass the daemon logs one line: the pass's
+//   time, its rss and heapUsed, and the CPU user and system time of all its threads since the pass before.
 //   When a pass moved the checkout (followMain), the daemon exits cleanly after that pass, releasing the lock and the socket, so the job's next run
 //   starts the new code (as #257 does for a Lead's hook). It exits the same way when its log (FACTORY_DAEMON_LOG, set by the job's start) passes
 //   10 MiB, so the next start moves it aside, and on SIGTERM, SIGINT and SIGHUP after the pass in hand (30 s at most). After every pass, whether
@@ -63,6 +65,7 @@ export const LEASE_MS = 180_000;
 const PASS_FILE = new URL('./daemon-pass.mjs', import.meta.url);
 
 const first = (error) => String(error?.message ?? error).split('\n')[0].slice(0, 200);
+const mib = (bytes) => (bytes / 1048576).toFixed(1);
 const text = (v, max = 4096) => typeof v === 'string' && v.length > 0 && v.length <= max && !v.includes('\0');
 const bad = (code, message) => ({ ok: false, error: { code, message } });
 
@@ -239,7 +242,7 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
     releaseLock(lockFile, lock.token);
     throw error;
   }
-  const d = { state, runs, store, lock, post, log, pushRecords, held: null, lastPing: Date.now(), passes: 0, passing: false, stopping: false, moved: false, worker: null, timer: null, startedAt: new Date().toISOString() };
+  const d = { state, runs, store, lock, post, log, pushRecords, held: null, lastPing: Date.now(), passes: 0, passing: false, stopping: false, moved: false, worker: null, timer: null, startedAt: new Date().toISOString(), cpu: process.cpuUsage() };
   // #366: off the factory host the daemon's gh and git run as the agents, with this node's own token (bin/lib/node.mjs), never with the login of
   // the person whose machine it is. The token goes into the daemon's environment alone, which its pass and its pushes inherit. With none
   // stored, the daemon answers its job, runs no pass and pushes nothing, says why once, and reads the store again before each pass.
@@ -307,6 +310,11 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
       d.passing = false;
       d.worker = null;
       d.passes += 1;
+      // FAC-38: what the process holds and has used, all threads, after each pass, so a day's log can be counted.
+      const mem = process.memoryUsage();
+      const cpu = process.cpuUsage(d.cpu);
+      d.cpu = process.cpuUsage();
+      log(`daemon: pass ${d.passes} took ${Date.now() - began} ms; rss ${mib(mem.rss)} MiB, heapUsed ${mib(mem.heapUsed)} MiB; cpu since the last pass: user ${Math.round(cpu.user / 1000)} ms, system ${Math.round(cpu.system / 1000)} ms`);
       releaseQueueLock(state);
       if (result?.heldBy) d.held = result.heldBy;
       if (result?.moved) d.moved = true;
