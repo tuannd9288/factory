@@ -20,11 +20,13 @@
 // of that write alone, and `seq` stays unique and increasing across both.
 // Only record and appendStart write: $FACTORY_STATE/events-active.json remembers which conditions hold and since when,
 // and a repository the sweep could not read keeps its conditions, since only a read that succeeded can end one. `factory colly --brief` and
-// `bin/factory-events` only read. `bin/factory-events [--follow]` prints the start lines after its cursor ($FACTORY_STATE/events.cursor);
+// `bin/factory-events` read those files. Before printing an INN answer, factory-events takes its shared Git claim; only the holder prints it.
+// `bin/factory-events [--follow]` prints the start lines after its cursor ($FACTORY_STATE/events.cursor);
 // only --follow moves the cursor and then follows the file, and no run prints a clear line. A text holds no token and no e-mail address.
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { claimJob } from './job-claim.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountOut } from './seat.mjs';
@@ -156,7 +158,7 @@ export function switchMoves({ repo, move, now }) {
   return [{ key: `switch-moved ${repo} ${move.at}`, scope: `switch ${repo}`, top: true, url: `https://github.com/${repo}/rules`, text: `${repo} merge switch moved from ${move.from} to ${move.to}, seen by the sweep at ${localStamp(seen)}` }];
 }
 
-/** INN answers are permanent conditions keyed by the source event, on the factory host only.
+/** INN answers are permanent conditions keyed by the source event.
  * Keeping the scope unread preserves the start across catch-up and daemon restarts. */
 export function innAnswer({ state, event, pick, source, now }) {
   const key = event.kind === 'commentCreated' ? event.id : `${event.id}:${event.time}`;
@@ -384,12 +386,36 @@ function main(argv) {
   let offset = 0;
   let partial = '';
   const pending = [];
+  const retryMs = Number(process.env.FACTORY_EVENTS_RETRY_MS) || 60_000;
   let writing = false;
   // One line at a time; the cursor moves in the write's callback, and only when the write succeeded.
   const pump = () => {
     if (writing || !pending.length) return;
     writing = true;
-    const { seq, line } = pending.shift();
+    const { seq, line, event } = pending[0];
+    // Claim at delivery, including catch-up, rather than when a node records the answer.
+    // Hex preserves the existing key without collisions or characters forbidden in refs.
+    let holder;
+    try {
+      holder = event.kind !== 'inn-answer' || claimJob(
+        process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '../..'),
+        state, 'inn-answer', Buffer.from(event.key.slice('inn-answer '.length)).toString('hex'), console.error,
+      );
+    } catch {
+      // Git errors can contain credentials. Name only the event and keep later lines waiting.
+      console.error(`factory-events: ${oneLine(event.key)}: claim failed; retrying in ${retryMs / 1000} seconds`);
+      setTimeout(() => {
+        writing = false;
+        pump();
+      }, retryMs);
+      return;
+    }
+    pending.shift();
+    if (!holder) {
+      writing = false;
+      pump();
+      return;
+    }
     process.stdout.write(`${line}\n`, (error) => {
       if (error) process.exit(0);
       writing = false;
@@ -435,7 +461,7 @@ function main(argv) {
       }
       if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= queued || NEWS_KINDS.has(e.kind) !== news) continue;
       queued = e.seq;
-      pending.push({ seq: e.seq, line: l });
+      pending.push({ seq: e.seq, line: l, event: e });
     }
     pump();
   };

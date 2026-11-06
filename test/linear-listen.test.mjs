@@ -388,7 +388,7 @@ test('the source answers ping while the async wake is pending', async (t) => {
 });
 
 
-test('INN answers use backed editors and write once across close, catch-up and restart on the host', async (t) => {
+test('INN answers use backed editors and write once across close, catch-up and restart on any node', async (t) => {
   const f = fixture(t);
   const originalHostUser = process.env.FACTORY_HOST_USER;
   process.env.FACTORY_HOST_USER = userInfo().username;
@@ -453,7 +453,7 @@ test('INN answers use backed editors and write once across close, catch-up and r
   try {
     f.comments.push({ ...answer, id: 'remote-answer', createdAt: time(9) });
     await start().ready;
-    assert.equal(lines().length, 5);
+    assert.equal(lines().length, 6, 'another node records answers for claimed delivery too');
   } finally {
     if (before === undefined) delete process.env.FACTORY_HOST_USER;
     else process.env.FACTORY_HOST_USER = before;
