@@ -18,7 +18,7 @@ import { checkoutRoot } from './checkout.mjs';
 import { quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
-import { markOnboarded, quote, roleOf } from '../../packs/pstack/bin/lead.mjs';
+import { markOnboarded, quote, roleOf, copyHook } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
@@ -589,19 +589,22 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     console.error(`bin/factory: lead --here: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
     return 1;
   }
-  // Two hooks record this Lead's inbox socket for `factory wake` (#351), and do nothing else. They run a copy of the script named by its
+  // Keep the local wake socket and install the pack's transcript/state copier (#476). They run a copy of the script named by its
   // hash, so a pull that changes the installed one leaves a live Lead's hook as it was (#257, #390).
-  let hook;
+  let hook, transcriptHook;
+  const runDir = join(contextOf(env).runs, `${repo}-${team}`);
   try {
     hook = copySocketHook(state);
+    transcriptHook = copyHook({ root: resolve(fileURLToPath(import.meta.url), '../../..'), runDir });
     mkdirSync(join(contextOf(env).runs, `${repo}-${team}`), { recursive: true });
   } catch (e) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 1;
   }
   const record = [{ hooks: [{ type: 'command', command: [process.execPath, hook, wakeFile(state, repo, team)].map(quote).join(' ') }] }];
+  const copy = { hooks: [{ type: 'command', command: `CLAUDE_CONFIG_DIR=${quote(env.CLAUDE_CONFIG_DIR || join(env.HOME, '.claude'))} ${[process.execPath, transcriptHook, join(runDir, 'transcripts')].map(quote).join(' ')}` }] };
   const settings = {
-    hooks: { SessionStart: record, SessionEnd: record },
+    hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },
     env: {
       GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,

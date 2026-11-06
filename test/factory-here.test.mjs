@@ -538,13 +538,13 @@ test('gh runs the remote gh in a new temporary folder each call, removes it with
   }
 });
 
-test('lead --here has a hook on SessionStart and SessionEnd that records and removes its inbox socket, and no other hook (#351)', () => {
+test('lead --here has a hook on SessionStart and SessionEnd that records and removes its inbox socket, alongside the transcript hooks (#351, #476)', () => {
   const s = world();
   try {
     s.identity();
     assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here']).code, 0);
     const { hooks } = settingsOf(s.nuls('claude.args'));
-    assert.deepEqual(Object.keys(hooks).sort(), ['SessionEnd', 'SessionStart']);
+    assert.deepEqual(Object.keys(hooks).sort(), ['Notification', 'SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit']);
     const [{ hooks: [{ type, command }] }] = hooks.SessionStart;
     assert.equal(type, 'command');
     assert.deepEqual(hooks.SessionEnd, hooks.SessionStart);
@@ -722,4 +722,32 @@ test('gh on the factory host runs gh itself, unchanged: no ssh, and no refusal',
   } finally {
     s.done();
   }
+});
+
+test('lead --here copies its transcript with the pack hook so the reader can discover it (#476)', async () => {
+  const s = world();
+  try {
+    s.identity();
+    assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here']).code, 0);
+    const { hooks } = settingsOf(s.nuls('claude.args'));
+    const command = hooks.Stop[0].hooks[0].command;
+    const config = join(s.home, '.claude');
+    const source = join(config, 'projects/fixture/0a1b2c3d-1111-2222-3333-444455556666.jsonl');
+    mkdirSync(join(config, 'projects/fixture'), { recursive: true });
+    const content = '{"type":"assistant","message":{"content":"Done","stop_reason":"end_turn"}}\n';
+    writeFileSync(source, content);
+    for (const event of ['Stop', 'SessionEnd']) {
+      const r = spawnSync('sh', ['-c', command], { input: JSON.stringify({ hook_event_name: event, transcript_path: source }), encoding: 'utf8', env: { PATH: process.env.PATH } });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.stderr, '');
+    }
+    const { listStreams } = await import('../bin/lib/streams.mjs');
+    const streams = listStreams(join(s.home, 'factory-runs'));
+    const found = streams.find((stream) => stream.key.startsWith('alpha-beta/transcripts/'));
+    assert.ok(found);
+    assert.equal(readFileSync(found.file, 'utf8'), content);
+    const copy = command.match(/'([^']*\/hooks\/transcript-copy-[0-9a-f]{7}\.mjs)'/)?.[1];
+    assert.ok(copy);
+    assert.deepEqual(readFileSync(copy), readFileSync(join(factory, 'packs/pstack/bin/transcript-copy.mjs')));
+  } finally { s.done(); }
 });
