@@ -30,11 +30,17 @@ function world(f) {
     mkdirSync(home);
     mkdirSync(fake);
     writeFileSync(join(fake, 'launchctl'), ['#!/bin/sh', 'echo "$*" >>"$HOME/launchctl.log"', // $HOME/linger counts how many more prints still find the job after a bootout, and a bootstrap in that gap fails (the race).
+      // Each job is loaded or not by its label: the last part of print's and bootout's target, the plist's name for bootstrap.
       'n=$(cat "$HOME/linger" 2>/dev/null || echo 0)', 'case "$1" in',
-      'print) [ -f "$HOME/loaded" ] && exit 0; [ "$n" -gt 0 ] || exit 1; echo $((n - 1)) >"$HOME/linger" ;;',
-      'bootstrap) [ "$n" -eq 0 ] || exit 5; : >"$HOME/loaded" ;;', 'bootout) rm -f "$HOME/loaded" ;;', 'esac', ''].join('\n'));
+      'print) [ -f "$HOME/loaded-${2##*/}" ] && exit 0; [ "$n" -gt 0 ] || exit 1; echo $((n - 1)) >"$HOME/linger" ;;',
+      'bootstrap) [ "$n" -eq 0 ] || exit 5; : >"$HOME/loaded-$(basename "$3" .plist)" ;;', 'bootout) rm -f "$HOME/loaded-${2##*/}" ;;', 'esac', ''].join('\n'));
     writeFileSync(join(fake, 'ssh'), ['#!/bin/sh', 'case "$*" in *--newest*) echo 4 ;; esac', ''].join('\n'));
-    for (const name of ['launchctl', 'ssh']) chmodSync(join(fake, name), 0o755);
+    // #366: gh as the queue's check meets it on the MacBook: the agents with their token in GH_TOKEN, the Human otherwise.
+    writeFileSync(join(fake, 'gh'), ['#!/bin/sh', 'case "$*" in', '  "api user"*) if [ "$GH_TOKEN" = made-up-agents-token ]; then echo agent-bot; else echo tuannd9288; fi ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
+    for (const name of ['launchctl', 'ssh', 'gh']) chmodSync(join(fake, name), 0o755);
+    // The agents' GitHub token in the node's own store (#366); a test takes it away to see the queue's check refuse.
+    mkdirSync(join(dir, 'profiles/tokens'), { recursive: true });
+    writeFileSync(join(dir, 'profiles/tokens/fake-agent'), 'made-up-agents-token\n');
     const w = {
       dir, home, origin, seed,
       root: join(home, '.local/share/factory/checkout'),
@@ -44,7 +50,8 @@ function world(f) {
       install: (args = [], env = {}, from = join(factory, 'bin/install-factory')) =>
         run(factory, 'bash', [from, ...args], {
           HOME: home, PATH: `${fake}:${process.env.PATH}`, FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'),
-          FACTORY_INSTALL_ORIGIN: origin, FACTORY_HOST_USER: 'nobody-here', FACTORY_CHECKOUT: '', XDG_DATA_HOME: '', ...env,
+          FACTORY_INSTALL_ORIGIN: origin, FACTORY_HOST_USER: 'nobody-here', FACTORY_CHECKOUT: '', XDG_DATA_HOME: '',
+          AGENT_PROFILES: join(dir, 'profiles'), FACTORY_AGENT: 'fake-agent', ...env,
         }),
       launchctl: () => (existsSync(join(home, 'launchctl.log')) ? readFileSync(join(home, 'launchctl.log'), 'utf8').split('\n').filter(Boolean) : []),
       push: (text) => {
@@ -150,17 +157,30 @@ test('it replaces a link whose target ends in /bin/factory (the old one into a d
   assert.equal(w.launchctl().length, loaded, 'a refused link loads nothing');
 }));
 
-test('on the MacBook it writes the relay\'s LaunchAgent for the copy through a rename, loads it, and runs check', () => world((w) => {
+test('on the MacBook it writes the relay\'s LaunchAgent and the queue\'s for the copy through a rename, loads them, and runs their checks (#366)', () => world((w) => {
   const r = w.install();
   assert.equal(r.code, 0, r.out);
   const text = readFileSync(w.plist, 'utf8');
   assert.ok(text.includes(join(w.root, 'bin/factory-relay')));
   assert.ok(!text.includes(factory), 'the job names nothing of the clone that ran it');
-  assert.deepEqual(readdirSync(join(w.home, 'Library/LaunchAgents')), ['io.github.tuannd9288.factory.relay.plist']);
+  const queue = join(w.home, 'Library/LaunchAgents/io.github.tuannd9288.factory.queue.plist');
+  assert.deepEqual(readdirSync(join(w.home, 'Library/LaunchAgents')).sort(), ['io.github.tuannd9288.factory.queue.plist', 'io.github.tuannd9288.factory.relay.plist']);
+  // The node's daemon starts from the copy's queue job, which follows the copy, runs as his user and holds no token.
+  const job = readFileSync(queue, 'utf8');
+  assert.ok(job.includes(join(w.root, 'bin/factory-queue')) && !job.includes(factory), job);
+  assert.match(job, new RegExp(`<key>FACTORY_CHECKOUT</key>\\s*<string>${w.root}</string>`));
+  assert.doesNotMatch(job, /UserName|made-up-agents-token/);
   const calls = w.launchctl();
-  assert.ok(calls.some((c) => c.startsWith('bootstrap gui/') && c.endsWith(w.plist)), calls.join('\n'));
+  for (const plist of [w.plist, queue]) assert.ok(calls.some((c) => c.startsWith('bootstrap gui/') && c.endsWith(plist)), calls.join('\n'));
   assert.ok(!calls.some((c) => c.startsWith('bootout')), 'nothing was loaded to unload');
   assert.match(r.out, /check: ready/);
+  assert.match(r.out, /^check: gh login agent-bot$/m);
+  assert.match(r.out, /^check: ready; the Human loads the job$/m);
+  // Without the agents' token in the node's store, the queue's check is not ready and says why, and so is the run.
+  rmSync(join(w.dir, 'profiles/tokens/fake-agent'));
+  const without = w.install();
+  assert.notEqual(without.code, 0, without.out);
+  assert.match(without.out, /^check: not ready: this node holds no GitHub token for the agents/m);
 }));
 
 test('a loaded job is unloaded before the new one is loaded', () => world((w) => {
