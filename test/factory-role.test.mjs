@@ -11,21 +11,27 @@ import { roleOf } from '../packs/pstack/bin/lead.mjs';
 test('lead --here passes the pack role as an appended system prompt', async (t) => {
   const state = mkdtempSync(join(tmpdir(), 'factory-role-'));
   const calls = [];
-  t.mock.method(childProcess, 'spawnSync', (cmd, args) => {
-    calls.push({ cmd, args });
+  t.mock.method(childProcess, 'spawnSync', (cmd, args, options) => {
+    calls.push({ cmd, args, options });
     return { status: 0, stdout: 'name:Fixture\nemail:fixture@example.invalid\n' };
   });
   syncBuiltinESMExports();
   try {
+    mkdirSync(join(state, '.agent-profiles/tokens'), { recursive: true });
+    writeFileSync(join(state, '.agent-profiles/tokens/fixture'), 'made-up-local-token');
+    writeFileSync(join(state, 'accounts'), 'factory/alpha-beta=fixture\n');
     for (const linear of [false, true]) {
       if (linear) {
         mkdirSync(join(state, 'linear'));
         writeFileSync(join(state, 'linear/repos.json'), JSON.stringify({ alpha: { key: 'ALP', teamId: 'fixture' } }));
       }
       assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], {
-        HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here',
+        HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', CLAUDE_CODE_OAUTH_TOKEN: 'made-up-wrong-node-token',
       }), 0);
-      const { cmd, args } = calls.at(-1);
+      const { cmd, args, options } = calls.at(-1);
+      assert.equal(options.env.CLAUDE_CODE_OAUTH_TOKEN, 'made-up-local-token');
+      assert.equal(options.env.CLAUDE_CONFIG_DIR, join(state, '.agent-profiles/leads/alpha-beta/claude'));
+      assert.ok(!args.join(' ').includes('made-up-local-token'));
       assert.equal(cmd, 'claude');
       const index = args.indexOf('--append-system-prompt');
       assert.ok(index >= 0, 'the launch must supply the role prompt');
@@ -33,6 +39,12 @@ test('lead --here passes the pack role as an appended system prompt', async (t) 
         .replaceAll('{{TEAM}}', 'beta').replaceAll('{{TEAMKEY}}', linear ? 'ALP' : '');
       assert.equal(args[index + 1], expected);
     }
+    rmSync(join(state, '.agent-profiles/tokens/fixture'));
+    calls.length = 0;
+    assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], {
+      HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', CLAUDE_CODE_OAUTH_TOKEN: 'made-up-wrong-node-token',
+    }), 2);
+    assert.ok(!calls.some((c) => c.cmd === 'claude'), 'no fallback to another node or inherited token');
   } finally {
     t.mock.restoreAll();
     syncBuiltinESMExports();
