@@ -466,11 +466,11 @@ const GIT_CONFIG = [
 // What the auto-mode classifier of a MacBook Lead is told is inside its boundary (#366): it trusts only the working folder and its
 // remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat goes through
 // that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
-// "$defaults" keeps the built-in entries, which a list without it replaces.
-const AUTO_MODE_ENVIRONMENT = [
+// "$defaults" keeps the built-in entries, which a list without it replaces. `seat` is the bin/seat this Lead starts its workers with.
+const autoModeEnvironment = (seat) => [
   '$defaults',
-  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), its workers with /Users/factory/WORKSPACES/bin/seat, and reads of that account's git settings.`,
-  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear and factory wake run on ${HOST} over that ssh. factory use and factory account add are the Human's, never this Lead's.`,
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), and reads of that account's git settings.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear and factory wake run on ${HOST} over that ssh. factory use and factory account add are the Human's, never this Lead's. ${seat}, of this MacBook's installed copy of the factory, starts this Lead's workers and reviewers on this MacBook, on the team's own account.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh. Pushes to them go over HTTPS as the agents' GitHub account: from this MacBook when it holds the agents' GitHub token, otherwise from ${HOST}.`,
 ];
 
@@ -577,7 +577,9 @@ function markTrusted(config, folder) {
  * GitHub's ssh addresses go over HTTPS; and the git identity comes from GitHub with that token (hostIdentity), so the team ships with the
  * Mac mini off. Without that token, everything above holds as it is.
  * The session runs on the team's own profile and token, in auto mode with the factory host and its commands inside the classifier's
- * boundary (AUTO_MODE_ENVIRONMENT), and the folder it starts in is trusted in that profile, so a first start asks nothing (#366). */
+ * boundary (autoModeEnvironment), and the folder it starts in is trusted in that profile, so a first start asks nothing (#366).
+ * Its seats start here, on the team's account: FACTORY_TEAM=<repo>-<team> is in its environment, and the bin/seat of this node's
+ * installed copy is granted and named in its role (lead.md's {{SEAT}} and {{RUNS}}). */
 function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -659,7 +661,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   // $GH_TOKEN from the session's environment, and GitHub's ssh addresses rewritten to HTTPS. Without it, pushes stay blocked (GIT_CONFIG).
   const gitConfig = token ? TOKEN_GIT : GIT_CONFIG;
   const settings = {
-    autoMode: { environment: AUTO_MODE_ENVIRONMENT },
+    autoMode: { environment: autoModeEnvironment(seat) },
     hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },
     // The settings never hold the token: with it, GH_TOKEN comes from the process environment below and is not emptied here.
     env: {
