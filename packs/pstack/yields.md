@@ -11,6 +11,9 @@ skills but `setup-pstack` refuse the model's own call; its agents `poteto-agent`
 playbook differs from the factory, the gate's rule wins. These are the places (upstream lines at `4dd1d05`, under
 `skills/poteto-mode/playbooks/` unless a path says otherwise):
 
+- **Draft until landable** (`opening-a-pr.md:30`: "Open every PR ready, never as a draft").
+  `drafts` in `.gate/driver.json` on `origin/main` defaults to `landable`; `pstack` opens ready.
+  The Human, 2026-11-05: "gạt landable cho mọi repo: có không? - có."
 - **Force-push** (`shipping.md:8`, `babysit.md:10`, `autopilot-full.md:12`): `forcePush` in origin/main’s `.gate/driver.json` defaults to `pstack`: only your own PR branch with `--force-with-lease`, never main or from a babysit; `off` forbids rewrites (the Human, #436, 2026-11-05).
 - **Stacked pull requests** (`opening-a-pr.md:28-32`, `shipping.md` step 4, `autopilot-stack.md`): `stacks` in `.gate/driver.json` on `origin/main` defaults to `pstack`; `off` keeps the old refusal, and restacking merges `origin/main` into the child after retargeting to `main`.
   The Human, 2026-11-05: "Thứ nhất PR Chồng PR là đúng, áp dụng cách đấy -> Factory đang làm lệch đi, hoặc là nó phải có công tắc. Trước tau nói cái nào khác thì đề xuất gạt công tắc mặc định giống pstack đầu tiên mà sao giờ vẫn lệch?"

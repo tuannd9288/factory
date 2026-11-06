@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
-function world({ driver = true, liveVerify = true, stacks, merge, drafts } = {}) {
+function world({ driver = true, liveVerify = true, stacks, merge, drafts = 'pstack' } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
   directories.push(dir);
   const repo = join(dir, 'app');
@@ -104,6 +104,7 @@ function world({ driver = true, liveVerify = true, stacks, merge, drafts } = {})
     const file = join(repo, '.gate/driver.json');
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stacks, merge, drafts }));
   }
+  if (driver === 'absent') rmSync(join(repo, '.gate/driver.json'));
   mkdirSync(sh);
   git(repo, 'init', '-q', '-b', 'main');
   commit(repo, { 'cli.js': 'console.log(1);\n' }, 'start');
@@ -162,6 +163,18 @@ test('removes every world when its test ends', async (t) => {
 });
 
 describe('opening the pull request', () => {
+  for (const driver of [true, 'absent']) {
+    test(`default opens a draft with ${driver === true ? 'no drafts key' : 'no driver file'}`, () => {
+      const w = world({ driver, drafts: null });
+      w.passed();
+      const out = w.ship();
+      assert.equal(out.code, 0, out.out);
+      assert.ok(w.calls().find((c) => c.startsWith('pr create')).includes('--draft'));
+      assert.equal(w.ship().code, 0);
+      assert.ok(!w.calls().some((c) => c.includes('--auto')));
+    });
+  }
+
   test('landable opens a draft using main policy and leaves auto-merge to the queue', () => {
     const w = world({ drafts: 'landable' });
     writeFileSync(join(w.repo, '.gate/driver.json'), JSON.stringify({ drafts: 'pstack' }));
@@ -199,7 +212,7 @@ describe('opening the pull request', () => {
     assert.match(out.out, /no red-check stamp against origin\/main/);
   });
 
-  test('opens it through gh pr create --body-file once the red-check stamp names the head, with no verify stamp', () => {
+  test('pstack opens ready through gh pr create --body-file once the red-check stamp names the head, with no verify stamp', () => {
     const w = world();
     w.passed();
     const out = w.ship();
