@@ -618,14 +618,15 @@ export async function enforcerIssues(api, teamKey) {
 /** The issue key a pull request body names on its line `Issue: <KEY>` (prbody.mjs reads only `#N`), or null. */
 export const linearIssueOf = (body) => /^Issue:[ \t]*([A-Z][A-Z0-9]{1,9}-[1-9]\d*)[ \t]*\r?$/m.exec(String(body ?? ''))?.[1] ?? null;
 
-/** The task rows of a repository on Linear (#406): an issue of the team that left Triage, from `startedAt` (else `createdAt`) to
- * `completedAt` or `canceledAt`, with the row of every pull request whose body has `Issue: <KEY>`. `allPulls` are the repository's pull
- * requests as { number, body }; `pullRow(number)` is the row of one. Gives { rows, keys }: the rows alive in [from, to], and every task's key. */
+/** The task rows of a repository on Linear (#406): an issue of the team that has started (FAC-45: one that never did, in Triage, Backlog,
+ * Todo or Canceled, is no task), from `startedAt` to `completedAt` or `canceledAt`, with the row of every pull request whose body has
+ * `Issue: <KEY>`. `allPulls` are the repository's pull requests as { number, body }; `pullRow(number)` is the row of one. Gives
+ * { rows, keys }: the rows alive in [from, to], and every task's key. */
 export async function linearTaskRows({ repo, api, teamKey, allPulls, pullRow, from, to }) {
-  const tasks = await linearIssues(api, teamKey, { state: { type: { neq: 'triage' } } }, 'identifier title url createdAt startedAt completedAt canceledAt');
+  const tasks = (await linearIssues(api, teamKey, { startedAt: { null: false } }, 'identifier title url startedAt completedAt canceledAt')).filter((t) => t.startedAt);
   const rows = [];
   for (const t of tasks) {
-    const start = t.startedAt ?? t.createdAt;
+    const start = t.startedAt;
     const end = t.completedAt ?? t.canceledAt ?? null;
     if (!inWindow(start, end, from, to)) continue;
     const prs = allPulls.filter((p) => linearIssueOf(p.body) === t.identifier).map((p) => pullRow(p.number));

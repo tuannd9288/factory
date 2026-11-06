@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
 import { wanted } from '../bin/lib/owner.mjs';
+import { TRUSTED } from '../bin/lib/gate-settings.mjs';
 
 // A fake gh that answers the reads the doctor makes from $GH_STATE and logs each call to $GH_CALLS. A call that is not
 // a read is answered with a failure, so a doctor that wrote would also fail here, besides being seen in the log.
@@ -47,6 +48,14 @@ if (path === repo + '/rules/branches/main') {
   if (!args.includes('--paginate') || !args.includes('--slurp')) { process.stderr.write('fake gh: the rules are asked without --paginate --slurp\n'); process.exit(1); }
   const list = state.rulesets.filter((r) => r.target === 'branch' && r.enforcement === 'active').flatMap((r) => r.rules);
   out(state.rulesInForce !== undefined ? state.rulesInForce : [list]);
+}
+// #337: the Actions event policies, asked with the API version they are documented for.
+if (path.startsWith(repo + '/actions/policies')) {
+  if (!args.includes('X-GitHub-Api-Version: 2026-03-10')) { process.stderr.write('fake gh: an Actions policies call without its API version\n'); process.exit(1); }
+  // As GitHub answers (tuannd9288/factory, 2026-11-07): a policy read by its id carries its conditions and rules, a list entry does not.
+  const id = /actions\/policies\/(\d+)$/.exec(path)?.[1];
+  if (id) { const p = (state.actionsPolicies ?? []).find((x) => x.id === Number(id)); p ? out(p) : missing(); }
+  out({ total_count: (state.actionsPolicies ?? []).length, policies: (state.actionsPolicies ?? []).map(({ conditions, rules, ...entry }) => entry) });
 }
 const env = repo + '/environments/reviewer';
 if (path === env) state.environment ? out(state.environment) : missing();
@@ -131,7 +140,8 @@ function variant(name, files) {
 
 /** What the fake GitHub holds of a repository that is as the factory wants it, with `over` laid over it. */
 function state(head, over = {}) {
-  const want = wanted({ kitLanded: true, branch: 'main', reviewer: '' });
+  // The Actions event policy the kit's gate-trusted.yml on main needs (#337): that file, and the one event it runs on.
+  const want = wanted({ kitLanded: true, branch: 'main', reviewer: '', target: { include: [TRUSTED], events: ['pull_request_target'] } });
   return {
     login: 'tuannd9288',
     agent: 'tuan9288-agent',
@@ -140,6 +150,7 @@ function state(head, over = {}) {
     collaborator: 'write',
     invitations: [],
     rulesets: want.rulesets.map((r, i) => ({ ...r, id: 100 + i })),
+    actionsPolicies: [{ ...want.actionsPolicy, id: 900 }],
     environment: { name: 'reviewer', deployment_branch_policy: BRANCH_POLICY, policies: [{ name: 'main', type: 'branch' }] },
     variables: [{ name: 'OTHER', value: OTHER_VALUE }],
     prs: [
@@ -222,6 +233,14 @@ test('settings: red names each call left, and when the kit is not on the default
   assert.equal(r.code, 1, r.out);
   assert.equal(mark(r.lines.settings), 'RED');
   assert.match(flat(r), /RED settings .*dev/);
+  // #337: the Actions event policy main's gate-trusted.yml needs, missing or allowing other events than its on: block names.
+  const policy = { id: 900, name: 'factory gate: pull_request_target', enforcement: 'active', conditions: { workflow_path: { include: [TRUSTED], exclude: [] } } };
+  for (const actionsPolicies of [[], [{ ...policy, rules: [{ type: 'restrict_action_events', parameters: { allowed_events: ['pull_request'] } }] }]]) {
+    r = doctor({ held: state(kitMerge, { actionsPolicies }) });
+    assert.equal(r.code, 1, r.out);
+    assert.deepEqual(marks(r), { ...green, settings: 'RED' }, r.out);
+    assert.match(flat(r), /RED settings .*Actions event policy "factory gate: pull_request_target"/);
+  }
 });
 
 /** A gate workflow as the target's main holds it. */
@@ -341,8 +360,10 @@ test('every gh call is a read: a GET with its query in the path, or a list or a 
   assert.ok(r.calls.length > 8);
   for (const args of r.calls) {
     assert.ok(!args.some((a) => /^(-X|--method|-f|-F|--field|--raw-field|--input)/.test(a)), JSON.stringify(args));
-    // The one flags of a read: the rules in force are read in full, page by page.
-    if (args[0] === 'api') assert.deepEqual(args.filter((a) => a.startsWith('-') && a !== '--paginate' && a !== '--slurp'), [], JSON.stringify(args));
+    // The one flags of a read: the rules in force are read in full, page by page, and the Actions policies name the API
+    // version they are documented for (#337).
+    const version = (a, i) => a === '-H' && args[i + 1] === 'X-GitHub-Api-Version: 2026-03-10';
+    if (args[0] === 'api') assert.deepEqual(args.filter((a, i) => a.startsWith('-') && a !== '--paginate' && a !== '--slurp' && !version(a, i)), [], JSON.stringify(args));
     else assert.ok(['variable list', 'pr list', 'pr checks'].includes(`${args[0]} ${args[1]}`), JSON.stringify(args));
   }
 });
