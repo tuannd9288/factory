@@ -11,17 +11,18 @@ import { factory } from './helpers.mjs';
 // The fake gh of queue-visible.test.mjs: who is logged in, and a repository with no pull request waiting.
 const GH = (login) => `#!/bin/sh\ncase "$*" in\n  "api user"*) echo ${login} ;;\n  *graphql*) echo '{"data":{"repository":{"pullRequests":{"nodes":[]}}}}' ;;\n  *rules/branches*) echo "[]" ;;\n  *) exit 1 ;;\nesac\n`;
 
-function withMachine(login, body) {
+function withMachine(login, body, over = () => ({})) {
   const dir = mkdtempSync(join(tmpdir(), 'queue-launchd-'));
   try {
     mkdirSync(join(dir, 'bin'));
-    writeFileSync(join(dir, 'bin/gh'), GH(login));
+    writeFileSync(join(dir, 'bin/gh'), typeof login === 'function' ? login(dir) : GH(login));
     chmodSync(join(dir, 'bin/gh'), 0o755);
     const home = join(dir, 'home');
     mkdirSync(home);
-    const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: home, FACTORY_STATE: join(dir, 'state') };
+    // The factory host's job, unless `over` says otherwise (#366: off it, the sweep needs the node's own agents token).
+    const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: home, FACTORY_STATE: join(dir, 'state'), FACTORY_HOST_USER: userInfo().username, ...over(dir) };
     const queue = (...args) => spawnSync(join(factory, 'bin/factory-queue'), args, { encoding: 'utf8', env });
-    body({ dir, home, queue });
+    body({ dir, home, queue, env });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -184,6 +185,37 @@ test('plist --daemon prints the job as the account that printed it, with its HOM
     assert.equal(job.KeepAlive, undefined);
     assert.equal(job.StandardOutPath, join(home, 'Library/Logs/factory/queue.log'));
     assert.deepEqual(readdirSync(home), [], 'plist made a folder');
+  });
+});
+
+// #366: the job off the factory host, on a node whose gh is the login of the person whose machine it is. The fake gh answers as the agents only
+// with their token in GH_TOKEN, and as that person otherwise.
+const NODE_GH = `#!/bin/sh\ncase "$*" in\n  "api user"*) if [ "$GH_TOKEN" = made-up-agents-token ]; then echo agent-bot; else echo tuannd9288; fi ;;\n  *graphql*) echo '{"data":{"repository":{"pullRequests":{"nodes":[]}}}}' ;;\n  *rules/branches*) echo "[]" ;;\n  *) exit 1 ;;\nesac\n`;
+const offHost = (dir) => ({ FACTORY_HOST_USER: 'nobody-here', AGENT_PROFILES: join(dir, 'profiles'), FACTORY_AGENT: 'fake-agent', XDG_DATA_HOME: join(dir, 'xdg'), FACTORY_CHECKOUT: '' });
+const storeToken = (dir) => {
+  mkdirSync(join(dir, 'profiles/tokens'), { recursive: true });
+  writeFileSync(join(dir, 'profiles/tokens/fake-agent'), 'made-up-agents-token\n');
+};
+
+test('off the factory host the job follows the node\'s installed copy and holds no token; check runs its sweep as the agents, or is not ready without their token (#366)', () => {
+  withMachine(() => NODE_GH, ({ dir, queue }) => {
+    let r = queue('check', '--repo', 'o/app');
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /^check: not ready: this node holds no GitHub token for the agents/m);
+    assert.doesNotMatch(r.stdout, /one sweep exited/, 'no sweep runs without the token');
+    storeToken(dir);
+    const printed = queue('plist', '--repo', 'o/app');
+    assert.equal(printed.status, 0, printed.stderr);
+    assert.equal(parse(printed.stdout, dir).EnvironmentVariables.FACTORY_CHECKOUT, join(dir, 'xdg/factory/checkout'));
+    assert.ok(!printed.stdout.includes('made-up-agents-token'), 'the job holds no token');
+    r = queue('check', '--repo', 'o/app');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^check: gh login agent-bot$/m);
+    assert.match(r.stdout, /^check: one sweep exited 0$/m);
+    assert.ok(!r.stdout.includes('made-up-agents-token'), 'nor does what check prints');
+  }, offHost);
+  withMachine('agent-bot', ({ dir, queue }) => {
+    assert.equal(parse(queue('plist', '--repo', 'o/app').stdout, dir).EnvironmentVariables.FACTORY_CHECKOUT, undefined, 'on the host the job is as it was');
   });
 });
 

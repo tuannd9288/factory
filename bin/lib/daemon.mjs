@@ -53,6 +53,7 @@ import { openStore } from './store.mjs';
 import { startLinearSource } from './linear-listen.mjs';
 import { postSync } from './wake.mjs';
 import { recordsWriter } from './shared-records.mjs';
+import { nodeLogin } from './node.mjs';
 
 export const PASS_MS = 60_000;
 const LOG_MAX = 10 * 1024 * 1024;
@@ -220,7 +221,7 @@ function releaseQueueLock(state) {
 
 /** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow`, `startSource`, `pushRecords` and `onStart` (told
  * { stop, d } once it listens) are passed in for tests. */
-export async function run({ state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'), human = process.env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = process.env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(process.env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
+export async function run({ env = process.env, state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'), runs = env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), human = env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
   const sock = socketPath(state);
   if (!fits(sock)) throw new Error(`the socket path ${sock} is longer than 103 bytes`);
   mkdirSync(state, { recursive: true });
@@ -239,6 +240,24 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     throw error;
   }
   const d = { state, runs, store, lock, post, log, pushRecords, held: null, lastPing: Date.now(), passes: 0, passing: false, stopping: false, moved: false, worker: null, timer: null, startedAt: new Date().toISOString() };
+  // #366: off the factory host the daemon's gh and git run as the agents, with this node's own token (bin/lib/node.mjs), never with the login of
+  // the person whose machine it is. The token goes into the daemon's environment alone, which its pass and its pushes inherit. With none
+  // stored, the daemon answers its job, runs no pass and pushes nothing, says why once, and reads the store again before each pass.
+  d.refused = null;
+  d.pushRecords = () => (d.refused === null ? pushRecords() : Promise.resolve());
+  const login = () => {
+    const got = nodeLogin(env, state);
+    if (got.refusal) {
+      if (d.refused !== got.refusal) log(`daemon: ${got.refusal}; no pass runs until it is stored`);
+      d.refused = got.refusal;
+      return false;
+    }
+    if (d.refused) log("daemon: the agents' GitHub token is stored; the passes start");
+    d.refused = null;
+    Object.assign(env, got.env);
+    return true;
+  };
+  const loggedIn = login();
   let server = null;
   let stopped;
   const finished = new Promise((done) => (stopped = done));
@@ -269,11 +288,16 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
   };
   const startPass = () => {
     if (d.passing || d.stopping) return;
+    if (!login()) {
+      d.timer = setTimeout(startPass, passMs);
+      return;
+    }
+    d.linear ??= startSource({ state, store, runs, log });
     d.pushRecords();
     d.passing = true;
     const began = Date.now();
     let result = null;
-    const worker = new Worker(passFile, { workerData: { state, human } });
+    const worker = new Worker(passFile, { workerData: { state, human }, env });
     d.worker = worker;
     worker.on('message', (m) => {
       if (m?.type === 'pass') result = m;
@@ -302,7 +326,7 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     releaseLock(lockFile, lock.token);
     throw error;
   }
-  d.linear = startSource({ state, store, runs, log });
+  d.linear = loggedIn ? startSource({ state, store, runs, log }) : null;
   if (signals) for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => stop(`signal ${sig}`));
   log(`daemon: listening on ${sock} (pid ${process.pid}, head ${String(LOADED ?? 'unknown').slice(0, 7)})`);
   // The lease: the job pings once a minute, so a daemon nobody pings (its job booted out) stops by itself, by the path of SIGTERM.

@@ -11,11 +11,10 @@
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { accessSync, constants, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkoutRoot } from './checkout.mjs';
+import { TOKEN_GIT, installedRoot, nodeGithubToken, placeOf } from './node.mjs';
 import { quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
@@ -167,17 +166,9 @@ export function contextOf(env = process.env) {
   };
 }
 
-/** The factory host is where the command runs as the host's user: FACTORY_HOST_USER, `factory` unless the setting names another. */
-export const placeOf = (env = process.env) => (userInfo().username === (env.FACTORY_HOST_USER || 'factory') ? 'factory' : 'macbook');
-
-/** Where this machine's installed copy of the factory is (#390): $FACTORY_CHECKOUT; on the factory host ~/WORKSPACES, as the queue's
- * checkoutRoot has it; on the MacBook ${XDG_DATA_HOME:-~/.local/share}/factory/checkout, outside the folders macOS refuses a launchd job.
- * Everything that runs on a schedule, and `factory` on the PATH, takes its root from here and never from where the running file sits. */
-export function installedRoot(env = process.env) {
-  if (env.FACTORY_CHECKOUT) return env.FACTORY_CHECKOUT;
-  if (placeOf(env) === 'factory') return checkoutRoot(env) ?? join(env.HOME, 'WORKSPACES');
-  return join(env.XDG_DATA_HOME || join(env.HOME, '.local/share'), 'factory/checkout');
-}
+// The place this command runs in and the installed copy of the factory are this node's (bin/lib/node.mjs), re-exported for the commands
+// that read them from here.
+export { installedRoot, placeOf };
 
 const win = (w) => (w ? { use: w.use, resetsAt: w.resetsAt } : null);
 
@@ -438,13 +429,6 @@ function lead(all, env) {
   return r.status ?? 1;
 }
 
-/** The agents' GitHub token in this node's own token store (#366), under the account bin/onboard names (FACTORY_AGENT, default
- * tuan9288-agent); undefined on the factory host, whose gh has its own login, and on a node that holds none. */
-function nodeGithubToken(env) {
-  if (placeOf(env) === 'factory') return undefined;
-  return readTokenFile(join(tokenDir(contextOf(env).agentProfiles), env.FACTORY_AGENT ?? 'tuan9288-agent')).token;
-}
-
 /** The agents' git name and e-mail (#349, #366). With the node's agents token, from GitHub: `gh api user` gives the login and the id,
  * and the e-mail is GitHub's noreply address for them; this node's own git settings are the Human's and are never read. Without it, read
  * on the factory host as the host's user, from its own git settings: no account is named in this repository. { name, email }, or null
@@ -672,11 +656,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   const copy = { hooks: [{ type: 'command', command: `CLAUDE_CONFIG_DIR=${quote(config)} ${[process.execPath, transcriptHook, join(runDir, 'transcripts')].map(quote).join(' ')}` }] };
   // With the node's agents token, git pushes to GitHub over HTTPS with it: one credential helper for https://github.com that reads
   // $GH_TOKEN from the session's environment, and GitHub's ssh addresses rewritten to HTTPS. Without it, pushes stay blocked (GIT_CONFIG).
-  const gitConfig = token ? [
-    ['credential.helper', ''],
-    ['credential.https://github.com.helper', '!f() { if [ "$1" = get ]; then printf "%s\\n" "username=x-access-token" "password=$GH_TOKEN"; fi; }; f'],
-    ...['git@github.com:', 'ssh://git@github.com/'].map((from) => ['url.https://github.com/.insteadOf', from]),
-  ] : GIT_CONFIG;
+  const gitConfig = token ? TOKEN_GIT : GIT_CONFIG;
   const settings = {
     autoMode: { environment: AUTO_MODE_ENVIRONMENT },
     hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },

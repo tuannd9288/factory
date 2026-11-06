@@ -3,9 +3,9 @@
 // Claude Code's sandbox. The pass is a fake worker file; no test reaches GitHub (the fake gh refuses).
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -47,7 +47,9 @@ async function world(body, { pass = FAKE_PASS } = {}) {
   const start = async (extra = {}) => {
     let up;
     const ready = new Promise((done) => (up = done));
-    const finished = run({ state, runs, human: 'nobody', passFile: new URL(`file://${join(dir, 'pass.mjs')}`), post, log: () => {}, signals: false, startSource: () => null, pushRecords: () => {}, onStart: up, ...extra });
+    // The factory host's daemon, unless a test gives another environment (#366).
+    const env = { ...process.env, FACTORY_HOST_USER: userInfo().username };
+    const finished = run({ env, state, runs, human: 'nobody', passFile: new URL(`file://${join(dir, 'pass.mjs')}`), post, log: () => {}, signals: false, startSource: () => null, pushRecords: () => {}, onStart: up, ...extra });
     const api = await Promise.race([ready, finished.then(() => null)]);
     daemons.push({ api, finished });
     return { api, finished };
@@ -64,6 +66,52 @@ async function world(body, { pass = FAKE_PASS } = {}) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// A pass that records the gh and git environment it ran with, in <state>/pass-env.
+const ENV_PASS = `
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parentPort, workerData } from 'node:worker_threads';
+const seen = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(GH_|GITHUB_TOKEN$|GIT_)/.test(k)));
+writeFileSync(join(workerData.state, 'pass-env'), JSON.stringify(seen));
+parentPort.postMessage({ type: 'pass', code: 0, heldBy: null, moved: false });
+`;
+
+test('off the factory host a pass runs as the agents with the node\'s own token, and with none stored none runs and the daemon says why once (#366)', () =>
+  world(async ({ dir, state, start }) => {
+    const lines = [];
+    const profiles = join(dir, 'profiles');
+    const caller = { GH_TOKEN: 'made-up-callers-token', GH_CONFIG_DIR: join(dir, 'callers-gh') };
+    const env = { ...process.env, ...caller, FACTORY_HOST_USER: 'nobody-here', AGENT_PROFILES: profiles, FACTORY_AGENT: 'fake-agent' };
+    await start({ env, passMs: 50, log: (line) => lines.push(line) });
+    await new Promise((done) => setTimeout(done, 300));
+    assert.ok(!existsSync(join(state, 'pass-env')), 'no pass runs while the node holds no agents token');
+    assert.equal(lines.filter((l) => /holds no GitHub token for the agents/.test(l)).length, 1, lines.join('\n'));
+    // Stored later: the next pass finds it, and runs with it alone.
+    mkdirSync(join(profiles, 'tokens'), { recursive: true });
+    writeFileSync(join(profiles, 'tokens/fake-agent'), 'made-up-agents-token\n');
+    assert.ok(await wait(() => existsSync(join(state, 'pass-env'))), lines.join('\n'));
+    const seen = JSON.parse(readFileSync(join(state, 'pass-env'), 'utf8'));
+    assert.equal(seen.GH_TOKEN, 'made-up-agents-token');
+    assert.equal(seen.GITHUB_TOKEN, '');
+    assert.notEqual(seen.GH_CONFIG_DIR, caller.GH_CONFIG_DIR);
+    assert.deepEqual(readdirSync(seen.GH_CONFIG_DIR), [], 'gh reads no login folder');
+    // git, given that environment, answers GitHub with the agents' token and no helper of the machine's own.
+    const fill = spawnSync('git', ['credential', 'fill'], { env: { PATH: process.env.PATH, HOME: dir, ...seen }, input: 'protocol=https\nhost=github.com\n\n', encoding: 'utf8' });
+    assert.equal(fill.status, 0, fill.stderr);
+    assert.match(fill.stdout, /^password=made-up-agents-token$/m);
+    assert.ok(!lines.some((l) => l.includes('made-up-agents-token')), 'the token is in no log line');
+    assert.equal(env.GH_TOKEN, 'made-up-agents-token', 'the daemon\'s own environment, which its pushes inherit');
+  }, { pass: ENV_PASS }));
+
+test('on the factory host the pass runs with the environment the job gave it, unchanged (#366)', () =>
+  world(async ({ state, start }) => {
+    await start({ env: { ...process.env, FACTORY_HOST_USER: userInfo().username, GH_TOKEN: 'made-up-host-token' }, passMs: 50 });
+    assert.ok(await wait(() => existsSync(join(state, 'pass-env'))));
+    const seen = JSON.parse(readFileSync(join(state, 'pass-env'), 'utf8'));
+    assert.equal(seen.GH_TOKEN, 'made-up-host-token');
+    assert.equal(seen.GIT_CONFIG_COUNT, process.env.GIT_CONFIG_COUNT);
+  }, { pass: ENV_PASS }));
 
 const record = (tag, extra = {}) => ({ role: 'worker', tag, run: '/runs/app-7', team: 'app-lead', session: `s-${tag}`, end: new Date().toISOString(), structured: { conclusion: 'done' }, ...extra });
 
