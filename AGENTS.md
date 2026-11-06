@@ -283,12 +283,14 @@ Six steps, run by Colly and a team:
    approval of the kit pull request covers it. The merge queue then sweeps the repository with nothing more from
    him, and no `sudo` install for each new repository (#211). The queue job's one install is his, together with the
    other daemons after #203 (#209).
-5. The team sweeps the repository (#20) with the Human's `repo-refresh` skill (#19) in audit mode, then opens one
-   pull request per area through the gate.
+5. When the kit pull request merges, the team's Lead opens one Needs Human item asking the Human to type
+   `/repo-refresh` in audit mode in that Lead's session. The sweep follows the pack's docs rule (`packs/pstack/section.md`,
+   "Docs") and steers nothing into `docs/architecture`, `docs/product` or `docs/process`; the team then opens one pull
+   request per area through the gate, and one that seeds the Feature Map with `/pstack:create-verification-skill`.
 6. When `bin/onboard-doctor` prints every line green, Colly closes the issue.
 
-His part is the two approvals, and pasting the reviewer's secret where the repository uses the kit's Claude reviewer;
-Entire needs none (#155).
+His part is the two approvals, typing `/repo-refresh` in audit mode in the Lead's session, and pasting the reviewer's
+secret where the repository uses the kit's Claude reviewer; Entire needs none (#155).
 
 What step 2 sets and reads back is in the header of `bin/onboard-owner`; what step 3 does, file by file, is in the header of
 `bin/onboard`. Use `bin/onboard` once, for a repository that has no kit yet, and `bin/kit-update` for every later move of an

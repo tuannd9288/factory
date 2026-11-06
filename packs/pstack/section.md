@@ -17,6 +17,17 @@ plugin is under `~/.local/share/factory/plugins/`; `recall` and `reflect` read a
 folder, or a Lead's `~/factory-runs/<repo>-<team>/transcripts/`; no profile gets a rules file, so a role uses its
 skill's default model.
 
+## Docs
+
+- A work spec is its tracker issue. No `docs/` tree is required.
+- A product description is the Feature Map: `feature-map/` at the repository root, a `README.md` index and one short
+  file per feature, from the user's side, in the four sections `/pstack:create-verification-skill` writes.
+- A pull request that changes a feature updates that feature's file.
+- A flow diagram is drawn only for a complex flow, with `/pstack:statechart`, in that feature's file.
+- Linear Documents hold only writing the Human reads.
+- Until the map is seeded, an existing feature doc stays where it is and is corrected in place; the pull request that
+  seeds the map moves it in and deletes the old file.
+
 ## Shipping with pstack
 
 Push, then run `scripts/ship --body-file <body>` until it says `armed` or stops. Each run takes the next step: it opens
