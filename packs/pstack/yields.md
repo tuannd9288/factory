@@ -29,6 +29,17 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
 - **`AskUserQuestion`** (`docs/harness/claude-code.md:10`: "In `-p` mode it is absent, so ask in plain text"). A `-p`
   seat's tool list in its log (#203's `run-yields-2.jsonl`, line 3) holds no `AskUserQuestion`, so a seat asks in its
   report. `bin/seat`'s code says nothing of it. An interactive Lead: not checked.
+- **The Feature Map** (`skills/create-verification-skill/SKILL.md:11,36-38`; `skills/maintain-verification-skill/SKILL.md:11`).
+  It is `.claude/skills/verify-<app>/features/`, the adapter's place for `.cursor/skills/` (`docs/harness/claude-code.md:52`),
+  seeded from source by `create-verification-skill` §3 and updated by each pull request that changes a feature
+  (`lead.md` steps 3 and 6; INN-23 A). The Lead writes it itself, since a worker seat cannot write under
+  `.claude/skills/`: the sandbox denies it (code.claude.com/docs/en/sandboxing, "Protected paths"), and in auto mode the
+  Lead's Edit there is the classifier's call (code.claude.com/docs/en/permission-modes, "Protected paths"). Every change
+  to it is tier 3 (`/.claude` in `.gate/protected`). Not taken: the generated `SKILL.md` and its proof run (§2 and §4,
+  `:25-34` and `:40-42`), and `maintain-verification-skill`'s pass, whose live drive is required (`:35`): a worker seat
+  cannot start the app (no network and no local binding, `sandboxSettings` in `bin/lib/seat.mjs`), and there is no
+  driver until #264. Also not taken: its daily run "from a scheduled automation" (`docs/guide/06-verify-and-ship.md:88`),
+  which Claude Code lacks (`docs/harness/claude-code.md:58-60`). The Human approved this on <date>.
 
 `/repo-refresh` (the Human's, #19) runs only when typed, hidden from the model. Its audit mode, the default,
 changes nothing; its apply mode changes a repository only through pull requests that pass the gate.

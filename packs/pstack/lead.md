@@ -35,9 +35,18 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    and `.gate/bin/verify --fast` on the staged files before each commit. Never write "check it against" a script: the
    session then builds its own command, a deny rule refuses it, and it stops with no test run (#256). Tell the worker to
    list in `foundOutside` each bug or improvement it finds outside the issue, with where, and to fix none of them on the
-   branch. Work the issue needs is not a finding; the worker does it. Tell every seat to stop on a refused action,
+   branch. Work the issue needs is not a finding; the worker does it. Where the repository has a Feature Map
+   (`.claude/skills/verify-<app>/features/`) and the change alters a feature a user reaches, update that feature's file
+   yourself in the worktree and commit it before step 6, or, for a new feature, add its file and its line in the map's
+   `README.md`: a seat cannot write under `.claude/skills/`. Tell every
+   seat to stop on a refused action,
    report its exact message to you and never retry it in another form, with another tool or a script. You handle
-   approvals; seat briefs do not describe them.
+   approvals; seat briefs do not describe them. A repository with no Feature Map gets one issue to seed it, filed as
+   step 4 files a finding. You seed it yourself, since a seat cannot write under `.claude/skills/`: follow §3 alone of
+   `create-verification-skill`'s `SKILL.md`, read from the plugin, from the source:
+   `.claude/skills/verify-<app>/features/README.md` and one file for each of the top three to five user-facing
+   features, with no `SKILL.md` and no run of the app; an existing feature doc moves into the map, and its old file is
+   deleted, in the same pull request.
 4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
    `/Users/factory/WORKSPACES/bin/seat worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
    the background: end the turn. A `seat-ended` wake says it ended; only then check, with Grep, once,
@@ -78,7 +87,9 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    named as in step 3 (`.gate/bin/verify --tests <files>` and `.gate/bin/red-check --base origin/main`; `--fast`
    checks only staged files, and a committed change has none), or that it runs none, since step 5 ran them, that it
    writes nothing in the worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists
-   what it found. Start it with step 4's command, with `reviewer` in place of `worker`, its own brief and
+   what it found. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
+   a user reaches and leaves that feature's file unchanged. Start it with step 4's command, with `reviewer` in place of
+   `worker`, its own brief and
    `--tag review<k>`, and on its wake find its record with `"tag":"review<k>"` the same way; sort its `foundOutside`
    as in step 4. On `FAIL`, brief a fix round as in step 5, run step 5's checks again, then review again. A `fix<k>`
    or `review<k>` tag is used once in a run: `<k>` counts on and never restarts. Push only after a `PASS`; after three
@@ -141,7 +152,7 @@ for example "Waiting on #212 checks" or "Waiting on review2 of #212", so the pan
 ## Never
 - Log in, or ask a worker to; write through `gh api` (a REST POST, PUT, PATCH or DELETE, or a GraphQL mutation)
   without his approval; push to `main`, tag, or merge by hand; `forcePush` on origin/main defaults to `pstack`, allowing only your own PR branch with `--force-with-lease`, never main; `off` forbids rewrites.
-- Write the change yourself: a worker writes it, you brief and check.
+- Write the change yourself: a worker writes it, you brief and check; the Feature Map's files are the one exception (step 3).
 - Change this repository's files other than through a pull request.
 - Write or change a file through Bash (a heredoc, `cat >`, `tee`, `printf >` or `echo >`): use the Edit and Write tools.
 - Retry a refused action (a push, a read, a deny rule, a command that requires approval) in another form, with another
