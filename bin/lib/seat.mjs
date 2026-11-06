@@ -19,16 +19,16 @@ import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } f
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. `foundOutside` lists the bugs and
  * improvements it found outside its task, one line each, for the Lead to file (#338). `findings` is a reviewer's list of what it
- * found, each with its kind (#408); every other role returns an empty list. */
+ * found, each with its kind (#408); every other role returns an empty list. `needsLead` returns questions to the Lead. */
 export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['conclusion', 'evidence', 'couldNotRead', 'needsHuman', 'foundOutside', 'findings'],
+  required: ['conclusion', 'evidence', 'couldNotRead', 'needsLead', 'foundOutside', 'findings'],
   properties: {
     conclusion: { type: 'string' },
     evidence: { type: 'array', items: { type: 'string' } },
     couldNotRead: { type: 'array', items: { type: 'string' } },
-    needsHuman: { type: 'array', items: { type: 'string' } },
+    needsLead: { type: 'array', items: { type: 'string' } },
     foundOutside: { type: 'array', items: { type: 'string' } },
     findings: {
       type: 'array',
@@ -82,13 +82,13 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
 export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
-// No agent runs `factory login` or `factory store` (#177): the Human alone puts a token in the store. The leading `*` takes
+// No agent runs `factory account add` or `factory store` (#177): the Human alone puts a token in the store. The leading `*` takes
 // `factory` by name, by a relative or an absolute path and after other words; the two library rules close the `node` grant.
-// `factory logout` stays the Human's alone. Colly may run `factory use` and `factory lead` on his spoken word
+// `factory account remove` stays the Human's alone. Colly may run `factory use` and `factory lead` on his spoken word
 // (INN-30, 2026-11-05); every bin/seat role and every Lead keep their deny on all five, unchanged.
 export const tokenStoreDeny = [
-  'Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)',
-  'Bash(*factory use*)', 'Bash(*factory logout*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs logout*)',
+  'Bash(*factory account add*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs store*)',
+  'Bash(*factory use*)', 'Bash(*factory account remove*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs account remove*)',
 ];
 // The copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185): only the Lead reads its own, so every seat role is
 // denied them. The Lead's own deny list takes secretsRead alone.
@@ -398,11 +398,11 @@ export function parseArgs(argv) {
 }
 
 /** The token of a seat's account from its file under tokens/, trailing newlines stripped. Refuses, naming the path only, when the
- * file is missing (and then names `factory login`), empty or holds any byte outside printable ASCII (0x21-0x7E): such a value
+ * file is missing (and then names `factory account add`), empty or holds any byte outside printable ASCII (0x21-0x7E): such a value
  * would make Node throw an error that quotes it. */
 function readToken(path, seat, account) {
   const r = readTokenFile(path);
-  if (r.error === 'missing') throw new Refused(`seat ${seat}: the account ${account} has no token file ${path}; the Human runs \`factory login ${account}\``);
+  if (r.error === 'missing') throw new Refused(`seat ${seat}: the account ${account} has no token file ${path}; the Human runs \`factory account add ${account}\``);
   if (r.error) throw new Refused(`seat ${seat}: the token file ${path} is empty or not printable ASCII`);
   return r.token;
 }

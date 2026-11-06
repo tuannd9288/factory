@@ -10,11 +10,11 @@ const lib = () => import('../bin/lib/seat.mjs');
 const RUN = '/r/issue-1';
 const WORK = '/r/w';
 const HOME = '/h';
-const SCHEMA = '{"type":"object","additionalProperties":false,"required":["conclusion","evidence","couldNotRead","needsHuman","foundOutside","findings"],"properties":{"conclusion":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"couldNotRead":{"type":"array","items":{"type":"string"}},"needsHuman":{"type":"array","items":{"type":"string"}},"foundOutside":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","claim","blocking"],"properties":{"kind":{"type":"string","pattern":"^[a-z0-9]+(-[a-z0-9]+)*$","maxLength":40},"claim":{"type":"string"},"blocking":{"type":"boolean"}}}}}}';
+const SCHEMA = '{"type":"object","additionalProperties":false,"required":["conclusion","evidence","couldNotRead","needsLead","foundOutside","findings"],"properties":{"conclusion":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"couldNotRead":{"type":"array","items":{"type":"string"}},"needsLead":{"type":"array","items":{"type":"string"}},"foundOutside":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","claim","blocking"],"properties":{"kind":{"type":"string","pattern":"^[a-z0-9]+(-[a-z0-9]+)*$","maxLength":40},"claim":{"type":"string"},"blocking":{"type":"boolean"}}}}}}';
 
 const DENY = [
-  'Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)',
-  'Bash(*factory use*)', 'Bash(*factory logout*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs logout*)',
+  'Bash(*factory account add*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs store*)',
+  'Bash(*factory use*)', 'Bash(*factory account remove*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs account remove*)',
   'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', 'Bash(/h/.local/bin/herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'WebFetch', 'WebSearch',
   'Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)',

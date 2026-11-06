@@ -43,6 +43,33 @@ export function recordedPath(file) {
   return text.trim().replace(/^uds:/, '') || null;
 }
 
+/** Checks whether the recorded inbox is listening, without writing to the connection. Uses the same path and owner checks as post. */
+export async function alive(file) {
+  const path = recordedPath(file);
+  if (path === null || !isAbsolute(path)) return false;
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch {
+    return false;
+  }
+  if (!st.isSocket() || st.uid !== process.getuid?.()) return false;
+  return new Promise((done) => {
+    let over = false;
+    const finish = (result) => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      socket.destroy();
+      done(result);
+    };
+    const socket = createConnection(path);
+    const timer = setTimeout(() => finish(false), POST_TIMEOUT_MS);
+    socket.on('error', () => finish(false));
+    socket.on('connect', () => finish(true));
+  });
+}
+
 /** Posts `line` to the socket whose path `file` records. Resolves { posted: true } or { posted: false, why }: no file (nothing recorded, or
  * the socket is gone), not an absolute path, not a socket (a symlink counts as none), not ours (another user's), refused (nothing listens
  * there), timed out. */

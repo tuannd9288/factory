@@ -138,9 +138,12 @@ describe('leadArgs', () => {
       'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
       'Bash(factory linear:*)',
       'Bash(' + root + '/bin/seat:*)',
-      'Bash(' + root + '/bin/brief-check:*)',
     ]);
     for (const bad of ['Bash(gh:*)', 'Bash(git:*)']) assert.ok(!list('--allowedTools').includes(bad));
+  });
+
+  test('the removed brief checker has no execution grant (#482)', () => {
+    assert.ok(!list('--allowedTools').includes('Bash(' + root + '/bin/brief-check:*)'));
   });
 
   test('the Lead edits a pull request\'s body through scripts/pr-body, never gh pr edit (#386)', () => {
@@ -169,7 +172,7 @@ describe('leadArgs', () => {
     for (const rule of ['Read(~/.agent-profiles/tokens/**)', 'Read(~/.agent-profiles/archive/**)', 'Read(~/.agent-profiles/seats/1/oauth-token)']) assert.ok(deny.includes(rule), rule);
   });
 
-  test('the deny list refuses factory login, store, use and logout in every form, and not the list', () => {
+  test('the deny list refuses factory account add, store, use and logout in every form, and not the list', () => {
     const deny = list('--disallowedTools');
     for (const command of FORMS) assert.ok(deny.some((r) => matches(r, command)), command);
     for (const command of HARMLESS) assert.ok(!deny.some((r) => matches(r, command)), command);
