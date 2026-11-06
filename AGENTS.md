@@ -91,8 +91,8 @@ that approval it requests the code owners' review on GitHub, so the pull request
   switch is at `all` (#333), a tier-3 pull request needs no approval of his (a `needs-human` one too, as the code does:
   his choice on #354, 2026-11-02 20:16:33 +07, review 5737110797); a deploy is still his.
 - His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
-  `reviewer` environment, "Allow auto-merge"), which Colly then applies on his login; and the reviewer's secret, where a
-  repository uses the kit's Claude reviewer.
+  `reviewer` environment, "Allow auto-merge", the Actions event policy for `pull_request_target`), which Colly then
+  applies on his login; and the reviewer's secret, where a repository uses the kit's Claude reviewer.
 - Logging into the verifier's Codex profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.
@@ -230,7 +230,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
 | `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
 | `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
-| `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment), which Colly runs on the Human's login after his one approval |
+| `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment, Actions event policy), which Colly runs on the Human's login after his one approval; on the factory's own repository it sets the Actions event policy alone (#337) |
 | `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
 | `bin/onboard-doctor` | Reads one repository taken in and prints one line per check, green or red, and changes nothing; Colly runs it on the Human's login, from a commit on `main`; the "Take <repo> in" issue closes on its output |
 | `bin/kit-update` | The onboarded repository's counterpart of onboard: brings its clone up to a factory commit, with evidence, in a pull request from `factory/kit-<sha7>` |
