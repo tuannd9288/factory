@@ -9,7 +9,7 @@ import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from '../packs/pstack/bin/lead.mjs';
-import { main } from '../bin/lib/factory.mjs';
+import { main, noPushGitEnv } from '../bin/lib/factory.mjs';
 
 /** Whether a Bash(...) rule matches a command, by the three rules of Claude Code's permissions page ("Wildcard patterns", read 2026-11-06):
  * a `*` matches any text, spaces included; a trailing `*` with a space before it, the rule's only `*`, also matches the bare command; `:*` at
@@ -24,7 +24,7 @@ function bashMatches(rule, command) {
   return new RegExp(`^${source}$`, 's').test(command);
 }
 
-test('colly isolates GitHub and grants only use and lead, with the pack role required', async (t) => {
+test('colly isolates GitHub and git, grants use, lead and account list, and runs with the pack role required (#365 B8)', async (t) => {
   const state = fs.mkdtempSync(join(tmpdir(), 'factory-colly-'));
   const env = { HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', GH_TOKEN: 'inherited', GITHUB_TOKEN: 'inherited' };
   const calls = [];
@@ -59,6 +59,18 @@ test('colly isolates GitHub and grants only use and lead, with the pack role req
     assert.equal(settings.env.GITHUB_TOKEN, '');
     assert.deepEqual(fs.readdirSync(settings.env.GH_CONFIG_DIR), []);
     assert.equal(fs.statSync(settings.env.GH_CONFIG_DIR).mode & 0o777, 0o700);
+    // #365 B8: the git fence of a MacBook Lead that holds no agents' token. No prompt, ssh off, every credential helper emptied, and each
+    // GitHub push URL rewritten to an unreachable one, so a push never uses his credential helper or SSH key.
+    const push = 'url.file:///nonexistent/factory-lead-pushes-from-the-mac-mini/.pushInsteadOf';
+    const gitPairs = Array.from({ length: Number(settings.env.GIT_CONFIG_COUNT) }, (_, i) => [settings.env[`GIT_CONFIG_KEY_${i}`], settings.env[`GIT_CONFIG_VALUE_${i}`]]);
+    assert.deepEqual(gitPairs, [['credential.helper', ''], [push, 'https://github.com/'], [push, 'git@github.com:'], [push, 'ssh://git@github.com/']]);
+    assert.equal(settings.env.GIT_TERMINAL_PROMPT, '0');
+    assert.match(settings.env.GIT_SSH_COMMAND, /git over ssh is off/);
+    for (const [key, value] of Object.entries(noPushGitEnv())) assert.equal(settings.env[key], value, key);
+    // Its classifier is not told that a push is routine for it.
+    assert.equal(settings.autoMode.environment[0], '$defaults');
+    assert.ok(!settings.autoMode.environment.some((e) => /Pushes to them go/.test(e)), 'no source-control write is routine for Colly');
+    assert.ok(settings.autoMode.environment.some((e) => /Colly pushes nothing/.test(e)));
     assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)']);
     assert.deepEqual(settings.permissions.deny, [
       'Read(~/.agent-profiles/**)', `Read(/${join(state, '.agent-profiles')}/**)`,

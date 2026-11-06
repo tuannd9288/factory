@@ -492,6 +492,17 @@ const GIT_CONFIG = [
   ...['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].map((from) => [`url.${PUSH_BASE}.pushInsteadOf`, from]),
 ];
 
+/** git settings as the environment variables git reads them from: GIT_CONFIG_COUNT and a GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n pair for each. */
+const gitConfigEnv = (pairs) => ({
+  GIT_CONFIG_COUNT: String(pairs.length),
+  ...Object.fromEntries(pairs.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
+});
+
+/** The git fence of a factory session on this MacBook that holds no agents' GitHub token: a `--here` Lead without one (#366) and Colly,
+ * always (#365 B8). No password prompt, ssh off (GIT_SSH_COMMAND), every credential helper emptied, and GitHub's push URLs rewritten to
+ * an unreachable one (GIT_CONFIG), so a push can never use the Human's own credential helper or SSH key. Fetches are untouched. */
+export const noPushGitEnv = () => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, ...gitConfigEnv(GIT_CONFIG) });
+
 // What the auto-mode classifier of a MacBook Lead and of Colly is told is inside its boundary (#366, #365): it trusts only the working
 // folder and its remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat
 // goes through that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
@@ -501,6 +512,16 @@ const AUTO_MODE_ENVIRONMENT = [
   `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). The factory's sessions on this MacBook (a team's Lead, and Colly, the Human's own assistant) run their routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), a Lead's workers with /Users/factory/WORKSPACES/bin/seat, Colly's watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow, and reads of that account's git settings.`,
   `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear and factory wake run on ${HOST} over that ssh. factory use and factory account add are the Human's, never a Lead's.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh. Pushes to them go over HTTPS as the agents' GitHub account: from this MacBook when it holds the agents' GitHub token, otherwise from ${HOST}.`,
+];
+
+// What Colly's auto-mode classifier is told (#365 B8). The Mac mini and the factory's commands are inside, as for a MacBook Lead, but
+// Colly pushes nothing: its git cannot reach GitHub (noPushGitEnv), so no source-control write is routine for it. "$defaults" keeps
+// the built-in entries.
+const COLLY_AUTO_MODE_ENVIRONMENT = [
+  '$defaults',
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). Colly, the Human's own assistant on this MacBook, runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list) and its watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login, on ${HOST} over ssh factory@${HOST}, or on this MacBook itself when its token store holds the agents' GitHub token; factory linear and factory wake run on ${HOST}. On the Human's spoken word Colly runs factory use and factory lead; factory account add, factory account remove and factory store are the Human's, never Colly's.`,
+  `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it. Colly reads them, and reads and writes their issues and pull requests only through factory gh, as the agents. Colly pushes nothing and makes no source-control write of its own: its git cannot push to GitHub, and a git push, a force push, or a branch or tag write by Colly is never routine.`,
 ];
 
 /** Where the socket of the MacBook Lead of a repository's team is recorded (#351), beside `lead-here`'s other files. */
@@ -704,9 +725,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     env: {
       GH_CONFIG_DIR: empty, ...(token ? {} : { GH_TOKEN: '' }), GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
-      GIT_TERMINAL_PROMPT: '0', ...(token ? {} : { GIT_SSH_COMMAND }),
-      GIT_CONFIG_COUNT: String(gitConfig.length),
-      ...Object.fromEntries(gitConfig.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
+      ...(token ? { GIT_TERMINAL_PROMPT: '0', ...gitConfigEnv(gitConfig) } : noPushGitEnv()),
     },
     // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
     // env and printenv as for every role and seat (#181): the session's environment holds the team's Claude token and, with a stored
@@ -837,9 +856,11 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
     },
     // Claude Code status line docs, captured 2026-11-03, line 67: refreshInterval re-runs the command every N seconds.
     statusLine: { type: 'command', command: [process.execPath, factory, 'colly', '--line'].map(quote).join(' '), refreshInterval: 60 },
-    // Colly reaches the Mac mini by ssh (factory gh, bin/factory-events --follow), as a MacBook Lead does.
-    autoMode: { environment: AUTO_MODE_ENVIRONMENT },
-    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '' },
+    // Colly reaches the Mac mini by ssh (factory gh, bin/factory-events --follow), as a MacBook Lead does, but pushes nothing (#365 B8).
+    autoMode: { environment: COLLY_AUTO_MODE_ENVIRONMENT },
+    // No gh login of the Human's, and the git fence of a MacBook Lead with no agents' token: a push from Colly's pane never uses his
+    // credential helper or SSH key (#365 B8, H9 rule 3).
+    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '', ...noPushGitEnv() },
     permissions: {
       defaultMode: 'auto',
       // Colly sees the accounts table on every node, which prints no token (#365, his requirement of 2026-11-06).
