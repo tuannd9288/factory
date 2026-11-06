@@ -1,11 +1,16 @@
 // #414: the daemon's read-only Linear source. Catch-up and the buffered stream share
 // one recording function; the store commits the deduplication row and cursor together.
+// For a day of real use (FAC-38): each row says whether the stream delivered it (`via`, bin/lib/store.mjs), the daemon's log has one line for
+// each close (its code, time and the wait before the next connect) and each connect, and `bin/factory-daemon linear-check --since <time>`
+// lists the events of the window that the store lacks (linearCheck below).
 import { readRegistry, TEAM_KEY } from './linear-repos.mjs';
 import { CONDITION, createLinear, isAuthFailure } from './linear.mjs';
 import { join } from 'node:path';
 import { commentsOfIssue, holderOf } from './linear-cli.mjs';
 import { post as postAsync, wakeLine } from './wake.mjs';
 import { record, appendStart, innAnswer } from './events.mjs';
+import { ask, socketPath } from './daemon-proto.mjs';
+import { linearKey } from './store.mjs';
 
 const COMMENT = 'id createdAt user { id } botActor { type } issue { identifier team { key } }';
 // Issue has no update actor in the schema. Do not mistake its creator for its editor.
@@ -25,11 +30,12 @@ export function linearTeams(state) {
     .map((r) => r.key)])];
 }
 
-function eventOf(kind, node) {
+/** `via` says who found it, `stream` or `catch-up` (store.mjs). */
+function eventOf(kind, node, via) {
   const issue = kind === 'commentCreated' ? node?.issue : node;
   const time = Date.parse(kind === 'commentCreated' ? node?.createdAt : node?.updatedAt);
   if (!node?.id || !issue?.identifier || !issue?.team?.key || !Number.isFinite(time)) return null;
-  return { kind, id: node.id, issueIdentifier: issue.identifier, teamKey: issue.team.key,
+  return { kind, id: node.id, issueIdentifier: issue.identifier, teamKey: issue.team.key, via,
     ...(kind === 'issueUpdated' ? { description: node.description ?? null } : {}),
     actorId: kind === 'commentCreated' ? node.user?.id ?? null : null,
     self: kind === 'commentCreated' && !node.user && node.botActor?.type === 'oauthClient', time };
@@ -110,15 +116,15 @@ export async function handleLinearEvent(store, event, { state, runs, linear, pos
   return true;
 }
 
-/** Read every page before moving the cursor; sort across both connections, not per page. */
-async function catchUp(fetchCatchUp, teams, store) {
+/** Every comment and issue of `teams` updated from `since(key)` (ms) on, up to `until` when given, as events, oldest first. Read every page
+ * before moving the cursor; sort across both connections, not per page. */
+async function readEvents(fetchCatchUp, teams, since, until = null) {
   const events = [];
   for (const key of teams) for (const [collection, kind, filterType] of [
     ['comments', 'commentCreated', 'CommentFilter'], ['issues', 'issueUpdated', 'IssueFilter'],
   ]) {
     const team = { key: { in: [key] } };
-    const since = store.offset(`linear:${key}`) - 60_000;
-    const filter = { updatedAt: { gte: new Date(since).toISOString() },
+    const filter = { updatedAt: { gte: new Date(since(key)).toISOString(), ...(until === null ? {} : { lte: new Date(until).toISOString() }) },
       ...(collection === 'comments' ? { issue: { team } } : { team }) };
     const query = `query($filter: ${filterType}!, $after: String) {
       ${collection}(filter: $filter, after: $after, first: 100, includeArchived: true, orderBy: updatedAt) {
@@ -131,7 +137,7 @@ async function catchUp(fetchCatchUp, teams, store) {
       const page = data?.[collection];
       if (!Array.isArray(page?.nodes) || !page.pageInfo) throw new Error('invalid catch-up page');
       for (const node of page.nodes) {
-        const event = eventOf(kind, node);
+        const event = eventOf(kind, node, 'catch-up');
         if (event && event.teamKey === key) events.push(event);
       }
       if (!page.pageInfo.hasNextPage) break;
@@ -141,6 +147,8 @@ async function catchUp(fetchCatchUp, teams, store) {
   }
   return events.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
 }
+
+const catchUp = (fetchCatchUp, teams, store) => readEvents(fetchCatchUp, teams, (key) => store.offset(`linear:${key}`) - 60_000);
 
 /** Starts asynchronously after the daemon listens. The API object and both network seams
  * are injectable. Authentication retries use mint({ failed }) from the shared token source.
@@ -217,13 +225,17 @@ export function startLinearSource({ state, store, runs = process.env.FACTORY_RUN
     if (stopped) return;
     failures = authClose(code) ? failures + 1 : 0;
     shutdowns = code === 1001 ? shutdowns + 1 : 0;
+    // FAC-38: one line for each close, with its time, so a day's closes and reconnects can be counted from the daemon's log.
+    const closed = `daemon: Linear source closed (${code}) at ${new Date(now()).toISOString()}`;
     if (failures >= 3) {
+      log(`${closed}; stopped after three authentication failures, checks again in ${RECHECK_MS / 60_000} min`);
       condition(true);
       recheck();
       return;
     }
     const delay = code === 1001 && shutdowns === 1 ? 0 : backoff;
     if (delay) backoff = Math.min(60_000, backoff * 2);
+    log(`${closed}; reconnects in ${delay} ms`);
     timer = schedule(() => { void connect(); }, delay);
   };
   async function connect() {
@@ -310,6 +322,7 @@ export function startLinearSource({ state, store, runs = process.env.FACTORY_RUN
             failures = 0;
             failedTokens.clear();
             condition(false);
+            log(`daemon: Linear source connected at ${new Date(now()).toISOString()}`);
             heartbeat = schedule(ping, 30_000);
             for (const [kind, selection] of Object.entries(fields)) {
               send({ id: kind, type: 'subscribe', payload: { query: `subscription { ${kind} { ${selection} } }` } });
@@ -329,7 +342,7 @@ export function startLinearSource({ state, store, runs = process.env.FACTORY_RUN
             disconnect(1000);
           } else if (message.type === 'next') {
             for (const kind of Object.keys(fields)) {
-              const e = eventOf(kind, message.payload?.data?.[kind]);
+              const e = eventOf(kind, message.payload?.data?.[kind], 'stream');
               if (!e || !teams.includes(e.teamKey)) continue;
               if (catching) pending.push(e);
               else void handle(e).catch(() => disconnect(1006));
@@ -345,4 +358,56 @@ export function startLinearSource({ state, store, runs = process.env.FACTORY_RUN
   }
   const ready = connect();
   return { stop, ready, get stopped() { return stopped; }, get waiting() { return waiting; } };
+}
+
+const CHECK_BATCH = 500; // keys a request carries: about 27 KB, under the socket's 64 KiB line
+
+/** The end-of-day check (FAC-38): the catch-up's query over [since, until] (ms), as the Factory app, for the teams the source watches, and the
+ * daemon's answer to which of those events its store lacks. An issue is checked at its newest update in the window, the only one Linear lists.
+ * Only events dated in the window count, so a comment written before it and edited inside it is left out. Reads only; `ask` is the daemon's
+ * `linear-check` verb. Gives { teams, total, missing (events), via ({ stream, catch-up, unmarked } of the store's rows in the window) }. */
+export async function linearCheck({ state, since, until, fetchCatchUp, ask }) {
+  const teams = linearTeams(state);
+  const events = (await readEvents(fetchCatchUp, teams, () => since, until)).filter((e) => e.time >= since && e.time <= until);
+  const missing = [];
+  let via = {};
+  for (let i = 0; i === 0 || i < events.length; i += CHECK_BATCH) {
+    const batch = events.slice(i, i + CHECK_BATCH);
+    const r = await ask({ verb: 'linear-check', since, until, keys: batch.map(linearKey) });
+    if (!r.ok) throw new Error(`the daemon did not answer (${r.why})`);
+    const lacks = new Set(r.result.missing);
+    missing.push(...batch.filter((e) => lacks.has(linearKey(e))));
+    via = r.result.via;
+  }
+  return { teams, total: events.length, missing, via };
+}
+
+const USAGE = 'usage: bin/factory-daemon linear-check --since <time> [--until <time>]   (a time is ISO 8601; --until defaults to a minute ago)';
+
+/** `bin/factory-daemon linear-check`: prints one line for each missing event, then a summary; 0 when none is missing, 1 when some is or the
+ * check could not run, 2 usage. Run it as the daemon's account on its node. */
+export async function linearCheckMain(argv, { env = process.env, now = Date.now, fetchCatchUp, ask: askFn, print = console.log } = {}) {
+  const flags = {};
+  for (let i = 0; i < argv.length; i += 2) {
+    if (!['--since', '--until'].includes(argv[i]) || argv[i] in flags || argv[i + 1] === undefined) return print(USAGE), 2;
+    flags[argv[i]] = Date.parse(argv[i + 1]);
+  }
+  const since = flags['--since'];
+  const until = flags['--until'] ?? now() - 60_000;
+  if (!Number.isFinite(since) || !Number.isFinite(until) || since > until) return print(USAGE), 2;
+  const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
+  fetchCatchUp ??= (query, variables) => createLinear({ state }).request(query, variables);
+  askFn ??= (request) => ask(socketPath(state), request, { timeoutMs: 5000 });
+  let r;
+  try {
+    r = await linearCheck({ state, since, until, fetchCatchUp, ask: askFn });
+  } catch (error) {
+    print(`linear-check: could not run: ${String(error?.message ?? error).split('\n')[0]}`);
+    return 1;
+  }
+  for (const e of r.missing) print(`missing ${e.kind} ${e.issueIdentifier} ${e.id} ${new Date(e.time).toISOString()}`);
+  const window = `${new Date(since).toISOString()} to ${new Date(until).toISOString()}`;
+  print(`linear-check: ${r.total} events of ${r.teams.join(', ')} from ${window}, ${r.missing.length} missing; the store's rows in it: `
+    + `${r.via.stream ?? 0} by the stream, ${r.via['catch-up'] ?? 0} by catch-up only, ${r.via.unmarked ?? 0} unmarked`);
+  return r.missing.length ? 1 : 0;
 }
