@@ -172,7 +172,7 @@ describe('leadArgs', () => {
     for (const rule of ['Read(~/.agent-profiles/tokens/**)', 'Read(~/.agent-profiles/archive/**)', 'Read(~/.agent-profiles/seats/1/oauth-token)']) assert.ok(deny.includes(rule), rule);
   });
 
-  test('the deny list refuses factory login, store, use and logout in every form, and not the list', () => {
+  test('the deny list refuses factory account add, store, use and logout in every form, and not the list', () => {
     const deny = list('--disallowedTools');
     for (const command of FORMS) assert.ok(deny.some((r) => matches(r, command)), command);
     for (const command of HARMLESS) assert.ok(!deny.some((r) => matches(r, command)), command);

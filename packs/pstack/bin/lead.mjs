@@ -426,7 +426,7 @@ function main(argv, env) {
   const tokenPath = join(tokenDir(profiles), account);
   const t = readTokenFile(tokenPath);
   if (t.error) {
-    process.stderr.write(`bin/lead: ${t.error === 'missing' ? `the account ${account} has no token file ${tokenPath}; the Human runs \`factory login ${account}\`` : `the token file ${tokenPath} is empty or not printable ASCII`}\n`);
+    process.stderr.write(`bin/lead: ${t.error === 'missing' ? `the account ${account} has no token file ${tokenPath}; the Human runs \`factory account add ${account}\`` : `the token file ${tokenPath} is empty or not printable ASCII`}\n`);
     return 2;
   }
   const token = t.token;
