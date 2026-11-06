@@ -15,6 +15,8 @@ const a = process.argv.slice(2);
 fs.appendFileSync(sh + '/gh-calls', a.join(' ') + '\n');
 const read = () => (fs.existsSync(sh + '/pr.json') ? JSON.parse(fs.readFileSync(sh + '/pr.json', 'utf8')) : null);
 const out = (s) => { process.stdout.write(s); process.exit(0); };
+if (a[0] === 'api' && a[1] === 'graphql')
+  out(JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { nodes: read()?.retarget ? [{ previousRefName: 'parent', currentRefName: 'main' }] : [] } } } } }));
 if (a[0] === 'pr' && a[1] === 'list' && a.includes('merged'))
   out(fs.existsSync(sh + '/parent.json') ? fs.readFileSync(sh + '/parent.json', 'utf8') : '[]');
 if (a[0] === 'pr' && a[1] === 'edit') {
@@ -953,7 +955,7 @@ for (const merge of [undefined, 'squash', 'merge']) {
   });
 }
 
-test('squash restacks the child past the merged parent head and asks for a lease push', () => {
+test('squash restacks by merging main and preserves the child history', () => {
   const w = world({ merge: 'squash' });
   const parent = w.head();
   git(w.repo, 'branch', 'parent');
@@ -976,9 +978,10 @@ test('squash restacks the child past the merged parent head and asks for a lease
   writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
   const out = w.ship();
   assert.equal(out.code, 0, out.out);
-  assert.match(out.out, /push with --force-with-lease/);
+  assert.match(out.out, /push HEAD/);
+  assert.equal(git(w.repo, 'rev-parse', 'HEAD^1'), child);
+  assert.equal(git(w.repo, 'rev-parse', 'HEAD^2'), git(w.repo, 'rev-parse', 'origin/main'));
   assert.ok(w.calls().includes('pr edit 7 --base main'));
-  assert.equal(git(w.repo, 'rev-parse', 'HEAD^'), git(w.repo, 'rev-parse', 'origin/main'));
   assert.equal(git(w.repo, 'diff', '--name-only', 'origin/main', 'HEAD'), 'child.js');
   assert.equal(git(w.repo, 'show', 'HEAD:parent.js'), 'later');
   assert.equal(git(w.repo, 'ls-remote', 'origin', 'refs/heads/work').split(/\s/)[0], child);
@@ -1014,4 +1017,16 @@ test('squash refuses malformed titles before opening or arming a pull request', 
   w.pr({ title: 'Update the queue' });
   assert.match(w.ship().out, /refused title/);
   assert.ok(!w.calls().some((c) => c.includes('--auto')));
+});
+
+test('ship leaves an automatically retargeted ready child to the queue', () => {
+  const w = world({ drafts: 'pstack' });
+  w.passed();
+  assert.equal(w.ship().code, 0);
+  w.pr({ retarget: true });
+  const out = w.ship();
+  assert.equal(out.code, 0, out.out);
+  assert.match(out.out, /queue merges main/);
+  assert.ok(!w.calls().some((c) => c.includes('--auto')));
+  assert.equal(w.read('lv-calls'), '');
 });

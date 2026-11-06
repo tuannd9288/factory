@@ -87,7 +87,8 @@ export function pickUpdate(prs, required, position) {
 export { pickReruns };
 
 export const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} ${MERGED_FIELDS} pullRequests(states:OPEN,first:100){nodes{
-number isDraft body mergeable createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
+timelineItems(last:1,itemTypes:[BASE_REF_CHANGED_EVENT,AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT]){nodes{... on BaseRefChangedEvent{previousRefName currentRefName createdAt} ... on AutomaticBaseChangeSucceededEvent{previousRefName:oldBase currentRefName:newBase createdAt}}}
+number isDraft body mergeable createdAt mergeStateStatus baseRefOid baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{id databaseId name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
 
@@ -134,6 +135,8 @@ function openPulls(repo, since) {
       createdAt: p.createdAt,
       mergeStateStatus: p.mergeStateStatus,
       base: p.baseRefName,
+      baseOid: p.baseRefOid,
+      retarget: p.timelineItems?.nodes?.[0],
       autoMerge: Boolean(p.autoMergeRequest),
       author: p.author?.login,
       head: p.headRefOid,
@@ -341,7 +344,7 @@ function sweep(repo, reads, state, switches, { self, folder, runs, clone }) {
   } catch (error) {
     console.log(`queue: the news of ${repo} was not handled: ${String(error.message).split('\n')[0]}`);
   }
-  draftReadiness(repo, prs, clone);
+  draftReadiness(repo, prs, clone, required);
   const { ran, position } = followSwitch(repo, state, rules, prs);
   if (position) switches.set(repo, watchSwitch({ state, repo, position }));
   for (const { number, jobId } of pickReruns(prs).filter((p) => !ran.has(p.number))) rerun(repo, number, jobId, "after its approval or Entire's check");
@@ -351,14 +354,56 @@ function sweep(repo, reads, state, switches, { self, folder, runs, clone }) {
   console.log(`queue: updated ${repo}#${pr.number} to its base`);
 }
 
-function draftReadiness(repo, prs, clone) {
+function draftReadiness(repo, prs, clone, required) {
   // Like ship, only origin/main's policy counts, never the candidate's driver file.
   let policy = {};
   if (clone && spawnSync('git', ['-C', clone, 'cat-file', '-e', 'origin/main:.gate/driver.json'], { stdio: 'ignore' }).status === 0)
     policy = JSON.parse(execFileSync('git', ['-C', clone, 'show', 'origin/main:.gate/driver.json'], { encoding: 'utf8' }));
   let merge = policy.merge == null ? null : policy.merge === 'merge' ? 'merge' : 'squash';
+  let updated = false;
+  for (const pr of prs) {
+    const stacked = pr.base !== BASE || (pr.retarget?.previousRefName !== BASE && pr.retarget?.currentRefName === BASE);
+    if (!stacked) continue;
+    // A child must never land in its parent's branch, including under drafts=pstack or stacks=off.
+    const disarm = () => {
+      if (pr.autoMerge) gh(['pr', 'merge', String(pr.number), '--repo', repo, '--disable-auto']);
+      pr.autoMerge = false;
+    };
+    if (pr.base !== BASE || policy.stacks === 'off' || pr.mergeable !== 'MERGEABLE') {
+      disarm();
+      continue;
+    }
+    // The compare is against the exact base/head read above, not a mutable branch name. A squash parent
+    // still gets a merge of main. update-branch's default is merge; never pass --rebase.
+    const comparison = JSON.parse(gh(['api', `repos/${repo}/compare/${pr.baseOid}...${pr.head}`]));
+    if (!['ahead', 'identical'].includes(comparison.status)) {
+      disarm();
+      if (!updated) {
+        gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
+        updated = true;
+      }
+      continue; // Never use checks from the head before the merge.
+    }
+    // edited must schedule fresh checks even if retargeting did not change the head. If GitHub does
+    // not emit them, wait. #456 can carry approval across an unchanged patch here; no verdict is copied.
+    if (!required.length || !required.every((name) => {
+      const check = pr.checks[name] ?? pr.apps?.[name];
+      return check?.state === 'SUCCESS' && Date.parse(check.startedAt) >= Date.parse(pr.retarget.createdAt);
+    })) {
+      disarm();
+      continue;
+    }
+    if (pr.autoMerge) continue;
+    if (merge === null) {
+      const allowed = JSON.parse(gh(['repo', 'view', repo, '--json', 'squashMergeAllowed,mergeCommitAllowed']));
+      merge = !allowed.squashMergeAllowed && allowed.mergeCommitAllowed ? 'merge' : 'squash';
+    }
+    if (pr.isDraft) gh(['pr', 'ready', String(pr.number), '--repo', repo]);
+    gh(['pr', 'merge', String(pr.number), '--repo', repo, '--auto', `--${merge}`, '--match-head-commit', pr.head]);
+  }
   if ((policy.drafts ?? 'landable') === 'landable') {
     for (const pr of prs) {
+      if (pr.base !== BASE || (pr.retarget?.previousRefName !== BASE && pr.retarget?.currentRefName === BASE)) continue;
       const conflict = pr.mergeable === 'CONFLICTING';
       if (pr.isDraft && pr.checks.verify?.state === 'SUCCESS' && !conflict) {
         if (merge === null) {
@@ -404,7 +449,7 @@ function sweepNews(repo, folder, state, runs, rulesRead, root) {
   const required = requiredIn(rules);
   const { prs, merged, comments } = openPulls(repo);
   if (folder === FACTORY_REPO) {
-    draftReadiness(repo, prs, root);
+    draftReadiness(repo, prs, root, required);
     for (const { number, jobId } of pickReruns(prs, 'approval')) rerun(repo, number, jobId, 'after its approval', false, 'approval');
   }
   wakeOnNews({ repo, folder, state, runs, data: { prs, merged, required, claims: comments.claims?.nodes } });

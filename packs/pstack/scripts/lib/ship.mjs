@@ -128,11 +128,12 @@ function step(pr, head, branch, stacks, merge, drafts) {
   const n = pr.number;
   const short = head.slice(0, 7);
   const armed = Boolean(pr.autoMergeRequest);
-  if (stacks && pr.baseRefName !== 'main') {
+  if (pr.baseRefName !== 'main') {
     if (armed) {
       gh(['pr', 'merge', String(n), '--disable-auto']);
       return say(0, `disarmed #${n}: its base is ${pr.baseRefName}, not main`);
     }
+    if (!stacks) return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
     const parents = JSON.parse(gh(['pr', 'list', '--head', pr.baseRefName, '--base', 'main', '--state', 'merged', '--json', 'headRefOid']));
     if (!parents.length) return say(0, `#${n} waits for its parent ${pr.baseRefName}; nothing was armed`);
     git(['fetch', '--quiet', 'origin', 'main']);
@@ -140,18 +141,18 @@ function step(pr, head, branch, stacks, merge, drafts) {
       return say(0, `#${n} waits for its parent ${pr.baseRefName} in origin/main; nothing was armed`);
     if (head !== pr.headRefOid) return say(1, `refused: HEAD ${short} is not the pull request's head; pull or push so they agree`);
     if (git(['status', '--porcelain'])) return say(1, 'refused: commit or remove what git status shows before restacking');
-    if (merge === 'squash') {
-      if (!quietGit(['cat-file', '-e', `${parents[0].headRefOid}^{commit}`]))
-        git(['fetch', '--quiet', 'origin', parents[0].headRefOid]);
-      git(['rebase', '--onto', 'origin/main', parents[0].headRefOid]);
-      gh(['pr', 'edit', String(n), '--base', 'main']);
-      return say(0, `retargeted #${n} to main and rebased onto origin/main; push with --force-with-lease, then run ship again`);
-    }
     gh(['pr', 'edit', String(n), '--base', 'main']);
     git(['merge', '--no-ff', '--no-edit', 'origin/main']);
     // live-verify --covered compares the new base/head patch-id with the old verdict on the next run.
     return say(0, `retargeted #${n} to main and merged origin/main; push HEAD, then run ship again`);
   }
+  // GitHub may have retargeted this child before ship ran. The queue owns the merge and waits for
+  // checks on that head; do not arm it through the ordinary ready-PR path in the meantime.
+  const timeline = JSON.parse(gh(['api', 'graphql', '-F', 'owner={owner}', '-F', 'name={repo}', '-F', `number=${n}`, '-f',
+    'query=query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){timelineItems(last:1,itemTypes:[BASE_REF_CHANGED_EVENT,AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT]){nodes{... on BaseRefChangedEvent{previousRefName currentRefName} ... on AutomaticBaseChangeSucceededEvent{previousRefName:oldBase currentRefName:newBase}}}}}}']));
+  const retarget = timeline.data.repository.pullRequest.timelineItems.nodes[0];
+  if (retarget?.previousRefName !== 'main' && retarget?.currentRefName === 'main')
+    return say(0, `#${n} was retargeted to main; the queue merges main and arms it after required checks pass`);
   const problem = titleProblem(pr.title) || (merge === 'squash' && subjectProblem(`${pr.title} (#${n})`));
   if (problem) return say(1, `refused title for #${n}: ${problem}`);
   if (drafts === 'landable' && pr.isDraft) return say(0, `#${n} waits for verify and no conflict; the queue marks it ready and arms auto-merge`);

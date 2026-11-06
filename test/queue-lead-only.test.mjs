@@ -32,15 +32,15 @@ function world() {
   localGit('init', '-q');
   localGit('remote', 'add', 'origin', 'https://github.com/o/factory.git');
   writeFileSync(join(state, 'accounts'), 'factory/factory-lead=acct\n');
-  writeFileSync(join(dir, 'gh'), ['#!/bin/sh', 'printf \'%s\\n\' "$(printf \'%s\' "$*" | tr \'\\n\' \' \')" >>"$Q/calls"', 'case "$*" in', '  "api user"*) echo agent-bot ;;', '  *rules/branches*) printf "["; cat "$Q/rules.json"; printf "]" ;;', '  "repo view "*) cat "$Q/methods.json" ;;', '  *graphql*) cat "$Q/prs.json" ;;', '  "run rerun "*|"pr ready "*|"pr merge "*) exit 0 ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
+  writeFileSync(join(dir, 'gh'), ['#!/bin/sh', 'printf \'%s\\n\' "$(printf \'%s\' "$*" | tr \'\\n\' \' \')" >>"$Q/calls"', 'case "$*" in', '  "api user"*) echo agent-bot ;;', '  *rules/branches*) printf "["; cat "$Q/rules.json"; printf "]" ;;', '  "repo view "*) cat "$Q/methods.json" ;;', '  *compare/*) cat "$Q/compare.json" ;;', '  "pr update-branch "*) git -C "$Q/root" merge --no-ff --no-edit refs/remotes/origin/main ;;', '  *graphql*) cat "$Q/prs.json" ;;', '  "run rerun "*|"pr ready "*|"pr merge "*) exit 0 ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
   chmodSync(join(dir, 'gh'), 0o755);
   writeFileSync(join(dir, 'rules.json'), JSON.stringify(rules));
   writeFileSync(join(dir, 'methods.json'), JSON.stringify({ squashMergeAllowed: true, mergeCommitAllowed: true }));
   const put = (nodes) => writeFileSync(join(dir, 'prs.json'), JSON.stringify({ data: { repository: { pullRequests: { nodes } } } }));
   return {
     dir, root, state, put,
-    policy: (drafts) => {
-      commit(root, { '.gate/driver.json': JSON.stringify({ drafts }) }, 'policy');
+    policy: (drafts, stacks) => {
+      commit(root, { '.gate/driver.json': JSON.stringify({ drafts, stacks }) }, 'policy');
       git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
     },
     sweep: (args = ['sweep', '--once']) => {
@@ -200,3 +200,69 @@ test('factory with no driver uses its allowed merge method once per sweep, only 
     ]);
   } finally { w.cleanup(); }
 });
+
+for (const drafts of ['landable', 'pstack']) {
+for (const stacks of [undefined, 'pstack', 'off']) {
+  for (const method of ['merge', 'squash']) {
+    test(`stack lifecycle: ${drafts}, ${stacks ?? 'default'}, parent lands by ${method}`, () => {
+      const w = world();
+      try {
+        w.policy(drafts, stacks);
+        git(w.root, 'branch', 'trunk');
+        git(w.root, 'switch', '-q', '-c', 'parent');
+        commit(w.root, { 'parent.txt': 'first\n' }, 'parent');
+        git(w.root, 'switch', '-q', '-c', 'child');
+        const oldHead = commit(w.root, { 'child.txt': 'child\n' }, 'child');
+        const checks = (names = ['verify', 'tier'], fresh = false) => ({ nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: names.map((name) => ({ ...run(name, 'SUCCESS'), startedAt: fresh ? '2026-11-04T00:01:00Z' : STARTED })) } } } }] });
+        let child = pull(2, { isDraft: true, baseRefName: 'parent', headRefOid: oldHead, autoMergeRequest: null, commits: checks() });
+        w.put([pull(1, { autoMergeRequest: null }), child]);
+        assert.deepEqual(w.sweep().calls.filter((c) => c.startsWith('pr ')), []);
+        // Even an accidentally armed child is disarmed before it can land into its parent.
+        w.put([{ ...child, autoMergeRequest: { enabledAt: 't' } }]);
+        assert.deepEqual(w.sweep().calls.filter((c) => c.startsWith('pr ')), ['pr merge 2 --repo o/factory --disable-auto']);
+        git(w.root, 'switch', '-q', 'parent');
+        const parentTip = commit(w.root, { 'late.txt': 'parent advanced\n' }, 'parent advances');
+        git(w.root, 'switch', '-q', 'trunk');
+        if (method === 'squash') {
+          git(w.root, 'merge', '--squash', 'parent');
+          commit(w.root, {}, 'land parent');
+        } else git(w.root, 'merge', '--no-ff', '--no-edit', 'parent');
+        const base = git(w.root, 'rev-parse', 'HEAD');
+        git(w.root, 'update-ref', 'refs/remotes/origin/main', base);
+        git(w.root, 'switch', '-q', 'child');
+        // GitHub's branch deletion retargets the child and records a base-change event.
+        child = { ...child, baseRefName: 'main', baseRefOid: base, timelineItems: { nodes: [{ previousRefName: 'parent', currentRefName: 'main', createdAt: '2026-11-04T00:00:00Z' }] } };
+        w.put([child]);
+        writeFileSync(join(w.dir, 'compare.json'), JSON.stringify({ status: 'diverged' }));
+        const restack = w.sweep();
+        assert.deepEqual(restack.calls.filter((c) => c.startsWith('pr ')), stacks === 'off' ? [] : ['pr update-branch 2 --repo o/factory'], restack.out);
+        if (stacks === 'off') {
+          assert.equal(git(w.root, 'rev-parse', 'HEAD'), oldHead);
+          return;
+        }
+        const head = git(w.root, 'rev-parse', 'HEAD');
+        assert.equal(git(w.root, 'rev-parse', 'HEAD^1'), oldHead);
+        assert.equal(git(w.root, 'rev-parse', 'HEAD^2'), base);
+        assert.equal(git(w.root, 'show', 'HEAD:late.txt'), 'parent advanced');
+        if (method === 'merge') git(w.root, 'merge-base', '--is-ancestor', parentTip, head);
+        assert.equal(git(w.root, 'diff', '--name-only', base, head), 'child.txt');
+        writeFileSync(join(w.dir, 'compare.json'), JSON.stringify({ status: 'ahead' }));
+        // No checks on the new head, stale edited checks, and only verify green all wait.
+        for (const commits of [checks([]), checks(), checks(['verify'], true)]) {
+          w.put([{ ...child, headRefOid: head, commits }]);
+          assert.deepEqual(w.sweep().calls.filter((c) => c.startsWith('pr ')), []);
+        }
+        child = { ...child, headRefOid: head, commits: checks(['verify', 'tier'], true) };
+        w.put([child]);
+        const ready = w.sweep();
+        assert.deepEqual(ready.calls.filter((c) => c.startsWith('pr ')), [
+          'pr ready 2 --repo o/factory',
+          `pr merge 2 --repo o/factory --auto --squash --match-head-commit ${head}`,
+        ], ready.out);
+        w.put([{ ...child, isDraft: false, autoMergeRequest: { enabledAt: 't' } }]);
+        assert.deepEqual(w.sweep().calls.filter((c) => c.startsWith('pr ')), []);
+      } finally { w.cleanup(); }
+    });
+  }
+}
+}
