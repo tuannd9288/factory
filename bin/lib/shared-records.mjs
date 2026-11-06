@@ -32,20 +32,46 @@ const sizeOf = (file) => {
   }
 };
 
-/** The whole lines of `file` from byte `at` to its last newline, and the position after them; null when the file is shorter than `at`. */
-function linesFrom(file, at) {
+const CHUNK = Buffer.alloc(1 << 20);
+const RATE_LIMIT = '"type":"rate_limit_event"'; // seat.accountEvent's selector, verbatim
+
+/** Calls `each` with the bytes of each whole line of `file` from byte `at` to its last newline, read 1 MiB at a time into one buffer (larger
+ * only for a longer line), so a long log is never in memory whole and only the lines kept are decoded; the bytes are valid during the call.
+ * Returns the position after the last line, or null when the file is shorter than `at`. */
+function eachLine(file, at, each) {
   const size = sizeOf(file);
-  if (size === null || size === at) return { lines: [], end: at };
+  if (size === null || size === at) return at;
   if (size < at) return null;
-  const buf = Buffer.alloc(size - at);
   const fd = openSync(file, 'r');
   try {
-    for (let got = 0, n; got < buf.length; got += n) if (!(n = readSync(fd, buf, got, buf.length - got, at + got))) break;
+    let buf = CHUNK;
+    let kept = 0; // the start of a line that the next read completes
+    let pos = at;
+    let end = at;
+    while (pos < size) {
+      if (kept === buf.length) {
+        const bigger = Buffer.alloc(buf.length * 2);
+        buf.copy(bigger, 0, 0, kept);
+        buf = bigger;
+      }
+      const n = readSync(fd, buf, kept, Math.min(buf.length - kept, size - pos), pos);
+      if (!n) break;
+      pos += n;
+      const len = kept + n;
+      const read = buf.subarray(0, len);
+      let start = 0;
+      for (let nl = read.indexOf(10); nl !== -1; nl = read.indexOf(10, start)) {
+        each(read.subarray(start, nl));
+        start = nl + 1;
+      }
+      if (start) end = pos - (len - start);
+      buf.copy(buf, 0, start, len);
+      kept = len - start;
+    }
+    return end;
   } finally {
     closeSync(fd);
   }
-  const end = buf.lastIndexOf(10) + 1;
-  return { lines: lines(buf.toString('utf8', 0, end)), end: at + end };
 }
 
 /** The rows of the local files past the positions in `from` (by file: 'sessions.jsonl', '<folder>/<run*.jsonl>'), and the new positions; a
@@ -53,26 +79,27 @@ function linesFrom(file, at) {
 function localRows(state, runs, node, from = {}) {
   const out = [];
   const files = { ...from };
-  const sessions = linesFrom(join(state, 'sessions.jsonl'), from['sessions.jsonl'] ?? 0);
-  if (!sessions) return null;
-  for (const row of sessions.lines) {
+  const sessions = eachLine(join(state, 'sessions.jsonl'), from['sessions.jsonl'] ?? 0, (bytes) => {
+    const row = bytes.toString('utf8');
+    if (!row.trim()) return;
     JSON.parse(row); // Never advance past a damaged session record.
     out.push(`{"v":1,"node":${JSON.stringify(node)},"kind":"session","row":${row}}`);
-  }
-  if (sessions.end) files['sessions.jsonl'] = sessions.end;
+  });
+  if (sessions === null) return null;
+  if (sessions) files['sessions.jsonl'] = sessions;
   for (const folder of existsSync(runs) ? readdirSync(runs, { withFileTypes: true }) : []) {
     if (!folder.isDirectory()) continue;
     for (const name of readdirSync(join(runs, folder.name))) {
       if (!name.startsWith('run') || !name.endsWith('.jsonl')) continue;
       const key = `${folder.name}/${name}`;
-      const log = linesFrom(join(runs, key), from[key] ?? 0);
-      if (!log) return null;
-      for (const line of log.lines) {
-        if (!line.includes('"type":"rate_limit_event"')) continue; // seat.accountEvent's selector, verbatim
-        try { JSON.parse(line); } catch { continue; }
+      const end = eachLine(join(runs, key), from[key] ?? 0, (bytes) => {
+        if (!bytes.includes(RATE_LIMIT)) return;
+        const line = bytes.toString('utf8');
+        try { JSON.parse(line); } catch { return; }
         out.push(`{"v":1,"node":${JSON.stringify(node)},"kind":"log","run":${JSON.stringify(key)},"line":${line}}`);
-      }
-      if (log.end) files[key] = log.end;
+      });
+      if (end === null) return null;
+      if (end) files[key] = end;
     }
   }
   return { rows: out, files };
