@@ -26,6 +26,10 @@
 #   factory linear <verb> ...      a Lead's steps on a repository on Linear (#404; bin/lib/linear-cli.mjs has the verbs): take, release, read, list, comment, ask,
 #                                  answered, create and onboard, as the Factory app; one JSON object on stdout, exit 0, 1 (Linear refused) or 2 (usage); a
 #                                  body comes on stdin (--body-file -); on the MacBook the same command runs on the Mac mini by ssh, stdin kept
+#   factory codex --role <role> [--effort <e>] [--write <folder>]  a pstack step that asks for another model family, on Codex on the verifier's
+#                                  profile, never on Claude (#182; packs/pstack/bin/codex-step.mjs has the roles and the rest): the brief on stdin,
+#                                  Codex's answer on stdout; exit 3 when it waits for Codex (logged out, out of quota, failed), logged with its
+#                                  cause in $FACTORY_STATE/codex-waits.jsonl; on the MacBook it runs on the Mac mini by ssh, in a new temporary folder
 #   factory wake <repo> --issue <n> [--team <name>]  wakes the Lead of a team (#351): one line into its Claude Code inbox socket, which says to re-read
 #                                  the issue (the message itself is a comment there) and types nothing into its pane; on the Mac mini it posts to the socket
 #                                  its hook recorded in ~/factory-runs/<repo>-<team>/socket; on the MacBook to the socket `lead --here` recorded when that

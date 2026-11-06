@@ -137,6 +137,7 @@ describe('leadArgs', () => {
       'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
       'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
       'Bash(factory linear:*)',
+      'Bash(factory codex:*)',
       'Bash(' + root + '/bin/seat:*)',
     ]);
     for (const bad of ['Bash(gh:*)', 'Bash(git:*)']) assert.ok(!list('--allowedTools').includes(bad));
@@ -164,6 +165,11 @@ describe('leadArgs', () => {
     const deny = list('--disallowedTools');
     assert.ok(secretsRead.length > 0);
     for (const d of ['Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
+    // Codex is reached through `factory codex` alone, never codex itself (#182, D2).
+    const allowed = list('--allowedTools');
+    assert.ok(allowed.some((r) => matches(r, 'factory codex --role cross-judge --effort high')));
+    assert.ok(deny.some((r) => matches(r, 'codex exec -')));
+    assert.ok(!allowed.some((r) => matches(r, 'codex exec -')));
   });
 
   test('the deny list refuses reading the environment, the tokens folder and the archive folder (#178)', () => {
