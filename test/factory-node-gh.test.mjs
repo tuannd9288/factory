@@ -37,6 +37,10 @@ console.log(process.env.FAKE_GH_BODY ?? JSON.stringify({ login: 'fake-agent', id
     assert.equal(stored.status, 0, stored.stderr);
     assert.equal(readFileSync(join(env.AGENT_PROFILES, 'tokens', env.FACTORY_AGENT), 'utf8'), `${token}\n`);
     assert.ok(!stored.stdout.includes(token));
+    // The Lead also needs its own local Claude account; store above creates only the GitHub token.
+    mkdirSync(env.FACTORY_STATE, { recursive: true });
+    writeFileSync(join(env.FACTORY_STATE, 'accounts'), 'factory/alpha-beta=fixture\n');
+    writeFileSync(join(env.AGENT_PROFILES, 'tokens/fixture'), 'made-up-claude-token\n');
     const args = ['pr', 'create', '--body-file', 'local.md'];
     assert.equal(await main(['gh', ...args], env), 0);
     assert.equal(calls[0].cmd, 'gh');
@@ -46,6 +50,8 @@ console.log(process.env.FAKE_GH_BODY ?? JSON.stringify({ login: 'fake-agent', id
     assert.ok(!calls.some((c) => c.cmd === 'ssh'));
     const lead = calls.find((c) => c.cmd === 'claude');
     assert.equal(lead.options.env.GH_TOKEN, token);
+    assert.equal(lead.options.env.CLAUDE_CODE_OAUTH_TOKEN, 'made-up-claude-token');
+    assert.equal(lead.options.env.CLAUDE_CONFIG_DIR, join(env.AGENT_PROFILES, 'leads/alpha-beta/claude'));
     const settings = JSON.parse(lead.args[lead.args.indexOf('--settings') + 1]);
     assert.equal(settings.env.GH_TOKEN, undefined, 'settings arguments must not carry the token or override it');
     assert.equal(settings.env.GIT_AUTHOR_NAME, 'fake-agent');
