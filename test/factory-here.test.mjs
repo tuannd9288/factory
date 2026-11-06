@@ -3,7 +3,7 @@
 // Nothing live runs, and every name below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
@@ -37,6 +37,7 @@ cat > "$FAKE/gh.stdin"
 exit "$(cat "$FAKE/gh.exit" 2>/dev/null || echo 0)"
 `,
   claude: `#!/bin/sh
+pwd > "$FAKE/claude.cwd"
 : > "$FAKE/claude.args"
 for a; do printf '%s\\0' "$a" >> "$FAKE/claude.args"; done
 exit "$(cat "$FAKE/claude.exit" 2>/dev/null || echo 0)"
@@ -117,6 +118,35 @@ test('lead --here passes what follows -- to claude, and the team to --name', () 
     assert.equal(args[args.indexOf('--name') + 1], 'alpha-beta');
     s.w('claude.exit', '7');
     assert.equal(s.fac(['lead', 'alpha', '--here']).code, 7, 'claude\'s exit code is the command\'s');
+  } finally {
+    s.done();
+  }
+});
+
+test('a restored Lead session returns through the launcher with its settings and role (#366)', () => {
+  const s = world();
+  try {
+    s.identity();
+    const session = '11111111-2222-4333-8444-555555555555';
+    assert.equal(s.fac(['lead', '--resume-session', session, '--check']).code, 1);
+    assert.equal(s.calls(), '');
+    assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here', '--', '--resume', session], undefined, s.dir).code, 0);
+    const original = s.nuls('claude.args');
+    const calls = s.calls();
+    rmSync(join(s.fake, 'claude.args'));
+    assert.equal(s.fac(['lead', '--resume-session', session, '--check']).code, 0);
+    assert.equal(s.calls(), calls, 'checking never launches anything');
+    assert.equal(s.read('claude.args'), '');
+    const resumed = s.fac(['lead', '--resume-session', session]);
+    assert.equal(resumed.code, 0, resumed.out);
+    assert.deepEqual(s.nuls('claude.args'), original, 'role, settings, wake hook and isolation are restored');
+    assert.equal(s.read('claude.cwd').trim(), realpathSync(s.dir));
+    assert.equal(s.fac(['lead', 'alpha', '--team', 'beta', '--here']).code, 0);
+    const fresh = s.nuls('claude.args');
+    const id = fresh[fresh.indexOf('--session-id') + 1];
+    assert.match(id, /^[0-9a-f-]{36}$/);
+    assert.equal(s.fac(['lead', '--resume-session', id, '--check']).code, 0);
+    assert.equal(s.fac(['lead', '--resume-session', session, '--check']).code, 0, 'earlier sessions remain recorded');
   } finally {
     s.done();
   }
@@ -505,7 +535,9 @@ test('lead --here has a hook on SessionStart and SessionEnd that records and rem
     assert.equal(started.status, 0);
     assert.equal(started.stderr, '');
     assert.equal(readFileSync(file, 'utf8'), '/tmp/cc-socks-1/42.sock\n');
-    assert.deepEqual(readdirSync(join(s.state, 'lead-here')).sort(), ['alpha-beta.socket', 'gh-empty'], 'nothing else is written');
+    const args = s.nuls('claude.args');
+    const session = args[args.indexOf('--session-id') + 1];
+    assert.deepEqual(readdirSync(join(s.state, 'lead-here')).sort(), [`${session}.json`, 'alpha-beta.socket', 'gh-empty'].sort());
     run('SessionStart', { CLAUDE_CODE_MESSAGING_SOCKET: 'uds:/tmp/cc-socks-1/43.sock' });
     assert.equal(readFileSync(file, 'utf8'), '/tmp/cc-socks-1/43.sock\n');
     assert.equal(run('SessionEnd', env).status, 0);
