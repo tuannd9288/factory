@@ -30,7 +30,8 @@
 # adds the factory rows and the piggery rows over ssh to the Mac mini. --json prints the rows as one JSON line.
 # A row that is not logged in shows its login command; the Human runs it. The profiles are committed in lib/factory.mjs, with no
 # account name; the account of a profile is in $FACTORY_STATE/accounts (default ~/.local/state/factory/accounts), one
-# "<profile>=<name>" a line, local to the machine, mode 600: on the Mac mini the one source of a row's account (only `use` changes it).
+# "<profile>=<name>" a line, local to the machine, mode 600: on the Mac mini the one source of a row's account. Only `use` changes it,
+# run by the Human or Colly on his spoken word (INN-30, 2026-11-05).
 # A call that takes longer than FACTORY_TIMEOUT_MS (default 15000) is shown as timed out.
 # Tokens are stored at ~/.agent-profiles/tokens/<account> (mode 600, in a folder of mode 700); only the Human runs login (bin/install-factory
 # puts this command on his PATH, as a symlink into the machine's installed copy of the factory, which follows main and is followed here, #390).
@@ -56,7 +57,8 @@
 # `factory login <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into
 # (--no-setup skips setup-token) and stores it at ~/.agent-profiles/tokens/<account> (mode 600, folder 700): on the Mac mini
 # directly, from the MacBook over ssh's stdin to `factory store <account>`, never in an argument. Only the Human runs `login`,
-# `store`, `use` and `logout`: every bin/seat role and the pstack Lead deny them (#177, #178).
+# `store` and `logout`. Colly may run `use` and `lead` on his spoken word (INN-30, 2026-11-05).
+# Every bin/seat role and every Lead keep their deny on all five, unchanged (#177, #178).
 # `factory lead`: the team is a letter then at most 31 lowercase letters and digits, chosen from the existing teams or the nickname list, and is the team of its
 # claims and pull requests; on the Mac mini it runs packs/pstack/bin/lead, on the MacBook it runs that by ssh (the start is
 # described in that file's header).

@@ -155,6 +155,16 @@ export function switchMoves({ repo, move, now }) {
   return [{ key: `switch-moved ${repo} ${move.at}`, scope: `switch ${repo}`, top: true, url: `https://github.com/${repo}/rules`, text: `${repo} merge switch moved from ${move.from} to ${move.to}, seen by the sweep at ${localStamp(seen)}` }];
 }
 
+/** INN answers are permanent conditions keyed by the source event, on the factory host only.
+ * Keeping the scope unread preserves the start across catch-up and daemon restarts. */
+export function innAnswer({ state, event, pick, source, now }) {
+  const key = event.kind === 'commentCreated' ? event.id : `${event.id}:${event.time}`;
+  const answer = event.kind === 'commentCreated' ? 'his comment'
+    : source ? `his pick ${pick} (${source})` : `pick ${pick}; ticker is not confirmed; not his answer`;
+  return record({ state, found: [{ key: `inn-answer ${key}`, scope: 'inn-answer',
+    text: `${event.issueIdentifier}: ${answer}` }], read: new Set(), now });
+}
+
 const emptyActive = () => ({ seq: 0, conditions: {} });
 
 /** The conditions that hold, as events-active.json keeps them: { seq, conditions: { key: { kind, key, scope, text, since, started, top, url } } }. */

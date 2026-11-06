@@ -8,7 +8,7 @@
 // The committed profile list below holds no account name: the factory repository is public, and an account is an email local
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
@@ -346,6 +346,7 @@ const USAGE = `usage: bin/factory [--all] [--json]
        bin/factory colly --brief [--after <seq>]
        bin/factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]
        bin/factory lead <repo> [--team <name> | --new-team] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
+       bin/factory lead --resume-session <id> [--check]
        bin/factory gh <gh arguments>   (on the MacBook: gh on the Mac mini, under the agents' login)
        bin/factory linear take|release|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
@@ -363,8 +364,24 @@ function onHostBySsh(sub, args, tty, env) {
 
 /** `factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository. On
  * the factory host it runs this clone's packs/pstack/bin/lead; on the MacBook it runs the same command there by ssh. The name, the
- * team (the grammar of bin/lib/names.mjs) and the flags are checked before anything runs. */
+ * team (the grammar of bin/lib/names.mjs) and the flags are checked before anything runs.
+ * --resume-session restores a recorded --here session; --check only tests whether its record exists. */
 function lead(all, env) {
+  if (all[0] === '--resume-session') {
+    const [, session, check] = all;
+    if (!session || all.length > 3 || (check !== undefined && check !== '--check')) {
+      console.error(USAGE);
+      return 2;
+    }
+    let saved;
+    try {
+      if (!/^[A-Za-z0-9-]+$/.test(session)) return 1;
+      saved = JSON.parse(readFileSync(join(contextOf(env).state, 'lead-here', `${session}.json`), 'utf8'));
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(saved.repo ?? '') || !TEAM.test(saved.team ?? '') || typeof saved.cwd !== 'string') return 1;
+    } catch { return 1; }
+    if (check) return 0;
+    return leadHere(saved.repo, saved.team, ['--resume', session], env, saved.cwd);
+  }
   // What follows `--` is for claude, and only `--here` takes it.
   const dd = all.indexOf('--');
   const args = dd === -1 ? all : all.slice(0, dd);
@@ -495,7 +512,7 @@ function copySocketHook(state) {
  * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
  * prompt, a push URL that cannot be reached for GitHub's HTTPS addresses, and an ssh command that only fails (a push goes from the
  * Mac mini); `gh auth` and `security` (the Keychain) are denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
-function leadHere(repo, team, passed, env) {
+function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
     return 2;
@@ -556,7 +573,22 @@ function leadHere(repo, team, passed, env) {
     },
     permissions: { deny: ['Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
-  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, '--settings', JSON.stringify(settings), ...passed], { stdio: 'inherit', env });
+  // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
+  const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
+  const index = passed.indexOf(sessionFlag);
+  const session = index === -1 ? randomUUID() : passed[index + 1];
+  if (!session || !/^[A-Za-z0-9-]+$/.test(session)) {
+    console.error('bin/factory: lead --here: a session id is required');
+    return 2;
+  }
+  try {
+    writeFileSync(join(parent, `${session}.json`), `${JSON.stringify({ repo, team, cwd })}\n`, { mode: 0o600 });
+  } catch (e) {
+    console.error(`bin/factory: lead --here: ${e.message}`);
+    return 1;
+  }
+  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, '--settings', JSON.stringify(settings),
+    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env, cwd });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
