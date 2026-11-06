@@ -2,7 +2,9 @@ import { forcePushOn } from './force-push.mjs';
 // The admin step of taking a repository in, run by Colly from the factory clone, on the Human's gh login, after his one
 // approval of what it prints: it checks the repository is the one he names, by name and id, shows every change, and
 // with --apply invites the agents' account (write), sets the factory's rulesets, creates the reviewer environment and turns
-// on the repository's "Allow auto-merge" (#139), then reads back what it set. The gate's ruleset follows the reviewer as
+// on the repository's "Allow auto-merge" (#139), once the kit is on main sets an Actions event policy that allows the gate's
+// workflows on pull_request_target the events main's own files give them (#337), then reads back what it set. On the factory's
+// own repository it sets that policy alone. The gate's ruleset follows the reviewer as
 // main's gate-trusted.yml holds it (#155: entire has its own). The gate's settings are in the workflows on main, which
 // bin/onboard fills in and a pull request changes (#335); this command sets none of them, since the Human's approval of
 // that pull request is what changes one. Nor does it set the gate's merge switch (#333), the two review parameters of the
@@ -17,7 +19,8 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { POSITIONS, PARAMETERS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
-import { SETTINGS, TRUSTED, WORKFLOWS, readsVariables, sharedRunners, valuesIn } from './gate-settings.mjs';
+import { SETTINGS, TRUSTED, WORKFLOWS, readsVariables, sharedRunners, targetOf, valuesIn } from './gate-settings.mjs';
+import { FACTORY_REPO } from './repos.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FILES = {
@@ -31,6 +34,20 @@ const ENV = 'reviewer';
 const GATE_NAME = 'factory-gate';
 const CALL_MS = 60_000;
 const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
+/** #337: from 2026-12-02 GitHub blocks pull_request_target in a public repository that has no Actions event policy allowing
+ * it, and the gate's trusted jobs run on it. The repository gets one policy, by this name, that allows the gate's workflow files
+ * that run on pull_request_target the events they run on. Its endpoints are documented for this API version, sent on each call. */
+export const POLICY_NAME = 'factory gate: pull_request_target';
+export const POLICY_VERSION = '2026-03-10';
+const versioned = (version) => (version ? ['-H', `X-GitHub-Api-Version: ${version}`] : []);
+
+/** The policy's body for what targetOf read from main: its files and their events. */
+export const eventPolicy = ({ include, events }) => ({
+  name: POLICY_NAME,
+  enforcement: 'active',
+  conditions: { workflow_path: { include, exclude: [] } },
+  rules: [{ type: 'restrict_action_events', parameters: { allowed_events: events } }],
+});
 /** #155: Entire's GitHub App, which posts the check "Entire Gates": read by the Human on 2026-10-29 from that check on
  * factory-onboard-scratch's head 485678f. An App's id never changes; main() asks GitHub that the slug still names it. */
 export const ENTIRE_APP = { slug: 'entire', id: 2626939, check: 'Entire Gates' };
@@ -71,8 +88,9 @@ const sorted = (r) => ({ ...r, rules: [...(r.rules ?? [])].sort((a, b) => a.type
 /** What the repository should hold: before the kit is on its default branch, a ruleset that refuses a rewrite on main and claims
  * (every branch with forcePush off), one on every tag that refuses creation, update and deletion but for a repository admin, one on the claim refs
  * (claim/<n>) that refuses deletion and rewrite for everyone, and a bootstrap one on main that asks the Human to approve
- * the last push; after, the kit's gate in place of the bootstrap one, in its Entire variant when the reviewer is entire. */
-export function wanted({ kitLanded, branch, reviewer, mergeMethod = 'squash', forcePush }) {
+ * the last push; after, the kit's gate in place of the bootstrap one, in its Entire variant when the reviewer is entire, and the
+ * Actions event policy for the workflow files `target` names (#337), read from main by gateState. */
+export function wanted({ kitLanded, branch, reviewer, mergeMethod = 'squash', forcePush, target }) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
   const gate = () => {
     const value = reviewer === 'entire' ? entireGate(read(FILES.gate)) : read(FILES.gate);
@@ -85,6 +103,7 @@ export function wanted({ kitLanded, branch, reviewer, mergeMethod = 'squash', fo
     rulesets: [branches, read(FILES.tags), read(FILES.claims), kitLanded ? gate() : read(FILES.bootstrap)],
     drop: kitLanded ? [read(FILES.bootstrap).name] : [],
     branch,
+    actionsPolicy: kitLanded && target?.include?.length ? eventPolicy(target) : null,
   };
 }
 
@@ -156,11 +175,39 @@ export function plan(slug, agent, have, want) {
   if (!have.policies.some((p) => p.name === want.branch && (p.type ?? 'branch') === 'branch'))
     calls.push({ what: `environment ${ENV} deploys from ${want.branch}`, method: 'POST', path: `${repo}/environments/${ENV}/deployment-branch-policies`, body: { name: want.branch, type: 'branch' } });
   if (!have.autoMerge) calls.push({ what: 'allow auto-merge', method: 'PATCH', path: repo, body: { allow_auto_merge: true } });
+  calls.push(...policyCalls(slug, have, want));
   for (const name of want.drop) {
     const now = have.rulesets.find((x) => x.name === name);
     if (now) calls.push({ what: `ruleset ${name}, which the kit's gate replaces`, method: 'DELETE', path: `${repo}/rulesets/${now.id}` });
   }
   return calls;
+}
+
+/** A policy as the comparison reads it: its three lists (include, exclude, allowed_events) as sets, sorted, and a missing exclude
+ * as the empty one sent, so GitHub's echo of the same policy in another order, or without the empty list, is no difference. */
+const asSets = (p) => {
+  const sort = (list) => (Array.isArray(list) ? [...list].sort() : list);
+  const path = p.conditions?.workflow_path ?? {};
+  return {
+    ...p,
+    conditions: { ...p.conditions, workflow_path: { ...path, include: sort(path.include), exclude: sort(path.exclude ?? []) } },
+    rules: (p.rules ?? []).map((r) => (r.type === 'restrict_action_events' ? { ...r, parameters: { ...r.parameters, allowed_events: sort(r.parameters?.allowed_events) } } : r)),
+  };
+};
+
+/** The call that brings the Actions event policy (#337) from have to want: made when absent, put back by its id when it differs. */
+export function policyCalls(slug, have, want) {
+  const body = want.actionsPolicy;
+  if (!body) return [];
+  const what = `Actions event policy "${POLICY_NAME}"`;
+  const path = `repos/${slug}/actions/policies`;
+  if (!have.actionsPolicy) return [{ what, method: 'POST', path, body, version: POLICY_VERSION }];
+  return holds(asSets(body), asSets(have.actionsPolicy)) ? [] : [{ what, method: 'PUT', path: `${path}/${have.actionsPolicy.id}`, body, version: POLICY_VERSION }];
+}
+
+/** The repository's own Actions event policy of that name, or null: none, or no policies list at all (a 404). */
+export function policyNow(slug, read = gh) {
+  return maybe(`repos/${slug}/actions/policies?has_parents=false&per_page=100`, read, POLICY_VERSION)?.policies?.find((p) => p.name === POLICY_NAME) ?? null;
 }
 
 export function gh(args, input) {
@@ -169,10 +216,10 @@ export function gh(args, input) {
 }
 
 /** A GET that answers null on 404 and throws on any other failure. `read` makes the call: bin/onboard-doctor passes one
- * that refuses anything but a read. */
-export function maybe(path, read = gh) {
+ * that refuses anything but a read. `version` sends the API version header an endpoint is documented for. */
+export function maybe(path, read = gh, version = undefined) {
   try {
-    return read(['api', path]);
+    return read(['api', ...versioned(version), path]);
   } catch (error) {
     if (/\(HTTP 404\)/.test(String(error.stderr))) return null;
     throw error;
@@ -194,6 +241,7 @@ export function current(slug, agent, names, read = gh) {
     rulesets: list.filter((r) => names.has(r.name)).map((r) => read(['api', `${repo}/rulesets/${r.id}`])),
     environment,
     policies: environment ? (read(['api', `${repo}/environments/${ENV}/deployment-branch-policies`])?.branch_policies ?? []) : [],
+    actionsPolicy: policyNow(slug, read),
   };
 }
 
@@ -251,7 +299,9 @@ export function gateState(slug, branch, read = gh, fileAt = undefined) {
   // On a main where the kit has landed, a gate-trusted.yml that is absent, or holds no reviewer line in the kit's form, is not
   // "no reviewer": the reviewer is unknown, and the ruleset it chooses would be the wrong one (#333, #335's round 2).
   const unreadable = kitLanded && !old && settings.reviewer === undefined;
-  return { forcePush, kitLanded, files, settings, variables, old, unreadable, mergeMethod, reviewer: settings.reviewer ?? (old ? (variables.GATE_REVIEWER ?? '') : '') };
+  // The Actions event policy's files and events, from the same workflows (#337); { unreadable: path } when one is not in the kit's form.
+  const target = targetOf(files);
+  return { forcePush, kitLanded, files, settings, variables, old, unreadable, mergeMethod, target, reviewer: settings.reviewer ?? (old ? (variables.GATE_REVIEWER ?? '') : '') };
 }
 
 /** The arguments of bin/onboard-owner: { slug, id, apply, merge }, or { problem } for a usage error. */
@@ -282,6 +332,53 @@ export function parseArguments(argv) {
 
 const show = (c) => c.shown ?? `${c.method} ${c.path}${c.body ? ` ${JSON.stringify(c.body)}` : ''}`;
 
+/** Makes the planned calls, in order, each with the API version its endpoint is documented for. */
+function send(calls) {
+  for (const c of calls) {
+    const args = ['api', '-X', c.method, ...versioned(c.version), c.path];
+    gh(c.body ? [...args, '--input', '-'] : args, c.body ? JSON.stringify(c.body) : undefined);
+    console.log(`  done    ${c.what}`);
+  }
+}
+
+/** The workflow files on the branch, by path, as the contents API gives the folder and each file. */
+function workflowsOn(slug, branch) {
+  const ref = `?ref=${encodeURIComponent(branch)}`;
+  const files = {};
+  for (const entry of maybe(`repos/${slug}/contents/.github/workflows${ref}`) ?? []) {
+    if (entry.type !== 'file' || !/\.ya?ml$/.test(entry.name)) continue;
+    const file = maybe(`repos/${slug}/contents/${entry.path}${ref}`);
+    if (typeof file?.content === 'string') files[entry.path] = Buffer.from(file.content, 'base64').toString('utf8');
+  }
+  return files;
+}
+
+/** The factory's own repository (#337, option a): it keeps its own `factory` ruleset and runs none of the kit, so a run plans,
+ * applies and reads back only its Actions event policy, for the workflows on its main that run on pull_request_target. */
+function policyOnly(slug, branch, apply) {
+  const target = targetOf(workflowsOn(slug, branch));
+  if (target.unreadable) {
+    console.error(`onboard-owner: ${target.unreadable} on ${branch} has no on: block in the kit's form, so the events its Actions event policy must allow are not known: nothing changes`);
+    return 2;
+  }
+  const want = { actionsPolicy: target.include.length ? eventPolicy(target) : null };
+  console.log(`onboard-owner: ${slug} is the factory's own repository: this run sets only its Actions event policy, for ${target.include.join(', ') || 'no workflow on pull_request_target'}`);
+  const calls = policyCalls(slug, { actionsPolicy: policyNow(slug) }, want);
+  for (const c of calls) console.log(`  change  ${c.what}: ${show(c)}`);
+  if (!calls.length) console.log('  nothing to change');
+  if (!apply) {
+    if (calls.length) console.log('onboard-owner: dry run: nothing changed; rerun with --apply to make these changes');
+    return 0;
+  }
+  send(calls);
+  if (policyCalls(slug, { actionsPolicy: policyNow(slug) }, want).length) {
+    console.log(`onboard-owner: incomplete: Actions event policy "${POLICY_NAME}"`);
+    return 1;
+  }
+  console.log('onboard-owner: read back: the Actions event policy as planned');
+  return 0;
+}
+
 export function linearCodeStep(slug) {
   return `onboard-owner: Human's manual step: open https://github.com/settings/installations, then Linear Code → Configure → tick ${slug} → Save`;
 }
@@ -299,12 +396,24 @@ function main(argv) {
     console.error(who.refusal);
     return 2;
   }
-  const { repo } = who;
+  const { repo, login } = who;
   const branch = repo.default_branch;
+  // The factory's own repository is his login's `factory`: its gate is its own, so the kit's rulesets never go there.
+  if (slug.toLowerCase() === `${login}/${FACTORY_REPO}`.toLowerCase()) {
+    if (merge) {
+      console.error(`onboard-owner: --merge moves the kit's gate, which ${slug} does not run: nothing changes`);
+      return 2;
+    }
+    return policyOnly(slug, branch, apply);
+  }
   // The reviewer as main holds it; a runner that breaks the rule is the evidence's and the doctor's to name.
-  const { kitLanded, settings, old, reviewer, unreadable, mergeMethod, forcePush } = gateState(slug, branch);
+  const { kitLanded, settings, old, reviewer, unreadable, mergeMethod, forcePush, target } = gateState(slug, branch);
   if (unreadable) {
     console.error(`onboard-owner: ${TRUSTED} on ${branch} cannot be read as the kit's file with its reviewer line, so the reviewer is not known and the gate's ruleset cannot be chosen: nothing changes`);
+    return 2;
+  }
+  if (target.unreadable) {
+    console.error(`onboard-owner: ${target.unreadable} on ${branch} has no on: block in the kit's form, so the events its Actions event policy must allow are not known: nothing changes`);
     return 2;
   }
   if (merge && !kitLanded) {
@@ -318,7 +427,7 @@ function main(argv) {
       return 2;
     }
   }
-  const kit = wanted({ kitLanded, branch, reviewer, mergeMethod, forcePush });
+  const kit = wanted({ kitLanded, branch, reviewer, mergeMethod, forcePush, target });
   const names = new Set([...kit.rulesets.map((r) => r.name), ...kit.drop]);
   const now = current(slug, agent, names);
   // The gate's two review parameters are the merge switch (#333): the position --merge names, else the live ruleset's own,
@@ -372,11 +481,7 @@ function main(argv) {
     if (!merge) console.log(linearCodeStep(slug));
     return 0;
   }
-  for (const c of calls) {
-    const args = ['api', '-X', c.method, c.path];
-    gh(c.body ? [...args, '--input', '-'] : args, c.body ? JSON.stringify(c.body) : undefined);
-    console.log(`  done    ${c.what}`);
-  }
+  send(calls);
   const have = current(slug, agent, names);
   if (merge) {
     const set = reviewOf(have.rulesets.find((r) => r.name === GATE_NAME));
