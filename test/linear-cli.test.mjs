@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { nodeName } from '../bin/lib/shared-records.mjs';
 import { join } from 'node:path';
 import { createLinear } from '../bin/lib/linear.mjs';
 import { createCli, holderOf, onLinear, parse, registryFile } from '../bin/lib/linear-cli.mjs';
@@ -148,7 +149,7 @@ test('a retake after a failed holder comment is allowed, and the comment is post
   linear.failComment = false;
   const r = await run(['take', 'FAC-12', '--team', 'lead']);
   assert.equal(r.code, 0, JSON.stringify(r));
-  assert.deepEqual(linear.stored.map((c) => c.body), ['Taken by team lead.']);
+  assert.deepEqual(linear.stored.map((c) => c.body), [`Taken by team lead on ${nodeName()}.`]);
 });
 
 test('take refuses and changes nothing more when another team\'s take came first, read after its own comment', async () => {
@@ -192,7 +193,7 @@ test('create --delegate needs --team and posts the holder comment a take posts; 
   assert.equal(linear.stored.length, 0, 'no holder comment without --delegate');
   const r = await make(['--delegate', '--team', 'lead']);
   assert.equal(r.code, 0, JSON.stringify(r));
-  assert.deepEqual(linear.stored.map((c) => c.body), ['Taken by team lead.']);
+  assert.deepEqual(linear.stored.map((c) => c.body), [`Taken by team lead on ${nodeName()}.`]);
   const posted = linear.mutations().find((m) => m.query.includes('commentCreate'));
   assert.equal(inputOf(posted).createAsUser, 'factory-lead');
   const created = linear.mutations().filter((m) => m.query.includes('issueCreate')).at(-1);
@@ -225,7 +226,7 @@ test('release by the holder clears the delegate, moves to the first unstarted st
   assert.equal(ms.length, 2);
   assert.equal(inputOf(ms[0]).delegateId, null);
   assert.equal(inputOf(ms[0]).stateId, 's-todo');
-  assert.equal(inputOf(ms[1]).body, 'Released by team lead.');
+  assert.equal(inputOf(ms[1]).body, `Released by team lead on ${nodeName()}.`);
   assert.equal(inputOf(ms[1]).createAsUser, 'factory-lead');
   assert.equal(linear.issue.delegate, null);
   assert.equal(holderOf(linear.stored), null);
@@ -556,5 +557,30 @@ test('decision items file all fields and close with a comment using only the sto
     writeFileSync(join(root, 'tokens', 'colly'), '');
     assert.equal((await run(['decision-close', 'INN-7', '--body-file', '-'])).code, 1);
     assert.equal(calls.length, before, 'a missing Colly key never falls back to Factory credentials');
+  }
+});
+
+
+test('holder comments name the shared-records node and accept old and new forms', async () => {
+  const { run, linear, stdin } = setup();
+  const node = nodeName();
+  assert.equal((await run(['take', 'FAC-12', '--team', 'lead'])).code, 0);
+  assert.equal(linear.stored[0].body, `Taken by team lead on ${node}.`);
+  assert.equal(holderOf(linear.stored), 'lead');
+  assert.equal((await run(['release', 'FAC-12', '--team', 'lead'])).code, 0);
+  assert.equal(linear.stored[1].body, `Released by team lead on ${node}.`);
+  assert.equal(holderOf(linear.stored), null);
+  assert.equal(holderOf([note('Taken by team lead.', 1)]), 'lead');
+  assert.equal(holderOf([note('Taken by team lead on macbook.', 1)]), 'lead');
+  assert.equal(holderOf([note('Taken by team lead.', 1), note('Released by team lead on macbook.', 2)]), null);
+  assert.equal(holderOf([note('Taken by team lead on macbook.', 1), note('Released by team lead.', 2)]), null);
+  assert.equal(holderOf([note('Taken by team lead on macbook.', 1), note('Taken by team other on macmini.', 2)]), 'lead');
+  for (const body of ['Taken by team lead on macbook.', 'Released by team lead on macbook.']) {
+    stdin.text = body;
+    for (const verb of ['comment', 'ask']) {
+      const before = linear.mutations().length;
+      assert.equal((await run([verb, 'FAC-12', '--team', 'lead', '--body-file', '-'])).code, 1);
+      assert.equal(linear.mutations().length, before);
+    }
   }
 });
