@@ -10,6 +10,9 @@ import { roleOf } from '../packs/pstack/bin/lead.mjs';
 
 test('lead --here passes the pack role as an appended system prompt', async (t) => {
   const state = mkdtempSync(join(tmpdir(), 'factory-role-'));
+  mkdirSync(join(state, 'tokens'));
+  writeFileSync(join(state, 'tokens/fixture'), 'fixture-token');
+  writeFileSync(join(state, 'accounts'), 'factory/alpha-beta=fixture');
   const calls = [];
   t.mock.method(childProcess, 'spawnSync', (cmd, args) => {
     calls.push({ cmd, args });
@@ -23,7 +26,7 @@ test('lead --here passes the pack role as an appended system prompt', async (t) 
         writeFileSync(join(state, 'linear/repos.json'), JSON.stringify({ alpha: { key: 'ALP', teamId: 'fixture' } }));
       }
       assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], {
-        HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here',
+        HOME: state, FACTORY_STATE: state, AGENT_PROFILES: state, FACTORY_HOST_USER: 'nobody-here',
       }), 0);
       const { cmd, args } = calls.at(-1);
       assert.equal(cmd, 'claude');

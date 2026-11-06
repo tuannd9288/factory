@@ -56,10 +56,17 @@ function world() {
     chmodSync(join(bin, name), 0o755);
   }
   const env = { FAKE: fake, HOME: home, PATH: `${bin}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_RUNS: join(home, 'factory-runs'), AGENT_PROFILES: join(dir, 'profiles'), FACTORY_ROOT: join(home, 'WORKSPACES'), FACTORY_HOST_USER: 'nobody-here' };
+  mkdirSync(join(dir, 'profiles/tokens'), { recursive: true });
+  writeFileSync(join(dir, 'profiles/tokens/fixture'), 'fixture-token');
   const w = (name, text) => writeFileSync(join(fake, name), text);
   const read = (name) => (existsSync(join(fake, name)) ? readFileSync(join(fake, name), 'utf8') : '');
   const nuls = (name) => read(name).split('\0').slice(0, -1);
   const fac = (args, input, cwd = factory) => {
+    if (args[0] === 'lead' && args.includes('--here') && !existsSync(join(state, 'accounts'))) {
+      const teamIndex = args.indexOf('--team');
+      const team = teamIndex === -1 ? freeWord(args[1], []) : args[teamIndex + 1];
+      writeFileSync(join(state, 'accounts'), `factory/${args[1]}-${team}=fixture\n`);
+    }
     const { NODE_TEST_CONTEXT, ...outer } = process.env;
     const r = spawnSync(join(factory, 'bin/factory'), args, { cwd, encoding: 'utf8', env: { ...outer, ...env }, input });
     return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
@@ -537,7 +544,7 @@ test('lead --here has a hook on SessionStart and SessionEnd that records and rem
     assert.equal(readFileSync(file, 'utf8'), '/tmp/cc-socks-1/42.sock\n');
     const args = s.nuls('claude.args');
     const session = args[args.indexOf('--session-id') + 1];
-    assert.deepEqual(readdirSync(join(s.state, 'lead-here')).sort(), [`${session}.json`, 'alpha-beta.socket', 'gh-empty'].sort());
+    assert.deepEqual(readdirSync(join(s.state, 'lead-here')).sort(), [`${session}.json`, 'alpha-beta.socket', 'gh-empty', 'profiles'].sort());
     run('SessionStart', { CLAUDE_CODE_MESSAGING_SOCKET: 'uds:/tmp/cc-socks-1/43.sock' });
     assert.equal(readFileSync(file, 'utf8'), '/tmp/cc-socks-1/43.sock\n');
     assert.equal(run('SessionEnd', env).status, 0);

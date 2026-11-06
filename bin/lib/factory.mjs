@@ -9,7 +9,7 @@
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, lstatSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -18,13 +18,13 @@ import { checkoutRoot } from './checkout.mjs';
 import { quotaRows } from './quota.mjs';
 import { post, wakeLine } from './wake.mjs';
 import { liveOfAccount } from './seat.mjs';
-import { quote, roleOf } from '../../packs/pstack/bin/lead.mjs';
+import { markOnboarded, quote, roleOf } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
-import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
+import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -48,10 +48,9 @@ function spareFolders(home) {
 export function profilesOf(place, { home, agentProfiles, state, root }) {
   if (place === 'macbook') {
     return [
-      claude('macbook/claude', 'Colly', {}, 'claude auth login'),
+      claude('macbook/claude', 'Colly', { CLAUDE_CONFIG_DIR: join(state, 'colly/profile') }, 'factory colly, then /login'),
       ...spareFolders(home).map((n) => claude(`macbook/claude-acc${n}`, 'spare Claude', { CLAUDE_CONFIG_DIR: join(home, `.claude-acc${n}`) }, `claude-use login ${n}`)),
       { profile: 'macbook/codex', role: 'Colly Codex', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: {} }, login: 'codex-use login <N>' },
-      { profile: 'macbook/gh', role: 'Colly gh', kind: 'gh', check: { cmd: 'gh', args: ['auth', 'status'], env: {} }, login: 'gh auth login' },
     ];
   }
   if (place === 'factory') {
@@ -512,6 +511,7 @@ function copySocketHook(state) {
  * no login here; `factory gh` runs it on the Mac mini), the agents' git identity, an emptied credential.helper list, no git password
  * prompt, a push URL that cannot be reached for GitHub's HTTPS addresses, and an ssh command that only fails (a push goes from the
  * Mac mini); `gh auth` and `security` (the Keychain) are denied. It refuses to start when the gh folder holds hosts.yml, the file a gh login writes. */
+// INN-31: each team owns a plain profile under the node's state; authentication comes from its local token store.
 function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -522,7 +522,17 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     console.error("bin/factory: lead --here: could not read the factory host's git user.name and user.email; nothing was started");
     return 1;
   }
-  const { state } = contextOf(env);
+  const { state, agentProfiles } = contextOf(env);
+  const account = readAccounts(state)[`factory/${repo}-${team}`];
+  if (!account || accountRefusal(account)) {
+    console.error('bin/factory: lead --here: a valid team row in the accounts file is required; use factory use');
+    return 1;
+  }
+  const token = readTokenFile(join(tokenDir(agentProfiles), account));
+  if (token.error) {
+    console.error('bin/factory: lead --here: the team token is missing or invalid');
+    return 1;
+  }
   const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/lead.md');
   let roleText;
   try {
@@ -538,8 +548,12 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 2;
   }
   const parent = join(state, 'lead-here');
+  const config = join(parent, 'profiles', repo, team);
   const empty = join(parent, 'gh-empty');
   try {
+    if (existsSync(config) && lstatSync(config).isSymbolicLink()) throw new Error('the factory profile must be a plain folder');
+    mkdirSync(config, { recursive: true, mode: 0o700 });
+    chmodSync(config, 0o700);
     mkdirSync(empty, { recursive: true, mode: 0o700 });
     chmodSync(parent, 0o700);
     chmodSync(empty, 0o700);
@@ -555,6 +569,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   // hash, so a pull that changes the installed one leaves a live Lead's hook as it was (#257, #390).
   let hook;
   try {
+    markOnboarded(config);
     hook = copySocketHook(state);
     mkdirSync(join(contextOf(env).runs, `${repo}-${team}`), { recursive: true });
   } catch (e) {
@@ -587,8 +602,10 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 1;
   }
+  const childEnv = { ...env, CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: token.token, FACTORY_TEAM: `${repo}-${team}` };
+  for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
   const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, '--settings', JSON.stringify(settings),
-    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env, cwd });
+    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: childEnv, cwd });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
@@ -597,7 +614,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
 }
 
 /** Colly's current-pane launch (#365): the pack supplies the approved role; GitHub writes go through `factory gh`.
- * INN-30 permits use and lead; login, store and logout remain denied. */
+ * INN-30 permits use and lead; login, store and logout remain denied.
+ * INN-31: a plain profile under the node's state, signed in once through /login; no inherited profile or token. */
 function colly(args, env) {
   if (args.includes('--line') || args.includes('--brief')) return collyStatus(args, env);
   if (args.length) {
@@ -621,8 +639,12 @@ function colly(args, env) {
     return 2;
   }
   const parent = join(contextOf(env).state, 'colly');
+  const config = join(parent, 'profile');
   const empty = join(parent, 'gh-empty');
   try {
+    if (existsSync(config) && lstatSync(config).isSymbolicLink()) throw new Error('the factory profile must be a plain folder');
+    mkdirSync(config, { recursive: true, mode: 0o700 });
+    chmodSync(config, 0o700);
     mkdirSync(empty, { recursive: true, mode: 0o700 });
     chmodSync(parent, 0o700);
     chmodSync(empty, 0o700);
@@ -645,7 +667,9 @@ function colly(args, env) {
       ],
     },
   };
-  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', 'colly', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env });
+  const childEnv = { ...env, CLAUDE_CONFIG_DIR: config };
+  for (const key of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
+  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', 'colly', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env: childEnv });
   if (r.error) {
     console.error(`bin/factory: colly: claude did not run (${r.error.code ?? 'error'})`);
     return 1;

@@ -14,17 +14,17 @@ test('with no arguments, on the MacBook: one row for each profile, with the acco
   const s = sandbox();
   try {
     spares(s, 2, 3, 4, 5);
-    s.w('claude-default.json', claudeJson(EMAIL));
+    s.w('claude-profile.json', claudeJson(EMAIL));
     s.w('claude-.claude-acc2.json', claudeJson('bob.example@other.example', 'pro'));
     s.w('codex-default', '');
     s.w('gh-macbook', 'ghann');
     const r = s.fac();
     assert.equal(r.code, 0, r.out);
-    for (const p of ['macbook/claude', 'macbook/claude-acc2', 'macbook/claude-acc3', 'macbook/claude-acc4', 'macbook/claude-acc5', 'macbook/codex', 'macbook/gh']) assert.ok(rowOf(r.out, p), `${p} in\n${r.out}`);
+    for (const p of ['macbook/claude', 'macbook/claude-acc2', 'macbook/claude-acc3', 'macbook/claude-acc4', 'macbook/claude-acc5', 'macbook/codex']) assert.ok(rowOf(r.out, p), `${p} in\n${r.out}`);
     assert.match(rowOf(r.out, 'macbook/claude '), /ann\.example/);
     assert.match(rowOf(r.out, 'macbook/claude '), /max/);
     assert.match(rowOf(r.out, 'macbook/claude-acc2'), /bob\.example/);
-    assert.match(rowOf(r.out, 'macbook/gh'), /ghann/);
+    assert.equal(rowOf(r.out, 'macbook/gh'), undefined);
     assert.ok(!r.out.includes('factory/'), 'no factory row on the MacBook');
     const j = s.fac('--json');
     assert.equal(j.code, 0, j.out);
@@ -40,7 +40,7 @@ test('on the MacBook, a plain run lists the Mac mini\'s rows too, as --all does;
   try {
     const rows = [{ place: 'factory', profile: 'factory/seat-2', role: 'worker', kind: 'Claude', loggedIn: true, account: 'ann.example', accountFrom: 'read', plan: 'max', five_hour: null, seven_day: null, asOf: null, live: 0, shared: [], login: 'x', note: '' }];
     s.w('ssh-factory.json', JSON.stringify(rows));
-    s.w('claude-default.json', claudeJson(EMAIL));
+    s.w('claude-profile.json', claudeJson(EMAIL));
     const plain = s.fac();
     assert.equal(plain.code, 0, plain.out);
     assert.ok(rowOf(plain.out, 'factory/seat-2'), `the Mac mini's rows in\n${plain.out}`);
@@ -127,7 +127,7 @@ test('the account comes from the local accounts file or FACTORY_SEAT_ACCOUNTS wh
   const s = sandbox();
   try {
     spares(s, 3, 4);
-    s.w('claude-default.json', claudeJson(EMAIL));
+    s.w('claude-profile.json', claudeJson(EMAIL));
     writeFileSync(join(s.state, 'accounts'), 'macbook/claude-acc3=ann.example\nmacbook/codex=zed.example\n');
     const j = JSON.parse(s.fac('--json').out);
     const by = (p) => j.find((x) => x.profile === p);
@@ -148,7 +148,7 @@ test('the table stays under 105 columns when "shared with" names four long profi
   const s = sandbox();
   try {
     spares(s, 2, 3, 4, 5);
-    s.w('claude-default.json', claudeJson(EMAIL));
+    s.w('claude-profile.json', claudeJson(EMAIL));
     writeFileSync(join(s.state, 'accounts'), [2, 3, 4, 5].map((n) => `macbook/claude-acc${n}=ann.example`).join('\n'));
     const r = s.fac();
     const table = r.out.split('\n\n')[0].split('\n');
@@ -256,7 +256,7 @@ test('one hung vendor call cannot hang the table', () => {
 test('--all merges the macbook rows, the factory rows over ssh and the piggery rows through pig', () => {
   const s = sandbox();
   try {
-    s.w('claude-default.json', claudeJson(EMAIL));
+    s.w('claude-profile.json', claudeJson(EMAIL));
     s.w('claude-piggery-claude.json', claudeJson('ann.example@secret-corp.example'));
     s.w('codex-piggery-codex', '');
     const factoryRows = [{ place: 'factory', profile: 'factory/seat-2', role: 'worker', kind: 'Claude', loggedIn: true, account: 'ann.example', accountFrom: 'read', plan: 'max', five_hour: null, seven_day: null, asOf: null, live: 0, shared: [], login: 'x', note: '' }];
@@ -366,7 +366,7 @@ exec "$0.real" "$@"
     assert.equal(r.code, 0, r.out);
     const log = readFileSync(join(s.fake, 'env.log'), 'utf8');
     assert.match(log, /^claude /m);
-    assert.match(log, /^gh /m);
+    assert.doesNotMatch(log, /^gh /m);
     assert.doesNotMatch(log, /=set/);
   } finally {
     s.done();
