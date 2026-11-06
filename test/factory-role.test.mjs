@@ -27,9 +27,12 @@ test('lead --here passes the pack role as an appended system prompt', async (t) 
       }
       assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], {
         HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', CLAUDE_CODE_OAUTH_TOKEN: 'made-up-wrong-node-token',
+        ANTHROPIC_API_KEY: 'made-up-key', ANTHROPIC_AUTH_TOKEN: 'made-up-auth', CLAUDE_CODE_PLUGIN_CACHE_DIR: join(state, 'other-plugins'),
       }), 0);
       const { cmd, args, options } = calls.at(-1);
       assert.equal(options.env.CLAUDE_CODE_OAUTH_TOKEN, 'made-up-local-token');
+      // A key in the caller's shell outranks the team's token, and a plugin cache would be another profile's (#366).
+      for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) assert.equal(options.env[key], undefined, key);
       assert.equal(options.env.CLAUDE_CONFIG_DIR, join(state, '.agent-profiles/leads/alpha-beta/claude'));
       assert.ok(!args.join(' ').includes('made-up-local-token'));
       assert.equal(cmd, 'claude');
