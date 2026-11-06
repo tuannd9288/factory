@@ -942,12 +942,16 @@ function ghCmd(args, env) {
 }
 
 /** `factory linear <verb> ...` (#404): a Lead's steps on a repository on Linear (bin/lib/linear-cli.mjs). On the factory host it runs there and
- * reads the Factory app's token in its own process; on the MacBook it runs the same command on the host, in the host user's login shell over ssh,
- * with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of this Mac is
- * involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
+ * reads the Factory app's token in its own process. On another node it runs there too when the node's own token store holds the app's
+ * client id and secret (FAC-38, #490's shape for `factory gh`): the node mints its own token, which leaves the host's alive, and reads its
+ * own registry. Otherwise, and always for the verbs that act as Colly, it runs the same command on the host, in the host user's login shell
+ * over ssh, with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of
+ * this Mac is involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
 async function linearCmd(args, env) {
   const cli = await import('./linear-cli.mjs');
-  if (placeOf(env) === 'factory') return cli.main(args, env);
+  const { appStored } = await import('./linear.mjs');
+  const here = !cli.COLLY_VERBS.includes(args[0]) && appStored(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
+  if (placeOf(env) === 'factory' || here) return cli.main(args, env);
   try {
     cli.parse(args);
   } catch (e) {
