@@ -199,8 +199,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - This folder stays out of every sync between the Macs. Code moves only through GitHub.
 - `.gitignore` admits only the factory's own files, so every repository folder is ignored.
 - A change to `kit/` changes every repository's gate at its next kit pull request: it is tier 3 here.
-- Before any brief, the Lead posts the Human's words verbatim, with their source, on the issue, in a comment marked
-  "relayed by Colly"; the brief carries them, and `bin/brief-check <brief> <relay>` is the check (#90).
+- The Lead keeps each of the Human's decisions on the issue, with its date and where he gave it. A brief is one direct
+  order in the fields of `bin/brief-template.md` and quotes no one above its sender (#482, #486).
 - The weekly digest is `bin/factory-ledger --post tuannd9288/better-factory --last-week`: it posts even when the canary
   (`--check`) finds a field missing or stale, saying so in one line. `--post` refuses a repository that is not
   `PRIVATE`, since the digest lists private repositories' tasks (#209). `bin/factory-ledger plist --daemon --repo
@@ -257,7 +257,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, or `codex`) and, for each side, its model and effort |
 | `bin/lib/streams.mjs` | Finds the two kinds of stream the reader reads, a seat's `run-<tag>.jsonl` and a Lead's `transcripts/<session>.jsonl` |
 | `bin/lib/redact.mjs` | The one redaction: the events' patterns (#309) and seatwork's, used by `bin/lib/events.mjs` and the reader |
-| `bin/brief-check` | Compares a brief with the relay it came from, with no model call: every double-quoted span of the relay must be in the brief's own body, above the attached message; `bin/brief-template.md` is the brief's seven fields and that attachment |
+| `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
 | `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
