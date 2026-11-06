@@ -1,5 +1,5 @@
 // #178, #311: `factory` on the Mac mini lists numbered rows (each team the accounts file names, the verifier) and lettered
-// accounts; `factory use <row> <letter>` rewrites the accounts file; `factory logout <account>` moves a token into the archive.
+// accounts; `factory use <row> <letter>` rewrites the accounts file; `factory account remove <account>` moves a token into the archive.
 // Fake claude, codex, gh and ssh on PATH and fixture folders; every name and token below is invented.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -54,7 +54,7 @@ test('the frame: one numbered row for each team, no seat row; lettered accounts 
   try {
     mini(s);
     logRun(s, 'ann');
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.equal(r.code, 0, r.out);
     console.log(`--- frame of \`factory\` (the factory Lead on ann, the ${REPO} Lead on bob) ---\n${r.out}\n--- end of frame ---`);
     const rows = [`factory/${REPO}-lead`, 'factory/factory-lead', 'factory/verifier'];
@@ -84,12 +84,12 @@ test('an account with a token file and no row is lettered, and an account a row 
   const s = box();
   try {
     mini(s, { accounts: `factory/${REPO}-lead=ann\nfactory/factory-lead=cat\n`, tokens: { ann: ANN, zed: BOB } });
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.equal(r.code, 0, r.out);
     const letters = r.out.split('\n').filter((l) => /^\s*[a-z]\s+\S/.test(l)).map((l) => l.trim().split(/\s+/).slice(0, 2).join(' '));
     assert.deepEqual(letters, ['a ann', 'b cat', 'c zed']);
     assert.match(lineOf(r.out, 'factory/factory-lead'), /\bNO\b/);
-    assert.match(r.out, /factory login cat/);
+    assert.match(r.out, /factory account add cat/);
     assert.match(r.out, /factory use 2 /);
     assert.match(lineOf(r.out, `factory/${REPO}-lead`), /\byes\b/);
     const zed = r.out.split('\n').find((l) => /^\s*c\s+zed\b/.test(l));
@@ -104,10 +104,10 @@ test('a token file shows its mode and date in the accounts block, never the cont
   try {
     mini(s);
     chmodSync(join(s.tokens(), 'bob'), 0o644);
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     assert.match(r.out.split('\n').find((l) => /^\s*b\s+bob\b/.test(l)) ?? 'no line for bob', /mode 644 \(should be 600\)/);
     assert.match(r.out.split('\n').find((l) => /^\s*a\s+ann\b/.test(l)) ?? 'no line for ann', /mode 600/);
-    assert.ok(!r.out.includes('ANNANN') && !JSON.stringify(s.fac('--json').out).includes('ANNANN'));
+    assert.ok(!r.out.includes('ANNANN') && !JSON.stringify(s.fac('account', 'list', '--json').out).includes('ANNANN'));
   } finally {
     s.done();
   }
@@ -118,11 +118,11 @@ test('a team row whose account is not in the file is not a row; a row of the fil
   try {
     mini(s, { accounts: `factory/factory-lead=ann\nfactory/${REPO}-lead=zed\n`, tokens: { ann: ANN } });
     s.env.FACTORY_SEAT_ACCOUNTS = '2=zed';
-    const rows = JSON.parse(s.fac('--json').out);
+    const rows = JSON.parse(s.fac('account', 'list', '--json').out);
     const lead = rows.find((x) => x.profile === `factory/${REPO}-lead`);
     assert.equal(lead.loggedIn, false);
     assert.equal(lead.account, 'zed');
-    assert.match(lead.login, /factory login zed/);
+    assert.match(lead.login, /factory account add zed/);
     assert.match(lead.login, /factory use 1 /);
     assert.equal(rows.some((x) => /seat/.test(x.profile)), false);
   } finally {
@@ -136,8 +136,8 @@ test('the team rows are the file\'s, sorted, for the factory and the onboarded r
     mini(s, { accounts: `factory/seat-1=ann\nfactory/seat-2=ann\nfactory/lead-zeta=ann\nfactory/${REPO}-lead=bob\nfactory/${REPO}-b=ann\nfactory/factory-lead=ann\nfactory/gamma-lead=ann\nfactory/nope-lead=ann\n` });
     onboarded(s, 'gamma');
     mkdirSync(join(s.env.FACTORY_ROOT, 'bare'), { recursive: true });
-    const rows = JSON.parse(s.fac('--json').out);
-    assert.deepEqual(rows.map((x) => x.profile).filter((p) => p !== 'factory/verifier' && p !== 'factory/gh'), [`factory/${REPO}-b`, `factory/${REPO}-lead`, 'factory/factory-lead', 'factory/gamma-lead']);
+    const rows = JSON.parse(s.fac('account', 'list', '--json').out);
+    assert.deepEqual(rows.filter((x) => x.role !== 'node token').map((x) => x.profile).filter((p) => p !== 'factory/verifier' && p !== 'factory/gh'), [`factory/${REPO}-b`, `factory/${REPO}-lead`, 'factory/factory-lead', 'factory/gamma-lead']);
     assert.doesNotMatch(s.calls(), /direnv/);
   } finally {
     s.done();
@@ -148,7 +148,7 @@ test('the JSON keeps its list of rows and adds the number and the letter of each
   const s = box();
   try {
     mini(s);
-    const rows = JSON.parse(s.fac('--json').out);
+    const rows = JSON.parse(s.fac('account', 'list', '--json').out);
     const by = (p) => rows.find((x) => x.profile === p);
     assert.equal(by(`factory/${REPO}-lead`).n, 1);
     assert.equal(by('factory/factory-lead').n, 2);
@@ -284,7 +284,7 @@ test('the LIVE column of a team row counts the live runs of its account; teams o
     writeFileSync(join(folder, 'run-dead.pid'), '999999\n');
     writeFileSync(join(folder, 'run-dead.account'), 'bob\n');
     s.w('gh-factory', 'agent-x'); // a logged-in gh row names an account but runs no session
-    const rows = JSON.parse(s.fac('--json').out);
+    const rows = JSON.parse(s.fac('account', 'list', '--json').out);
     const liveOf = (p) => rows.find((x) => x.profile === p).live;
     assert.equal(liveOf(`factory/${REPO}-b`), 2);
     assert.equal(liveOf('factory/factory-lead'), 2);
@@ -384,7 +384,7 @@ test('use on a running Lead to an account with no token file restarts nothing an
     withPane(s);
     const r = s.fac('use', '1', 'a');
     assert.equal(r.code, 1, r.out);
-    assert.match(r.out, /factory login ann/);
+    assert.match(r.out, /factory account add ann/);
     assert.deepEqual(herdrCalls(s), []);
   } finally {
     s.done();
@@ -398,7 +398,7 @@ test('use on a Lead that is not running, to an account with no token file, says 
     withPane(s, 'p-7', { running: false });
     const r = s.fac('use', '1', 'a');
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /next start is refused until factory login ann/);
+    assert.match(r.out, /next start is refused until factory account add ann/);
     assert.deepEqual(herdrCalls(s), []);
   } finally {
     s.done();
@@ -665,20 +665,23 @@ test('from the MacBook, use with an argument missing runs ssh -t, so the host as
   }
 });
 
-test('from the MacBook, logout runs on the Mac mini over ssh, and a bad account never reaches it', () => {
+test('on the MacBook, account remove archives only the local token', () => {
   const s = box();
   try {
-    const dir = far(s);
-    assert.equal(s.fac('logout', '../x').code, 2);
-    assert.equal(s.fac('logout', 'ann', 'bob').code, 2);
-    assert.equal(s.fac('logout').code, 2);
+    far(s);
+    const dir = s.tokens();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'ann'), ANN);
+    assert.equal(s.fac('account', 'remove', '../x').code, 2);
+    assert.equal(s.fac('account', 'remove', 'ann', 'bob').code, 2);
+    assert.equal(s.fac('account', 'remove').code, 2);
     assert.doesNotMatch(s.calls(), /ssh/);
-    const r = s.fac('logout', 'ann');
+    const r = s.fac('account', 'remove', 'ann');
     assert.equal(r.code, 0, r.out);
-    assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '~\/WORKSPACES\/bin\/factory logout ann'/);
+    assert.doesNotMatch(s.calls(), /ssh/);
     assert.equal(existsSync(join(dir, 'ann')), false);
-    assert.equal(readdirSync(join(s.fake, 'far/.agent-profiles/archive/tokens')).length, 1);
-    assert.equal(s.fac('logout', 'nobody').code, 1, 'the host\'s refusal comes back as the exit code');
+    assert.equal(readdirSync(join(s.env.AGENT_PROFILES, 'archive/tokens')).length, 1);
+    assert.equal(s.fac('account', 'remove', 'nobody').code, 1, 'the host\'s refusal comes back as the exit code');
   } finally {
     s.done();
   }
@@ -700,7 +703,7 @@ test('logout moves the token into archive/tokens by rename, never deletes it, an
   const s = box();
   try {
     mini(s);
-    const r = s.fac('logout', 'ann');
+    const r = s.fac('account', 'remove', 'ann');
     assert.equal(r.code, 0, r.out);
     const archive = join(s.env.AGENT_PROFILES, 'archive/tokens');
     const kept = readdirSync(archive);
@@ -711,10 +714,10 @@ test('logout moves the token into archive/tokens by rename, never deletes it, an
     assert.equal(mode(join(s.env.AGENT_PROFILES, 'archive')), '700');
     assert.equal(existsSync(join(s.tokens(), 'ann')), false);
     assert.ok(!r.out.includes('ANNANN'));
-    const list = s.fac();
+    const list = s.fac('account', 'list');
     assert.match(lineOf(list.out, 'factory/factory-lead'), /\bNO\b/);
     assert.match(lineOf(list.out, `factory/${REPO}-lead`), /\byes\b/);
-    assert.match(list.out, /factory login ann/);
+    assert.match(list.out, /factory account add ann/);
     assert.match(list.out, /factory use 2 /);
     assert.match(readFileSync(join(s.state, 'accounts'), 'utf8'), /factory-lead=ann/);
   } finally {
@@ -726,14 +729,14 @@ test('logout refuses an account with no token file, a bad name and a missing nam
   const s = box();
   try {
     mini(s);
-    assert.equal(s.fac('logout', 'nobody').code, 1);
-    assert.equal(s.fac('logout', '../x').code, 2);
-    assert.equal(s.fac('logout').code, 2);
-    assert.equal(s.fac('logout', 'ann', 'bob').code, 2);
-    assert.equal(s.fac('logout', 'ann').code, 0);
-    const again = s.facIn('sk-ant-oat01-NEWNEWNEW1234567890\n', 'login', 'ann', '--no-setup');
+    assert.equal(s.fac('account', 'remove', 'nobody').code, 1);
+    assert.equal(s.fac('account', 'remove', '../x').code, 2);
+    assert.equal(s.fac('account', 'remove').code, 2);
+    assert.equal(s.fac('account', 'remove', 'ann', 'bob').code, 2);
+    assert.equal(s.fac('account', 'remove', 'ann').code, 0);
+    const again = s.facIn('sk-ant-oat01-NEWNEWNEW1234567890\n', 'account', 'add', 'ann', '--no-setup');
     assert.equal(again.code, 0, again.out);
-    assert.match(lineOf(s.fac().out, 'factory/factory-lead'), /\byes\b/);
+    assert.match(lineOf(s.fac('account', 'list').out, 'factory/factory-lead'), /\byes\b/);
     assert.equal(readdirSync(join(s.env.AGENT_PROFILES, 'archive/tokens')).length, 1, 'the archive keeps the old one');
   } finally {
     s.done();
@@ -751,11 +754,11 @@ test('while seat 1\'s old token file is there, factory prints one line about it,
   try {
     mini(s);
     withOld(s);
-    const r = s.fac();
+    const r = s.fac('account', 'list');
     const lines = r.out.split('\n').filter((l) => l.includes('seats/1/oauth-token'));
     assert.equal(lines.length, 1, r.out);
     assert.ok(!r.out.includes('OLDOLD'));
-    assert.ok(!s.fac('--json').out.includes('OLDOLD'));
+    assert.ok(!s.fac('account', 'list', '--json').out.includes('OLDOLD'));
   } finally {
     s.done();
   }
@@ -777,7 +780,7 @@ test('use, once the old seat-1 line of the file names an account with a token, m
     assert.equal(kept.length, 1);
     assert.match(kept[0], /^\d{8}T\d{6}Z-oauth-token$/);
     assert.equal(readFileSync(join(s.env.AGENT_PROFILES, 'archive/seat-1', kept[0]), 'utf8'), 'sk-ant-oat01-OLDOLDOLD1234567890\n');
-    assert.ok(!s.fac().out.includes('seats/1/oauth-token'), 'no line once it is gone');
+    assert.ok(!s.fac('account', 'list').out.includes('seats/1/oauth-token'), 'no line once it is gone');
   } finally {
     s.done();
   }
@@ -799,10 +802,10 @@ test('login on the Mac mini moves the old seat 1 file when seat 1\'s account now
   try {
     mini(s, { accounts: 'factory/seat-1=ann\nfactory/seat-2=ann\n', tokens: {} });
     withOld(s);
-    const other = s.facIn('sk-ant-oat01-BOBBOB1234567890\n', 'login', 'bob', '--no-setup');
+    const other = s.facIn('sk-ant-oat01-BOBBOB1234567890\n', 'account', 'add', 'bob', '--no-setup');
     assert.equal(other.code, 0, other.out);
     assert.ok(existsSync(oldFile(s)), 'a token for another account moves nothing');
-    const r = s.facIn(`${ANN}\n`, 'login', 'ann', '--no-setup');
+    const r = s.facIn(`${ANN}\n`, 'account', 'add', 'ann', '--no-setup');
     assert.equal(r.code, 0, r.out);
     assert.equal(existsSync(oldFile(s)), false);
     assert.equal(readdirSync(join(s.env.AGENT_PROFILES, 'archive/seat-1')).length, 1);
@@ -829,7 +832,7 @@ test('the verifier\'s row is read-only: it shows its Codex login and has no acco
   try {
     mini(s);
     s.w('codex-codex', '');
-    const rows = JSON.parse(s.fac('--json').out);
+    const rows = JSON.parse(s.fac('account', 'list', '--json').out);
     const v = rows.find((x) => x.profile === 'factory/verifier');
     assert.equal(v.n, 3);
     assert.ok(userInfo().username);

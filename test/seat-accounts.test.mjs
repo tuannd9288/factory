@@ -134,11 +134,11 @@ test('the seat rows are not read: with only factory/seat-N in the file, every st
   assert.deepEqual(started(w), []);
 }));
 
-test('a team whose account has no token file starts nothing and names factory login <account> (#311)', () => world((w) => {
+test('a team whose account has no token file starts nothing and names factory account add <account> (#311)', () => world((w) => {
   w.accounts(TEAMS);
   const r = w.start('worker', ['--tag', 'x'], { FACTORY_TEAM: 'probe-alpha' });
   assert.equal(r.code, 2, r.out + r.err);
-  assert.match(r.out + r.err, /factory login acct-two/);
+  assert.match(r.out + r.err, /factory account add acct-two/);
   assert.deepEqual(started(w), []);
   assert.equal(w.records().length, 0);
 }));
@@ -150,7 +150,7 @@ test('after the account\'s token file is moved away (logout) every team naming i
   for (const team of ['factory-lead', 'probe-beta']) {
     const r = w.start('worker', ['--tag', `t-${team}`], { FACTORY_TEAM: team });
     assert.equal(r.code, 2, r.out + r.err);
-    assert.match(r.out + r.err, /factory login acct-one/, team);
+    assert.match(r.out + r.err, /factory account add acct-one/, team);
   }
   assert.deepEqual(started(w), []);
 }));
