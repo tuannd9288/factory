@@ -69,7 +69,7 @@ test('MacBook Leads and Colly use private factory folders and their own authenti
     assert.ok(!rows.some((r) => r.role === 'Colly gh'));
     fs.unlinkSync(join(agentProfiles, 'tokens/fixture'));
     const starts = calls.filter((c) => c.cmd === 'claude').length;
-    assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], env), 1);
+    assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], env), 2);
     assert.equal(calls.filter((c) => c.cmd === 'claude').length, starts);
   } finally {
     t.mock.restoreAll();
