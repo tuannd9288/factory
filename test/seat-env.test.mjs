@@ -19,13 +19,18 @@ test('seat 1: only claude\'s environment holds the token; the supervisor\'s, whi
   assert.equal(saw.env.token.length > 0, true, 'claude has the token');
 }));
 
-test('the caller\'s GH_TOKEN, GITHUB_TOKEN and ANTHROPIC_API_KEY do not reach claude, on either seat', () => world(async (w) => {
+test('the caller\'s GH_TOKEN, GITHUB_TOKEN and ANTHROPIC_API_KEY do not reach claude, on either seat, and a MacBook Lead\'s git identity does (#366)', () => world(async (w) => {
+  // As `factory lead --here` gives its commands: the agents' token as GH_TOKEN, and the agents' identity, which the node's git has nowhere else.
+  const identity = { GIT_AUTHOR_NAME: 'Agent Ann', GIT_AUTHOR_EMAIL: 'ann@example.invalid', GIT_COMMITTER_NAME: 'Agent Ann', GIT_COMMITTER_EMAIL: 'ann@example.invalid' };
   for (const [seat, tag] of [['2', 'two'], ['1', 'one']]) {
-    const r = w.start('worker', ['--resume', 'sid-1', '--seat', seat, '--tag', tag], { ...creds, FAKE_OUT: w.out(tag) });
+    const r = w.start('worker', ['--resume', 'sid-1', '--seat', seat, '--tag', tag], { ...creds, ...identity, FAKE_OUT: w.out(tag) });
     assert.equal(r.code, 0, r.out + r.err);
   }
   await until(() => w.records().length === 2, 'both records');
-  for (const tag of ['two', 'one']) assert.deepEqual([w.saw(tag).env.GH_TOKEN, w.saw(tag).env.GITHUB_TOKEN, w.saw(tag).env.ANTHROPIC_API_KEY], [false, false, false], tag);
+  for (const tag of ['two', 'one']) {
+    assert.deepEqual([w.saw(tag).env.GH_TOKEN, w.saw(tag).env.GITHUB_TOKEN, w.saw(tag).env.ANTHROPIC_API_KEY], [false, false, false], tag);
+    assert.deepEqual(w.saw(tag).env.author, Object.values(identity), tag);
+  }
 }));
 
 test('a worker runs with no CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, on either seat, whatever the caller set: it would force default mode (#307)', () => world(async (w) => {

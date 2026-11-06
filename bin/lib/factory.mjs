@@ -18,7 +18,7 @@ import { TOKEN_GIT, installedRoot, nodeGithubToken, placeOf } from './node.mjs';
 import { quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
-import { markOnboarded, quote, roleOf, copyHook } from '../../packs/pstack/bin/lead.mjs';
+import { markOnboarded, quote, roleFor, copyHook } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
@@ -612,11 +612,12 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 1;
   }
   const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/lead.md');
+  // The Lead starts its seats with the bin/seat of this node's installed copy, which follows main (#390), whatever clone runs this.
+  const seat = join(installedRoot(env), 'bin/seat');
   let roleText;
   try {
     const linear = onLinear(repo, state);
-    roleText = existsSync(rolePath) ? roleOf(readFileSync(rolePath, 'utf8'), Boolean(linear))
-      .replaceAll('{{TEAM}}', team).replaceAll('{{TEAMKEY}}', () => linear?.key ?? '') : '';
+    roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat, runs: contextOf(env).runs }) : '';
   } catch (e) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 2;
@@ -671,7 +672,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
     // env and printenv as for every role and seat (#181): the session's environment holds the team's Claude token and, with a stored
     // agents token, GH_TOKEN.
-    permissions: { defaultMode: 'auto', deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
+    permissions: { defaultMode: 'auto', allow: [`Bash(${seat}:*)`], deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -690,7 +691,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   // Auto mode, as the Mac mini's Lead and the seats start (#273), unless what follows -- names a mode. A key or a plugin cache in the
   // caller's shell would override the team's token or point at another profile's plugins, so neither reaches claude.
   const mode = passed.some((a) => a === '--permission-mode' || a.startsWith('--permission-mode=')) ? [] : ['--permission-mode', 'auto'];
-  const childEnv = { ...env, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: '' } : {}), CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: claudeToken.token };
+  // FACTORY_TEAM is the team bin/seat starts each seat on (#311), as packs/pstack/bin/lead sets it on the Mac mini.
+  const childEnv = { ...env, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: '' } : {}), CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: claudeToken.token, FACTORY_TEAM: `${repo}-${team}` };
   for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
   const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, ...mode, '--settings', JSON.stringify(settings),
     ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: childEnv, cwd });

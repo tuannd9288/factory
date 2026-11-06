@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { main } from '../bin/lib/factory.mjs';
 import { roleOf } from '../packs/pstack/bin/lead.mjs';
 
-test('lead --here passes the pack role as an appended system prompt', async (t) => {
+test('lead --here passes the pack role as an appended system prompt, and lets its seats start on the team: FACTORY_TEAM, and the installed copy\'s bin/seat granted and named (#366)', async (t) => {
   const state = mkdtempSync(join(tmpdir(), 'factory-role-'));
   const calls = [];
   t.mock.method(childProcess, 'spawnSync', (cmd, args, options) => {
@@ -36,11 +36,18 @@ test('lead --here passes the pack role as an appended system prompt', async (t) 
       assert.equal(options.env.CLAUDE_CONFIG_DIR, join(state, '.agent-profiles/leads/alpha-beta/claude'));
       assert.ok(!args.join(' ').includes('made-up-local-token'));
       assert.equal(cmd, 'claude');
+      // bin/seat refuses a start with no FACTORY_TEAM (bin/lib/seat.mjs), so without it no seat of this Lead runs.
+      assert.equal(options.env.FACTORY_TEAM, 'alpha-beta');
+      const seat = join(state, '.local/share/factory/checkout/bin/seat');
+      assert.deepEqual(JSON.parse(args[args.indexOf('--settings') + 1]).permissions.allow, [`Bash(${seat}:*)`]);
       const index = args.indexOf('--append-system-prompt');
       assert.ok(index >= 0, 'the launch must supply the role prompt');
       const expected = roleOf(readFileSync(new URL('../packs/pstack/lead.md', import.meta.url), 'utf8'), linear)
-        .replaceAll('{{TEAM}}', 'beta').replaceAll('{{TEAMKEY}}', linear ? 'ALP' : '');
+        .replaceAll('{{TEAM}}', 'beta').replaceAll('{{TEAMKEY}}', linear ? 'ALP' : '')
+        .replaceAll('{{SEAT}}', seat).replaceAll('{{RUNS}}', join(state, 'factory-runs'));
       assert.equal(args[index + 1], expected);
+      // The role names the bin/seat its grant allows and the runs folder its seats' records carry, on this node.
+      for (const path of [seat, join(state, 'factory-runs')]) assert.ok(args[index + 1].includes(path), path);
     }
     rmSync(join(state, '.agent-profiles/tokens/fixture'));
     calls.length = 0;

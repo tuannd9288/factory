@@ -96,6 +96,8 @@ export const leadTranscripts = 'Read(~/factory-runs/*/transcripts/**)';
 const denyOf = (home, web) => [
   ...tokenStoreDeny, 'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead, leadTranscripts,
+  // The keychain of the user the seat runs as, which on the MacBook can hold logins the factory never put there (#366).
+  'Bash(security:*)', 'Bash(/usr/bin/security:*)',
 ];
 
 /** The presets. turns is a new session's --max-turns, resumeTurns a resumed one's. No preset has a spend cap: a figure the
