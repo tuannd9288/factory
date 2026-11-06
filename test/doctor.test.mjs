@@ -52,7 +52,10 @@ if (path === repo + '/rules/branches/main') {
 // #337: the Actions event policies, asked with the API version they are documented for.
 if (path.startsWith(repo + '/actions/policies')) {
   if (!args.includes('X-GitHub-Api-Version: 2026-03-10')) { process.stderr.write('fake gh: an Actions policies call without its API version\n'); process.exit(1); }
-  out({ total_count: (state.actionsPolicies ?? []).length, policies: state.actionsPolicies ?? [] });
+  // As GitHub answers (tuannd9288/factory, 2026-11-07): a policy read by its id carries its conditions and rules, a list entry does not.
+  const id = /actions\/policies\/(\d+)$/.exec(path)?.[1];
+  if (id) { const p = (state.actionsPolicies ?? []).find((x) => x.id === Number(id)); p ? out(p) : missing(); }
+  out({ total_count: (state.actionsPolicies ?? []).length, policies: (state.actionsPolicies ?? []).map(({ conditions, rules, ...entry }) => entry) });
 }
 const env = repo + '/environments/reviewer';
 if (path === env) state.environment ? out(state.environment) : missing();
