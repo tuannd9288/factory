@@ -1,4 +1,4 @@
-// #177: no agent runs `factory login` or `factory store`: every role of bin/seat denies them, on either seat, in each form a
+// #177: no agent runs `factory account add` or `factory store`: every role of bin/seat denies them, on either seat, in each form a
 // session could type: by name, by a relative or an absolute path, after other words. The matcher is the one seat-rules.test.mjs
 // reads Claude Code's permissions page with (bash-rule.mjs).
 import { test } from 'node:test';
@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { matches, rulesAfter } from './bash-rule.mjs';
 import { FORMS, HARMLESS } from './login-forms.mjs';
 
-test('every role denies factory login, store, use and logout, in every form', async () => {
+test('every role denies factory account add, store, use and logout, in every form', async () => {
   const { buildArgs, ROLES } = await import('../bin/lib/seat.mjs');
   for (const role of ROLES) {
     for (const seat of [1, 2]) {
