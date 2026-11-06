@@ -82,6 +82,66 @@ test('colly isolates GitHub and grants only use and lead, with the pack role req
   }
 });
 
+test('colly starts on its own factory profile, signed in by nothing the caller holds, with its folder trusted and in auto mode (INN-31 3A)', async (t) => {
+  const state = fs.mkdtempSync(join(tmpdir(), 'factory-colly-profile-'));
+  const personal = join(state, 'personal');
+  const env = {
+    HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', CLAUDE_CONFIG_DIR: personal,
+    CLAUDE_CODE_OAUTH_TOKEN: 'inherited', ANTHROPIC_API_KEY: 'inherited', ANTHROPIC_AUTH_TOKEN: 'inherited', CLAUDE_CODE_PLUGIN_CACHE_DIR: join(personal, 'plugins'),
+  };
+  const config = join(state, 'colly/profile');
+  const calls = [];
+  const reads = [];
+  const errors = [];
+  const exists = fs.existsSync;
+  const read = fs.readFileSync;
+  const isRole = (path) => String(path).endsWith('/packs/colly/colly.md');
+  t.mock.method(fs, 'existsSync', (path) => isRole(path) || exists(path));
+  t.mock.method(fs, 'readFileSync', (path, ...args) => {
+    reads.push(String(path));
+    return isRole(path) ? 'Fixture role' : read(path, ...args);
+  });
+  t.mock.method(console, 'error', (text) => errors.push(text));
+  t.mock.method(childProcess, 'spawnSync', (cmd, args, options) => {
+    calls.push({ cmd, args, options });
+    return { status: 0 };
+  });
+  syncBuiltinESMExports();
+  try {
+    fs.mkdirSync(personal);
+    assert.equal(await main(['colly'], env), 0);
+    const { args, options } = calls.at(-1);
+    assert.equal(options.env.CLAUDE_CONFIG_DIR, config);
+    for (const key of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) assert.equal(options.env[key], undefined, key);
+    assert.ok(!reads.some((p) => p.startsWith(personal)), 'nothing is read from the caller\'s profile');
+    assert.equal(fs.statSync(config).mode & 0o777, 0o700);
+    // An onboarded profile opens at the prompt with "Run /login", not the theme screen; the start folder asks no trust question.
+    const profile = JSON.parse(read(join(config, '.claude.json'), 'utf8'));
+    assert.equal(profile.hasCompletedOnboarding, true);
+    assert.equal(profile.projects[fs.realpathSync(process.cwd())].hasTrustDialogAccepted, true);
+    assert.equal(args[args.indexOf('--permission-mode') + 1], 'auto');
+    const { environment } = JSON.parse(args[args.indexOf('--settings') + 1]).autoMode;
+    assert.ok(environment.includes('$defaults'));
+    assert.ok(environment.some((e) => e.includes('factory@tuans-mac-mini')), environment.join('\n'));
+    // What /login writes stays for the next start.
+    fs.writeFileSync(join(config, 'login-fixture'), 'written by claude');
+    assert.equal(await main(['colly'], env), 0);
+    assert.equal(read(join(config, 'login-fixture'), 'utf8'), 'written by claude');
+    // A link could lead into his personal ~/.claude: refused before claude starts.
+    fs.rmSync(config, { recursive: true });
+    fs.symlinkSync(personal, config);
+    const count = calls.length;
+    assert.equal(await main(['colly'], env), 1);
+    assert.match(errors.at(-1), /symlink/);
+    assert.equal(calls.length, count);
+    assert.deepEqual(fs.readdirSync(personal), [], 'the linked folder is left as it was');
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    fs.rmSync(state, { recursive: true, force: true });
+  }
+});
+
 test('colly supplies the brief and status line, records its socket, and reuses the live pane', async (t) => {
   const state = fs.mkdtempSync(join(tmpdir(), 'colly-hooks-'));
   const env = { HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', HERDR_PANE_ID: 'w1:p7', PATH: state };

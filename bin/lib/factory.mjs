@@ -10,7 +10,7 @@
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -44,15 +44,18 @@ function spareFolders(home) {
   return entries.filter((e) => e.isDirectory() && /^\.claude-acc[0-9]+$/.test(e.name)).map((e) => Number(e.name.slice('.claude-acc'.length))).sort((a, b) => a - b);
 }
 
+/** Colly's Claude Code profile on the MacBook (INN-31 3A, #365): a plain folder the factory owns, signed in once by /login. */
+const collyProfile = (state) => join(state, 'colly', 'profile');
+
 /** The profiles of a place, from the committed list. On the Mac mini the Lead rows are the ones the accounts file names. A row with
  * `byFile` has its account from that file, and its login state is the token file of that account. */
 export function profilesOf(place, { home, agentProfiles, state, root }) {
   if (place === 'macbook') {
     return [
-      claude('macbook/claude', 'Colly', {}, 'claude auth login'),
+      // Colly's own factory profile (INN-31 3A, #365); Colly writes to GitHub only through factory gh, so it has no gh row.
+      claude('macbook/claude', 'Colly', { CLAUDE_CONFIG_DIR: collyProfile(state) }, 'factory colly, then /login'),
       ...spareFolders(home).map((n) => claude(`macbook/claude-acc${n}`, 'spare Claude', { CLAUDE_CONFIG_DIR: join(home, `.claude-acc${n}`) }, `claude-use login ${n}`)),
       { profile: 'macbook/codex', role: 'Colly Codex', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: {} }, login: 'codex-use login <N>' },
-      { profile: 'macbook/gh', role: 'Colly gh', kind: 'gh', check: { cmd: 'gh', args: ['auth', 'status'], env: {} }, login: 'gh auth login' },
     ];
   }
   if (place === 'factory') {
@@ -459,14 +462,14 @@ const GIT_CONFIG = [
   ...['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].map((from) => [`url.${PUSH_BASE}.pushInsteadOf`, from]),
 ];
 
-// What the auto-mode classifier of a MacBook Lead is told is inside its boundary (#366): it trusts only the working folder and its
-// remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat goes through
-// that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
+// What the auto-mode classifier of a MacBook Lead and of Colly is told is inside its boundary (#366, #365): it trusts only the working
+// folder and its remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat
+// goes through that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
 // "$defaults" keeps the built-in entries, which a list without it replaces.
 const AUTO_MODE_ENVIRONMENT = [
   '$defaults',
-  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list), its workers with /Users/factory/WORKSPACES/bin/seat, and reads of that account's git settings.`,
-  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). On this MacBook, factory gh runs gh on ${HOST} under the agents' GitHub login, and factory linear and factory wake run there too, each over ssh factory@${HOST}. factory use and factory account add are the Human's, never this Lead's.`,
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). The factory's sessions on this MacBook (a team's Lead, and Colly, the Human's own assistant) run their routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list), a Lead's workers with /Users/factory/WORKSPACES/bin/seat, Colly's watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow, and reads of that account's git settings.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). On this MacBook, factory gh runs gh on ${HOST} under the agents' GitHub login, and factory linear and factory wake run there too, each over ssh factory@${HOST}. factory use and factory account add are the Human's, never a Lead's.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh, and pushes go from ${HOST}.`,
 ];
 
@@ -685,7 +688,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
 }
 
 /** Colly's current-pane launch (#365): the pack supplies the approved role; GitHub writes go through `factory gh`.
- * INN-30 permits use and lead; account and store remain denied. */
+ * INN-30 permits use and lead; account and store remain denied. INN-31 3A: Colly runs on its own factory profile, <state>/colly/profile,
+ * signed in once by /login, with no token or key from the caller's shell, in auto mode with the Mac mini inside the classifier's boundary. */
 async function colly(args, env) {
   if (args.includes('--line') || args.includes('--brief')) return collyStatus(args, env);
   if (args.length) {
@@ -727,6 +731,7 @@ async function colly(args, env) {
     return 2;
   }
   const empty = join(parent, 'gh-empty');
+  const config = collyProfile(state);
   try {
     mkdirSync(empty, { recursive: true, mode: 0o700 });
     chmodSync(parent, 0o700);
@@ -737,6 +742,21 @@ async function colly(args, env) {
   }
   if (readdirSync(empty).includes('hosts.yml')) {
     console.error(`bin/factory: colly: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
+    return 1;
+  }
+  // Its own profile, never the caller's (INN-31 3A): a link could lead into his personal ~/.claude. On a profile with no login, an
+  // onboarded profile opens at the prompt with "Not logged in · Run /login", where the onboarding would first ask for a theme; the folder
+  // Colly starts in is trusted (2.1.319, 2026-11-06).
+  try {
+    let link = false;
+    try { link = lstatSync(config).isSymbolicLink(); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    if (link) throw new Error(`${config} is a symlink; Colly's profile must be a plain folder, so nothing was started`);
+    mkdirSync(config, { recursive: true, mode: 0o700 });
+    chmodSync(config, 0o700);
+    markOnboarded(config);
+    markTrusted(config, realpathSync(process.cwd()));
+  } catch (e) {
+    console.error(`bin/factory: colly: ${e.message}`);
     return 1;
   }
   let hook;
@@ -763,8 +783,11 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
     },
     // Claude Code status line docs, captured 2026-11-03, line 67: refreshInterval re-runs the command every N seconds.
     statusLine: { type: 'command', command: [process.execPath, factory, 'colly', '--line'].map(quote).join(' '), refreshInterval: 60 },
+    // Colly reaches the Mac mini by ssh (factory gh, bin/factory-events --follow), as a MacBook Lead does.
+    autoMode: { environment: AUTO_MODE_ENVIRONMENT },
     env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '' },
     permissions: {
+      defaultMode: 'auto',
       allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)'],
       deny: [
         'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
@@ -773,7 +796,10 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
       ],
     },
   };
-  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', 'colly', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env });
+  // /login is the only sign-in: no token or key from the caller's shell, and no other profile's plugin cache.
+  const childEnv = { ...env, CLAUDE_CONFIG_DIR: config };
+  for (const key of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
+  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', 'colly', '--permission-mode', 'auto', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env: childEnv });
   if (r.error) {
     console.error(`bin/factory: colly: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
