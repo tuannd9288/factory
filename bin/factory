@@ -4,9 +4,11 @@
 #                                  the rows are the teams, numbered and the accounts lettered, with 5h, 7d, reset and the rows that share each (#178)
 #   factory account add <account> [--node <node>] [--no-setup]   runs `claude setup-token`, takes the token from a hidden prompt, stores it
 #   factory store <account>        on this node: reads one token from stdin and stores it (what account add runs over ssh)
-#   factory use [<row|repo-team> [<letter>]]  on the Mac mini: the row's account in the accounts file becomes the letter's (the team's next seat
-#                                  session takes it); <repo>-<team> makes the row of a team of an onboarded repository or of the factory, and that team's running
-#                                  Lead alone is restarted once Herdr reports it idle (#179, #196, #311)
+#   factory use [--node <node>] [<row|repo-team> [<letter>]]  the row's account in the accounts file of the node the team runs on becomes the
+#                                  letter's: on the MacBook a <repo>-<team> of its own file (nothing restarts; the --here Lead takes it at its next
+#                                  start), any other row on the Mac mini; --node macbook makes a MacBook team's first line (#366). On the Mac mini
+#                                  the team's next seat session takes it; <repo>-<team> makes the row of a team of an onboarded repository or of the
+#                                  factory, and that team's running Lead alone is restarted once Herdr reports it idle (#179, #196, #311)
 #   factory lead <repo> [--team <name>] [--new] [--dry-run]  starts the Lead of one team of a repository (use the only team, pick a nickname if none, refuse if several; --new-team picks a free nickname, #416)
 #   factory lead <repo> [--team <name>] --here [-- <claude arguments>]  on the MacBook only (#349): claude in this terminal and folder as
 #                                  the Lead of <repo>, with an empty GH_CONFIG_DIR, empty GH_TOKEN and GITHUB_TOKEN, the agents' git identity
@@ -41,8 +43,10 @@
 # rows that share it, and `?` where no run of the account reported; a row whose account has no token file is red with the line to
 # run. $FACTORY_STATE/accounts (<profile>=<account> a line, mode 600, written through a temporary file and a rename) is the one
 # source of a row's account (#178). `factory use <row> <letter>` rewrites it (from the MacBook, `use` runs on the Mac
-# mini over ssh, its arguments checked first, `ssh -t` when `use` lacks one; with an argument missing: on a terminal the list
-# and a question, else the list and exit 2); the verifier's row is refused; `<repo>-<team>` in a row's place names a team of an
+# mini over ssh, its arguments checked first, `ssh -t` when `use` lacks one, unless the row is a <repo>-<team> of the MacBook's own
+# accounts file or --node macbook is given: then it writes the MacBook's file, its letters are the MacBook's own token files, and
+# `use --node macbook` on the Mac mini is refused; with an argument missing: on a terminal the list and a question, else the list
+# and exit 2); the verifier's row is refused; `<repo>-<team>` in a row's place names a team of an
 # onboarded repository, or of `factory`, and makes its row when there is none (`use lead-<repo>` is gone); only that team's Lead,
 # if it runs (a `claude` process with `--name <repo>-<team>`, the shared Lead process rule), is restarted, once Herdr reports it
 # idle or done (its pane is in <repo>-<team>/pane): `/exit`, then `packs/pstack/bin/lead <repo> [--team <team>]` again in the same
@@ -56,6 +60,9 @@
 # `account add` or `use` once seat 1's account has a token.
 # `factory account add <account>` runs `claude setup-token` on his terminal, takes the token from a hidden prompt he pastes into
 # (--no-setup skips setup-token). --node defaults to this machine; macbook and tuans-mac-mini name the nodes.
+# A token has no whitespace, so account add and store take every space and line break out of what they read: a token pasted from
+# a wrapped terminal line is stored whole. The prompt turns on bracketed paste and reads until an Enter followed by 200 ms of quiet,
+# so a paste whose line breaks fall between chunks is read whole and none of it is left for the shell (#366).
 # For another node, ssh sends the token only on stdin to its factory store; no token goes in arguments or files outside the store.
 # Each node owns its store. Leads and seats use only their node's tokens. account remove archives only the local token.
 # account add records the UTC added date in tokens/.<account>.added (mode 600), with no token in that file.

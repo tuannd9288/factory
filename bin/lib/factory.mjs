@@ -24,7 +24,7 @@ import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
-import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAdded, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
+import { APP_FOLDERS, accountList, accountRefusal, archiveToken, nodeAccountList, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAdded, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -359,7 +359,7 @@ const USAGE = `usage: bin/factory account list [--all] [--json]
        bin/factory account add <account> [--node <node>] [--no-setup]
        bin/factory account add linear-app <client-id|client-secret>   (the Factory app's Linear credentials, #403; no setup-token)
        bin/factory store <account>   (on this node; reads the token from stdin; \`store linear-app <client-id|client-secret>\` likewise)
-       bin/factory use [<row|repo-team> [<letter>]]   (the row's account becomes the letter's; <repo>-<team> makes a team's row, and that team's running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
+       bin/factory use [--node <node>] [<row|repo-team> [<letter>]]   (the row's account becomes the letter's, on the node whose accounts file has the row: on the MacBook a team of its own file, nothing restarted; else on the Mac mini, by ssh from the MacBook, where <repo>-<team> makes a team's row and that team's running Lead restarts when idle; --node macbook makes a MacBook team's first line)
        bin/factory account remove <account>   (moves this node's account token into the archive)
        bin/factory colly   (starts Colly in this pane on the MacBook)
        bin/factory colly --line [--width N]
@@ -1090,11 +1090,86 @@ async function restartTeam(repo, team, account, ctx, oldAccount) {
   return 0;
 }
 
-/** `factory use <row> <letter>`: the row's account in the accounts file becomes the letter's. The verifier's row is read-only; a
+/** `factory use [--node macbook|<HOST>] <row> <letter>` (#366): it acts on the node a team runs on, which is the node whose accounts file
+ * has the team's row. On the MacBook a `<repo>-<team>` of its own file is written there and any other row goes to the Mac mini, as
+ * before; `--node` names the node either way, and `--node macbook` is how a MacBook team gets its first line. On the Mac mini it acts
+ * there; `--node macbook` is refused, since accounts are changed from the Human's own machine (INN-31 2A). */
+async function use(args, env, io) {
+  const onHost = placeOf(env) === 'factory';
+  const at = args.indexOf('--node');
+  const named = at === -1 ? null : args[at + 1];
+  if (at !== -1 && (![HOST, 'macbook'].includes(named) || args.filter((a) => a === '--node').length > 1)) {
+    console.error(`bin/factory: --node must name macbook or ${HOST}`);
+    return 2;
+  }
+  const words = at === -1 ? args : args.filter((a, i) => i !== at && i !== at + 1);
+  if (onHost) {
+    if (named !== 'macbook') return useOnHost(words, env, io);
+    console.error('bin/factory: use --node macbook runs on the MacBook, not on the Mac mini');
+    return 2;
+  }
+  const local = parseTeam(words[0]) && readAccounts(contextOf(env).state)[`factory/${words[0]}`];
+  return (named ?? (local ? 'macbook' : HOST)) === 'macbook' ? useHere(words, env, io) : remote('use', words, env);
+}
+
+/** The MacBook's list for `use`: the team rows of its accounts file, numbered in name order, and its accounts, lettered from its own
+ * token store (INN-31 1B: one token for each node and account). */
+function hereListing(ctx) {
+  const rows = Object.entries(readAccounts(ctx.state))
+    .filter(([profile]) => profile.startsWith('factory/') && parseTeam(profile.slice('factory/'.length)))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([profile, account], i) => ({ n: i + 1, profile, account }));
+  const accounts = nodeAccountList(ctx.agentProfiles);
+  const letters = new Map(accounts.map((a) => [a.name, a.letter]));
+  const w = Math.max(0, ...rows.map((r) => r.profile.length));
+  const lines = ['ROWS ON macbook', ...rows.map((r) => `  ${r.n}  ${pad(r.profile, w)}  ${r.account}${letters.has(r.account) ? ` (${letters.get(r.account)})` : ' (no token here)'}`)];
+  return { rows, accounts, text: [...lines, '', ...accountsText(rows, accounts, ctx)].join('\n') };
+}
+
+/** `use` on the MacBook (#366): the line `factory/<repo>-<team>=<account>` of its own accounts file, which `factory lead <repo> --team
+ * <team> --here` reads at its start. Nothing is restarted. The row is a `<repo>-<team>`, or the number of a row of its list. */
+async function useHere(args, env, io) {
+  if (args.length > 2) {
+    console.error(USAGE);
+    return 2;
+  }
+  const ctx = contextOf(env);
+  const { rows, accounts, text } = hereListing(ctx);
+  let [row, letter] = args;
+  if (row === undefined || letter === undefined) {
+    console.log(text);
+    if (!io.isTTY) {
+      console.error('bin/factory: use needs a row and an account letter');
+      return 2;
+    }
+    if (row === undefined) row = (await io.ask('Row number or <repo>-<team>: ')).trim();
+    if (letter === undefined) letter = (await io.ask('Account letter: ')).trim();
+  }
+  const profile = /^[1-9][0-9]*$/.test(row) ? rows.find((r) => r.n === Number(row))?.profile : parseTeam(row) && `factory/${row}`;
+  if (!profile) {
+    console.error(`bin/factory: there is no row ${row} on macbook; a row is <repo>-<team> or a number from 1 to ${rows.length}`);
+    return 2;
+  }
+  const account = accounts.find((a) => a.letter === letter);
+  if (!account) {
+    console.error(`bin/factory: there is no account ${letter} on macbook; the letters are ${accounts.map((a) => a.letter).join(', ') || 'none: factory account add <account> stores one'}`);
+    return 2;
+  }
+  try {
+    setAccount(ctx.state, profile, account.name);
+  } catch (e) {
+    console.error(`bin/factory: ${e.message}`);
+    return 1;
+  }
+  const t = parseTeam(profile.slice('factory/'.length));
+  console.log(`${profile} now uses ${account.name} (${account.letter}) on macbook; nothing restarts here: the --here Lead takes it at its next start (factory lead ${t.repo} --team ${t.team} --here)`);
+  return 0;
+}
+
+/** `use` on the Mac mini: the row's account in the accounts file becomes the letter's. The verifier's row is read-only; a
  * team's next seat session takes its new account and nothing else running is touched; the row also restarts that team's Lead alone,
  * if it runs (#179, #311). The row is a number, or `<repo>-<team>` for an onboarded repository or the factory, which makes the row when the file has none. */
-async function use(args, env, io) {
-  if (placeOf(env) !== 'factory') return remote('use', args, env);
+async function useOnHost(args, env, io) {
   if (args.length > 2) {
     console.error(USAGE);
     return 2;
@@ -1144,7 +1219,7 @@ async function use(args, env, io) {
     console.error(`bin/factory: ${e.message}`);
     return 1;
   }
-  console.log(`${target.profile} now uses ${account.name} (${account.letter}); its next seat session takes it, and nothing else running is touched.`);
+  console.log(`${target.profile} now uses ${account.name} (${account.letter}) on ${HOST}; its next seat session takes it, and nothing else running is touched.`);
   if (moved) console.log(moved);
   const t = parseTeam(target.profile.slice('factory/'.length));
   return t ? restartLead(t.repo, t.team, account.name, ctx, oldAccount) : 0;
