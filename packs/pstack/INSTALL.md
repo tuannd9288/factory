@@ -26,9 +26,9 @@ checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.ga
 
 ## Pull request readiness
 
-The Human can choose `drafts: "landable"` in `.gate/driver.json` on main to keep
-pull requests in draft until verification passes and there is no conflict.
-The default, `pstack`, opens ready (pstack `opening-a-pr.md:30`). With `landable`, the queue marks a draft
+The `drafts` switch in `.gate/driver.json` on `origin/main` defaults to `landable`, including when
+the file is absent, for every repository, the factory included. Choose `"drafts": "pstack"` to open
+ready (pstack `opening-a-pr.md:30`). With `landable`, the queue marks a draft
 ready and arms auto-merge once `verify` passed and it has no conflict, and turns it back to a draft when either fails (#455).
 
 ## The live verifier's login

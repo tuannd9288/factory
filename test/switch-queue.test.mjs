@@ -30,6 +30,7 @@ function world() {
       '  *"nodes(ids"*) if [ -e "$Q/recfail" ]; then echo "HTTP 502" >&2; exit 1; fi; cat "$Q/records.json" ;;',
       '  *graphql*) cat "$Q/prs.json" ;;',
       '  "run rerun --job "*) case " $(cat "$Q/fail" 2>/dev/null) " in *" $4 "*) echo "HTTP 403: Workflow run cannot be rerun" >&2; exit 1 ;; esac ;;',
+      '  "repo view "*) echo \'{"squashMergeAllowed":true,"mergeCommitAllowed":true}\' ;;',
       '  "pr ready "*|"pr merge "*) ;;',
       '  *) exit 1 ;;',
       'esac',
@@ -508,10 +509,10 @@ test('at none the queue updates no pull request that lacks an approval of someon
   for (const position of ['1-2', 'all', undefined]) assert.equal(pickUpdate([behind(1)], [], position)?.number, 1, String(position));
 });
 
-test('landable sweeps every PR: green drafts become ready and armed, red or conflicting ready PRs become drafts', () => {
+for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweeps every PR: green drafts become ready and armed, red or conflicting ready PRs become drafts`, () => {
   const w = world();
   try {
-    w.policy('landable');
+    w.policy(drafts);
     w.rules('1-2');
     const prs = [
       [true, 'SUCCESS', 'MERGEABLE'],
@@ -578,6 +579,7 @@ for (const merge of [undefined, 'squash', 'merge']) {
       w.pulls([p]);
       const r = w.sweep();
       assert.equal(r.code, 0, r.out);
+      assert.equal(r.calls.filter((c) => c.startsWith('repo view')).length, merge === undefined ? 1 : 0);
       assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
         'pr ready 1 --repo o/app',
         `pr merge 1 --repo o/app --auto --${merge ?? 'squash'}`,
