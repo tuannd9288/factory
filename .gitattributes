@@ -16,7 +16,6 @@ kit/.gate/bin/lib/reviewer-prompt.md review-agent-guidance
 # Tests and fixtures.
 test/** review-test
 packs/*/test/** review-test
-modules/*/test/** review-test
 
 # Documentation.
 NOTICE review-documentation
@@ -30,7 +29,6 @@ packs/*/INSTALL.md -review-agent-guidance review-documentation
 packs/*/attacks.md -review-agent-guidance review-test
 packs/*/yields.md -review-agent-guidance review-documentation
 kit/.gate/proofs/** review-test
-modules/*/kit/.gate/proofs/** review-test
 
 # Written by a tool, not a person.
 kit/.gate/bin/reviewer/package-lock.json review-generated

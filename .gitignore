@@ -11,7 +11,6 @@
 /docs/*
 !/docs/decisions.md
 !/kit/
-!/modules/
 !/packs/
 !/scripts/
 !/test/
