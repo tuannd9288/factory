@@ -101,7 +101,9 @@ if (path.startsWith(repo + '/actions/policies')) {
     if (kept('policy')) state.actionsPolicies[i] = { ...state.actionsPolicies[i], ...body };
     done(state.actionsPolicies[i]);
   }
-  done({ total_count: state.actionsPolicies.length, policies: state.actionsPolicies });
+  // As GitHub answers (tuannd9288/factory, 2026-11-07): a policy read by its id carries its conditions and rules, a list entry does not.
+  if (id) { const p = state.actionsPolicies.find((x) => x.id === Number(id)); p ? done(p) : missing(); }
+  done({ total_count: state.actionsPolicies.length, policies: state.actionsPolicies.map(({ conditions, rules, ...entry }) => entry) });
 }
 const env = repo + '/environments/reviewer';
 if (path === env) {
