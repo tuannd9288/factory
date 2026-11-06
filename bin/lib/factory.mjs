@@ -1,10 +1,10 @@
-// bin/factory (#173, #177, #178, #311): the list of every agent profile in a table with each account's quota in a second one, and `login`,
-// `store`, `use` and `logout`. On the Mac mini the rows are numbered (each team the accounts file names, the verifier) and the accounts
+// bin/factory (#173, #177, #178, #311): the account list of every agent profile and quota, and `account add`,
+// `store`, `use` and `account remove`. On the Mac mini the rows are numbered (each team the accounts file names, the verifier) and the accounts
 // lettered; `use` rewrites the accounts file (`use <repo>-<team>` makes a team's row; that team's running Lead alone is restarted once
-// Herdr reports it idle, #179, #196; `lead <repo> [--team <name>]` starts one team's) and `logout` moves a token into the archive; `login` and
+// Herdr reports it idle, #179, #196; `lead <repo> [--team <name>]` starts one team's) and `account remove` moves a token into the archive; `account add` and
 // `store` put a token in the factory's token store. The list runs only the vendors' own status commands (codex login status,
 // gh auth status; on the MacBook claude auth status too), reads quota through quotaRows(), and keeps from each answer
-// only the logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and date).
+// only the logged-in flag, the local part of the account and the plan. It reads no token (a token file shows its mode and recorded added date).
 // The committed profile list below holds no account name: the factory repository is public, and an account is an email local
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
@@ -17,14 +17,14 @@ import { fileURLToPath } from 'node:url';
 import { checkoutRoot } from './checkout.mjs';
 import { quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
-import { liveOfAccount } from './seat.mjs';
-import { quote, roleOf } from '../../packs/pstack/bin/lead.mjs';
+import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
+import { markOnboarded, quote, roleOf } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
-import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
+import { APP_FOLDERS, accountList, accountRefusal, archiveToken, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAdded, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -104,8 +104,8 @@ const readGh = (text) => {
 /** codex login status exits 0 when logged in and 1 when not; any other exit (127 for a missing command, a failed shell) says nothing. */
 const readCodex = (code) => ({ loggedIn: code === 0 ? true : code === 1 ? false : null, account: null, plan: null });
 
-/** An account's token file by its stat alone: { ok, note }; the content is never read. */
-function tokenState(agentProfiles, account) {
+/** An account's token stat and date-only sidecar: { ok, note }; the token content is never read. */
+function tokenState(agentProfiles, account, now = Date.now()) {
   let s;
   try {
     s = statSync(join(tokenDir(agentProfiles), account));
@@ -113,7 +113,19 @@ function tokenState(agentProfiles, account) {
     return { ok: false, note: 'no token file' };
   }
   const mode = (s.mode & 0o777).toString(8);
-  return { ok: true, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, modified ${s.mtime.toISOString().slice(0, 10)}` };
+  const added = tokenAdded(agentProfiles, account);
+  const expiry = new Date(`${added}T00:00:00Z`);
+  let expiryNote = 'expiry unknown';
+  if (Number.isFinite(expiry.getTime()) && expiry.toISOString().slice(0, 10) === added) {
+    // Anthropic authentication page, captured 2026-11-06, line 295: setup-token makes a one-year OAuth token.
+    const month = expiry.getUTCMonth();
+    expiry.setUTCFullYear(expiry.getUTCFullYear() + 1);
+    if (expiry.getUTCMonth() !== month) expiry.setUTCDate(0); // February 29 -> February 28.
+    const remaining = expiry.getTime() - now;
+    const warning = remaining <= 0 ? 'WARNING: expired' : remaining <= 7 * 86400000 ? 'WARNING: expires within 7 days' : '';
+    expiryNote = `expiry ${expiry.toISOString().slice(0, 10)}${warning ? `; ${warning}` : ''}`;
+  }
+  return { ok: true, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, added ${added}; ${expiryNote}` };
 }
 
 /** The profile's login state by its own vendor command: { loggedIn: true|false|null, account, plan, note }. A row of the accounts
@@ -182,7 +194,7 @@ export function readPlace(place, ctx) {
   const seatRows = place === 'factory' ? seatAccounts(ctx.state) : {};
   const letters = place === 'factory' ? new Map(accountList(ctx).map((a) => [a.name, a.letter])) : new Map();
   let numbered = 0;
-  return profilesOf(place, ctx).map((p) => {
+  const rows = profilesOf(place, ctx).map((p) => {
     const c = check(p, { ...ctx, accounts });
     const n = p.numbered ? (numbered += 1) : null;
     const q = c.account ? quota.find((x) => x.account === c.account) : null;
@@ -196,13 +208,19 @@ export function readPlace(place, ctx) {
       }
     }
     // A row of the file that is not logged in shows both ways out: log its account in, or move the row to another account.
-    const login = p.byFile && c.loggedIn === false ? [...(c.account ? [`factory login ${c.account}`] : []), `factory use ${n} <letter>`].join('\n') : p.login;
+    const login = p.byFile && c.loggedIn === false ? [...(c.account ? [`factory account add ${c.account}`] : []), `factory use ${n} <letter>`].join('\n') : p.login;
     return {
       place, profile: p.profile, role: p.role, kind: KINDS[p.kind], loggedIn: c.loggedIn, account: c.account, accountFrom: c.account ? 'read' : null, plan: c.plan,
       five_hour: win(q?.windows?.five_hour), seven_day: win(q?.windows?.seven_day), asOf: q?.asOf ?? null, live, shared: [], login, note: c.note,
       n, letter: (c.account && letters.get(c.account)) || null,
     };
   });
+  for (const account of tokenAccounts(ctx.agentProfiles)) {
+    const note = tokenState(ctx.agentProfiles, account).note;
+    rows.push({ ...blank(place, { profile: `${place}/tokens/${account}`, role: 'node token', kind: 'claude' },
+      { loggedIn: true, account, plan: null }, note), n: null, letter: letters.get(account) ?? null });
+  }
+  return rows;
 }
 
 // accountList moved to token.mjs, so that colly-status.mjs can use it without importing this file, which `bin/factory` runs as its main module.
@@ -232,9 +250,9 @@ function blank(place, p, read, note) {
   return { place, profile: p.profile, role: p.role, kind: KINDS[p.kind], loggedIn: read.loggedIn, account: read.account, accountFrom: read.account ? 'read' : null, plan: read.plan, five_hour: null, seven_day: null, asOf: null, live: null, shared: [], login: p.login, note };
 }
 
-/** The factory rows from the Mac mini: its own `factory --json`, run in a login shell over ssh. */
+/** The factory rows from the Mac mini: its own `factory account list --json`, run in a login shell over ssh. */
 export function readFactory(ctx) {
-  const r = call('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, "zsh -lc '~/WORKSPACES/bin/factory --json'"], { env: ctx.env, timeout: ctx.timeout * 4 });
+  const r = call('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, "zsh -lc '~/WORKSPACES/bin/factory account list --json'"], { env: ctx.env, timeout: ctx.timeout * 4 });
   if (r.error || r.code !== 0) return [unreachable('factory', r)];
   try {
     // stdout only: ssh and the login shell may print on stderr, and a line there can start with "[" too (#180).
@@ -250,7 +268,7 @@ export function readFactory(ctx) {
       ...(x.accountFrom === 'expected' && s(x.account) ? { expectedRemote: x.account } : {}),
     }));
   } catch {
-    return [unreachable('factory', { out: 'ssh answered, but not with factory --json' })];
+    return [unreachable('factory', { out: 'ssh answered, but not with factory account list --json' })];
   }
 }
 
@@ -268,7 +286,7 @@ export function finish(rows, expected) {
     }
     delete r.expectedRemote;
   }
-  for (const r of rows) r.shared = r.account && r.account !== 'unknown' && !r.unreachable ? rows.filter((o) => o !== r && o.kind === r.kind && o.account === r.account).map((o) => o.profile) : [];
+  for (const r of rows) r.shared = r.account && r.account !== 'unknown' && !r.unreachable ? rows.filter((o) => o !== r && o.role !== 'node token' && o.kind === r.kind && o.account === r.account).map((o) => o.profile) : [];
   return rows;
 }
 
@@ -289,7 +307,7 @@ export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }
   const heads = accounts.map(({ name, letter }) => {
     const members = rows.filter((r) => r.n && r.account === name);
     const q = members.filter((r) => r.asOf).sort((a, b) => b.asOf - a.asOf)[0];
-    const t = tokenState(agentProfiles, name);
+    const t = tokenState(agentProfiles, name, now);
     return { name, letter, members, q, t };
   });
   const nameW = Math.max(0, ...heads.map((h) => h.name.length));
@@ -307,7 +325,7 @@ export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }
  * what to do and what to know. A row of the Mac mini has its number first and its account's letter after the name; one that is not
  * logged in is red on a terminal. */
 export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
-  const normal = rows.filter((r) => !r.unreachable);
+  const normal = rows.filter((r) => !r.unreachable && r.role !== 'node token');
   const numbered = normal.some((r) => r.n);
   const heads = [...(numbered ? ['#'] : []), 'PROFILE', 'ROLE', 'KIND', 'IN', 'ACCOUNT', 'PLAN', 'LIVE', 'SHARED WITH / WHY NOT READ'];
   const cells = normal.map((r) => [...(numbered ? [r.n ?? '–'] : []), r.profile, r.role, r.kind, r.loggedIn === null ? '?' : r.loggedIn ? 'yes' : 'NO', `${r.accountFrom === 'expected' ? `${r.account}*` : r.account}${r.letter ? ` (${r.letter})` : ''}`, r.plan ?? '–', r.live ?? '–', r.loggedIn === null ? r.note : sharedCell(r.shared)]);
@@ -316,6 +334,8 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
   const out = [line(heads), ...cells.map((c, i) => (numbered && normal[i].loggedIn === false && normal[i].n ? red(line(c)) : line(c)))];
   for (const r of rows.filter((x) => x.unreachable)) out.push(`${r.profile}  ${r.note}`);
   if (accounts?.length) out.push('', ...accounts);
+  const tokens = rows.filter((r) => r.role === 'node token');
+  if (tokens.length) out.push('', 'TOKENS BY NODE', ...tokens.map((r) => `  ${r.place === 'factory' ? HOST : r.place}  ${r.account}  ${r.note}`));
   // One row for each account, not for each team: teams on one account share it.
   const quota = normal.filter((r) => (r.five_hour || r.seven_day || r.asOf) && r.account && r.account !== 'unknown').filter((r, i, all) => all.findIndex((o) => o.account === r.account) === i);
   if (quota.length) {
@@ -335,12 +355,12 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
   return out.join('\n');
 }
 
-const USAGE = `usage: bin/factory [--all] [--json]
-       bin/factory login <account> [--no-setup]
-       bin/factory login linear-app <client-id|client-secret>   (the Factory app's Linear credentials, #403; no setup-token)
-       bin/factory store <account>   (on the Mac mini; reads the token from stdin; \`store linear-app <client-id|client-secret>\` likewise)
+const USAGE = `usage: bin/factory account list [--all] [--json]
+       bin/factory account add <account> [--node <node>] [--no-setup]
+       bin/factory account add linear-app <client-id|client-secret>   (the Factory app's Linear credentials, #403; no setup-token)
+       bin/factory store <account>   (on this node; reads the token from stdin; \`store linear-app <client-id|client-secret>\` likewise)
        bin/factory use [<row|repo-team> [<letter>]]   (the row's account becomes the letter's; <repo>-<team> makes a team's row, and that team's running Lead restarts when idle; on the Mac mini, by ssh from the MacBook)
-       bin/factory logout <account>   (moves the account's token into the archive; on the Mac mini, by ssh from the MacBook)
+       bin/factory account remove <account>   (moves this node's account token into the archive)
        bin/factory colly   (starts Colly in this pane on the MacBook)
        bin/factory colly --line [--width N]
        bin/factory colly --brief [--after <seq>]
@@ -522,7 +542,25 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     console.error("bin/factory: lead --here: could not read the factory host's git user.name and user.email; nothing was started");
     return 1;
   }
-  const { state } = contextOf(env);
+  const { state, agentProfiles } = contextOf(env);
+  const account = readAccounts(state)[`factory/${repo}-${team}`];
+  if (accountRefusal(account)) {
+    console.error('bin/factory: lead --here: the team needs an account in this node’s accounts file');
+    return 2;
+  }
+  const token = readTokenFile(join(tokenDir(agentProfiles), account));
+  if (token.error) {
+    console.error('bin/factory: lead --here: no usable local token; run factory account add on this node');
+    return 2;
+  }
+  const config = join(agentProfiles, 'leads', `${repo}-${team}`, 'claude');
+  try {
+    mkdirSync(config, { recursive: true, mode: 0o700 });
+    markOnboarded(config);
+  } catch {
+    console.error('bin/factory: lead --here: could not prepare the local profile');
+    return 1;
+  }
   const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/lead.md');
   let roleText;
   try {
@@ -571,7 +609,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
       GIT_CONFIG_COUNT: String(GIT_CONFIG.length),
       ...Object.fromEntries(GIT_CONFIG.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
     },
-    permissions: { deny: ['Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
+    permissions: { deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -588,7 +626,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 1;
   }
   const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, '--settings', JSON.stringify(settings),
-    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env, cwd });
+    ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: { ...env, CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: token.token }, cwd });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
@@ -597,7 +635,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
 }
 
 /** Colly's current-pane launch (#365): the pack supplies the approved role; GitHub writes go through `factory gh`.
- * INN-30 permits use and lead; login, store and logout remain denied. */
+ * INN-30 permits use and lead; account and store remain denied. */
 async function colly(args, env) {
   if (args.includes('--line') || args.includes('--brief')) return collyStatus(args, env);
   if (args.length) {
@@ -680,8 +718,8 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
       allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)'],
       deny: [
         'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
-        'Bash(*factory login*)', 'Bash(*factory store*)', 'Bash(*factory logout*)',
-        'Bash(*lib/factory.mjs login*)', 'Bash(*lib/factory.mjs store*)', 'Bash(*lib/factory.mjs logout*)',
+        'Bash(*factory account*)', 'Bash(*factory store*)',
+        'Bash(*lib/factory.mjs account*)', 'Bash(*lib/factory.mjs store*)',
       ],
     },
   };
@@ -803,11 +841,18 @@ async function collyStatus(args, env) {
   return onHostBySsh('colly', args, false, env);
 }
 
-/** `factory login <account>`: checks the name, runs `claude setup-token` on the terminal's own streams (so what it prints goes to
- * the Human's screen and is never captured), reads the token from a hidden prompt, then stores it: here on the Mac mini, else by
- * ssh to `factory store` there, the token on ssh's stdin and in no argument. */
+/** `factory account add <account>`: checks the name, runs `claude setup-token` on the terminal's own streams (so what it prints goes to
+ * the Human's screen and is never captured), reads the token from a hidden prompt, then stores it on this node by default, or by
+ * ssh to `factory store` on the named node, the token on ssh's stdin and in no argument. */
 async function login(args, env) {
-  const words = args.filter((a) => a !== '--no-setup');
+  const here = placeOf(env) === 'factory' ? HOST : 'macbook';
+  const at = args.indexOf('--node');
+  const node = at === -1 ? here : args[at + 1];
+  if (![HOST, 'macbook'].includes(node) || args.filter((a) => a === '--node').length > 1) {
+    console.error(`bin/factory: --node must name macbook or ${HOST}`);
+    return 2;
+  }
+  const words = args.filter((a, i) => a !== '--no-setup' && (at === -1 || (i !== at && i !== at + 1)));
   const app = appSlot(words);
   if (!app && words.length !== 1) {
     console.error(USAGE);
@@ -838,7 +883,7 @@ async function login(args, env) {
     console.error(`bin/factory: ${t.error}; nothing was stored`);
     return 1;
   }
-  if (placeOf(env) === 'factory') {
+  if (node === here) {
     const { agentProfiles, state } = contextOf(env);
     let moved;
     try {
@@ -853,22 +898,22 @@ async function login(args, env) {
     if (moved) console.log(moved);
     return 0;
   }
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory store ${words.join(' ')}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${node}`, `zsh -lc '~/WORKSPACES/bin/factory store ${words.join(' ')}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
   if (r.error?.code === 'ETIMEDOUT' || r.status !== 0) {
     const why = r.error?.code === 'ETIMEDOUT' ? 'timed out' : lastLine(`${r.stderr ?? ''}${r.stdout ?? ''}`);
-    console.error(`bin/factory: the token was not stored on the Mac mini: ${why.split(t.token).join('[token]')}`);
+    console.error(`bin/factory: the token was not stored on ${node}: ${why.split(t.token).join('[token]')}`);
     return 1;
   }
-  console.log(app ? `stored the ${app.file} of ${app.app} on the Mac mini` : `stored the token of ${account} on the Mac mini`);
+  console.log(app ? `stored the ${app.file} of ${app.app} on ${node}` : `stored the token of ${account} on ${node}`);
   return 0;
 }
 
-/** `login`/`store` words that name a file of an app's folder (#403): `linear-app client-id` or `linear-app client-secret`, else null. */
+/** `account add`/`store` words that name a file of an app's folder (#403): `linear-app client-id` or `linear-app client-secret`, else null. */
 function appSlot(words) {
   return words.length === 2 && APP_FOLDERS.includes(words[0]) && ['client-id', 'client-secret'].includes(words[1]) ? { app: words[0], file: words[1] } : null;
 }
 
-/** `factory store <account>`, on the Mac mini: one token from stdin, never from a terminal, written to the store. */
+/** `factory store <account>`, on each node: one token from stdin, never from a terminal, written to the store. */
 async function store(args, env) {
   const app = appSlot(args);
   if (!app && args.length !== 1) {
@@ -878,10 +923,6 @@ async function store(args, env) {
   const refused = app ? null : accountRefusal(args[0]);
   if (refused) {
     console.error(`bin/factory: ${refused}`);
-    return 2;
-  }
-  if (placeOf(env) !== 'factory') {
-    console.error('bin/factory: store runs on the Mac mini, the factory host, as the factory user');
     return 2;
   }
   if (process.stdin.isTTY) {
@@ -912,7 +953,7 @@ async function store(args, env) {
  * already covers a Mac mini that cannot be reached); 60 seconds for every other. */
 export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
 
-/** `use` and `logout` from the MacBook run on the Mac mini, as `login` does: the arguments are checked here first (a row is a number,
+/** `use` from the MacBook runs on the Mac mini: the arguments are checked here first (a row is a number,
  * a letter is a to z, an account matches the account pattern), then the host runs the command in a login shell over ssh, on the
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
 function remote(cmd, args, env) {
@@ -920,7 +961,7 @@ function remote(cmd, args, env) {
     ? null // checked by wake() before it comes here
     : cmd === 'use'
     ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) && !parseTeam(args[0]) ? 'the row is a number or <repo>-<team>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
-    : (args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account');
+    : (args.length === 1 ? accountRefusal(args[0]) : 'account remove takes one account');
   if (bad) {
     console.error(`bin/factory: ${bad}\n${USAGE}`);
     return 2;
@@ -939,7 +980,7 @@ function listing(ctx, env) {
   const rows = readPlace('factory', ctx);
   finish(rows, expectedAccounts(env, ctx.state));
   const text = tableText(rows, { accounts: accountsText(rows, accountList(ctx), ctx) });
-  return { rows, text: existsSync(seat1File(ctx.agentProfiles)) ? `${text}\n\nseats/1/oauth-token (seat 1's old token file) is still there; it moves aside, never deleted, at the next factory login or factory use once seat 1's account has a token.` : text };
+  return { rows, text: existsSync(seat1File(ctx.agentProfiles)) ? `${text}\n\nseats/1/oauth-token (seat 1's old token file) is still there; it moves aside, never deleted, at the next factory account add or factory use once seat 1's account has a token.` : text };
 }
 
 const defaultAsk = async (question) => {
@@ -974,11 +1015,11 @@ async function restartLead(repo, team, account, ctx, oldAccount) {
   // The Lead process rule: a claude process with --name <repo>-<team>. A recorded pane may hold something else by now.
   if (!leadTeams(repo).includes(team)) {
     console.log(`the Lead of ${repo} (team ${team}) is not running; it takes ${account} at its next start${startNote(repo, flag)}`);
-    if (!hasToken) console.log(`${account} has no token file yet: that next start is refused until factory login ${account}`);
+    if (!hasToken) console.log(`${account} has no token file yet: that next start is refused until factory account add ${account}`);
     return 0;
   }
   if (!hasToken) {
-    console.log(`${account} has no token file yet: factory login ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
+    console.log(`${account} has no token file yet: factory account add ${account}; the Lead keeps running and was not restarted, and its next start is refused until then`);
     return 1;
   }
   return restartTeam(repo, team, account, ctx, oldAccount);
@@ -1106,11 +1147,10 @@ async function use(args, env, io) {
   return t ? restartLead(t.repo, t.team, account.name, ctx, oldAccount) : 0;
 }
 
-/** `factory logout <account>`: the account's token file moves into archive/tokens, never deleted. The rows that name it stay in the
- * accounts file and start nothing until `factory login <account>` or `factory use` gives them another. */
+/** `factory account remove <account>`: the account's token file moves into archive/tokens, never deleted. The rows that name it stay in the
+ * accounts file and start nothing until `factory account add <account>` or `factory use` gives them another. */
 function logout(args, env) {
-  if (placeOf(env) !== 'factory') return remote('logout', args, env);
-  const refused = args.length === 1 ? accountRefusal(args[0]) : 'logout takes one account';
+  const refused = args.length === 1 ? accountRefusal(args[0]) : 'account remove takes one account';
   if (refused) {
     console.error(`bin/factory: ${refused}\n${USAGE}`);
     return 2;
@@ -1118,7 +1158,7 @@ function logout(args, env) {
   const { agentProfiles } = contextOf(env);
   try {
     const to = archiveToken(agentProfiles, args[0]);
-    console.log(`moved the token of ${args[0]} to ${to}; every row that names it starts nothing until factory login ${args[0]} or factory use`);
+    console.log(`moved the token of ${args[0]} to ${to}; every row that names it starts nothing until factory account add ${args[0]} or factory use`);
   } catch (e) {
     console.error(`bin/factory: ${e.message}`);
     return 1;
@@ -1128,10 +1168,21 @@ function logout(args, env) {
 
 export async function main(argv, env = process.env, io = { isTTY: Boolean(process.stdin.isTTY), ask: defaultAsk }) {
   const [cmd, ...rest] = argv;
-  if (cmd === 'login') return login(rest, env);
+  if (cmd === 'login' || cmd === 'logout') {
+    console.error(`factory ${cmd} was renamed to factory account ${cmd === 'login' ? 'add' : 'remove'}`);
+    return 2;
+  }
+  if (cmd === 'account') {
+    if (rest[0] === 'add') return login(rest.slice(1), env);
+    if (rest[0] === 'remove') return logout(rest.slice(1), env);
+    if (rest[0] !== 'list') { console.error(USAGE); return 2; }
+    argv = rest.slice(1);
+  } else if (!cmd || ['--all', '--json'].includes(cmd)) {
+    console.error('the table moved to factory account list');
+    return 2;
+  }
   if (cmd === 'store') return store(rest, env);
   if (cmd === 'use') return use(rest, env, io);
-  if (cmd === 'logout') return logout(rest, env);
   if (cmd === 'top') {
     console.error("factory top was removed. Use Linear's project 'Factory release 1'.");
     return 2;

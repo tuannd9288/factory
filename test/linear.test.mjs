@@ -319,7 +319,7 @@ test('the app\'s folder is no Claude account: tokenAccounts and accountList skip
   assert.deepEqual(tokenAccounts(f.agentProfiles), ['real-account']);
   assert.deepEqual(accountList(f).map((a) => a.name), ['real-account']);
   assert.notEqual(accountRefusal('linear-app'), null);
-  assert.deepEqual(readdirSync(tokenDir(f.agentProfiles)).sort(), ['linear-app', 'real-account']);
+  assert.deepEqual(readdirSync(tokenDir(f.agentProfiles)).sort(), ['.real-account.added', 'linear-app', 'real-account']);
 });
 
 test('a bare team name is refused before a Linear request', async () => {

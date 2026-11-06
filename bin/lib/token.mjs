@@ -1,4 +1,4 @@
-// The token store of `factory login` (#177): one file for each account, ~/.agent-profiles/tokens/<account>, mode 600, in a
+// The token store of `factory account add` (#177): one file for each account, ~/.agent-profiles/tokens/<account>, mode 600, in a
 // folder of mode 700. This file holds the checks of a name and of a token, the write, the list of the files and the read of a
 // token from stdin. It never prints a token, and no error it raises holds one.
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -46,7 +46,18 @@ export function readTokenFile(path) {
   return /^[\x21-\x7e]+$/.test(text) ? { token: text } : { error: 'unprintable' };
 }
 
-/** Writes the token to a temporary file in the store and renames it over <account>. The caller has checked both. */
+/** The recorded UTC date, never inferred from a token or its mtime. Older stores have no sidecar. */
+export function tokenAdded(agentProfiles, account) {
+  try {
+    const date = readFileSync(join(tokenDir(agentProfiles), `.${account}.added`), 'utf8').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Writes the token and its added date through temporary files inside the store. The hidden date file contains no token
+ * and cannot be mistaken for an account. The caller has checked the account and token. */
 export function writeToken(agentProfiles, account, token) {
   const dir = tokenDir(agentProfiles);
   let st = null;
@@ -59,12 +70,18 @@ export function writeToken(agentProfiles, account, token) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const tmp = join(dir, `.${account}.${process.pid}.tmp`);
+  const added = join(dir, `.${account}.added`);
+  const addedTmp = `${tmp}.added`;
   rmSync(tmp, { force: true });
+  rmSync(addedTmp, { force: true });
   try {
     writeFileSync(tmp, `${token}\n`, { mode: 0o600, flag: 'wx' });
+    writeFileSync(addedTmp, `${new Date().toISOString().slice(0, 10)}\n`, { mode: 0o600, flag: 'wx' });
     renameSync(tmp, join(dir, account));
+    renameSync(addedTmp, added);
   } catch (e) {
     rmSync(tmp, { force: true });
+    rmSync(addedTmp, { force: true });
     throw e;
   }
 }
@@ -195,7 +212,10 @@ function archive(agentProfiles, kind, from, name, at) {
 export function archiveToken(agentProfiles, account, at = new Date()) {
   const from = join(tokenDir(agentProfiles), account);
   if (!existsSync(from)) throw new Error(`there is no token file for ${account}`);
-  return archive(agentProfiles, 'tokens', from, account, at);
+  const to = archive(agentProfiles, 'tokens', from, account, at);
+  const added = join(tokenDir(agentProfiles), `.${account}.added`);
+  if (existsSync(added)) renameSync(added, `${to}.added`);
+  return to;
 }
 
 export const seat1File = (agentProfiles) => join(agentProfiles, 'seats/1/oauth-token');

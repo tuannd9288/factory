@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountOut } from './seat.mjs';
+import { quotaRows, alertLines } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
 import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
 
@@ -305,6 +306,27 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
     read.add('quota');
   } catch {
     // the accounts could not be read: their conditions stay
+  }
+  // The same rows serve the hook and the sweep. Keep the last observed identity in the existing
+  // conditions store, silently; a Lead's manual account move gets a one-time event.
+  try {
+    const previous = readActive(state).conditions;
+    for (const row of quotaRows({ runs, accounts: [] }).filter((r) => r.source === 'Codex')) {
+      const identity = `codex-seat ${row.file} `;
+      const key = `${identity}${row.account}`;
+      const old = Object.values(previous).find((c) => c.key.startsWith(identity));
+      if (old && old.key !== key && row.account !== 'not recorded') {
+        appendStart({ state, kind: 'account-moved', key: `account-moved ${row.file}`,
+          text: `seat ${row.seat} moved from ${old.text} to ${row.account}`, now });
+      }
+      found.push({ key, scope: 'codex', text: row.account, afterMs: Infinity });
+      const text = alertLines([row], { now })[0];
+      if (text) found.push({ key: `${row.windows.rejected ? 'out-of-quota' : 'model-at-capacity'} ${row.file} ${row.account}`,
+        scope: 'codex', text });
+    }
+    read.add('codex');
+  } catch {
+    // An unreadable log keeps its previous conditions.
   }
   if (notes.refused) {
     found.push({ key: 'gh-refused', scope: 'gh', top: true, text: notes.refused });
