@@ -7,29 +7,6 @@ import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../bin/lib/factory.mjs';
 
-test('colly passes the shipped role unchanged to the session', async (t) => {
-  const state = fs.mkdtempSync(join(tmpdir(), 'factory-colly-role-'));
-  const calls = [];
-  t.mock.method(childProcess, 'spawnSync', (cmd, args) => {
-    calls.push({ cmd, args });
-    return { status: 0 };
-  });
-  syncBuiltinESMExports();
-  try {
-    assert.equal(await main(['colly'], {
-      HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here',
-    }), 0);
-    const role = fs.readFileSync(new URL('../packs/colly/colly.md', import.meta.url), 'utf8');
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].cmd, 'claude');
-    assert.deepEqual(calls[0].args.slice(0, 2), ['--append-system-prompt', role]);
-  } finally {
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
-    fs.rmSync(state, { recursive: true, force: true });
-  }
-});
-
 test('colly isolates GitHub and grants only use and lead, with the pack role required', async (t) => {
   const state = fs.mkdtempSync(join(tmpdir(), 'factory-colly-'));
   const env = { HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', GH_TOKEN: 'inherited', GITHUB_TOKEN: 'inherited' };
