@@ -22,6 +22,7 @@
 //   the line carries `woke`, so the wake comes before it), and settles the store's row with the time of the wake or why it went not. The wake is
 //   #351's: a post into the Lead's recorded inbox socket (bin/lib/wake.mjs), the same line and text. This is the factory's counterpart of
 //   piggery's `cmd.Wait` (driver/local/runner.go:331-344): piggery's daemon owns the worker's process; here bin/seat does, and tells the daemon.
+//   #366: the same record scan feeds the shared-records outbox at startup, each seat end, ping and pass. A failed push stays local for retry.
 //   When a pass moved the checkout (followMain), the daemon exits cleanly after that pass, releasing the lock and the socket, so the job's next run
 //   starts the new code (as #257 does for a Lead's hook). It exits the same way when its log (FACTORY_DAEMON_LOG, set by the job's start) passes
 //   10 MiB, so the next start moves it aside, and on SIGTERM, SIGINT and SIGHUP after the pass in hand (30 s at most). After every pass, whether
@@ -51,6 +52,7 @@ import { wakeOnSeatEnds } from './news-wake.mjs';
 import { openStore } from './store.mjs';
 import { startLinearSource } from './linear-listen.mjs';
 import { postSync } from './wake.mjs';
+import { recordsWriter } from './shared-records.mjs';
 
 export const PASS_MS = 60_000;
 const LOG_MAX = 10 * 1024 * 1024;
@@ -90,6 +92,7 @@ export const codeMoved = (loaded, head) => Boolean(loaded && head && loaded !== 
 /** The records of sessions.jsonl not yet taken, woken once, before the socket listens. The first pass finds the holders of a record that names no
  * team, so such a record waits for it. */
 export function reconcile(d) {
+  d.pushRecords?.();
   const file = join(d.state, 'sessions.jsonl');
   const size = sizeOf(file);
   let offset = d.store.offset('sessions.jsonl');
@@ -138,6 +141,8 @@ function seatEnded(d, req) {
     } catch (error) {
       d.log(`daemon: seat-ended ${req.tag}: ${first(error)}`);
       d.store.settle(id, { why: `error: ${first(error)}` });
+    } finally {
+      d.pushRecords?.();
     }
   };
   return { response: { ok: true, result: { id } }, after };
@@ -155,7 +160,7 @@ export function handleLine(d, line) {
   const id = typeof req.id === 'string' || typeof req.id === 'number' ? req.id : null;
   try {
     if (req.verb === 'ping') d.lastPing = Date.now();
-    if (req.verb === 'ping') return { response: { id, ok: true, result: { pid: process.pid, start: d.lock.start, startedAt: d.startedAt, head: LOADED ?? null, passes: d.passes, passing: d.passing } } };
+    if (req.verb === 'ping') return { response: { id, ok: true, result: { pid: process.pid, start: d.lock.start, startedAt: d.startedAt, head: LOADED ?? null, passes: d.passes, passing: d.passing } }, after: d.pushRecords };
     if (req.verb === 'seat-ended') {
       const r = seatEnded(d, req);
       return { ...r, response: { id, ...r.response } };
@@ -213,9 +218,9 @@ function releaseQueueLock(state) {
   if (holderOf(lock)?.pid === process.pid) rmSync(lock, { force: true });
 }
 
-/** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow`, `startSource` and `onStart` (told
+/** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow`, `startSource`, `pushRecords` and `onStart` (told
  * { stop, d } once it listens) are passed in for tests. */
-export async function run({ state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'), human = process.env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = process.env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(process.env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, onStart } = {}) {
+export async function run({ state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'), human = process.env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = process.env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(process.env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
   const sock = socketPath(state);
   if (!fits(sock)) throw new Error(`the socket path ${sock} is longer than 103 bytes`);
   mkdirSync(state, { recursive: true });
@@ -233,7 +238,7 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     releaseLock(lockFile, lock.token);
     throw error;
   }
-  const d = { state, runs, store, lock, post, log, held: null, lastPing: Date.now(), passes: 0, passing: false, stopping: false, moved: false, worker: null, timer: null, startedAt: new Date().toISOString() };
+  const d = { state, runs, store, lock, post, log, pushRecords, held: null, lastPing: Date.now(), passes: 0, passing: false, stopping: false, moved: false, worker: null, timer: null, startedAt: new Date().toISOString() };
   let server = null;
   let stopped;
   const finished = new Promise((done) => (stopped = done));
@@ -244,7 +249,9 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
     d.linear?.stop();
     clearTimeout(d.timer);
     clearInterval(d.lease);
-    const close = () => {
+    const close = async () => {
+      // Keep the daemon lock until its outbox has settled; a replacement must not write the same clone concurrently.
+      await d.pushRecords();
       server?.close();
       rmSync(sock, { force: true });
       store.close();
@@ -262,6 +269,7 @@ export async function run({ state = process.env.FACTORY_STATE ?? join(process.en
   };
   const startPass = () => {
     if (d.passing || d.stopping) return;
+    d.pushRecords();
     d.passing = true;
     const began = Date.now();
     let result = null;

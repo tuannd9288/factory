@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { startLinearSource, SOURCE_CONDITION, SOURCE_SCOPE } from '../bin/lib/linear-listen.mjs';
 import { openStore } from '../bin/lib/store.mjs';
 import { CONDITION, createLinear } from '../bin/lib/linear.mjs';
 import { writeAppFile } from '../bin/lib/token.mjs';
-import { readActive, record } from '../bin/lib/events.mjs';
+import { readActive, readLines, record } from '../bin/lib/events.mjs';
 
 const time = (n) => new Date(n * 1000).toISOString();
 const comment = (id, n, key = 'FAC') => ({ id, createdAt: time(n), user: { id: 'actor-id' },
@@ -110,6 +110,7 @@ test('a stream event is recorded once, after every catch-up page and only for se
   await tick();
   ws.next('issueUpdated', issue('issue-1', 2));
   ws.next('issueUpdated', issue('issue-1', 4));
+  await tick();
   assert.deepEqual(f.store.linearEvents().map((r) => [r.kind, r.id, r.time]), [
     ['commentCreated', 'older', 1000], ['issueUpdated', 'issue-1', 2000],
     ['commentCreated', 'comment-1', 3000], ['issueUpdated', 'issue-1', 4000],
@@ -160,6 +161,7 @@ test('1001 reconnect catches an event posted while down once', async (t) => {
   await tick();
   innOnly.next('commentCreated', comment('excluded', 1201));
   innOnly.next('commentCreated', comment('inn-only', 1202, 'INN'));
+  await tick();
   assert.equal(f.logs.filter((line) => line.includes('watching INN only')).length, 1);
   assert.equal(f.store.linearEvents().some((r) => r.id === 'excluded'), false);
   assert.equal(f.store.linearEvents().some((r) => r.id === 'inn-only'), true);
@@ -286,10 +288,16 @@ test('connect refreshes tokens, repeated closes back off, ack resets and heartbe
 
 test('an empty real token store starts nothing, polls quietly and resumes when a token appears', async (t) => {
   const f = fixture(t);
+  const originalHostUser = process.env.FACTORY_HOST_USER;
+  process.env.FACTORY_HOST_USER = userInfo().username;
+  t.after(() => {
+    if (originalHostUser === undefined) delete process.env.FACTORY_HOST_USER;
+    else process.env.FACTORY_HOST_USER = originalHostUser;
+  });
   const agentProfiles = join(f.state, 'empty-profiles');
   let networkCalls = 0;
   const linear = createLinear({ state: f.state, agentProfiles, now: () => f.now,
-    fetchFn: async () => { networkCalls += 1; throw new Error('unexpected network request'); } });
+    fetchFn: async () => { networkCalls += 1; return { status: 200, text: async () => JSON.stringify({ data: { users: { nodes: [] } } }) }; } });
   const source = f.start({ linear, getToken: undefined, mintToken: undefined });
   await source.ready;
   assert.equal(source.waiting, true);
@@ -306,7 +314,7 @@ test('an empty real token store starts nothing, polls quietly and resumes when a
   await tick();
   assert.equal(source.waiting, false);
   assert.deepEqual(f.store.linearEvents().map((r) => r.id), ['before-token']);
-  assert.equal(networkCalls, 0);
+  assert.equal(networkCalls, 1);
 });
 
 
@@ -377,4 +385,77 @@ test('the source answers ping while the async wake is pending', async (t) => {
   assert.equal(f.store.linearEvents()[0].wake_delay_ms, null);
   const lines = readFileSync(join(f.state, 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   assert.match(lines.find((line) => line.kind === 'comment').text, /not woken \(no file\); the comment waits on Linear/);
+});
+
+
+test('INN answers use backed editors and write once across close, catch-up and restart on the host', async (t) => {
+  const f = fixture(t);
+  const originalHostUser = process.env.FACTORY_HOST_USER;
+  process.env.FACTORY_HOST_USER = userInfo().username;
+  t.after(() => {
+    if (originalHostUser === undefined) delete process.env.FACTORY_HOST_USER;
+    else process.env.FACTORY_HOST_USER = originalHostUser;
+  });
+  const calls = [];
+  const linear = { request: async (query, variables) => {
+    calls.push({ query, variables });
+    if (query.includes('users(')) return { users: { nodes: [{ id: 'human' }] } };
+    if (query.includes('documentContentHistory(')) return { documentContentHistory: [
+      { actorIds: ['human'], contentDataSnapshotAt: time(4) },
+    ] };
+    return { issue: { history: page([
+      { updatedDescription: true, createdAt: time(2), descriptionUpdatedBy: [{ id: 'human' }] },
+      { updatedDescription: true, createdAt: time(6), actor: { id: 'human' }, descriptionUpdatedBy: [] },
+    ]), documentContent: { id: 'document-1' } } };
+  } };
+  const start = () => f.start({ linear });
+  const first = start();
+  await first.ready;
+  const ws = f.sockets[0];
+  ws.open();
+  await tick();
+  const update = (n, description) => ({ ...issue('pick', n), description });
+  const nodes = [update(1, '- [ ] **A**'), update(2, '- [x] **A**'),
+    update(3, '- [x] **A** more words'), update(4, '- [X] **B (Đề xuất):** chọn'),
+    update(6, '- [x] **C**')];
+  for (const n of nodes) { ws.next('issueUpdated', n); await tick(); }
+  const answer = { ...comment('answer', 7, 'INN'), user: { id: 'human' } };
+  ws.next('commentCreated', answer);
+  ws.next('commentCreated', answer);
+  ws.next('commentCreated', comment('other', 8, 'INN'));
+  await tick();
+  const lines = () => readLines(f.state).filter((e) => e.kind === 'inn-answer');
+  assert.equal(lines().length, 4);
+  assert.ok(lines().every((e) => e.type === 'start'));
+  assert.match(lines()[0].text, /A.*IssueHistory.descriptionUpdatedBy/);
+  assert.match(lines()[1].text, /B.*documentContentHistory.actorIds/);
+  assert.match(lines()[2].text, /C.*ticker is not confirmed.*not his answer/);
+  assert.match(lines()[3].text, /his comment/);
+  assert.equal(calls.filter((c) => c.query.includes('documentContentHistory(')).length, 2);
+  const unseen = { ...update(8, '- [X] **D**'), id: 'unseen' };
+  ws.next('issueUpdated', unseen);
+  await tick();
+  assert.match(lines().at(-1).text, /D.*ticker is not confirmed/, 'older edits do not attribute a first-seen tick');
+  f.issues = [...nodes, unseen];
+  f.comments = [answer];
+  ws.emit('close', { code: 1001 });
+  (await f.reconnect(0)).open();
+  await tick();
+  first.stop();
+  f.store.close();
+  f.store = openStore(join(f.state, 'factory.db'));
+  const second = start();
+  await second.ready;
+  assert.equal(lines().length, 5);
+  second.stop();
+  const before = process.env.FACTORY_HOST_USER;
+  process.env.FACTORY_HOST_USER = 'not-this-host';
+  try {
+    f.comments.push({ ...answer, id: 'remote-answer', createdAt: time(9) });
+    await start().ready;
+    assert.equal(lines().length, 5);
+  } finally {
+    if (before === undefined) delete process.env.FACTORY_HOST_USER;
+    else process.env.FACTORY_HOST_USER = before;
+  }
 });
