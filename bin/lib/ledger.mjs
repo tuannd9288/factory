@@ -953,7 +953,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   } catch (error) {
     const why = String(error.stderr || error.message).trim();
     console.error(`factory-ledger: ${why}`);
-    // A failed weekly post leaves digest.failed for bin/factory-alerts, as the queue leaves queue-run.failed (#209);
+    // A failed weekly post leaves digest.failed for Colly's status line and brief (queueOf in colly-status.mjs), as the queue
+    // leaves queue-run.failed (#209);
     // a run that prints to stdout, and plist, keep no state.
     const args = process.argv.slice(2);
     if (args[0] !== 'plist' && args.includes('--post')) {

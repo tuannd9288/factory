@@ -34,13 +34,7 @@ export const SCHEMA = {
 // The researcher's only git (#181).
 export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta.url));
 
-// The settings every session gets with --settings (#205): bin/factory-alerts at its start, from this checkout, so no profile
-// has to hold the hook.
-export const ALERTS_SETTINGS = JSON.stringify({
-  hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: fileURLToPath(new URL('../factory-alerts', import.meta.url)), timeout: 10 }] }] },
-});
-
-/** The sandbox of the worker's and the reviewer's Bash (#183), in the one --settings value with the alerts hook. It covers Bash
+/** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get. It covers Bash
  * only: the Read tool, the hooks and the MCP servers run outside it, so the Read denies stay permission rules. Paths are absolute
  * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
  * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. Only ~/.config/gh is denied of ~/.config, so
@@ -134,7 +128,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
     '--permission-mode', p.hideKey ? 'default' : 'auto',
-    '--settings', p.sandbox ? JSON.stringify({ ...JSON.parse(ALERTS_SETTINGS), sandbox: sandboxSettings({ home, run, work, profiles }) }) : ALERTS_SETTINGS,
+    ...(p.sandbox ? ['--settings', JSON.stringify({ sandbox: sandboxSettings({ home, run, work, profiles }) })] : []),
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
     '--allowedTools', ...(p.hideKey ? p.allow(run) : []), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,

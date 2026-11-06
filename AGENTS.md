@@ -124,7 +124,7 @@ Names are standard terms, never coined ones (25/10).
 - **1b System of record** [OA1, UAC]: where work is recorded: issues, pull requests, the ledger. For a repository on
   Linear its issues are in Linear (Linear, 2026-11-04, in Decisions).
 - **1c Orchestrator-workers** [A1]: a lead gives each task to a worker.
-- **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory-alerts`, `bin/factory top`, the ledger's canary.
+- **1d Monitoring** [GH1]: `bin/factory-queue`, `bin/factory top`, the ledger's canary.
 - **1e Surfaces** [GH2, #68]: the Human's own screens: Ghostty with the Herdr TUI or app until the factory is finished, then
   Rex on the MacBook (K1 = C, pending his check) and Paseo's app (Control surfaces, in Decisions), and Remote Control (T3,
   pending); and, now, Linear, where he decides, takes notes and asks (Linear, in Decisions; #373), which for a
@@ -306,8 +306,7 @@ behind. GitHub kept the Human's approval of #323 through such a merge, whose pat
 
 Claude Code updates itself on the stable channel; nothing in the factory pins the version its sessions run (the canary,
 #24, is at the tag `before-271`). The gate's reviewer on CI pins its own, 2.1.308
-(`kit/.gate/bin/reviewer/package.json`, `kit/.gate/bin/lib/reviewer.json`). The digest's job is in `bin/factory-ledger`'s header,
-and the alerts hook's in `bin/factory-alerts`'s.
+(`kit/.gate/bin/reviewer/package.json`, `kit/.gate/bin/lib/reviewer.json`). The digest's job is in `bin/factory-ledger`'s header.
 
 The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of seven conditions begins (a required check
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, the sweep's own `gh` refused,
