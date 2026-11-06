@@ -6,8 +6,13 @@
 #   bin/onboard-owner <owner/name> --id <repository id> --apply    invite the agents' account (write), set the
 #        factory's rulesets (forcePush defaults to pstack: no rewrite on main or claims; on main, a bootstrap one until the kit lands, then the kit's
 #        gate, which with GATE_REVIEWER=entire in main's gate-trusted.yml requires verify, tier and Entire's check
-#        Entire Gates instead of review and verdict), create the reviewer environment, allow auto-merge (#139),
-#        and read it all back
+#        Entire Gates instead of review and verdict), create the reviewer environment, allow auto-merge (#139), once the
+#        kit is on main set the Actions event policy "factory gate: pull_request_target" (#337: GitHub blocks pull_request_target
+#        in a public repository from 2026-12-02 unless a policy allows it), and read it all back. The policy names the workflow
+#        files on main that run on pull_request_target and allows them every event their on: block names, read from those
+#        files; a file whose on: block is not in the kit's form stops the run. onboard-doctor reports the policy missing.
+#   bin/onboard-owner <his login>/factory --id <id> [--apply]   the factory's own repository: only that policy, for the
+#        workflows on its main that run on pull_request_target; its own ruleset stays, and no kit ruleset goes there
 #   It sets none of the gate's settings (#335): the reviewer and the three runners are in the workflows on main, which
 #   bin/onboard fills in (--reviewer, --runner, --pr-runner, --trusted-runner) and a pull request the Human approves
 #   changes. It reads the reviewer from main's gate-trusted.yml; a main whose gate-trusted.yml still reads the repository

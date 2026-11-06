@@ -2,7 +2,7 @@
 // nothing. The Human's login runs it (Colly runs it from the MacBook, as bin/onboard-owner), so its code is made to be
 // reviewed as code that only reads:
 //   - every gh call goes through `get`, which refuses all but `gh api <path>` with no flag but --paginate and --slurp (the
-//     rules in force are read in full), `gh variable list`,
+//     rules in force are read in full) or the one API version header of the Actions policies (#337), `gh variable list`,
 //     `gh pr list` and `gh pr checks`, and any -X, --method, -f, -F, --field, --raw-field or --input; a query is in the path;
 //   - it runs only from a commit on the first-parent line of origin/main, with no uncommitted, untracked or ignored
 //     file under bin/ or kit/, as bin/onboard asks of its clone;
@@ -23,7 +23,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_BYTES, MAX_LINES, carrierProblems, countLines, entryIn, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { SETTINGS, TRUSTED, runnerProblems } from './gate-settings.mjs';
-import { current, gateState, gh, identify, left, reviewOf, switchNow, wanted, withReview } from './owner.mjs';
+import { POLICY_VERSION, current, gateState, gh, identify, left, reviewOf, switchNow, wanted, withReview } from './owner.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WIDTH = 120;
@@ -37,7 +37,10 @@ class Refusal extends Error {}
 /** The one way this command calls gh: a read. Every call is remembered, for the list at the end. */
 const calls = new Set();
 function get(args) {
-  const plain = args[0] === 'api' ? args.length >= 2 && !args.at(-1).startsWith('-') && args.slice(1, -1).every((a) => a === '--paginate' || a === '--slurp') : NOT_A_WRITE.some(([a, b]) => args[0] === a && args[1] === b);
+  const flags = args.slice(1, -1);
+  // The one header besides: the API version the Actions policies are documented for (#337), which changes no read into a write.
+  const header = flags.length === 2 && flags[0] === '-H' && flags[1] === `X-GitHub-Api-Version: ${POLICY_VERSION}`;
+  const plain = args[0] === 'api' ? args.length >= 2 && !args.at(-1).startsWith('-') && (header || flags.every((a) => a === '--paginate' || a === '--slurp')) : NOT_A_WRITE.some(([a, b]) => args[0] === a && args[1] === b);
   if (!plain || args.some((a) => WRITES.test(a))) throw new Error(`the doctor only reads: refused gh ${args.join(' ')}`);
   calls.add(`gh ${args.join(' ')}`);
   return gh(args);
@@ -124,15 +127,16 @@ function settingProblems({ slug, files, settings, old, variables }) {
 }
 
 function checkSettings(ctx) {
-  const reads = 'repo rulesets env collab invites kit vars workflows';
-  const { slug, agent, branch, kitLanded, reviewer, mergeMethod, forcePush } = ctx;
-  const kit = wanted({ kitLanded: true, branch, reviewer, mergeMethod, forcePush });
+  const reads = 'repo rulesets env collab invites kit vars workflows policies';
+  const { slug, agent, branch, kitLanded, reviewer, mergeMethod, forcePush, target } = ctx;
+  const kit = wanted({ kitLanded: true, branch, reviewer, mergeMethod, forcePush, target });
   const names = new Set([...kit.rulesets.map((r) => r.name), ...kit.drop]);
   const have = current(slug, agent, names, get);
   // The gate's two review parameters are the merge switch (#333), the Human's to move: whatever they hold is as wanted.
   const live = reviewOf(have.rulesets.find((r) => r.name === 'factory-gate'));
   const want = live ? withReview(kit, live) : kit;
-  const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...left(slug, agent, have, want), ...(kitLanded ? settingProblems(ctx) : [])];
+  const unknown = target.unreadable ? [`${target.unreadable} on ${branch} has no on: block in the kit's form, so the Actions event policy it needs is not known (#337)`] : [];
+  const problems = [...(kitLanded ? [] : [`the kit is not on ${branch}`]), ...left(slug, agent, have, want), ...unknown, ...(kitLanded ? settingProblems(ctx) : [])];
   return { ok: !problems.length, result: problems.length ? problems : 'all as the kit\'s gate wants', reads };
 }
 
