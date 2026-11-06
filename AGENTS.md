@@ -138,8 +138,8 @@ Names are standard terms, never coined ones (25/10).
 - **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
 - **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
 - **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
-- **4b Evals** [A8]: the pack's attacks (`packs/pstack/attacks.md`); the gate's attacks and the 20 seeded + 20 clean
-  probes, at the tag `before-271`, which re-run when real use calls for them (#153); no probe programme runs (29–31/10).
+- **4b Evals** [A8]: the pack's and the gate's attacks and the 20 seeded + 20 clean probes, at the tag `before-271`,
+  which re-run when real use calls for them (#153); no probe programme runs (29–31/10).
 
 A sublayer may change anything inside it while its contracts hold; a change to a contract is tier 3 (as is every change
 here). A contract is named by its code. Its sentence states the factory's rule; the rule's source is the Human's
@@ -227,7 +227,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | Path | What it is |
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
-| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests and attacks, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
+| `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, `.gate/driver.json`, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
 | `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment), which Colly runs on the Human's login after his one approval |
 | `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
