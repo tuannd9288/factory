@@ -5,7 +5,7 @@ import { ROOT } from './checkout.mjs';
 import { parseTeam } from './names.mjs';
 import { readAccounts } from './token.mjs';
 import { teamRows } from './teams.mjs';
-import { leadTeams } from './top.mjs';
+import { leadTeams } from './colly-status.mjs';
 
 // The living-person block, elon through mira, is omitted: teams must not be named after real people.
 // Every other reference word is retained in its original order.

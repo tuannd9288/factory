@@ -26,7 +26,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   (Recommended)", 12:14:34), so GitHub holds it and a move applies at once to the open pull requests, which the queue
   follows by re-running a tier-3 `tier` whose recorded position and the one in force differ in a way that changes its
   verdict. At `all` the code also lets a `needs-human` pull request merge once its checks are green: his choice on #354
-  (2026-11-02 20:16:33 +07, review 5737110797). Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`, which Colly runs; each move shows in `factory top` and wakes Colly.
+  (2026-11-02 20:16:33 +07, review 5737110797). Only he moves it, on his login, asked before each move: `bin/onboard-owner --merge`, which Colly runs; each move appears in Colly’s brief and wakes Colly.
   "Làm ngay trong release 1", "1–2 tự merge (Recommended)" and "Thử thật lúc team đang chạy
   (Recommended)" are his answers; the factory's own repository is unchanged. Sources:
   https://github.com/tuannd9288/factory/issues/333#issuecomment-6568029635 (09:51 to about 10:00),

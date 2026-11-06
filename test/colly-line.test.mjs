@@ -1,4 +1,4 @@
-// `factory top --line` and `--brief` (#365): the status line and the start hook's text, from fixture folders and a fake gh on PATH. The
+// `factory colly --line` and `--brief` (#365): the status line and the start hook's text, from fixture folders and a fake gh on PATH. The
 // fake gh logs each call, so the tests count how often GitHub is read across separate snapshots (each stands for one process).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 process.env.TZ = 'UTC';
 
-const top = () => import('../bin/lib/top.mjs');
+const top = () => import('../bin/lib/colly-status.mjs');
 const NOW = Date.parse('2026-10-31T12:00:00Z');
 const REPO = 'tuannd9288/factory';
 

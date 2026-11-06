@@ -6,7 +6,7 @@
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 
-// The hook also tells `factory top` what the Lead is doing (#286): every event it runs for writes <dest>/../state.json,
+// The hook also tells Colly’s brief what the Lead is doing (#286): every event it runs for writes <dest>/../state.json,
 // { event, type, at }, by rename. Only SessionStart, UserPromptSubmit and Notification stop there; the others (Stop, SessionEnd) copy.
 const STATE_ONLY = new Set(['SessionStart', 'UserPromptSubmit', 'Notification']);
 
