@@ -10,12 +10,12 @@
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TOKEN_GIT, installedRoot, nodeGithubToken, placeOf } from './node.mjs';
-import { quotaRows } from './quota.mjs';
+import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
 import { markOnboarded, quote, roleOf, copyHook } from '../../packs/pstack/bin/lead.mjs';
@@ -43,15 +43,25 @@ function spareFolders(home) {
   return entries.filter((e) => e.isDirectory() && /^\.claude-acc[0-9]+$/.test(e.name)).map((e) => Number(e.name.slice('.claude-acc'.length))).sort((a, b) => a - b);
 }
 
+/** Colly's Claude Code profile on the MacBook (INN-31 3A, #365): a plain folder the factory owns, signed in once by /login. */
+const collyProfile = (state) => join(state, 'colly', 'profile');
+
 /** The profiles of a place, from the committed list. On the Mac mini the Lead rows are the ones the accounts file names. A row with
  * `byFile` has its account from that file, and its login state is the token file of that account. */
-export function profilesOf(place, { home, agentProfiles, state, root }) {
+export function profilesOf(place, { home, agentProfiles, state, root, runs }) {
   if (place === 'macbook') {
+    // #365 (B5): the MacBook's own teams, its accounts file's `factory/<repo>-<team>` lines, sorted, numbered as `factory use` numbers them
+    // here (hereListing). Their profile names the place, as every row's does; `key` is the line the account is read from.
+    const teams = Object.keys(readAccounts(state)).filter((key) => key.startsWith('factory/') && parseTeam(key.slice('factory/'.length))).sort();
     return [
-      claude('macbook/claude', 'Colly', {}, 'claude auth login'),
+      ...teams.map((key) => {
+        const t = parseTeam(key.slice('factory/'.length));
+        return { profile: `macbook/${t.repo}-${t.team}`, key, role: `Lead of ${t.repo}, team ${t.team}`, kind: 'claude', byFile: true, numbered: true, statusFile: statusFile(runs, t.repo, t.team) };
+      }),
+      // Colly's own factory profile (INN-31 3A, #365); Colly writes to GitHub only through factory gh, so it has no gh row.
+      claude('macbook/claude', 'Colly', { CLAUDE_CONFIG_DIR: collyProfile(state) }, 'factory colly, then /login'),
       ...spareFolders(home).map((n) => claude(`macbook/claude-acc${n}`, 'spare Claude', { CLAUDE_CONFIG_DIR: join(home, `.claude-acc${n}`) }, `claude-use login ${n}`)),
       { profile: 'macbook/codex', role: 'Colly Codex', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: {} }, login: 'codex-use login <N>' },
-      { profile: 'macbook/gh', role: 'Colly gh', kind: 'gh', check: { cmd: 'gh', args: ['auth', 'status'], env: {} }, login: 'gh auth login' },
     ];
   }
   if (place === 'factory') {
@@ -132,7 +142,7 @@ function tokenState(agentProfiles, account, now = Date.now()) {
  * file is logged in when its account has a token file; it runs no command. */
 function check(p, ctx) {
   if (p.byFile) {
-    const account = ctx.accounts[p.profile] ?? null;
+    const account = ctx.accounts[p.key ?? p.profile] ?? null;
     if (!account) return { loggedIn: false, account: null, plan: null, note: 'no row in the accounts file' };
     const t = tokenState(ctx.agentProfiles, account);
     return { loggedIn: t.ok, account, plan: null, note: t.note };
@@ -182,14 +192,16 @@ export function readPlace(place, ctx) {
       quota = [];
     }
   }
-  const accounts = place === 'factory' ? readAccounts(ctx.state) : {};
+  // The MacBook reads its own accounts file and letters its own token files, as `factory use` does there (#365, B5).
+  const accounts = readAccounts(ctx.state);
   const seatRows = place === 'factory' ? seatAccounts(ctx.state) : {};
-  const letters = place === 'factory' ? new Map(accountList(ctx).map((a) => [a.name, a.letter])) : new Map();
+  const letters = new Map((place === 'factory' ? accountList(ctx) : nodeAccountList(ctx.agentProfiles)).map((a) => [a.name, a.letter]));
   let numbered = 0;
   const rows = profilesOf(place, ctx).map((p) => {
     const c = check(p, { ...ctx, accounts });
     const n = p.numbered ? (numbered += 1) : null;
-    const q = c.account ? quota.find((x) => x.account === c.account) : null;
+    // A MacBook team's quota is what its Lead's status line kept (#365 B5); a Mac mini team's, its account's newest run report.
+    const q = p.statusFile ? lastStatusLine(p.statusFile) : c.account ? quota.find((x) => x.account === c.account) : null;
     let live = null;
     // Only a team's row runs sessions; the gh row and the MacBook's rows name an account but run none.
     if (p.byFile && c.account) {
@@ -294,7 +306,7 @@ const red = (text) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[31m
 
 /** The lines of the lettered accounts (Mac mini): for each, its 5h and 7d use with the reset, the token file, and the numbers of the
  * rows that name it. The quota is the newest a run of that account reported; "?" where none did. */
-export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }) {
+export function accountsText(rows, accounts, { now = Date.now(), agentProfiles, title = 'ACCOUNTS' }) {
   const win = (w) => (w ? windowCell(w, now) : '?');
   const heads = accounts.map(({ name, letter }) => {
     const members = rows.filter((r) => r.n && r.account === name);
@@ -305,7 +317,7 @@ export function accountsText(rows, accounts, { now = Date.now(), agentProfiles }
   const nameW = Math.max(0, ...heads.map((h) => h.name.length));
   const rowsOf = (h) => (h.members.length ? `rows ${h.members.map((r) => r.n).join(', ')}` : 'no row');
   const rowsW = Math.max(0, ...heads.map((h) => rowsOf(h).length));
-  const lines = ['ACCOUNTS'];
+  const lines = [title];
   for (const h of heads) {
     const text = `  ${h.letter}  ${pad(h.name, nameW)}  5H ${pad(win(h.q?.five_hour), 17)}  7D ${pad(win(h.q?.seven_day), 17)}  ${pad(rowsOf(h), rowsW)}  ${h.t.note}`;
     lines.push(h.t.ok ? text : red(text));
@@ -327,7 +339,8 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
   for (const r of rows.filter((x) => x.unreachable)) out.push(`${r.profile}  ${r.note}`);
   if (accounts?.length) out.push('', ...accounts);
   const tokens = rows.filter((r) => r.role === 'node token');
-  if (tokens.length) out.push('', 'TOKENS BY NODE', ...tokens.map((r) => `  ${r.place === 'factory' ? HOST : r.place}  ${r.account}  ${r.note}`));
+  // Each account's letter, a spare's too, so `factory use <row> <letter>` finds it here (#365 B5).
+  if (tokens.length) out.push('', 'TOKENS BY NODE', ...tokens.map((r) => `  ${r.place === 'factory' ? HOST : r.place}  ${r.account}${r.letter ? ` (${r.letter})` : ''}  ${r.note}`));
   // One row for each account, not for each team: teams on one account share it.
   const quota = normal.filter((r) => (r.five_hour || r.seven_day || r.asOf) && r.account && r.account !== 'unknown').filter((r, i, all) => all.findIndex((o) => o.account === r.account) === i);
   if (quota.length) {
@@ -336,7 +349,7 @@ export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
     out.push('', `${pad('QUOTA', qw)}  ${pad('5H USE @RESET (UTC)', 21)}  ${pad('7D USE @RESET (UTC)', 21)}  AS OF (UTC)`);
     for (const [i, r] of quota.entries()) out.push(`${pad(names[i], qw)}  ${pad(windowCell(r.five_hour, now), 21)}  ${pad(windowCell(r.seven_day, now), 21)}  ${r.asOf ? utc(r.asOf) : '–'}`);
   }
-  out.push('', 'Quota is reported for each account that has run a session, from the run logs; every other row: not reported.', '* = the expected account (a local file), not one read.');
+  out.push('', 'Quota is reported for each account that has run a session: from the run logs, and on the MacBook from its team\'s Lead\'s status line; every other row: not reported.', '* = the expected account (a local file), not one read.');
   const out_ = normal.filter((r) => r.loggedIn !== true);
   if (out_.length) {
     out.push('', 'Not logged in or not readable:');
@@ -464,19 +477,43 @@ const GIT_CONFIG = [
   ...['https://github.com/', 'git@github.com:', 'ssh://git@github.com/'].map((from) => [`url.${PUSH_BASE}.pushInsteadOf`, from]),
 ];
 
-// What the auto-mode classifier of a MacBook Lead is told is inside its boundary (#366): it trusts only the working folder and its
-// remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat goes through
-// that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
+/** git settings as the environment variables git reads them from: GIT_CONFIG_COUNT and a GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n pair for each. */
+const gitConfigEnv = (pairs) => ({
+  GIT_CONFIG_COUNT: String(pairs.length),
+  ...Object.fromEntries(pairs.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
+});
+
+/** The git fence of a factory session on this MacBook that holds no agents' GitHub token: a `--here` Lead without one (#366) and Colly,
+ * always (#365 B8). No password prompt, ssh off (GIT_SSH_COMMAND), every credential helper emptied, and GitHub's push URLs rewritten to
+ * an unreachable one (GIT_CONFIG), so a push can never use the Human's own credential helper or SSH key. Fetches are untouched. */
+export const noPushGitEnv = () => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, ...gitConfigEnv(GIT_CONFIG) });
+
+// What the auto-mode classifier of a MacBook Lead and of Colly is told is inside its boundary (#366, #365): it trusts only the working
+// folder and its remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat
+// goes through that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
 // "$defaults" keeps the built-in entries, which a list without it replaces.
 const AUTO_MODE_ENVIRONMENT = [
   '$defaults',
-  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), its workers with /Users/factory/WORKSPACES/bin/seat, and reads of that account's git settings.`,
-  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear and factory wake run on ${HOST} over that ssh. factory use and factory account add are the Human's, never this Lead's.`,
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). The factory's sessions on this MacBook (a team's Lead, and Colly, the Human's own assistant) run their routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), a Lead's workers with /Users/factory/WORKSPACES/bin/seat, Colly's watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow, and reads of that account's git settings.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear and factory wake run on ${HOST} over that ssh. factory use and factory account add are the Human's, never a Lead's.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh. Pushes to them go over HTTPS as the agents' GitHub account: from this MacBook when it holds the agents' GitHub token, otherwise from ${HOST}.`,
+];
+
+// What Colly's auto-mode classifier is told (#365 B8). The Mac mini and the factory's commands are inside, as for a MacBook Lead, but
+// Colly pushes nothing: its git cannot reach GitHub (noPushGitEnv), so no source-control write is routine for it. "$defaults" keeps
+// the built-in entries.
+const COLLY_AUTO_MODE_ENVIRONMENT = [
+  '$defaults',
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). Colly, the Human's own assistant on this MacBook, runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list) and its watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login, on ${HOST} over ssh factory@${HOST}, or on this MacBook itself when its token store holds the agents' GitHub token; factory linear and factory wake run on ${HOST}. On the Human's spoken word Colly runs factory use and factory lead; factory account add, factory account remove and factory store are the Human's, never Colly's.`,
+  `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it. Colly reads them, and reads and writes their issues and pull requests only through factory gh, as the agents. Colly pushes nothing and makes no source-control write of its own: its git cannot push to GitHub, and a git push, a force push, or a branch or tag write by Colly is never routine.`,
 ];
 
 /** Where the socket of the MacBook Lead of a repository's team is recorded (#351), beside `lead-here`'s other files. */
 export const wakeFile = (state, repo, team) => join(state, 'lead-here', `${repo}-${team}.socket`);
+
+/** Where a MacBook Lead's status line keeps the newest quota Claude Code showed it (#365 B5, bin/lib/statusline-hook.mjs). */
+const statusFile = (runs, repo, team) => join(runs, `${repo}-${team}`, 'statusline.jsonl');
 
 /** `factory wake <repo> --issue <n> [--team <name>]` (#351): posts one line into the Lead's Claude Code inbox socket, which says to re-read
  * the issue and carries nothing else (bin/lib/wake.mjs); the message itself is a comment on the issue. On the factory host the socket is the
@@ -528,12 +565,13 @@ async function wake(args, env) {
   return 1;
 }
 
-/** Copies socket-hook.mjs to <state>/hooks/socket-hook-<sha7 of its bytes>.mjs unless a copy is there (reused, never written again), and
- * returns the path. A changed script has another name, so an earlier copy stays for the Leads that run it; it imports only node: modules. */
-function copySocketHook(state) {
-  const from = resolve(fileURLToPath(import.meta.url), '../socket-hook.mjs');
+/** Copies bin/lib/<name>.mjs (socket-hook, statusline-hook) to <dir>/<name>-<sha7 of its bytes>.mjs unless a copy is there (reused, never
+ * written again), and returns the path. A changed script has another name, so an earlier copy stays for the Leads that run it; each
+ * imports only node: modules. */
+function copyLibHook(dir, name) {
+  const from = resolve(fileURLToPath(import.meta.url), `../${name}.mjs`);
   const bytes = readFileSync(from);
-  const to = join(state, 'hooks', `socket-hook-${createHash('sha256').update(bytes).digest('hex').slice(0, 7)}.mjs`);
+  const to = join(dir, `${name}-${createHash('sha256').update(bytes).digest('hex').slice(0, 7)}.mjs`);
   if (!existsSync(to)) {
     mkdirSync(dirname(to), { recursive: true });
     const tmp = `${to}.${process.pid}.tmp`;
@@ -642,11 +680,12 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   }
   // Keep the local wake socket and install the pack's transcript/state copier (#476). They run a copy of the script named by its
   // hash, so a pull that changes the installed one leaves a live Lead's hook as it was (#257, #390).
-  let hook, transcriptHook;
+  let hook, transcriptHook, statusHook;
   const runDir = join(contextOf(env).runs, `${repo}-${team}`);
   try {
-    hook = copySocketHook(state);
+    hook = copyLibHook(join(state, 'hooks'), 'socket-hook');
     transcriptHook = copyHook({ root: resolve(fileURLToPath(import.meta.url), '../../..'), runDir });
+    statusHook = copyLibHook(join(runDir, 'hooks'), 'statusline-hook');
     mkdirSync(join(contextOf(env).runs, `${repo}-${team}`), { recursive: true });
   } catch (e) {
     console.error(`bin/factory: lead --here: ${e.message}`);
@@ -661,13 +700,13 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   const settings = {
     autoMode: { environment: AUTO_MODE_ENVIRONMENT },
     hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },
+    // The team's quota for `factory account list` on this node (#365 B5): the newest rate_limits Claude Code shows the status line.
+    statusLine: { type: 'command', command: [process.execPath, statusHook, statusFile(contextOf(env).runs, repo, team)].map(quote).join(' ') },
     // The settings never hold the token: with it, GH_TOKEN comes from the process environment below and is not emptied here.
     env: {
       GH_CONFIG_DIR: empty, ...(token ? {} : { GH_TOKEN: '' }), GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
-      GIT_TERMINAL_PROMPT: '0', ...(token ? {} : { GIT_SSH_COMMAND }),
-      GIT_CONFIG_COUNT: String(gitConfig.length),
-      ...Object.fromEntries(gitConfig.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]])),
+      ...(token ? { GIT_TERMINAL_PROMPT: '0', ...gitConfigEnv(gitConfig) } : noPushGitEnv()),
     },
     // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
     // env and printenv as for every role and seat (#181): the session's environment holds the team's Claude token and, with a stored
@@ -703,7 +742,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
 }
 
 /** Colly's current-pane launch (#365): the pack supplies the approved role; GitHub writes go through `factory gh`.
- * INN-30 permits use and lead; account and store remain denied. */
+ * INN-30 permits use and lead; account and store remain denied. INN-31 3A: Colly runs on its own factory profile, <state>/colly/profile,
+ * signed in once by /login, with no token or key from the caller's shell, in auto mode with the Mac mini inside the classifier's boundary. */
 async function colly(args, env) {
   if (args.includes('--line') || args.includes('--brief')) return collyStatus(args, env);
   if (args.length) {
@@ -714,7 +754,7 @@ async function colly(args, env) {
     console.error('bin/factory: colly runs on the MacBook');
     return 2;
   }
-  const { state } = contextOf(env);
+  const { state, agentProfiles } = contextOf(env);
   const parent = join(state, 'colly');
   const socket = join(parent, 'socket');
   // Connect without writing to the recorded inbox. A stale record is not a live session.
@@ -745,6 +785,7 @@ async function colly(args, env) {
     return 2;
   }
   const empty = join(parent, 'gh-empty');
+  const config = collyProfile(state);
   try {
     mkdirSync(empty, { recursive: true, mode: 0o700 });
     chmodSync(parent, 0o700);
@@ -757,9 +798,24 @@ async function colly(args, env) {
     console.error(`bin/factory: colly: ${join(empty, 'hosts.yml')} exists; a login was written there, so nothing was started`);
     return 1;
   }
+  // Its own profile, never the caller's (INN-31 3A): a link could lead into his personal ~/.claude. On a profile with no login, an
+  // onboarded profile opens at the prompt with "Not logged in · Run /login", where the onboarding would first ask for a theme; the folder
+  // Colly starts in is trusted (2.1.319, 2026-11-06).
+  try {
+    let link = false;
+    try { link = lstatSync(config).isSymbolicLink(); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    if (link) throw new Error(`${config} is a symlink; Colly's profile must be a plain folder, so nothing was started`);
+    mkdirSync(config, { recursive: true, mode: 0o700 });
+    chmodSync(config, 0o700);
+    markOnboarded(config);
+    markTrusted(config, realpathSync(process.cwd()));
+  } catch (e) {
+    console.error(`bin/factory: colly: ${e.message}`);
+    return 1;
+  }
   let hook;
   try {
-    hook = copySocketHook(state);
+    hook = copyLibHook(join(state, 'hooks'), 'socket-hook');
     writeFileSync(join(parent, 'pane'), `${env.HERDR_PANE_ID ?? ''}\n`, { mode: 0o600 });
   } catch (e) {
     console.error(`bin/factory: colly: ${e.message}`);
@@ -781,17 +837,29 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
     },
     // Claude Code status line docs, captured 2026-11-03, line 67: refreshInterval re-runs the command every N seconds.
     statusLine: { type: 'command', command: [process.execPath, factory, 'colly', '--line'].map(quote).join(' '), refreshInterval: 60 },
-    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '' },
+    // Colly reaches the Mac mini by ssh (factory gh, bin/factory-events --follow), as a MacBook Lead does, but pushes nothing (#365 B8).
+    autoMode: { environment: COLLY_AUTO_MODE_ENVIRONMENT },
+    // No gh login of the Human's, and the git fence of a MacBook Lead with no agents' token: a push from Colly's pane never uses his
+    // credential helper or SSH key (#365 B8, H9 rule 3).
+    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '', ...noPushGitEnv() },
     permissions: {
-      allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)'],
+      defaultMode: 'auto',
+      // Colly sees the accounts table on every node, which prints no token (#365, his requirement of 2026-11-06).
+      allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)'],
+      // The token store holds the teams' Claude tokens and the agents' GitHub token: Colly never reads one (INN-31 3A), nor adds,
+      // removes or stores one. Not tokenStoreDeny as a whole, which denies factory use, a command INN-30 allows Colly.
       deny: [
+        'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`,
         'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
-        'Bash(*factory account*)', 'Bash(*factory store*)',
-        'Bash(*lib/factory.mjs account*)', 'Bash(*lib/factory.mjs store*)',
+        'Bash(*factory account add*)', 'Bash(*factory account remove*)', 'Bash(*factory store*)',
+        'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs account remove*)', 'Bash(*lib/factory.mjs store*)',
       ],
     },
   };
-  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', 'colly', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env });
+  // /login is the only sign-in: no token or key from the caller's shell, and no other profile's plugin cache.
+  const childEnv = { ...env, CLAUDE_CONFIG_DIR: config };
+  for (const key of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
+  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', 'colly', '--permission-mode', 'auto', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env: childEnv });
   if (r.error) {
     console.error(`bin/factory: colly: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
@@ -1397,9 +1465,12 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
     return 0;
   }
   const rows = readPlace(place, ctx);
+  // The MacBook's own lettered accounts, with the quota its teams' Leads reported, before the other places' rows join (#365 B5).
+  const lettered = nodeAccountList(ctx.agentProfiles);
+  const accounts = lettered.length ? accountsText(rows.filter((r) => r.place === 'macbook'), lettered, { ...ctx, title: 'ACCOUNTS ON macbook' }) : null;
   if (all) rows.push(...readFactory(ctx), ...readPiggery(ctx));
   finish(rows, expectedAccounts(env, ctx.state));
-  console.log(argv.includes('--json') ? JSON.stringify(rows) : tableText(rows));
+  console.log(argv.includes('--json') ? JSON.stringify(rows) : tableText(rows, { accounts }));
   return 0;
 }
 

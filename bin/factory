@@ -78,7 +78,9 @@
 # account list shows the added date and its one-year expiry per node (Anthropic authentication page, captured 2026-11-06, line 295).
 # It warns within seven days of expiry and when expired; tokens without an added date show "expiry unknown".
 # Dates are UTC; a February 29 anniversary becomes February 28. Replacing a token updates its added date; remove archives both.
-# Only the Human runs account and store; Colly may run use and lead (INN-30). Seats and Leads deny add, remove, store and use.
+# Only the Human runs account add, account remove and store; Colly may run use and lead (INN-30) and account list, which prints no token
+# (#365). Seats and Leads deny add, remove, store and use. On the MacBook account list also shows its own teams, each account's letter
+# (a spare's too) and the quota each MacBook Lead's status line last showed (#365 B5).
 # The old login/logout verbs refuse in one line naming account add/remove; the old table invocation names account list.
 # `factory lead`: the team is a letter then at most 31 lowercase letters and digits, chosen from the existing teams or the nickname list, and is the team of its
 # claims and pull requests; on the Mac mini it runs packs/pstack/bin/lead, on the MacBook it runs that by ssh (the start is
