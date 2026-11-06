@@ -1,0 +1,10 @@
+{"type":"assistant","message":{"content":[{"type":"text","text":"I am trying the same fix again; the same assertion failed again."}]}}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"I was wrong about the migration; I edited the wrong table."}]}}
+{"type":"error","message":"You have hit your usage limit."}
+{"type":"turn.failed","error":{"message":"The service is at capacity."}}
+{"type":"error","message":"Login refused; authentication failed."}
+{"type":"item.completed","item":{"type":"agent_message","text":"I am idle. No seats are running. The next task is unblocked and I have not started it."}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"The build passed. I am starting the next task."}]}}
+{"type":"item.completed","item":{"type":"agent_message","text":"All work is complete; no tasks remain."}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Waiting for the running review seat before continuing."}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"The fixture contains the phrase usage limit; this is a test example, not a live failure."}]}}

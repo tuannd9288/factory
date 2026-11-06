@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The stream reader's pass (#339); the queue's sweep starts it every 15 minutes (bin/lib/queue.mjs, startReader), and it needs no one to run it:
+# The Watcher (#476), extending the stream reader (#339); the queue's sweep starts it every 15 minutes (bin/lib/queue.mjs, startReader), and it needs no one to run it:
 #   bin/factory-reader                                 one pass: what the Leads and the seats wrote since the last pass goes to the model
 #                                                      the setting picks (bin/lib/reader.json), and what it finds becomes lines in the
 #                                                      events file (bin/factory-events prints them)

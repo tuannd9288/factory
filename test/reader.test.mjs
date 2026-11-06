@@ -173,7 +173,7 @@ test('the redaction is one function: events.mjs uses it and keeps every pattern 
 
 // ---- the setting ----------------------------------------------------------------------------------------------------------
 
-test('the setting file is the default: pi, antigravity/gemini-3.8-flash, high; codex is there as well', async () => {
+test('the setting file defaults to the existing pi Flash path', async () => {
   const { loadSetting, SETTING_FILE } = await reader();
   assert.equal(SETTING_FILE, join(factory, 'bin/lib/reader.json'));
   assert.deepEqual(JSON.parse(readFileSync(SETTING_FILE, 'utf8')), DEFAULT);
@@ -395,7 +395,7 @@ test('the headers name a seat stream by its run folder and tag, and a Lead copy 
     const input = w.calls()[0].input;
     assert.match(input, /^.*issue-333 fix9.*\n.*seat words/m);
     assert.match(input, /^.*app-lead 0a1b2c3d.*\n.*lead words/m);
-    assert.ok(!input.includes(LEAD_ID));
+    assert.ok(input.includes(`transcripts/${LEAD_ID}.jsonl`));
   });
 });
 
@@ -603,14 +603,15 @@ test('a stream that shrank starts again from 0', async () => {
   });
 });
 
-test('a stream with nothing of the assistant\'s in what it grew by sends nothing, and its cursor moves', async () => {
+test('pi receives new tool results and advances its cursor', async () => {
   await withDir(async (dir) => {
     const w = world(dir);
     w.put(w.seatFile(), '');
     await w.pass({ now: T0 });
     appendFileSync(w.seatFile(), user('only a tool result'));
     await w.pass({ now: T0 + 15 * MIN });
-    assert.deepEqual(w.calls(), []);
+    assert.equal(w.calls().length, 1);
+    assert.match(w.calls()[0].input, /only a tool result/);
     assert.equal(w.cursors()['issue-333/run-fix9.jsonl'], statSync(w.seatFile()).size);
   });
 });
@@ -857,7 +858,7 @@ test('factory-reader --try reduces one file, sends it once to the side named, pr
       assert.equal(calls.length, 1);
       assert.equal(calls[0].name, side);
       assert.ok(calls[0].input.includes('going in circles'));
-      assert.ok(!calls[0].input.includes('TOOL-OUTPUT-MARKER'));
+      assert.equal(calls[0].input.includes('TOOL-OUTPUT-MARKER'), side === 'pi');
       assert.match(r.stdout, /going in circles on the same flaky test/);
       assert.match(r.stdout, /a quote that was never in the input/);
       assert.match(r.stdout, /dropped/i);
