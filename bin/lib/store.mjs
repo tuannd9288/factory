@@ -44,6 +44,7 @@ export const MIGRATIONS = [
      time INTEGER NOT NULL
    );`,
   `ALTER TABLE linear_events ADD COLUMN wake_delay_ms INTEGER;`,
+  `ALTER TABLE linear_events ADD COLUMN description TEXT;`,
 ];
 
 const KEEP_BACKUPS = 3;
@@ -138,12 +139,12 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
     settle: (id, { wokeAt = null, why = null, seq = null }) => void settle.run(wokeAt, why, seq, id),
     posts: () => allPosts.all().map((r) => ({ ...r })),
     /** Linear's own ids deduplicate stream and catch-up; the cursor commits with the row. */
-    linearEvent: ({ kind, id, issueIdentifier, teamKey, actorId = null, time }) => {
+    linearEvent: ({ kind, id, issueIdentifier, teamKey, actorId = null, time, description = null }) => {
       const key = kind === 'commentCreated' ? id : `${id}:${time}`;
       db.exec('BEGIN IMMEDIATE');
       try {
-        const added = q('INSERT OR IGNORE INTO linear_events (event_key, kind, id, issue_identifier, team_key, actor_id, time) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .run(key, kind, id, issueIdentifier, teamKey, actorId, time).changes > 0;
+        const added = q('INSERT OR IGNORE INTO linear_events (event_key, kind, id, issue_identifier, team_key, actor_id, time, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(key, kind, id, issueIdentifier, teamKey, actorId, time, description).changes > 0;
         if (added) setOffset.run(`linear:${teamKey}`, Math.max(time, Number(getOffset.get(`linear:${teamKey}`)?.value ?? 0)), now());
         db.exec('COMMIT');
         return added;
@@ -152,6 +153,9 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
         throw error;
       }
     },
+    /** Last description observed, and deduplication before the INN history queries. */
+    linearPrevious: (id) => q('SELECT * FROM linear_events WHERE kind = ? AND id = ? ORDER BY time DESC LIMIT 1').get('issueUpdated', id),
+    linearSeen: ({ kind, id, time }) => Boolean(q('SELECT 1 FROM linear_events WHERE event_key = ?').get(kind === 'commentCreated' ? id : `${id}:${time}`)),
     /** Delay from comment creation to a successful async wake, in milliseconds. */
     linearWake: (id, delay) => void q('UPDATE linear_events SET wake_delay_ms = ? WHERE event_key = ?').run(delay, id),
     linearEvents: () => q('SELECT * FROM linear_events ORDER BY time, event_key').all().map((r) => ({ ...r })),
