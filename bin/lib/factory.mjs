@@ -465,8 +465,8 @@ const GIT_CONFIG = [
 // "$defaults" keeps the built-in entries, which a list without it replaces.
 const AUTO_MODE_ENVIRONMENT = [
   '$defaults',
-  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, use, wake, account list), its workers with /Users/factory/WORKSPACES/bin/seat, and reads of that account's git settings.`,
-  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). On this MacBook, factory gh runs gh on ${HOST} under the agents' GitHub login, and factory linear, factory use and factory wake run there too, each over ssh factory@${HOST}.`,
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list), its workers with /Users/factory/WORKSPACES/bin/seat, and reads of that account's git settings.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). On this MacBook, factory gh runs gh on ${HOST} under the agents' GitHub login, and factory linear and factory wake run there too, each over ssh factory@${HOST}. factory use and factory account add are the Human's, never this Lead's.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh, and pushes go from ${HOST}.`,
 ];
 
