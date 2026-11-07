@@ -2,7 +2,7 @@
 // The socket is $FACTORY_STATE/daemon.sock. One JSON line asks and one answers, matched by `id` (piggery v0.10.3, internal/proto/proto.go:136-157):
 //   ask:    { id, verb, ...fields }              fields are flat, as the brief of #399 gives them: { verb: 'seat-ended', run, tag, session }
 //   answer: { id, ok: true, result } or { id, ok: false, error: { code, message } }
-// The verbs of slice 1 are `ping` (the daemon's pid, start and head) and `seat-ended`. An unknown verb gets an error answer, never a crash.
+// The verbs are `ping` (the daemon's pid, start and head), `seat-ended` and `linear-check` (FAC-38). An unknown verb gets an error answer, never a crash.
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 

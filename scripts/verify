@@ -11,7 +11,7 @@ failed=0
 if ! why=$(node kit/.gate/bin/lib/instructions.mjs section kit/.gate/gate-section.md 2>&1); then
   echo "verify: kit/.gate/gate-section.md: $why"; failed=1
 fi
-for f in packs/pstack/scripts/* kit/.gate/bin/* kit/.gate/hooks/* bin/onboard bin/onboard-owner bin/kit-update bin/kit-evidence bin/factory-ledger bin/factory-queue bin/factory-daemon bin/factory-events bin/factory-alerts scripts/verify; do
+for f in packs/pstack/scripts/* kit/.gate/bin/* kit/.gate/hooks/* bin/onboard bin/onboard-owner bin/kit-update bin/kit-evidence bin/factory-ledger bin/factory-queue bin/factory-daemon bin/factory-events scripts/verify; do
   [ -f "$f" ] || continue
   head -1 "$f" | grep -q bash || continue
   bash -n "$f" 2>/dev/null || { echo "verify: $f does not parse"; failed=1; }

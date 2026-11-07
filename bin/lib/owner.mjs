@@ -205,9 +205,12 @@ export function policyCalls(slug, have, want) {
   return holds(asSets(body), asSets(have.actionsPolicy)) ? [] : [{ what, method: 'PUT', path: `${path}/${have.actionsPolicy.id}`, body, version: POLICY_VERSION }];
 }
 
-/** The repository's own Actions event policy of that name, or null: none, or no policies list at all (a 404). */
+/** The repository's own Actions event policy of that name, read in full, or null: none, or no policies list at all (a 404). The list
+ * finds it by name, but its entries carry no conditions and no rules (as GitHub answered on tuannd9288/factory, 2026-11-07), so the
+ * policy itself is then read by its id; compared on a list entry, it never held, and every run put it back and read "incomplete". */
 export function policyNow(slug, read = gh) {
-  return maybe(`repos/${slug}/actions/policies?has_parents=false&per_page=100`, read, POLICY_VERSION)?.policies?.find((p) => p.name === POLICY_NAME) ?? null;
+  const found = maybe(`repos/${slug}/actions/policies?has_parents=false&per_page=100`, read, POLICY_VERSION)?.policies?.find((p) => p.name === POLICY_NAME);
+  return found ? maybe(`repos/${slug}/actions/policies/${found.id}`, read, POLICY_VERSION) : null;
 }
 
 export function gh(args, input) {
