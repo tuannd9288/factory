@@ -24,8 +24,14 @@ checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.ga
 
 The `drafts` switch in `.gate/driver.json` on `origin/main` defaults to `landable`, including when
 the file is absent, for every repository, the factory included. Choose `"drafts": "pstack"` to open
-ready (pstack `opening-a-pr.md:30`). With `landable`, the queue marks a draft
-ready and arms auto-merge once `verify` passed and it has no conflict, and turns it back to a draft when either fails (#455).
+ready (pstack `opening-a-pr.md:30`). With `landable`, `scripts/ship` marks its draft ready and arms
+auto-merge once `verify` passed on its head and it has no conflict, and the queue turns a ready one back to a draft when either fails
+(#455); the queue never readies a draft (FAC-55). A stack's child moved onto `main` is readied only once its parent landed and its head
+holds that landing, which the queue's merge of `main` into it brings (INN-38 A, 2026-11-07 07:33:46 +07).
+
+A repository that copied `scripts/ship` before FAC-55 copies it again, step 1, in a pack refresh pull request: the queue readies no
+draft now, and an older copy cannot ready one. A kit older than the one whose `.gate/bin/lib/subject.mjs` exports `titleProblem`, which
+`ship` imports, is brought up first with `bin/kit-update`.
 
 ## The live verifier's login
 
@@ -80,5 +86,5 @@ model mapped them itself (#193's seat run). The factory does not use these parts
   own `CLAUDE_CONFIG_DIR`, in `~/.agent-profiles/`, which `bin/seat` and `packs/pstack/bin/lead` deny (#185); they read
   the copies instead: a seat's `run-<tag>.jsonl` and a Lead's `~/factory-runs/<repo>-<team>/transcripts/`.
 - `cursor-team-kit`'s `deslop`, `control-ui` and `control-cli`: they ship in another Cursor plugin, not in pstack.
-- The Feature Map's place inside the skill, its generated `SKILL.md`, its proof run and `maintain-verification-skill`:
-  `yields.md`, "The Feature Map".
+- The Feature Map's place inside the skill, its generated `SKILL.md`, its proof run and `maintain-verification-skill`'s
+  live pass: `yields.md`, "The Feature Map".

@@ -97,8 +97,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    `FAIL` rounds, ask the Human.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier, which you need before you write the body. Push from the
    worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>`. It takes one
-   step a run: run it again at once, run after run, until it says `armed` or stops, and only then end the turn,
-   naming what it waits on. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386, #411) and
+   step a run: run it again at once, run after run, until it says `armed`, stops, or that the draft stays one, and only
+   then end the turn, naming what it waits on. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386, #411) and
    its three lines, Anh quyết, Đề xuất and Rủi ro, in Vietnamese plain words with the terms in English (PR, main,
    revert, Approve), then `**TL;DR**` with the same three in English (You decide, Recommendation, Risk). Each line is
    one sentence, with no commit ids and no file paths; the Vietnamese block is the repository's only Vietnamese. Any
@@ -113,7 +113,19 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a
    check is red, read `.claude/skills/gate-red/SKILL.md` first.
-9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes the worktree.
+9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes that issue's worktree.
+   Where the repository has a Feature Map and `~/factory-runs/<repo>-map-pass/date` does not hold today's date (one file
+   for the repository, whichever team), write today's date there, run `git fetch origin`; if
+   `~/factory-runs/<repo>-map-pass/w` is still there, run `git worktree remove --force` on it first; then run
+   `git worktree add --detach ~/factory-runs/<repo>-map-pass/w origin/main`, and start one reviewer seat on it as step 6
+   does, with `--run ~/factory-runs/<repo>-map-pass` and `--tag mappass-<YYYY-MM-DD>`. Its brief's first line is
+   `/pstack:maintain-verification-skill` (where a seat's log shows that line did not start the skill, the brief tells it
+   to read `skills/maintain-verification-skill/SKILL.md` from its plugin root and follow it instead); it names
+   `feature-map/` as step 0's target and no edit scope, orders steps 0 to 3 from the source with step 1's index fixes
+   reported as drift, step 4 not run (no session can run the app until #264) and step 5's sorting of each finding, and
+   asks for the outcome, `blocked`, with each finding, its kind, its feature file and its source path. On its
+   `seat-ended` wake, run `git worktree remove ~/factory-runs/<repo>-map-pass/w` (nothing removes it otherwise), then
+   file the doc drift as one issue of this repository and each product gap as its own, as step 4 files a finding.
 
 ## What you ask the Human
 Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login, a
@@ -137,7 +149,10 @@ never answers a permission prompt, and you never treat it as one. It has one of 
   - `seat-no-result`: the seat ended without its result, or its process is gone after a restart: read its log in the run
     folder, then resume it in a fix round or report.
   - `checks-red`: read step 8's `gate-red` skill first.
-  - `checks-green`: nothing to run. An armed pull request merges by itself and a `merged` wake follows.
+  - `checks-green`: on a draft, it only says the draft is green. Run `scripts/ship` in its worktree, which readies and arms it (FAC-55),
+    only once its review has passed: step 6's reviewer `PASS`, or, where a supervisor accepts your pull requests, that acceptance. A pull
+    request held for a fix or a review stays a draft. Otherwise nothing to run: an armed pull request merges by itself and a `merged`
+    wake follows.
   - `conflict`: `forcePush` on origin/main defaults to `pstack`: the owner may rebase its own PR branch with `--force-with-lease`, never main or from a babysit; `off` means merge main, then run step 5's checks.
   - `check-not-started`: a check `main` requires is missing from the head of a pull request waiting on auto-merge, or
     has not started, for 30 minutes from the first sweep that saw it, and Colly is told too: read the pull request's

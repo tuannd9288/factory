@@ -29,8 +29,8 @@
 // socket, no gh call; the start of a check-not-started condition wakes that pull request's Lead too. The merged ones are the 10 most
 // recently updated of the merged pull requests, the query having no order by merge time.
 // The news wake also reads every repository that has a team row (teamRows, bin/lib/teams.mjs) and is not taken in, the factory's own
-// among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and the factory's draft readiness (#455) and approval re-run (#456): no branch
-// update, no tier re-run, no comment wake (no claim is held there), no #309 condition, no switch watch beyond watchOwn's. Not with --repo.
+// among them (leadOnly, sweepNews): the rules' required checks and the same one query, then the news wake and the factory's draft readiness (#455, FAC-13) and approval re-run (#456): no branch
+// update but a moved draft's (FAC-13), no tier re-run, no comment wake (no claim is held there), no #309 condition, no switch watch beyond watchOwn's. Not with --repo.
 // The rules it read for the factory's own repository are handed to watchOwn, so they are read once in a sweep.
 // A pull request of the factory's own repository finds its Lead by its `Team:` line (`Team: lead` is `factory-lead`).
 // After that, still under the lock, it checks Lead silence on every sweep, then starts the stream reader's pass (#339, bin/lib/reader.mjs) detached, when 15 minutes have passed since
@@ -92,7 +92,7 @@ export const QUERY = `query($owner:String!,$name:String!,$since:DateTime){reposi
 number isDraft body mergeable createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
 timelineItems(last:1,itemTypes:[BASE_REF_CHANGED_EVENT,AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT]){nodes{... on BaseRefChangedEvent{previousRefName currentRefName createdAt} ... on AutomaticBaseChangeSucceededEvent{previousRefName:oldBase currentRefName:newBase createdAt}}}
 reviews(last:50,states:APPROVED){nodes{author{login} commit{oid} submittedAt}}
-commits(last:1){nodes{commit{committedDate statusCheckRollup{contexts(first:100){nodes{... on CheckRun{id databaseId name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
+commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on CheckRun{id databaseId name status conclusion startedAt completedAt detailsUrl checkSuite{app{slug}}}}}}}}}}}}}`;
 
 /** The merge switch records of finished check runs, by node id: one batched query, a few points, for the runs whose record the
  * state does not hold yet. The annotations are not asked in QUERY: they would be counted for every context of every pull
@@ -140,7 +140,6 @@ function openPulls(repo, since) {
       autoMerge: Boolean(p.autoMergeRequest),
       author: p.author?.login,
       head: p.headRefOid,
-      committedAt: p.commits.nodes[0]?.commit.committedDate,
       baseChange: p.timelineItems?.nodes?.[0],
       labels: p.labels.nodes.map((l) => l.name),
       approvals: p.reviews.nodes.map((r) => ({ login: r.author?.login, oid: r.commit?.oid, at: r.submittedAt })),
@@ -356,46 +355,36 @@ function sweep(repo, reads, state, switches, { self, folder, runs, clone }) {
   console.log(`queue: updated ${repo}#${pr.number} to its base`);
 }
 
-/** Whether a pull request is a stack's child moved onto main (by GitHub when its parent's branch was deleted on merge, or by ship)
- * whose head predates the move, so main's merge of the parent is not in it yet. GitHub's edited event on a move already re-runs verify
- * against main; bringing the child up to main closes what that run leaves open: a sweep that reads before the run appears, which would
- * take the check that ran against the parent's branch, and a head behind main under an up-to-date rule. */
-export const toRestack = (pr) =>
-  pr.base === BASE && pr.baseChange?.currentRefName === BASE && pr.baseChange.previousRefName !== BASE &&
-  !(Date.parse(pr.committedAt) >= Date.parse(pr.baseChange.createdAt));
+/** Whether a pull request is a draft moved onto main from another branch, a stack's child (by GitHub when its parent's branch was deleted on
+ * merge, or by ship): one that may lack main's merge of its parent. */
+export const movedDraft = (pr) => pr.isDraft && pr.base === BASE && pr.baseChange?.currentRefName === BASE && pr.baseChange.previousRefName !== BASE;
 
 function draftReadiness(repo, prs, clone) {
   // Like ship, only origin/main's policy counts, never the candidate's driver file.
   let policy = {};
   if (clone && spawnSync('git', ['-C', clone, 'cat-file', '-e', 'origin/main:.gate/driver.json'], { stdio: 'ignore' }).status === 0)
     policy = JSON.parse(execFileSync('git', ['-C', clone, 'show', 'origin/main:.gate/driver.json'], { encoding: 'utf8' }));
-  let merge = policy.merge == null ? null : policy.merge === 'merge' ? 'merge' : 'squash';
-  // A child moved onto main is first brought up to main by a merge (FAC-13; the factory restacks by merging, never a force-push), and is
-  // readied and armed only on that head. One that conflicts waits for its Lead, whose push ends it.
-  const restacking = new Set(prs.filter(toRestack).map((pr) => pr.number));
-  for (const pr of prs.filter((p) => restacking.has(p.number) && p.mergeable === 'MERGEABLE')) {
+  // FAC-13: a moved draft whose head lacks main's tip is brought up to main by a merge, never a rewrite, so its verify runs on main's
+  // merge of its parent before its Lead's ship readies it (INN-38 A). By ancestry, GitHub's compare of main with its head: one whose Lead
+  // merged main in has nothing to merge. One that conflicts waits for its Lead. GitHub's edited event already re-runs verify against main
+  // on a move; this closes the sweep that reads before that run starts, and a head behind main under an up-to-date rule. With stacks off on
+  // main there are no stacks to restack.
+  for (const pr of prs.filter((p) => policy.stacks !== 'off' && movedDraft(p) && p.mergeable === 'MERGEABLE')) {
     try {
+      if (JSON.parse(gh(['api', `repos/${repo}/compare/${BASE}...${pr.head}`])).behind_by === 0) continue;
       gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
       console.log(`queue: brought ${repo}#${pr.number}, moved onto ${BASE} from ${pr.baseChange.previousRefName}, up to ${BASE}`);
     } catch (error) {
       console.log(`queue: could not bring ${repo}#${pr.number} up to ${BASE}: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
     }
   }
+  // FAC-55: a draft is its owner's hold, and readying it is the owner's step (scripts/ship), as in every reference system; the queue never
+  // readies one. It only turns a ready pull request whose verify is not green, or that conflicts, back into a draft.
   if ((policy.drafts ?? 'landable') === 'landable') {
     for (const pr of prs) {
-      // Only a pull request on main, the base the rulesets guard: a stacked child armed here merges into its parent with no review
-      // (#455, 2026-11-06 17:06 +07). As in pstack's ship, a child waits unarmed until its parent lands and it is retargeted to main;
-      // until then the queue neither readies, arms, drafts nor disarms it.
-      if (pr.base !== BASE || restacking.has(pr.number)) continue;
-      const conflict = pr.mergeable === 'CONFLICTING';
-      if (pr.isDraft && pr.checks.verify?.state === 'SUCCESS' && !conflict) {
-        if (merge === null) {
-          const allowed = JSON.parse(gh(['repo', 'view', repo, '--json', 'squashMergeAllowed,mergeCommitAllowed']));
-          merge = !allowed.squashMergeAllowed && allowed.mergeCommitAllowed ? 'merge' : 'squash';
-        }
-        gh(['pr', 'ready', String(pr.number), '--repo', repo]);
-        gh(['pr', 'merge', String(pr.number), '--repo', repo, '--auto', `--${merge}`, '--match-head-commit', pr.head]);
-      } else if (!pr.isDraft && (pr.checks.verify?.state !== 'SUCCESS' || conflict)) {
+      // Only a pull request on main, the base the rulesets guard (#455): a stacked child is left as it is until it is moved to main.
+      if (pr.base !== BASE || pr.isDraft) continue;
+      if (pr.checks.verify?.state !== 'SUCCESS' || pr.mergeable === 'CONFLICTING') {
         gh(['pr', 'ready', String(pr.number), '--repo', repo, '--undo']);
         pr.isDraft = true;
       }
@@ -423,7 +412,7 @@ export function leadOnly({ state, root, taken, swept = [], origin = ownRepo }) {
 }
 
 /** The sweep of a repository that is not taken in, for the news wake alone (#370): the rules' required checks and the same one query, then
- * wakeOnNews, and the factory's draft readiness (#455) and approval re-run (#456). No branch update, tier re-run, comment wake, condition for the events or switch watch. Returns the claim
+ * wakeOnNews, and the factory's draft readiness (#455, FAC-13) and approval re-run (#456). No branch update but a moved draft's, no tier re-run, comment wake, condition for the events or switch watch. Returns the claim
  * holders it read, for a seat's run that names no team. The rules it read are put in `rulesRead` (repo -> pages), for watchOwn, so the
  * factory's own rules are read once in a sweep. */
 function sweepNews(repo, folder, state, runs, rulesRead, root) {
