@@ -19,6 +19,7 @@ const DENY = [
   'Bash(herdr:*)', 'Bash(/h/.local/bin/herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'WebFetch', 'WebSearch',
   'Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)',
   'Read(~/factory-runs/*/transcripts/**)',
+  'Bash(security:*)', 'Bash(/usr/bin/security:*)',
 ];
 // The researcher's own allow list, which it keeps while hideKey is true (#307).
 const RESEARCHER_ALLOW = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${join(factory, 'bin/research-git')}:*)`, 'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)'];

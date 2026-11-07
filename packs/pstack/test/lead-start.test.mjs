@@ -227,6 +227,15 @@ describe('lead role.sha (#316)', () => {
     assert.equal(prompt(), 'Take: GH issue for lead.\nend\n');
   }));
 
+  test('the role takes its seat form and names bin/seat by the absolute path the Lead\'s grant allows, and the runs folder its seats\' records carry (#366)', () => world((w) => {
+    setRole(w, 'Start <!--seat-->{{SEAT}} worker<!--/seat--><!--noseat-->no seat<!--/noseat-->; its record has {{RUNS}}/zalo-lead.\n');
+    assert.equal(w.lead(['--new']).code, 0);
+    const { argv } = w.log().at(-1);
+    const seat = join(w.tree, 'bin/seat');
+    assert.ok(argv.includes(`Bash(${seat}:*)`), 'the grant names this checkout\'s bin/seat');
+    assert.equal(argv[argv.indexOf('--append-system-prompt') + 1], `Start ${seat} worker; its record has ${join(w.home, 'factory-runs')}/zalo-lead.\n`);
+  }));
+
   test('a registry file that does not parse stops the start, names the file, and starts no claude (#404)', () => world((w) => {
     const registry = join(w.home, '.local/state/factory/linear/repos.json');
     mkdirSync(dirname(registry), { recursive: true });
