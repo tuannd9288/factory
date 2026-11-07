@@ -150,7 +150,7 @@ test('seat 1, on a resume: the token is in the session\'s environment and in no 
   assert.ok(!saw.argv.some((a) => a.includes(TOKEN)));
   const i = saw.argv.indexOf('--disallowedTools');
   const denied = saw.argv.slice(i + 1, saw.argv.indexOf('--output-format'));
-  assert.deepEqual(denied.slice(-3), [`Read(/${w.profiles}/tokens/**)`, `Read(/${w.profiles}/archive/**)`, `Read(/${w.profiles}/seats/1/oauth-token)`]);
+  for (const rule of [`Read(/${w.profiles}/tokens/**)`, `Read(/${w.profiles}/archive/**)`, `Read(/${w.profiles}/seats/1/oauth-token)`]) assert.ok(denied.includes(rule), rule);
   for (const [file, text] of [...filesUnder(w.run), ...filesUnder(w.state)]) assert.ok(!text.includes(TOKEN), `${file} holds the token`);
   assert.ok(!(r.out + r.err).includes(TOKEN));
 }));
