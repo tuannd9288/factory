@@ -24,8 +24,10 @@ checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.ga
 
 The `drafts` switch in `.gate/driver.json` on `origin/main` defaults to `landable`, including when
 the file is absent, for every repository, the factory included. Choose `"drafts": "pstack"` to open
-ready (pstack `opening-a-pr.md:30`). With `landable`, the queue marks a draft
-ready and arms auto-merge once `verify` passed and it has no conflict, and turns it back to a draft when either fails (#455).
+ready (pstack `opening-a-pr.md:30`). With `landable`, `scripts/ship` marks its draft ready and arms
+auto-merge once `verify` passed on its head and it has no conflict, and the queue turns a ready one back to a draft when either fails
+(#455); the queue never readies a draft (FAC-55). A stack's child moved onto `main` is readied only once its parent landed and its head
+holds that landing, which the queue's merge of `main` into it brings (INN-38 A, 2026-11-07 07:33:46 +07).
 
 ## The live verifier's login
 

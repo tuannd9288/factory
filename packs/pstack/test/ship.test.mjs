@@ -15,6 +15,14 @@ const a = process.argv.slice(2);
 fs.appendFileSync(sh + '/gh-calls', a.join(' ') + '\n');
 const read = () => (fs.existsSync(sh + '/pr.json') ? JSON.parse(fs.readFileSync(sh + '/pr.json', 'utf8')) : null);
 const out = (s) => { process.stdout.write(s); process.exit(0); };
+// The repository's merge methods are $SH/methods.json, both allowed by default.
+if (a[0] === 'repo' && a[1] === 'view') out(fs.existsSync(sh + '/methods.json') ? fs.readFileSync(sh + '/methods.json', 'utf8') : '{"squashMergeAllowed":true,"mergeCommitAllowed":true}');
+if (a[0] === 'pr' && a[1] === 'ready') { const pr = read(); pr.isDraft = a.includes('--undo'); fs.writeFileSync(sh + '/pr.json', JSON.stringify(pr)); out('ok\n'); }
+// The pull request's last base change and its head commit's date, from pr.json's baseChange and committedDate.
+if (a[0] === 'api' && a[1] === 'graphql') {
+  const pr = read();
+  out(JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { nodes: pr.baseChange ? [pr.baseChange] : [] }, commits: { nodes: [{ commit: { committedDate: pr.committedDate ?? '2026-11-07T00:00:00Z' } }] } } } } }));
+}
 if (a[0] === 'pr' && a[1] === 'list' && a.includes('merged'))
   out(fs.existsSync(sh + '/parent.json') ? fs.readFileSync(sh + '/parent.json', 'utf8') : '[]');
 if (a[0] === 'pr' && a[1] === 'edit') {
@@ -131,17 +139,64 @@ describe('opening the pull request', () => {
     });
   }
 
-  test('landable opens a draft using main policy and leaves auto-merge to the queue', () => {
+  test('landable opens a draft using main policy, keeps it one until verify passed on its head with no conflict, then readies and arms it (FAC-55)', () => {
     const w = world({ drafts: 'landable' });
     writeFileSync(join(w.repo, '.gate/driver.json'), JSON.stringify({ drafts: 'pstack' }));
     w.passed();
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.ok(w.calls().find((c) => c.startsWith('pr create')).includes('--draft'));
-    assert.ok(!w.calls().some((c) => c.includes('--auto')));
-    assert.equal(w.ship().code, 0);
-    assert.ok(!w.calls().some((c) => c.includes('--auto')));
+    const tier = { name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' };
+    const verify = (conclusion, startedAt) => ({ name: 'verify', status: 'COMPLETED', conclusion, startedAt });
+    for (const over of [
+      { statusCheckRollup: [tier] },
+      { statusCheckRollup: [tier, verify('SUCCESS', '2026-11-07T01:00:00Z'), verify('FAILURE', '2026-11-07T02:00:00Z')] },
+      { statusCheckRollup: [tier, verify('SUCCESS')], mergeable: 'CONFLICTING' },
+    ]) {
+      w.pr(over);
+      assert.equal(w.ship().code, 0);
+      assert.ok(!w.calls().some((c) => c.startsWith('pr ready') || c.includes('--auto')), JSON.stringify(over));
+    }
+    w.pr({ statusCheckRollup: [tier, verify('FAILURE', '2026-11-07T01:00:00Z'), verify('SUCCESS', '2026-11-07T02:00:00Z')], mergeable: 'MERGEABLE' });
+    const armed = w.ship();
+    assert.equal(armed.code, 0, armed.out);
+    const after = w.calls().slice(w.calls().indexOf('pr ready 7'));
+    assert.deepEqual(after.filter((c) => c.startsWith('pr ready') || c.startsWith('pr merge')), ['pr ready 7', `pr merge 7 --auto --squash --match-head-commit ${w.head()}`]);
   });
+
+  test('a draft moved onto main is readied only once its parent landed and its head holds that landing (INN-38 A, FAC-55)', () => {
+    const w = world({ drafts: 'landable' });
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    const green = { statusCheckRollup: [{ name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' }, { name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
+    w.pr({ ...green, baseChange: { previousRefName: 'parent', currentRefName: 'main', createdAt: '2026-11-07T01:00:00Z' } });
+    const held = (pattern) => {
+      const out = w.ship();
+      assert.equal(out.code, 0, out.out);
+      assert.match(out.out, pattern);
+      assert.ok(!w.calls().some((c) => c.startsWith('pr ready') || c.includes('--auto')));
+    };
+    // Moved by hand before its parent landed, as #490 was: its parent's change is not on main.
+    held(/its parent parent has not landed/);
+    // The parent landed; the child's head does not hold that landing yet: the queue's restack is pending, whatever its verify's time.
+    const other = join(w.dir, 'other');
+    git(w.dir, 'clone', '-q', join(w.dir, 'origin.git'), other);
+    const landing = commit(other, { 'parent.js': 'landed\n' }, 'Land parent (#6)');
+    git(other, 'push', '-q', 'origin', 'main');
+    writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: landing, mergeCommit: { oid: landing } }]));
+    held(/restack/);
+    // Restacked: its head holds the landing, as after the queue's merge of main, or its Lead's.
+    git(w.repo, 'fetch', '-q', 'origin');
+    git(w.repo, 'merge', '--no-ff', '--no-edit', 'origin/main');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: w.head() });
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.ok(w.calls().includes('pr ready 7'), w.calls().join('\n'));
+    assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`));
+  });
+
+
 
   test('is refused without a red-check stamp, and for one against another base', () => {
     const w = world();
@@ -162,7 +217,7 @@ describe('opening the pull request', () => {
     directories.push(dir);
     const repo = join(dir, 'factory');
     const sh = join(dir, 'sh');
-    for (const path of ['kit', 'packs/pstack/scripts', 'packs/pstack/.gate', 'scripts']) cpSync(join(factory, path), join(repo, path), { recursive: true });
+    for (const path of ['kit', 'packs/pstack/scripts', 'scripts']) cpSync(join(factory, path), join(repo, path), { recursive: true });
     mkdirSync(sh);
     mkdirSync(join(dir, 'bin'));
     writeFileSync(join(dir, 'bin/gh'), FAKE_GH);
@@ -180,12 +235,23 @@ describe('opening the pull request', () => {
     writeFileSync(join(dir, 'body.md'), body);
     writeFileSync(join(sh, 'head'), git(repo, 'rev-parse', 'HEAD'));
     writeFileSync(join(sh, 'base'), git(repo, 'rev-parse', 'origin/main'));
-    const out = run(repo, join(repo, 'scripts/ship'), ['--body-file', join(dir, 'body.md')], { ...quiet, SH: sh, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-a-token' });
+    const ship = () => run(repo, join(repo, 'scripts/ship'), ['--body-file', join(dir, 'body.md')], { ...quiet, SH: sh, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-a-token' });
+    const out = ship();
     assert.equal(out.code, 0, out.out);
-    const create = readFileSync(join(sh, 'gh-calls'), 'utf8').split('\n').find((c) => c.startsWith('pr create'));
+    const calls = () => readFileSync(join(sh, 'gh-calls'), 'utf8').split('\n').filter(Boolean);
+    const create = calls().find((c) => c.startsWith('pr create'));
     assert.match(create, /--base main --head fac-14-ship-here --title feat\(factory\): add x /);
     assert.ok(create.includes('--draft'));
     assert.equal(readFileSync(join(sh, 'created-body'), 'utf8'), body);
+    // Once verify passed, ship readies it and arms it with this repository's own method, merge commits: every pull request here waits
+    // for the Human, so it stops there.
+    writeFileSync(join(sh, 'methods.json'), JSON.stringify({ squashMergeAllowed: false, mergeCommitAllowed: true }));
+    const pr = JSON.parse(readFileSync(join(sh, 'pr.json'), 'utf8'));
+    writeFileSync(join(sh, 'pr.json'), JSON.stringify({ ...pr, statusCheckRollup: [{ name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS' }] }));
+    const armed = ship();
+    assert.equal(armed.code, 1, armed.out);
+    assert.match(armed.out, /waits for the Human's approval/);
+    assert.deepEqual(calls().filter((c) => c.startsWith('pr ready') || c.startsWith('pr merge')), ['pr ready 7', `pr merge 7 --auto --merge --match-head-commit ${pr.headRefOid}`]);
   });
 
   test('is refused when origin/main moved past the base red-check judged', () => {
@@ -288,7 +354,7 @@ describe('the steps after it opened', () => {
     let out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: armed #7 at HEAD [0-9a-f]{7}$/m);
-    assert.ok(w.calls().includes('pr merge 7 --auto --squash'), w.calls().join('\n'));
+    assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`), w.calls().join('\n'));
     out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: #7 is armed; nothing to do$/m);
@@ -353,7 +419,7 @@ describe('the steps after it opened', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: armed #7/m);
     assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
-    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
+    assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`));
     w.pr({ statusCheckRollup: [{ name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     out = w.ship();
     assert.equal(out.code, 0, out.out);
@@ -405,7 +471,7 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: armed #7/m);
     assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
-    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
+    assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`));
     out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
@@ -701,7 +767,7 @@ for (const merge of [undefined, 'squash', 'merge']) {
     w.pr({ statusCheckRollup: [{ name: 'tier', conclusion: 'SUCCESS' }] });
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
-    assert.ok(w.calls().includes(`pr merge 7 --auto --${merge ?? 'squash'}`));
+    assert.ok(w.calls().includes(`pr merge 7 --auto --${merge ?? 'squash'} --match-head-commit ${w.head()}`));
   });
 }
 

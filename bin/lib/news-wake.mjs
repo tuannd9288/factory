@@ -10,7 +10,8 @@
 //                   (`tier` is left out while the pull request carries tier-3 or needs-human, when it waits on the Human, and while
 //                   another required check has not concluded: under Entire it is red until Entire Gates concludes; and while the queue
 //                   re-runs it in this sweep, as pickReruns says: an approval, or Entire's conclusion, after it started)
-//   checks-green    every required check of the head succeeded                       pull request and head
+//   checks-green    every required check of the head succeeded; for a draft, verify  pull request and head
+//                   did, since its next step is its Lead's scripts/ship, which readies it (FAC-55), and tier waits on the Human
 //   conflict        `mergeable` is CONFLICTING (UNKNOWN, which GitHub says for a while after a push, is none)   pull request and head
 //   merged          the pull request merged                                          pull request
 // The six lines are the Lead's, not Colly's: bin/factory-events leaves them out (NEWS_KINDS) and `--news` prints only them.
@@ -103,8 +104,8 @@ export function detect({ repo, prs, merged = [], required, now = Date.now() }) {
     const red = required.filter((name) => !(name === 'tier' && tierWaits) && failedCheck(p, name));
     if (red.length)
       found.push({ ...base, kind: 'checks-red', key: `checks-red ${repo}#${p.number} ${p.head}`, what: `${at}: required check ${red.join(', ')} failed`, runs: Object.fromEntries(red.map((name) => [name, runOf(checkOf(p, name))])) });
-    if (required.length && required.every((name) => checkOf(p, name)?.state === 'SUCCESS'))
-      found.push({ ...base, kind: 'checks-green', key: `checks-green ${repo}#${p.number} ${p.head}`, what: `${at}: every required check succeeded` });
+    if (p.isDraft ? checkOf(p, 'verify')?.state === 'SUCCESS' : required.length && required.every((name) => checkOf(p, name)?.state === 'SUCCESS'))
+      found.push({ ...base, kind: 'checks-green', key: `checks-green ${repo}#${p.number} ${p.head}`, what: p.isDraft ? `${at}: verify succeeded on the draft; scripts/ship readies it` : `${at}: every required check succeeded` });
     if (p.mergeable === 'CONFLICTING') found.push({ ...base, kind: 'conflict', key: `conflict ${repo}#${p.number} ${p.head}`, what: `${at} conflicts with its base` });
   }
   // A merged pull request counts only within the keep window: the list is by update, so an old one that comes back on a comment is no news.

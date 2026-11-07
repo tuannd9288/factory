@@ -32,6 +32,9 @@ function world() {
       '  "run rerun --job "*) case " $(cat "$Q/fail" 2>/dev/null) " in *" $4 "*) echo "HTTP 403: Workflow run cannot be rerun" >&2; exit 1 ;; esac ;;',
       '  "repo view "*) echo \'{"squashMergeAllowed":true,"mergeCommitAllowed":true}\' ;;',
       '  "pr ready "*|"pr merge "*|"pr update-branch "*) ;;',
+      // How far each head is behind main: h4 already holds main's tip, every other head lacks it.
+      '  *"compare/main...h4"*) echo \'{"behind_by":0}\' ;;',
+      '  *compare/main...*) echo \'{"behind_by":1}\' ;;',
       '  *) exit 1 ;;',
       'esac',
       '',
@@ -511,7 +514,7 @@ test('at none the queue updates no pull request that lacks an approval of someon
   for (const position of ['1-2', 'all', undefined]) assert.equal(pickUpdate([behind(1)], [], position)?.number, 1, String(position));
 });
 
-for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweeps every PR: green drafts become ready and armed, ready PRs that are not green or conflict become drafts, and one on another base than main is left as it is (#455)`, () => {
+for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweeps every PR: a green draft stays a draft for its owner's ship (FAC-55), a ready PR that is not green or conflicts becomes a draft, and one on another base than main is left as it is (#455)`, () => {
   const w = world();
   try {
     w.policy(drafts);
@@ -541,48 +544,42 @@ for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweep
     const r = w.sweep();
     assert.equal(r.code, 0, r.out);
     assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
-      'pr ready 1 --repo o/app',
-      'pr merge 1 --repo o/app --auto --squash --match-head-commit h1',
       'pr ready 5 --repo o/app --undo',
       'pr ready 6 --repo o/app --undo',
       'pr ready 8 --repo o/app --undo',
-      'pr ready 10 --repo o/app',
-      'pr merge 10 --repo o/app --auto --squash --match-head-commit h10',
       'pr ready 11 --repo o/app --undo',
     ]);
+    assert.deepEqual(r.calls.filter((c) => c.startsWith('repo view')), []);
   } finally {
     w.cleanup();
   }
 });
 
-test('a child moved to main when its parent landed is first brought up to main, then readied and armed on that new head (FAC-13)', () => {
+test('a child moved to main when its parent landed is brought up to main by a merge, and no draft is readied by the queue (FAC-13, FAC-55)', () => {
   const w = world();
   try {
     w.policy('landable');
     w.rules('1-2');
-    const child = (number, { mergeable = 'MERGEABLE', committedDate = '2026-11-07T00:00:00Z' } = {}) => {
-      const p = pull(number, { draft: true, labels: [], auto: false });
+    const child = (number, { mergeable = 'MERGEABLE', draft = true } = {}) => {
+      const p = pull(number, { draft, labels: [], auto: false });
       p.mergeable = mergeable;
       p.timelineItems = { nodes: [{ previousRefName: 'parent', currentRefName: 'main', createdAt: '2026-11-07T01:00:00Z' }] };
-      const c = p.commits.nodes[0].commit;
-      c.committedDate = committedDate;
-      Object.assign(c.statusCheckRollup.contexts.nodes[0], { name: 'verify', conclusion: 'SUCCESS' });
+      Object.assign(p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0], { name: 'verify', conclusion: 'SUCCESS' });
       return p;
     };
-    // 1: its head predates the move, so its green verify ran against the parent's branch. 2: the same, but it conflicts with
-    // main, which its Lead resolves. 3: its head was made after the move (the queue's merge of main), so its verify is its own.
-    w.pulls([child(1), child(2, { mergeable: 'CONFLICTING' }), child(3, { committedDate: '2026-11-07T01:05:00Z' })]);
+    // 1: a moved draft whose head lacks main's tip. 2: the same, but it conflicts with main, which its Lead resolves. 3: one its Lead's
+    // ship readied already. 4: a moved draft whose head already holds main's tip (its Lead merged main in), so there is nothing to merge.
+    w.pulls([child(1), child(2, { mergeable: 'CONFLICTING' }), child(3, { draft: false }), child(4)]);
     const r = w.sweep();
     assert.equal(r.code, 0, r.out);
-    assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
-      'pr update-branch 1 --repo o/app',
-      'pr ready 3 --repo o/app',
-      'pr merge 3 --repo o/app --auto --squash --match-head-commit h3',
-    ]);
+    assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), ['pr update-branch 1 --repo o/app']);
+    assert.deepEqual(r.calls.filter((c) => c.includes('compare/')).map((c) => c.split('/').pop()), ['main...h1', 'main...h4']);
   } finally {
     w.cleanup();
   }
 });
+
+
 
 test('pstack does not change draft status or arm auto-merge', () => {
   const w = world();
@@ -601,27 +598,3 @@ test('pstack does not change draft status or arm auto-merge', () => {
   }
 });
 
-for (const merge of [undefined, 'squash', 'merge']) {
-  test(`landable arms with ${merge ?? 'default squash'} from origin/main after marking ready`, () => {
-    const w = world();
-    try {
-      w.policy('landable', merge);
-      w.rules('1-2');
-      const p = pull(1, { draft: true, labels: [], auto: false });
-      p.mergeable = 'MERGEABLE';
-      const check = p.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0];
-      check.name = 'verify';
-      check.conclusion = 'SUCCESS';
-      w.pulls([p]);
-      const r = w.sweep();
-      assert.equal(r.code, 0, r.out);
-      assert.equal(r.calls.filter((c) => c.startsWith('repo view')).length, merge === undefined ? 1 : 0);
-      assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
-        'pr ready 1 --repo o/app',
-        `pr merge 1 --repo o/app --auto --${merge ?? 'squash'} --match-head-commit h1`,
-      ]);
-    } finally {
-      w.cleanup();
-    }
-  });
-}

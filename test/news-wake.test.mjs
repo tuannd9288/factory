@@ -83,6 +83,13 @@ test('a required check that fails wakes at once, though another is still running
   assert.deepEqual(kinds({ verify: ok() }), []);
 });
 
+test("a draft wakes its Lead once verify passed on its head, though tier waits on the Human: only its Lead's ship readies it (FAC-55)", () => {
+  const kinds = (checks, isDraft = true) => detect({ repo: REPO, prs: [pr(1, { checks, isDraft, labels: ['tier-3'] })], required: REQUIRED }).map((e) => e.kind);
+  assert.deepEqual(kinds({ verify: ok(), tier: ok('FAILURE') }), ['checks-green']);
+  assert.deepEqual(kinds({ verify: ok('PENDING'), tier: ok('FAILURE') }), []);
+  assert.deepEqual(kinds({ verify: ok(), tier: ok('FAILURE') }, false), [], 'a ready one waits on the Human, not on its Lead');
+});
+
 test('a red `tier` is no failure while another required check has not concluded (Entire Gates pending), and is once all have', () => {
   const required = ['verify', 'tier', 'Entire Gates'];
   const found = (apps) => detect({ repo: REPO, prs: [pr(1, { checks: { verify: ok(), tier: ok('FAILURE') }, apps })], required }).map((e) => e.kind);

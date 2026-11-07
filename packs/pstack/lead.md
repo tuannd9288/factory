@@ -85,8 +85,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    `FAIL` rounds, ask the Human.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier, which you need before you write the body. Push from the
    worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>`. It takes one
-   step a run: run it again at once, run after run, until it says `armed` or stops, and only then end the turn,
-   naming what it waits on. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386, #411) and
+   step a run: run it again at once, run after run, until it says `armed`, stops, or that the draft stays one, and only
+   then end the turn, naming what it waits on. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386, #411) and
    its three lines, Anh quyết, Đề xuất and Rủi ro, in Vietnamese plain words with the terms in English (PR, main,
    revert, Approve), then `**TL;DR**` with the same three in English (You decide, Recommendation, Risk). Each line is
    one sentence, with no commit ids and no file paths; the Vietnamese block is the repository's only Vietnamese. Any
@@ -125,7 +125,8 @@ never answers a permission prompt, and you never treat it as one. It has one of 
   - `seat-no-result`: the seat ended without its result, or its process is gone after a restart: read its log in the run
     folder, then resume it in a fix round or report.
   - `checks-red`: read step 8's `gate-red` skill first.
-  - `checks-green`: nothing to run. An armed pull request merges by itself and a `merged` wake follows.
+  - `checks-green`: on a draft, run `scripts/ship` in its worktree: it readies and arms it (FAC-55). Otherwise nothing to run: an armed
+    pull request merges by itself and a `merged` wake follows.
   - `conflict`: `forcePush` on origin/main defaults to `pstack`: the owner may rebase its own PR branch with `--force-with-lease`, never main or from a babysit; `off` means merge main, then run step 5's checks.
   - `check-not-started`: a check `main` requires is missing from the head of a pull request waiting on auto-merge, or
     has not started, for 30 minutes from the first sweep that saw it, and Colly is told too: read the pull request's
