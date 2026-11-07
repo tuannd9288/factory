@@ -38,11 +38,15 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
   (`lead.md` steps 3 and 6; INN-23 A).
   Not taken: the generated `SKILL.md` and its proof run (§2 and §4, `:25-34` and `:40-42`), since a worker seat cannot
   start the app (no network and no local binding, `sandboxSettings` in `bin/lib/seat.mjs`) and there is no driver until
-  #264. `maintain-verification-skill` runs in its source half: the Lead starts a reviewer seat on the first `merged` wake
-  of a day (pstack: "at least once a day, ideally from a scheduled automation", `docs/guide/06-verify-and-ship.md:88`;
-  Claude Code has no Automations, `docs/harness/claude-code.md:58-60`); it takes `feature-map/` as step 0's target and
-  edit scope (`:23`, `:27`), runs steps 0 to 3, and reports `blocked` (`:19`), since step 4's live drive (`:35`) waits for
-  #264; a blocked pass opens no PR (`:39`), so the Lead files the confirmed drift as one issue. The Human chose the place
+  #264. `maintain-verification-skill` runs in its source half: on the first `merged` wake of a day, a Lead starts one
+  reviewer seat for the repository (pstack: "at least once a day, ideally from a scheduled automation",
+  `docs/guide/06-verify-and-ship.md:88`; Claude Code has no Automations, `docs/harness/claude-code.md:58-60`). It takes
+  `feature-map/` as step 0's target (`:27`) and edits nothing, so step 1's index fixes and the drift it finds are
+  reported, not made, in place of the edit scope (`:23`); it runs steps 0 to 3, sorts its findings as step 5 does
+  (`:37`), and reports `blocked` (`:19`), since step 4's live drive (`:35`) waits for #264. A blocked pass opens no PR
+  (`:39`), so the Lead files the doc drift as one issue and each product gap as its own. Its cost is one reviewer seat a
+  day per repository with a merge, and one read-only subagent per feature file within it (step 2, `:31`). Line numbers
+  are at the pin, `4dd1d05`, where the skill's adapter line (`:9`) comes first. The Human chose the place
   on 2026-11-07, INN-37 A, 07:32:48 +07, and wrote at 07:33:28 +07 (FAC-39): "keep A, and make sure
   /maintain-verification-skill is handled".
 
