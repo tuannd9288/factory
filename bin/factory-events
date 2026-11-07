@@ -3,12 +3,19 @@
 #   bin/factory-events [--after <seq>]            print the lines that begin a condition (`start`), after the cursor, and leave the cursor
 #   bin/factory-events --follow [--after <seq>]   print them, move the cursor after each line is written, and follow the file;
 #                                                 it never prints a `clear` line
+#   ... --file <share>                            read another user's share (FACTORY_EVENTS_SHARE, bin/lib/events.mjs) in place of
+#                                                 $FACTORY_STATE/events.jsonl, with a cursor of its own in this user's state; it refuses,
+#                                                 in one line, a share or folder that is a link, is owned by anyone but the agents' user
+#                                                 or this user, or that anyone else can write; it takes no claim and passes over an INN
+#                                                 answer, which the Mac mini's Monitor delivers
 # The sweep writes $FACTORY_STATE/events.jsonl (bin/lib/events.mjs has the conditions and the shape of a line); the cursor is
 # $FACTORY_STATE/events.cursor. Only --follow moves it, and only Colly's Monitor runs that, so a look never takes Colly's lines; to look,
 # use `factory colly --brief`. Started again after it stopped, --follow prints the start lines it missed and none it printed already.
 # `--after <seq>` (a whole number, 0 or more) starts after that seq in place of the cursor; it is how the reader says how far it got,
 # since a write to a link that has died, unnoticed by the Mac mini, is lost. A seq (or a cursor) above the file's highest starts from
-# its first line and says so on stderr. Colly runs it from the MacBook, and a dead link ends the ssh and the Monitor with it:
+# its first line and says so on stderr. Colly also follows the MacBook's own events, through the share the MacBook's daemon writes, in a
+# second Monitor of its own seq (packs/colly/colly.md has that command). Colly runs this one from the MacBook, and a dead link ends the ssh and
+# the Monitor with it:
 #   ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 factory@tuans-mac-mini /Users/factory/WORKSPACES/bin/factory-events --follow
 # When the Monitor ends, start it again with `--after <the last seq Colly saw>` added; in a new session, which knows no seq, leave
 # `--after` out.

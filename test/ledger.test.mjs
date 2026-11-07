@@ -304,6 +304,31 @@ test('the digest counts raised on task rows, the rows it is made of', () => {
   assert.match(digest([task, ledger.taskRow('o/s', issue({ number: 5 }), [])], { since: 'a', until: 'b' }), /by repository: o\/r 1, o\/s 0\n/);
 });
 
+test('the digest counts the pstack steps that waited for Codex in the week, by cause, from the waits factory codex logs (#182)', () => {
+  const state = mkdtempSync(join(tmpdir(), 'ledger-waits-'));
+  try {
+    const week = { since: '2026-11-02', until: '2026-11-08' };
+    const line = (at, cause) => JSON.stringify({ at, cause, role: 'cross-judge', repo: 'o/app', cwd: '/w' });
+    // As codex-step.mjs writes them: one JSON object a line, appended; the first and last days count whole.
+    writeFileSync(join(state, 'codex-waits.jsonl'), [
+      line('2026-11-01T23:59:59.000Z', 'no-quota'),
+      line('2026-11-02T00:00:00.000Z', 'not-logged-in'),
+      line('2026-11-05T09:00:00.000Z', 'no-quota'),
+      line('2026-11-06T09:00:00.000Z', 'not-logged-in'),
+      '{"at":"2026-11-06T10:00:00.000Z","cau',
+      line('2026-11-08T23:59:59.000Z', 'not-logged-in'),
+      line('2026-11-09T00:00:00.000Z', 'failed'),
+      '',
+    ].join('\n'));
+    const waits = ledger.codexWaits(state, week.since, week.until);
+    assert.match(digest([], { ...week, codexWaits: waits }), /^- pstack steps that waited for Codex: 4 \(not-logged-in 3, no-quota 1\)$/m);
+    rmSync(join(state, 'codex-waits.jsonl'));
+    assert.match(digest([], { ...week, codexWaits: ledger.codexWaits(state, week.since, week.until) }), /^- pstack steps that waited for Codex: none$/m);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
 // Reverted pull requests (#83): a body line `Reverts #N` or `Reverts o/r#N`, or the title `Revert "<title>"`.
 const revertPeriod = { since: '2026-10-14', until: '2026-10-21' };
 const mergedPR = (number, title, mergedAt, body = '') => pr({ number, title, body, mergedAt, state: 'MERGED' });

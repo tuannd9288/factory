@@ -617,7 +617,7 @@ describe('stacked pull requests', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge') || c.startsWith('pr edit')));
   });
 
-  test('retargets after the parent merges and merges main without rewriting the child', () => {
+  test('with merge commits, waits until the parent is in origin/main, then only moves the child to main', () => {
     const w = world({ merge: 'merge' });
     const parent = w.head();
     git(w.repo, 'branch', 'parent');
@@ -629,22 +629,21 @@ describe('stacked pull requests', () => {
     const child = w.head();
     git(w.repo, 'switch', '-q', 'parent');
     const tip = commit(w.repo, { 'parent.js': 'later\n' }, 'Parent advances');
+    git(w.repo, 'switch', '-q', 'work');
+    writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
+    const early = w.ship();
+    assert.equal(early.code, 0, early.out);
+    assert.match(early.out, /waits for its parent parent in origin\/main/);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr edit')));
     git(w.repo, 'switch', '-q', 'main');
     git(w.repo, 'merge', '--no-ff', '--no-edit', 'parent');
     git(w.repo, 'push', '-q', 'origin', 'main');
     git(w.repo, 'switch', '-q', 'work');
-    writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /push HEAD, then run ship again/);
     assert.ok(w.calls().includes('pr edit 7 --base main'));
-    assert.equal(git(w.repo, 'rev-parse', 'HEAD^1'), child);
-    assert.equal(git(w.repo, 'rev-parse', 'HEAD^2'), git(w.repo, 'rev-parse', 'origin/main'));
+    assert.equal(w.head(), child);
     assert.ok(!w.calls().some((c) => c.includes('--auto')));
-    git(w.repo, 'push', '-q', 'origin', 'work');
-    w.pr({ headRefOid: w.head(), baseRefOid: git(w.repo, 'rev-parse', 'origin/main') });
-    assert.equal(w.ship().code, 0);
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
   });
 
   test('off on origin/main refuses opening a child even when HEAD enables stacks', () => {
@@ -673,8 +672,8 @@ for (const merge of [undefined, 'squash', 'merge']) {
   });
 }
 
-test('squash restacks the child past the merged parent head and asks for a lease push', () => {
-  const w = world({ merge: 'squash' });
+test('after a squashed parent lands, ship only moves the child to main: no rebase, no push, the queue merges main into it', () => {
+  const w = world();
   const parent = w.head();
   git(w.repo, 'branch', 'parent');
   commit(w.repo, { 'child.js': 'child\n' }, 'feat(cli): add child');
@@ -692,15 +691,12 @@ test('squash restacks the child past the merged parent head and asks for a lease
   git(other, 'merge', '--squash', 'parent');
   commit(other, {}, 'Land parent (#6)');
   git(other, 'push', '-q', 'origin', 'main');
-  assert.notEqual(run(w.repo, 'git', ['cat-file', '-e', `${tip}^{commit}`], quiet).code, 0);
   writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
   const out = w.ship();
   assert.equal(out.code, 0, out.out);
-  assert.match(out.out, /push with --force-with-lease/);
+  assert.match(out.out, /the queue merges main into it/);
   assert.ok(w.calls().includes('pr edit 7 --base main'));
-  assert.equal(git(w.repo, 'rev-parse', 'HEAD^'), git(w.repo, 'rev-parse', 'origin/main'));
-  assert.equal(git(w.repo, 'diff', '--name-only', 'origin/main', 'HEAD'), 'child.js');
-  assert.equal(git(w.repo, 'show', 'HEAD:parent.js'), 'later');
+  assert.equal(w.head(), child);
   assert.equal(git(w.repo, 'ls-remote', 'origin', 'refs/heads/work').split(/\s/)[0], child);
   assert.ok(!w.calls().some((c) => c.includes('--auto')));
 });
