@@ -6,13 +6,11 @@
 // pull request left its file as it was); updated (the base held a past blob of kit/<path>, or a past rendering of it, and
 // the head holds the kit's now: only bin/kit-update's pull requests make one, and a file the kit dropped that the base held
 // as a past blob is removed the same way); generated (.gate/kit-files, the sorted inventory; .gate/kit-commit, the factory
-// commit; .gate/modules, the repository's choice of modules); merged (a .claude/settings.json the base had is the base's
+// commit); merged (a .claude/settings.json the base had is the base's
 // bytes with the kit's deny lines inserted as text, bin/lib/settings.mjs, and nothing else; with none at the base it is the
 // kit's file as it is); adapter (.gate/config.sh is the kit's text, or with the lines bin/lib/adapter.mjs writes for the
 // files the head holds); untouched (the repository's own scripts/ and .githooks/ files, which the kit does not ship, are in
-// the head as in the base). A module's files (bin/lib/module.mjs) are judged like the kit's but stricter: as in the module,
-// or updated from a past blob of it, never kept as the repository's own; when the module is off they must be gone, and are
-// removed only when the base held a past blob.
+// the head as in the base).
 //
 // AGENTS.md and CLAUDE.md are the repository's own and no kit file. AGENTS.md is the base's text with the kit's Gate block
 // put in (a title line and the block where the base had none; with --own, any text the repository prepared, shown in full),
@@ -26,7 +24,6 @@
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { MODULES_FILE, mergedTree, offFiles, parseModules } from './module.mjs';
 import { carrierProblems, insertGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { HOOK, NATIVE, adapterBlock } from './adapter.mjs';
 import { ATTRIBUTES, BLOCK_FILE, insertBlock, splitBlock } from './attributes.mjs';
@@ -61,18 +58,10 @@ export function tree(dir, rev, prefix = '') {
   return entries;
 }
 
-/** The modules a tree's .gate/modules names: { names }, with a failure line in `why` when the file is not what onboard writes. */
-function modulesIn(dir, files) {
-  const file = files.get(MODULES_FILE);
-  if (!file) return { names: [] };
-  if (file.mode !== '100644') return { names: [], why: `differs: ${MODULES_FILE} (mode ${file.mode})` };
-  const text = git(dir, ['cat-file', 'blob', file.oid]);
-  try {
-    if (text === '') throw new Error(`${MODULES_FILE}: empty; the file is absent when no module is on`);
-    return { names: parseModules(text) };
-  } catch (error) {
-    return { names: [], why: `differs: ${error.message}` };
-  }
+/** The kit's files at a factory commit: path → { mode, oid, src }, `src` being the path in the factory (kit/<path>), where the
+ * file's history lives. */
+export function kitFiles(factory, fac) {
+  return new Map([...tree(factory, fac, 'kit/')].map(([path, e]) => [path, { ...e, src: `kit/${path}` }]));
 }
 
 /** The blob at rev:path in the factory, or null; git's complaint about an absent path is not output. */
@@ -182,26 +171,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   const now = tree(repo, headSha);
   const blob = (dir, oid) => git(dir, ['cat-file', 'blob', oid]);
   const fails = [];
-  const chosenModules = modulesIn(repo, now);
-  if (chosenModules.why) fails.push(chosenModules.why);
-  let names = chosenModules.names;
-  let kit;
-  try {
-    kit = mergedTree(factory, fac, names);
-  } catch (error) {
-    fails.push(`${MODULES_FILE}: ${error.message}`);
-    names = [];
-    kit = mergedTree(factory, fac, []);
-  }
-  // The modules the base had on and the head does not: their files must be gone.
-  const baseNames = modulesIn(repo, at).names;
-  let off = new Map();
-  try {
-    off = offFiles(factory, fac, baseNames, names);
-  } catch (error) {
-    fails.push(error.message);
-  }
-  for (const [path, e] of off) if (now.has(path)) fails.push(`left: ${path} (module ${e.module} is off, so its files go)`);
+  const kit = kitFiles(factory, fac);
   const rendered = [];
   const filled = new Set();
   const kept = [];
@@ -215,16 +185,6 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   for (const [path, want] of [...kit].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const have = now.get(path);
     const had = at.get(path);
-    if (want.module) {
-      // Stricter than a kit file: the module's, or updated from a past blob of it; never the repository's own.
-      const asIs = (e) => e && e.mode === want.mode && e.oid === want.oid;
-      if (!have) fails.push(`missing: ${path}`);
-      else if (!asIs(have)) fails.push(`differs: ${path} (${have.mode !== want.mode ? `mode ${have.mode}, the module's ${want.mode}` : 'content'}, module ${want.module})`);
-      else if (had && !asIs(had) && !pastBlobs(factory, fac, want.src).has(had.oid)) fails.push(`differs: ${path} (the repository's own, at a path module ${want.module} lays)`);
-      else if (had && !asIs(had)) updated.push(was(path, had.oid, `module ${want.module}`));
-      else exact++;
-      continue;
-    }
     if (path === SETTINGS && had) {
       // The repository's own file: its bytes with the kit's deny lines inserted as text, and nothing else changed.
       let expected;
@@ -354,24 +314,22 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   const haveK = now.get(KIT_COMMIT);
   if (!haveK) fails.push(`missing: ${KIT_COMMIT}`);
   else if (haveK.mode !== '100644' || blob(repo, haveK.oid) !== `${fac}\n`) fails.push(`differs: ${KIT_COMMIT} (the factory commit ${fac} and a newline)`);
-  const list = [...new Set([...kit.keys(), INVENTORY, KIT_COMMIT, ...(names.length ? [MODULES_FILE] : [])])].sort((a, b) => (a < b ? -1 : 1));
+  const list = [...new Set([...kit.keys(), INVENTORY, KIT_COMMIT, ])].sort((a, b) => (a < b ? -1 : 1));
   const inventory = now.get(INVENTORY);
   if (!inventory) fails.push(`missing: ${INVENTORY}`);
   else if (inventory.mode !== '100644' || blob(repo, inventory.oid) !== `${list.join('\n')}\n`) fails.push(`differs: ${INVENTORY} (not the kit's inventory)`);
   const listed = new Set(at.get(INVENTORY) ? blob(repo, at.get(INVENTORY).oid).split('\n').filter(Boolean) : []);
   const changed = git(repo, ['diff', '--name-only', '-z', '--no-renames', baseSha, headSha]).split('\0').filter(Boolean);
   for (const path of changed) {
-    if (kit.has(path) || [INVENTORY, KIT_COMMIT, MODULES_FILE, ATTRIBUTES, ...INSTRUCTION_FILES].includes(path)) continue;
+    if (kit.has(path) || [INVENTORY, KIT_COMMIT, ATTRIBUTES, ...INSTRUCTION_FILES].includes(path)) continue;
     const had = at.get(path);
     // The pack file of the old kit: the kit lays none now, so an update removes it.
     if (path === '.gate/pack' && had && !now.has(path)) {
       removed.push(was(path, had.oid, 'no longer laid; no pack'));
       continue;
     }
-    // A file the kit dropped may go when the base lists it as the kit's and holds a blob the kit once had at that path;
-    // so may a module's, dropped by the module or with the module, from the places the base's modules laid it.
-    const places = [`kit/${path}`, ...baseNames.map((n) => `modules/${n}/kit/${path}`)];
-    if (had && listed.has(path) && !now.has(path) && places.some((p) => pastBlobs(factory, fac, p).has(had.oid))) removed.push(was(path, had.oid, off.has(path) ? `module ${off.get(path).module} is off` : 'no longer in the kit'));
+    // A file the kit dropped may go when the base lists it as the kit's and holds a blob the kit once had at that path.
+    if (had && listed.has(path) && !now.has(path) && pastBlobs(factory, fac, `kit/${path}`).has(had.oid)) removed.push(was(path, had.oid, 'no longer in the kit'));
     else if (had && UNTOUCHED(path) && !listed.has(path)) fails.push(`differs: ${path} (the repository's own, which the kit leaves untouched)`);
     else fails.push(`extra: ${path} (not a kit file)`);
   }
@@ -396,8 +354,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
     `repository: ${slug} (id ${id})`,
     `base: ${baseSha}`,
     `head: ${headSha}`,
-    ...(names.length ? [`modules: ${names.join(', ')}`] : []),
-    `managed files: ${kit.size + (kit.has(INVENTORY) ? 0 : 1) + 1 + (names.length ? 1 : 0)}: ${exact} as in the kit, ${filled.size} rendered, ${kept.length} kept, ${names.length ? 3 : 2} generated`,
+    `managed files: ${kit.size + (kit.has(INVENTORY) ? 0 : 1) + 1}: ${exact} as in the kit, ${filled.size} rendered, ${kept.length} kept, 2 generated`,
   ];
   if (fails.length) lines.push('failures:', ...fails.map((f) => `  ${f}`));
   lines.push("instructions (the repository's own AGENTS.md and CLAUDE.md; the kit's part is the Gate block):", ...(instructions.length ? instructions.map((l) => `  ${l}`) : ['  none']));
@@ -410,8 +367,8 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   lines.push("replaced (the repository's own at the base, now the kit's):", ...(replaced.length ? replaced.map((p) => `  ${p}`) : ['  none']));
   lines.push("kept (the repository's own, unchanged):", ...(kept.length ? kept.map((p) => `  ${p}`) : ['  none']));
   // Only bin/kit-update's pull requests make these two; a first onboarding's evidence has neither.
-  if (updated.length) lines.push("updated (the base held an older kit or module file, or an older rendering, now the kit's):", ...updated.map((p) => `  ${p}`));
-  if (removed.length) lines.push('removed (the base held an older kit or module file that is no longer laid):', ...removed.map((p) => `  ${p}`));
+  if (updated.length) lines.push("updated (the base held an older kit file, or an older rendering, now the kit's):", ...updated.map((p) => `  ${p}`));
+  if (removed.length) lines.push('removed (the base held an older kit file that is no longer laid):', ...removed.map((p) => `  ${p}`));
   return { pass: !fails.length, text: lines.join('\n') };
 }
 

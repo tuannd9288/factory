@@ -130,8 +130,7 @@ Names are standard terms, never coined ones (25/10).
   pending); and, now, Linear, where he decides, takes notes and asks (Linear, in Decisions; #373), which for a
   repository on Linear is also that repository's record, in 1b. Herdr's server and Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
-- **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
-  repository lists in `.gate/modules`, each bringing its own skill.
+- **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository.
 - **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify --fast`, the tests of the part changed, `red-check`; the full suite runs on CI (#281).
 - **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit; where Entire
   reviews, `verify`, `tier` and `Entire Gates` (#155).
@@ -231,7 +230,6 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
 | `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
-| `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment, Actions event policy), which Colly runs on the Human's login after his one approval; on the factory's own repository it sets the Actions event policy alone (#337) |
 | `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
 | `bin/onboard-doctor` | Reads one repository taken in and prints one line per check, green or red, and changes nothing; Colly runs it on the Human's login, from a commit on `main`; the "Take <repo> in" issue closes on its output |
@@ -299,7 +297,7 @@ What step 2 sets and reads back is in the header of `bin/onboard-owner`; what st
 onboarded repository to a newer factory commit; its refusals, what it replaces and the gate's judgment of its pull request are in
 the header of `bin/kit-update`.
 
-Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
+Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks),
 and proposes `.gate/load-bearing`.
 
 The queue's job, its install, its lock and its checkout rules are in `bin/factory-queue`'s header. A rollback is a revert pull
@@ -318,7 +316,7 @@ The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line whe
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, an account Claude Code warns is
 near its limit, the sweep's own `gh` refused,
 a repository's merge switch moved, the Factory app's Linear token refused, raised by `bin/lib/linear.mjs`)
-and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
+and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh, and from the MacBook's own events, through the share the MacBook's daemon writes (`packs/colly/colly.md` has both commands); its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
 starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out. The sweep also writes
 a one-time `comment` start line, like the reader's and no condition, when it wakes a Lead (#351); six more kinds of the same sort tell a
@@ -363,19 +361,6 @@ denied `Read(~/factory-runs/*/transcripts/**)` (only a Lead's folder has a `tran
 A pack is a folder a team copies; the kit lays none (#132). What `packs/pstack/` holds and how it is copied are at the opening of
 `packs/pstack/INSTALL.md`. The pstack Lead's start (`factory lead <repo>`), its resume and `--dry-run`, its login and the Herdr notes
 are in the header of `packs/pstack/bin/lead`.
-
-A module is what the factory holds only for the repositories that turn it on (#71): `modules/<name>/kit/` holds the
-files it adds, at repository paths (a skill among them, at `.claude/skills/<name>/`), and `modules/<name>/test/` its
-tests. The repository lists its modules in `.gate/modules`, one name a line (a tier-3 path; absent means none), and
-`bin/onboard --module <name>` and `bin/kit-update --module <name>` / `--no-module <name>` write it. A module's files are copied only where it is on, never over a file the repository has (a conflict, not a
-"kept"), and removed when it is turned off; `bin/kit-evidence` judges them against the module at the factory commit and
-treats `.gate/modules` as generated. The kit's only part in a module is two hooks, both inert without it: `red-check` runs
-`.gate/bin/lib/deletion.mjs` first on a source change with no test where the file exists, and `prove-check --all` also runs
-the `red-check-*` fixtures on disk. No `AGENTS.md` changes with a module: its guidance is its skill. A session in this
-factory lists `deletion-proof` among its skills, because Claude Code finds `.claude/skills` nested under `modules/`;
-the skill's first step reports the proof as off here. The first module,
-`deletion-proof` (step 1 of #17), proves a pull request whose only source change deletes whole files knip 6.42.1 listed
-as unused; no repository turns it on until #72 (a repository's knip config must be in its `.gate/protected`) lands.
 
 The pstack pin, its install per repository, what was found on Claude Code 2.1.308 and the parts of pstack the factory does not
 use are in `packs/pstack/INSTALL.md`.

@@ -46,7 +46,7 @@ import { checkPlists, checkoutRoot, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
 import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
-import { noteGh, observe, resetNotes } from './events.mjs';
+import { MACBOOK_SHARE, noteGh, observe, resetNotes } from './events.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
 import { clonesUnder } from './ledger.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
@@ -719,8 +719,8 @@ export function job(repos, env = process.env, daemon = false, as = {}) {
     throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);
   const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN', ...keep].filter((k) => env[k]).map((k) => [k, env[k]]));
   // #366: off the factory host the sweep follows the node's installed copy (#390), which checkoutRoot knows only by this name. No token is ever
-  // here: the daemon reads the node's own (bin/lib/node.mjs).
-  const copy = placeOf(env) === 'factory' ? {} : { FACTORY_CHECKOUT: installedRoot(env) };
+  // here: the daemon reads the node's own (bin/lib/node.mjs). Its events also go to the share, which Colly, in another user, follows (FAC-43).
+  const copy = placeOf(env) === 'factory' ? {} : { FACTORY_CHECKOUT: installedRoot(env), FACTORY_EVENTS_SHARE: MACBOOK_SHARE };
   return {
     label,
     interval: calendar ? null : interval,

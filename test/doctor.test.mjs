@@ -94,7 +94,7 @@ before(() => {
   mkdirSync(fake);
   writeFileSync(join(fake, 'gh'), FAKE_GH);
   chmodSync(join(fake, 'gh'), 0o755);
-  fac = makeFactory(join(dir, 'factory'), ['bin', 'kit', 'packs', 'modules']);
+  fac = makeFactory(join(dir, 'factory'), ['bin', 'kit', 'packs']);
   // The target: an app, the kit laid on factory/kit by the real onboard, and that branch merged into main by a merge commit.
   const seed = join(dir, 'seed');
   mkdirSync(seed);
