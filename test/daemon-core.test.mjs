@@ -8,6 +8,7 @@ import test from 'node:test';
 import { codeMoved, handleLine, leaseExpired, reconcile } from '../bin/lib/daemon.mjs';
 import { readLines } from '../bin/lib/events.mjs';
 import { wakeOnSeatEnds, wakeOnSeats } from '../bin/lib/news-wake.mjs';
+import { takeLock } from '../bin/lib/lock.mjs';
 import { ensureDaemon } from '../bin/lib/queue.mjs';
 import { openStore } from '../bin/lib/store.mjs';
 
@@ -163,11 +164,12 @@ test('the job starts the daemon when nobody answers, and does nothing when it an
     assert.equal(await ensureDaemon(state, { ping: async () => ({ ok: true, result: { pid: 1 } }), spawnFn, home: dir, waitMs: 100 }), 0);
     assert.equal(spawned.length, 0);
     // A daemon that holds the lock and does not answer: told, nothing started.
-    writeFileSync(join(state, 'daemon.lock'), JSON.stringify({ pid: process.pid, start: null, token: 'x' }));
+    const held = takeLock(join(state, 'daemon.lock'));
     const mute = async () => ({ ok: false, why: 'timed out' });
     assert.equal(await ensureDaemon(state, { ping: mute, spawnFn, home: dir, waitMs: 100 }), 1);
     assert.equal(spawned.length, 0);
     assert.match(readFileSync(join(state, 'queue-run.failed'), 'utf8'), /holds .*daemon\.lock and does not answer/);
+    held.release();
     // A lock whose process is gone: the daemon is started detached, with the job's environment and a log of its own.
     writeFileSync(join(state, 'daemon.lock'), JSON.stringify({ pid: 2 ** 22 + 12345, start: null, token: 'y' }));
     let answered = false;

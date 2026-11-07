@@ -6,6 +6,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { takeLock } from '../bin/lib/lock.mjs';
 import * as ledger from '../bin/lib/ledger.mjs';
 import { branchCosts, digest, rate, rowOf, wilson } from '../bin/lib/ledger.mjs';
 import { costOf } from '../bin/lib/claude-code.mjs';
@@ -220,13 +221,13 @@ test('a sweep runs once, alone, never as the Human, and leaves a failure report 
     out = sweep({ Q_LOGIN: 'tuannd9288' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
     assert.match(out.stderr, /runs as the agents' account, not the Human's \(tuannd9288\)/);
-    mkdirSync(join(state, 'queue.lock'), { recursive: true });
+    const held = takeLock(join(state, 'queue.lock'));
     writeFileSync(join(dir, 'calls'), '');
     out = sweep();
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.match(out.stdout, /another sweep is running/);
     assert.equal(readFileSync(join(dir, 'calls'), 'utf8'), '');
-    rmSync(join(state, 'queue.lock'), { recursive: true });
+    held.release();
     out = sweep();
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.ok(!existsSync(report));
