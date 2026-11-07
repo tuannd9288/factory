@@ -10,6 +10,10 @@
 //     id: its conclusion, or pending before it completes or while there is none. Another App's check of that name counts
 //     for nothing.
 //   node .gate/bin/lib/history.mjs raised-at --repo <owner/name> --pr <n>     when the Actions bot first added the label raised, or nothing
+//   node .gate/bin/lib/history.mjs moved --repo <owner/name> --pr <n>
+//     nothing when the base never changed; else `<time> <sha|none>`: when it last changed, by hand or by GitHub when the old base's
+//     branch was deleted on merge, and the head of the latest pull request of this repository from the old base into the new one
+//     that merged before then (a stack's parent), or none (approval.mjs --moved-at, --parent-head)
 //   node .gate/bin/lib/history.mjs raise --repo <owner/name> --run <id> --head <sha>
 //     `pending` while the `review` job of that run has not completed; then `ok` or `red` (its latest attempt's
 //     conclusion) and `none`, `absent` (it left no result annotation) or `raise <why>`, from its annotation titled
@@ -38,6 +42,13 @@ const ROUNDS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$o
 commits(last:100){pageInfo{hasPreviousPage} nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{databaseId name conclusion}}}}}}}}}}`;
 const FORCED = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){baseRefOid
 timelineItems(first:100,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){pageInfo{hasNextPage} nodes{... on HeadRefForcePushedEvent{beforeCommit{oid}}}}}}}`;
+// The last base change only, so no page is left unread; GitHub's event for its own change names the bases oldBase and newBase.
+const MOVED = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
+timelineItems(last:1,itemTypes:[BASE_REF_CHANGED_EVENT,AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT]){nodes{__typename ... on BaseRefChangedEvent{createdAt previousRefName currentRefName}
+... on AutomaticBaseChangeSucceededEvent{createdAt previousRefName:oldBase currentRefName:newBase}}}}}}`;
+// A parent missed past these (a branch name reused more than 20 times) only leaves the approval asked again.
+const PARENT = `query($owner:String!,$name:String!,$head:String!,$base:String!){repository(owner:$owner,name:$name){
+pullRequests(states:MERGED,headRefName:$head,baseRefName:$base,first:20,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{headRefOid mergedAt isCrossRepository}}}}`;
 const RED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE']);
 const ENTIRE = 'Entire Gates';
 
@@ -191,6 +202,23 @@ try {
     const times = items.nodes.filter((n) => n.label?.name === 'raised' && n.actor?.login === 'github-actions').map((n) => n.createdAt);
     if (times.some((t) => typeof t !== 'string' || !t)) throw new Error('a raised label event has no createdAt');
     console.log(times.sort()[0] ?? '');
+  } else if (args[0] === 'moved') {
+    const change = pull(MOVED).timelineItems?.nodes?.[0];
+    if (change) {
+      const { createdAt: at, previousRefName: from, currentRefName: to } = change;
+      if (![at, from, to].every((v) => typeof v === 'string' && v)) throw new Error('the last base change has no time or bases');
+      const out = execFileSync('gh', ['api', 'graphql', '-f', `query=${PARENT}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-f', `head=${from}`, '-f', `base=${to}`], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const nodes = JSON.parse(out).data?.repository?.pullRequests?.nodes;
+      if (!Array.isArray(nodes)) throw new Error('the merged pull requests of the old base are unreadable');
+      const parent = nodes
+        .filter((n) => n.isCrossRepository === false && /^[0-9a-f]{40}$/.test(String(n.headRefOid)) && typeof n.mergedAt === 'string' && n.mergedAt <= at)
+        .sort((a, b) => a.mergedAt.localeCompare(b.mergedAt))
+        .at(-1);
+      console.log(`${at} ${parent?.headRefOid ?? 'none'}`);
+    } else console.log('');
   } else if (args[0] === 'rounds') {
     const checks = new Set(opt('--checks').split(',').filter(Boolean));
     // A review or verdict that ended because the reviewer was unavailable judged nothing: it is no round. Its annotations are
@@ -221,7 +249,7 @@ try {
       commit.checkSuites.nodes.some((s) => s.app?.slug === 'github-actions' && s.checkRuns.nodes.some((c) => checks.has(c.name) && RED.has(c.conclusion) && !onlyUnavailable(c))),
     );
     console.log(red.length);
-  } else throw new Error('usage: history.mjs labels|raised-at|rounds|check|entire|raise|verdict|reuse --repo owner/name --pr n|--head sha|--run id [--checks a,b] [--name c] [--branch b]');
+  } else throw new Error('usage: history.mjs labels|raised-at|moved|rounds|check|entire|raise|verdict|reuse --repo owner/name --pr n|--head sha|--run id [--checks a,b] [--name c] [--branch b]');
 } catch (error) {
   console.log(`history: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
   process.exit(2);
