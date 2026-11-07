@@ -39,4 +39,5 @@ jobs:
       - name: Require approval of the head or its unchanged patch
         run: |
           reviews=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR/reviews")
-          printf '%s' "$reviews" | node kit/.gate/bin/lib/approval.mjs --owners .github/CODEOWNERS --author "$AUTHOR" --head "$HEAD" --base "$BASE"
+          moved=$(node kit/.gate/bin/lib/history.mjs moved --repo "$GITHUB_REPOSITORY" --pr "$PR") || { echo "approval: the base changes could not be read ($moved)"; exit 1; }
+          printf '%s' "$reviews" | node kit/.gate/bin/lib/approval.mjs --owners .github/CODEOWNERS --author "$AUTHOR" --head "$HEAD" --base "$BASE" ${moved:+--moved-at "${moved%% *}" --parent-head "${moved#* }"}

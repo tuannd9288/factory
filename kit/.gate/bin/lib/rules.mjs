@@ -44,8 +44,7 @@ if (!existsSync(tablePath)) fail('.gate/handin.json is missing');
 const table = JSON.parse(readFileSync(tablePath, 'utf8'));
 
 const RULES = table.rules.map((r) => ({ ...r, test: new RegExp(r.pattern, r.flags ?? ''), where: r.path ? new RegExp(r.path) : null }));
-// The kit's proof fixtures are bad on purpose; the hand-in rules do not read them.
-const SKIP = [...table.skip, '^\\.gate/proofs/'].map((p) => new RegExp(p));
+const SKIP = table.skip.map((p) => new RegExp(p));
 const TESTS = table.tests.map((p) => new RegExp(p));
 const EXTENSIONS = new Map(Object.entries(table.languages).flatMap(([lang, exts]) => exts.map((e) => [e, lang])));
 const isTestPath = (path) => TESTS.some((p) => p.test(path));

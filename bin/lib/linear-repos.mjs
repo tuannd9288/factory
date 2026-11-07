@@ -1,5 +1,6 @@
-// The registry of repositories on Linear (#404): $FACTORY_STATE/linear/repos.json, { "<repo>": { key, teamId } }, on the factory host. Only
-// `factory linear onboard` writes it (bin/lib/linear-cli.mjs), atomically and under a lock; a repository not in it is on GitHub. A file that
+// The registry of repositories on Linear (#404): $FACTORY_STATE/linear/repos.json, { "<repo>": { key, teamId } }, one on each node that runs
+// `factory linear` itself (FAC-38). Only `factory linear onboard` writes it (bin/lib/linear-cli.mjs), atomically and under a lock; a repository
+// not in a node's registry is on GitHub for that node. A file that
 // exists and does not parse is an error, never an empty registry: every reader refuses, and `onboard` writes nothing. It imports nothing but
 // node: modules, so the pack's launcher can read it without the rest of the factory.
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
