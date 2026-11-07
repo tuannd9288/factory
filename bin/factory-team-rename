@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# The Human's rename of a stopped Lead team; without --apply, prints the moves only.
-exec node "$(dirname "$0")/lib/team-rename.mjs" "$@"
