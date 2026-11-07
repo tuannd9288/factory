@@ -86,6 +86,8 @@ const allowOf = (root) => [
   'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
   'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr comment:*)', 'Bash(scripts/ship:*)', 'Bash(scripts/pr-body:*)',
   'Bash(factory linear:*)',
+  // pstack's other-model-family steps on Codex, through the factory's verb alone; codex itself stays denied (#182).
+  'Bash(factory codex:*)',
   `Bash(${join(root, 'bin/seat')}:*)`,
 ];
 // The Lead writes only in ~/factory-runs: a leading // makes each rule an absolute path.
