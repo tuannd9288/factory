@@ -36,15 +36,4 @@ describe('.gate/bin/verify re-entry', () => {
       s.cleanup();
     }
   });
-
-  test('prove-check, which runs verify on purpose, still passes', () => {
-    const s = seeded();
-    try {
-      assert.equal(s.onboard().code, 0);
-      const out = script(s.repo, 'prove-check', ['native']);
-      assert.equal(out.code, 0, out.out);
-    } finally {
-      s.cleanup();
-    }
-  });
 });

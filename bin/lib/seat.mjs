@@ -4,12 +4,13 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
 import { firstFree, parseTeam } from './names.mjs';
+import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
 import { repoOk } from './repos.mjs';
@@ -55,12 +56,17 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
     autoAllowBashIfSandboxed: false,
     allowUnsandboxedCommands: false,
     filesystem: {
-      denyRead: [...new Set([...['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'].map((d) => `${home}/${d}`), ...(profiles ? [profiles] : [])])],
+      denyRead: [...new Set([...DENY_READ.map((d) => `${home}/${d}`), ...(profiles ? [profiles] : [])])],
       allowWrite: [...new Set([work, run, tmp].filter(Boolean))],
     },
     network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
   };
 }
+
+/** The folders under home that no sandboxed command reads: the agent profiles and their tokens, Claude Code's and Codex's own, gh's
+ * and ssh's. The seats' sandbox above denies them (#183), and so does `factory codex`'s Codex profile (packs/pstack/bin/codex-step.mjs,
+ * #182). An entry with * is a glob. */
+export const DENY_READ = ['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'];
 
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
@@ -79,6 +85,8 @@ export const leadTranscripts = 'Read(~/factory-runs/*/transcripts/**)';
 const denyOf = (home, web) => [
   ...tokenStoreDeny, 'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead, leadTranscripts,
+  // The keychain of the user the seat runs as, which on the MacBook can hold logins the factory never put there (#366).
+  'Bash(security:*)', 'Bash(/usr/bin/security:*)',
 ];
 
 /** The presets. turns is a new session's --max-turns, resumeTurns a resumed one's. No preset has a spend cap: a figure the
@@ -395,6 +403,9 @@ const onPath = (name, PATH) => (PATH ?? '').split(':').some((d) => d && existsSy
 export function launch(argv, env = process.env) {
   const o = parseArgs(argv);
   if (!Object.hasOwn(PRESETS, o.role)) throw new Refused(`unknown role ${o.role}; the roles are ${ROLES.join(', ')}`);
+  // Seats run only as the agents' macOS user (#366 (a)): `factory`, on the Mac mini and on the MacBook, never the Human's own user, whose
+  // files and Keychain a seat would hold. A Lead's role says so; this is the permission (H6), checked before anything is read or claimed.
+  if (!isAgentsUser(env)) throw new Refused(`this account, ${userInfo().username}, is not the agents' user ${env.FACTORY_HOST_USER || 'factory'}: a seat runs only as that user (#366), so nothing was started`);
   const home = env.HOME;
   // Absolute, like --run and --work: the supervisor and claude run in the work folder.
   const runs = resolve(env.FACTORY_RUNS ?? join(home, 'factory-runs'));

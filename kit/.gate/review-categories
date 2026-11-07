@@ -8,7 +8,6 @@ CLAUDE.md review-agent-guidance
 .gate/bin/lib/reviewer-prompt.md review-agent-guidance
 .claude/skills/** review-agent-guidance
 .claude/skills/**/scripts/** -review-agent-guidance
-.gate/proofs/** review-test
 .github/pull_request_template.md review-documentation
 .gate/bin/reviewer/package-lock.json review-generated
 # factory:review-categories:end (your own lines go after this one)

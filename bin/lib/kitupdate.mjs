@@ -2,7 +2,7 @@
 // (origin/main) holds against what the kit's history has held. Reads git objects of both sides (ls-tree, cat-file, log);
 // it runs nothing the repository holds. bin/kit-evidence then proves the result against the same commit.
 //   node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <repo name>
-//     --human <login> [--modules <a,b>] [--out <dir>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>]
+//     --human <login> [--out <dir>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>]
 //     [--trusted-runner <json>]
 // `plan` only checks; `lay` also writes the files into the repository's working tree and, with --out, one list per
 // kind (added, updated, kept, removed, dropped-kept; one path a line). Per path:
@@ -24,10 +24,7 @@
 // it at its start, none gets a file of the block alone, unless the clone holds an untracked file there (a conflict, so a local
 // ignored file is never overwritten); malformed markers, CRLF or a link are conflicts.
 // .gate/kit-commit records the factory commit; the old .gate/pack is removed.
-// A module's files (bin/lib/module.mjs) are laid with the kit's, from the modules --modules names, and are stricter:
-// added, left alone or updated from a past module blob; the repository's own file at a module path is a conflict, never
-// kept. The files of a module the base had on and --modules leaves out are removed, or a conflict when the repository
-// changed one. A path of the base's .gate/kit-files that kit/ no longer has is removed when its blob is one the kit once held, and
+// A path of the base's .gate/kit-files that kit/ no longer has is removed when its blob is one the kit once held, and
 // otherwise kept (dropped-kept). Exit 0, or 1 with the conflicts when the repository's own must be merged by hand.
 import { chmodSync, lstatSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -35,30 +32,19 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { carrierProblems, replaceGate, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { replaceBlock, insertBlock, splitBlock } from './attributes.mjs';
-import { ATTRIBUTES, BLOCK_FILE, CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, KIT_COMMIT, SECTION, SETTINGS, blockFor, denyOf, git, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
+import { ATTRIBUTES, BLOCK_FILE, CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, KIT_COMMIT, SECTION, SETTINGS, blockFor, denyOf, git, kitFiles, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
 import { SETTINGS as GATE_SETTINGS, WORKFLOWS, describe, parseOptions, runnerProblems, valuesIn } from './gate-settings.mjs';
-import { MODULES_FILE, baseModules, mergedTree, offFiles } from './module.mjs';
 import { addDeny } from './settings.mjs';
 
 const RENDERED = (path) => Boolean(FILLED[path]);
 
-export function plan({ factory, commit, repo, base, name, human, modules, given = {} }) {
+export function plan({ factory, commit, repo, base, name, human, given = {} }) {
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
   const baseSha = git(repo, ['rev-parse', '--verify', `${base}^{commit}`]).trim();
-  const names = modules ? modules.split(',') : [];
-  const kit = mergedTree(factory, fac, names);
+  const kit = kitFiles(factory, fac);
   const at = tree(repo, baseSha);
   const text = (dir, oid) => git(dir, ['cat-file', 'blob', oid]);
-  const baseNames = baseModules(at.get(MODULES_FILE) ? text(repo, at.get(MODULES_FILE).oid) : null);
-  // The files of a module the base had on and the update turns off; a base that names a module the factory lacks stops it.
-  let off = new Map();
-  const lost = [];
-  try {
-    off = offFiles(factory, fac, baseNames, names);
-  } catch (error) {
-    lost.push(error.message);
-  }
-  const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: lost, writes: [], removes: [] };
+  const out = { add: [], update: [], same: [], keep: [], remove: [], droppedKept: [], conflicts: [], writes: [], removes: [] };
   // The gate's settings: each as an option gives it, else as the base's workflows hold it, else the kit's default.
   const baseValues = valuesIn(Object.fromEntries(WORKFLOWS.filter((p) => at.get(p)?.mode === '100644').map((p) => [p, text(repo, at.get(p).oid)])));
   const driver = at.get('.gate/driver.json');
@@ -120,16 +106,7 @@ export function plan({ factory, commit, repo, base, name, human, modules, given 
       // An older kit text with the adapter block after it: laid anew, with the block.
       out.update.push(path);
       out.writes.push({ path, mode: want.mode, text: text(factory, want.oid) + blockFor(repo, at) });
-    } else if (want.module) out.conflicts.push(`${path}: the repository's own, at a path module ${want.module} lays; a module's file is never kept`);
-    else out.keep.push(path);
-  }
-  for (const [path, e] of off) {
-    const had = at.get(path);
-    if (!had) continue;
-    if (pastBlobs(factory, fac, e.src).has(had.oid)) {
-      out.remove.push(path);
-      out.removes.push(path);
-    } else out.conflicts.push(`${path}: the repository's own, which module ${e.module} laid and is now off; a module's file is never kept`);
+    } else out.keep.push(path);
   }
   for (const problem of runnerProblems(values)) out.conflicts.push(`runners: ${problem} (kit/.gate/enforced-rules.md)`);
   instructions({ out, at, repo, factory, fac, name, kit, text });
@@ -137,8 +114,8 @@ export function plan({ factory, commit, repo, base, name, human, modules, given 
   const listed = at.get(INVENTORY) ? text(repo, at.get(INVENTORY).oid).split('\n').filter(Boolean) : [];
   for (const path of listed) {
     const had = at.get(path);
-    if (kit.has(path) || off.has(path) || path === INVENTORY || path === KIT_COMMIT || path === '.gate/pack' || path === MODULES_FILE || INSTRUCTION_FILES.includes(path) || !had) continue;
-    if ([`kit/${path}`, ...baseNames.map((n) => `modules/${n}/kit/${path}`)].some((p) => pastBlobs(factory, fac, p).has(had.oid))) {
+    if (kit.has(path) || path === INVENTORY || path === KIT_COMMIT || path === '.gate/pack' || INSTRUCTION_FILES.includes(path) || !had) continue;
+    if (pastBlobs(factory, fac, `kit/${path}`).has(had.oid)) {
       out.remove.push(path);
       out.removes.push(path);
     } else out.droppedKept.push(path);
@@ -275,7 +252,7 @@ function main(argv) {
   const { values: given, problem } = parseOptions(settings);
   if (problem || !['plan', 'lay'].includes(verb) || ['factory', 'commit', 'repo', 'base', 'name', 'human'].some((k) => !opt[k])) {
     if (problem) console.error(`kit-update: ${problem}`);
-    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> [--modules <a,b>] [--out <dir>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]');
+    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> [--out <dir>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]');
     return 2;
   }
   const result = plan({ ...opt, given });

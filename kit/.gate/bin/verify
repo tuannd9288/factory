@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # The repository's one gate command. It prints only failures and a one-line summary; a check that cannot run fails.
-#   .gate/bin/verify                 every check, then every check's proof (.gate/bin/prove-check --all)
+#   .gate/bin/verify                 every check
 #   .gate/bin/verify --fast          the hand-in rules and gate_fast on the staged files (the pre-commit hook)
-#   .gate/bin/verify --only <check>  one check, no proofs (prove-check runs this)
+#   .gate/bin/verify --only <check>  one check
 #   .gate/bin/verify --tests <file>  the named tests, JUnit report in .gate/report.xml
 # GATE_BASE names the commit the rules and subjects checks read from (default: the merge-base with origin/main).
 set -uo pipefail
 # gate_fast and the native verify run the repository's own commands; one that calls this script again would run it for ever.
-# Only those two routes set the variable: prove-check and red-check run verify on purpose and are not under them.
+# Only those two routes set the variable.
 if [ -n "${GATE_IN_VERIFY:-}" ]; then
   echo "verify: reached again from ${GATE_IN_VERIFY}: that is a loop: the repository's hook or verify calls .gate/bin/verify. Take that call out."
   exit 2
@@ -97,7 +97,6 @@ case "${1:-}" in
     ;;
   "")
     for name in $BUILTIN $GATE_CHECKS; do run "$name" "check_$name"; done
-    [ -z "$failed" ] && run proofs .gate/bin/prove-check --all
     ;;
   *)
     echo "verify: unknown argument $1"

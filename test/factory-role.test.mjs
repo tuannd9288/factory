@@ -6,9 +6,9 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../bin/lib/factory.mjs';
-import { roleOf } from '../packs/pstack/bin/lead.mjs';
+import { roleFor } from '../packs/pstack/bin/lead.mjs';
 
-test('lead --here passes the pack role as an appended system prompt', async (t) => {
+test('lead --here passes the pack role as an appended system prompt; run as a user other than the agents\', the Human\'s own, it starts no seat: no FACTORY_TEAM, no bin/seat grant, and a role with no seat path (#366)', async (t) => {
   const state = mkdtempSync(join(tmpdir(), 'factory-role-'));
   const calls = [];
   t.mock.method(childProcess, 'spawnSync', (cmd, args, options) => {
@@ -28,6 +28,7 @@ test('lead --here passes the pack role as an appended system prompt', async (t) 
       assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], {
         HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', CLAUDE_CODE_OAUTH_TOKEN: 'made-up-wrong-node-token',
         ANTHROPIC_API_KEY: 'made-up-key', ANTHROPIC_AUTH_TOKEN: 'made-up-auth', CLAUDE_CODE_PLUGIN_CACHE_DIR: join(state, 'other-plugins'),
+        FACTORY_TEAM: 'other-gamma',
       }), 0);
       const { cmd, args, options } = calls.at(-1);
       assert.equal(options.env.CLAUDE_CODE_OAUTH_TOKEN, 'made-up-local-token');
@@ -36,11 +37,20 @@ test('lead --here passes the pack role as an appended system prompt', async (t) 
       assert.equal(options.env.CLAUDE_CONFIG_DIR, join(state, '.agent-profiles/leads/alpha-beta/claude'));
       assert.ok(!args.join(' ').includes('made-up-local-token'));
       assert.equal(cmd, 'claude');
+      // Seats run only as the agents' user (#366 (a)): bin/seat refuses a start with no FACTORY_TEAM (bin/lib/seat.mjs), one in the
+      // caller's shell included, and nothing grants bin/seat or names it in the role.
+      assert.equal(options.env.FACTORY_TEAM, undefined);
+      // Nor the setting that names the agents' user to bin/seat, which the caller's environment here has (`nobody-here`).
+      assert.equal(options.env.FACTORY_HOST_USER, undefined);
+      assert.equal(JSON.parse(args[args.indexOf('--settings') + 1]).permissions.allow, undefined);
       const index = args.indexOf('--append-system-prompt');
       assert.ok(index >= 0, 'the launch must supply the role prompt');
-      const expected = roleOf(readFileSync(new URL('../packs/pstack/lead.md', import.meta.url), 'utf8'), linear)
-        .replaceAll('{{TEAM}}', 'beta').replaceAll('{{TEAMKEY}}', linear ? 'ALP' : '');
-      assert.equal(args[index + 1], expected);
+      const role = args[index + 1];
+      assert.ok(!role.includes('/bin/seat'), 'no seat path');
+      assert.doesNotMatch(role, /\{\{|<!--/, 'no token or form marker is left');
+      const expected = roleFor(readFileSync(new URL('../packs/pstack/lead.md', import.meta.url), 'utf8'),
+        { linear: linear && { key: 'ALP' }, team: 'beta', seat: null, runs: join(state, 'factory-runs') });
+      assert.equal(role, expected);
     }
     rmSync(join(state, '.agent-profiles/tokens/fixture'));
     calls.length = 0;
