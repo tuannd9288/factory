@@ -1,5 +1,5 @@
 // scripts/ship (#85): one command that opens the pull request only after a local pass and then takes step 4's next step,
-// against a fake gh and a fake scripts/live-verify, in a copy of the kit and the pstack pack with a real bare origin.
+// against a fake gh, in a copy of the kit and the pstack pack with a real bare origin.
 import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,17 +32,7 @@ if (a[0] === 'pr' && a[1] === 'create') {
   fs.writeFileSync(sh + '/pr.json', JSON.stringify({ number: 7, title: a[a.indexOf('--title') + 1], url: 'https://github.com/o/app/pull/7', baseRefName: a[a.indexOf('--base') + 1], baseRefOid: base, headRefOid: head, labels: [], isDraft: a.includes('--draft'), autoMergeRequest: null, statusCheckRollup: [] }));
   out('https://github.com/o/app/pull/7\n');
 }
-// The comments are $SH/comments.json; a comment gh posts is by the pull request's author ($SH/author, else agent).
-const comments = () => (fs.existsSync(sh + '/comments.json') ? JSON.parse(fs.readFileSync(sh + '/comments.json', 'utf8')) : []);
-const author = () => (fs.existsSync(sh + '/author') ? fs.readFileSync(sh + '/author', 'utf8').trim() : 'agent');
-// $SH/login is the login gh runs as, when it is not the pull request's author.
-const login = () => (fs.existsSync(sh + '/login') ? fs.readFileSync(sh + '/login', 'utf8').trim() : author());
-if (a[0] === 'pr' && a[1] === 'view') out(JSON.stringify({ author: { login: author() }, headRefOid: read().headRefOid, mergeStateStatus: read().mergeStateStatus, comments: comments() }));
-if (a[0] === 'pr' && a[1] === 'comment') {
-  const body = fs.readFileSync(a[a.indexOf('--body-file') + 1], 'utf8');
-  fs.writeFileSync(sh + '/comments.json', JSON.stringify([...comments(), { author: { login: login() }, body, includesCreatedEdit: false }]));
-  out('https://github.com/o/app/pull/7#issuecomment-1\n');
-}
+if (a[0] === 'pr' && a[1] === 'view') out(JSON.stringify({ mergeStateStatus: read().mergeStateStatus }));
 if (a[0] === 'pr' && a[1] === 'merge') {
   // $SH/arm-refused: GitHub refuses to enable auto-merge, as gh 2.102.0 reports it.
   if (a.includes('--auto') && fs.existsSync(sh + '/arm-refused')) {
@@ -58,27 +48,6 @@ process.stderr.write('fake gh: ' + a.join(' ') + '\n');
 process.exit(1);
 `;
 
-// scripts/live-verify: $SH/verdict names what a run answers; a PASS or PASS+NOTES makes --covered pass.
-const FAKE_LIVE_VERIFY = String.raw`#!/usr/bin/env node
-const fs = require('fs');
-const sh = process.env.SH;
-const a = process.argv.slice(2);
-fs.appendFileSync(sh + '/lv-calls', a.join(' ') + '\n');
-if (a[0] === '--covered') process.exit(fs.existsSync(sh + '/covered') ? 0 : 1);
-const verdict = fs.readFileSync(sh + '/verdict', 'utf8').trim();
-console.log('live-verify: ' + verdict + ' on #' + a[0]);
-if (verdict === 'PASS' || verdict === 'PASS+NOTES') {
-  fs.writeFileSync(sh + '/covered', '');
-  // $SH/clean-on-verify: CI turned green while the run took its minutes.
-  if (fs.existsSync(sh + '/clean-on-verify')) {
-    const pr = JSON.parse(fs.readFileSync(sh + '/pr.json', 'utf8'));
-    fs.writeFileSync(sh + '/pr.json', JSON.stringify({ ...pr, mergeStateStatus: 'CLEAN' }));
-  }
-  process.exit(0);
-}
-process.exit(verdict === 'FAIL' ? 1 : 2);
-`;
-
 const BODY = '**Tóm tắt cho anh**\n- **Anh quyết:** x\n- **Đề xuất:** Approve.\n- **Rủi ro:** y\n\n**TL;DR**\n- **You decide:** x\n- **Recommendation:** Approve.\n- **Risk:** y\n\n<details>\n<summary>The change in detail</summary>\n\n- Purpose: names the operation\n\n</details>\n\nCloses #3\n';
 
 const directories = [];
@@ -88,23 +57,16 @@ afterEach(() => {
 });
 
 /** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
-function world({ driver = true, liveVerify = true, stacks, merge, drafts = 'pstack' } = {}) {
+function world({ driver = true, stacks, merge, drafts = 'pstack' } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
   directories.push(dir);
   const repo = join(dir, 'app');
   const sh = join(dir, 'sh');
   cpSync(join(factory, 'kit'), repo, { recursive: true });
-  // What a pstack team copies into its repository (packs/pstack/section.md): the pack's scripts and its .gate files.
-  // Until #264, packs/pstack/INSTALL.md lays only ship, lib/ship.mjs and lib/driver.mjs: ship must run with those alone.
-  for (const f of liveVerify ? ['.'] : ['ship', 'lib/ship.mjs', 'lib/driver.mjs']) cpSync(join(factory, 'packs/pstack/scripts', f), join(repo, 'scripts', f), { recursive: true });
-  cpSync(join(factory, 'packs/pstack/.gate'), join(repo, '.gate'), { recursive: true });
-  // main's driver, which ship reads at the base: filled by default, the pack's empty one when `driver` is false.
-  if (driver) writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ name: 'cli', start: '', drive: 'node cli.js', network: false }));
-  if (stacks || merge || drafts) {
-    const file = join(repo, '.gate/driver.json');
-    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), stacks, merge, drafts }));
-  }
-  if (driver === 'absent') rmSync(join(repo, '.gate/driver.json'));
+  // What a pstack team copies into its repository (packs/pstack/INSTALL.md): the pack's scripts.
+  cpSync(join(factory, 'packs/pstack/scripts'), join(repo, 'scripts'), { recursive: true });
+  // main's switches, which ship reads at origin/main; `driver: 'absent'` leaves the file out.
+  if (driver !== 'absent') writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ stacks, merge, drafts: drafts ?? undefined }));
   mkdirSync(sh);
   git(repo, 'init', '-q', '-b', 'main');
   commit(repo, { 'cli.js': 'console.log(1);\n' }, 'start');
@@ -115,15 +77,9 @@ function world({ driver = true, liveVerify = true, stacks, merge, drafts = 'psta
   git(repo, 'switch', '-q', '-c', 'work');
   commit(repo, { 'cli.js': 'console.log(2);\n' }, 'fix(cli): print two');
   git(repo, 'push', '-q', 'origin', 'work');
-  if (liveVerify) {
-    writeFileSync(join(repo, 'scripts/live-verify'), FAKE_LIVE_VERIFY);
-    git(repo, 'update-index', '--assume-unchanged', 'scripts/live-verify');
-  }
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin/gh'), FAKE_GH);
   chmodSync(join(dir, 'bin/gh'), 0o755);
-  if (liveVerify) chmodSync(join(repo, 'scripts/live-verify'), 0o755);
-  writeFileSync(join(sh, 'verdict'), 'PASS\n');
   writeFileSync(join(dir, 'body.md'), BODY);
   const gitdir = () => join(git(repo, 'rev-parse', '--absolute-git-dir'), 'factory');
   const w = {
@@ -225,7 +181,7 @@ describe('opening the pull request', () => {
     assert.match(create, /--title fix\(cli\): print two/);
     assert.match(create, /--body-file /);
     assert.equal(w.read('created-body'), BODY);
-    assert.equal(w.read('lv-calls'), '', 'it opens, and goes no further in the same run');
+    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), 'it opens, and goes no further in the same run');
   });
 
   test('takes the title from the last subject without its trailing issue number, and --title as given', () => {
@@ -294,65 +250,27 @@ describe('the steps after it opened', () => {
     return w;
   };
 
-  test('a second run live-verifies and arms on PASS; a third finds nothing to do', () => {
+  test('a second run arms; a third finds nothing to do', () => {
     const w = opened();
     let out = w.ship();
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /^live-verify: PASS on #7$/m);
-    assert.match(out.out, /^ship: armed #7: a live PASS covers HEAD [0-9a-f]{7}$/m);
-    assert.equal(w.read('lv-calls'), '--covered 7\n7\n');
+    assert.match(out.out, /^ship: armed #7 at HEAD [0-9a-f]{7}$/m);
     assert.ok(w.calls().includes('pr merge 7 --auto --squash'), w.calls().join('\n'));
     out = w.ship();
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /^ship: #7 is armed and a live verdict covers it; nothing to do$/m);
+    assert.match(out.out, /^ship: #7 is armed; nothing to do$/m);
     assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 1);
   });
 
-  test('arms on PASS+NOTES too', () => {
-    const w = opened();
-    writeFileSync(join(w.sh, 'verdict'), 'PASS+NOTES\n');
-    const out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
-  });
-
-  test('refuses to arm on FAIL, and on BLOCKED, and says what to do', () => {
-    const w = opened();
-    writeFileSync(join(w.sh, 'verdict'), 'FAIL\n');
-    let out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: refused to arm #7: live-verify answered FAIL; fix forward with a red test, then run ship again$/m);
-    writeFileSync(join(w.sh, 'verdict'), 'BLOCKED\n');
-    out = w.ship();
-    assert.equal(out.code, 2, out.out);
-    assert.match(out.out, /^ship: stopped on #7: live-verify is BLOCKED; put the reason and your recommended answer in the pull request$/m);
-    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
-  });
-
   test('stops on a ready pull request that is not armed, before the arm (#304)', () => {
-    for (const driver of [true, false]) {
-      for (const mergeStateStatus of ['CLEAN', 'HAS_HOOKS', 'UNSTABLE']) {
-        const w = world({ driver });
-        w.passed();
-        assert.equal(w.ship().code, 0);
-        w.pr({ mergeStateStatus });
-        const out = w.ship();
-        assert.equal(out.code, 1, out.out);
-        assert.match(out.out, /^ship: stopped on #7: it is ready to merge and not armed; the Human merges it$/m);
-        assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
-      }
+    for (const mergeStateStatus of ['CLEAN', 'HAS_HOOKS', 'UNSTABLE']) {
+      const w = opened();
+      w.pr({ mergeStateStatus });
+      const out = w.ship();
+      assert.equal(out.code, 1, out.out);
+      assert.match(out.out, /^ship: stopped on #7: it is ready to merge and not armed; the Human merges it$/m);
+      assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
     }
-  });
-
-  test('stops when CI turns green while live-verify runs, with no merge (#304)', () => {
-    const w = opened();
-    w.pr({ mergeStateStatus: 'BLOCKED' });
-    writeFileSync(join(w.sh, 'clean-on-verify'), '');
-    const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: it is ready to merge and not armed; the Human merges it$/m);
-    assert.equal(w.read('lv-calls'), '--covered 7\n7\n');
-    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
   });
 
   test('stops when GitHub refuses the arm because auto-merge is off (#304)', () => {
@@ -376,43 +294,14 @@ describe('the steps after it opened', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
   });
 
-  test('arms again without a new run when a verdict already covers the head', () => {
-    const w = opened();
-    writeFileSync(join(w.sh, 'covered'), '');
-    const out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.equal(w.read('lv-calls'), '--covered 7\n');
-    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
-  });
-
   test('disarms an armed pull request first when HEAD has a commit the pull request lacks', () => {
     const w = opened();
     assert.equal(w.ship().code, 0);
     commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'A new patch');
-    const before = w.read('lv-calls');
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: disarmed #7: HEAD [0-9a-f]{7} is past what was verified; push it, then run ship again$/m);
     assert.equal(w.calls().at(-1), 'pr merge 7 --disable-auto');
-    assert.equal(w.read('lv-calls'), before, 'nothing else ran in that run');
-  });
-
-  test('disarms when the pushed head is no longer covered, then covers it and arms again on the next runs', () => {
-    const w = opened();
-    assert.equal(w.ship().code, 0);
-    const old = w.head();
-    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'A new patch');
-    git(w.repo, 'push', '-q', 'origin', 'work');
-    w.pr({ headRefOid: w.head() });
-    rmSync(join(w.sh, 'covered'));
-    let out = w.ship();
-    assert.match(out.out, /^ship: disarmed #7: no live verdict covers HEAD [0-9a-f]{7}/m);
-    assert.equal(w.calls().at(-1), 'pr merge 7 --disable-auto');
-    assert.notEqual(old, w.head());
-    out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /^ship: armed #7/m);
-    assert.equal(w.calls().at(-1), 'pr merge 7 --auto --squash');
   });
 
   test('stops while the pull request carries needs-human', () => {
@@ -421,11 +310,10 @@ describe('the steps after it opened', () => {
     const out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: stopped on #7: it carries needs-human; the Human decides$/m);
-    assert.equal(w.read('lv-calls'), '');
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
   });
 
-  test('arms a tier-3 pull request by the PASS rule, then stops while its tier check waits, and is done once it is green', () => {
+  test('arms a tier-3 pull request, then stops while its tier check waits, and is done once it is green', () => {
     const w = opened();
     w.pr({ labels: [{ name: 'tier-3' }], statusCheckRollup: [{ name: 'tier', status: 'IN_PROGRESS', conclusion: '' }] });
     let out = w.ship();
@@ -436,18 +324,7 @@ describe('the steps after it opened', () => {
     w.pr({ statusCheckRollup: [{ name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     out = w.ship();
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /^ship: #7 is armed and a live verdict covers it; nothing to do$/m);
-  });
-
-  test('does not arm a tier-3 pull request on FAIL, and says FAIL, not the wait', () => {
-    const w = opened();
-    w.pr({ labels: [{ name: 'tier-3' }], statusCheckRollup: [{ name: 'tier', status: 'IN_PROGRESS', conclusion: '' }] });
-    writeFileSync(join(w.sh, 'verdict'), 'FAIL\n');
-    const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /live-verify answered FAIL/);
-    assert.doesNotMatch(out.out, /waits for the Human/);
-    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
+    assert.match(out.out, /^ship: #7 is armed; nothing to do$/m);
   });
 
   test('a disarm comes before the stop', () => {
@@ -488,7 +365,7 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
     assert.equal(w.read('tier-calls'), '--base origin/main --head HEAD --labels task,tier-2\n');
   });
 
-  test('arms by the same PASS rule, then stops with the line, and a later run stops again', () => {
+  test('arms it, then stops with the line, and a later run stops again', () => {
     const w = opened(3);
     w.pr({ statusCheckRollup: waiting });
     let out = w.ship();
@@ -500,17 +377,6 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
     assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 1);
-  });
-
-  test('does not arm it on FAIL, and says FAIL, not the wait', () => {
-    const w = opened(3);
-    w.pr({ statusCheckRollup: waiting });
-    writeFileSync(join(w.sh, 'verdict'), 'FAIL\n');
-    const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /live-verify answered FAIL/);
-    assert.doesNotMatch(out.out, /waits for the Human/);
-    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
   });
 
   test('is no wait once the tier check passed, and a running tier check below tier 3 is none', () => {
@@ -584,13 +450,12 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     assert.doesNotMatch(out.out, /waits for the Human/);
   });
 
-  test('when .gate/bin/tier cannot judge, ship fails closed: no live-verify, no arming', () => {
+  test('when .gate/bin/tier cannot judge, ship fails closed: no arming', () => {
     const w = opened(3);
     writeFileSync(join(w.repo, '.gate/bin/tier'), '#!/bin/sh\necho "tier: could not read the policy"\nexit 2\n');
     const out = w.ship();
     assert.equal(out.code, 2, out.out);
     assert.match(out.out, /^ship: could not judge the tier \(\.gate\/bin\/tier exited 2\)$/m);
-    assert.equal(w.read('lv-calls'), '');
     assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 0);
   });
 });
@@ -618,20 +483,6 @@ describe('a red-check that passed by the body\'s No-red line', () => {
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: opened #7/m);
-  });
-});
-
-describe('a live-verify that exits 2 without a BLOCKED verdict', () => {
-  test('is said to have not run, with none of the BLOCKED advice', () => {
-    const w = world();
-    w.passed();
-    assert.equal(w.ship().code, 0);
-    writeFileSync(join(w.sh, 'verdict'), 'CRASH\n');
-    const out = w.ship();
-    assert.equal(out.code, 2, out.out);
-    assert.match(out.out, /^ship: live-verify could not run on #7 \(exit 2\); nothing was armed$/m);
-    assert.doesNotMatch(out.out, /BLOCKED|recommended answer/);
-    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
   });
 });
 
@@ -740,136 +591,7 @@ describe('the remote branch', () => {
     const out = w.ship();
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /^ship: refused: origin\/work is at [0-9a-f]{7}, not HEAD [0-9a-f]{7}; push HEAD first$/m);
-    assert.equal(w.read('lv-calls'), '');
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
-  });
-});
-
-describe('a repository with no driver on main', () => {
-  const opened = () => {
-    const w = world({ driver: false });
-    w.passed();
-    assert.equal(w.ship().code, 0);
-    return w;
-  };
-  const noteFor = (head) => `not run as a user: no driver (head ${head})`;
-  const notes = (w) => (w.read('comments.json') ? JSON.parse(w.read('comments.json')) : []);
-  const plant = (w, comment) => writeFileSync(join(w.sh, 'comments.json'), JSON.stringify([...notes(w), { author: { login: 'agent' }, includesCreatedEdit: false, ...comment }]));
-  const posts = (w) => w.calls().filter((c) => c.startsWith('pr comment'));
-
-  test('ships the same in a repository that has no live-verify (#288), as INSTALL.md lays the pack until #264', () => {
-    const w = world({ driver: false, liveVerify: false });
-    w.passed();
-    let out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.equal(posts(w).length, 1, w.calls().join('\n'));
-    assert.equal(notes(w)[0].body.split('\n')[0], noteFor(w.head()));
-    assert.ok(w.calls().includes('pr merge 7 --auto --squash'), w.calls().join('\n'));
-  });
-
-  test('posts one note for the head, never runs live-verify, arms, and the next run does neither again', () => {
-    const w = opened();
-    let out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.equal(w.read('lv-calls'), '', 'live-verify was not run');
-    assert.equal(posts(w).length, 1, w.calls().join('\n'));
-    assert.match(posts(w)[0], /^pr comment 7 --body-file /);
-    assert.equal(notes(w)[0].body.split('\n')[0], noteFor(w.head()));
-    assert.ok(w.calls().includes('pr merge 7 --auto --squash'), w.calls().join('\n'));
-    out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.equal(posts(w).length, 1, 'no second note');
-    assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 1, 'not disarmed, not armed twice');
-    assert.equal(w.read('lv-calls'), '');
-  });
-
-  test('arms on a note the agents\' login already posted for the head, and posts none', () => {
-    const w = opened();
-    plant(w, { body: `${noteFor(w.head())}\nmore\n` });
-    const out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.equal(posts(w).length, 0);
-    assert.ok(w.calls().includes('pr merge 7 --auto --squash'));
-  });
-
-  test('ignores a note by another login: it posts its own', () => {
-    const w = opened();
-    plant(w, { author: { login: 'stranger' }, body: noteFor(w.head()) });
-    const out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.equal(posts(w).length, 1);
-  });
-
-  test('ignores an edited note: it posts its own', () => {
-    const w = opened();
-    plant(w, { includesCreatedEdit: true, body: noteFor(w.head()) });
-    const out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.equal(posts(w).length, 1);
-  });
-
-  test('ignores a note for another head: it posts its own', () => {
-    const w = opened();
-    plant(w, { body: noteFor('0'.repeat(40)) });
-    const out = w.ship();
-    assert.equal(out.code, 0, out.out);
-    assert.equal(posts(w).length, 1);
-    assert.equal(notes(w).at(-1).body.split('\n')[0], noteFor(w.head()));
-  });
-
-  test('stops without arming when the note it posted does not count: the pull request\'s author is not its login', () => {
-    const w = opened();
-    writeFileSync(join(w.sh, 'author'), 'human');
-    writeFileSync(join(w.sh, 'login'), 'agent');
-    const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: .*author \(human\) is not ship's login/m);
-    assert.equal(posts(w).length, 1);
-    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
-  });
-
-  test('judges the note on the pull request\'s head: an armed one whose head moved past the note is disarmed', () => {
-    const w = opened();
-    assert.equal(w.ship().code, 0);
-    w.pr({ headRefOid: 'e'.repeat(40) });
-    const out = w.ship();
-    assert.match(out.out, /^ship: disarmed #7: no no-driver note covers HEAD/m);
-    assert.equal(w.calls().at(-1), 'pr merge 7 --disable-auto');
-  });
-
-  test('refuses, posting and arming nothing, when the local HEAD is not the pull request\'s head', () => {
-    const w = opened();
-    w.pr({ headRefOid: 'e'.repeat(40) });
-    const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: refused: HEAD [0-9a-f]{7} is not the pull request's head eeeeeee; pull or push so they agree$/m);
-    assert.equal(posts(w).length, 0);
-    assert.ok(!w.calls().some((c) => c.startsWith('pr merge')), w.calls().join('\n'));
-  });
-
-  test('disarms an armed pull request when the only note is a forged one', () => {
-    const w = opened();
-    assert.equal(w.ship().code, 0);
-    writeFileSync(join(w.sh, 'comments.json'), JSON.stringify([{ author: { login: 'agent' }, includesCreatedEdit: true, body: noteFor(w.head()) }]));
-    const out = w.ship();
-    assert.match(out.out, /^ship: disarmed #7: no /m);
-    assert.equal(w.calls().at(-1), 'pr merge 7 --disable-auto');
-  });
-});
-
-describe('a repository with a driver on main', () => {
-  test('runs live-verify as before, posts no note, and FAIL still stops it', () => {
-    const w = world();
-    w.passed();
-    assert.equal(w.ship().code, 0);
-    writeFileSync(join(w.sh, 'verdict'), 'FAIL\n');
-    const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /live-verify answered FAIL/);
-    assert.equal(w.read('lv-calls'), '--covered 7\n7\n');
-    assert.ok(!w.calls().some((c) => c.startsWith('pr comment') || c.startsWith('pr merge')), w.calls().join('\n'));
   });
 });
 
@@ -884,7 +606,7 @@ describe('stacked pull requests', () => {
     }
   });
 
-  test('waits without verifying or arming while the parent is not merged', () => {
+  test('waits without arming while the parent is not merged', () => {
     const w = world();
     w.passed();
     assert.equal(w.ship().code, 0);
@@ -892,11 +614,10 @@ describe('stacked pull requests', () => {
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /waits for its parent/);
-    assert.equal(w.read('lv-calls'), '');
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge') || c.startsWith('pr edit')));
   });
 
-  test('retargets after the parent merges and merges main without rewriting the child', () => {
+  test('with merge commits, waits until the parent is in origin/main, then only moves the child to main', () => {
     const w = world({ merge: 'merge' });
     const parent = w.head();
     git(w.repo, 'branch', 'parent');
@@ -908,23 +629,21 @@ describe('stacked pull requests', () => {
     const child = w.head();
     git(w.repo, 'switch', '-q', 'parent');
     const tip = commit(w.repo, { 'parent.js': 'later\n' }, 'Parent advances');
+    git(w.repo, 'switch', '-q', 'work');
+    writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
+    const early = w.ship();
+    assert.equal(early.code, 0, early.out);
+    assert.match(early.out, /waits for its parent parent in origin\/main/);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr edit')));
     git(w.repo, 'switch', '-q', 'main');
     git(w.repo, 'merge', '--no-ff', '--no-edit', 'parent');
     git(w.repo, 'push', '-q', 'origin', 'main');
     git(w.repo, 'switch', '-q', 'work');
-    writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
     const out = w.ship();
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /push HEAD, then run ship again/);
     assert.ok(w.calls().includes('pr edit 7 --base main'));
-    assert.equal(git(w.repo, 'rev-parse', 'HEAD^1'), child);
-    assert.equal(git(w.repo, 'rev-parse', 'HEAD^2'), git(w.repo, 'rev-parse', 'origin/main'));
-    assert.equal(w.read('lv-calls'), '');
+    assert.equal(w.head(), child);
     assert.ok(!w.calls().some((c) => c.includes('--auto')));
-    git(w.repo, 'push', '-q', 'origin', 'work');
-    w.pr({ headRefOid: w.head(), baseRefOid: git(w.repo, 'rev-parse', 'origin/main') });
-    assert.equal(w.ship().code, 0);
-    assert.ok(w.calls().includes('pr merge 7 --auto --merge'));
   });
 
   test('off on origin/main refuses opening a child even when HEAD enables stacks', () => {
@@ -953,8 +672,8 @@ for (const merge of [undefined, 'squash', 'merge']) {
   });
 }
 
-test('squash restacks the child past the merged parent head and asks for a lease push', () => {
-  const w = world({ merge: 'squash' });
+test('after a squashed parent lands, ship only moves the child to main: no rebase, no push, the queue merges main into it', () => {
+  const w = world();
   const parent = w.head();
   git(w.repo, 'branch', 'parent');
   commit(w.repo, { 'child.js': 'child\n' }, 'feat(cli): add child');
@@ -972,15 +691,12 @@ test('squash restacks the child past the merged parent head and asks for a lease
   git(other, 'merge', '--squash', 'parent');
   commit(other, {}, 'Land parent (#6)');
   git(other, 'push', '-q', 'origin', 'main');
-  assert.notEqual(run(w.repo, 'git', ['cat-file', '-e', `${tip}^{commit}`], quiet).code, 0);
   writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
   const out = w.ship();
   assert.equal(out.code, 0, out.out);
-  assert.match(out.out, /push with --force-with-lease/);
+  assert.match(out.out, /the queue merges main into it/);
   assert.ok(w.calls().includes('pr edit 7 --base main'));
-  assert.equal(git(w.repo, 'rev-parse', 'HEAD^'), git(w.repo, 'rev-parse', 'origin/main'));
-  assert.equal(git(w.repo, 'diff', '--name-only', 'origin/main', 'HEAD'), 'child.js');
-  assert.equal(git(w.repo, 'show', 'HEAD:parent.js'), 'later');
+  assert.equal(w.head(), child);
   assert.equal(git(w.repo, 'ls-remote', 'origin', 'refs/heads/work').split(/\s/)[0], child);
   assert.ok(!w.calls().some((c) => c.includes('--auto')));
 });

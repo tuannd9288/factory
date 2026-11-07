@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
@@ -172,7 +172,7 @@ test('condition 3: a Lead whose newest hook event is a permission prompt or a di
   });
 });
 
-test('condition 4: an account out of quota starts once for the account, not for each session, and clears when its reset passes', async () => {
+test('condition 4: an account out of quota, or warned near a limit, starts once for the account, not for each session, and clears when its reset passes', async () => {
   const e = await events();
   await withDir(async (dir) => {
     const state = join(dir, 'state');
@@ -183,19 +183,27 @@ test('condition 4: an account out of quota starts once for the account, not for 
     writeFileSync(join(state, 'accounts'), 'factory/factory-lead=acct-one\nfactory/factory-b=acct-two\n');
     const resetsAt = (T0 + 3600_000) / 1000;
     const limit = `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt, unifiedWindows: { five_hour: { utilization: 1, resetsAt }, seven_day: { utilization: 0.2, resetsAt: resetsAt + 86400 } } } })}\n`;
+    // acct-two is not rejected: Claude Code warns that its seven-day window, which resets in three hours, is near its limit (FAC-8).
+    const weekReset = (T0 + 3 * 3600_000) / 1000;
+    const warning = `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', rateLimitType: 'seven_day', resetsAt: weekReset, unifiedWindows: { five_hour: { utilization: 0.3, resetsAt }, seven_day: { utilization: 0.92, resetsAt: weekReset } } } })}\n`;
     for (const tag of ['worker', 'reviewer']) {
       mkdirSync(join(runs, 'issue-1'), { recursive: true });
       writeFileSync(join(runs, 'issue-1', `run-${tag}.jsonl`), limit);
       writeFileSync(join(runs, 'issue-1', `run-${tag}.account`), 'acct-one\n');
+      mkdirSync(join(runs, 'issue-2'), { recursive: true });
+      writeFileSync(join(runs, 'issue-2', `run-${tag}.jsonl`), warning);
+      writeFileSync(join(runs, 'issue-2', `run-${tag}.account`), 'acct-two\n');
     }
     const seen = (now) => record(e, state, e.accountsOut({ runs, state, agentProfiles: profiles, now }), new Set(['quota']), now);
     seen(T0);
     seen(T0 + MIN);
-    assert.deepEqual(shape(state), ['start out-of-quota a']);
-    assert.doesNotMatch(JSON.stringify(linesOf(state)), /acct-one/, 'the account is named by its letter');
+    assert.deepEqual(shape(state), ['start out-of-quota a', 'start quota-warning b']);
+    assert.doesNotMatch(JSON.stringify(linesOf(state)), /acct-one|acct-two/, 'each account is named by its letter');
     seen(T0 + 2 * 3600_000);
     seen(T0 + 2 * 3600_000 + MIN);
-    assert.deepEqual(shape(state), ['start out-of-quota a', 'clear out-of-quota a']);
+    assert.deepEqual(shape(state), ['start out-of-quota a', 'start quota-warning b', 'clear out-of-quota a']);
+    seen(T0 + 4 * 3600_000);
+    assert.deepEqual(shape(state), ['start out-of-quota a', 'start quota-warning b', 'clear out-of-quota a', 'clear quota-warning b']);
   });
 });
 
@@ -603,5 +611,146 @@ test('Colly brief lists a condition-1 line with the repository, the pull request
     seen([pr({ checks: { verify: run('IN_PROGRESS') } })], now);
     assert.doesNotMatch(await frame(), /verify has not started/);
     assert.match(await frame(), /Nothing waits on you/);
+  });
+});
+
+// ---- the share (FAC-43): the MacBook's Colly runs in another user than the MacBook's daemon ----------------------------------
+
+/** Runs body with FACTORY_EVENTS_SHARE set to `file` in this process, as the MacBook's queue job sets it. */
+function withShare(file, body) {
+  const before = process.env.FACTORY_EVENTS_SHARE;
+  process.env.FACTORY_EVENTS_SHARE = file;
+  try {
+    return body();
+  } finally {
+    if (before === undefined) delete process.env.FACTORY_EVENTS_SHARE;
+    else process.env.FACTORY_EVENTS_SHARE = before;
+  }
+}
+
+/** A folder of mine at mode 0755 holding a good file, a link to it, and a file the group can write; and a link to the folder. */
+function plantings(dir) {
+  const mine = join(dir, 'mine');
+  mkdirSync(mine);
+  chmodSync(mine, 0o755);
+  writeFileSync(join(mine, 'target.jsonl'), '');
+  chmodSync(join(mine, 'target.jsonl'), 0o644);
+  symlinkSync(join(mine, 'target.jsonl'), join(mine, 'planted.jsonl'));
+  writeFileSync(join(mine, 'open.jsonl'), '');
+  chmodSync(join(mine, 'open.jsonl'), 0o664);
+  symlinkSync(mine, join(dir, 'linked'));
+  // A folder of another user: /usr/bin is root's on macOS and Linux. Left out when the tests run as root.
+  const theirs = process.getuid() === 0 ? [] : [['/usr/bin/env', /folder is owned by uid 0/]];
+  return { mine, theirs };
+}
+
+test('the share gets the same lines as events.jsonl from both writers, in a folder of mode 0755 and a file of mode 0644', async () => {
+  const e = await events();
+  await withDir(async (dir) => {
+    const state = join(dir, 'state');
+    const file = join(dir, 'Shared/factory/events.jsonl');
+    mkdirSync(join(dir, 'Shared'));
+    withShare(file, () => {
+      record(e, state, [{ key: 'gh-refused', scope: 'gh', text: 'gh api: rate limit' }], new Set(['gh']), T0);
+      e.appendStart({ state, kind: 'comment', key: 'comment o/app#1', text: 'a new comment', now: T0 + MIN });
+      record(e, state, [], new Set(['gh']), T0 + 2 * MIN);
+    });
+    assert.deepEqual(shape(state), ['start gh-refused', 'start comment o/app#1', 'clear gh-refused']);
+    assert.equal(readFileSync(file, 'utf8'), readFileSync(join(state, 'events.jsonl'), 'utf8'));
+    assert.equal(statSync(join(dir, 'Shared/factory')).mode & 0o777, 0o755);
+    assert.equal(statSync(file).mode & 0o777, 0o644);
+    assert.ok(!existsSync(join(state, 'events-share.failed')));
+  });
+});
+
+test('the share is not written in a folder of another user, through a link, or into a file others can write; events.jsonl still is', async () => {
+  const e = await events();
+  await withDir(async (dir) => {
+    const { mine, theirs } = plantings(dir);
+    const cases = [
+      [join(dir, 'linked/events.jsonl'), /folder is a link/],
+      [join(mine, 'planted.jsonl'), /file is a link/],
+      [join(mine, 'open.jsonl'), /file is writable by others \(mode 664\)/],
+      ...theirs.map(([, why]) => ['/usr/bin/fac43-events.jsonl', why]),
+    ];
+    for (const [i, [file, why]] of cases.entries()) {
+      const state = join(dir, `state-${i}`);
+      withShare(file, () => e.appendStart({ state, kind: 'comment', key: `comment o/app#${i}`, text: 'a new comment', now: T0 }));
+      assert.equal(linesOf(state).length, 1, `${file}: events.jsonl is written`);
+      assert.match(readFileSync(join(state, 'events-share.failed'), 'utf8'), why, file);
+    }
+    assert.equal(readFileSync(join(mine, 'target.jsonl'), 'utf8'), '', "nothing reached the link's target");
+    assert.equal(readFileSync(join(mine, 'open.jsonl'), 'utf8'), '');
+  });
+});
+
+test('factory-events --file follows a share and keeps its cursor in its own state, never beside the share', async () => {
+  const e = await events();
+  await withDir((dir) =>
+    withFollowers(async (start) => {
+      const daemon = join(dir, 'daemon-state');
+      const file = join(dir, 'Shared/factory/events.jsonl');
+      mkdirSync(join(dir, 'Shared'));
+      withShare(file, () => record(e, daemon, [{ key: 'gh-refused', scope: 'gh', text: 'gh api: rate limit' }], new Set(['gh']), T0));
+      const colly = join(dir, 'colly-state');
+      const f = start(colly, ['--file', file]);
+      await f.until(1);
+      withShare(file, () => e.appendStart({ state: daemon, kind: 'watch_fired', key: 'watch_fired a', text: 'a Lead is silent', now: T0 + MIN }));
+      await f.until(2);
+      await sleep(300);
+      await f.stop();
+      assert.deepEqual(f.lines().map((l) => l.key), ['gh-refused', 'watch_fired a']);
+      assert.deepEqual(readdirSync(join(dir, 'Shared/factory')), ['events.jsonl'], 'nothing is written beside the share');
+      const cursors = readdirSync(colly).filter((n) => n.endsWith('.cursor'));
+      assert.equal(cursors.length, 1);
+      assert.notEqual(cursors[0], 'events.cursor', "this user's own events keep their own cursor");
+      assert.equal(readFileSync(join(colly, cursors[0]), 'utf8').trim(), '2');
+    }));
+});
+
+// #509 review: an INN answer's claim is a git push, which Colly's user may not make; the Mac mini's Monitor delivers that line.
+test('factory-events --file leaves an INN answer to the Mac mini: no git call, and the lines after it still come', async () => {
+  const e = await events();
+  withDir((dir) => {
+    const daemon = join(dir, 'daemon-state');
+    const file = join(dir, 'Shared/factory/events.jsonl');
+    mkdirSync(join(dir, 'Shared'));
+    withShare(file, () => {
+      e.innAnswer({ state: daemon, event: { kind: 'commentCreated', id: 'c1', issueIdentifier: 'INN-9' }, now: T0 });
+      e.appendStart({ state: daemon, kind: 'watch_fired', key: 'watch_fired a', text: 'a Lead is silent', now: T0 + MIN });
+    });
+    assert.deepEqual(readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).kind), ['inn-answer', 'watch_fired']);
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(join(dir, 'git-calls'))}\nexit 1\n`);
+    chmodSync(join(bin, 'git'), 0o755);
+    const colly = join(dir, 'colly-state');
+    const r = spawnSync(join(factory, 'bin/factory-events'), ['--file', file], { encoding: 'utf8', timeout: 5000, env: { ...eventsEnv(colly), PATH: `${bin}:${process.env.PATH}`, FACTORY_EVENTS_RETRY_MS: '200' } });
+    assert.equal(r.status, 0, `${r.error?.code ?? ''} ${r.stderr}`);
+    assert.deepEqual(r.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).key), ['watch_fired a']);
+    assert.ok(!existsSync(join(dir, 'git-calls')), 'no git call');
+  });
+});
+
+test('factory-events --file refuses a share in a folder of another user, through a link, or in a file others can write, in one line', () => {
+  withDir((dir) => {
+    const { mine, theirs } = plantings(dir);
+    const colly = join(dir, 'colly-state');
+    // Only this user may own the share here: the agents' user is one that does not exist.
+    const run = (file, timeout = 10_000) => spawnSync(join(factory, 'bin/factory-events'), ['--follow', '--file', file], { encoding: 'utf8', timeout, env: { ...eventsEnv(colly), FACTORY_HOST_USER: 'nobody-here-fac43' } });
+    const cases = [
+      [join(dir, 'linked/target.jsonl'), /folder is a link/],
+      [join(mine, 'planted.jsonl'), /file is a link/],
+      [join(mine, 'open.jsonl'), /file is writable by others \(mode 664\)/],
+      ...theirs,
+    ];
+    for (const [file, why] of cases) {
+      const r = run(file);
+      assert.equal(r.status, 2, `${file}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, new RegExp(`${why.source}; not followed`));
+      assert.equal(r.stdout, '');
+    }
+    assert.ok(!existsSync(colly), 'a refused share moves no cursor');
+    assert.equal(run(join(mine, 'target.jsonl'), 1500).error?.code, 'ETIMEDOUT', 'a good share in the same folder is followed, not refused');
   });
 });

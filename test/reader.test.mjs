@@ -653,13 +653,16 @@ test('an event that quotes a seat\'s StructuredOutput report is kept by the quot
 
 // ---- the pass: lock and crash ---------------------------------------------------------------------------------------------
 
-test('a pass writes reader/last.json with its counts, a crashed one too, and one that found the lock taken writes nothing', async () => {
+test('a pass writes reader/last.json with its counts and appends them to reader/passes.jsonl, a crashed one too, and one that found the lock taken writes nothing', async () => {
   await withDir(async (dir) => {
     const w = world(dir);
     const last = () => JSON.parse(readFileSync(join(w.state, 'reader/last.json'), 'utf8'));
+    // #476 acceptance 4: a day's calls and characters are the sum of its lines.
+    const passes = () => (existsSync(join(w.state, 'reader/passes.jsonl')) ? readFileSync(join(w.state, 'reader/passes.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
     w.put(w.seatFile(), '');
     await w.pass({ now: T0 });
     assert.deepEqual(last(), { at: new Date(T0).toISOString(), status: 'ok', calls: 0, events: 0, failed: [], chars: 0 });
+    const first = last();
     appendFileSync(w.seatFile(), fixture('seat-report.jsonl'));
     w.answer({ events: [
       { kind: 'admits-mistake', session: 'issue-333 fix9', quote: 'I ran the full suite once although the brief said not to.', why: 'w' },
@@ -669,17 +672,21 @@ test('a pass writes reader/last.json with its counts, a crashed one too, and one
     const sent = w.calls()[0].input.length;
     assert.ok(sent > 0);
     assert.deepEqual(last(), { at: new Date(T0 + 15 * MIN).toISOString(), status: 'ok', calls: 1, events: 1, failed: ['answer'], chars: sent });
+    const second = last();
+    assert.deepEqual(passes(), [first, second], 'one line a pass, in order');
     const { takeLock } = await import('../bin/lib/queue.mjs');
     const mine = takeLock(join(w.state, 'reader.lock'));
     assert.ok(mine);
     assert.equal((await w.pass({ now: T0 + 30 * MIN })).status, 'running');
     assert.equal(last().at, new Date(T0 + 15 * MIN).toISOString(), 'a pass that found the lock taken wrote nothing');
+    assert.equal(passes().length, 2, 'nor appended a line');
     rmSync(join(w.state, 'reader.lock'));
     rmSync(join(w.state, 'reader/cursors.json'));
     mkdirSync(join(w.state, 'reader/cursors.json'));
     const r = await w.pass({ now: T0 + 45 * MIN });
     assert.equal(r.status, 'crashed');
     assert.deepEqual(last(), { at: new Date(T0 + 45 * MIN).toISOString(), status: 'crashed', calls: 0, events: 0, failed: [], chars: 0 });
+    assert.deepEqual(passes(), [first, second, last()], 'a crashed pass is a line too');
   });
 });
 
@@ -742,17 +749,20 @@ test('a pass reads only the runs folder: a profile folder beside it is never lis
 
 // ---- the two writers ------------------------------------------------------------------------------------------------------
 
-test('the sweep and the reader write the events file in turn: no seq repeats, none is lost', async () => {
+test('the sweep and the reader write the events file in turn: no seq repeats, none is lost, and the share gets the same bytes', async () => {
   await withDir(async (dir) => {
     const state = join(dir, 'state');
     mkdirSync(state);
+    // FAC-43: the MacBook's share, written under the same lock, so three writers at once leave it equal to events.jsonl.
+    mkdirSync(join(dir, 'Shared'));
+    const share = join(dir, 'Shared/factory/events.jsonl');
     const events = pathToFileURL(join(factory, 'bin/lib/events.mjs')).href;
     const script = (body) => `import * as e from ${JSON.stringify(events)};\n${body}`;
     const N = 40;
     const readerCode = script(`for (let i = 0; i < ${N}; i += 1) e.appendStart({ state: ${JSON.stringify(state)}, kind: 'drift', key: 'drift s' + i, text: 'line ' + i });`);
     const sweepCode = script(`for (let i = 0; i < ${N}; i += 1) e.record({ state: ${JSON.stringify(state)}, found: [{ key: 'gh-refused', scope: 'gh', text: 'x' }, { key: 'out-of-quota ' + i, scope: 'quota', text: 'q' + i }], read: new Set(['gh', 'quota']), now: 1000 + i });`);
     const run = (code) => new Promise((res) => {
-      const c = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'inherit', 'inherit'] });
+      const c = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'inherit', 'inherit'], env: { ...process.env, FACTORY_EVENTS_SHARE: share } });
       c.once('exit', (status) => res(status));
     });
     const codes = await Promise.all([run(readerCode), run(readerCode), run(sweepCode)]);
@@ -767,6 +777,7 @@ test('the sweep and the reader write the events file in turn: no seq repeats, no
     assert.equal(lines.filter((l) => l.kind === 'out-of-quota' && l.type === 'start').length, N);
     assert.equal(JSON.parse(readFileSync(join(state, 'events-active.json'), 'utf8')).seq, lines.length);
     assert.ok(!existsSync(join(state, 'events.lock')), 'the lock is released');
+    assert.equal(readFileSync(share, 'utf8'), readFileSync(join(state, 'events.jsonl'), 'utf8'), 'the share holds the same lines in the same order');
   });
 });
 

@@ -2,16 +2,14 @@
 // pull request, or opens one, and takes the next step; it refuses a wrong step with the reason. See scripts/ship.
 import { execFileSync, spawnSync } from 'node:child_process';
 import console from 'node:console';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { driverAt } from './driver.mjs';
 import { subjectProblem, titleProblem } from '../../.gate/bin/lib/subject.mjs';
 
 // The template's issue lines. A body for a repository on Linear carries `Fixes <KEY>` and `Issue: <KEY>` in their place and passes (#404).
 const PLACEHOLDER = '<issue labelled task>';
-const FIELDS = 'number,title,url,baseRefName,baseRefOid,headRefOid,labels,isDraft,autoMergeRequest,statusCheckRollup';
+const FIELDS = 'number,title,url,baseRefName,headRefOid,labels,isDraft,autoMergeRequest,statusCheckRollup';
 // gh pr merge --auto merges these outright, whatever the repository's auto-merge setting.
 const READY = ['CLEAN', 'HAS_HOOKS', 'UNSTABLE'];
 
@@ -88,42 +86,6 @@ function tierWait(pr) {
   return !(tier && (tier.conclusion === 'SUCCESS' || tier.state === 'SUCCESS'));
 }
 
-/** Main's driver at the pull request's base: an object, null when main names none, undefined when the base is not here. */
-function driverOf(pr) {
-  const here = () => quietGit(['cat-file', '-e', `${pr.baseRefOid}^{commit}`]);
-  if (!here()) spawnSync('git', ['fetch', '--quiet', 'origin', pr.baseRefName], { stdio: 'ignore' });
-  return here() ? driverAt(pr.baseRefOid) : undefined;
-}
-
-const noteLine = (head) => `not run as a user: no driver (head ${head})`;
-
-/**
- * The pull request's head and its author, and whether a note for that head stands: a comment by the pull request's
- * author, the agents' login, as live-verify's coverage counts a verdict, never edited since (gh's includesCreatedEdit),
- * whose first line is exactly the note. The head is gh's headRefOid, the head coverage() judges a verdict on, not the local
- * HEAD. Anyone can comment, so any other comment, an edited one included, stands for nothing.
- */
-function noteOf(n) {
-  const view = JSON.parse(gh(['pr', 'view', String(n), '--json', 'author,headRefOid,comments']));
-  const author = String(view.author?.login ?? '');
-  const stands = Boolean(author) && (view.comments ?? []).some((c) => (
-    String(c.author?.login ?? '').toLowerCase() === author.toLowerCase() &&
-    c.includesCreatedEdit === false &&
-    String(c.body ?? '').replace(/\r/g, '').split('\n')[0] === noteLine(view.headRefOid)
-  ));
-  return { head: view.headRefOid, author, stands };
-}
-
-function postNote(n, head) {
-  const dir = mkdtempSync(join(tmpdir(), 'ship-'));
-  try {
-    writeFileSync(join(dir, 'note.md'), `${noteLine(head)}\n\n.gate/driver.json on main names no driver, so no live verdict was run. The ledger counts this head as a miss.\n`);
-    gh(['pr', 'comment', String(n), '--body-file', join(dir, 'note.md')]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
 function step(pr, head, branch, stacks, merge, drafts) {
   const n = pr.number;
   const short = head.slice(0, 7);
@@ -138,27 +100,14 @@ function step(pr, head, branch, stacks, merge, drafts) {
     git(['fetch', '--quiet', 'origin', 'main']);
     if (merge === 'merge' && !parents.some((p) => quietGit(['merge-base', '--is-ancestor', p.headRefOid, 'origin/main'])))
       return say(0, `#${n} waits for its parent ${pr.baseRefName} in origin/main; nothing was armed`);
-    if (head !== pr.headRefOid) return say(1, `refused: HEAD ${short} is not the pull request's head; pull or push so they agree`);
-    if (git(['status', '--porcelain'])) return say(1, 'refused: commit or remove what git status shows before restacking');
-    if (merge === 'squash') {
-      if (!quietGit(['cat-file', '-e', `${parents[0].headRefOid}^{commit}`]))
-        git(['fetch', '--quiet', 'origin', parents[0].headRefOid]);
-      git(['rebase', '--onto', 'origin/main', parents[0].headRefOid]);
-      gh(['pr', 'edit', String(n), '--base', 'main']);
-      return say(0, `retargeted #${n} to main and rebased onto origin/main; push with --force-with-lease, then run ship again`);
-    }
+    // Only the move, which GitHub makes itself where the parent's branch is deleted on merge: the queue then merges main into the child,
+    // by a merge for either method, never a rewrite.
     gh(['pr', 'edit', String(n), '--base', 'main']);
-    git(['merge', '--no-ff', '--no-edit', 'origin/main']);
-    // live-verify --covered compares the new base/head patch-id with the old verdict on the next run.
-    return say(0, `retargeted #${n} to main and merged origin/main; push HEAD, then run ship again`);
+    return say(0, `retargeted #${n} to main; the queue merges main into it, then pull before your next commit and run ship again`);
   }
   const problem = titleProblem(pr.title) || (merge === 'squash' && subjectProblem(`${pr.title} (#${n})`));
   if (problem) return say(1, `refused title for #${n}: ${problem}`);
   if (drafts === 'landable' && pr.isDraft) return say(0, `#${n} waits for verify and no conflict; the queue marks it ready and arms auto-merge`);
-  const driver = driverOf(pr);
-  if (driver === undefined) return say(2, `could not read .gate/driver.json: the base ${String(pr.baseRefOid).slice(0, 7)} is not here and could not be fetched`);
-  const covered = () => (driver ? spawnSync('scripts/live-verify', ['--covered', String(n)], { stdio: 'ignore' }).status === 0 : noteOf(n).stands);
-  const how = driver ? 'a live verdict covers it' : 'a no-driver note covers it';
   const known = quietGit(['cat-file', '-e', `${pr.headRefOid}^{commit}`]);
   const ahead = head !== pr.headRefOid && known && !quietGit(['merge-base', '--is-ancestor', head, pr.headRefOid]);
 
@@ -167,42 +116,19 @@ function step(pr, head, branch, stacks, merge, drafts) {
     return say(0, `disarmed #${n}: ${why}`);
   };
   if (armed && ahead) return disarm(`HEAD ${short} is past what was verified; push it, then run ship again`);
-  if (armed && !covered()) return disarm(`no ${driver ? 'live verdict' : 'no-driver note'} covers HEAD ${short}; run ship again once it is pushed`);
 
   if (pr.labels.some((l) => l.name === 'needs-human')) return say(1, `stopped on #${n}: it carries needs-human; the Human decides`);
   const wait = tierWait(pr);
   if (typeof wait === 'string') return say(2, `could not judge the tier (${wait})`);
   const stop = () => (wait ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval (unless the merge switch is at all)`) : 0);
-  if (armed) return stop() || say(0, `#${n} is armed and ${how}; nothing to do`);
+  if (armed) return stop() || say(0, `#${n} is armed; nothing to do`);
   if (ahead) return say(1, `refused: HEAD ${short} has commits #${n} lacks; git push first`);
 
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);
 
-  // No driver: live-verify would only answer BLOCKED. The note stands for the pull request's head in its place, once, and
-  // the run goes on. Never arm a head nobody checked: a local HEAD that is not the pull request's head is refused, and a
-  // note that does not count once posted (the author is not this login) stops the run before the arming.
-  if (!driver) {
-    const note = noteOf(n);
-    if (note.head !== head) return say(1, `refused: HEAD ${short} is not the pull request's head ${String(note.head).slice(0, 7)}; pull or push so they agree`);
-    if (!note.stands) {
-      postNote(n, note.head);
-      const posted = noteOf(n);
-      if (!posted.stands) return say(1, `stopped on #${n}: the note it posted does not count: the pull request's author (${posted.author}) is not ship's login; nothing was armed`);
-    }
-  } else if (!covered()) {
-    const r = spawnSync('scripts/live-verify', [String(n)], { encoding: 'utf8', maxBuffer: 64 << 20 });
-    process.stdout.write(r.stdout ?? '');
-    process.stderr.write(r.stderr ?? '');
-    if (r.status === 1) return say(1, `refused to arm #${n}: live-verify answered FAIL; fix forward with a red test, then run ship again`);
-    // Exit 2 is BLOCKED, which live-verify says in its first words; any other exit 2 is a run that did not happen.
-    if (r.status === 2 && /^live-verify: BLOCKED\b/m.test(r.stdout ?? ''))
-      return say(2, `stopped on #${n}: live-verify is BLOCKED; put the reason and your recommended answer in the pull request`);
-    if (r.status === 2) return say(2, `live-verify could not run on #${n} (exit 2); nothing was armed`);
-    if (r.status !== 0) return say(2, `could not run: live-verify exited ${r.status ?? r.signal}`);
-  }
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
-  // Read fresh: live-verify may have run for minutes, CI may have ended, and arming a ready pull request would merge it.
+  // Read fresh: CI may have ended, and arming a ready pull request would merge it.
   if (READY.includes(JSON.parse(gh(['pr', 'view', String(n), '--json', 'mergeStateStatus'])).mergeStateStatus))
     return say(1, `stopped on #${n}: it is ready to merge and not armed; the Human merges it`);
   try {
@@ -211,7 +137,7 @@ function step(pr, head, branch, stacks, merge, drafts) {
     if (!String(error.stderr).includes('Auto merge is not allowed for this repository')) throw error;
     return say(1, `stopped on #${n}: auto-merge is off on this repository; the Human merges it`);
   }
-  say(0, driver ? `armed #${n}: a live PASS covers HEAD ${short}` : `armed #${n}: not run as a user, no driver; the note covers HEAD ${short}`);
+  say(0, `armed #${n} at HEAD ${short}`);
   return stop();
 }
 

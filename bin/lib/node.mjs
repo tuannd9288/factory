@@ -7,8 +7,11 @@ import { join } from 'node:path';
 import { checkoutRoot } from './checkout.mjs';
 import { readTokenFile, tokenDir } from './token.mjs';
 
-/** The factory host is where the command runs as the host's user: FACTORY_HOST_USER, `factory` unless the setting names another. */
-export const placeOf = (env = process.env) => (userInfo().username === (env.FACTORY_HOST_USER || 'factory') ? 'factory' : 'macbook');
+/** Whether this process runs as the agents' macOS user: FACTORY_HOST_USER, `factory` unless the setting names another (#366). */
+export const isAgentsUser = (env = process.env) => userInfo().username === (env.FACTORY_HOST_USER || 'factory');
+
+/** The factory host is where the command runs as the agents' user. */
+export const placeOf = (env = process.env) => (isAgentsUser(env) ? 'factory' : 'macbook');
 
 /** Where this machine's installed copy of the factory is (#390): $FACTORY_CHECKOUT; on the factory host ~/WORKSPACES, as the queue's
  * checkoutRoot has it; on the MacBook ${XDG_DATA_HOME:-~/.local/share}/factory/checkout, outside the folders macOS refuses a launchd job.

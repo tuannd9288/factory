@@ -1,16 +1,20 @@
 // The factory's one way to reach Linear as the "Factory" app (#403, sublayer 1b): the only code that talks to Linear's API. The Lead's reads and
 // writes (#404), the sweep's readers (#405) and the daemon's listener (#414) all come through here.
 // Decision verbs (#365, sublayer 1e) use Colly instead: read tokens/colly for each request, with no mint or Factory fallback.
-//   One token source. Two tokens minted from one app can revoke each other (seen 2026-11-04: a read-scoped token died when another was minted,
-//   4002 "You need to authenticate"), so there is one token, minted with one fixed set of scopes (SCOPES), and every caller reads it from the
-//   store for each request; none keeps its own copy.
+//   One token source on each node. Linear keeps up to 1000 client-credentials tokens of one app alive at once when they share their scopes; a
+//   mint with other scopes, or a rotated client secret, revokes every token of the app (linear.app/developers/oauth-2-0-authentication, "Client
+//   credentials tokens", read 2026-11-07; seen 2026-11-04: a read-scoped token died with 4002 "You need to authenticate" when one with other
+//   scopes was minted). So every token is minted with one fixed set of scopes (SCOPES), each node mints its own, and every caller on a node
+//   reads that node's from the store for each request; none keeps its own copy. A change to SCOPES revokes every node's token at its first
+//   mint, and a node still on the old set mints it back: every node must run the same main.
 //   The store (bin/lib/token.mjs, #311): ~/.agent-profiles/tokens/linear-app/ holds `client-id` and `client-secret` (stored by
 //   `factory login linear-app <client-id|client-secret>`) and `access.json` { token, expiresAt, scope }, each mode 600 in a folder of mode 700.
 //   The folder is no file, so tokenAccounts, accountList, the table of `factory` and `factory use` never see it; the name is refused as an account.
 //   The mint (client credentials, 30 days) runs under tokens/linear-app/mint.lock, a folder made with mkdir. After taking it the caller re-reads
 //   access.json: a token another caller stored meanwhile, and not one this caller found dead, is used and nothing is minted.
-//   Renewal: `renew()` mints when less than RENEW_AHEAD_MS (7 days) is left. The daemon's pass runs it once a minute (bin/lib/daemon-pass.mjs), so
-//   a token is replaced for every caller long before it ends. A host with no credentials stored is not an error: renew says 'unconfigured'.
+//   Renewal: `renew()` mints when less than RENEW_AHEAD_MS (7 days) is left. Each node's daemon pass runs it once a minute (bin/lib/daemon-pass.mjs),
+//   so a node's token is replaced for every caller on it long before it ends. A node with no credentials stored is not an error: renew says
+//   'unconfigured'.
 //   An authentication failure (HTTP 401, or an error whose code says authentication, or a message that says "authenticate"): the caller re-reads
 //   the store and retries once with a token another caller stored there; if it still fails, it mints once under the lock and retries once; if that
 //   fails too it raises the condition `linear-auth-failed` (a `start` line in events.jsonl and a line in `factory colly --brief`, bin/lib/events.mjs) and
@@ -45,6 +49,17 @@ const LOCK_WAIT_MS = 30_000;
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const first = (error) => String(error?.message ?? error).split('\n')[0];
+
+/** Whether this node's store holds the app's client id and secret (FAC-38): both files present and not empty, in a folder that is no symlink.
+ * Their contents are not read. `factory linear` runs on a node that holds them, else on the factory host. */
+export function appStored(agentProfiles) {
+  const folder = appDir(agentProfiles, APP);
+  try {
+    return !lstatSync(folder).isSymbolicLink() && ['client-id', 'client-secret'].every((name) => statSync(join(folder, name)).size > 0);
+  } catch {
+    return false;
+  }
+}
 
 /** A failure that is Linear's refusal of the token, from the HTTP status and the parsed body. */
 export function isAuthFailure(status, body) {

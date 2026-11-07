@@ -173,7 +173,7 @@ for (const policy of ['absent', 'no-key', 'pstack']) {
       const r = w.sweep();
       assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), policy === 'pstack' ? [] : [
         'pr ready 1 --repo o/factory',
-        'pr merge 1 --repo o/factory --auto --squash',
+        'pr merge 1 --repo o/factory --auto --squash --match-head-commit h1',
         'pr ready 2 --repo o/factory --undo',
         'pr ready 3 --repo o/factory --undo',
       ], r.out);
@@ -191,9 +191,9 @@ test('factory with no driver uses its allowed merge method once per sweep, only 
     const r = w.sweep();
     assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
       'pr ready 1 --repo o/factory',
-      'pr merge 1 --repo o/factory --auto --merge',
+      'pr merge 1 --repo o/factory --auto --merge --match-head-commit h1',
       'pr ready 2 --repo o/factory',
-      'pr merge 2 --repo o/factory --auto --merge',
+      'pr merge 2 --repo o/factory --auto --merge --match-head-commit h2',
     ], r.out);
     assert.deepEqual(r.calls.filter((c) => c.startsWith('repo view')), [
       'repo view o/factory --json squashMergeAllowed,mergeCommitAllowed',

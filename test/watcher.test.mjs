@@ -30,6 +30,37 @@ test('Watcher sends new Codex limit lines through the provider seam once', async
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// 2026-11-06: 92 hand-run Codex seat logs sat at <runs>/star/<name>/run.jsonl, the layout quota.mjs reads, and every reader pass made no call.
+test('a hand-run seat two folders deep is read: its usage limit reaches the events, named by both folders', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'watcher-'));
+  try {
+    const state = join(dir, 'state'), runs = join(dir, 'runs');
+    mkdirSync(join(runs, 'star/peer'), { recursive: true });
+    mkdirSync(join(runs, 'issue-1'), { recursive: true });
+    mkdirSync(join(state, 'reader'), { recursive: true });
+    writeFileSync(join(state, 'reader/cursors.json'), '{}');
+    writeFileSync(join(runs, 'star/peer/run.jsonl'), JSON.stringify({ type: 'turn.failed', error: { message: "You've hit your usage limit." } }) + '\n');
+    writeFileSync(join(runs, 'issue-1/run-peer.jsonl'), JSON.stringify({ type: 'turn.completed' }) + '\n');
+    // A pack Lead's worktree w/ and a Lead's transcripts/ are no seat folders: a product repository's run.log at the worktree's root, or a
+    // file of that name among the transcript copies, is not a seat stream.
+    mkdirSync(join(runs, 'issue-1/w'), { recursive: true });
+    mkdirSync(join(runs, 'app-lead/transcripts'), { recursive: true });
+    writeFileSync(join(runs, 'issue-1/w/run.log'), 'a product repository log\n');
+    writeFileSync(join(runs, 'app-lead/transcripts/run.log'), 'not a seat\n');
+    let sessions = [];
+    const provider = async ({ args }) => {
+      const input = readFileSync(args.find((a) => a.startsWith('@')).slice(1), 'utf8');
+      sessions = [...input.matchAll(/^### (.+)$/gm)].map((m) => m[1]);
+      return { ok: true, stdout: JSON.stringify({ events: [{ kind: 'limit', session: 'star/peer run', quote: "You've hit your usage limit.", why: 'The seat cannot continue.' }] }) };
+    };
+    assert.equal((await runPass({ state, runs, env: {}, provider })).events, 1);
+    assert.deepEqual(sessions.sort(), ['issue-1 peer', 'star/peer run'], 'a one-level seat and a two-level one, each its own session');
+    const [event] = readFileSync(join(state, 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(event.stream, 'star/peer/run.jsonl');
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(state, 'reader/cursors.json'), 'utf8'))).sort(), ['issue-1/run-peer.jsonl', 'star/peer/run.jsonl']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('all required signals retain evidence; ordinary lines, invalid quotes and duplicate reports do not wake', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'watcher-'));
   try {
@@ -109,6 +140,8 @@ test('a finished Lead silent for 15 minutes fires once, names quiet seats, and r
     const put = (file, text, at) => { writeFileSync(file, text); utimesSync(file, at / 1000, at / 1000); };
     put(lead, line('Finished the first task.'), t);
     put(join(runs, 'quiet/run.jsonl'), 'quiet seat\n', t);
+    mkdirSync(join(runs, 'star/peer'), { recursive: true });
+    put(join(runs, 'star/peer/run.jsonl'), 'quiet hand-run seat\n', t);
     put(join(runs, 'active/run.jsonl'), 'active seat\n', t + window / 2);
     const reader = await runPass({ state, runs, now: t + window, env: {}, provider: async () => {
       assert.fail('the initial model pass must only set its cursors');
@@ -122,7 +155,7 @@ test('a finished Lead silent for 15 minutes fires once, names quiet seats, and r
     assert.equal(readFileSync(join(state, 'reader/started'), 'utf8'), `${t + window}\n`, 'silence checks never start a model pass');
     const events = () => readFileSync(join(state, 'events.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).filter((e) => e.kind === 'watch_fired');
     assert.match(events()[0].quote, /Finished the first task/);
-    assert.deepEqual(events()[0].seats, ['quiet/run.jsonl']);
+    assert.deepEqual(events()[0].seats, ['quiet/run.jsonl', 'star/peer/run.jsonl']);
     assert.equal((await pass(t + 2 * window)).events, 0);
     // Durable event deduplication also survives loss of the observation cache.
     rmSync(join(state, 'reader/silence.json'));
