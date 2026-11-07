@@ -97,19 +97,13 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
     for (const command of ['factory account add colly', 'factory account remove ann', 'factory store ann', 'bin/factory account add ann --node macbook', 'node bin/lib/factory.mjs account remove ann', 'node bin/lib/factory.mjs store ann'])
       assert.ok(deny.some((r) => bashMatches(r, command)), command);
     // Its shell runs in Claude Code's sandbox with no network (FAC-79 (b)): it reads none of the list's shell paths, writes only its folder
-    // and the temporary folder, and runs only `factory` outside it, and the Monitor lines its role gives it, exactly.
+    // and the temporary folder, and runs only `factory` outside it, its Monitors (`factory events`) included.
     assert.deepEqual(settings.sandbox, {
       enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
       filesystem: { denyRead: sandboxPaths(state, join(state, '.agent-profiles')), allowWrite: [process.cwd(), fs.realpathSync(tmpdir())] },
       network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
       excludedCommands: ['factory *'],
     });
-    role = read(new URL('../packs/colly/colly.md', import.meta.url), 'utf8');
-    assert.equal(await main(['colly'], env), 0);
-    const mini = 'ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 factory@tuans-mac-mini /Users/factory/WORKSPACES/bin/factory-events --follow';
-    const book = '~/.local/share/factory/checkout/bin/factory-events --follow --file /Users/Shared/factory/events.jsonl';
-    assert.deepEqual(JSON.parse(calls.at(-1).args[calls.at(-1).args.indexOf('--settings') + 1]).sandbox.excludedCommands,
-      ['factory *', mini, `${mini} --after *`, book, `${book} --after *`]);
     result = { status: 7 };
     assert.equal(await main(['colly'], env), 7);
     result = { error: { code: 'ENOENT' } };

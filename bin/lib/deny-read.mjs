@@ -21,12 +21,11 @@
 //   verb and every program a verb runs would read what the user reads. The seats exclude none and set allowUnsandboxedCommands false (their
 //   sandbox object is pinned whole in test/seat-sandbox.test.mjs), but a work folder's own .claude/settings.json is a settings layer too.
 //   Open gaps of the MacBook Lead's and Colly's sandboxes (bin/lib/factory.mjs), each until its probe shows it bounded:
-//     `factory *` (both): every verb runs with full access; the permission rules (tokenStoreDeny and Colly's denies) are the only guard
-//       left on the verbs that touch the token store.
+//     `factory *` (both): every verb runs with full access, Colly's Monitors (`factory events`) among them; the permission rules
+//       (tokenStoreDeny and Colly's denies) are the only guard left on the verbs that touch the token store, and `factory gh`, with the
+//       agents' GitHub token in this node's store, sends a local file it is given.
 //     `<bin/seat> *` (the MacBook Lead as the agents' user): bin/seat reads the tokens by design, and it takes any file as the brief, so a
 //       brief outside the work and run folders reaches the model; the probe is a seat started on a synthetic denied file.
-//     Colly's two Monitor lines from packs/colly/colly.md, exactly, each with ` --after *`: the Mac mini's ssh and the MacBook's
-//       bin/factory-events, which writes its cursor in the state folder.
 //   Not here: commands (`Bash(...)` rules, bin/lib/seat.mjs); the gate's reviewer on CI, which denies the runner's system folders
 //   (kit/.gate/bin/lib/claude-reviewer.mjs).
 export const SCOPES = {

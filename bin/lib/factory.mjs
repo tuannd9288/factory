@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { HOST, TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
+import { MACBOOK_SHARE } from './events.mjs';
 import { liveOfAccount, sandboxSettings, tokenStoreDeny } from './seat.mjs';
 import { readRules } from './deny-read.mjs';
 import { markOnboarded, quote, roleFor, copyHook } from '../../packs/pstack/bin/lead.mjs';
@@ -375,7 +376,8 @@ const USAGE = `usage: bin/factory account list [--all] [--json]
        bin/factory gh <gh arguments>   (under the agents' login: here, with this node's stored agents GitHub token; otherwise, on the MacBook, on the Mac mini)
        bin/factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; here when this node's store holds the Factory app's credentials, else on the Mac mini, a body on stdin; decision-create and decision-close always on the Mac mini)
        bin/factory codex --role <role> [--effort <e>] [--write <folder>]   (a pstack step on another model family, on Codex, #182; the brief on stdin)
-       bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
+       bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)
+       bin/factory events --follow [--local] [--after <seq>]   (Colly's Monitor on the events: the Mac mini's, by ssh from the MacBook; with --local, this MacBook's share)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
  * -t asks for a terminal of its own. The exit code is the remote command's. */
@@ -505,7 +507,7 @@ const autoModeEnvironment = (seat) => [
 // the built-in entries.
 const COLLY_AUTO_MODE_ENVIRONMENT = [
   '$defaults',
-  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). Colly, the Human's own assistant on this MacBook, runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list) and its watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow. It also watches this MacBook's own events with ~/.local/share/factory/checkout/bin/factory-events --follow --file /Users/Shared/factory/events.jsonl, which only reads the share the MacBook's daemon writes.`,
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). Colly, the Human's own assistant on this MacBook, runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list, events), its watch of the factory's events among them, which it starts with factory events --follow. It also watches this MacBook's own events with factory events --follow --local, which only reads the share the MacBook's daemon writes.`,
   `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login, on ${HOST} over ssh factory@${HOST}, or on this MacBook itself when its token store holds the agents' GitHub token; factory linear runs on this MacBook itself when its token store holds the Factory app's credentials, else on ${HOST}, and decision-create and decision-close always run on ${HOST}; factory wake runs on ${HOST}. On the Human's spoken word Colly runs factory use and factory lead; factory account add, factory account remove and factory store are the Human's, never Colly's.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it. Colly reads them, and reads and writes their issues and pull requests only through factory gh, as the agents. Colly pushes nothing and makes no source-control write of its own: its git cannot push to GitHub, and a git push, a force push, or a branch or tag write by Colly is never routine.`,
 ];
@@ -566,6 +568,44 @@ async function wake(args, env) {
   return 1;
 }
 
+/** `factory events --follow [--local] [--after <seq>]` (FAC-79 (b)): Colly's two Monitors on the events, so that Colly's sandbox excludes
+ * them as `factory *` and no raw ssh line, whose words the Mac mini's shell would run. It adds nothing to bin/factory-events: from the
+ * MacBook, `factory events --follow` on the Mac mini by ssh (remote), which there runs bin/factory-events --follow on its own events; with
+ * --local, bin/factory-events --follow on this MacBook's share, the fixed MACBOOK_SHARE. Only these words pass, each once, and --after only
+ * with a whole number, so no text of the caller's reaches a shell; anything else is refused in one line before ssh runs. */
+function events(args, env) {
+  const seen = new Set();
+  let after = null;
+  let ok = true;
+  for (let i = 0; i < args.length && ok; i++) {
+    const flag = args[i];
+    ok = ['--follow', '--local', '--after'].includes(flag) && !seen.has(flag);
+    seen.add(flag);
+    if (ok && flag === '--after') {
+      after = args[++i] ?? '';
+      ok = /^\d+$/.test(after) && Number.isSafeInteger(Number(after));
+    }
+  }
+  if (!ok || !seen.has('--follow')) {
+    console.error('bin/factory: events takes --follow, and --local and --after <a whole number>, each once');
+    return 2;
+  }
+  const local = seen.has('--local');
+  const onHost = placeOf(env) === 'factory';
+  if (local && onHost) {
+    console.error('bin/factory: events --local reads the MacBook\'s share; on the Mac mini use factory events --follow');
+    return 2;
+  }
+  const rest = after === null ? [] : ['--after', after];
+  if (!local && !onHost) return remote('events', ['--follow', ...rest], env);
+  const r = spawnSync(fileURLToPath(new URL('../factory-events', import.meta.url)), ['--follow', ...(local ? ['--file', MACBOOK_SHARE] : []), ...rest], { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: events: bin/factory-events did not run (${r.error.code ?? 'error'})`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
 /** Copies bin/lib/<name>.mjs (socket-hook, statusline-hook) to <dir>/<name>-<sha7 of its bytes>.mjs unless a copy is there (reused, never
  * written again), and returns the path. A changed script has another name, so an earlier copy stays for the Leads that run it; each
  * imports only node: modules. */
@@ -614,10 +654,6 @@ const hereSandbox = ({ home, cwd, profiles, writes = null, hosts = [], excluded 
   const base = sandboxSettings({ home, run: writes, work: cwd, profiles: resolve(profiles) });
   return { ...base, excludedCommands: excluded, network: { ...base.network, allowedDomains: hosts } };
 };
-
-/** The lines colly.md gives Colly for its Monitors on the events (`…bin/factory-events --follow…`, in backticks), as the role text it is
- * started with has them: they are written only there, so its sandbox's exclusions are read from that text and follow it. */
-export const collyMonitors = (roleText) => [...roleText.matchAll(/`([^`]*bin\/factory-events --follow[^`]*)`/g)].map((m) => m[1]);
 
 /** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
  * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
@@ -900,12 +936,8 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
       ],
     },
     // Its shell runs in Claude Code's sandbox with no network (FAC-79 (b)). `factory` reaches the Mac mini by ssh, which the sandbox refuses,
-    // and so does one of its two Monitors; the other writes its cursor in the state folder. So `factory` and those two lines, exactly, with
-    // the `--after <seq>` they restart with, run outside it.
-    sandbox: hereSandbox({
-      home: env.HOME, cwd: process.cwd(), profiles: agentProfiles,
-      excluded: ['factory *', ...collyMonitors(roleText).flatMap((line) => [line, `${line} --after *`])],
-    }),
+    // and writes the state folder, as its Monitors do (`factory events`), so `factory` alone runs outside it.
+    sandbox: hereSandbox({ home: env.HOME, cwd: process.cwd(), profiles: agentProfiles, excluded: ['factory *'] }),
   };
   // /login is the only sign-in: no token or key from the caller's shell, and no other profile's plugin cache.
   const childEnv = { ...env, CLAUDE_CONFIG_DIR: config };
@@ -1188,14 +1220,14 @@ async function store(args, env) {
 
 /** How long ssh may run for a command: none for `use`, whose restart waits up to ten minutes for a busy Lead (`ConnectTimeout`
  * already covers a Mac mini that cannot be reached); 60 seconds for every other. */
-export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
+export const remoteTimeout = (cmd) => (cmd === 'use' || cmd === 'events' ? undefined : 60000);
 
 /** `use` from the MacBook runs on the Mac mini: the arguments are checked here first (a row is a number,
  * a letter is a to z, an account matches the account pattern), then the host runs the command in a login shell over ssh, on the
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
 function remote(cmd, args, env) {
-  const bad = cmd === 'wake'
-    ? null // checked by wake() before it comes here
+  const bad = cmd === 'wake' || cmd === 'events'
+    ? null // checked by wake() and events() before it comes here
     : cmd === 'use'
     ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) && !parseTeam(args[0]) ? 'the row is a number or <repo>-<team>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
     : (args.length === 1 ? accountRefusal(args[0]) : 'account remove takes one account');
@@ -1204,7 +1236,9 @@ function remote(cmd, args, env) {
     return 2;
   }
   const tty = cmd === 'use' && args.length < 2;
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: remoteTimeout(cmd), killSignal: 'SIGKILL' });
+  // A Monitor that follows the events ends when the link dies, so Colly starts it again with --after.
+  const keepAlive = cmd === 'events' ? ['-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3'] : [];
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...keepAlive, ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: remoteTimeout(cmd), killSignal: 'SIGKILL' });
   if (r.error) {
     console.error(`bin/factory: ${cmd} did not reach the Mac mini: ${r.error.code === 'ETIMEDOUT' ? 'timed out' : (r.error.code ?? 'failed')}`);
     return 1;
@@ -1505,6 +1539,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'linear') return linearCmd(rest, env);
   if (cmd === 'codex') return codexCmd(rest, env);
   if (cmd === 'wake') return wake(rest, env);
+  if (cmd === 'events') return events(rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);
     return 2;

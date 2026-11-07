@@ -820,6 +820,21 @@ test('wake refuses a bad repository, issue or team, a flag twice and any other w
   }
 });
 
+test('events sends the Mac mini only the words it checked, and refuses any other text before any ssh (FAC-79 (b))', () => {
+  const s = world();
+  try {
+    // The fake ssh runs the remote command through a shell, as the Mac mini's does: text that reached it would make the marker.
+    const marker = join(s.dir, 'marker');
+    for (const args of [['--follow', '--after', `1; touch ${marker}`], ['--follow', '--file', marker]]) assert.equal(s.fac(['events', ...args]).code, 2, args.join(' '));
+    assert.equal(existsSync(marker), false);
+    assert.equal(s.calls(), '', 'no ssh call');
+    s.fac(['events', '--follow', '--after', '5']);
+    assert.equal(s.calls(), "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory events --follow --after 5'\n");
+  } finally {
+    s.done();
+  }
+});
+
 test('gh on the factory host runs gh itself, unchanged: no ssh, and no refusal', () => {
   const s = world();
   try {
