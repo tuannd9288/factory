@@ -15,6 +15,9 @@ import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readClaude } from './claude-code.mjs';
+
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
+export { readClaude };
 import { HOST, TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';

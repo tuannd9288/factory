@@ -6,12 +6,12 @@
 // See bin/factory-ledger for the arguments.
 import { revertedTitle } from '../../kit/.gate/bin/lib/subject.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
-import { STALE_RUN, assistantEntries, inspect } from './claude-code.mjs';
+import { STALE_RUN, assistantEntryOf, canaryOf } from './claude-code.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
@@ -19,8 +19,45 @@ import { job, plist } from './queue.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
 
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import them from here.
+export { READS, costOf } from './claude-code.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 export const REQUIRED = requiredChecks(join(here, '../../kit'));
+
+/** The session files under a folder, at any depth. */
+function jsonlFiles(dir) {
+  const out = [];
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      const p = join(d, name);
+      const s = statSync(p);
+      if (s.isDirectory()) walk(p);
+      else if (name.endsWith('.jsonl')) out.push(p);
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return out;
+}
+
+/** Every assistant entry with usage in a profile folder's session files, in file order, as claude-code.mjs's entryOf gives it. */
+function* assistantEntries(profileDir) {
+  for (const file of jsonlFiles(join(profileDir, 'projects'))) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const entry = assistantEntryOf(line);
+      if (entry) yield entry;
+    }
+  }
+}
+
+/** The canary (claude-code.mjs's canaryOf) over the session files of the profile folders, oldest first by modification time. */
+export function inspect(profileDirs, { latest = 50 } = {}) {
+  const dated = [];
+  for (const dir of profileDirs)
+    for (const file of jsonlFiles(join(dir, 'projects'))) dated.push({ file, time: statSync(file).mtimeMs });
+  dated.sort((a, b) => a.time - b.time);
+  return canaryOf(dated.map(({ file }) => ({ file, text: readFileSync(file, 'utf8') })), { latest });
+}
 
 /** The 95% Wilson interval of k successes in n, as fractions; null when n is 0. */
 export function wilson(k, n, z = 1.96) {
