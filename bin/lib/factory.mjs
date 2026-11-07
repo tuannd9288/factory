@@ -721,9 +721,9 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     // would start a seat as that user; FACTORY_HOST_NAME names the factory host's machine (placeOf). So none may carry either; nothing a
     // Lead runs needs them.
     // The session runs as the user of this Mac, so its Read tool is denied the seats' DENY_READ (ssh, gh's login, Claude's and Codex's
-    // folders, the profiles), not only the profiles (FAC-38); its own config folder is under the profiles, already denied, which Claude Code
-    // reads itself and the Read tool never needs.
-    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...denyReadRules, `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
+    // folders, the profiles), not only the profiles (FAC-38), and, as the seats' Read tool is, all of ~/.config and the work folder's .env
+    // files; its own config folder is under the profiles, already denied, which Claude Code reads itself and the Read tool never needs.
+    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...denyReadRules, 'Read(~/.config/**)', 'Read(./.env*)', `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -869,9 +869,10 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
       allow: ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)'],
       // The token store holds the teams' Claude tokens and the agents' GitHub token: Colly never reads one (INN-31 3A), nor adds,
       // removes or stores one. Not tokenStoreDeny as a whole, which denies factory use, a command INN-30 allows Colly. Its Read tool is
-      // denied the seats' DENY_READ, as the MacBook Lead's is (FAC-38); its own profile is under the state folder, which none of it names.
+      // denied the seats' DENY_READ, all of ~/.config and the work folder's .env files, as the MacBook Lead's is (FAC-38); its own profile is
+      // under the state folder, which none of it names.
       deny: [
-        ...denyReadRules, `Read(/${agentProfiles}/**)`,
+        ...denyReadRules, 'Read(~/.config/**)', 'Read(./.env*)', `Read(/${agentProfiles}/**)`,
         'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
         'Bash(*factory account add*)', 'Bash(*factory account remove*)', 'Bash(*factory store*)',
         'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs account remove*)', 'Bash(*lib/factory.mjs store*)',

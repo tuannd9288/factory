@@ -18,6 +18,7 @@ const DENY = [
   'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', 'Bash(/h/.local/bin/herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'WebFetch', 'WebSearch',
   'Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)',
+  'Read(~/.claude*)', 'Read(~/.claude*/**)', 'Read(~/.codex*)', 'Read(~/.codex*/**)', 'Read(~/.cursor/**)', 'Read(./.env*)',
   'Read(~/factory-runs/*/transcripts/**)',
   'Bash(security:*)', 'Bash(/usr/bin/security:*)',
 ];
@@ -93,10 +94,10 @@ test('with no work folder, the researcher\'s only Edit rule is the run folder\'s
   assert.deepEqual(allowed.filter((r) => r.startsWith('Edit(')), ['Edit(//r/issue-1/**)']);
 });
 
-test('given the profiles folder, every seat adds three deny rules by absolute path: the tokens, the archive and seat 1\'s old file (#178)', async () => {
+test('given the profiles folder, every seat denies it whole and by name the tokens, the archive and seat 1\'s old file (#178), by absolute path', async () => {
   const { buildArgs } = await lib();
   const denied = (args) => args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--output-format'));
-  const rules = [...DENY, 'Read(//p/tokens/**)', 'Read(//p/archive/**)', 'Read(//p/seats/1/oauth-token)'];
+  const rules = [...DENY, 'Read(//p/**)', 'Read(//p/tokens/**)', 'Read(//p/archive/**)', 'Read(//p/seats/1/oauth-token)'];
   for (const seat of [1, 2]) assert.deepEqual(denied(buildArgs({ role: 'worker', run: RUN, home: HOME, seat, profiles: '/p' })), rules, `seat ${seat}`);
   assert.deepEqual(denied(buildArgs({ role: 'worker', run: RUN, home: HOME, seat: 2 })), DENY, 'with no folder given, none');
 });

@@ -17,7 +17,9 @@ test('the plugin cache a seat session uses is outside every folder the deny list
   const { env } = w.saw();
   // Where Claude Code puts the cache: the variable, else a folder of the config dir.
   const cache = env.pluginCache ?? join(env.config, 'plugins');
-  const denied = secretsRead.map((rule) => join(w.home, /^Read\(~\/(.*)\/\*\*\)$/.exec(rule)[1]));
-  assert.equal(denied.length, 6);
-  for (const folder of denied) assert.ok(cache !== folder && !cache.startsWith(folder + sep), `the plugin cache ${cache} is under ${folder}, which the deny list refuses to read`);
+  const denied = secretsRead.map((rule) => /^Read\(~\/(.*)\/\*\*\)$/.exec(rule)?.[1]).filter(Boolean).map((p) => join(w.home, p));
+  assert.ok(denied.includes(join(w.home, '.agent-profiles')));
+  // A glob entry (~/.claude*) refuses every path whose part under home starts with what precedes its *.
+  const under = (folder) => (folder.endsWith('*') ? cache.startsWith(folder.slice(0, -1)) : cache === folder || cache.startsWith(folder + sep));
+  for (const folder of denied) assert.ok(!under(folder), `the plugin cache ${cache} is under ${folder}, which the deny list refuses to read`);
 }));

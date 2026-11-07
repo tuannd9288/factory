@@ -10,7 +10,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from '../packs/pstack/bin/lead.mjs';
 import { main, noPushGitEnv } from '../bin/lib/factory.mjs';
-import { DENY_READ, denyReadRules } from '../bin/lib/seat.mjs';
+import { denyReadRules } from '../bin/lib/seat.mjs';
+import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
 import { HOST_ENV } from './helpers.mjs';
 
 /** Whether a Bash(...) rule matches a command, by the three rules of Claude Code's permissions page ("Wildcard patterns", read 2026-11-06):
@@ -74,10 +75,15 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
     assert.ok(!settings.autoMode.environment.some((e) => /Pushes to them go/.test(e)), 'no source-control write is routine for Colly');
     assert.ok(settings.autoMode.environment.some((e) => /Colly pushes nothing/.test(e)));
     assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)']);
-    // Its Read tool is denied each folder the seats' sandbox denies, ssh and gh's login among them (FAC-38).
-    for (const d of DENY_READ) for (const rule of [`Read(~/${d})`, `Read(~/${d}/**)`]) assert.ok(settings.permissions.deny.includes(rule), rule);
+    // Its Read tool refuses each protected category and still reads what the work needs (FAC-38, INN-39).
+    const w = probeWorld();
+    try {
+      assert.deepEqual(mismatches({ 'colly file': (p) => refusedRead(settings.permissions.deny, p, w) }, w), []);
+    } finally {
+      w.done();
+    }
     assert.deepEqual(settings.permissions.deny, [
-      ...denyReadRules, `Read(/${join(state, '.agent-profiles')}/**)`,
+      ...denyReadRules, 'Read(~/.config/**)', 'Read(./.env*)', `Read(/${join(state, '.agent-profiles')}/**)`,
       'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
       'Bash(*factory account add*)', 'Bash(*factory account remove*)', 'Bash(*factory store*)',
       'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs account remove*)', 'Bash(*lib/factory.mjs store*)',
