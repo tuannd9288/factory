@@ -3,7 +3,7 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { factory, git } from '../../../test/helpers.mjs';
@@ -180,4 +180,29 @@ test('--write gives Codex workspace-write in a folder of the repository, and ref
   const r = w.run(['--role', 'arena-runner', '--write', outside]);
   assert.equal(r.code, 2, r.out + r.err);
   assert.equal(w.execs().length, 2, 'no third exec');
+});
+
+test('--brief-file reads the brief from a file of the repository or the temporary folder, and refuses one a seat could not read', () => {
+  // A seat's sandbox runs factory codex outside it only with no redirect or pipe in the call, so a seat passes its brief as a file.
+  const w = world();
+  const inTmp = join(realpathSync(tmpdir()), `codex-step-brief-${process.pid}.md`);
+  writeFileSync(inTmp, 'Judge the brief from the temporary folder.\n');
+  dirs.push(inTmp);
+  writeFileSync(join(w.repo, 'brief.md'), 'Judge the brief from the repository.\n');
+  assert.equal(w.run(['--role', 'arena-runner', '--brief-file', inTmp], { input: '' }).code, 0);
+  assert.equal(w.prompt(), 'Judge the brief from the temporary folder.\n');
+  assert.equal(w.run(['--role', 'arena-runner', '--brief-file', 'brief.md'], { input: '' }).code, 0);
+  assert.equal(w.prompt(), 'Judge the brief from the repository.\n');
+  // Unread by a seat: a denied folder (by a link too), a .env file, a file outside the repository and the temporary folder.
+  mkdirSync(join(w.home, '.agent-profiles/tokens'), { recursive: true });
+  writeFileSync(join(w.home, '.agent-profiles/tokens/x'), 'dummy\n');
+  mkdirSync(join(w.home, '.claude-x'), { recursive: true });
+  writeFileSync(join(w.home, '.claude-x/y'), 'dummy\n');
+  symlinkSync(join(w.home, '.agent-profiles/tokens/x'), join(w.repo, 'link.md'));
+  writeFileSync(join(w.repo, '.env.local'), 'dummy\n');
+  for (const file of [join(w.home, '.agent-profiles/tokens/x'), join(w.home, '.claude-x/y'), join(w.repo, 'link.md'), join(w.repo, '.env.local'), '/etc/hosts', join(w.repo, 'none.md')]) {
+    const r = w.run(['--role', 'arena-runner', '--brief-file', file], { input: '' });
+    assert.equal(r.code, 2, `${file}: ${r.out}${r.err}`);
+  }
+  assert.equal(w.execs().length, 2, 'no codex call for a refused brief file');
 });
