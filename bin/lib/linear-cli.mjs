@@ -25,7 +25,10 @@
 //                                               (through Colly's key); a label, project or due date is sent only when given. create also accepts these four.
 //   decision-close <INN-key> --body-file -     posts the closing comment, then moves to the first completed state, as Colly
 //   Colly reads only tokens/colly in the factory token store (the Human stores it with `factory store colly`); no key argument or environment.
-//   onboard <repo> --key <KEY> --name <name>    the repository's team (copied from FAC) and its Needs Human status, and the registry
+//   onboard <repo> --key <KEY> [--name <name>]  the repository's team (copied from FAC) and its Needs Human status, and the registry of the
+//                                               node it runs on; --name is needed only to make a new team. Run again, on a team that is there,
+//                                               it creates nothing and only registers it, so each node that runs `factory linear` itself (a node
+//                                               whose store holds the app's credentials, FAC-38) runs it once for its own registry
 // One JSON object on stdout. Exit 0 done, 1 Linear refused or failed (the reason is in `error`, never a token), 2 usage.
 // Scope: take, comment, ask, answered, the triage verbs, create and list act only on a team that is in the registry, never on INN or any other team; read does
 // not. `--team` is a team name of the factory's grammar (bin/lib/names.mjs). A corrupt registry file refuses every verb that reads it.
@@ -50,6 +53,8 @@ export { onLinear, readRegistry, registryFile };
 class Usage extends Error {}
 class Refused extends Error {}
 
+/** The verbs that act as Colly, with Colly's key, not as the Factory app. */
+export const COLLY_VERBS = ['decision-create', 'decision-close'];
 const FILING_FIELDS = { '--assignee-id': 'value', '--label-id': 'repeat', '--project-id': 'value', '--due-date': 'value' };
 const SHAPES = {
   'decision-create': { args: 0, flags: { '--title': 'value', '--status': 'value', '--body-file': 'value', ...FILING_FIELDS } },
@@ -74,7 +79,7 @@ const REQUIRED = {
   'decision-close': ['--body-file'],
   take: ['--team'], comment: ['--team', '--body-file'], ask: ['--team', '--body-file'], answered: ['--team'], release: ['--team'],
   accept: ['--team', '--body-file'], decline: ['--team', '--body-file'], duplicate: ['--of', '--team', '--body-file'],
-  create: ['--team-key', '--title', '--status', '--body-file'], onboard: ['--key', '--name'], list: ['--team-key'],
+  create: ['--team-key', '--title', '--status', '--body-file'], onboard: ['--key'], list: ['--team-key'],
 };
 
 /** { verb, args, flags } or a thrown Usage. A flag is given once; a body comes on stdin only, since a path names a file on the caller's Mac. */
@@ -403,6 +408,7 @@ export function createCli({ api, collyApi, state, readStdin }) {
     let team = await find(key);
     let createdTeam = false;
     if (!team) {
+      if (!flags['--name']) throw new Usage(`onboard: Linear has no team ${key}; --name is needed to make it`);
       const from = await find(FIRST_TEAM);
       if (!from) throw new Refused(`team ${FIRST_TEAM}, the one to copy settings from, was not found; nothing was created`);
       let made;
@@ -467,7 +473,8 @@ async function stdinText() {
 /** The command on the factory host: prints the JSON, returns the exit code. A tty on stdin gives an empty body, which a verb that needs one refuses. */
 export async function main(argv, env = process.env, { api, readStdin = () => (process.stdin.isTTY ? Promise.resolve('') : stdinText()) } = {}) {
   const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
-  const run = createCli({ api: api ?? createLinear({ state }), collyApi: createLinear({ state, agentProfiles: env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'), colly: true }), state, readStdin });
+  const agentProfiles = env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles');
+  const run = createCli({ api: api ?? createLinear({ state, agentProfiles }), collyApi: createLinear({ state, agentProfiles, colly: true }), state, readStdin });
   const { code, out } = await run(argv);
   console.log(JSON.stringify(out));
   if (code === 2) console.error('usage: factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard|decision-create|decision-close ... (see bin/lib/linear-cli.mjs)');

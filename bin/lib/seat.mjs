@@ -9,7 +9,6 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
-import { KIND_MAX, KIND_PATTERN, knownKinds, rolePrompt } from './findings.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
@@ -18,40 +17,24 @@ import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } f
 
 /** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
  * The cost is not asked of the model: the record takes it from the session's result event. `foundOutside` lists the bugs and
- * improvements it found outside its task, one line each, for the Lead to file (#338). `findings` is a reviewer's list of what it
- * found, each with its kind (#408); every other role returns an empty list. `needsLead` returns questions to the Lead. */
+ * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead. */
 export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['conclusion', 'evidence', 'couldNotRead', 'needsLead', 'foundOutside', 'findings'],
+  required: ['conclusion', 'evidence', 'couldNotRead', 'needsLead', 'foundOutside'],
   properties: {
     conclusion: { type: 'string' },
     evidence: { type: 'array', items: { type: 'string' } },
     couldNotRead: { type: 'array', items: { type: 'string' } },
     needsLead: { type: 'array', items: { type: 'string' } },
     foundOutside: { type: 'array', items: { type: 'string' } },
-    findings: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['kind', 'claim', 'blocking'],
-        properties: { kind: { type: 'string', pattern: KIND_PATTERN, maxLength: KIND_MAX }, claim: { type: 'string' }, blocking: { type: 'boolean' } },
-      },
-    },
   },
 };
 
 // The researcher's only git (#181).
 export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta.url));
 
-// The settings every session gets with --settings (#205): bin/factory-alerts at its start, from this checkout, so no profile
-// has to hold the hook.
-export const ALERTS_SETTINGS = JSON.stringify({
-  hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: fileURLToPath(new URL('../factory-alerts', import.meta.url)), timeout: 10 }] }] },
-});
-
-/** The sandbox of the worker's and the reviewer's Bash (#183), in the one --settings value with the alerts hook. It covers Bash
+/** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get. It covers Bash
  * only: the Read tool, the hooks and the MCP servers run outside it, so the Read denies stay permission rules. Paths are absolute
  * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
  * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. Only ~/.config/gh is denied of ~/.config, so
@@ -140,9 +123,8 @@ export const ROLES = Object.keys(PRESETS);
  * rules (#92), which come after the role's and before those three. The mode is auto and the only grants are StructuredOutput,
  * the skills and the run's own allow, the deny rules staying whole (#307). With hideKey the mode is default (the scrub forces it,
  * Claude Code 2.1.308, #188), with the role's allow list and one Edit rule for each of the session's own folders (run, work and
- * each --add-dir): Write, Edit and redirects reach those only. A rolePrompt is added to the session's system prompt (a resumed
- * session keeps the one it started with). */
-export function buildArgs({ role, run, work = null, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, profiles = null, rolePrompt: prompt = null }) {
+ * each --add-dir): Write, Edit and redirects reach those only. */
+export function buildArgs({ role, run, work = null, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, profiles = null }) {
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
   const edits = p.hideKey ? [...new Set([run, work, ...addDirs].filter(Boolean))].map((d) => `Edit(/${d}/**)`) : [];
@@ -151,12 +133,11 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
     '--permission-mode', p.hideKey ? 'default' : 'auto',
-    '--settings', p.sandbox ? JSON.stringify({ ...JSON.parse(ALERTS_SETTINGS), sandbox: sandboxSettings({ home, run, work, profiles }) }) : ALERTS_SETTINGS,
+    ...(p.sandbox ? ['--settings', JSON.stringify({ sandbox: sandboxSettings({ home, run, work, profiles }) })] : []),
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
     '--allowedTools', ...(p.hideKey ? p.allow(run) : []), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
     '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA),
-    ...(prompt ? ['--append-system-prompt', prompt] : []),
   ];
 }
 
@@ -553,9 +534,7 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
     if (e instanceof PluginError) throw new Refused(`plugins: ${e.message}`);
     throw e;
   }
-  // A reviewer is told the kinds its repository's reviewers have used, so that it reuses one (#408).
-  const prompt = o.role === 'reviewer' ? rolePrompt(knownKinds(readSessions(state), placeOf(work).repo)) : null;
-  const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles, rolePrompt: prompt });
+  const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
     childFile: join(run, `run-${tag}.child`), tokenPath, account, team, role: o.role, seat, tag, name, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),

@@ -8,7 +8,7 @@
 // 15 minutes follows captions 11:46-11:57. The finished-turn predicate is review round 1's adaptation.
 // All notifications reuse Colly's existing events monitor; no periodic Supervisor prompt.
 import { spawn } from 'node:child_process';
-import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -382,7 +382,8 @@ export function watchSilence({ state, runs, now = Date.now() }) {
 // ---- a pass ---------------------------------------------------------------------------------------------------------------
 
 /** One pass. Returns { status: 'ok' | 'running' | 'crashed', calls, events, failed, chars } (`failed`: the causes of reader-failed this pass had;
- * `chars`: the characters sent to the model). Every pass but a 'running' one writes the same fields, with the time, to reader/last.json. */
+ * `chars`: the characters sent to the model). Every pass but a 'running' one writes the same fields, with the time, to reader/last.json, and
+ * appends them as one line to reader/passes.jsonl, so a day's calls and characters are the sum of its lines (#476). */
 export async function runPass({ state, runs, settingFile = SETTING_FILE, home = process.env.HOME, env = process.env, timeoutMs = TIMEOUT_MS, now = Date.now(), provider = runModel }) {
   const dir = join(state, 'reader');
   mkdirSync(dir, { recursive: true });
@@ -410,11 +411,18 @@ export async function runPass({ state, runs, settingFile = SETTING_FILE, home = 
     final = { ...result, status: 'crashed', failed: [...causes.keys()], error: error.message };
   } finally {
     // The record of this pass, crashed or not; a pass that found the lock taken wrote nothing. Its own failure must not hide the pass's.
+    // The two writes are apart, so a failed last.json still leaves the pass in the day's lines.
+    const { status, calls, events, failed, chars } = final;
+    const line = `${JSON.stringify({ at: new Date(now).toISOString(), status, calls, events, failed, chars })}\n`;
     try {
-      const { status, calls, events, failed, chars } = final;
-      writeAtomic(join(dir, 'last.json'), `${JSON.stringify({ at: new Date(now).toISOString(), status, calls, events, failed, chars })}\n`);
+      writeAtomic(join(dir, 'last.json'), line);
     } catch {
       // the next pass writes it again
+    }
+    try {
+      appendFileSync(join(dir, 'passes.jsonl'), line);
+    } catch {
+      // this pass is missing from the day's lines
     }
     releaseLock(join(state, 'reader.lock'), lock.token);
   }

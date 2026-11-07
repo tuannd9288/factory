@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
 import { SWITCH_HOLD_MS as HOLD_MS, observe, readActive, readLines } from '../bin/lib/events.mjs';
@@ -224,11 +224,15 @@ test('a failed read leaves the position file and the condition as they were', ()
     assert.deepEqual(verbs.slice(1).sort(), ['clear', 'start']);
   }));
 
+// The factory host is whoever runs the test (bin/lib/node.mjs placeOf); a node off it has another user.
+const ON_HOST = { FACTORY_HOST_USER: userInfo().username };
+const OFF_HOST = { FACTORY_HOST_USER: `${userInfo().username}-not` };
+
 test('the factory\'s own repository: its rules are read once a sweep and none of its pull requests; no checkout, no read', () =>
   withDir((dir) => {
     const w = world(dir);
     w.rules('1-2');
-    const withOwn = { FACTORY_CHECKOUT: w.checkout };
+    const withOwn = { FACTORY_CHECKOUT: w.checkout, ...ON_HOST };
     let r = w.sweep(withOwn);
     assert.equal(r.code, 0, r.out);
     const own = r.calls.filter((c) => c.includes('repos/o/factory/rules/branches/main'));
@@ -242,9 +246,25 @@ test('the factory\'s own repository: its rules are read once a sweep and none of
     r = w.sweep(withOwn, ['o/app', 'o/factory']);
     assert.equal(r.calls.filter((c) => c.includes('repos/o/factory/rules/branches/main')).length, 1, 'a repository named twice is read once');
     rmSync(w.state, { recursive: true, force: true });
-    r = w.sweep();
+    r = w.sweep(ON_HOST);
     assert.ok(!r.calls.some((c) => c.includes('o/factory')), 'no checkout, no read');
     assert.ok(!existsSync(positionFile(w.state, 'o/factory')));
+  }));
+
+// #366: a MacBook's daemon sweeps with its installed copy as FACTORY_CHECKOUT, a checkout of the factory too; it told each move again.
+test('a node off the factory host reads no merge switch of the factory\'s own and raises no switch-moved for it', () =>
+  withDir((dir) => {
+    const w = world(dir);
+    const offHost = { FACTORY_CHECKOUT: w.checkout, ...OFF_HOST };
+    w.rules('1-2');
+    let r = w.sweep(offHost);
+    assert.equal(r.code, 0, r.out);
+    w.rules('all');
+    r = w.sweep(offHost);
+    assert.equal(r.code, 0, r.out);
+    assert.ok(!r.calls.some((c) => c.includes('repos/o/factory/')), 'its rules are not read');
+    assert.ok(!existsSync(positionFile(w.state, 'o/factory')));
+    assert.ok(!readLines(w.state).some((e) => e.key.startsWith('switch-moved o/factory ')));
   }));
 
 test('rules that give no position write no position file and start no condition, and the sweep goes on', () =>
@@ -270,7 +290,7 @@ test('rules that give no position write no position file and start no condition,
 test('the factory\'s own repository whose rules cannot be read: one line says so, the exit code is the sweep\'s, the file and the condition stay', () =>
   withDir((dir) => {
     const w = world(dir);
-    const withOwn = { FACTORY_CHECKOUT: w.checkout };
+    const withOwn = { FACTORY_CHECKOUT: w.checkout, ...ON_HOST };
     const ownLines = () => lines(w.state).filter((l) => l.includes(' switch-moved o/factory '));
     w.rules('1-2');
     w.sweep(withOwn);
