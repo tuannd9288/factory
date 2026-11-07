@@ -125,8 +125,10 @@ never answers a permission prompt, and you never treat it as one. It has one of 
   - `seat-no-result`: the seat ended without its result, or its process is gone after a restart: read its log in the run
     folder, then resume it in a fix round or report.
   - `checks-red`: read step 8's `gate-red` skill first.
-  - `checks-green`: on a draft, run `scripts/ship` in its worktree: it readies and arms it (FAC-55). Otherwise nothing to run: an armed
-    pull request merges by itself and a `merged` wake follows.
+  - `checks-green`: on a draft, it only says the draft is green. Run `scripts/ship` in its worktree, which readies and arms it (FAC-55),
+    only once its review has passed: step 6's reviewer `PASS`, or, where a supervisor accepts your pull requests, that acceptance. A pull
+    request held for a fix or a review stays a draft. Otherwise nothing to run: an armed pull request merges by itself and a `merged`
+    wake follows.
   - `conflict`: `forcePush` on origin/main defaults to `pstack`: the owner may rebase its own PR branch with `--force-with-lease`, never main or from a babysit; `off` means merge main, then run step 5's checks.
   - `check-not-started`: a check `main` requires is missing from the head of a pull request waiting on auto-merge, or
     has not started, for 30 minutes from the first sweep that saw it, and Colly is told too: read the pull request's
