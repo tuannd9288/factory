@@ -357,7 +357,9 @@ function sweep(repo, reads, state, switches, { self, folder, runs, clone }) {
 }
 
 /** Whether a pull request is a stack's child moved onto main (by GitHub when its parent's branch was deleted on merge, or by ship)
- * whose head predates the move: its checks ran against its parent's branch, and main's merge of the parent is not in it yet. */
+ * whose head predates the move, so main's merge of the parent is not in it yet. GitHub's edited event on a move already re-runs verify
+ * against main; bringing the child up to main closes what that run leaves open: a sweep that reads before the run appears, which would
+ * take the check that ran against the parent's branch, and a head behind main under an up-to-date rule. */
 export const toRestack = (pr) =>
   pr.base === BASE && pr.baseChange?.currentRefName === BASE && pr.baseChange.previousRefName !== BASE &&
   !(Date.parse(pr.committedAt) >= Date.parse(pr.baseChange.createdAt));
@@ -368,8 +370,8 @@ function draftReadiness(repo, prs, clone) {
   if (clone && spawnSync('git', ['-C', clone, 'cat-file', '-e', 'origin/main:.gate/driver.json'], { stdio: 'ignore' }).status === 0)
     policy = JSON.parse(execFileSync('git', ['-C', clone, 'show', 'origin/main:.gate/driver.json'], { encoding: 'utf8' }));
   let merge = policy.merge == null ? null : policy.merge === 'merge' ? 'merge' : 'squash';
-  // A child moved onto main is first brought up to main by a merge (FAC-13; the factory restacks by merging, never a force-push), so
-  // it is readied and armed only on a head whose checks ran against main. One that conflicts waits for its Lead, whose push ends it.
+  // A child moved onto main is first brought up to main by a merge (FAC-13; the factory restacks by merging, never a force-push), and is
+  // readied and armed only on that head. One that conflicts waits for its Lead, whose push ends it.
   const restacking = new Set(prs.filter(toRestack).map((pr) => pr.number));
   for (const pr of prs.filter((p) => restacking.has(p.number) && p.mergeable === 'MERGEABLE')) {
     try {

@@ -20,6 +20,5 @@ skill's default model.
 ## Shipping with pstack
 
 Push, then run `scripts/ship --body-file <body>` until it says `armed` or stops. Each run takes the next step: it opens
-the pull request, posts a `no driver` note (`.gate/driver.json` stays the template until #264 is fixed), and arms
-auto-merge. It refuses a wrong step with the reason, and never a push. Stopped: put the reason and your recommended
-answer in the pull request. Then release the branch; do not wait for CI.
+the pull request, then arms auto-merge. It refuses a wrong step with the reason, and never a push. Stopped: put the
+reason and your recommended answer in the pull request. Then release the branch; do not wait for CI.
