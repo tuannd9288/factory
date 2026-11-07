@@ -15,8 +15,9 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    `--team {{TEAM}} --body-file -` and the reason on stdin. Then list your team's work with
    `factory linear list --team-key {{TEAMKEY}} --status unstarted` and take an issue that has no delegate: work comes only from Todo,
    never from Triage or Backlog. Read it with `factory linear read <KEY>`, then run `factory linear take <KEY> --team {{TEAM}}`: it makes the Factory
-   app the issue's delegate, moves it to In Progress, assigns no person and comments which team took it. That is the lock: until the gate reads
-   Linear (#407) a repository on Linear has no claim. A refused `take` means another Lead holds the issue; take another issue. The holder is
+   app the issue's delegate, moves it to In Progress, assigns no person and comments which team took it. That is the lock in Linear. The claim ref
+   on GitHub, named by the issue's key, stays the lock across machines; until `.gate/bin/claim` takes a key (today it takes issue
+   numbers only), the take is the only lock. A refused `take` means another Lead holds the issue; take another issue. The holder is
    the earliest "Taken by team <team>." comment after the last "Released by team" one, because the delegate is the one app of every team: after
    a restart find your issues by those comments (`factory linear read <KEY>` shows them), never by the delegate. An issue you will not finish
    you drop with `factory linear release <KEY> --team {{TEAM}}`: it clears the delegate, moves the issue to Todo and comments the release; only
@@ -98,7 +99,7 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    turn with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was
    opened (the reviewer's raise, a `needs-human` label). The body also carries <!--github-->`Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`,<!--/github--><!--linear-->`Fixes <KEY>`, so Linear closes the issue on merge, `Issue: <KEY>`
-   and `Team: {{TEAM}}` (no `Claim:`: a repository on Linear has no claim),<!--/linear--> outside that block. The title uses Conventional Commits `type(scope): subject`, no trailing period, at most 72 characters; type is `feat`, `fix`, `docs`, `refactor`, `test`, `chore` or `perf`; scope is the area; subject is short, imperative and names a real symbol when one carries the change. It carries no issue number (`ship`
+   and `Team: {{TEAM}}` (and `Claim: <sha>`, once `.gate/bin/claim` takes a key),<!--/linear--> outside that block. The title uses Conventional Commits `type(scope): subject`, no trailing period, at most 72 characters; type is `feat`, `fix`, `docs`, `refactor`, `test`, `chore` or `perf`; scope is the area; subject is short, imperative and names a real symbol when one carries the change. It carries no issue number (`ship`
    drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a

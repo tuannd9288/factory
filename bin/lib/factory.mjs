@@ -374,6 +374,7 @@ const USAGE = `usage: bin/factory account list [--all] [--json]
        bin/factory lead --resume-session <id> [--check]
        bin/factory gh <gh arguments>   (under the agents' login: here, with this node's stored agents GitHub token; otherwise, on the MacBook, on the Mac mini)
        bin/factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
+       bin/factory codex --role <role> [--effort <e>] [--write <folder>]   (a pstack step on another model family, on Codex, #182; the brief on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
@@ -840,7 +841,7 @@ async function colly(args, env) {
   }
   const record = { type: 'command', command: [process.execPath, hook, socket].map(quote).join(' ') };
   // The wrapper is carried in the settings, so its bytes stay with this session, like the hash-named socket hook.
-  // SessionStart additionalContext uses the same documented shape as alerts.mjs.
+  // SessionStart additionalContext is the documented hook output (code.claude.com/docs/en/hooks).
   // bin/factory is a Bash wrapper; run its Node entry point directly with this session's Node.
   const factory = fileURLToPath(import.meta.url);
   const brief = `const {spawnSync}=require('node:child_process');
@@ -960,12 +961,16 @@ function ghCmd(args, env) {
 }
 
 /** `factory linear <verb> ...` (#404): a Lead's steps on a repository on Linear (bin/lib/linear-cli.mjs). On the factory host it runs there and
- * reads the Factory app's token in its own process; on the MacBook it runs the same command on the host, in the host user's login shell over ssh,
- * with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of this Mac is
- * involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
+ * reads the Factory app's token in its own process. On another node it runs there too when the node's own token store holds the app's
+ * client id and secret (FAC-38, #490's shape for `factory gh`): the node mints its own token, which leaves the host's alive, and reads its
+ * own registry. Otherwise, and always for the verbs that act as Colly, it runs the same command on the host, in the host user's login shell
+ * over ssh, with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of
+ * this Mac is involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
 async function linearCmd(args, env) {
   const cli = await import('./linear-cli.mjs');
-  if (placeOf(env) === 'factory') return cli.main(args, env);
+  const { appStored } = await import('./linear.mjs');
+  const here = !cli.COLLY_VERBS.includes(args[0]) && appStored(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
+  if (placeOf(env) === 'factory' || here) return cli.main(args, env);
   try {
     cli.parse(args);
   } catch (e) {
@@ -979,6 +984,37 @@ async function linearCmd(args, env) {
     return 1;
   }
   return r.status ?? 1;
+}
+
+/** `factory codex --role <role> ...` (#182): a pstack step that asks for another model family, on Codex (packs/pstack/bin/codex-step.mjs
+ * has the options, the profile and the wait). On the factory host it runs there, on the verifier's Codex profile; on the MacBook the same
+ * command runs on the host over ssh, stdin kept, in a new temporary folder there that is removed after, so Codex reads the brief alone: a
+ * step that writes (--write) is refused here, and this folder's repository goes along as --repo for the wait log. */
+async function codexCmd(args, env) {
+  const step = await import('../../packs/pstack/bin/codex-step.mjs');
+  if (placeOf(env) === 'factory') return step.main(args, env);
+  let o;
+  try {
+    o = step.parse(args);
+  } catch (e) {
+    console.error(`bin/factory: codex: ${e.message}`);
+    return 2;
+  }
+  if (o.write !== undefined) {
+    console.error('bin/factory: codex: --write runs only on the factory host, where its folder is');
+    return 2;
+  }
+  const repo = o.repo ?? step.repoOf(process.cwd());
+  const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
+  const line = ['~/WORKSPACES/bin/factory', 'codex', ...[...args, ...(o.repo || !repo ? [] : ['--repo', repo])].map(word)].join(' ');
+  const script = `d=$(mktemp -d) && cd "$d" || exit 2; ${line}; c=$?; cd /; rm -rf "$d"; exit $c`;
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { stdio: 'inherit', env });
+  // ssh's own failure is 255: the step waits, as it does for Codex, and never runs on Claude.
+  if (r.error || r.status === 255) {
+    console.log(`codex: ${o.role} waits for Codex: the factory host could not be reached by ssh. This step does not run on Claude; say so, and go on with other work.`);
+    return 3;
+  }
+  return r.status ?? 3;
 }
 
 /** The line told once seat 1's account has a token: the old file moved aside, never deleted. */
@@ -1431,6 +1467,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'lead') return lead(rest, env);
   if (cmd === 'gh') return ghCmd(rest, env);
   if (cmd === 'linear') return linearCmd(rest, env);
+  if (cmd === 'codex') return codexCmd(rest, env);
   if (cmd === 'wake') return wake(rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);

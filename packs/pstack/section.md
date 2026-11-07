@@ -10,16 +10,18 @@ differs from the factory, the gate's rule wins (sources: the factory's `packs/ps
 - `gh api` freely to read (a GET or a GraphQL query; on a REST read, `-X GET` with `-f`/`-F`); a write through it only
   with the Human's approval; a seat has no `gh` at all.
 - `claude -p` has no `AskUserQuestion`: ask in the report.
+- A step that asks for another model family than its worker's runs on Codex through `factory codex --role <role>`, never
+  on Claude: a panel's other seat and arena's cross-judge (the Lead's rules file names them), show-me-your-work's trail
+  review (`trail-reviewer`) and Orchestrate's verifier (`verifier`). Exit 3: it waits for Codex; say so.
 - `/repo-refresh` runs only when the Human types it (`skillOverrides`), and changes a repository only by pull request.
 
 A session that `bin/seat` or `factory lead` starts is denied its profile. Where pstack's docs say `~/.claude/`, its
 plugin is under `~/.local/share/factory/plugins/`; `recall` and `reflect` read a seat's `run-<tag>.jsonl` in its run
-folder, or a Lead's `~/factory-runs/<repo>-<team>/transcripts/`; no profile gets a rules file, so a role uses its
-skill's default model.
+folder, or a Lead's `~/factory-runs/<repo>-<team>/transcripts/`; a Lead's profile gets the factory's
+`rules/pstack-models.md` at every start, a seat's none, so a seat's role uses its skill's default model.
 
 ## Shipping with pstack
 
 Push, then run `scripts/ship --body-file <body>` until it says `armed` or stops. Each run takes the next step: it opens
-the pull request, posts a `no driver` note (`.gate/driver.json` stays the template until #264 is fixed), and arms
-auto-merge. It refuses a wrong step with the reason, and never a push. Stopped: put the reason and your recommended
-answer in the pull request. Then release the branch; do not wait for CI.
+the pull request, then arms auto-merge. It refuses a wrong step with the reason, and never a push. Stopped: put the
+reason and your recommended answer in the pull request. Then release the branch; do not wait for CI.

@@ -1,27 +1,23 @@
 # Installing the pstack pack in a repository
 
 The pack is a folder a team copies; the kit does not lay it. A pack is what the factory holds only for one way of working, and
-a team copies it; the kit lays none (#132). `packs/pstack/` holds its scripts (`ship`, `pr-body`, `live-verify`), `.gate/driver.json`, the
-pin (`settings.json`), the prose for the repository's own `AGENTS.md` (`section.md`) and its sources (`yields.md`), two rows for
+a team copies it; the kit lays none (#132). `packs/pstack/` holds its scripts (`ship`, `pr-body`), the
+pin (`settings.json`), the prose for the repository's own `AGENTS.md` (`section.md`) and its sources (`yields.md`), one row for
 `.gate/enforced-rules.md` and `INSTALL.md`, the steps; a repository that chooses it copies them in its own tier-3 pull request.
 There is no `.gate/pack` and no `--pack`. Run from the repository's root, with the factory
 checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.gate/` and `.claude/` are tier 3.
 
 1. `mkdir -p scripts/lib && cp -p $FACTORY/packs/pstack/scripts/ship $FACTORY/packs/pstack/scripts/pr-body scripts/ && cp -p
-   $FACTORY/packs/pstack/scripts/lib/ship.mjs $FACTORY/packs/pstack/scripts/lib/driver.mjs scripts/lib/`. A `scripts/`
-   the repository already has keeps its other files. `live-verify`, `lib/live-verify.mjs` and `lib/verdict.mjs` stay out
-   until #264 is fixed (`yields.md`, "The live verifier").
-2. `cp $FACTORY/packs/pstack/.gate/driver.json .gate/driver.json`. It stays the template until #264 is fixed: with
-   no `scripts/live-verify`, a filled driver stops `scripts/ship` on every pull request.
-3. Append the two rows of `enforced-rules.rows.md` to `.gate/enforced-rules.md`.
-4. Add what `section.md` says to the repository's own `AGENTS.md`, after the Gate block, within 150 lines and 32 KiB.
+   $FACTORY/packs/pstack/scripts/lib/ship.mjs scripts/lib/`. A `scripts/` the repository already has keeps its other files.
+2. Append the row of `enforced-rules.rows.md` to `.gate/enforced-rules.md`.
+3. Add what `section.md` says to the repository's own `AGENTS.md`, after the Gate block, within 150 lines and 32 KiB.
    A repository already near the limit shortens its own rules first, through the Human's rule audit; the pack is not
    cut further (#288).
-5. Add `packs/pstack/settings.json`'s keys to `.claude/settings.json` (one pin for each repository), then, once per
+4. Add `packs/pstack/settings.json`'s keys to `.claude/settings.json` (one pin for each repository), then, once per
    repository and profile, `claude plugin install pstack@pstack-4dd1d05 --scope project` (below, "pstack, per repository").
-6. `mkdir -p .claude/skills && cp -R $FACTORY/packs/pstack/skills/repo-refresh .claude/skills/`: the Human's
+5. `mkdir -p .claude/skills && cp -R $FACTORY/packs/pstack/skills/repo-refresh .claude/skills/`: the Human's
    `repo-refresh` skill (#19), as a project skill, unedited. A session runs it only when it names it
-   (`/repo-refresh`), as the skill's own rule says, and step 5's `skillOverrides` is what keeps it user-only;
+   (`/repo-refresh`), as the skill's own rule says, and step 4's `skillOverrides` is what keeps it user-only;
    `.claude/` is tier 3.
 
 ## Pull request readiness
@@ -33,11 +29,9 @@ ready and arms auto-merge once `verify` passed and it has no conflict, and turns
 
 ## The live verifier's login
 
-For a repository that installs `live-verify`: the live verifier runs on one Codex profile for every repository,
+The verifier's Codex profile, for pstack's steps on another model family (#182), is one for every repository,
 `~/.agent-profiles/verifier/codex`, which only the Human logs in: `mkdir -p ~/.agent-profiles/verifier/codex`, then
-`CODEX_HOME=~/.agent-profiles/verifier/codex` before Codex's own login command. Until he has, every live verdict is BLOCKED and
-nothing auto-merges, but for a repository whose `main` has no driver, where `scripts/ship` arms on its "no driver" note in place
-of a verdict.
+`CODEX_HOME=~/.agent-profiles/verifier/codex` before Codex's own login command.
 
 ## pstack, per repository
 
@@ -75,12 +69,12 @@ Cursor's names as the adapter says; before that, the plugin was cached under the
 model mapped them itself (#193's seat run). The factory does not use these parts:
 
 - `/setup-pstack`: the launcher now writes `$CLAUDE_CONFIG_DIR/rules/pstack-models.md` at every start, with the
-  skill defaults mapped by the adapter; a change of model is the Human's; whether Claude
+  skill defaults mapped by the adapter: a `grok` role runs on the session model, and the seats that exist to be another
+  model family (the second seat of arena, architect and interrogate, and arena's cross-judge) are `codex high`, run through
+  `factory codex` on the verifier's Codex profile, never on Claude; a change of model is the Human's; whether Claude
   Code loads a profile's own `$CLAUDE_CONFIG_DIR/rules/` instead is not checked (#182).
 - Autopilot's owners and swarm of verifiers: the adapter runs a Cursor cloud agent as a worktree subagent of the
-  session, outside `bin/seat` (#182). Shipping's one verifier per pull request is taken, on the Codex CLI instead
-  (`packs/pstack/scripts/live-verify`, `packs/pstack/yields.md`); its verdict is no gate
-  input, so the gate's reviewer (`review`, `verdict`) stays the only judge the merge waits for.
+  session, outside `bin/seat` (#182).
 - The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): the adapter points them
   at `~/.claude/projects/<slug>/`, which the kit's deny rules refuse. A factory profile keeps its transcripts under its
   own `CLAUDE_CONFIG_DIR`, in `~/.agent-profiles/`, which `bin/seat` and `packs/pstack/bin/lead` deny (#185); they read
