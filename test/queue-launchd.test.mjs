@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { factory } from './helpers.mjs';
+import { HOST_ENV, factory } from './helpers.mjs';
 
 // The fake gh of queue-visible.test.mjs: who is logged in, and a repository with no pull request waiting.
 const GH = (login) => `#!/bin/sh\ncase "$*" in\n  "api user"*) echo ${login} ;;\n  *graphql*) echo '{"data":{"repository":{"pullRequests":{"nodes":[]}}}}' ;;\n  *rules/branches*) echo "[]" ;;\n  *) exit 1 ;;\nesac\n`;
@@ -20,7 +20,7 @@ function withMachine(login, body, over = () => ({})) {
     const home = join(dir, 'home');
     mkdirSync(home);
     // The factory host's job, unless `over` says otherwise (#366: off it, the sweep needs the node's own agents token).
-    const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: home, FACTORY_STATE: join(dir, 'state'), FACTORY_HOST_USER: userInfo().username, ...over(dir) };
+    const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: home, FACTORY_STATE: join(dir, 'state'), ...HOST_ENV, ...over(dir) };
     const queue = (...args) => spawnSync(join(factory, 'bin/factory-queue'), args, { encoding: 'utf8', env });
     body({ dir, home, queue, env });
   } finally {
