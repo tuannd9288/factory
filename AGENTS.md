@@ -191,6 +191,15 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
 
+Versions follow Semantic Versioning 2.0.0: a version is a tag `v<major>.<minor>.<patch>` on `main`, cut on his word and never
+moved or deleted (the tag ruleset `factory-versions`, `.github/ruleset-versions.json`, which he sets). Its public API is the
+contracts H1–H9; the required check names (3a); the record shapes `events.jsonl` (`bin/lib/events.mjs`), `sessions.jsonl`
+(`bin/lib/seat.mjs`) and the reviewer result (`kit/.gate/bin/lib/result.mjs`); the commands `factory`, `bin/seat`,
+`bin/onboard`, `bin/onboard-owner`, `bin/onboard-doctor` and `bin/kit-update`; and what a served repository holds of the kit:
+the Gate block, the `.gate/bin/` commands, the keys of `.gate/config.sh` and `.gate/driver.json` and the line forms of
+`.gate/protected`. Everything else is internal. An incompatible change to the API is MAJOR; a new compatible contract,
+command or key, or a deprecation, is MINOR; a fix is PATCH.
+
 ## This root
 
 - No `CLAUDE.md` here. With one, Claude Code reads it and skips the `AGENTS.md` of every repository below
