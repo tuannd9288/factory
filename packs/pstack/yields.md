@@ -39,7 +39,7 @@ playbook differs from the factory, the gate's rule wins. These are the places (u
   `:40-42`), and `maintain-verification-skill`'s pass, whose live drive is required (`:35`): a worker seat cannot start
   the app (no network and no local binding, `sandboxSettings` in `bin/lib/seat.mjs`), and there is no driver until
   #264. Also not taken: its daily run "from a scheduled automation" (`docs/guide/06-verify-and-ship.md:88`), which
-  Claude Code lacks (`docs/harness/claude-code.md:58-60`). The Human approved this on <date>.
+  Claude Code lacks (`docs/harness/claude-code.md:58-60`). The Human approved this on 2026-11-07, INN-37 A, 07:32:48 +07.
 
 `/repo-refresh` (the Human's, #19) runs only when typed, hidden from the model. Its audit mode, the default,
 changes nothing; its apply mode changes a repository only through pull requests that pass the gate.
