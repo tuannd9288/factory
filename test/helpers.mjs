@@ -8,6 +8,12 @@ import { nodeName } from '../bin/lib/node.mjs';
 
 export const factory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+// The reader's setting every test runs with (#518): the model pass on, on its pi side, so a pull request that turns the shipped switch
+// (bin/lib/reader.json) off changes no sweep test. A child a test starts with this process's environment gets it too. The one test of the
+// shipped file reads it by its own path (REPO_SETTING).
+export const READER_ON = join(factory, 'test/fixtures/reader/setting-on.json');
+process.env.FACTORY_READER_SETTING ??= READER_ON;
+
 // The settings that make this machine and user the factory host (placeOf, bin/lib/node.mjs): its user and its name.
 export const HOST_ENV = { FACTORY_HOST_USER: userInfo().username, FACTORY_HOST_NAME: nodeName() };
 

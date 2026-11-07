@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// The reader's test setting, the pass on (FACTORY_READER_SETTING, #518): runPass reads it at each call.
+import './helpers.mjs';
 import { runPass, watchSilence } from '../bin/lib/reader.mjs';
 
 test('Watcher sends new Codex limit lines through the provider seam once', async () => {

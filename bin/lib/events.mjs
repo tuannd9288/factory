@@ -17,6 +17,7 @@
 // an INN issue, which is never cleared (innAnswer, #414).
 // The sweep writes its kinds (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
 // of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
+// and the sweep holds a `reader-off` condition, of scope `reader-switch`, while the reader's switch is off (readerSwitch, INN-39);
 // which are no condition and are never cleared; the sweep writes one too, a `comment` line when it wakes a Lead for a new comment (#351,
 // bin/lib/comment-wake.mjs), and one line of its own for each piece of news of a Lead's seats, checks and pull request (#370,
 // bin/lib/news-wake.mjs: seat-ended, seat-no-result, checks-red, checks-green, conflict, merged: NEWS_KINDS, the Lead's, which
