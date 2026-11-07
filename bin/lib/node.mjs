@@ -1,17 +1,36 @@
 // This node (#366): which place it is, where its installed copy of the factory is, and the agents' GitHub login it holds. It imports
 // nothing but checkout.mjs and token.mjs, so the daemon and the queue can use it without entering the module ring that bin/lib/factory.mjs
 // is part of (factory.mjs -> colly-status.mjs -> ledger.mjs -> queue.mjs). bin/lib/factory.mjs re-exports placeOf and installedRoot.
+import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { userInfo } from 'node:os';
+import { hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { checkoutRoot } from './checkout.mjs';
 import { readTokenFile, tokenDir } from './token.mjs';
 
+/** The factory host's name, which ssh reaches as factory@HOST. */
+export const HOST = 'tuans-mac-mini';
+
+// The function itself, taken now: a test that mocks child_process.spawnSync later does not get this read.
+const run = spawnSync;
+let name;
+/** This machine's name, in lower case: its LocalHostName (`scutil --get LocalHostName`, the name set in Sharing), which a network cannot
+ * change, as it can the kernel's host name when HostName is not set; os.hostname() where scutil is missing or fails (Linux). Read once. */
+export function nodeName() {
+  if (name === undefined) {
+    const r = run('scutil', ['--get', 'LocalHostName'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    const local = r.status === 0 ? r.stdout.trim() : '';
+    name = (local || hostname()).toLowerCase().replace(/\.local$/, '').split('.')[0];
+  }
+  return name;
+}
+
 /** Whether this process runs as the agents' macOS user: FACTORY_HOST_USER, `factory` unless the setting names another (#366). */
 export const isAgentsUser = (env = process.env) => userInfo().username === (env.FACTORY_HOST_USER || 'factory');
 
-/** The factory host is where the command runs as the agents' user. */
-export const placeOf = (env = process.env) => (isAgentsUser(env) ? 'factory' : 'macbook');
+/** The factory host is the machine named HOST (FACTORY_HOST_NAME in tests) when the command runs as the agents' user there. The agents'
+ * `factory` user on any other machine is a node (#366). */
+export const placeOf = (env = process.env) => (isAgentsUser(env) && nodeName() === (env.FACTORY_HOST_NAME || HOST) ? 'factory' : 'macbook');
 
 /** Where this machine's installed copy of the factory is (#390): $FACTORY_CHECKOUT; on the factory host ~/WORKSPACES, as the queue's
  * checkoutRoot has it; on the MacBook ${XDG_DATA_HOME:-~/.local/share}/factory/checkout, outside the folders macOS refuses a launchd job.

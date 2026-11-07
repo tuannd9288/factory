@@ -5,12 +5,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DENY_READ, denyReadRules, tokenStoreDeny } from '../bin/lib/seat.mjs';
 import { freeWord, teamsOf } from '../bin/lib/team-names.mjs';
-import { factory } from './helpers.mjs';
+import { HOST_ENV, factory } from './helpers.mjs';
 
 // Each fake writes what it got to $FAKE: its arguments one per NUL (<name>.args), and gh its stdin and exits with gh.exit.
 const SCRIPTS = {
@@ -74,7 +74,8 @@ function world() {
   };
   return {
     dir, fake, home, state, w, read, nuls, fac, calls: () => read('calls.log'),
-    onHost: () => { env.FACTORY_HOST_USER = userInfo().username; },
+    // The host's user here, on the machine named `name`: by default this one, so here is the factory host.
+    onHost: (name = HOST_ENV.FACTORY_HOST_NAME) => { Object.assign(env, HOST_ENV, { FACTORY_HOST_NAME: name }); },
     identity: (name = 'Agent Ann', email = 'agent.ann@example.invalid') => { w('git-user.name', `${name}\n`); w('git-user.email', `${email}\n`); },
     done: () => rmSync(dir, { recursive: true, force: true }),
   };
@@ -116,7 +117,7 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_CONFIG_KEY_2: push, GIT_CONFIG_VALUE_2: 'git@github.com:',
       GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
     });
-    assert.deepEqual(permissions.deny, [...tokenStoreDeny, ...denyReadRules, `Read(/${join(s.dir, 'profiles')}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)']);
+    assert.deepEqual(permissions.deny, [...tokenStoreDeny, ...denyReadRules, `Read(/${join(s.dir, 'profiles')}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)']);
     // It runs as the user of this Mac: its Read tool is denied each folder the seats' sandbox denies, ssh and gh's login among them (FAC-38).
     for (const d of DENY_READ) for (const rule of [`Read(~/${d})`, `Read(~/${d}/**)`]) assert.ok(permissions.deny.includes(rule), rule);
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
@@ -344,7 +345,7 @@ test('lead passes arguments after -- to claude only with --here', () => {
   }
 });
 
-test('lead --here is refused on the factory host, and with --new or --dry-run', () => {
+test('lead --here is refused on the factory host, and with --new or --dry-run; the host\'s user on another machine is a node and starts it (#366)', () => {
   const s = world();
   try {
     s.identity();
@@ -358,6 +359,11 @@ test('lead --here is refused on the factory host, and with --new or --dry-run', 
     assert.match(r.out, /--here/);
     assert.equal(s.read('claude.args'), '');
     assert.equal(s.calls(), '', 'no ssh call');
+    // The MacBook's own `factory` user: the host's user name, on a machine with another name.
+    s.onHost('another-machine');
+    const node = s.fac(['lead', 'alpha', '--here']);
+    assert.equal(node.code, 0, node.out);
+    assert.notEqual(s.read('claude.args'), '');
   } finally {
     s.done();
   }
@@ -735,7 +741,7 @@ function hostSsh(s) {
   const bin = join(s.home, 'WORKSPACES/bin');
   mkdirSync(bin, { recursive: true });
   symlinkSync(join(factory, 'bin/factory'), join(bin, 'factory'));
-  writeFileSync(join(s.dir, 'bin/ssh'), `#!/bin/sh\necho "ssh $*" >> "$FAKE/calls.log"\nfor last; do :; done\nif [ -f "$FAKE/ssh-down" ]; then echo 'ssh: Could not resolve hostname' >&2; exit 255; fi\nFACTORY_HOST_USER=${userInfo().username} exec sh -c "$last"\n`);
+  writeFileSync(join(s.dir, 'bin/ssh'), `#!/bin/sh\necho "ssh $*" >> "$FAKE/calls.log"\nfor last; do :; done\nif [ -f "$FAKE/ssh-down" ]; then echo 'ssh: Could not resolve hostname' >&2; exit 255; fi\nFACTORY_HOST_USER=${HOST_ENV.FACTORY_HOST_USER} FACTORY_HOST_NAME=${HOST_ENV.FACTORY_HOST_NAME} exec sh -c "$last"\n`);
   chmodSync(join(s.dir, 'bin/ssh'), 0o755);
 }
 

@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { factory, git } from './helpers.mjs';
+import { HOST_ENV, factory, git } from './helpers.mjs';
 import { HOST, check, follow, job, pass, readNewest, readNews } from '../bin/lib/relay.mjs';
 import { installedRoot } from '../bin/lib/factory.mjs';
 import { plist } from '../bin/lib/queue.mjs';
@@ -190,7 +190,7 @@ function stubs() {
   return dir;
 }
 
-test('plist renders a LaunchAgent that runs the relay every 60 s with no user key and no KeepAlive, and a PATH of the folders node and ssh are found in, not the Cellar one', () => {
+test('plist renders a LaunchDaemon run by the user that printed it, with its HOME, every 60 s and no KeepAlive, and a PATH of the folders node and ssh are found in, not the Cellar one (#366)', () => {
   const home = mkdtempSync(join(tmpdir(), 'relay-home-'));
   const bin = stubs();
   try {
@@ -198,7 +198,12 @@ test('plist renders a LaunchAgent that runs the relay every 60 s with no user ke
     assert.deepEqual(j.env.PATH.split(':'), [bin, '/usr/bin', '/bin', '/usr/sbin', '/sbin']);
     const text = plist(j);
     assert.match(text, /<string>io\.github\.tuannd9288\.factory\.relay<\/string>/);
-    assert.ok(!text.includes('<key>UserName</key>'));
+    // A LaunchDaemon runs with nobody logged in, as this user, who has no other HOME there.
+    assert.match(text, new RegExp(`<key>UserName</key>\\s*<string>${userInfo().username}</string>`));
+    assert.equal(j.env.HOME, home);
+    // The sweep renders it with FACTORY_CHECKOUT set (queue.mjs's job), the Human's shell without: the plist is the same, or the sweep would
+    // report it as differing from the installed one at every pass.
+    assert.equal(plist(job({ HOME: home, PATH: bin, ...MAC, FACTORY_CHECKOUT: installedRoot({ HOME: home, ...MAC }) })), text);
     assert.ok(!text.includes('KeepAlive'));
     assert.match(text, /<key>StartInterval<\/key>\s*<integer>60<\/integer>/);
     assert.match(text, /bin\/factory-relay<\/string>\s*<string>run<\/string>/);
@@ -211,7 +216,7 @@ test('plist renders a LaunchAgent that runs the relay every 60 s with no user ke
 
 test('installedRoot: FACTORY_CHECKOUT first, ~/WORKSPACES on the factory host, XDG_DATA_HOME or ~/.local/share on the MacBook', () => {
   const home = '/home/someone';
-  const host = { HOME: home, FACTORY_HOST_USER: userInfo().username };
+  const host = { HOME: home, ...HOST_ENV };
   assert.equal(installedRoot({ ...host, FACTORY_CHECKOUT: '/x/checkout' }), '/x/checkout');
   assert.equal(installedRoot({ ...MAC, HOME: home, FACTORY_CHECKOUT: '/x/checkout' }), '/x/checkout');
   assert.equal(installedRoot(host), join(home, 'WORKSPACES'));
@@ -320,24 +325,26 @@ test('a copy that cannot follow stays where it was, and the refusal is in queue-
 
 /** The commands, as processes, with a fake ssh first on PATH that exits `code` after printing `out` to stdout; it logs its arguments and
  * SSH_AUTH_SOCK to $HOME/calls, which is the job's too. */
-function command(args, { code = 0, out = '', hostUser = 'nobody-here' } = {}) {
+function command(args, { code = 0, out = '', place = MAC } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'relay-cmd-'));
   writeFileSync(join(dir, 'ssh'), ['#!/bin/sh', 'printf \'%s sock=%s\\n\' "$*" "$SSH_AUTH_SOCK" >>"$HOME/calls"', `printf '%s' '${out}'`, `exit ${code}`, ''].join('\n'));
   chmodSync(join(dir, 'ssh'), 0o755);
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir, FACTORY_STATE: join(dir, 'state'), FACTORY_HOST_USER: hostUser };
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir, FACTORY_STATE: join(dir, 'state'), ...place };
   const r = spawnSync(join(factory, 'bin/factory-relay'), args, { encoding: 'utf8', env });
   const calls = existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean) : [];
   return { dir, code: r.status, out: r.stdout + r.stderr, calls, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** `check` in this process, with a fake ssh: it answers `--newest` with 4 and logs its calls under HOME. A fake launchctl answers `getenv` with
- * `sock` (the job's SSH_AUTH_SOCK) and `print` with `printed` (null: the job is not loaded). The installed copy is a folder with an executable
- * bin/factory-relay at the default place under HOME, or, with `copyAt`, a symlink from there to that path under HOME, or, with `copy` false,
- * none. `state` is a path under HOME; `installed` is the text of an installed plist, `$HOME` standing for HOME. */
-function checkWith({ code = 0, cursor = null, sock = '/agent.sock', printed = null, copyAt = null, copy = true, state: stateAt = 'state', installed = null } = {}) {
+/** `check` in this process, with a fake ssh: it answers `--newest` with 4 and logs its calls and SSH_AUTH_SOCK under HOME. A fake launchctl
+ * answers `print system/<the relay's label>` with `printed` (null: the job is not loaded) and any other domain as not found. The installed
+ * copy is a folder with an executable bin/factory-relay at the default place under HOME, or, with `copyAt`, a symlink from there to that path
+ * under HOME, or, with `copy` false, none. `state` is a path under HOME; `installed` is the text of an installed plist in the LaunchDaemons
+ * folder (FACTORY_PLIST_DIR), `$HOME` standing for HOME. */
+function checkWith({ code = 0, cursor = null, printed = null, copyAt = null, copy = true, state: stateAt = 'state', installed = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'relay-check-'));
   writeFileSync(join(dir, 'ssh'), ['#!/bin/sh', 'printf \'%s sock=%s\\n\' "$*" "$SSH_AUTH_SOCK" >>"$HOME/calls"', 'case "$*" in *--newest*) echo 4 ;; esac', `exit ${code}`, ''].join('\n'));
-  writeFileSync(join(dir, 'launchctl'), ['#!/bin/sh', 'case "$1" in', `getenv) printf '%s' '${sock}' ;;`, printed === null ? 'print) exit 113 ;;' : `print) printf '%s\\n' '${printed}' ;;`, 'esac', ''].join('\n'));
+  writeFileSync(join(dir, 'launchctl'), ['#!/bin/sh', '[ "$1 $2" = "print system/io.github.tuannd9288.factory.relay" ] || exit 113',
+    printed === null ? 'exit 113' : `printf '%s\\n' '${printed}'`, ''].join('\n'));
   chmodSync(join(dir, 'ssh'), 0o755);
   chmodSync(join(dir, 'launchctl'), 0o755);
   const root = join(dir, '.local/share/factory/checkout');
@@ -351,9 +358,10 @@ function checkWith({ code = 0, cursor = null, sock = '/agent.sock', printed = nu
     mkdirSync(join(dir, '.local/share/factory'), { recursive: true });
     symlinkSync(join(dir, copyAt), root);
   } else if (copy) program(root);
+  const daemons = join(dir, 'LaunchDaemons');
   if (installed) {
-    mkdirSync(join(dir, 'Library/LaunchAgents'), { recursive: true });
-    writeFileSync(join(dir, 'Library/LaunchAgents/io.github.tuannd9288.factory.relay.plist'), installed.replaceAll('$HOME', dir));
+    mkdirSync(daemons, { recursive: true });
+    writeFileSync(join(daemons, 'io.github.tuannd9288.factory.relay.plist'), installed.replaceAll('$HOME', dir));
   }
   const state = join(dir, stateAt);
   if (cursor !== null) {
@@ -364,8 +372,8 @@ function checkWith({ code = 0, cursor = null, sock = '/agent.sock', printed = nu
   console.log = () => {};
   let exit;
   try {
-    // The test's own SSH_AUTH_SOCK is in the environment `check` is given; only launchctl's reaches the probe.
-    exit = check({ HOME: dir, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, SSH_AUTH_SOCK: 'the-test-own.sock', ...MAC });
+    // The test's own SSH_AUTH_SOCK is in the environment `check` is given; the probe gets none, as the LaunchDaemon has none.
+    exit = check({ HOME: dir, PATH: `${dir}:${process.env.PATH}`, FACTORY_STATE: state, FACTORY_PLIST_DIR: daemons, SSH_AUTH_SOCK: 'the-test-own.sock', ...MAC });
   } finally {
     console.log = was;
   }
@@ -385,27 +393,17 @@ test('check fails on a failing ssh and makes the log folder, and never sets a cu
   }
 });
 
-test('check passes when ssh works: it passes launchd\'s SSH_AUTH_SOCK on, sets the cursor to the newest seq only when there is none, and posts nothing', () => {
+test('check passes when ssh works with no ssh agent, as the LaunchDaemon has none, never the caller\'s; it sets the cursor to the newest seq only when there is none, and posts nothing (#366)', () => {
   const none = checkWith();
   const kept = checkWith({ cursor: 9 });
   try {
     assert.deepEqual([none.exit, none.cursor], [0, '4']);
-    assert.ok(none.calls.every((c) => c.endsWith('sock=/agent.sock')));
+    assert.ok(none.calls.length > 0 && none.calls.every((c) => c.endsWith('sock=')));
     assert.ok(none.calls.some((c) => c.includes('BatchMode=yes') && c.includes('--newest')));
     assert.deepEqual([kept.exit, kept.cursor], [0, '9']);
   } finally {
     none.cleanup();
     kept.cleanup();
-  }
-});
-
-test('the ssh probe gets the SSH_AUTH_SOCK launchctl getenv prints, none when that is empty, and never the test\'s own', () => {
-  const none = checkWith({ sock: '' });
-  try {
-    assert.equal(none.exit, 0);
-    assert.ok(none.calls.length > 0 && none.calls.every((c) => c.endsWith('sock=')));
-  } finally {
-    none.cleanup();
   }
 });
 
@@ -425,7 +423,7 @@ test('check fails, and probes no ssh, when the installed copy, the log or the st
   }
 });
 
-test('check fails when an installed plist names a path under Desktop, and passes when it names the installed copy', () => {
+test('check fails when the installed LaunchDaemon plist names a path under Desktop, and passes when it names the installed copy (#366)', () => {
   const bad = checkWith({ installed: '<plist><dict><key>ProgramArguments</key><array><string>$HOME/Desktop/x/bin/factory-relay</string><string>run</string></array></dict></plist>' });
   const good = checkWith({ installed: '<plist><dict><string>$HOME/.local/share/factory/checkout/bin/factory-relay</string><string>run</string></dict></plist>' });
   try {
@@ -437,7 +435,7 @@ test('check fails when an installed plist names a path under Desktop, and passes
   }
 });
 
-test('check fails when the loaded job last exited with 126 or any code but 0, and passes at 0 or when the job is not loaded', () => {
+test('check fails when the loaded system job last exited with 126 or any code but 0, and passes at 0 or when the job is not loaded (#366)', () => {
   const r126 = checkWith({ printed: '\tlast exit code = 126' });
   const r0 = checkWith({ printed: '\tlast exit code = 0' });
   try {
@@ -472,7 +470,7 @@ test('run reads the newest seq by ssh with BatchMode on its first pass and sets 
 
 test('run and check refuse to run as the factory host user, and call no ssh', () => {
   for (const verb of ['run', 'check']) {
-    const r = command([verb], { hostUser: userInfo().username });
+    const r = command([verb], { place: HOST_ENV });
     try {
       assert.equal(r.code, 2, r.out);
       assert.deepEqual(r.calls, []);
