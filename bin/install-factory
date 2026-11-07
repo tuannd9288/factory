@@ -70,7 +70,7 @@ fi
 echo "factory: $link -> $target"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "note: $HOME/.local/bin is not on your PATH" ;; esac
 
-# Only the MacBook installs LaunchAgents; on the Mac mini the link above is all.
+# Only the MacBook has jobs here, its LaunchDaemons; on the Mac mini the link above is all.
 if [ "$(node "$helper" place)" != macbook ]; then
   exit 0
 fi
