@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { factory } from './helpers.mjs';
+import { HOST_ENV, factory } from './helpers.mjs';
 import { SWITCH_HOLD_MS as HOLD_MS, observe, readActive, readLines } from '../bin/lib/events.mjs';
 import { watchSwitch } from '../bin/lib/switch-watch.mjs';
 
@@ -224,9 +224,11 @@ test('a failed read leaves the position file and the condition as they were', ()
     assert.deepEqual(verbs.slice(1).sort(), ['clear', 'start']);
   }));
 
-// The factory host is whoever runs the test (bin/lib/node.mjs placeOf); a node off it has another user.
-const ON_HOST = { FACTORY_HOST_USER: userInfo().username };
+// The factory host is whoever runs the test, on this machine (bin/lib/node.mjs placeOf); a node off it has another user, or is the MacBook's
+// own `factory` user: the host's user name on a machine with another name (#366).
+const ON_HOST = HOST_ENV;
 const OFF_HOST = { FACTORY_HOST_USER: `${userInfo().username}-not` };
+const MACBOOK_FACTORY = { ...HOST_ENV, FACTORY_HOST_NAME: 'another-machine' };
 
 test('the factory\'s own repository: its rules are read once a sweep and none of its pull requests; no checkout, no read', () =>
   withDir((dir) => {
@@ -252,19 +254,21 @@ test('the factory\'s own repository: its rules are read once a sweep and none of
   }));
 
 // #366: a MacBook's daemon sweeps with its installed copy as FACTORY_CHECKOUT, a checkout of the factory too; it told each move again.
-test('a node off the factory host reads no merge switch of the factory\'s own and raises no switch-moved for it', () =>
+test('a node off the factory host, the MacBook\'s own `factory` user included, reads no merge switch of the factory\'s own and raises no switch-moved for it', () =>
   withDir((dir) => {
     const w = world(dir);
-    const offHost = { FACTORY_CHECKOUT: w.checkout, ...OFF_HOST };
-    w.rules('1-2');
-    let r = w.sweep(offHost);
-    assert.equal(r.code, 0, r.out);
-    w.rules('all');
-    r = w.sweep(offHost);
-    assert.equal(r.code, 0, r.out);
-    assert.ok(!r.calls.some((c) => c.includes('repos/o/factory/')), 'its rules are not read');
-    assert.ok(!existsSync(positionFile(w.state, 'o/factory')));
-    assert.ok(!readLines(w.state).some((e) => e.key.startsWith('switch-moved o/factory ')));
+    for (const place of [OFF_HOST, MACBOOK_FACTORY]) {
+      const offHost = { FACTORY_CHECKOUT: w.checkout, ...place };
+      w.rules('1-2');
+      let r = w.sweep(offHost);
+      assert.equal(r.code, 0, r.out);
+      w.rules('all');
+      r = w.sweep(offHost);
+      assert.equal(r.code, 0, r.out);
+      assert.ok(!r.calls.some((c) => c.includes('repos/o/factory/')), 'its rules are not read');
+      assert.ok(!existsSync(positionFile(w.state, 'o/factory')));
+      assert.ok(!readLines(w.state).some((e) => e.key.startsWith('switch-moved o/factory ')));
+    }
   }));
 
 test('rules that give no position write no position file and start no condition, and the sweep goes on', () =>

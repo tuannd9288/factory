@@ -14,13 +14,9 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, truncateSync, writeFileSync, appendFileSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-
-export function nodeName() {
-  return hostname().split('.')[0].toLowerCase();
-}
+import { nodeName } from './node.mjs';
 
 const exec = promisify(execFile);
 // Same private destination as ledger.mjs's DIGEST_REPO; the digest itself is unchanged.

@@ -4,9 +4,10 @@ import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../bin/lib/factory.mjs';
+import { HOST_ENV } from './helpers.mjs';
 
 test('a node with its agents token uses local gh and git with the other node down (#366)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'factory-node-gh-'));
@@ -87,7 +88,7 @@ console.log(process.env.FAKE_GH_BODY ?? JSON.stringify({ login: 'fake-agent', id
 
 test('a stored token leaves factory-host gh, lead --here and store unchanged (#366)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'factory-host-gh-'));
-  const env = { HOME: dir, AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: join(dir, 'state'), FACTORY_HOST_USER: userInfo().username, FACTORY_AGENT: 'fake-agent', GH_TOKEN: 'existing-host-token' };
+  const env = { HOME: dir, AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: join(dir, 'state'), ...HOST_ENV, FACTORY_AGENT: 'fake-agent', GH_TOKEN: 'existing-host-token' };
   const calls = [];
   const original = childProcess.spawnSync;
   childProcess.spawnSync = (cmd, args, options) => {

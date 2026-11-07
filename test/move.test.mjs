@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { nodeName } from '../bin/lib/shared-records.mjs';
+import { nodeName } from '../bin/lib/node.mjs';
 import { join } from 'node:path';
 import { freeWord } from '../bin/lib/team-names.mjs';
 import { createLinear } from '../bin/lib/linear.mjs';
