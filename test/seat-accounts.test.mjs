@@ -4,7 +4,7 @@
 // claude and fake tokens only.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { skipPs } from './ps-skip.mjs';
 import { filesUnder, rejected, rejectedOn, until, world } from './seat-world.mjs';
@@ -79,6 +79,18 @@ test('no FACTORY_TEAM, a malformed one, or a team with no row: refused before an
   assert.match(unknown.err, /probe-gamma.*no row.*factory use probe-gamma/s);
   assert.deepEqual(started(w), [], 'nothing was claimed');
   assert.equal(w.records().length, 0);
+}));
+
+test('as a user that is not the agents\', on a machine that is not the host, bin/seat starts nothing: exit 2, a plain line, no claude; as the agents\' user it starts (#366)', () => world(async (w) => {
+  // The Human's own user on the MacBook: neither the agents' user nor the factory host's name.
+  const r = w.start('worker', ['--tag', 'x'], { FACTORY_HOST_USER: 'factory-not-this-account', FACTORY_HOST_NAME: 'not-this-machine' });
+  assert.equal(r.code, 2, r.out + r.err);
+  assert.match(r.err, /is not the agents' user factory-not-this-account.*nothing was started/);
+  assert.deepEqual(started(w), [], 'nothing was claimed');
+  assert.equal(existsSync(w.out()), false, 'no claude ran');
+  const host = w.start('worker', ['--tag', 'y']);
+  assert.equal(host.code, 0, host.out + host.err);
+  await until(() => w.records().length === 1, 'the record');
 }));
 
 test('an old factory/lead-<repo> line is no team: FACTORY_TEAM=lead-<repo> is refused before anything is claimed, naming the repository (#311)', () => world((w) => {

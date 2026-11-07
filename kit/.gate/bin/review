@@ -352,7 +352,13 @@ case "$job" in
       after=$(node .gate/bin/lib/history.mjs raised-at --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") || { echo "tier: when the pull request was raised could not be read ($after), so this check fails closed"; exit 1; }
       [ -n "$after" ] || [ -z "${did_raise:-}" ] || after=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     fi
-    printf '%s' "$reviews" | node .gate/bin/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" --base "$base" ${after:+--after "$after"}
+    # An approval given before the base last changed showed the diff from the old base: it counts only through the old base's merged
+    # pull request (FAC-41: a stack's child moved onto main before its parent landed carries the parent's change).
+    moved=""
+    if [ -n "${GATE_PR:-}" ]; then
+      moved=$(node .gate/bin/lib/history.mjs moved --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") || { echo "tier: the base changes of the pull request could not be read ($moved), so this check fails closed"; exit 1; }
+    fi
+    printf '%s' "$reviews" | node .gate/bin/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" --base "$base" ${after:+--after "$after"} ${moved:+--moved-at "${moved%% *}" --parent-head "${moved#* }"}
     code=$?
     # Waiting for his approval (exit 1): request his review, then fail as before.
     [ "$code" -ne 0 ] || exit 0

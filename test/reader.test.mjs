@@ -749,17 +749,20 @@ test('a pass reads only the runs folder: a profile folder beside it is never lis
 
 // ---- the two writers ------------------------------------------------------------------------------------------------------
 
-test('the sweep and the reader write the events file in turn: no seq repeats, none is lost', async () => {
+test('the sweep and the reader write the events file in turn: no seq repeats, none is lost, and the share gets the same bytes', async () => {
   await withDir(async (dir) => {
     const state = join(dir, 'state');
     mkdirSync(state);
+    // FAC-43: the MacBook's share, written under the same lock, so three writers at once leave it equal to events.jsonl.
+    mkdirSync(join(dir, 'Shared'));
+    const share = join(dir, 'Shared/factory/events.jsonl');
     const events = pathToFileURL(join(factory, 'bin/lib/events.mjs')).href;
     const script = (body) => `import * as e from ${JSON.stringify(events)};\n${body}`;
     const N = 40;
     const readerCode = script(`for (let i = 0; i < ${N}; i += 1) e.appendStart({ state: ${JSON.stringify(state)}, kind: 'drift', key: 'drift s' + i, text: 'line ' + i });`);
     const sweepCode = script(`for (let i = 0; i < ${N}; i += 1) e.record({ state: ${JSON.stringify(state)}, found: [{ key: 'gh-refused', scope: 'gh', text: 'x' }, { key: 'out-of-quota ' + i, scope: 'quota', text: 'q' + i }], read: new Set(['gh', 'quota']), now: 1000 + i });`);
     const run = (code) => new Promise((res) => {
-      const c = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'inherit', 'inherit'] });
+      const c = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'inherit', 'inherit'], env: { ...process.env, FACTORY_EVENTS_SHARE: share } });
       c.once('exit', (status) => res(status));
     });
     const codes = await Promise.all([run(readerCode), run(readerCode), run(sweepCode)]);
@@ -774,6 +777,7 @@ test('the sweep and the reader write the events file in turn: no seq repeats, no
     assert.equal(lines.filter((l) => l.kind === 'out-of-quota' && l.type === 'start').length, N);
     assert.equal(JSON.parse(readFileSync(join(state, 'events-active.json'), 'utf8')).seq, lines.length);
     assert.ok(!existsSync(join(state, 'events.lock')), 'the lock is released');
+    assert.equal(readFileSync(share, 'utf8'), readFileSync(join(state, 'events.jsonl'), 'utf8'), 'the share holds the same lines in the same order');
   });
 });
 
