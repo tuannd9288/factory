@@ -7,10 +7,9 @@
 // Piggery watch.go:26-28,79-81,136-177@67c083e supplies incident deduplication (no default);
 // 15 minutes follows captions 11:46-11:57. The finished-turn predicate is review round 1's adaptation.
 // All notifications reuse Colly's existing events monitor; no periodic Supervisor prompt.
-// The model pass sits behind a switch, `"side": "off"` in reader.json, changed by pull request (INN-39): off, the sweep starts no pass and
-// says so once (readerSwitch); the silence watch runs whatever the switch says.
-// Frozen until it is cut (INN-39, 2026-11-07): no new signal kind (KINDS, watch_fired, the reader-failed causes) and no new side (SIDES,
-// reader.json). A new model or effort for an existing side is not a new side.
+// The model pass sits behind a switch, `"side": "off"` in reader.json, changed by pull request (INN-39): off, the sweep starts no new pass
+// (one already running finishes) and says so once (readerSwitch); the silence watch runs whatever the switch says.
+// The detector's kinds and sides are frozen: docs/decisions.md, "The Watcher's freeze, 2026-11-07".
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
