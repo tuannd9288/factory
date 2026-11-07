@@ -7,10 +7,13 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
-import { leadStateOf, parseLog } from './claude-code.mjs';
+import { hookStateOf, parseLog } from './claude-code.mjs';
 import { REQUIRED, clonesUnder, readSessions } from './ledger.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
+
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
+export { parseLog };
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +21,22 @@ const GH_MS = 60_000;
 const CALL_MS = 15_000;
 const WORKING_MS = 120_000;
 const GONE_MS = 24 * 3600_000;
+const LOGIN_MS = 60_000;
 const ROLE_ORDER = ['lead', 'worker', 'reviewer', 'researcher'];
+
+/** The Lead's state from state.json's event and its process: { state, stateAt, waitNote? }, or null to leave it to the log. An event
+ * older than the process belongs to an earlier session. A process that carries the new SessionStart hook, is over a minute old and
+ * has run none of its hooks waits at the login or the folder trust. That is an inference: whether SessionStart fires only after the
+ * trust dialog has not been seen yet; it is seen at zalo-gateway's first Lead start. A Lead started before the hook existed never
+ * gets this line. */
+export function leadStateOf({ event, command, ageMs, now }) {
+  const at = event ? Date.parse(event.at) : NaN;
+  if (Number.isFinite(at) && (ageMs == null || at >= now - ageMs)) {
+    const state = hookStateOf(event);
+    return state ? { state, stateAt: at } : null;
+  }
+  return /"SessionStart"/.test(command) && ageMs > LOGIN_MS ? { state: 'waiting', waitNote: 'login or folder trust?' } : null;
+}
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 

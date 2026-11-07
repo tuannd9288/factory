@@ -5,6 +5,9 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { RATE_SOURCE, statusLineWindows } from './claude-code.mjs';
+
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import them from here.
+export { statusLineWindows, windowsOf } from './claude-code.mjs';
 import { accountEvent, resetPassed, runFiles } from './seat.mjs';
 import { teamAccounts } from './teams.mjs';
 import { seatAccounts } from './token.mjs';

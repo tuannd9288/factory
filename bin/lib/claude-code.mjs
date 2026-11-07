@@ -1,23 +1,8 @@
-// Claude Code's formats (INN-39 item 3): the one file of the factory that reads what Claude Code writes. The rest of the factory reads
-// the factory's own shapes, which this file gives it:
-//   - the stream-json log of `claude -p` (bin/seat's run-<tag>.jsonl): its `system`/`init` and `result` events (resultOf, for a seat's
-//     record), and its `rate_limit_event` lines (rateReadingOf, RATE_LIMIT_LINE);
-//   - a log or a Lead's transcript copy, summed (parseLog), and a session's transcripts under a profile's projects/ (assistantEntries),
-//     priced at API rates from prices.json (costOf), with the canary that the fields read are still there (READS, inspect);
-//   - the status line's rate_limits, as bin/lib/statusline-hook.mjs keeps them (statusLineWindows);
-//   - the hook events a Lead's hooks record in state.json, named by Claude Code (leadStateOf);
-//   - a stream line reduced for the reader (reduce), and whether it ends a turn of the session's own (turnEnded);
-//   - `claude auth status`'s JSON (readClaude).
-// Its fixtures come from Claude Code 2.1.308 (test/fixtures/ledger-entry-2.1.308.json, the reader's and the seats' stream fixtures).
-// The pinned contract it produces into: a seat's record in sessions.jsonl (bin/lib/seat.mjs recordOf composes it from resultOf), the lines
-// of events.jsonl (bin/lib/events.mjs) and the reviewer's result JSON (kit/.gate/bin/lib/result.mjs).
-// Left out, on purpose: the three hook scripts (packs/pstack/bin/transcript-copy.mjs, bin/lib/socket-hook.mjs, bin/lib/statusline-hook.mjs)
-// run as hash-named copies in a Lead's pane for days and import only node: modules, so each reads its own hook input; the kit's
-// claude-reviewer.mjs is copied into every repository and cannot import bin/lib, and is already the kit's one Claude file, behind
-// result.mjs. Codex's formats are not here (no second harness now): quota.mjs's codexRow and the reader's `turn.completed` keep them.
-// It imports nothing from bin/lib but prices.json and redact.mjs, so it stays out of the import ring of factory.mjs, colly-status.mjs,
-// ledger.mjs and queue.mjs (bin/lib/node.mjs).
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+// Claude Code's formats (INN-39 item 3): the one parser of what Claude Code writes, which hands the rest of the factory its own shapes.
+// Claude Code owns these formats and changes them without notice: the stream-json events of `claude -p`, its rate_limit_event lines, a
+// transcript's assistant entries, the status line's rate_limits, the hook events it names, and `claude auth status`'s JSON.
+// The fixtures were captured from Claude Code 2.1.308 (test/fixtures/ledger-entry-2.1.308.json, the reader's and the seats' stream fixtures).
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { redact, redactDeep } from './redact.mjs';
@@ -162,20 +147,17 @@ export function parseLog(text) {
   };
 }
 
-// ---- a session's transcripts under a profile -------------------------------------------------------------------------------
+// ---- a session's transcripts -----------------------------------------------------------------------------------------------
 
-function jsonlFiles(dir) {
-  const out = [];
-  const walk = (d) => {
-    for (const name of readdirSync(d)) {
-      const p = join(d, name);
-      const s = statSync(p);
-      if (s.isDirectory()) walk(p);
-      else if (name.endsWith('.jsonl')) out.push(p);
-    }
-  };
-  if (existsSync(dir)) walk(dir);
-  return out;
+/** One transcript line as its assistant entry with usage, or null for any other line. */
+function assistantOf(line) {
+  if (!line.includes('"assistant"') || !line.includes('"usage"')) return null;
+  try {
+    const entry = JSON.parse(line);
+    return entry.type === 'assistant' && entry.message?.usage ? entry : null;
+  } catch {
+    return null;
+  }
 }
 
 /** One assistant entry of a transcript in the factory's shape: { key, session, branch, cwd, model, dollars }, `key` its message's id (else
@@ -189,21 +171,11 @@ export const entryOf = (e) => ({
   dollars: costOf(e.message.model, e.message.usage),
 });
 
-/** Every assistant entry with usage in a profile folder's session files, in file order, as entryOf gives it. */
-export function* assistantEntries(profileDir) {
-  for (const file of jsonlFiles(join(profileDir, 'projects'))) {
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
-      let entry;
-      try {
-        entry = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (entry.type === 'assistant' && entry.message?.usage) yield entryOf(entry);
-    }
-  }
-}
+/** One transcript line as entryOf gives it, or null when it is no assistant entry with usage. */
+export const assistantEntryOf = (line) => {
+  const entry = assistantOf(line);
+  return entry ? entryOf(entry) : null;
+};
 
 /** The fields of an assistant entry the canary checks, those entryOf and costOf read for a cost: a path, or paths of which one is enough.
  * entryOf also reads `sessionId`, which only the ledger's repoCosts uses and the canary has never checked. */
@@ -230,23 +202,16 @@ const has = (e, r) => r.split('|').some((p) => valueAt(e, p) !== undefined && va
 /** How many of the newest entries the canary calls `stale` when a field is absent from all of them; `bin/factory-ledger --check` says so. */
 export const STALE_RUN = 10;
 
-/** The canary: over the latest `latest` distinct assistant entries of the profile folders (newest files first by
- * modification time), which fields the ledger reads are present in none of them (`missing`), absent from every entry of
- * the newest session file or from the newest 10 entries (`stale`: the format changed lately), absent from some
- * (`partly`), and every key path with its types and counts. It reads values only to learn their type and reports none. */
-export function inspect(profileDirs, { latest = 50 } = {}) {
-  const dated = [];
-  for (const dir of profileDirs)
-    for (const file of jsonlFiles(join(dir, 'projects'))) dated.push({ file, time: statSync(file).mtimeMs });
-  dated.sort((a, b) => a.time - b.time);
+/** The canary, over session files given oldest first as [{ file, text }] (the ledger finds and orders them): over the latest `latest`
+ * distinct assistant entries, which fields the ledger reads are present in none of them (`missing`), absent from every entry of the
+ * newest file or from the newest 10 entries (`stale`: the format changed lately), absent from some (`partly`), and every key path with
+ * its types and counts. It reads values only to learn their type and reports none. */
+export function canaryOf(files, { latest = 50 } = {}) {
   const entries = [];
-  for (const { file } of dated) {
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
-      try {
-        const e = JSON.parse(line);
-        if (e.type === 'assistant' && e.message?.usage) entries.push({ e, file });
-      } catch {}
+  for (const { file, text } of files) {
+    for (const line of text.split('\n')) {
+      const e = assistantOf(line);
+      if (e) entries.push({ e, file });
     }
   }
   const seen = new Set();
@@ -256,7 +221,7 @@ export function inspect(profileDirs, { latest = 50 } = {}) {
   });
   const sampleItems = distinct.slice(-latest);
   const sample = sampleItems.map((x) => x.e);
-  const newestFile = dated.length ? dated[dated.length - 1].file : null;
+  const newestFile = files.length ? files[files.length - 1].file : null;
   const inNewest = distinct.filter((x) => x.file === newestFile).map((x) => x.e);
   const paths = new Map();
   const walk = (value, path, seenHere) => {
@@ -288,8 +253,6 @@ export function inspect(profileDirs, { latest = 50 } = {}) {
 
 // ---- a Lead's hook events --------------------------------------------------------------------------------------------------
 
-const LOGIN_MS = 60_000;
-
 // The Lead's state from its newest hook event (packs/pstack/bin/transcript-copy.mjs writes state.json): Claude Code's Notification
 // types and the hooks the launcher sets. It is data, to be adjusted from what real Leads send; an event it does not name leaves the
 // state the Lead's log gives.
@@ -302,19 +265,8 @@ const LEAD_STATES = {
   UserPromptSubmit: 'working',
 };
 
-/** The Lead's state from state.json's event and its process: { state, stateAt, waitNote? }, or null to leave it to the log. An event
- * older than the process belongs to an earlier session. A process that carries the new SessionStart hook, is over a minute old and
- * has run none of its hooks waits at the login or the folder trust. That is an inference: whether SessionStart fires only after the
- * trust dialog has not been seen yet; it is seen at zalo-gateway's first Lead start. A Lead started before the hook existed never
- * gets this line. */
-export function leadStateOf({ event, command, ageMs, now }) {
-  const at = event ? Date.parse(event.at) : NaN;
-  if (Number.isFinite(at) && (ageMs == null || at >= now - ageMs)) {
-    const state = LEAD_STATES[event.type ? `${event.event}:${event.type}` : event.event];
-    return state ? { state, stateAt: at } : null;
-  }
-  return /"SessionStart"/.test(command) && ageMs > LOGIN_MS ? { state: 'waiting', waitNote: 'login or folder trust?' } : null;
-}
+/** The state a hook event of state.json ({ event, type }) names: 'waiting', 'idle' or 'working', or null for one it does not name. */
+export const hookStateOf = (event) => LEAD_STATES[event.type ? `${event.event}:${event.type}` : event.event] ?? null;
 
 // ---- the reader's input ----------------------------------------------------------------------------------------------------
 

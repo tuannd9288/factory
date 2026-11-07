@@ -11,7 +11,7 @@ import { factory } from './helpers.mjs';
 
 const FIXTURE = JSON.parse(readFileSync(join(factory, 'test/fixtures/ledger-entry-2.1.308.json'), 'utf8'));
 const ledger = () => import(join(factory, 'bin/lib/ledger.mjs'));
-// The transcript reading, the canary and the prices live in the one module that reads Claude Code's formats (INN-39 item 3).
+// The prices live in the one module that reads Claude Code's formats (INN-39 item 3); the ledger finds the files.
 const claudeCode = () => import(join(factory, 'bin/lib/claude-code.mjs'));
 
 /** A profile folder holding one session file made of the fixture entry with some fields changed. */
@@ -27,7 +27,7 @@ function profile(entries) {
 }
 
 test('the canary reads every field the ledger reads from the fixture of 2.1.308: none missing, and cwd is one of them', async () => {
-  const { READS, inspect, costOf } = await claudeCode();
+  const { READS, inspect, costOf } = await ledger();
   assert.ok(READS.includes('cwd'));
   const p = profile([{}]);
   try {

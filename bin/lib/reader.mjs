@@ -18,6 +18,9 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendStart, oneLine, readActive, record, readLines } from './events.mjs';
 import { reduceLine, turnEnded } from './claude-code.mjs';
+
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
+export { reduce } from './claude-code.mjs';
 import { redact, redactDeep } from './redact.mjs';
 import { releaseLock, takeLock } from './queue.mjs';
 import { listStreams } from './streams.mjs';
