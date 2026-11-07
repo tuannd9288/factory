@@ -172,7 +172,7 @@ test('condition 3: a Lead whose newest hook event is a permission prompt or a di
   });
 });
 
-test('condition 4: an account out of quota starts once for the account, not for each session, and clears when its reset passes', async () => {
+test('condition 4: an account out of quota, or warned near a limit, starts once for the account, not for each session, and clears when its reset passes', async () => {
   const e = await events();
   await withDir(async (dir) => {
     const state = join(dir, 'state');
@@ -183,19 +183,27 @@ test('condition 4: an account out of quota starts once for the account, not for 
     writeFileSync(join(state, 'accounts'), 'factory/factory-lead=acct-one\nfactory/factory-b=acct-two\n');
     const resetsAt = (T0 + 3600_000) / 1000;
     const limit = `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt, unifiedWindows: { five_hour: { utilization: 1, resetsAt }, seven_day: { utilization: 0.2, resetsAt: resetsAt + 86400 } } } })}\n`;
+    // acct-two is not rejected: Claude Code warns that its seven-day window, which resets in three hours, is near its limit (FAC-8).
+    const weekReset = (T0 + 3 * 3600_000) / 1000;
+    const warning = `${JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', rateLimitType: 'seven_day', resetsAt: weekReset, unifiedWindows: { five_hour: { utilization: 0.3, resetsAt }, seven_day: { utilization: 0.92, resetsAt: weekReset } } } })}\n`;
     for (const tag of ['worker', 'reviewer']) {
       mkdirSync(join(runs, 'issue-1'), { recursive: true });
       writeFileSync(join(runs, 'issue-1', `run-${tag}.jsonl`), limit);
       writeFileSync(join(runs, 'issue-1', `run-${tag}.account`), 'acct-one\n');
+      mkdirSync(join(runs, 'issue-2'), { recursive: true });
+      writeFileSync(join(runs, 'issue-2', `run-${tag}.jsonl`), warning);
+      writeFileSync(join(runs, 'issue-2', `run-${tag}.account`), 'acct-two\n');
     }
     const seen = (now) => record(e, state, e.accountsOut({ runs, state, agentProfiles: profiles, now }), new Set(['quota']), now);
     seen(T0);
     seen(T0 + MIN);
-    assert.deepEqual(shape(state), ['start out-of-quota a']);
-    assert.doesNotMatch(JSON.stringify(linesOf(state)), /acct-one/, 'the account is named by its letter');
+    assert.deepEqual(shape(state), ['start out-of-quota a', 'start quota-warning b']);
+    assert.doesNotMatch(JSON.stringify(linesOf(state)), /acct-one|acct-two/, 'each account is named by its letter');
     seen(T0 + 2 * 3600_000);
     seen(T0 + 2 * 3600_000 + MIN);
-    assert.deepEqual(shape(state), ['start out-of-quota a', 'clear out-of-quota a']);
+    assert.deepEqual(shape(state), ['start out-of-quota a', 'start quota-warning b', 'clear out-of-quota a']);
+    seen(T0 + 4 * 3600_000);
+    assert.deepEqual(shape(state), ['start out-of-quota a', 'start quota-warning b', 'clear out-of-quota a', 'clear quota-warning b']);
   });
 });
 

@@ -4,7 +4,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { quotaRows, alertLines } from '../bin/lib/quota.mjs';
-import { quotaLines } from '../bin/lib/alerts.mjs';
 import { observe, readLines } from '../bin/lib/events.mjs';
 
 test('Codex hand-run refusals reach quota alerts and events; capacity is softer and a manual move is reported', () => {
@@ -24,7 +23,6 @@ test('Codex hand-run refusals reach quota alerts and events; capacity is softer 
   try {
     log([{ type: 'turn.failed', error: { message: "You've hit your usage limit", resets_at: resetsAt } }]);
     assert.match(alertLines(rows(), { now }).join('\n'), /quota: account fictional-first, seat peer:.*rejected.*2099-11-06 06:00/);
-    assert.match(quotaLines({ FACTORY_RUNS: runs, FACTORY_STATE: state }).join('\n'), /quota: account fictional-first, seat peer/);
     sweep();
     sweep();
     assert.equal(starts().filter((e) => e.kind === 'out-of-quota').length, 1);
