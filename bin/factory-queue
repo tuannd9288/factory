@@ -52,8 +52,8 @@
 # come after); a refused start names the lock's holder; a start that loaded older code than the checkout now holds starts
 # again once (FACTORY_REEXEC). A deferral says nothing until two hours, then queue-checkout.failed says how far behind and why.
 # The Lead's Stop and SessionEnd hooks run a copy of transcript-copy.mjs in its run folder (hooks/transcript-copy-<sha7>.mjs,
-# reused, never removed), since its pane stays open for days. The sweep also renders the two LaunchDaemon plists with the new
-# code and compares them with the installed ones (/Library/LaunchDaemons, read only): while they differ, or a plist cannot be
+# reused, never removed), since its pane stays open for days. The sweep also renders the LaunchDaemon plists with the new
+# code (the queue's and the digest's, and on the MacBook the relay's, #366) and compares them with the installed ones (/Library/LaunchDaemons, read only): while they differ, or a plist cannot be
 # rendered (`could not render <label>`), queue-plist.failed says so and $FACTORY_STATE/plist-wanted/ holds what the Human
 # installs with sudo, in the order above (the daemon stopped before the new job starts); it goes away on the first sweep after he does.
 # Until then the old plist still starts the same files, so a change to the plist's arguments or environment must keep the old ones working.

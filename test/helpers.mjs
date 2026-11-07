@@ -1,11 +1,15 @@
 // A throwaway repository with the kit installed by bin/onboard, and helpers to change it and run its scripts.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nodeName } from '../bin/lib/node.mjs';
 
 export const factory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// The settings that make this machine and user the factory host (placeOf, bin/lib/node.mjs): its user and its name.
+export const HOST_ENV = { FACTORY_HOST_USER: userInfo().username, FACTORY_HOST_NAME: nodeName() };
 
 // Commits made by the tests name a throwaway author and run no hooks unless a test asks for them. They also start no
 // background gc or maintenance: git's own default starts one detached after a commit, and it can write into a test's
