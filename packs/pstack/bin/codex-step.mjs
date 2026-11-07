@@ -191,7 +191,11 @@ export function main(args, { home: seamHome, codex: seamCodex } = {}) {
     const argv = ['exec', '-C', dir, ...permissionArgs({ home: p.home, profiles: p.profiles, write: o.write === undefined ? null : dir, tmp: p.tmp }), '-c', 'approval_policy="never"', '-c', 'project_doc_max_bytes=0'];
     if (o.effort) argv.push('-c', `model_reasoning_effort="${o.effort}"`);
     if (git(dir, ['rev-parse', '--is-inside-work-tree']) !== 'true') argv.push('--skip-git-repo-check');
-    argv.push('--ignore-rules', '--ephemeral', '-o', out, '-');
+    // --ignore-user-config: Codex loads a folder's own .codex/config.toml (and a config.toml in the folder), with its MCP servers, hooks
+    // and exec policies, only when its user config.toml trusts that folder (rust-v0.163.0, config/src/loader/mod.rs:130-134, :375-383).
+    // A worker writes the folder, so no user config is loaded and nothing is trusted (:520-528); auth still reads CODEX_HOME. A `-c`
+    // that marks the folder untrusted did not undo a trust the user config grants (codex mcp list, 0.163.0), so it is not used.
+    argv.push('--ignore-user-config', '--ignore-rules', '--ephemeral', '-o', out, '-');
     const r = spawnSync(codex, argv, { env: codexEnv, input: prompt, encoding: 'utf8', maxBuffer: 256 << 20, timeout: MINUTES * 60_000 });
     if (r.error?.code === 'ETIMEDOUT') return wait('timeout', `codex exec ran past ${MINUTES} minutes`);
     if (r.error || r.status !== 0) {

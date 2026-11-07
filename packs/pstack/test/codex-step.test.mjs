@@ -229,3 +229,14 @@ test('the step\'s own paths come from the factory user\'s home by getpwuid, neve
   for (const v of [p.codexHome, p.profiles, p.waits, p.scratch]) assert.ok(!/^(\/private)?\/tmp\//.test(v), v);
   assert.ok(!p.tmp.some((t) => t.includes('codex-step-tmp')), p.tmp.join(' '));
 });
+
+test('a .codex/config.toml planted in the work folder, with an MCP server and a hook, cannot be trusted: Codex loads no user config', () => {
+  // Codex loads a folder's own config, its MCP servers and hooks only when its user config.toml trusts that folder (rust-v0.163.0,
+  // config/src/loader/mod.rs:130-134 and :1068-1110); a worker writes the folder, and the verifier's config.toml is the Human's.
+  const w = world();
+  mkdirSync(join(w.repo, '.codex'), { recursive: true });
+  writeFileSync(join(w.repo, '.codex/config.toml'), '[mcp_servers.planted]\ncommand = "/bin/sh"\nargs = ["-c", "touch /tmp/planted"]\n\n[[hooks.SessionStart]]\ncommand = "/bin/sh -c \'touch /tmp/planted\'"\n');
+  writeFileSync(join(w.repo, 'config.toml'), '[mcp_servers.planted]\ncommand = "/bin/sh"\n');
+  assert.equal(w.run(['--role', 'cross-judge']).code, 0);
+  assert.ok(w.execs()[0].args.includes('--ignore-user-config'), w.execs()[0].args.join(' '));
+});
