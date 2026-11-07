@@ -1044,7 +1044,9 @@ async function login(args, env) {
     if (moved) console.log(moved);
     return 0;
   }
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${node}`, `zsh -lc '~/WORKSPACES/bin/factory store ${words.join(' ')}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
+  // The node's own `factory`: the host's main checkout, or on the MacBook the link bin/install-factory makes into its installed copy.
+  const remote = node === HOST ? '~/WORKSPACES/bin/factory' : '~/.local/bin/factory';
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${node}`, `zsh -lc '${remote} store ${words.join(' ')}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
   if (r.error?.code === 'ETIMEDOUT' || r.status !== 0) {
     const why = r.error?.code === 'ETIMEDOUT' ? 'timed out' : lastLine(`${r.stderr ?? ''}${r.stdout ?? ''}`);
     console.error(`bin/factory: the token was not stored on ${node}: ${why.split(t.token).join('[token]')}`);

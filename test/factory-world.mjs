@@ -72,7 +72,7 @@ if [ -f "$FAKE/ssh-$user.error" ]; then cat "$FAKE/ssh-$user.error" >&2; exit 25
 cmd=$(printf '%s' "$last" | sed -n "s/^zsh -lc '\\(.*\\)'$/\\1/p")
 case "$cmd" in
   *"factory store "*|*"factory use"*|*"factory account remove "*)
-    rest=\${cmd#\\~/WORKSPACES/bin/factory}
+    rest=\${cmd#\\~/WORKSPACES/bin/factory}; rest=\${rest#\\~/.local/bin/factory}
     FACTORY_HOST_USER="$FAR_USER" FACTORY_HOST_NAME="$FAR_NAME" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" FACTORY_STATE="$FAKE/far/state" exec "$NODE_BIN" -- "$FACTORY_BIN" $rest;;
 esac
 if [ -f "$FAKE/ssh-factory.stderr" ]; then cat "$FAKE/ssh-factory.stderr" >&2; fi
