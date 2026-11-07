@@ -2,7 +2,7 @@
 // temporary AGENT_PROFILES, and FACTORY_RUNS and FACTORY_STATE of their own.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
 import { factory } from './helpers.mjs';
@@ -141,9 +141,10 @@ export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   w.accounts = (text) => writeFileSync(join(w.state, 'accounts'), text);
   w.out = (n = 'a') => join(w.fake, `${n}.json`);
   // A null in extra takes the variable out (FACTORY_TEAM: null is a start with no team).
+  // The test's own user is the agents' (FACTORY_HOST_USER), as the Mac mini's `factory` runs the seats.
   w.env = (extra = {}) => Object.fromEntries(Object.entries({
     PATH: `${w.bin}:${dirname(process.execPath)}`, HOME: w.home, AGENT_PROFILES: w.profiles, FACTORY_RUNS: w.runs, FACTORY_STATE: w.state,
-    FACTORY_TEAM: w.team, FACTORY_ROOT: w.froot, FAKE_OUT: w.out(), ...extra,
+    FACTORY_TEAM: w.team, FACTORY_ROOT: w.froot, FAKE_OUT: w.out(), FACTORY_HOST_USER: userInfo().username, ...extra,
   }).filter(([, v]) => v !== null));
   w.seat = (args, extra = {}) => {
     const r = spawnSync(process.execPath, [SEAT_JS, ...args], { encoding: 'utf8', env: w.env(extra), cwd: w.root, timeout: 20000 });

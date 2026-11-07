@@ -617,10 +617,12 @@ function markTrusted(config, folder) {
  * Mac mini off. Without that token, everything above holds as it is.
  * The session runs on the team's own profile and token, in auto mode with the factory host and its commands inside the classifier's
  * boundary (autoModeEnvironment), and the folder it starts in is trusted in that profile, so a first start asks nothing (#366).
- * Run as the agents' user (isAgentsUser), the MacBook's `factory` user, its seats start here, on the team's account: FACTORY_TEAM=<repo>-<team>
- * is in its environment, and the bin/seat of this node's installed copy is granted and named in its role (lead.md's {{SEAT}} and {{RUNS}}).
- * Run as any other user, the Human's own included, it gets none of the three and its role's <!--noseat--> form: seats run only as the agents'
- * user (#366 (a)), so a seat never runs with his user's files and Keychain. */
+ * Its seats run only as the agents' user (#366 (a)), so a seat never runs with the Human's files and Keychain; bin/seat itself refuses any
+ * other user. So a Lead here gets no FACTORY_TEAM, no bin/seat grant and its role's <!--noseat--> form, which stops at the worker step and
+ * says the work waits for a Lead run as the MacBook's `factory` user. Today every Lead here is such a Lead: the agents' user is what
+ * placeOf calls the factory host, refused above. Once placeOf also reads the machine's name (the next FAC-10 change), a Lead run as the
+ * MacBook's `factory` user gets the three: FACTORY_TEAM=<repo>-<team>, the grant of this node's installed copy's bin/seat, and that path in
+ * its role (lead.md's {{SEAT}} and {{RUNS}}). */
 function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -655,8 +657,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 1;
   }
   const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/lead.md');
-  // As the agents' user the Lead starts its seats with the bin/seat of this node's installed copy, which follows main (#390), whatever clone
-  // runs this; as any other user it starts none.
+  // As the agents' user (reached here once placeOf reads the machine's name) the Lead starts its seats with the bin/seat of this node's
+  // installed copy, which follows main (#390), whatever clone runs this; as any other user it starts none.
   const seat = isAgentsUser(env) ? join(installedRoot(env), 'bin/seat') : null;
   let roleText;
   try {
