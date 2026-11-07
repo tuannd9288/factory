@@ -306,7 +306,8 @@ request through the gate. Only when the gate itself is broken does the Human tur
 every open pull request, since with the ruleset off each would land unjudged. The queue leaves a tier-3 pull request behind
 `main` until the Human approved it, then updates it once; his approval holds on the updated head, whose patch is unchanged
 (`git patch-id`), so he is asked once. `tuannd9288/factory` itself is not swept; its Lead merges `main` into a branch that fell
-behind. GitHub kept the Human's approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
+behind, except a stack's child moved onto `main`, which the queue brings up to `main` (FAC-13). GitHub kept the Human's
+approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
 
 Claude Code updates itself on the stable channel; nothing in the factory pins the version its sessions run (the canary,
 #24, is at the tag `before-271`). The gate's reviewer on CI pins its own, 2.1.308
