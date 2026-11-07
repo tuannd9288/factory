@@ -36,9 +36,16 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    and `.gate/bin/verify --fast` on the staged files before each commit. Never write "check it against" a script: the
    session then builds its own command, a deny rule refuses it, and it stops with no test run (#256). Tell the worker to
    list in `foundOutside` each bug or improvement it finds outside the issue, with where, and to fix none of them on the
-   branch. Work the issue needs is not a finding; the worker does it. Tell every seat to stop on a refused action,
+   branch. Work the issue needs is not a finding; the worker does it. Where the repository has a Feature Map
+   (`feature-map/`) and the change alters a feature a user reaches, tell the worker to update that feature's file in
+   the same pull request, or, for a new feature, to add its file and its line in `feature-map/README.md`. Tell every
+   seat to stop on a refused action,
    report its exact message to you and never retry it in another form, with another tool or a script. You handle
-   approvals; seat briefs do not describe them.
+   approvals; seat briefs do not describe them. A repository with no Feature Map gets one issue to seed it, filed as
+   step 4 files a finding. Its brief's first line is `/pstack:create-verification-skill`, and it orders §3 alone, from
+   the source, at the repository root and not under `.claude/skills/`: `feature-map/README.md` and one file for each of
+   the top three to five user-facing features, with no `SKILL.md` and no run of the app; an existing feature doc moves
+   into the map, and its old file is deleted, in the same pull request.
 4. Start the worker <!--seat-->by `bin/seat`'s absolute path, the one your grant names:
    `{{SEAT}} worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
    the background: end the turn.<!--/seat--><!--noseat-->only as this MacBook's `factory` user, the agents' own: you run as another
@@ -81,7 +88,9 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    named as in step 3 (`.gate/bin/verify --tests <files>` and `.gate/bin/red-check --base origin/main`; `--fast`
    checks only staged files, and a committed change has none), or that it runs none, since step 5 ran them, that it
    writes nothing in the worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists
-   what it found. Start it with step 4's command, with `reviewer` in place of `worker`, its own brief and
+   what it found. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
+   a user reaches and leaves that feature's file unchanged. Start it with step 4's command, with `reviewer` in place of
+   `worker`, its own brief and
    `--tag review<k>`, and on its wake find its record with `"tag":"review<k>"` the same way; sort its `foundOutside`
    as in step 4. On `FAIL`, brief a fix round as in step 5, run step 5's checks again, then review again. A `fix<k>`
    or `review<k>` tag is used once in a run: `<k>` counts on and never restarts. Push only after a `PASS`; after three
@@ -107,8 +116,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
 9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes the worktree.
 
 ## What you ask the Human
-Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login or a
-cost.
+Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login, a
+cost, or, once for each repository taken in, typing `/repo-refresh` in audit mode in your session.
 Number each question and give your recommended answer. While you wait on any decision, <!--github-->label your issue `needs-human`;
 remove the label once the answer is on the issue or its pull request.<!--/github--><!--linear-->move your issue to Needs Human with
 `factory linear ask`; move it back with `factory linear answered` once the answer is on the issue or its pull request, and acknowledge it
