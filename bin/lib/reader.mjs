@@ -7,12 +7,16 @@
 // Piggery watch.go:26-28,79-81,136-177@67c083e supplies incident deduplication (no default);
 // 15 minutes follows captions 11:46-11:57. The finished-turn predicate is review round 1's adaptation.
 // All notifications reuse Colly's existing events monitor; no periodic Supervisor prompt.
+// The model pass sits behind a switch, `"side": "off"` in reader.json, changed by pull request (INN-39): off, the sweep starts no pass and
+// says so once (readerSwitch); the silence watch runs whatever the switch says.
+// Frozen until it is cut (INN-39, 2026-11-07): no new signal kind (KINDS, watch_fired, the reader-failed causes) and no new side (SIDES,
+// reader.json). A new model or effort for an existing side is not a new side.
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appendStart, oneLine, record, readLines } from './events.mjs';
+import { appendStart, oneLine, readActive, record, readLines } from './events.mjs';
 import { redact } from './redact.mjs';
 import { releaseLock, takeLock } from './queue.mjs';
 import { listStreams } from './streams.mjs';
@@ -69,8 +73,12 @@ const refuse = (why) => {
 };
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** The setting as { side, model, effort } for the side it picks (or `override`, for --try), or a refusal (error.cause 'setting'): a side
- * the reader does not have, a missing model, an effort the side does not take, any other key. The file is checked whole, both sides. */
+/** The switch's side (INN-39): `"side": "off"` turns the model pass off. It is the side, not an effort, though pi takes an effort `off` too. */
+export const OFF = 'off';
+
+/** The setting as { side, model, effort } for the side it picks (or `override`, for --try), { side: 'off' } when the switch is off and no
+ * side is named, or a refusal (error.cause 'setting'): a side the reader does not have, a missing model, an effort the side does not take,
+ * any other key. The file is checked whole, both sides, so switching back on finds them as they were. */
 export function loadSetting(file = SETTING_FILE, override = undefined) {
   let s;
   try {
@@ -86,6 +94,7 @@ export function loadSetting(file = SETTING_FILE, override = undefined) {
     if (!SIDES[name].includes(v.effort)) return refuse(`side ${name} does not take the effort ${JSON.stringify(v.effort)}`);
   }
   const side = override ?? s.side;
+  if (side === OFF && override === undefined) return { side: OFF };
   if (!SIDES[side]) return refuse(`unknown side ${JSON.stringify(side)}`);
   if (!s.sides[side]) return refuse(`side ${side} is not in sides`);
   return { side, model: s.sides[side].model, effort: s.sides[side].effort };
@@ -332,6 +341,30 @@ function writeAtomic(file, text) {
 const flat = (s) => s.replace(/\s+/g, ' ').trim();
 const eventText = (e) => `${flat(e.session)} ${e.kind}: "${flat(e.quote)}" (${flat(e.why)})`;
 
+/** The switch (INN-39), read by the sweep before it starts a pass: 'off' when reader.json's side is `off`, else 'on'. Off, it ends any held
+ * reader-failed condition (no pass will end it), removes reader/cursors.json (so the first pass once it is on again starts each stream at its
+ * end, as the first pass ever does) and holds one `reader-off` condition, of a scope of its own so that a pass cannot end it: it starts once.
+ * On, it ends a held reader-off. A setting that does not load counts as on, so the pass reports it, as before. The silence watch does not
+ * read the switch. */
+export function readerSwitch({ state, settingFile = SETTING_FILE, now = Date.now() }) {
+  let side = null;
+  try {
+    side = loadSetting(settingFile).side;
+  } catch {
+    // the pass reports a setting that does not load
+  }
+  if (side !== OFF) {
+    if (readActive(state).conditions['reader-off']) record({ state, found: [], read: new Set(['reader-switch']), now });
+    return 'on';
+  }
+  rmSync(join(state, 'reader', 'cursors.json'), { force: true });
+  record({
+    state, now, read: new Set(['reader', 'reader-switch']),
+    found: [{ key: 'reader-off', scope: 'reader-switch', top: true, text: "the Watcher's model pass is off (bin/lib/reader.json); the silence watch still runs" }],
+  });
+  return 'off';
+}
+
 // Piggery has no silent_for default: watch.go:26-28 rejects a missing value.
 export const SILENT_FOR_MS = 15 * 60_000;
 
@@ -401,7 +434,9 @@ export async function runPass({ state, runs, settingFile = SETTING_FILE, home = 
       if (error.cause !== 'setting') throw error;
       causes.set('setting', error.message);
     }
-    if (setting) await readAndSend({ state, dir, runs, setting, home, env, timeoutMs, now, causes, result, provider });
+    // Off (INN-39): a pass run by hand makes no model call; the sweep starts none (readerSwitch).
+    if (setting?.side === OFF) result.status = OFF;
+    else if (setting) await readAndSend({ state, dir, runs, setting, home, env, timeoutMs, now, causes, result, provider });
     // The reader-failed conditions: each cause starts once and is cleared by the next pass where it does not happen.
     record({ state, read: new Set(['reader']), now, found: [...causes].map(([cause, detail]) => ({ key: `reader-failed ${cause}`, scope: 'reader', text: `the stream reader failed (${cause}): ${detail}` })) });
     result.failed = [...causes.keys()];
@@ -510,6 +545,7 @@ async function readAndSend({ state, dir, runs, setting, home, env, timeoutMs, no
  * event, lock or file but its temporary input, which is removed. Returns the exit code. */
 async function tryFile(file, side, env = process.env) {
   const setting = loadSetting(SETTING_FILE, side);
+  if (setting.side === OFF) throw new Error(`the model pass is off in ${SETTING_FILE}; name a side with --side pi|codex`);
   // The header of the one part is `try <first 8 characters of the file's name>`: a file has no run folder or session id to name.
   const header = `try ${basename(file).replace(/\.jsonl$/, '').slice(0, 8)}`;
   const w = wholeLines(file, 0);
@@ -558,6 +594,10 @@ async function main(argv) {
   }
   if (argv.length) throw new Error('usage: factory-reader [--try <file> [--side pi|codex]]');
   const r = await runPass({ state: stateDir, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
+  if (r.status === OFF) {
+    console.log(`reader: off in ${SETTING_FILE}; no model call`);
+    return 0;
+  }
   console.log(`reader: ${r.status}, ${r.calls} call(s), ${r.events} event(s)${r.failed.length ? `, failed: ${r.failed.join(' ')}` : ''}`);
   return r.status === 'crashed' ? 1 : 0;
 }

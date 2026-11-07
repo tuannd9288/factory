@@ -230,6 +230,11 @@ test('a setting naming no known side, a missing model, an effort the side does n
       assert.throws(() => load(s), (e) => e.cause === 'setting' || /setting/i.test(e.message), why);
     for (const effort of ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']) assert.equal(load(piWith({ effort })).effort, effort);
     for (const effort of ['minimal', 'low', 'medium', 'high', 'xhigh']) assert.equal(load(codexWith({ effort })).effort, effort);
+    // INN-39: the switch. Off loads as off; --try, which names its side, still gets that side's model; the sides are still checked whole.
+    assert.deepEqual(load(side({ side: 'off' })), { side: 'off' });
+    assert.deepEqual(loadSetting(file, 'pi'), { side: 'pi', ...DEFAULT.sides.pi });
+    assert.throws(() => loadSetting(file, 'off'), (e) => e.cause === 'setting', 'off is no side for --try');
+    assert.throws(() => load({ side: 'off', sides: { ...DEFAULT.sides, pi: { ...DEFAULT.sides.pi, effort: 'ultra' } } }), (e) => e.cause === 'setting', 'off still checks the sides');
   });
 });
 
@@ -819,6 +824,47 @@ test('the sweep starts a pass when 15 minutes have passed since the last began a
     writeFileSync(join(state, 'reader.lock'), JSON.stringify({ pid: dead.pid, start: 'x', host: 'h', token: 'deadbeef' }));
     assert.equal(go(T0 + 40 * MIN), true, 'a lock whose pid is gone is stale');
     assert.equal(started.length, 3);
+  });
+});
+
+// INN-39: the model pass sits behind reader.json's switch; the silence watch does not.
+test('with the switch off no pass starts, no model call is made, no cursor is kept, the notice starts once, and a silent Lead still fires', async () => {
+  const { startReader } = await import('../bin/lib/queue.mjs');
+  const { watchSilence } = await reader();
+  await withDir(async (dir) => {
+    const w = world(dir);
+    // While it was on: cursors kept, and a reader-failed held.
+    w.put(w.seatFile(), '');
+    await w.pass({ now: T0 });
+    w.flag('fail');
+    appendFileSync(w.seatFile(), say('seat words'));
+    await w.pass({ now: T0 + 15 * MIN });
+    w.unflag('fail');
+    assert.deepEqual(w.shape(), ['start reader-failed command']);
+    assert.ok(existsSync(join(w.state, 'reader/cursors.json')));
+    const calls = w.calls().length;
+    w.setting({ ...DEFAULT, side: 'off' });
+    const spawned = [];
+    const sweep = (now) => startReader({ state: w.state, runs: w.runs, now, settingFile: w.settingFile, env: w.env, spawnFn: (...a) => (spawned.push(a), { unref() {}, on() {} }) });
+    assert.equal(sweep(T0 + 60 * MIN), false);
+    assert.equal(sweep(T0 + 61 * MIN), false);
+    assert.deepEqual(spawned, [], 'no pass starts');
+    assert.ok(!existsSync(join(w.state, 'reader/cursors.json')), 'no cursor is kept');
+    assert.deepEqual(w.shape().slice(1).sort(), ['clear reader-failed command', 'start reader-off'], 'a held reader-failed ends and the notice starts once');
+    assert.equal((await w.pass({ now: T0 + 62 * MIN })).status, 'off', 'a pass run by hand says it is off');
+    assert.equal(w.calls().length, calls, 'no model call is made');
+    // The silence watch runs whatever the switch says.
+    w.put(w.leadFile(), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done for now.' }], stop_reason: 'end_turn' }, parent_tool_use_id: null })}\n`);
+    utimesSync(w.leadFile(), (T0 + 40 * MIN) / 1000, (T0 + 40 * MIN) / 1000);
+    assert.equal(watchSilence({ state: w.state, runs: w.runs, now: T0 + 70 * MIN }), 1);
+    assert.ok(w.events().some((e) => e.kind === 'watch_fired'));
+    // On again: the notice ends, and the first pass starts each stream at its end, with no model call.
+    w.setting(DEFAULT);
+    assert.equal(sweep(T0 + 80 * MIN), true);
+    assert.equal(w.shape().filter((l) => l === 'clear reader-off').length, 1);
+    await w.pass({ now: T0 + 80 * MIN });
+    assert.equal(w.calls().length, calls, 'what was written while it was off is not read');
+    assert.ok(existsSync(join(w.state, 'reader/cursors.json')));
   });
 });
 
