@@ -5,8 +5,9 @@
 //   over). piggery takes a flock (server/server.go:119-130); a pid and a start time is how the queue's lock tells a dead holder from a reused pid.
 //   The socket: $FACTORY_STATE/daemon.sock, mode 0600, its path under 104 bytes (bin/lib/daemon-proto.mjs says the wire). Only the lock holder
 //   unlinks a stale socket and makes its own (server/transport_unix.go:16-30). One request, one answer, matched by `id` (proto/proto.go:136-157).
-//   Verbs: `ping` -> { pid, start, startedAt, head, passes, passing }; `seat-ended` { run, tag, session } -> { id }. An unknown verb gets an error
-//   answer, a bad line too; nothing a client sends ends the daemon.
+//   Verbs: `ping` -> { pid, start, startedAt, head, passes, passing }; `seat-ended` { run, tag, session } -> { id }; `linear-check`
+//   { keys, since, until } -> { missing, via }, a read of the Linear events the store holds, for `bin/factory-daemon linear-check` (FAC-38,
+//   bin/lib/linear-listen.mjs). An unknown verb gets an error answer, a bad line too; nothing a client sends ends the daemon.
 //   Reconcile before listening (server/server.go:242-248, core/reconcile.go:11-54): the store is opened, then the seat records not yet taken are
 //   woken once. The authority for "once" is queue-seats.news (bin/lib/news-wake.mjs, wakeOnSeatEnds), the state the sweep always had; the store's
 //   offset into sessions.jsonl is the daemon's own read position. piggery's reconcile marks sessions gone and never respawns; this daemon starts no
@@ -52,7 +53,7 @@ import { MAX_LINE, fits, socketPath } from './daemon-proto.mjs';
 import { holderOf, releaseLock, takeLock } from './queue.mjs';
 import { wakeOnSeatEnds } from './news-wake.mjs';
 import { openStore } from './store.mjs';
-import { startLinearSource } from './linear-listen.mjs';
+import { linearCheckMain, startLinearSource } from './linear-listen.mjs';
 import { postSync } from './wake.mjs';
 import { recordsWriter } from './shared-records.mjs';
 import { nodeLogin } from './node.mjs';
@@ -168,6 +169,11 @@ export function handleLine(d, line) {
     if (req.verb === 'seat-ended') {
       const r = seatEnded(d, req);
       return { ...r, response: { id, ...r.response } };
+    }
+    if (req.verb === 'linear-check') {
+      if (!Array.isArray(req.keys) || req.keys.length > 1000 || !req.keys.every((k) => text(k, 200)) || !Number.isFinite(req.since) || !Number.isFinite(req.until))
+        return { response: { id, ...bad('bad-request', 'linear-check needs keys (at most 1000) and since and until in ms') } };
+      return { response: { id, ok: true, result: { missing: d.store.linearMissing(req.keys), via: d.store.linearVia(req.since, req.until) } } };
     }
     return { response: { id, ...bad('unknown-verb', `unknown verb ${JSON.stringify(String(req.verb).slice(0, 40))}`) } };
   } catch (error) {
@@ -348,7 +354,7 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    process.exitCode = await run();
+    process.exitCode = process.argv[2] === 'linear-check' ? await linearCheckMain(process.argv.slice(3)) : await run();
     process.exit();
   } catch (error) {
     console.error(`factory-daemon: ${first(error)}`);
