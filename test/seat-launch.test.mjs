@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { factory } from './helpers.mjs';
 import { skipPs } from './ps-skip.mjs';
@@ -49,9 +49,10 @@ function world(body) {
   writeFileSync(join(w.profiles, 'tokens/acct-one'), `${TOKEN}\n`);
   writeFileSync(join(w.state, 'accounts'), 'factory/factory-lead=acct-one\nfactory/seat-1=acct-one\nfactory/seat-2=acct-one\n');
   w.out = (n = 'a') => join(w.fake, `${n}.json`);
+  // The test's own user is the agents' (FACTORY_HOST_USER), as the Mac mini's `factory` runs the seats.
   w.env = (extra = {}) => ({
     PATH: `${w.bin}:${dirname(process.execPath)}`, HOME: w.home, AGENT_PROFILES: w.profiles, FACTORY_RUNS: w.runs, FACTORY_STATE: w.state,
-    FACTORY_TEAM: 'factory-lead', FAKE_OUT: w.out(), CLAUDE_CODE_OAUTH_TOKEN: 'inherited-token-must-go', ...extra,
+    FACTORY_TEAM: 'factory-lead', FAKE_OUT: w.out(), CLAUDE_CODE_OAUTH_TOKEN: 'inherited-token-must-go', FACTORY_HOST_USER: userInfo().username, ...extra,
   });
   w.seat = (args, extra = {}) => {
     const r = spawnSync(process.execPath, [SEAT_JS, ...args], { encoding: 'utf8', env: w.env(extra), cwd: w.root, timeout: 20000 });
