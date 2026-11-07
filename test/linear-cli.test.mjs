@@ -436,11 +436,16 @@ test('onboard with an existing team creates nothing, registers it, and a second 
   assert.equal(linear.mutations().length, 0);
   assert.deepEqual(onLinear('zalo-gateway', state), { key: 'ZAL', teamId: 'team-zal' });
   const file = readFileSync(registryFile(state), 'utf8');
-  const again = await run(['onboard', 'zalo-gateway', '--key', 'ZAL', '--name', 'zalo-gateway']);
-  assert.equal(again.code, 0);
-  assert.equal(again.out.registered, false);
+  const again = await run(['onboard', 'zalo-gateway', '--key', 'ZAL']);
+  assert.equal(again.code, 0, 'a team that is there needs no --name: a node registers it with the key alone (FAC-38)');
+  assert.deepEqual([again.out.registered, again.out.createdTeam, again.out.createdState], [false, false, false]);
   assert.equal(linear.mutations().length, 0);
   assert.equal(readFileSync(registryFile(state), 'utf8'), file);
+  const unnamed = await run(['onboard', 'probe', '--key', 'PRB']);
+  assert.equal(unnamed.code, 2, 'a team to make needs its name');
+  assert.match(unnamed.out.error, /no team PRB; --name is needed/);
+  assert.equal(linear.mutations().length, 0);
+  assert.equal(onLinear('probe', state), null);
 });
 
 test('onboard of a new team copies FAC\'s settings and adds Needs Human only when the copy lacks it', async () => {

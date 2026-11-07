@@ -11,12 +11,10 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
-import { coverage } from '../../packs/pstack/scripts/lib/verdict.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { job, plist } from './queue.mjs';
-import { enforcerIndex, findingsSection, repeatedKinds } from './findings.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
 
@@ -263,10 +261,8 @@ export function inWindow(start, end, from, to) {
   return Date.parse(start) <= to && (!end || Date.parse(end) >= from);
 }
 
-/** One pull request's row, as the GraphQL query below returns it; a task of its own when it closes no task. patchOf
- * gives the merged head's patch-id from a local clone, or null; a merged pull request's live is whether a live
- * verdict covered that head (scripts/live-verify), null when that cannot be told. */
-export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null }) {
+/** One pull request's row, as the GraphQL query below returns it; a task of its own when it closes no task. */
+export function rowOf(repo, pr, { human, costs, profile }) {
   const labels = pr.labels.nodes.map((l) => l.name);
   const tiers = labels.map((l) => /^tier-([123])$/.exec(l)?.[1]).filter(Boolean).map(Number);
   const events = pr.timelineItems.nodes;
@@ -308,19 +304,13 @@ export function rowOf(repo, pr, { human, costs, profile, patchOf = () => null })
     cost = branch.dollars;
     costNote = branch.unpriced.size ? `unpriced: ${[...branch.unpriced].join(', ')}` : '';
   }
-  const comments = pr.comments?.nodes ?? [];
-  const lv = coverage(comments, { author: pr.author?.login, head: pr.headRefOid, patch: pr.mergedAt ? patchOf(pr.mergeCommit?.oid, pr.headRefOid) : null });
-  const live = pr.mergedAt ? lv.covered : undefined;
   return {
     repo,
     number: pr.number,
     title: pr.title,
     url: pr.url,
     prs: [pr.number],
-    live,
-    livePRs: pr.mergedAt ? [{ number: pr.number, title: pr.title, covered: live }] : [],
     merges: pr.mergedAt ? [{ number: pr.number, title: pr.title, body: pr.body ?? '', merged: pr.mergedAt }] : [],
-    codexRuns: lv.runs,
     who: [pr.author?.login ?? '?', ...(branch ? [...branch.models].map((m) => m.replace(/^claude-/, '')) : [])].join(' · '),
     tier: tiers.length ? Math.max(...tiers) : null,
     state: pr.mergedAt ? 'landed' : pr.state === 'OPEN' ? 'open' : 'abandoned',
@@ -353,9 +343,7 @@ export function taskRow(repo, issue, prRows) {
     title: issue.title,
     url: issue.url,
     prs: prs.map((r) => r.number),
-    livePRs: prs.flatMap((r) => r.livePRs ?? []),
     merges: prs.flatMap((r) => r.merges ?? []),
-    codexRuns: prs.reduce((sum, r) => sum + (r.codexRuns ?? 0), 0),
     who: prs[0]?.who ?? '?',
     tier: tiers.length ? Math.max(...tiers) : null,
     state: landed ? 'landed' : issue.state === 'OPEN' || prs.some((r) => r.state === 'open') ? 'open' : 'abandoned',
@@ -471,7 +459,7 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, findings = null, unread = null, shared = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, unread = null, shared = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -506,19 +494,6 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     `- Average rounds (commits the gate judged): ${rounds.length ? (rounds.reduce((s, r) => s + r.rounds, 0) / rounds.length).toFixed(2) : '–'} (n=${rounds.length})`,
     `- API-equivalent cost per merged task (every attempt added up; not cash): ${costed.length && landed.length ? `$${(costed.reduce((s, r) => s + r.cost, 0) / landed.length).toFixed(2)} (cost measured on ${costed.length}/${n} tasks)` : 'not measurable yet'}`,
     '',
-    '## Live verifier (Codex, scripts/live-verify; not a gate input)',
-    '',
-  );
-  const livePRs = rows.flatMap((r) => (r.livePRs ?? []).map((p) => ({ ...p, repo: r.repo })));
-  const known = livePRs.filter((p) => p.covered !== null);
-  const named = (list) => (list.length ? list.map((p) => `${p.repo}#${p.number}`).join(', ') : 'none');
-  const missed = known.filter((p) => !p.covered);
-  lines.push(
-    `- Merged PRs whose head a live verdict covers: ${rate(known.filter((p) => p.covered).length, known.length)}`,
-    `- No covering verdict: ${missed.length ? missed.map((p) => `${p.repo}#${p.number} ${p.title}`).join('; ') : 'none'}`,
-    `- Undetermined (patch-id not computable in the clone): ${named(livePRs.filter((p) => p.covered === null))}`,
-    `- Codex runs: ${rows.reduce((sum, r) => sum + (r.codexRuns ?? 0), 0)} (the verifier's Codex subscription, paid monthly; no API price, not split by task)`,
-    '',
     '## Per task',
     '',
     '| Repo | Task | PR | Who | Tier | Rounds | API cost | Human touched | Outcome |',
@@ -530,7 +505,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
       `| ${r.repo.split('/')[1]} | [${at(r.number).trim()}](${r.url}) ${r.title.replace(/\|/g, '/').slice(0, 60)} | ${r.prs.map((n) => `#${n}`).join(' ') || '–'} | ${r.who} | ${r.tier ?? '?'} | ${r.rounds} | ${cost} | ${r.touched ? `yes (${r.touchedWhy})` : 'no'} | ${STATE[r.state]} |`,
     );
   }
-  if (unread?.size) lines.push('', ...[...unread].map(([repo, why]) => `- ${repo}: could not read its Linear issues (${why}); its task list above is missing and its enforcer lookup was skipped.`));
+  if (unread?.size) lines.push('', ...[...unread].map(([repo, why]) => `- ${repo}: could not read its Linear issues (${why}); its task list above is missing.`));
   if (sessions) {
     const { lines: ran, total } = sessionLines(sessions, since, until);
     const uncharged = unchargedSessions(sessions, since, until);
@@ -545,7 +520,6 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     }
   }
   if (quota) lines.push('', ...(quota.error ? ['## Quota windows (what Claude Code itself reports)', '', `- ${quota.error}`] : quotaSection(quota.rows, { now: quota.now })), '', '## Role, model and seat (bin/seat)', '', ...roleMapLines(keptSessions(sessions ?? [], since, until), accounts));
-  if (findings) lines.push('', ...findingsSection(findings));
   if (queue) {
     lines.push('', '## Merge queue (bin/factory-queue)', '');
     if (queue.missing) lines.push(`- Cannot check the queue: the state folder ${queue.dir} does not exist (the queue has not run, or FACTORY_STATE is wrong).`);
@@ -561,7 +535,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     '',
     'Task: an issue labelled task, from the label to the close, with every PR that closes it; a PR that closes no task is a task of its own, from its opening.',
     'API cost: the cost of the bin/seat sessions that ran on the PR\'s branch, as their records name the repository and branch, plus the tokens of the --profile-dir folders by the same branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
-    'Cash: the Claude subscription, paid monthly, not split by task; the verifier\'s Codex subscription is the same. The ledger sees no other cash.',
+    'Cash: the Claude subscription, paid monthly, not split by task. The ledger sees no other cash.',
     'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N"; only when its body has no "Reverts" line at all, for any repository, is its title Revert "<title of a merged PR>" or revert(scope): <title of a merged PR> (scope optional) read; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
     'Human touched: the Human reviewed it, the label needs-human, or a merge by the Human\'s own login that was not made by auto-merge (a merge by the agents\' login is a team merge).',
   );
@@ -569,8 +543,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
 }
 
 const QUERY = `query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){
-number title url body author{login} createdAt mergedAt state headRefName headRefOid mergeCommit{oid}
-comments(first:100){nodes{author{login} body}}
+number title url body author{login} createdAt mergedAt state headRefName
 closingIssuesReferences(first:10){nodes{number labels(first:20){nodes{name}}}}
 labels(first:30){nodes{name}}
 reviews(first:50){nodes{author{login} state}}
@@ -586,39 +559,6 @@ function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-/** The number of the merged pull request from a branch of a repository, or null: the one read of "which pull request is this
- * reviewer record's" (#408), by the record's repository and branch. Each answer is asked of GitHub once; run is the `gh` runner. */
-export function mergedPullLookup(run = gh) {
-  const seen = new Map();
-  return (repo, branch) => {
-    const key = `${repo}\n${branch}`;
-    if (!seen.has(key)) {
-      const pulls = JSON.parse(run(['api', `repos/${repo}/pulls?state=all&per_page=100&head=${repo.split('/')[0]}:${encodeURIComponent(branch)}`]));
-      seen.set(key, pulls.find((p) => p.merged_at)?.number ?? null);
-    }
-    return seen.get(key);
-  };
-}
-
-/** The issue of a repository whose body has the line `Kind: <kind>`, open or closed, as { number, state }, or null: the one read
- * of enforcer issues (#408). A repository's issues are read once; run is the `gh` runner. For a repository on Linear (#406) `linear(repo)`
- * gives the team's issues as { key, description, closed }, read beforehand by enforcerIssues, and `number` is the issue's key. */
-export function enforcerLookup(run = gh, { linear = () => null } = {}) {
-  const byRepo = new Map();
-  return (repo, kind) => {
-    if (!byRepo.has(repo)) {
-      const issues = linear(repo);
-      if (issues) {
-        byRepo.set(repo, enforcerIndex(issues.map((i) => ({ number: i.key, state: i.closed ? 'closed' : 'open', body: i.description }))));
-      } else {
-        const all = JSON.parse(run(['api', '--paginate', '--slurp', `repos/${repo}/issues?state=all&per_page=100`])).flat();
-        byRepo.set(repo, enforcerIndex(all.filter((i) => !i.pull_request)));
-      }
-    }
-    return byRepo.get(repo).get(kind) ?? null;
-  };
-}
-
 /** Every issue of a Linear team that matches `filter`, with the fields `pick` names, across pages. */
 async function linearIssues(api, teamKey, filter, fields) {
   const out = [];
@@ -631,13 +571,6 @@ async function linearIssues(api, teamKey, filter, fields) {
     after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
   } while (after);
   return out;
-}
-
-/** The issues of a Linear team whose description names a `Kind:` line, as { key, description, closed }: what enforcerLookup reads for a
- * repository on Linear. Closed is a completed or canceled status. */
-export async function enforcerIssues(api, teamKey) {
-  const nodes = await linearIssues(api, teamKey, { description: { contains: 'Kind:' } }, 'identifier description state { type }');
-  return nodes.map((n) => ({ key: n.identifier, description: n.description ?? '', closed: ['completed', 'canceled'].includes(n.state?.type) }));
 }
 
 /** The issue key a pull request body names on its line `Issue: <KEY>` (prbody.mjs reads only `#N`), or null. */
@@ -682,23 +615,6 @@ export function clonesUnder(root, skip = () => {}) {
     else skip(dir, `origin ${url} does not name owner/name`);
   }
   return out;
-}
-
-/** A merged PR's patch-id: a squash is its diff from the old main; a merge keeps the original head's diff from
- * its fork. A fresh clone of main need not hold a squashed PR's old head. */
-export function patchIn(dir) {
-  const git = (args, input) => execFileSync('git', ['-C', dir, ...args], { input, encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['pipe', 'pipe', 'ignore'] });
-  return (merge, head) => {
-    if (!dir || !merge || !head) return null;
-    try {
-      const parents = git(['rev-list', '--parents', '-n', '1', merge]).trim().split(' ');
-      const squash = parents.length === 2;
-      const fork = squash ? parents[1] : git(['merge-base', `${merge}^1`, head]).trim();
-      return git(['patch-id', '--verbatim'], git(['diff', '--binary', '--no-renames', fork, squash ? merge : head])).split(' ')[0].trim() || null;
-    } catch {
-      return null;
-    }
-  };
 }
 
 /** `--check`: the canary, printed. Exit 1 when a field the ledger reads is missing or stale, or there is nothing to read. */
@@ -916,7 +832,7 @@ async function main(argv) {
     const pull = (n) => {
       if (!pulls.has(n)) {
         const node = graphql(QUERY, n).pullRequest;
-        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: true, patchOf: patchIn(clones.get(repo)) }) });
+        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: true }) });
       }
       return pulls.get(n);
     };
@@ -953,10 +869,10 @@ async function main(argv) {
   }
   rows.sort((a, b) => a.created.localeCompare(b.created));
   if (opts.mode === 'rows') {
-    const head = ['repo', 'task', 'prs', 'who', 'tier', 'state', 'rounds', 'first_pass', 'no_red', 'human_touched', 'why', 'cost_usd', 'cost_note', 'hours_to_merge', 'live_verdict', 'codex_runs', 'title'];
+    const head = ['repo', 'task', 'prs', 'who', 'tier', 'state', 'rounds', 'first_pass', 'no_red', 'human_touched', 'why', 'cost_usd', 'cost_note', 'hours_to_merge', 'title'];
     console.log(head.join('\t'));
     for (const r of rows)
-      console.log([r.repo, r.number, r.prs.join(' '), r.who, r.tier ?? '', r.state, r.rounds, r.firstPass ?? '', r.noRed, r.touched, r.touchedWhy, r.cost?.toFixed(4) ?? '', r.costNote, r.hours?.toFixed(2) ?? '', (r.livePRs ?? []).map((p) => `#${p.number}:${p.covered === null ? '?' : p.covered ? 'yes' : 'no'}`).join(' '), r.codexRuns ?? 0, r.title].join('\t'));
+      console.log([r.repo, r.number, r.prs.join(' '), r.who, r.tier ?? '', r.state, r.rounds, r.firstPass ?? '', r.noRed, r.touched, r.touchedWhy, r.cost?.toFixed(4) ?? '', r.costNote, r.hours?.toFixed(2) ?? '', r.title].join('\t'));
     return;
   }
   const secrets = new Map();
@@ -968,27 +884,7 @@ async function main(argv) {
     }
   }
   const report = inspect(shared ? [] : folders, { latest: opts.latest });
-  let findings;
-  try {
-    const onTeam = new Map();
-    for (const repo of opts.repos) {
-      try {
-        const team = unread.has(repo) ? null : onLinear(repo, state);
-        if (team) onTeam.set(repo, await enforcerIssues(linearApi(), team.key));
-      } catch (error) {
-        unreadBecause(repo, error);
-      }
-    }
-    // A repository whose Linear issues could not be read is not looked up on GitHub instead: the lookup fails for it alone.
-    const linear = (repo) => {
-      if (unread.has(repo)) throw new Error(`its Linear issues could not be read: ${unread.get(repo)}`);
-      return onTeam.get(repo) ?? null;
-    };
-    findings = repeatedKinds(sessions, { mergedOf: mergedPullLookup(), enforcerOf: enforcerLookup(gh, { linear }) });
-  } catch (error) {
-    findings = { error: `The findings could not be read (${String(error.stderr || error.message).trim().split('\n')[0]}).` };
-  }
-  const text = digest(rows, { ...opts, secrets, findings, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared });
+  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared });
   if (!opts.post) {
     process.stdout.write(text);
     return;
@@ -1016,7 +912,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   } catch (error) {
     const why = String(error.stderr || error.message).trim();
     console.error(`factory-ledger: ${why}`);
-    // A failed weekly post leaves digest.failed for bin/factory-alerts, as the queue leaves queue-run.failed (#209);
+    // A failed weekly post leaves digest.failed for Colly's status line and brief (queueOf in colly-status.mjs), as the queue
+    // leaves queue-run.failed (#209);
     // a run that prints to stdout, and plist, keep no state.
     const args = process.argv.slice(2);
     if (args[0] !== 'plist' && args.includes('--post')) {

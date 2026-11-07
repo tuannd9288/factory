@@ -44,7 +44,7 @@
 # The checkout the daemons and bin/seat run from, ~/WORKSPACES, follows main (#257) in the first step of each sweep
 # (bin/lib/checkout.mjs, in ~/WORKSPACES only, or where FACTORY_CHECKOUT names a clone, which is how the tests run it): git
 # fetch, then git merge --ff-only --no-overwrite-ignore of the tip it fetched, and nothing else moves the checkout. It
-# refuses, moving nothing and leaving queue-checkout.failed (the alerts hook and the digest show it): local changes, a branch
+# refuses, moving nothing and leaving queue-checkout.failed (Colly's status line and the digest show it): local changes, a branch
 # that is not main, a failed fetch, a main that is not a fast-forward, a failed pull. It moves a file in the way (an ignored
 # one that a commit brings in) to $FACTORY_STATE/archive/<sha7>-<time>/ and deletes nothing. It waits until liveRuns (every
 # run-*.pid in ~/factory-runs/*/, and claims, of any seat) is 0, under $FACTORY_STATE/checkout.lock, which every start of a

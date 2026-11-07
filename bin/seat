@@ -58,7 +58,7 @@
 # gives its https URL and a pushed commit, never a path, the factory's own repository included.
 # Known limit (#311): a session can set FACTORY_TEAM itself in a command it types, and so start a seat on another team's
 # account; lead.md says it must not. Known limit: the token files sit on disk, and the team holds the key by decision (#307). The
-# worker's and the reviewer's Bash runs in Claude Code's sandbox (#183), set in the one --settings value with the alerts hook: it
+# worker's and the reviewer's Bash runs in Claude Code's sandbox (#183), set in the one --settings value they get: it
 # denies reading the profiles folder, `~/.claude*`, `~/.codex*`, `~/.config/gh`, `~/.ssh` and `~/.local/share/claude`, allows
 # writes to the work folder, the run folder, the temporary folder, each `--add-dir` and Claude Code's own session temporary
 # folder (its defaults), and allows no network, and a sandbox that cannot start ends the session. bin/seat sets FACTORY_SANDBOX=1
