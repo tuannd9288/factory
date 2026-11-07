@@ -7,7 +7,8 @@
 //   waiting-on-human   a tier-3 or needs-human pull request whose tier check did not succeed, or an open issue labelled needs-human
 //   lead-at-dialog     a Lead whose newest hook event is a permission prompt or an elicitation dialog
 //   out-of-quota       an account Claude Code has rejected until a reset that has not come
-//   gh-refused         the sweep's own gh refused for a rate limit or a login
+//   quota-warning      an account not rejected whose window Claude Code warns is near its limit, until that window resets (FAC-8)
+//   gh-refused        the sweep's own gh refused for a rate limit or a login
 // and a sixth (#333):
 //   switch-moved       a repository's merge switch moved since the sweep before; held 24 hours from the sweep that saw it
 // The sweep writes them (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
@@ -29,8 +30,8 @@ import { fileURLToPath } from 'node:url';
 import { claimJob } from './job-claim.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
-import { accountOut } from './seat.mjs';
-import { quotaRows, alertLines } from './quota.mjs';
+import { accountEvent, accountOut } from './seat.mjs';
+import { quotaRows, alertLines, windowsOf } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
 import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
 
@@ -130,15 +131,21 @@ export function leadsAtDialog({ runs, now, processes = defaultProcesses }) {
 }
 
 /** Condition 4: one for each account Claude Code has rejected until a reset that has not come (accountOut, the signal that stops a
- * session), named by its letter. The account readers give an empty list for a file or folder they cannot read, so a host with no
- * account at all throws: it is not a reading, and cannot clear a condition. */
+ * session), named by its letter; and, for an account not rejected, a quota-warning while its newest event says `allowed_warning`,
+ * Claude Code's own warning that a window is near its limit, in alertLines' words, until that window resets: the time to switch (FAC-8).
+ * The account readers give an empty list for a file or folder they cannot read, so a host with no account at all throws: it is not a
+ * reading, and cannot clear a condition. */
 export function accountsOut({ runs, state, agentProfiles, now }) {
   const seatRows = seatAccounts(state);
   const accounts = accountList({ state, agentProfiles });
   if (!accounts.length) throw new Error('no account could be read');
   return accounts.flatMap(({ name, letter }) => {
     const why = accountOut(runs, name, seatRows, now);
-    return why ? [{ key: `out-of-quota ${letter}`, scope: 'quota', text: `account ${letter} is ${why}` }] : [];
+    if (why) return [{ key: `out-of-quota ${letter}`, scope: 'quota', text: `account ${letter} is ${why}` }];
+    const info = accountEvent(runs, name, seatRows)?.info;
+    if (info?.status !== 'allowed_warning') return [];
+    const [warned] = alertLines([{ profile: `account ${letter}`, source: 'rate_limit_event', windows: windowsOf(info), resetsAt: info.resetsAt ?? null }], { now });
+    return warned ? [{ key: `quota-warning ${letter}`, scope: 'quota', text: warned }] : [];
   });
 }
 
