@@ -28,8 +28,7 @@
 # read no more by any start (a hard cut, no alias); only a run or a record from before #311, with no account of its own, is
 # counted under the account its seat's old row names. A seat is a slot: a new session takes the first seat of its role's list,
 # a resume keeps its own (`--seat`). Each run writes run-<tag>.account beside run-<tag>.seat, and its sessions.jsonl record
-# names its `team` and `account`. A seat reads its own earlier sessions from the run-<tag>.jsonl logs in its run folder, never
-# from its profile (#185).
+# names its `team` and `account`.
 # A team's account is out only while Claude Code has rejected it: the last `rate_limit_event` of the newest log among that
 # account's runs has status `rejected`, until that event's `resetsAt`; the session is then refused, naming the account and the
 # reset, and never runs on another seat or account. No share of a window and no number of live sessions stops a session (#194,

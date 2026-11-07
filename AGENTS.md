@@ -310,7 +310,7 @@ every open pull request, since with the ruleset off each would land unjudged. Th
 behind, except a stack's child moved onto `main`, which the queue brings up to `main` (FAC-13). GitHub kept the Human's
 approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
 
-Sessions take Claude Code's own updates; only the gate's reviewer runs a pinned version (`kit/.gate/bin/lib/reviewer.json`).
+Sessions take Claude Code's own updates (#290); only the gate's reviewer runs a pinned version (`kit/.gate/bin/lib/reviewer.json`).
 
 The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of eight conditions begins (a required check
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, an account Claude Code warns is
