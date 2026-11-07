@@ -98,6 +98,8 @@ describe('bin/kit-update', () => {
       assert.equal(calls.filter((c) => c.startsWith('label create')).length, 6);
       assert.equal(calls.filter((c) => c.startsWith('pr create')).length, 1);
       assert.ok(calls.every((c) => !c.startsWith('api')), calls.join('\n'));
+      // It opens as a draft, so GitHub asks no code owner yet (request 21).
+      assert.ok(w.created().includes('--draft'), w.created().join(' '));
     } finally {
       w.cleanup();
     }
