@@ -8,7 +8,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { takeLock } from '../bin/lib/lock.mjs';
 import * as ledger from '../bin/lib/ledger.mjs';
-import { branchCosts, costOf, digest, rate, rowOf, wilson } from '../bin/lib/ledger.mjs';
+import { branchCosts, digest, rate, rowOf, wilson } from '../bin/lib/ledger.mjs';
+import { costOf } from '../bin/lib/claude-code.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
 
