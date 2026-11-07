@@ -47,12 +47,12 @@ function world() {
   return {
     dir,
     state,
-    policy: (drafts, merge) => {
+    policy: (drafts, merge, stacks) => {
       const repo = join(dir, 'root/app');
       mkdirSync(repo, { recursive: true });
       git(repo, 'init', '-q', '-b', 'main');
       git(repo, 'remote', 'add', 'origin', 'https://github.com/o/app.git');
-      commit(repo, { '.gate/config.sh': '', '.gate/driver.json': JSON.stringify({ drafts, merge }) }, 'policy');
+      commit(repo, { '.gate/config.sh': '', '.gate/driver.json': JSON.stringify({ drafts, merge, stacks }) }, 'policy');
       git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
       // A worktree edit cannot opt a repository out of main's rule.
       writeFileSync(join(repo, '.gate/driver.json'), JSON.stringify({ drafts: 'pstack', merge: merge === 'merge' ? 'squash' : 'merge' }));
@@ -580,6 +580,23 @@ test('a child moved to main when its parent landed is brought up to main by a me
 });
 
 
+
+test('with stacks off on main, a moved child is not brought up to main (#507 review)', () => {
+  const w = world();
+  try {
+    w.policy('landable', undefined, 'off');
+    w.rules('1-2');
+    const p = pull(1, { draft: true, labels: [], auto: false });
+    p.mergeable = 'MERGEABLE';
+    p.timelineItems = { nodes: [{ previousRefName: 'parent', currentRefName: 'main', createdAt: '2026-11-07T01:00:00Z' }] };
+    w.pulls([p]);
+    const r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(r.calls.filter((c) => c.startsWith('pr update-branch') || c.includes('compare/')), []);
+  } finally {
+    w.cleanup();
+  }
+});
 
 test('pstack does not change draft status or arm auto-merge', () => {
   const w = world();

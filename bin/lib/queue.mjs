@@ -367,8 +367,9 @@ function draftReadiness(repo, prs, clone) {
   // FAC-13: a moved draft whose head lacks main's tip is brought up to main by a merge, never a rewrite, so its verify runs on main's
   // merge of its parent before its Lead's ship readies it (INN-38 A). By ancestry, GitHub's compare of main with its head: one whose Lead
   // merged main in has nothing to merge. One that conflicts waits for its Lead. GitHub's edited event already re-runs verify against main
-  // on a move; this closes the sweep that reads before that run starts, and a head behind main under an up-to-date rule.
-  for (const pr of prs.filter((p) => movedDraft(p) && p.mergeable === 'MERGEABLE')) {
+  // on a move; this closes the sweep that reads before that run starts, and a head behind main under an up-to-date rule. With stacks off on
+  // main there are no stacks to restack.
+  for (const pr of prs.filter((p) => policy.stacks !== 'off' && movedDraft(p) && p.mergeable === 'MERGEABLE')) {
     try {
       if (JSON.parse(gh(['api', `repos/${repo}/compare/${BASE}...${pr.head}`])).behind_by === 0) continue;
       gh(['pr', 'update-branch', String(pr.number), '--repo', repo]);
