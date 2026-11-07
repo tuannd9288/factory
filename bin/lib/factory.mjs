@@ -823,7 +823,7 @@ async function colly(args, env) {
   }
   const record = { type: 'command', command: [process.execPath, hook, socket].map(quote).join(' ') };
   // The wrapper is carried in the settings, so its bytes stay with this session, like the hash-named socket hook.
-  // SessionStart additionalContext uses the same documented shape as alerts.mjs.
+  // SessionStart additionalContext is the documented hook output (code.claude.com/docs/en/hooks).
   // bin/factory is a Bash wrapper; run its Node entry point directly with this session's Node.
   const factory = fileURLToPath(import.meta.url);
   const brief = `const {spawnSync}=require('node:child_process');

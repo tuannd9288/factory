@@ -27,7 +27,6 @@ packs/*/INSTALL.md -review-agent-guidance review-documentation
 
 # Exceptions to the lines above.
 **/.claude/settings*.json -review-agent-guidance
-packs/*/attacks.md -review-agent-guidance review-test
 packs/*/yields.md -review-agent-guidance review-documentation
 kit/.gate/proofs/** review-test
 modules/*/kit/.gate/proofs/** review-test
