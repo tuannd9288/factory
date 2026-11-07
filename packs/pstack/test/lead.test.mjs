@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { enabledPlugins, exitCodeOf, findNode, leadArgs, refusal } from '../bin/lead.mjs';
 import { pushHook } from '../../../bin/lib/force-push.mjs';
-import { secretsRead } from '../../../bin/lib/seat.mjs';
+import { readRules } from '../../../bin/lib/deny-read.mjs';
 import { matches, rulesAfter } from '../../../test/bash-rule.mjs';
 import { FORMS, HARMLESS } from '../../../test/login-forms.mjs';
 
@@ -163,8 +163,8 @@ describe('leadArgs', () => {
 
   test('the deny list holds claude, codex, herdr and the secrets', () => {
     const deny = list('--disallowedTools');
-    assert.ok(secretsRead.length > 0);
-    for (const d of ['Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...secretsRead]) assert.ok(deny.includes(d), d);
+    assert.ok(readRules({ role: 'lead' }).length > 0);
+    for (const d of ['Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', ...readRules({ role: 'lead' })]) assert.ok(deny.includes(d), d);
     // Codex is reached through `factory codex` alone, never codex itself (#182, D2).
     const allowed = list('--allowedTools');
     assert.ok(allowed.some((r) => matches(r, 'factory codex --role cross-judge --effort high')));

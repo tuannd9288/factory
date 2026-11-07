@@ -2,13 +2,32 @@
   "permissions": {
     "deny": [
       "Read(./.env*)",
-      "Read(~/.ssh/**)",
+      "Read(~/.agent-profiles)",
+      "Read(~/.agent-profiles/**)",
+      "Read(~/.agent-profiles/tokens)",
+      "Read(~/.agent-profiles/tokens/**)",
+      "Read(~/.agent-profiles/archive)",
+      "Read(~/.agent-profiles/archive/**)",
+      "Read(~/.agent-profiles/seats/1/oauth-token)",
+      "Read(~/.agent-profiles/seats/1/oauth-token/**)",
+      "Read(~/.claude)",
       "Read(~/.claude/**)",
-      "Read(~/.claude-acc*/**)",
-      "Read(~/.claude-profiles/**)",
-      "Read(~/.claude.json*)",
-      "Read(~/.cursor/**)",
-      "Read(~/.agent-profiles/verifier/**)"
+      "Read(~/.claude*)",
+      "Read(~/.claude*/**)",
+      "Read(~/.codex)",
+      "Read(~/.codex/**)",
+      "Read(~/.codex*)",
+      "Read(~/.codex*/**)",
+      "Read(~/.config/gh)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/claude-credit)",
+      "Read(~/.config/claude-credit/**)",
+      "Read(~/.ssh)",
+      "Read(~/.ssh/**)",
+      "Read(~/.local/share/claude)",
+      "Read(~/.local/share/claude/**)",
+      "Read(~/.cursor)",
+      "Read(~/.cursor/**)"
     ]
   }
 }
