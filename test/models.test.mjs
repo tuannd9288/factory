@@ -1,53 +1,149 @@
-// INN-39, contract H7: every role's model and effort come from one table, bin/lib/models.json (the gate's reviewer from the kit's own
-// kit/.gate/bin/lib/reviewer.json), and no launcher names a model of its own.
+// INN-39, contract H7: each launcher takes its model and effort from the table it is given: the factory's one table, bin/lib/models.json,
+// for every role that runs from the factory checkout, and the kit's own pin for the gate's reviewer (test/claude-reviewer.test.mjs). The
+// launchers here get a made-up table, so every expectation is written out, never read from models.json; the approved defaults are one
+// matrix of their own. The MacBook Lead, Colly and `factory codex` get theirs in test/factory-here, test/factory-colly and
+// packs/pstack/test/codex-step.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
 
-const models = () => import('../bin/lib/models.mjs');
+const { MODELS, entryOf, pstackModels } = await import('../bin/lib/models.mjs');
+const { buildArgs } = await import('../bin/lib/seat.mjs');
+const { leadArgs, writeModels } = await import('../packs/pstack/bin/lead.mjs');
+const { commandOf, loadSetting } = await import('../bin/lib/reader.mjs');
+
+// Every role a model and effort no other role has, so a launcher that reads another role's entry fails.
+const SYNTHETIC = {
+  seats: {
+    worker: { model: 'mock-worker', effort: 'workereffort' },
+    reviewer: { model: 'mock-reviewer', effort: 'reviewereffort' },
+    researcher: { model: 'mock-researcher', effort: 'researchereffort' },
+  },
+  lead: { remote: { model: 'mock-lead-remote', effort: 'remoteeffort' }, here: { model: 'mock-lead-here', effort: 'hereeffort' } },
+  watcher: { side: 'codex', sides: { pi: { model: 'mock/pi-model', effort: 'minimal' }, codex: { model: 'mock-codex-watcher', effort: 'low' } } },
+  pstack: { budget: 'mock budget', roles: { 'mock role': 'mock value', 'other role': 'inherit-parent' } },
+};
+const SEAT = { run: '/r/issue-1', home: '/h', work: '/r/w' };
+const LEAD = { repo: 'app', team: 'lead', home: '/h', root: '/f', roleText: 'role', node: '/n' };
+const after = (args, flag) => args[args.indexOf(flag) + 1];
+
+test('each seat and the pack Lead pass their own entry of the table they are given', () => {
+  assert.deepEqual(buildArgs({ role: 'worker', ...SEAT, models: SYNTHETIC }).slice(0, 6), ['-p', '--model', 'mock-worker', '--effort', 'workereffort', '--max-turns']);
+  assert.deepEqual(buildArgs({ role: 'reviewer', ...SEAT, models: SYNTHETIC }).slice(0, 6), ['-p', '--model', 'mock-reviewer', '--effort', 'reviewereffort', '--max-turns']);
+  assert.deepEqual(buildArgs({ role: 'researcher', ...SEAT, resume: 'sid-1', models: SYNTHETIC }).slice(0, 8), ['-p', '--resume', 'sid-1', '--model', 'mock-researcher', '--effort', 'researchereffort', '--max-turns']);
+  // lead.remote, never lead.here: the two stay apart until the Human chooses one value.
+  assert.deepEqual(leadArgs({ ...LEAD, models: SYNTHETIC }).argv.slice(3, 9), ['claude', '--model', 'mock-lead-remote', '--effort', 'remoteeffort', '--append-system-prompt']);
+});
+
+test('inherit, or a key left out, passes no model or effort, so the harness default applies', () => {
+  const table = {
+    seats: { worker: { model: 'inherit', effort: 'inherit' }, reviewer: {}, researcher: { model: 'mock-researcher' } },
+    lead: { remote: { effort: 'remoteeffort' } },
+  };
+  assert.deepEqual(buildArgs({ role: 'worker', ...SEAT, models: table }).slice(0, 3), ['-p', '--max-turns', '400']);
+  assert.deepEqual(buildArgs({ role: 'reviewer', ...SEAT, models: table }).slice(0, 3), ['-p', '--max-turns', '300']);
+  assert.deepEqual(buildArgs({ role: 'researcher', ...SEAT, models: table }).slice(0, 4), ['-p', '--model', 'mock-researcher', '--max-turns']);
+  assert.deepEqual(leadArgs({ ...LEAD, models: table }).argv.slice(3, 7), ['claude', '--effort', 'remoteeffort', '--append-system-prompt']);
+});
+
+test('a missing role, the old flat shape or a value that is no plain name is refused, naming the role', () => {
+  assert.throws(() => buildArgs({ role: 'worker', ...SEAT, models: {} }), /no entry for seats\.worker/);
+  assert.throws(() => buildArgs({ role: 'reviewer', ...SEAT, models: { seats: { worker: {} } } }), /no entry for seats\.reviewer/);
+  assert.throws(() => buildArgs({ role: 'nobody', ...SEAT, models: SYNTHETIC }), /unknown role nobody/);
+  // A value that would reach claude as an option of its own.
+  assert.throws(() => buildArgs({ role: 'worker', ...SEAT, models: { seats: { worker: { model: '--dangerously-skip-permissions' } } } }), /seats\.worker has no usable model/);
+  assert.throws(() => buildArgs({ role: 'worker', ...SEAT, models: { seats: { worker: { model: 'mock', effort: 'high --verbose' } } } }), /seats\.worker has no usable effort/);
+  assert.throws(() => leadArgs({ ...LEAD, models: { lead: { model: 'mock-lead', effort: 'high' } } }), /no entry for lead\.remote/);
+  assert.throws(() => leadArgs({ ...LEAD, models: { lead: { here: { model: 'mock-lead-here' } } } }), /no entry for lead\.remote/);
+  assert.throws(() => pstackModels(undefined), /no usable entry for pstack/);
+  assert.throws(() => pstackModels({ budget: 'b', roles: { r: 'v\nsneaked: line' } }), /no usable entry for pstack/);
+});
+
+test('the Watcher takes the side and model of the table\'s watcher entry, and refuses a table without a usable one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'models-'));
+  try {
+    const file = join(dir, 'models.json');
+    const paths = { input: 'in', inputFile: '/i', schemaFile: '/s', empty: '/e', home: '/h' };
+    writeFileSync(file, JSON.stringify(SYNTHETIC));
+    const codex = commandOf(loadSetting(file), paths);
+    assert.equal(codex.command, 'codex');
+    assert.equal(after(codex.args, '-m'), 'mock-codex-watcher');
+    assert.ok(codex.args.includes('model_reasoning_effort=low'), codex.args.join(' '));
+    const pi = commandOf(loadSetting(file, 'pi'), paths);
+    assert.deepEqual([pi.command, after(pi.args, '--model'), after(pi.args, '--thinking')], ['pi', 'mock/pi-model', 'minimal']);
+    writeFileSync(file, JSON.stringify({ seats: SYNTHETIC.seats }));
+    assert.throws(() => loadSetting(file), (e) => e.cause === 'setting');
+    writeFileSync(file, JSON.stringify({ watcher: { side: 'pi', sides: { pi: { model: '--verbose', effort: 'high' } } } }));
+    assert.throws(() => loadSetting(file), /side pi has no usable model/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a Lead profile\'s rules/pstack-models.md is the given table\'s pstack lines, in pstack\'s own rule-file shape', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'models-'));
+  try {
+    writeModels(dir, SYNTHETIC);
+    const text = readFileSync(join(dir, 'rules/pstack-models.md'), 'utf8');
+    assert.deepEqual(text.split('\n').filter((l) => l && !l.startsWith('#')), ['mock role: mock value', 'other role: inherit-parent']);
+    assert.match(text, /^# budget: mock budget$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the approved defaults: changing one is the Human\'s, by a pull request that changes this matrix too', () => {
+  const roles = { worker: ['seats', 'worker'], reviewer: ['seats', 'reviewer'], researcher: ['seats', 'researcher'], 'lead.remote': ['lead', 'remote'], 'lead.here': ['lead', 'here'], colly: ['colly'], codex: ['codex'] };
+  const inherit = { model: 'inherit', effort: 'inherit' };
+  assert.deepEqual(Object.fromEntries(Object.entries(roles).map(([name, path]) => [name, entryOf(MODELS, ...path)])), {
+    worker: { model: 'sonnet', effort: 'medium' },
+    reviewer: { model: 'opus', effort: 'high' },
+    researcher: { model: 'opus', effort: 'high' },
+    'lead.remote': { model: 'opus', effort: 'high' },
+    'lead.here': inherit,
+    colly: inherit,
+    codex: inherit,
+  });
+  assert.deepEqual(MODELS.watcher, { side: 'pi', sides: { pi: { model: 'antigravity/gemini-3.8-flash', effort: 'high' }, codex: { model: 'gpt-6-luna', effort: 'high' } } });
+  assert.deepEqual(MODELS.pstack, {
+    budget: 'large (xhigh)',
+    roles: {
+      'feature, refactoring': 'inherit-parent',
+      'bug-fix': 'inherit-parent',
+      'perf-issue': 'inherit-parent',
+      hillclimb: 'inherit-parent',
+      'judgment and prose': 'opus xhigh',
+      'hardest tasks': 'opus xhigh',
+      'how explorer': 'inherit-parent',
+      'how explainer': 'opus xhigh',
+      'why investigators': 'inherit-parent',
+      'why synthesizer': 'opus xhigh',
+      'reflect tooling': 'inherit-parent',
+      'reflect judgment, divergent, synthesizer': 'opus xhigh',
+      'arena runners': 'opus xhigh, codex high',
+      'arena cross-judge pool': 'codex high',
+      'swarm workers': 'inherit-parent',
+      'architect runners': 'opus xhigh, codex high',
+      'interrogate reviewers': 'opus xhigh, codex high',
+    },
+  });
+});
 
 // A model written as a whole string: an alias Claude Code takes, or a model id of Claude, GPT or Gemini.
 const MODEL = /(['"`])(opus|sonnet|haiku|fable|claude-(?:opus|sonnet|haiku|fable)[a-z0-9.-]*|gpt-[a-z0-9.-]+|(?:[a-z0-9-]+\/)?gemini-[a-z0-9.-]+)\1/gi;
 /** Each model written as a whole string in a source file's text, as `<line>: <string>`. */
 const modelsIn = (text) => text.split('\n').flatMap((line, i) => [...line.matchAll(MODEL)].map((m) => `${i + 1}: ${m[0]}`));
+// The files that build a model's argv. A launcher in a file not listed here is not scanned; review catches it.
+const LAUNCHERS = ['bin/lib/seat.mjs', 'packs/pstack/bin/lead.mjs', 'bin/lib/factory.mjs', 'bin/lib/reader.mjs', 'packs/pstack/bin/codex-step.mjs', 'kit/.gate/bin/lib/claude-reviewer.mjs'];
 
-test('no launcher names a model of its own: no source file under bin/, packs/pstack/bin/ or kit/.gate/bin/ holds one as a string', () => {
-  // The scope is the launchers' source folders, not a list of exceptions: a price list, a test or a comment is no launcher.
+test('no file that builds a model\'s argv names a model of its own', () => {
   assert.deepEqual(modelsIn("const m = 'opus';\n// opus, high\nspawn('x', ['--model', \"claude-opus-5-5\"]);"), ["1: 'opus'", '3: "claude-opus-5-5"'], 'the scan finds a planted model');
-  const files = execFileSync('git', ['ls-files', 'bin', 'packs/pstack/bin', 'kit/.gate/bin'], { cwd: factory, encoding: 'utf8' }).split('\n').filter((f) => f.endsWith('.mjs'));
-  assert.ok(files.length > 20, files.join(' '));
-  const found = files.flatMap((f) => modelsIn(readFileSync(join(factory, f), 'utf8')).map((hit) => `${f}:${hit}`));
+  const found = LAUNCHERS.flatMap((f) => {
+    assert.ok(existsSync(join(factory, f)), `${f} is gone: list the file that builds its argv now`);
+    return modelsIn(readFileSync(join(factory, f), 'utf8')).map((hit) => `${f}:${hit}`);
+  });
   assert.deepEqual(found, []);
-});
-
-test('every seat, the pack Lead and the Watcher take their model and effort from the table', async () => {
-  const { MODELS, claudeModelArgs } = await models();
-  const { ROLES, buildArgs } = await import('../bin/lib/seat.mjs');
-  for (const role of ROLES) {
-    const args = buildArgs({ role, run: '/r/issue-1', home: '/h', work: '/r/w' });
-    assert.deepEqual(args.slice(args.indexOf('--model'), args.indexOf('--model') + 4), claudeModelArgs(MODELS.seats[role]), role);
-  }
-  const { leadArgs } = await import('../packs/pstack/bin/lead.mjs');
-  const { argv } = leadArgs({ repo: 'app', team: 'lead', home: '/h', root: '/f', roleText: 'role', node: '/opt/homebrew/bin/node' });
-  assert.deepEqual(argv.slice(argv.indexOf('claude') + 1, argv.indexOf('claude') + 5), claudeModelArgs(MODELS.lead));
-  const { loadSetting, SETTING_FILE } = await import('../bin/lib/reader.mjs');
-  const { side, sides } = MODELS.watcher;
-  assert.deepEqual(loadSetting(SETTING_FILE), { side, ...sides[side] });
-});
-
-test('an entry of inherit passes no model or effort, so the harness default applies', async () => {
-  const { claudeModelArgs } = await models();
-  assert.deepEqual(claudeModelArgs({ model: 'inherit', effort: 'inherit' }), []);
-  assert.deepEqual(claudeModelArgs({ model: 'x', effort: 'inherit' }), ['--model', 'x']);
-  assert.deepEqual(claudeModelArgs({ model: 'x', effort: 'high' }), ['--model', 'x', '--effort', 'high']);
-});
-
-test('a Lead profile\'s rules/pstack-models.md is the table\'s pstack lines, rendered in pstack\'s own rule-file shape', async () => {
-  const { MODELS, pstackModels } = await models();
-  const lines = pstackModels().split('\n').filter((l) => l && !l.startsWith('#'));
-  assert.deepEqual(lines, Object.entries(MODELS.pstack.roles).map(([role, value]) => `${role}: ${value}`));
-  assert.match(pstackModels(), new RegExp(`^# budget: ${MODELS.pstack.budget.replace(/[()]/g, '\\$&')}$`, 'm'));
 });

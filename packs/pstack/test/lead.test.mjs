@@ -84,8 +84,8 @@ describe('leadArgs', () => {
   });
 
   test('model, effort, role text, permission mode, add-dir and name', () => {
-    assert.equal(after('--model'), MODELS.lead.model);
-    assert.equal(after('--effort'), MODELS.lead.effort);
+    assert.equal(after('--model'), MODELS.lead.remote.model);
+    assert.equal(after('--effort'), MODELS.lead.remote.effort);
     assert.equal(after('--append-system-prompt'), roleText);
     assert.ok(!argv.includes('--append-system-prompt-file'));
     assert.equal(after('--permission-mode'), 'auto');
@@ -282,7 +282,7 @@ test('the model rule writes the table\'s pstack lines on every start without cha
     const file = join(config, 'rules/pstack-models.md');
     writeModels(config);
     const first = readFileSync(file);
-    assert.equal(first.toString(), pstackModels());
+    assert.equal(first.toString(), pstackModels(MODELS.pstack));
     assert.deepEqual(first.toString().split('\n').filter((line) => line && !line.startsWith('#')), Object.entries(MODELS.pstack.roles).map(([role, value]) => `${role}: ${value}`));
     writeModels(config);
     assert.deepEqual(readFileSync(file), first);

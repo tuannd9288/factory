@@ -1,7 +1,7 @@
 // #25: the Claude Code reviewer (kit/.gate/bin/lib/claude-reviewer.mjs), against a fake `claude` on PATH. No model runs.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commit, factory, git, quiet, run } from './helpers.mjs';
@@ -65,12 +65,12 @@ describe('claude-reviewer', () => {
   const T = join(factory, 'kit/.gate/bin/lib/claude-reviewer.mjs');
   const conf = (c) => writeFileSync(join(dir, 'claude.json'), JSON.stringify(c));
   const callsOf = () => readFileSync(join(dir, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  /** Runs the reviewer on the candidate; the environment is the job's, with both tokens set unless env says otherwise. */
-  const review = (c, env = {}, job = 'review') => {
+  /** Runs the reviewer (script, by default the kit's) on the candidate; the environment is the job's, with both tokens set unless env says otherwise. */
+  const review = (c, env = {}, job = 'review', script = T) => {
     conf(c);
     writeFileSync(join(dir, 'calls.jsonl'), '');
     rmSync(join(dir, 'out.json'), { force: true });
-    const r = run(repo, process.execPath, [T, job, base, head, '--out', join(dir, 'out.json')], {
+    const r = run(repo, process.execPath, [script, job, base, head, '--out', join(dir, 'out.json')], {
       ...quiet,
       PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
       CLAUDE_CODE_OAUTH_TOKEN: TOKEN,
@@ -105,12 +105,22 @@ describe('claude-reviewer', () => {
   });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
+  test('takes its model and effort from the pin beside it, the kit\'s own table, which a served repository carries (INN-39, H7)', () => {
+    const lib = join(dir, 'pinned-lib');
+    mkdirSync(lib, { recursive: true });
+    for (const f of ['claude-reviewer.mjs', 'budget.mjs', 'reviewer-prompt.md']) copyFileSync(join(factory, 'kit/.gate/bin/lib', f), join(lib, f));
+    const pin = JSON.parse(readFileSync(join(factory, 'kit/.gate/bin/lib/reviewer.json'), 'utf8'));
+    writeFileSync(join(lib, 'reviewer.json'), JSON.stringify({ ...pin, model: 'mock-reviewer-pin', effort: 'pineffort' }));
+    const r = review({}, {}, 'review', join(lib, 'claude-reviewer.mjs'));
+    assert.equal(r.code, 0, r.out);
+    const [{ argv }] = callsOf();
+    assert.deepEqual([argv[argv.indexOf('--model') + 1], argv[argv.indexOf('--effort') + 1]], ['mock-reviewer-pin', 'pineffort']);
+  });
+
   test('calls claude with the model, effort, bound, read-only tools and a sealed context', () => {
     assert.equal(review({}).code, 0);
     const a = calls.argv.join('\u0000');
-    // The model and effort are the kit's own table's, reviewer.json (INN-39, H7): a served repository's CI reads no factory file.
-    const pin = JSON.parse(readFileSync(join(factory, 'kit/.gate/bin/lib/reviewer.json'), 'utf8'));
-    for (const pair of [['--model', pin.model], ['--effort', pin.effort], ['--tools', 'Read,Grep,Glob'], ['--output-format', 'stream-json']])
+    for (const pair of [['--model', 'claude-opus-5-5'], ['--effort', 'max'], ['--tools', 'Read,Grep,Glob'], ['--output-format', 'stream-json']])
       assert.ok(a.includes(pair.join('\u0000')), `missing ${pair.join(' ')}: ${calls.argv.join(' ')}`);
     for (const flag of ['-p', '--restricted', '--add-dir', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--verbose', '--json-schema', '--system-prompt', '--max-turns'])
       assert.ok(calls.argv.includes(flag), `missing ${flag}`);
@@ -548,8 +558,8 @@ describe('the pinned install and the workflow', () => {
     assert.equal(pkg.dependencies['@anthropic-ai/claude-code'], pin.version);
     assert.equal(lock.packages['node_modules/@anthropic-ai/claude-code'].version, pin.version);
     assert.match(lock.packages['node_modules/@anthropic-ai/claude-code'].integrity, /^sha512-/);
-    assert.match(pin.model, /^[A-Za-z0-9][\w.-]*$/);
-    assert.match(pin.effort, /^[a-z]+$/);
+    assert.equal(pin.model, 'claude-opus-5-5');
+    assert.equal(pin.effort, 'max');
   });
 
   test('review gives the reviewer the job\'s start and length, and the length is the job\'s timeout', () => {

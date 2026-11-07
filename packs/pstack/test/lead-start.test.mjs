@@ -112,7 +112,7 @@ describe('lead --dry-run', () => {
     // The hook runs a copy in the Lead's run folder (#257); a dry run names it and makes none.
     assert.match(lines[3], new RegExp(`^transcript hook: '${w.bin}/node' '${w.home}/factory-runs/zalo-lead/hooks/transcript-copy-[0-9a-f]{7}\\.mjs' '${w.home}/factory-runs/zalo-lead/transcripts'$`));
     assert.ok(!existsSync(join(w.home, 'factory-runs')), 'a dry run copied nothing');
-    assert.match(lines[4], new RegExp(`^direnv exec \\. claude ${claudeModelArgs(MODELS.lead).join(' ')} .* --settings \\{"autoMemoryEnabled":false,"hooks":\\{"SessionStart":`));
+    assert.match(lines[4], new RegExp(`^direnv exec \\. claude ${claudeModelArgs(MODELS.lead.remote).join(' ')} .* --settings \\{"autoMemoryEnabled":false,"hooks":\\{"SessionStart":`));
     assert.deepEqual(w.log(), []);
     assert.ok(!existsSync(w.pluginRoot));
   }));
@@ -159,7 +159,7 @@ describe('lead resumes by default', () => {
     assert.equal(resumed(w.log().at(-1)), null);
     const rule = join(w.config, 'rules/pstack-models.md');
     const first = readFileSync(rule);
-    assert.equal(first.toString(), pstackModels());
+    assert.equal(first.toString(), pstackModels(MODELS.pstack));
     assert.equal(w.lead().code, 0);
     assert.deepEqual(readFileSync(rule), first);
 

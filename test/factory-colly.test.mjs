@@ -58,6 +58,14 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
     const { MODELS, claudeModelArgs } = await import('../bin/lib/models.mjs');
     const lead = claudeModelArgs(MODELS.colly);
     assert.deepEqual(args.slice(0, lead.length + 4), [...lead, '--append-system-prompt', role, '--name', 'colly']);
+    // Given a table of its own, Colly passes that table's colly entry, never the MacBook Lead's, and with none it starts nothing.
+    const here = { here: { model: 'mock-lead-here', effort: 'hereeffort' } };
+    assert.equal(await main(['colly'], env, undefined, { colly: { model: 'mock-colly', effort: 'collyeffort' }, lead: here }), 0);
+    assert.deepEqual(calls.at(-1).args.slice(0, 5), ['--model', 'mock-colly', '--effort', 'collyeffort', '--append-system-prompt']);
+    const started = calls.length;
+    assert.equal(await main(['colly'], env, undefined, { lead: here }), 1);
+    assert.match(errors.at(-1), /no entry for colly; nothing was started/);
+    assert.equal(calls.length, started);
     const settings = JSON.parse(args[args.indexOf('--settings') + 1]);
     assert.equal(settings.env.GH_TOKEN, '');
     assert.equal(settings.env.GITHUB_TOKEN, '');

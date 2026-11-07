@@ -47,7 +47,7 @@ const FAKE_CLAUDE = (fake) => `#!/bin/sh\necho "$*" >> ${JSON.stringify(join(fak
 
 const BRIEF = 'Judge the two candidates against the rubric.\n';
 const STEP = pathToFileURL(join(factory, 'packs/pstack/bin/codex-step.mjs')).href;
-// The seam: main(args, { home, codex }), called in a node of its own; no caller of `factory codex` can pass it. argv[1] is node's own
+// The seam: main(args, { home, codex, models }), called in a node of its own; no caller of `factory codex` can pass it. argv[1] is node's own
 // path, a real file that is no module's, since bin/lib/seat.mjs reads argv[1] as a path when it is imported.
 const RUN = `const [, seam, ...args] = process.argv.slice(1); const m = await import(${JSON.stringify(STEP)}); process.exitCode = m.main(args, JSON.parse(seam));`;
 const dirs = [];
@@ -70,14 +70,14 @@ function world({ loggedIn = true, mode = 'ok' } = {}) {
   // A caller's environment that points every path the step uses somewhere else, as a seat could set it (#182).
   w.poison = join(dir, 'poison');
   for (const d of ['home', 'profiles', 'tmp', 'state', 'codex-home']) mkdirSync(join(w.poison, d), { recursive: true });
-  w.run = (args, { cwd = w.repo, input = BRIEF } = {}) => {
+  w.run = (args, { cwd = w.repo, input = BRIEF, models } = {}) => {
     const { NODE_TEST_CONTEXT, ...outer } = process.env;
     const env = {
       ...outer, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-for-codex', CLAUDE_CONFIG_DIR: join(dir, 'not-for-codex'),
       HOME: join(w.poison, 'home'), AGENT_PROFILES: join(w.poison, 'profiles'), TMPDIR: join(w.poison, 'tmp'), FACTORY_STATE: join(w.poison, 'state'),
       CODEX_HOME: join(w.poison, 'codex-home'),
     };
-    const seam = JSON.stringify({ home: w.home, codex: join(dir, 'bin/codex') });
+    const seam = JSON.stringify({ home: w.home, codex: join(dir, 'bin/codex'), ...(models ? { models } : {}) });
     const r = spawnSync(process.execPath, ['--input-type=module', '-e', RUN, process.execPath, seam, ...args], { cwd, input, encoding: 'utf8', env });
     return { code: r.status, out: r.stdout, err: r.stderr };
   };
@@ -118,6 +118,19 @@ test('runs the brief on codex exec, read-only in the folder, on the verifier\'s 
   assert.equal(w.prompt(), BRIEF);
   assert.deepEqual(w.waits(), []);
   assert.equal(w.claude(), '');
+});
+
+test('passes the codex entry of the table it is given as -m, none on inherit, and runs nothing without the entry (INN-39)', () => {
+  const w = world();
+  const step = ['--role', 'arena-runner', '--effort', 'high'];
+  assert.equal(w.run(step, { models: { codex: { model: 'mock-codex' } } }).code, 0);
+  assert.deepEqual(w.execs().at(-1).args.filter((a, i, all) => a === '-m' || all[i - 1] === '-m'), ['-m', 'mock-codex']);
+  assert.equal(w.run(step, { models: { codex: {} } }).code, 0);
+  assert.ok(!w.execs().at(-1).args.includes('-m'));
+  const r = w.run(step, { models: { seats: { worker: { model: 'mock-codex' } } } });
+  assert.equal(r.code, 2);
+  assert.match(r.err, /no entry for codex/);
+  assert.equal(w.execs().length, 2);
 });
 
 test('waits when the verifier\'s profile is not logged in: exit 3, says so, logs the cause, and runs nothing on Codex or Claude', () => {
