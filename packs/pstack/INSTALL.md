@@ -71,7 +71,7 @@ pins share one profile without clashing. Found on Claude Code 2.1.308, 2026-10-2
 paths to Claude Code's, and skips, with one line, a step that needs Cursor Automations, Bugbot or a Cursor cloud agent itself. A
 session reads the adapter and the other files of the plugin from its profile's plugin root, outside `~/.agent-profiles/` (#185; a
 seat's run shows it reading `docs/harness/claude-code.md` and `references/explainer-prompt.md` with no denial), so it can map
-Cursor's names as the adapter says; before that, the plugin was cached under the profile, which `secretsRead` denies, and the
+Cursor's names as the adapter says; before that, the plugin was cached under the profile, which the deny rules refuse, and the
 model mapped them itself (#193's seat run). The factory does not use these parts:
 
 - `/setup-pstack`: the launcher now writes `$CLAUDE_CONFIG_DIR/rules/pstack-models.md` at every start, rendered from the

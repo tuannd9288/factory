@@ -52,7 +52,7 @@ import { clonesUnder } from './ledger.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
-import { watchSilence } from './reader.mjs';
+import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
 import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
@@ -638,8 +638,10 @@ export const READER_EVERY_MS = 15 * 60_000;
  * is a node process of its own, detached (a new process group, so launchd does not end it with the sweep), with this process's environment
  * unchanged, and nothing here waits for it. It runs bin/lib/reader.mjs with process.execPath, which is what bin/factory-reader (a bash
  * wrapper that finds node) execs, since a bash script cannot be started with a node path. With no stream there is nothing to read, so no
- * pass starts; the first pass then puts the first streams at their end, as it would have. */
-export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, env = process.env }) {
+ * pass starts; the first pass then puts the first streams at their end, as it would have. With reader.json's switch off (INN-39) no pass
+ * starts and readerSwitch tells it once; it runs on every sweep, so a cursor a running pass saves after the switch went off goes at the next. */
+export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, env = process.env, settingFile = settingPath(env) }) {
+  if (readerSwitch({ state, settingFile, now }) === 'off') return false;
   const holder = holderOf(join(state, 'reader.lock'));
   if (holder && !gone(holder)) return false;
   let last = 0;

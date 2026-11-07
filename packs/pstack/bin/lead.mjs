@@ -23,7 +23,8 @@ import { onLinear } from '../../../bin/lib/linear-repos.mjs';
 import { TEAM, firstFree } from '../../../bin/lib/names.mjs';
 import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
-import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
+import { heldNames, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
+import { readRules } from '../../../bin/lib/deny-read.mjs';
 import { MODELS, claudeModelArgs, entryOf, pstackModels } from '../../../bin/lib/models.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
@@ -103,9 +104,9 @@ const allowOf = (root) => [
 ];
 // The Lead writes only in ~/factory-runs: a leading // makes each rule an absolute path.
 const denyOf = (cwd) => [
-  ...tokenStoreDeny, 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', `Edit(/${cwd}/**)`, ...secretsRead,
-  // The tokens, the archive and seat 1's old file, by name, beside the whole profiles folder (#178).
-  'Read(~/.agent-profiles/tokens/**)', 'Read(~/.agent-profiles/archive/**)', 'Read(~/.agent-profiles/seats/1/oauth-token)',
+  ...tokenStoreDeny, 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', `Edit(/${cwd}/**)`,
+  // The paths no agent reads (bin/lib/deny-read.mjs), the whole profiles folder among them (#178).
+  ...readRules({ role: 'lead' }),
 ];
 
 // The reason to refuse a start, or null, lives in bin/lib/repos.mjs (#311), which bin/seat and the teams use too.

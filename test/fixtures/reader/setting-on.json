@@ -1,0 +1,7 @@
+{
+  "side": "pi",
+  "sides": {
+    "pi": { "model": "antigravity/gemini-3.8-flash", "effort": "high" },
+    "codex": { "model": "gpt-6-luna", "effort": "high" }
+  }
+}
