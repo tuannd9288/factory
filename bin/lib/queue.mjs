@@ -52,7 +52,7 @@ import { clonesUnder } from './ledger.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
-import { SETTING_FILE, readerSwitch, watchSilence } from './reader.mjs';
+import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
 import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
@@ -640,7 +640,7 @@ export const READER_EVERY_MS = 15 * 60_000;
  * wrapper that finds node) execs, since a bash script cannot be started with a node path. With no stream there is nothing to read, so no
  * pass starts; the first pass then puts the first streams at their end, as it would have. With reader.json's switch off (INN-39) no pass
  * starts and readerSwitch tells it once; it runs on every sweep, so a cursor a running pass saves after the switch went off goes at the next. */
-export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, env = process.env, settingFile = SETTING_FILE }) {
+export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, env = process.env, settingFile = settingPath(env) }) {
   if (readerSwitch({ state, settingFile, now }) === 'off') return false;
   const holder = holderOf(join(state, 'reader.lock'));
   if (holder && !gone(holder)) return false;

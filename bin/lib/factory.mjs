@@ -15,7 +15,7 @@ import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readClaude } from './claude-code.mjs';
-import { TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
+import { HOST, TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
@@ -27,7 +27,6 @@ import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
 import { APP_FOLDERS, accountList, accountRefusal, archiveToken, nodeAccountList, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAdded, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
-const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
 
 const claude = (profile, role, env, login) => ({ profile, role, kind: 'claude', check: { cmd: 'claude', args: ['auth', 'status'], env }, login });
@@ -608,11 +607,10 @@ function markTrusted(config, folder) {
  * The session runs on the team's own profile and token, in auto mode with the factory host and its commands inside the classifier's
  * boundary (autoModeEnvironment), and the folder it starts in is trusted in that profile, so a first start asks nothing (#366).
  * Its seats run only as the agents' user (#366 (a)), so a seat never runs with the Human's files and Keychain; bin/seat itself refuses any
- * other user. So a Lead here gets no FACTORY_TEAM, no bin/seat grant and its role's <!--noseat--> form, which stops at the worker step and
- * says the work waits for a Lead run as the MacBook's `factory` user. Today every Lead here is such a Lead: the agents' user is what
- * placeOf calls the factory host, refused above. Once placeOf also reads the machine's name (the next FAC-10 change), a Lead run as the
- * MacBook's `factory` user gets the three: FACTORY_TEAM=<repo>-<team>, the grant of this node's installed copy's bin/seat, and that path in
- * its role (lead.md's {{SEAT}} and {{RUNS}}). */
+ * other user. Run as the MacBook's `factory` user, the agents' (isAgentsUser) on a machine that is not the host (placeOf), it gets three
+ * things: FACTORY_TEAM=<repo>-<team>, the grant of this node's installed copy's bin/seat, and that path in its role (lead.md's {{SEAT}} and
+ * {{RUNS}}). Run as any other user, the Human's own included, it gets none of them and its role's <!--noseat--> form, which stops at the
+ * worker step and says the work waits for a Lead run as `factory`. */
 function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -647,8 +645,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 1;
   }
   const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/lead.md');
-  // As the agents' user (reached here once placeOf reads the machine's name) the Lead starts its seats with the bin/seat of this node's
-  // installed copy, which follows main (#390), whatever clone runs this; as any other user it starts none.
+  // As the agents' user the Lead starts its seats with the bin/seat of this node's installed copy, which follows main (#390), whatever clone
+  // runs this; as any other user it starts none.
   const seat = isAgentsUser(env) ? join(installedRoot(env), 'bin/seat') : null;
   let roleText;
   try {
@@ -709,8 +707,9 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
     // env and printenv as for every role and seat (#181): the session's environment holds the team's Claude token and, with a stored
     // agents token, GH_TOKEN. FACTORY_HOST_USER names the agents' user to bin/seat (isAgentsUser): a command that sets it to another user
-    // would start a seat as that user, so none may carry it; nothing a Lead runs needs it.
-    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)'] },
+    // would start a seat as that user; FACTORY_HOST_NAME names the factory host's machine (placeOf). So none may carry either; nothing a
+    // Lead runs needs them.
+    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -732,11 +731,12 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   // FACTORY_TEAM is the team bin/seat starts each seat on (#311), as packs/pstack/bin/lead sets it on the Mac mini: only for a Lead that starts
   // seats, and one the caller's shell has goes no further.
   const childEnv = { ...env, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: '' } : {}), CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: claudeToken.token, FACTORY_TEAM: `${repo}-${team}` };
-  // A Lead that starts no seat runs as a user other than the agents', and gets no FACTORY_HOST_USER: one it inherited could only point
-  // bin/seat at another user. A Lead run as the agents' user keeps it, since it names that user.
+  // A Lead that starts no seat runs as a user other than the agents', and gets no FACTORY_HOST_USER or FACTORY_HOST_NAME: ones it inherited
+  // could only point bin/seat at another user or the place at another machine. A Lead run as the agents' user keeps them.
   if (!seat) {
     delete childEnv.FACTORY_TEAM;
     delete childEnv.FACTORY_HOST_USER;
+    delete childEnv.FACTORY_HOST_NAME;
   }
   for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
   const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, ...mode, '--settings', JSON.stringify(settings),
@@ -1089,7 +1089,9 @@ async function login(args, env) {
     if (moved) console.log(moved);
     return 0;
   }
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${node}`, `zsh -lc '~/WORKSPACES/bin/factory store ${words.join(' ')}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
+  // The node's own `factory`: the host's main checkout, or on the MacBook the link bin/install-factory makes into its installed copy.
+  const remote = node === HOST ? '~/WORKSPACES/bin/factory' : '~/.local/bin/factory';
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', `factory@${node}`, `zsh -lc '${remote} store ${words.join(' ')}'`], { input: `${t.token}\n`, encoding: 'utf8', env, timeout: 60000, killSignal: 'SIGKILL' });
   if (r.error?.code === 'ETIMEDOUT' || r.status !== 0) {
     const why = r.error?.code === 'ETIMEDOUT' ? 'timed out' : lastLine(`${r.stderr ?? ''}${r.stdout ?? ''}`);
     console.error(`bin/factory: the token was not stored on ${node}: ${why.split(t.token).join('[token]')}`);
