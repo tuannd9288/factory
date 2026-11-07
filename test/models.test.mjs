@@ -46,13 +46,16 @@ test('inherit, or a key left out, passes no model or effort, so the harness defa
   assert.deepEqual(leadArgs({ ...LEAD, models: table }).argv.slice(3, 7), ['claude', '--effort', 'remoteeffort', '--append-system-prompt']);
 });
 
-test('a missing role, the old flat shape or a value that is no plain name is refused, naming the role', () => {
+test('a missing role, the old flat shape, or a value that is empty or starts with - is refused, naming the role; any other value passes as written', () => {
   assert.throws(() => buildArgs({ role: 'worker', ...SEAT, models: {} }), /no entry for seats\.worker/);
   assert.throws(() => buildArgs({ role: 'reviewer', ...SEAT, models: { seats: { worker: {} } } }), /no entry for seats\.reviewer/);
   assert.throws(() => buildArgs({ role: 'nobody', ...SEAT, models: SYNTHETIC }), /unknown role nobody/);
   // A value that would reach claude as an option of its own.
   assert.throws(() => buildArgs({ role: 'worker', ...SEAT, models: { seats: { worker: { model: '--dangerously-skip-permissions' } } } }), /seats\.worker has no usable model/);
-  assert.throws(() => buildArgs({ role: 'worker', ...SEAT, models: { seats: { worker: { model: 'mock', effort: 'high --verbose' } } } }), /seats\.worker has no usable effort/);
+  assert.throws(() => buildArgs({ role: 'worker', ...SEAT, models: { seats: { worker: { model: 'mock', effort: '--verbose' } } } }), /seats\.worker has no usable effort/);
+  assert.throws(() => buildArgs({ role: 'worker', ...SEAT, models: { seats: { worker: { model: '' } } } }), /seats\.worker has no usable model/);
+  // A model Claude Code 2.1.319 takes that no name pattern foresaw, as seatworks-v3 takes any non-empty string (4c35563, roles.ts:13).
+  assert.deepEqual(buildArgs({ role: 'worker', ...SEAT, models: { seats: { worker: { model: 'sonnet[1m]', effort: 'high' } } } }).slice(0, 6), ['-p', '--model', 'sonnet[1m]', '--effort', 'high', '--max-turns']);
   assert.throws(() => leadArgs({ ...LEAD, models: { lead: { model: 'mock-lead', effort: 'high' } } }), /no entry for lead\.remote/);
   assert.throws(() => leadArgs({ ...LEAD, models: { lead: { here: { model: 'mock-lead-here' } } } }), /no entry for lead\.remote/);
   assert.throws(() => pstackModels(undefined), /no usable entry for pstack/);

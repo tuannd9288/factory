@@ -17,13 +17,15 @@ export const MODELS = JSON.parse(readFileSync(MODELS_FILE, 'utf8'));
 /** The value that passes no model or effort, so the harness's own default applies. */
 export const INHERIT = 'inherit';
 
-const MODEL_VALUE = /^[A-Za-z0-9][\w.:/-]*$/;
-const EFFORT_VALUE = /^[a-z]+$/;
+// A model or an effort is any non-empty string, as seatworks-v3 takes one (4c35563, plugin/server/catalog/kit/schema/roles.ts:13, `model`
+// and `thinking`, and fields.ts:3), so `sonnet[1m]` passes; one that starts with `-` is refused, since it would reach the harness as an
+// option of its own.
+const usable = (value) => typeof value === 'string' && value !== '' && !value.startsWith('-');
 
 /**
  * A role's entry in a table, by its path (`entryOf(MODELS, 'seats', 'worker')`, `entryOf(MODELS, 'lead', 'here')`), as { model, effort }:
- * a key the entry leaves out is inherit. Throws naming the role when the table has no such entry or a value is neither inherit nor a plain
- * model or effort name, so a launcher refuses to start rather than pass a wrong or missing flag.
+ * a key the entry leaves out is inherit. Throws naming the role when the table has no such entry or a value is empty or starts with `-`,
+ * so a launcher refuses to start rather than pass a wrong or missing flag.
  */
 export function entryOf(models, ...path) {
   const name = path.join('.');
@@ -31,8 +33,8 @@ export function entryOf(models, ...path) {
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`models: the table has no entry for ${name}`);
   const model = entry.model ?? INHERIT;
   const effort = entry.effort ?? INHERIT;
-  if (model !== INHERIT && (typeof model !== 'string' || !MODEL_VALUE.test(model))) throw new Error(`models: ${name} has no usable model: ${JSON.stringify(model)}`);
-  if (effort !== INHERIT && (typeof effort !== 'string' || !EFFORT_VALUE.test(effort))) throw new Error(`models: ${name} has no usable effort: ${JSON.stringify(effort)}`);
+  if (!usable(model)) throw new Error(`models: ${name} has no usable model: ${JSON.stringify(model)}`);
+  if (!usable(effort)) throw new Error(`models: ${name} has no usable effort: ${JSON.stringify(effort)}`);
   return { model, effort };
 }
 
