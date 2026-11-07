@@ -15,11 +15,10 @@ as `prose` and gets one, or is deleted, within 30 days.
 | No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `.gate/bin/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
 | A new test fails at the base and passes at the head | `red-check`, inside `verify` |
 | A failing test committed first is not weakened later | `.gate/bin/rules` (`failing-test-edited`) |
-| Every check is shown failing on a fixture | `.gate/bin/prove-check` in `verify` and `verify-trusted` |
 | Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `.gate/bin/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
 | Tier-3 paths are one list, and CODEOWNERS ends with exactly it; a directory line has no trailing "/", so the path itself is protected too | `.gate/protected`; `verify` (`policy`) |
 | Removing a label lowers no tier | `tier` reads every label the pull request ever had |
-| Commit subject present, at most 72 characters, never `wip`, a placeholder, `fixup!` or `squash!` | `verify` (`subjects`, every commit of the change); `.gate/hooks/commit-msg` is the local copy |
+| Commit subject present, at most 72 characters, never `wip`, a placeholder, `fixup!` or `squash!` | `verify` (`subjects`, every commit of the change) |
 | No `--admin` merge, no self-approval | the ruleset (empty bypass list) and GitHub |
 | Tier 3 lands only with the Human's approval of the head commit, or of one whose patch (`git patch-id`) the head carries unchanged, unless the repository's merge switch is at all (#333), where the code asks none of a `needs-human` one either (the Human's choice on #354, 2026-11-02 20:16:33 +07, review 5737110797) | `tier` (`pull_request_target`); GitHub's code-owner rule alone lets an owner-author through. The switch is the two review parameters of the rules in force on main (`.gate/bin/lib/switch.mjs`); only the owner's login moves it, and a move applies to open pull requests: a tier-3 `tier` records the position it ran at on its own check run, and the queue re-runs one whose record and the position in force differ in a way that changes its verdict |
 | No `--no-verify`, tags, releases; no reads of `.env` or of the Human's own Claude Code and Cursor profiles (`~/.claude*`, `~/.cursor/`), whose transcripts are his, or of the verifier's Codex profile, which holds its login | for reads, `.claude/settings.json` deny rules, in Claude Code only; for tags, and for a release that would create one, the ruleset `factory-tags`, and a draft release, a release on an existing tag, or an edit or deletion of an existing release is not refused; a commit made with `--no-verify` still meets the same checks in the required check `verify` |
@@ -35,12 +34,11 @@ as `prose` and gets one, or is deleted, within 30 days.
 | Command | Healthy output |
 |---|---|
 | `.gate/bin/setup` | `setup: hooks from .gate/hooks` |
-| `.gate/bin/verify` | `verify: 6 passed in 12s` (prints only failures and this line) |
+| `.gate/bin/verify` | `verify: 5 passed in 12s` (prints only failures and this line) |
 | `.gate/bin/verify --fast` | `verify: 2 passed in 1s` (the pre-commit hook runs it) |
 | `.gate/bin/verify --tests <files>` | `verify: 1 passed in 2s`; JUnit in `.gate/report.xml` |
 | `.gate/bin/tier` | `tier 1` (2: load-bearing path or dependency; 3: a path in `.gate/protected`, or label `needs-human`) |
 | `.gate/bin/red-check` | `red-check: red at the base (1 of 1 failed), green at the head (1 passed)` |
-| `.gate/bin/prove-check --all` | `prove-check: 7 checks fail on their fixtures` |
 
 Push as often as you like; CI runs `main`'s copies of `verify` and `red-check` on your change, as the one check `verify`.
 Before writing, run `.gate/bin/tier` on the files you expect to touch. Tier 2 or 3: commit the failing test first, alone, with

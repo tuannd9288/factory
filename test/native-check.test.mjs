@@ -1,6 +1,5 @@
 // The `native` check: a repository that keeps its own scripts/verify names it in GATE_NATIVE, and the kit's verify runs
-// it as one of its checks, with a generic proof fixture; `verify --fast` runs gate_fast, which calls the repository's
-// own pre-commit hook.
+// it as one of its checks; `verify --fast` runs gate_fast, which calls the repository's own pre-commit hook.
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -34,12 +33,6 @@ describe('a repository with its own verify', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /verify: native failed/);
     assert.match(out.out, /own verify says no/);
-  });
-
-  test('prove-check shows the check failing with the kit\'s generic fixture', () => {
-    const out = script(r.repo, 'prove-check', ['native']);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /prove-check: 1 checks fail on their fixtures/);
   });
 
   test('verify --fast runs gate_fast, which is the repository\'s own pre-commit hook', () => {

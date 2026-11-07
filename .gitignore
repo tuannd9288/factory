@@ -3,7 +3,6 @@
 !/.gitattributes
 !/.gitignore
 !/.github/
-!/.githooks/
 !/AGENTS.md
 !/NOTICE
 !/bin/
@@ -11,7 +10,6 @@
 /docs/*
 !/docs/decisions.md
 !/kit/
-!/modules/
 !/packs/
 !/scripts/
 !/test/
