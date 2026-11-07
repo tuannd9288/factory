@@ -953,6 +953,24 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
 // A word that starts with `=` is never bare: zsh would read it as a command's path.
 const SAFE_WORD = /^[A-Za-z0-9_.,:/@%+-][A-Za-z0-9_.,:/=@%+-]*$/;
 
+const GH_STDIN = 'pass it on stdin with - (--body-file -, --input -) or @- (-F name=@-)';
+
+/** A body named as a file (FAC-79 (b)): a call that pipes or redirects a body into `factory` stays in Claude Code's sandbox, where `factory`
+ * reaches neither ssh nor Linear, so a Lead or Colly writes the body with its Write tool and names it: `--body-file <file>` (or
+ * `--body-file=<file>`), read here and passed on as `--body-file -` with its bytes on stdin. `-` stays stdin. Returns { args, body }, body
+ * null when no file is named, or { refused } when the file cannot be read. */
+function bodyFile(args) {
+  const i = args.findIndex((a) => a === '--body-file' || a.startsWith('--body-file='));
+  const inline = i !== -1 && args[i].startsWith('--body-file=');
+  const path = i === -1 ? undefined : inline ? args[i].slice('--body-file='.length) : args[i + 1];
+  if (path === undefined || path === '-') return { args, body: null };
+  try {
+    return { args: [...args.slice(0, i), '--body-file', '-', ...args.slice(i + (inline ? 1 : 2))], body: readFileSync(path) };
+  } catch (e) {
+    return { refused: `the body file ${path} cannot be read (${e.code ?? 'error'})` };
+  }
+}
+
 /** The reason `gh <args>` may not go to the Mac mini, or null. Refused: `gh auth` but `status`, and `gh auth status` with
  * `-t` or `--show-token`, which print a token; `--recover`; and a file given with `--body-file`, `--notes-file`, `--env-file`,
  * `--input`, `--field` or `-F` (alone or in a cluster of short flags), which names a file on this Mac and not on the Mac mini, so
@@ -963,7 +981,7 @@ function ghRefusal(args, local = false) {
   if (args[0] === 'auth' && args.slice(2).some((a) => /^--show-token(=.*)?$/s.test(a) || /^-[A-Za-z]*t[A-Za-z]*(=.*)?$/s.test(a))) return 'gh auth status -t / --show-token is refused here; it prints a token';
   if (local) return null;
   const api = args[0] === 'api';
-  const stdinHint = 'the Mac mini cannot read a file on this Mac; pass it on stdin with - (--body-file -, --input -) or @- (-F name=@-)';
+  const stdinHint = `the Mac mini cannot read a file on this Mac; ${GH_STDIN}`;
   const fieldFile = (v) => {
     const path = /^[^=]+=@(.*)$/s.exec(v)?.[1];
     return path !== undefined && path !== '-';
@@ -992,7 +1010,7 @@ function ghRefusal(args, local = false) {
  * code. Each argument is quoted for `zsh -lc`, and the whole line once
  * more for the remote login shell. With the agents' token in this node's own token store, gh runs here instead, the token in its
  * GH_TOKEN alone (#366), so it works with the Mac mini off and a local file works. On the factory host it runs gh itself, unchanged,
- * whatever the token store holds. */
+ * whatever the token store holds. By ssh, a `--body-file <file>` is read here and sent on stdin (bodyFile). */
 function ghCmd(args, env) {
   const token = nodeGithubToken(env);
   if (token) {
@@ -1010,14 +1028,16 @@ function ghCmd(args, env) {
     }
     return r.status ?? 1;
   }
-  const refused = ghRefusal(args);
+  const b = bodyFile(args);
+  const refused = b.refused ? `${b.refused}; or ${GH_STDIN}` : ghRefusal(b.args);
   if (refused) {
     console.error(`bin/factory: gh: ${refused}`);
     return 2;
   }
   const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
-  const script = `d=$(mktemp -d) && cd "$d" || exit 2; ${['gh', ...args.map(word)].join(' ')}; c=$?; cd /; rm -rf "$d"; exit $c`;
-  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { stdio: 'inherit', env });
+  const script = `d=$(mktemp -d) && cd "$d" || exit 2; ${['gh', ...b.args.map(word)].join(' ')}; c=$?; cd /; rm -rf "$d"; exit $c`;
+  const stdio = b.body === null ? { stdio: 'inherit' } : { stdio: ['pipe', 'inherit', 'inherit'], input: b.body };
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { ...stdio, env });
   if (r.error) {
     console.error(`bin/factory: gh: ssh did not run (${r.error.code ?? 'error'})`);
     return 1;
@@ -1029,13 +1049,21 @@ function ghCmd(args, env) {
  * reads the Factory app's token in its own process. On another node it runs there too when the node's own token store holds the app's
  * client id and secret (FAC-38, #490's shape for `factory gh`): the node mints its own token, which leaves the host's alive, and reads its
  * own registry. Otherwise, and always for the verbs that act as Colly, it runs the same command on the host, in the host user's login shell
- * over ssh, with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of
- * this Mac is involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
+ * over ssh, with stdin passed through. A body comes on stdin (`--body-file -`), or as a file read here and sent on stdin (bodyFile); the
+ * arguments are checked here first, so no token of this Mac is involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or
+ * 2 (usage). */
 async function linearCmd(args, env) {
   const cli = await import('./linear-cli.mjs');
   const { appStored } = await import('./linear.mjs');
+  const b = bodyFile(args);
+  if (b.refused) {
+    console.log(JSON.stringify({ ok: false, error: b.refused }));
+    return 2;
+  }
+  ({ args } = b);
+  const { body } = b;
   const here = !cli.COLLY_VERBS.includes(args[0]) && appStored(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
-  if (placeOf(env) === 'factory' || here) return cli.main(args, env);
+  if (placeOf(env) === 'factory' || here) return cli.main(args, env, body === null ? {} : { readStdin: () => Promise.resolve(body.toString('utf8')) });
   try {
     cli.parse(args);
   } catch (e) {
@@ -1043,7 +1071,8 @@ async function linearCmd(args, env) {
     return 2;
   }
   const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
-  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(['~/WORKSPACES/bin/factory', 'linear', ...args.map(word)].join(' '))}`], { stdio: 'inherit', env });
+  const stdio = body === null ? { stdio: 'inherit' } : { stdio: ['pipe', 'inherit', 'inherit'], input: body };
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(['~/WORKSPACES/bin/factory', 'linear', ...args.map(word)].join(' '))}`], { ...stdio, env });
   if (r.error) {
     console.error(`bin/factory: linear: ssh did not run (${r.error.code ?? 'error'})`);
     return 1;

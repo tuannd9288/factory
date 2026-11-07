@@ -426,7 +426,7 @@ exit "$(cat "$FAKE/host.exit" 2>/dev/null || echo 0)"
   chmodSync(file, 0o755);
 }
 
-test('linear refuses a usage error on the MacBook before any ssh, and a body that names a file', () => {
+test('linear refuses a usage error on the MacBook before any ssh, and a body file it cannot read', () => {
   const s = world();
   try {
     hostFactory(s);
@@ -478,6 +478,11 @@ test('linear hands a title with quotes and a dollar sign to the host unchanged, 
     assert.deepEqual(s.nuls('host.args'), args);
     assert.equal(s.read('host.stdin'), body);
     assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '/);
+    // A body the session wrote as a file goes on stdin too (FAC-79 (b)), since a pipe would keep the call in its sandbox.
+    writeFileSync(join(s.dir, 'body.md'), 'from a file\n');
+    s.fac(['linear', 'comment', 'FAC-12', '--team', 'lead', '--body-file', join(s.dir, 'body.md')]);
+    assert.deepEqual(s.nuls('host.args'), ['linear', 'comment', 'FAC-12', '--team', 'lead', '--body-file', '-']);
+    assert.equal(s.read('host.stdin'), 'from a file\n');
     s.w('ssh-down', '');
     assert.equal(s.fac(['linear', 'read', 'FAC-12']).code, 255, 'ssh\'s own exit code when it cannot reach the host');
   } finally {

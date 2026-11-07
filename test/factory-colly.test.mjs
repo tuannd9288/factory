@@ -267,3 +267,23 @@ test('colly supplies the brief and status line, records its socket, and reuses t
     fs.rmSync(state, { recursive: true, force: true });
   }
 });
+
+test('Colly\'s MacBook Monitor, events --local, follows the fixed share here, and is refused on the Mac mini (FAC-79 (b))', async (t) => {
+  const calls = [];
+  t.mock.method(childProcess, 'spawnSync', (cmd, args) => {
+    calls.push({ cmd, args });
+    return { status: 0 };
+  });
+  t.mock.method(console, 'error', () => {});
+  syncBuiltinESMExports();
+  try {
+    const env = { HOME: '/nonexistent-home', FACTORY_HOST_USER: 'nobody-here' };
+    assert.equal(await main(['events', '--follow', '--local', '--after', '3'], env), 0);
+    assert.deepEqual(calls, [{ cmd: fileURLToPath(new URL('../bin/factory-events', import.meta.url)), args: ['--follow', '--file', '/Users/Shared/factory/events.jsonl', '--after', '3'] }]);
+    assert.equal(await main(['events', '--follow', '--local'], { ...env, ...HOST_ENV }), 2);
+    assert.equal(calls.length, 1);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});
