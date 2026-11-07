@@ -6,7 +6,7 @@
 set -uo pipefail
 top=$(git rev-parse --show-toplevel) || exit 2
 cd "$top" || exit 2
-chmod +x .gate/hooks/* .gate/bin/verify .gate/bin/verify-trusted .gate/bin/setup .gate/bin/rules .gate/bin/tier .gate/bin/red-check .gate/bin/prove-check .gate/bin/review 2>/dev/null
+chmod +x .gate/hooks/* .gate/bin/verify .gate/bin/verify-trusted .gate/bin/setup .gate/bin/rules .gate/bin/tier .gate/bin/red-check .gate/bin/review 2>/dev/null
 if [ -z "$(git config --local --get core.hooksPath)" ] && [ ! -d .githooks ]; then
   git config core.hooksPath .gate/hooks || exit 1
   echo "setup: hooks from .gate/hooks"

@@ -1,7 +1,6 @@
-// The commit subject rules, in one place: .gate/hooks/commit-msg checks a message with them as the commit is made, and
-// .gate/bin/verify (the `subjects` check) checks every commit a change adds. Plain node: the hook runs before any
-// dependency is installed.
-//   node subject.mjs <message file>   the hook: the first line that is not a comment is the subject
+// The commit subject rules, in one place: .gate/bin/verify (the `subjects` check) checks every commit a change adds. There is
+// no local commit-msg hook: it refused pstack's own `wip:` commit (Pause safely), and pstack rebases into clean commits before a
+// pull request opens, so CI's check is the one that counts (FAC-8, INN-35).
 //   node subject.mjs --base [<rev>]   the commits in <rev>..HEAD with fewer than two parents (default: merge-base with main)
 // --base also checks the PR title when GITHUB_EVENT_PATH names a pull request event.
 // Exit 0 clean, 1 on a subject that breaks a rule, 2 when it could not run.
@@ -44,16 +43,6 @@ export function titleProblem(raw) {
   return null;
 }
 
-/** The subject of a message, as git's %s has it: blank and comment lines skipped, then the first paragraph with its
- * lines joined by spaces. */
-export function subjectOf(text) {
-  const lines = text.split('\n').filter((l) => !l.startsWith('#'));
-  const start = lines.findIndex((l) => l.trim());
-  if (start < 0) return '';
-  const end = lines.findIndex((l, i) => i > start && !l.trim());
-  return lines.slice(start, end < 0 ? undefined : end).map((l) => l.trim()).join(' ');
-}
-
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 << 20 });
 
 /** Commits in base..HEAD with fewer than two parents that break a rule: the ledger skips merges the same way. */
@@ -89,13 +78,8 @@ function main(argv) {
     if (bad.length) console.log(`subjects: ${bad.length} commit(s) with a subject that breaks a rule`);
     return bad.length || titleError ? 1 : 0;
   }
-  if (!argv[0]) {
-    console.log('commit-msg: no message file');
-    return 2;
-  }
-  const problem = subjectProblem(subjectOf(readFileSync(argv[0], 'utf8')));
-  if (problem) console.log(`commit-msg: ${problem}`);
-  return problem ? 1 : 0;
+  console.log('usage: node subject.mjs --base [<rev>]');
+  return 2;
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

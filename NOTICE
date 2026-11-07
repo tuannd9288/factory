@@ -13,7 +13,7 @@ in this factory.
                                Not taken: the council (gaming, narrowing), the command gate (scriptCommands),
                                answersInSource, the dependency and related-test readers, the finding store and
                                its acknowledgements, which the line comment `gate-allow <rule>: <reason>`
-                               replaces. Added here: the Failing-test guard, and skipping .gate/proofs/.
+                               replaces. Added here: the Failing-test guard.
 
 pstack (https://github.com/cursor/plugins, path pstack): what the pstack pack takes from it is in packs/pstack/NOTICE.
 

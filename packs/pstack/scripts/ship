@@ -6,9 +6,9 @@
 #    has a red-check stamp against origin/main (.gate/bin/red-check leaves it in the git dir; the full suite runs on CI);
 #    the body is --body-file, with `Closes #<issue>` filled in.
 #    --base opens a child on its parent's branch when origin/main's .gate/driver.json has stacks absent or "pstack";
-#    "off" keeps the main-only refusal. A child waits unarmed until its parent merges into main, then ship retargets it
-#    and rebases past the parent onto origin/main: push with --force-with-lease, then run ship again. With merge set to
-#    "merge", it merges origin/main instead and asks for a normal push.
+#    "off" keeps the main-only refusal. A child waits unarmed until its parent merges into main, then ship retargets it to
+#    main, unless GitHub already did, and the queue merges origin/main into it, for either merge method. An old verdict
+#    survives only when the patch-id matches.
 # 2. an armed pull request whose local HEAD has commits it lacks: disarms it first.
 # 3. stops while the pull request carries needs-human; arms a tier 3 (labels, or .gate/bin/tier on the paths) like any
 #    other, then stops with "tier 3 waits for the Human's approval (unless the merge switch is at all)" until its tier

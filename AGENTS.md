@@ -30,7 +30,7 @@ His standing rules for building the factory, approved on INN-24 (A, 2026-11-05 1
 - Every Linear label has a written purpose (04/11).
 - Data leaving the machine, needing a server or costing money is a warning, never a reason to reject; use what exists before building (21/10, 03/11).
 - English is plain, and speaks in features rather than mechanics (31/10, 02/11).
-- A repository's product description is pstack's Feature Map, files in the repository, one short file per feature, from the user's side, updated in the same pull request as the code; flow diagrams are drawn only for a complex flow; Linear Documents hold only writing he reads; the rule reaches every repository in release 1 (#428), the Feature Map after it (#422) (INN-23 A, 2026-11-04 23:37:50 +07).
+- A repository's product description is pstack's Feature Map, files in `feature-map/` at the repository root (INN-37 A, 2026-11-07 07:32:48 +07), one short file per feature, from the user's side, updated in the same pull request as the code; flow diagrams are drawn only for a complex flow; Linear Documents hold only writing he reads; the rule reaches every repository in release 1 (#428), the Feature Map too (#422, 2026-11-06 21:48:17 +07) (INN-23 A, 2026-11-04 23:37:50 +07).
 
 ## Decisions
 
@@ -130,8 +130,7 @@ Names are standard terms, never coined ones (25/10).
   pending); and, now, Linear, where he decides, takes notes and asks (Linear, in Decisions; #373), which for a
   repository on Linear is also that repository's record, in 1b. Herdr's server and Paseo's daemon stay in 0d.
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
-- **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository, and the modules (#70) a
-  repository lists in `.gate/modules`, each bringing its own skill.
+- **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository.
 - **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify --fast`, the tests of the part changed, `red-check`; the full suite runs on CI (#281).
 - **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit; where Entire
   reviews, `verify`, `tier` and `Entire Gates` (#155).
@@ -231,7 +230,6 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
 | `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
-| `modules/` | What only a repository that turns it on receives, one folder each (`modules/deletion-proof/`): `kit/` at repository paths (its skill included), `test/`; `bin/lib/module.mjs`, `bin/onboard --module`, `bin/kit-update --module` / `--no-module` |
 | `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment, Actions event policy), which Colly runs on the Human's login after his one approval; on the factory's own repository it sets the Actions event policy alone (#337) |
 | `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
 | `bin/onboard-doctor` | Reads one repository taken in and prints one line per check, green or red, and changes nothing; Colly runs it on the Human's login, from a commit on `main`; the "Take <repo> in" issue closes on its output |
@@ -239,12 +237,12 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/kit-evidence` | Proves the kit pull request's files are the kit at one factory commit, by git object |
 | `bin/rulesets/` | The rulesets `bin/onboard-owner` sets besides the kit's gate |
 | `bin/factory-ledger` | The ledger (one row per task) and the weekly digest; `--check` is its canary on Claude Code's session format; the header says what it charges a task from; for a repository on Linear (#406) a task is a team issue that left Triage, joined to its pull requests by `Issue: <KEY>` |
-| `bin/factory-move` | `bin/factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply --rewrites <dir>] [--only <n>,…] [--limit N] [--project <name> --in-project <n>,…]` (#406): moves a repository's open GitHub issues to its Linear team, once, as the Factory app; a dry run prints the plan, `--apply` writes and needs `--rewrites`, one `<n>.md` per issue in the task template, kept above the original body; `--only` moves the listed issues, in that order; a map file lets a second run resume, and each GitHub issue gets "Moved to <KEY>" and is closed as not planned, never deleted; not a `factory linear` verb; the header of `bin/lib/move.mjs` has the rest |
+| `bin/factory-move` | `bin/factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply --rewrites <dir>] [--only <n>,…] [--limit N] [--project <name> --in-project <n>,…]` (#406): moves a repository's open GitHub issues to its Linear team, once, as the Factory app; a dry run prints the plan, `--apply` writes and needs `--rewrites`, a folder of `<n>.md` files in the task template, each kept above its issue's original body, and an issue with no file there is skipped, listed as `no rewrite`, and not moved; `--only` moves the listed issues, in that order; a map file lets a second run resume, and each GitHub issue gets "Moved to <KEY>" and is closed as not planned, never deleted; not a `factory linear` verb; the header of `bin/lib/move.mjs` has the rest |
 | `bin/factory` | The one command for the Human's agent accounts (`factory` on his PATH): the table of profiles, accounts and quota, and `login`, `store`, `use` and `logout`, which only the Human runs (#177, #178); its header has the rest |
 | `bin/factory top` | The read-only view of every session and repository (#174, #286); the header of `bin/lib/top.mjs` has the rest |
 | `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest. `factory lead <repo> [--team <name>] --here [-- <claude arguments>]` (#349) is the MacBook's own Lead, with no `gh` login and no git credential of the Human's; with no agents' GitHub token on the MacBook a push to GitHub fails and git over ssh is off, and with one stored by his `factory store` the push runs on the MacBook itself (#366) |
 | `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` under the agents' login, on the Mac mini by ssh, or on the MacBook itself once his `factory store` has put the agents' GitHub token there (#366); on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
-| `bin/factory linear` | `factory linear <verb>` (#404): a Lead's steps on a repository on Linear, as the Factory app: `take`, `release`, `accept`, `decline`, `duplicate`, `read`, `list`, `comment`, `ask`, `answered`, `create` and `onboard`, one JSON object out; on the MacBook it runs on the Mac mini by ssh, a body on stdin; `onboard` makes the repository's team (copied from FAC) and its Needs Human status and records it in `$FACTORY_STATE/linear/repos.json`, which `bin/lib/linear-repos.mjs` reads and which picks the Linear form of `packs/pstack/lead.md`; the header of `bin/lib/linear-cli.mjs` has the rest |
+| `bin/factory linear` | `factory linear <verb>` (#404): a Lead's steps on a repository on Linear, as the Factory app: `take`, `release`, `accept`, `decline`, `duplicate`, `read`, `list`, `comment`, `ask`, `answered`, `create` and `onboard`, one JSON object out; it runs on any node whose own token store holds the Factory app's client id and secret, else on the Mac mini by ssh, a body on stdin, and Colly's verbs (`decision-create`, `decision-close`) always run on the Mac mini (FAC-38); `onboard` makes the repository's team (copied from FAC) and its Needs Human status, or with `--key` alone registers a team that exists, and records it in the node's own `$FACTORY_STATE/linear/repos.json`, which `bin/lib/linear-repos.mjs` reads and which picks the Linear form of `packs/pstack/lead.md`; the header of `bin/lib/linear-cli.mjs` has the rest |
 | `bin/factory codex` | `factory codex --role <role> [--effort <e>] [--write <folder>] [--brief-file <file>]` (#182): what runs where in pstack: a step that asks for another model family (the second seat of arena, architect and interrogate, arena's cross-judge, show-me-your-work's trail review, Orchestrate's verifier) runs on Codex, on the verifier's Codex profile, never on Claude, under Codex's own permission profile, which denies reading what the seats' sandbox denies (`DENY_READ` in `bin/lib/seat.mjs`) and every `.env*` file; a `grok` role runs on the session model, and every other role on Claude; when Codex cannot run (logged out, out of quota, failed) the step waits, exits 3 and logs the cause in the factory user's `~/.local/state/factory/codex-waits.jsonl`; every path the step uses comes from that user's home by getpwuid, never the caller's environment; the Lead and every seat are granted this verb, never `codex`, and a sandboxed seat runs it outside its sandbox (`excludedCommands` in `bin/lib/seat.mjs`), with the brief in `--brief-file`; `bin/factory` refuses a `factory codex` call whose environment carries `BASH_ENV`, `ENV`, `NODE_OPTIONS`, `NODE_PATH` or any `DYLD_*` or `LD_*`, from a `#!/bin/sh` first stage, and runs it on a `node` from a fixed folder; the header of `packs/pstack/bin/codex-step.mjs` has the rest |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH from each machine's installed copy of the factory (#390): `$FACTORY_CHECKOUT`, `~/WORKSPACES` on the Mac mini, `${XDG_DATA_HOME:-~/.local/share}/factory/checkout` on the MacBook (`installedRoot`), outside the folders macOS refuses a launchd job and never set by a dev clone's branch or edits, which change nothing that runs. Run from a clone that is not that copy, it clones the copy (main only, an empty `credential.helper`) or brings it to `origin/main` by `followMain`'s rules, then runs the copy's own `bin/install-factory`, which makes `~/.local/bin/factory` a symlink to the copy's `bin/factory` and replaces only a symlink whose target ends in `/bin/factory`; on the MacBook it also writes the relay's LaunchAgent, loads it anew and runs `bin/factory-relay check`. His one line after a change here is `~/.local/share/factory/checkout/bin/install-factory` when the copy exists, else `bin/install-factory` from any clone; it can be run again |
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
@@ -286,19 +284,21 @@ Six steps, run by Colly and a team:
    approval of the kit pull request covers it. The merge queue then sweeps the repository with nothing more from
    him, and no `sudo` install for each new repository (#211). The queue job's one install is his, together with the
    other daemons after #203 (#209).
-5. The team sweeps the repository (#20) with the Human's `repo-refresh` skill (#19) in audit mode, then opens one
-   pull request per area through the gate.
+5. When the kit pull request merges, the team's Lead opens one Needs Human item asking the Human to type
+   `/repo-refresh` in audit mode in that Lead's session. The sweep follows the pack's docs rule (`packs/pstack/section.md`,
+   "Docs") and steers nothing into `docs/architecture`, `docs/product` or `docs/process`; the team then opens one pull
+   request per area through the gate, and one that seeds the Feature Map with `/pstack:create-verification-skill`.
 6. When `bin/onboard-doctor` prints every line green, Colly closes the issue.
 
-His part is the two approvals, and pasting the reviewer's secret where the repository uses the kit's Claude reviewer;
-Entire needs none (#155).
+His part is the two approvals, typing `/repo-refresh` in audit mode in the Lead's session, and pasting the reviewer's
+secret where the repository uses the kit's Claude reviewer; Entire needs none (#155).
 
 What step 2 sets and reads back is in the header of `bin/onboard-owner`; what step 3 does, file by file, is in the header of
 `bin/onboard`. Use `bin/onboard` once, for a repository that has no kit yet, and `bin/kit-update` for every later move of an
 onboarded repository to a newer factory commit; its refusals, what it replaces and the gate's judgment of its pull request are in
 the header of `bin/kit-update`.
 
-Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks with proofs),
+Then the repository's session fills `.gate/config.sh` (test command, fast checks, its own checks),
 and proposes `.gate/load-bearing`.
 
 The queue's job, its install, its lock and its checkout rules are in `bin/factory-queue`'s header. A rollback is a revert pull
@@ -306,7 +306,8 @@ request through the gate. Only when the gate itself is broken does the Human tur
 every open pull request, since with the ruleset off each would land unjudged. The queue leaves a tier-3 pull request behind
 `main` until the Human approved it, then updates it once; his approval holds on the updated head, whose patch is unchanged
 (`git patch-id`), so he is asked once. `tuannd9288/factory` itself is not swept; its Lead merges `main` into a branch that fell
-behind. GitHub kept the Human's approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
+behind, except a stack's child moved onto `main`, which the queue brings up to `main` (FAC-13). GitHub kept the Human's
+approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
 
 Claude Code updates itself on the stable channel; nothing in the factory pins the version its sessions run (the canary,
 #24, is at the tag `before-271`). The gate's reviewer on CI pins its own, 2.1.308
@@ -316,7 +317,7 @@ The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line whe
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, an account Claude Code warns is
 near its limit, the sweep's own `gh` refused,
 a repository's merge switch moved, the Factory app's Linear token refused, raised by `bin/lib/linear.mjs`)
-and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
+and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh, and from the MacBook's own events, through the share the MacBook's daemon writes (`packs/colly/colly.md` has both commands); its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
 starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out. The sweep also writes
 a one-time `comment` start line, like the reader's and no condition, when it wakes a Lead (#351); six more kinds of the same sort tell a
@@ -361,19 +362,6 @@ denied `Read(~/factory-runs/*/transcripts/**)` (only a Lead's folder has a `tran
 A pack is a folder a team copies; the kit lays none (#132). What `packs/pstack/` holds and how it is copied are at the opening of
 `packs/pstack/INSTALL.md`. The pstack Lead's start (`factory lead <repo>`), its resume and `--dry-run`, its login and the Herdr notes
 are in the header of `packs/pstack/bin/lead`.
-
-A module is what the factory holds only for the repositories that turn it on (#71): `modules/<name>/kit/` holds the
-files it adds, at repository paths (a skill among them, at `.claude/skills/<name>/`), and `modules/<name>/test/` its
-tests. The repository lists its modules in `.gate/modules`, one name a line (a tier-3 path; absent means none), and
-`bin/onboard --module <name>` and `bin/kit-update --module <name>` / `--no-module <name>` write it. A module's files are copied only where it is on, never over a file the repository has (a conflict, not a
-"kept"), and removed when it is turned off; `bin/kit-evidence` judges them against the module at the factory commit and
-treats `.gate/modules` as generated. The kit's only part in a module is two hooks, both inert without it: `red-check` runs
-`.gate/bin/lib/deletion.mjs` first on a source change with no test where the file exists, and `prove-check --all` also runs
-the `red-check-*` fixtures on disk. No `AGENTS.md` changes with a module: its guidance is its skill. A session in this
-factory lists `deletion-proof` among its skills, because Claude Code finds `.claude/skills` nested under `modules/`;
-the skill's first step reports the proof as off here. The first module,
-`deletion-proof` (step 1 of #17), proves a pull request whose only source change deletes whole files knip 6.42.1 listed
-as unused; no repository turns it on until #72 (a repository's knip config must be in its `.gate/protected`) lands.
 
 The pstack pin, its install per repository, what was found on Claude Code 2.1.308 and the parts of pstack the factory does not
 use are in `packs/pstack/INSTALL.md`.

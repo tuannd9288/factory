@@ -378,6 +378,27 @@ export function queueState(dir, repos) {
   };
 }
 
+/** The pstack steps that waited for Codex from since to until, whole days in UTC (#182): the lines `factory codex` appends to
+ * <state>/codex-waits.jsonl (packs/pstack/bin/codex-step.mjs), as [cause, count] pairs, most first. A line that cannot be read
+ * counts for nothing; no file is no wait. */
+export function codexWaits(dir, since, until) {
+  const file = join(dir, 'codex-waits.jsonl');
+  const from = Date.parse(`${since}T00:00:00Z`);
+  const to = Date.parse(`${until}T23:59:59Z`);
+  const counts = new Map();
+  for (const text of existsSync(file) ? readFileSync(file, 'utf8').split('\n') : []) {
+    let wait;
+    try {
+      wait = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    const at = Date.parse(wait?.at);
+    if (typeof wait?.cause === 'string' && at >= from && at <= to) counts.set(wait.cause, (counts.get(wait.cause) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
 const STATE = { landed: 'merged', open: 'open', abandoned: 'abandoned' };
 
 /** The pull requests of this repository that a merged pull request reverts: the `Reverts #N` and `Reverts <repo>#N`
@@ -459,7 +480,7 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, unread = null, shared = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, unread = null, shared = null, codexWaits: waits = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
@@ -489,6 +510,7 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     `- Green at the first commit the gate judged: ${rate(judged.filter((r) => r.firstPass).length, judged.length)}`,
     `- Used No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
     `- Reviewer raised to tier 3 (label raised), by repository: ${[...new Set(rows.map((r) => r.repo))].sort().map((repo) => `${repo} ${rows.filter((r) => r.repo === repo && r.raised).length}`).join(', ') || 'no tasks'}`,
+    ...(waits ? [`- pstack steps that waited for Codex: ${waits.length ? `${waits.reduce((sum, [, k]) => sum + k, 0)} (${waits.map(([cause, k]) => `${cause} ${k}`).join(', ')})` : 'none'}`] : []),
     `- Cost measured: ${rate(costed.length, n)}`,
     ...(lost?.entries ? [`- ${lost.entries} ${lost.entries === 1 ? 'entry' : 'entries'} ($${lost.dollars.toFixed(2)} at API prices) in extra profile folders record no cwd, so they count for no repository, and "no session on the branch" may hide them`] : []),
     `- Average rounds (commits the gate judged): ${rounds.length ? (rounds.reduce((s, r) => s + r.rounds, 0) / rounds.length).toFixed(2) : '–'} (n=${rounds.length})`,
@@ -805,6 +827,8 @@ async function main(argv) {
   if (opts.post && !claimJob(root, state, 'digest', `${opts.since}_${opts.until}`)) return;
   const shared = opts.post || opts.lastWeek ? sharedRecords(state, opts.since, opts.until) : null;
   const sessions = shared?.sessions ?? readSessions(state);
+  // The waits for Codex are this host's: `factory codex` runs here, the MacBook's by ssh too (#182). The digest takes them from opts.
+  opts.codexWaits = codexWaits(state, opts.since, opts.until);
   const seat = seatCosts(sessions);
   const recorded = new Set(sessions.map((r) => r.session).filter(Boolean));
   const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';

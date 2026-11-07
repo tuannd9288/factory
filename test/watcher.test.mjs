@@ -41,6 +41,12 @@ test('a hand-run seat two folders deep is read: its usage limit reaches the even
     writeFileSync(join(state, 'reader/cursors.json'), '{}');
     writeFileSync(join(runs, 'star/peer/run.jsonl'), JSON.stringify({ type: 'turn.failed', error: { message: "You've hit your usage limit." } }) + '\n');
     writeFileSync(join(runs, 'issue-1/run-peer.jsonl'), JSON.stringify({ type: 'turn.completed' }) + '\n');
+    // A pack Lead's worktree w/ and a Lead's transcripts/ are no seat folders: a product repository's run.log at the worktree's root, or a
+    // file of that name among the transcript copies, is not a seat stream.
+    mkdirSync(join(runs, 'issue-1/w'), { recursive: true });
+    mkdirSync(join(runs, 'app-lead/transcripts'), { recursive: true });
+    writeFileSync(join(runs, 'issue-1/w/run.log'), 'a product repository log\n');
+    writeFileSync(join(runs, 'app-lead/transcripts/run.log'), 'not a seat\n');
     let sessions = [];
     const provider = async ({ args }) => {
       const input = readFileSync(args.find((a) => a.startsWith('@')).slice(1), 'utf8');
