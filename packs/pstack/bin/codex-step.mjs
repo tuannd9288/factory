@@ -24,7 +24,7 @@ import { userInfo } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DENY_READ } from '../../../bin/lib/seat.mjs';
-import { INHERIT, MODELS } from '../../../bin/lib/models.mjs';
+import { INHERIT, MODELS, entryOf } from '../../../bin/lib/models.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const ROLES = ['arena-runner', 'architect-runner', 'interrogate-reviewer', 'cross-judge', 'trail-reviewer', 'verifier'];
@@ -132,13 +132,16 @@ function scoreLine() {
  * One step. The seam, { home, codex }, is for the tests alone: no caller of `factory codex` can pass it (the verb takes the closed
  * option list and nothing else), and nothing here reads the caller's environment.
  */
-export function main(args, { home: seamHome, codex: seamCodex } = {}) {
+export function main(args, { home: seamHome, codex: seamCodex, models = MODELS } = {}) {
   let o;
   let prompt;
   let dir;
+  let model;
   const cwd = realpathSync(process.cwd());
   try {
     o = parse(args);
+    // Codex's model is the codex entry of the factory's one table (INN-39); inherit passes none, so Codex's own default applies.
+    ({ model } = entryOf(models, 'codex'));
     const brief = readFileSync(0, 'utf8');
     if (!brief.trim()) throw new Error(`the brief is empty; ${USAGE}`);
     prompt = REVIEW.has(o.role) ? `${brief.replace(/\n*$/, '\n')}\n${scoreLine()}\n` : brief;
@@ -190,8 +193,7 @@ export function main(args, { home: seamHome, codex: seamCodex } = {}) {
     // The step's permission profile (above); no approval prompt to wait on, no execpolicy rules and no AGENTS.md of the folder, no
     // bypass of any of it.
     const argv = ['exec', '-C', dir, ...permissionArgs({ home: p.home, profiles: p.profiles, write: o.write === undefined ? null : dir, tmp: p.tmp }), '-c', 'approval_policy="never"', '-c', 'project_doc_max_bytes=0'];
-    // Codex's model is the factory's one table's (INN-39); inherit passes none, so Codex's own default applies.
-    if (MODELS.codex.model !== INHERIT) argv.push('-m', MODELS.codex.model);
+    if (model !== INHERIT) argv.push('-m', model);
     if (o.effort) argv.push('-c', `model_reasoning_effort="${o.effort}"`);
     if (git(dir, ['rev-parse', '--is-inside-work-tree']) !== 'true') argv.push('--skip-git-repo-check');
     // --ignore-user-config: Codex loads a folder's own .codex/config.toml (and a config.toml in the folder), with its MCP servers, hooks

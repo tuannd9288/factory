@@ -25,7 +25,7 @@ import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
 import { APP_FOLDERS, accountList, accountRefusal, archiveToken, nodeAccountList, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAdded, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
-import { MODELS, claudeModelArgs } from './models.mjs';
+import { MODELS, claudeModelArgs, entryOf } from './models.mjs';
 
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
 
@@ -392,7 +392,7 @@ function onHostBySsh(sub, args, tty, env) {
  * the factory host it runs this clone's packs/pstack/bin/lead; on the MacBook it runs the same command there by ssh. The name, the
  * team (the grammar of bin/lib/names.mjs) and the flags are checked before anything runs.
  * --resume-session restores a recorded --here session; --check only tests whether its record exists. */
-function lead(all, env) {
+function lead(all, env, models = MODELS) {
   if (all[0] === '--resume-session') {
     const [, session, check] = all;
     if (!session || all.length > 3 || (check !== undefined && check !== '--check')) {
@@ -406,7 +406,7 @@ function lead(all, env) {
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(saved.repo ?? '') || !TEAM.test(saved.team ?? '') || typeof saved.cwd !== 'string') return 1;
     } catch { return 1; }
     if (check) return 0;
-    return leadHere(saved.repo, saved.team, ['--resume', session], env, saved.cwd);
+    return leadHere(saved.repo, saved.team, ['--resume', session], env, { cwd: saved.cwd, models });
   }
   // What follows `--` is for claude, and only `--here` takes it.
   const dd = all.indexOf('--');
@@ -432,7 +432,7 @@ function lead(all, env) {
   if (here) {
     try { team ??= pickTeam(repo, { ...contextOf(env), newTeam: flags.includes('--new-team') }); }
     catch (e) { console.error(e.message); return 2; }
-    return leadHere(repo, team, passed ?? [], env);
+    return leadHere(repo, team, passed ?? [], env, { models });
   }
   if (placeOf(env) !== 'factory') return onHostBySsh('lead', args, true, env);
   const r = spawnSync(resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/bin/lead'), args, { stdio: 'inherit', env });
@@ -623,11 +623,15 @@ function markTrusted(config, folder) {
  * things: FACTORY_TEAM=<repo>-<team>, the grant of this node's installed copy's bin/seat, and that path in its role (lead.md's {{SEAT}} and
  * {{RUNS}}). Run as any other user, the Human's own included, it gets none of them and its role's <!--noseat--> form, which stops at the
  * worker step and says the work waits for a Lead run as `factory`. */
-function leadHere(repo, team, passed, env, cwd = process.cwd()) {
+function leadHere(repo, team, passed, env, { cwd = process.cwd(), models = MODELS } = {}) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
     return 2;
   }
+  // Its model and effort are the lead.here entry of the factory's one table (INN-39); inherit passes none, so the account's default applies.
+  let modelArgs;
+  try { modelArgs = claudeModelArgs(entryOf(models, 'lead', 'here')); }
+  catch (e) { console.error(`bin/factory: lead --here: ${e.message}; nothing was started`); return 1; }
   const token = nodeGithubToken(env);
   const id = hostIdentity(env, token);
   if (!id) {
@@ -751,8 +755,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     delete childEnv.FACTORY_HOST_NAME;
   }
   for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
-  // Its model and effort come from the factory's one table (INN-39); inherit passes none, so the account's default applies.
-  const r = spawnSync('claude', [...claudeModelArgs(MODELS['lead-here']), '--append-system-prompt', roleText, '--name', `${repo}-${team}`, ...mode, '--settings', JSON.stringify(settings),
+  const r = spawnSync('claude', [...modelArgs, '--append-system-prompt', roleText, '--name', `${repo}-${team}`, ...mode, '--settings', JSON.stringify(settings),
     ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: childEnv, cwd });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
@@ -764,7 +767,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
 /** Colly's current-pane launch (#365): the pack supplies the approved role; GitHub writes go through `factory gh`.
  * INN-30 permits use and lead; account and store remain denied. INN-31 3A: Colly runs on its own factory profile, <state>/colly/profile,
  * signed in once by /login, with no token or key from the caller's shell, in auto mode with the Mac mini inside the classifier's boundary. */
-async function colly(args, env) {
+async function colly(args, env, models = MODELS) {
   if (args.includes('--line') || args.includes('--brief')) return collyStatus(args, env);
   if (args.length) {
     console.error(USAGE);
@@ -774,6 +777,10 @@ async function colly(args, env) {
     console.error('bin/factory: colly runs on the MacBook');
     return 2;
   }
+  // Its model and effort are the colly entry of the factory's one table (INN-39); inherit passes none, so the account's default applies.
+  let modelArgs;
+  try { modelArgs = claudeModelArgs(entryOf(models, 'colly')); }
+  catch (e) { console.error(`bin/factory: colly: ${e.message}; nothing was started`); return 1; }
   const { state, agentProfiles } = contextOf(env);
   const parent = join(state, 'colly');
   const socket = join(parent, 'socket');
@@ -879,8 +886,7 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
   // /login is the only sign-in: no token or key from the caller's shell, and no other profile's plugin cache.
   const childEnv = { ...env, CLAUDE_CONFIG_DIR: config };
   for (const key of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
-  // Its model and effort come from the factory's one table (INN-39); inherit passes none, so the account's default applies.
-  const r = spawnSync('claude', [...claudeModelArgs(MODELS.colly), '--append-system-prompt', roleText, '--name', 'colly', '--permission-mode', 'auto', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env: childEnv });
+  const r = spawnSync('claude', [...modelArgs, '--append-system-prompt', roleText, '--name', 'colly', '--permission-mode', 'auto', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env: childEnv });
   if (r.error) {
     console.error(`bin/factory: colly: claude did not run (${r.error.code ?? 'error'})`);
     return 1;
@@ -1448,7 +1454,8 @@ function logout(args, env) {
   return 0;
 }
 
-export async function main(argv, env = process.env, io = { isTTY: Boolean(process.stdin.isTTY), ask: defaultAsk }) {
+/** models is the factory's one table of models (INN-39); a test passes its own. */
+export async function main(argv, env = process.env, io = { isTTY: Boolean(process.stdin.isTTY), ask: defaultAsk }, models = MODELS) {
   const [cmd, ...rest] = argv;
   if (cmd === 'login' || cmd === 'logout') {
     console.error(`factory ${cmd} was renamed to factory account ${cmd === 'login' ? 'add' : 'remove'}`);
@@ -1469,8 +1476,8 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
     console.error("factory top was removed. Use Linear's project 'Factory release 1'.");
     return 2;
   }
-  if (cmd === 'colly') return colly(rest, env);
-  if (cmd === 'lead') return lead(rest, env);
+  if (cmd === 'colly') return colly(rest, env, models);
+  if (cmd === 'lead') return lead(rest, env, models);
   if (cmd === 'gh') return ghCmd(rest, env);
   if (cmd === 'linear') return linearCmd(rest, env);
   if (cmd === 'codex') return codexCmd(rest, env);

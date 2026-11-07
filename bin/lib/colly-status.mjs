@@ -11,6 +11,7 @@ import { REQUIRED, clonesUnder, costOf, readSessions } from './ledger.mjs';
 import { windowsOf } from './quota.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
+import { INHERIT, MODELS, entryOf } from './models.mjs';
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -218,13 +219,20 @@ export function leadStateOf({ event, command, ageMs, now }) {
   return /"SessionStart"/.test(command) && ageMs > LOGIN_MS ? { state: 'waiting', waitNote: 'login or folder trust?' } : null;
 }
 
+/** The effort the factory's one table gives a role (INN-39): a seat's, or the pack Lead's (lead.remote); null for another role or inherit. */
+function effortOf(role) {
+  const path = Object.hasOwn(MODELS.seats, role) ? ['seats', role] : role === 'lead' ? ['lead', 'remote'] : null;
+  const effort = path && entryOf(MODELS, ...path).effort;
+  return effort && effort !== INHERIT ? effort : null;
+}
+
 function shape(p, { record, role, name, issue, folder, seat, live, mtime, start, cwd, repo, branch, harness, now, override = null, pane = null, team = null }) {
   const ageMs = now - mtime;
   return {
     name, role, team, recordTeam: record?.team ?? null, issue, folder, repo, seat, harness, live, pane,
     ...(override ?? stateOf(p, { live, ageMs, record, now })),
     model: p.model ?? record?.model?.split(',')[0] ?? null,
-    effort: PRESETS[role]?.effort ?? (role === 'lead' ? 'high' : null),
+    effort: effortOf(role),
     ctx: p.ctx, turns: p.turns ?? num(record?.turns), tokensIn: p.tokensIn, tokensOut: p.tokensOut,
     cost: p.cost ?? num(record?.total_cost_usd), estCost: p.cost === null ? p.estCost : null,
     startedAt: start, lastAt: mtime, cwd: cwd ?? null, branch: branch ?? null,
