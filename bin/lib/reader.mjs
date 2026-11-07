@@ -17,7 +17,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendStart, oneLine, readActive, record, readLines } from './events.mjs';
 import { redact } from './redact.mjs';
-import { releaseLock, takeLock } from './queue.mjs';
+import { takeLock } from './lock.mjs';
 import { listStreams } from './streams.mjs';
 import { createHash } from 'node:crypto';
 
@@ -463,7 +463,7 @@ export async function runPass({ state, runs, settingFile = settingPath(), home =
     } catch {
       // this pass is missing from the day's lines
     }
-    releaseLock(join(state, 'reader.lock'), lock.token);
+    lock.release();
   }
   return final;
 }
