@@ -896,6 +896,36 @@ describe('stacked pull requests', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge') || c.startsWith('pr edit')));
   });
 
+  test('with merge commits, waits until the parent is in origin/main, then only moves the child to main', () => {
+    const w = world({ merge: 'merge' });
+    const parent = w.head();
+    git(w.repo, 'branch', 'parent');
+    commit(w.repo, { 'child.js': 'child\n' }, 'feat(cli): add child');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.passed();
+    assert.equal(w.ship(['--base', 'parent', '--body-file', join(w.dir, 'body.md')]).code, 0);
+    w.pr({ baseRefOid: parent });
+    const child = w.head();
+    git(w.repo, 'switch', '-q', 'parent');
+    const tip = commit(w.repo, { 'parent.js': 'later\n' }, 'Parent advances');
+    git(w.repo, 'switch', '-q', 'work');
+    writeFileSync(join(w.sh, 'parent.json'), JSON.stringify([{ headRefOid: tip }]));
+    const early = w.ship();
+    assert.equal(early.code, 0, early.out);
+    assert.match(early.out, /waits for its parent parent in origin\/main/);
+    assert.ok(!w.calls().some((c) => c.startsWith('pr edit')));
+    git(w.repo, 'switch', '-q', 'main');
+    git(w.repo, 'merge', '--no-ff', '--no-edit', 'parent');
+    git(w.repo, 'push', '-q', 'origin', 'main');
+    git(w.repo, 'switch', '-q', 'work');
+    const out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.ok(w.calls().includes('pr edit 7 --base main'));
+    assert.equal(w.head(), child);
+    assert.equal(w.read('lv-calls'), '');
+    assert.ok(!w.calls().some((c) => c.includes('--auto')));
+  });
+
   test('off on origin/main refuses opening a child even when HEAD enables stacks', () => {
     const w = world({ stacks: 'off' });
     commit(w.repo, { '.gate/driver.json': JSON.stringify({ stacks: 'pstack' }) }, 'Candidate policy');
