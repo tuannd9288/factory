@@ -1,12 +1,16 @@
 // The paths no agent may read (INN-39 item 2): one list, rendered for each harness that runs here, so a new harness renders it rather than
 // copying it. It imports nothing, so every launcher can read it.
 //   Who renders it: the seats (bin/lib/seat.mjs: their command sandbox and their Read rules), the pack Lead (packs/pstack/bin/lead.mjs), the
-//   MacBook Lead and Colly (bin/lib/factory.mjs), and `factory codex` (packs/pstack/bin/codex-step.mjs).
+//   MacBook Lead and Colly (bin/lib/factory.mjs), `factory codex` (packs/pstack/bin/codex-step.mjs), and kit/.claude/settings.json.
+//   The kit's file is a rendering, not a copy: Claude Code in a served repository reads that file, which has no bin/lib, and onboard and
+//   kit-update insert its lines as they are. test/deny-read.test.mjs fails when its bytes differ from `node bin/lib/deny-read.mjs kit`.
 //   An entry is a path under home, under the work folder (`base: 'work'`), or under the profiles folder (`base: 'profiles'`: under
 //   ~/.agent-profiles and, when a launcher gives it, under the profiles folder by its absolute path).
 //   Applicability is explicit: each entry names a scope, and a scope names the channels that deny it, the roles when not every role, and
 //   why. Each difference between harnesses is a named scope, never an exception. A channel is a harness and the way it reads:
 //     file    Claude Code's file tools (Read rules) in the factory's own sessions: every seat role, both Leads, Colly
+//     kit     Claude Code's file tools in a served repository's sessions (kit/.claude/settings.json), which Claude Code also merges into the
+//             sandbox of a session there
 //     shell   the seats' command sandbox (Claude Code's sandbox.filesystem.denyRead)
 //     codex   Codex's permission profile, which binds its commands, its only way to read
 //   Residual gaps the list does not close: the Read rules bind Claude Code's file tools, so a Lead's or Colly's shell, which runs in no
@@ -16,18 +20,19 @@
 //   Not here: commands (`Bash(...)` rules, bin/lib/seat.mjs); the gate's reviewer on CI, which denies the runner's system folders
 //   (kit/.gate/bin/lib/claude-reviewer.mjs).
 export const SCOPES = {
-  all: { channels: ['file', 'shell', 'codex'], why: 'a credential or a login: no channel reads it' },
-  'file-tools': { channels: ['file'], why: 'named beside the whole profiles folder (#178), which every sandbox denies whole' },
-  'not-the-shell': { channels: ['file', 'codex'], why: "a repository's tests may load its .env files in a seat's shell" },
+  all: { channels: ['file', 'kit', 'shell', 'codex'], why: 'a credential or a login: no channel reads it' },
+  'file-tools': { channels: ['file', 'kit'], why: 'named beside the whole profiles folder (#178), which every sandbox denies whole' },
+  'not-the-shell': { channels: ['file', 'kit', 'codex'], why: "a repository's tests may load its .env files in a seat's shell" },
   'factory-file-tools': {
     channels: ['file'],
-    why: "all of ~/.config for the factory's own file tools, as before; a sandbox would stop git, which reads ~/.config/git, so the shells and Codex name each store instead (INN-39, his question 1)",
+    why: "all of ~/.config for the factory's own file tools, as before; a sandbox, which the kit's rules reach too, would stop git, which reads ~/.config/git, so the shells, Codex and the kit name each store instead (INN-39, his question 1)",
   },
   'seats-only': { channels: ['file'], roles: ['seat'], why: "a Lead's transcript copies are its own (#185)" },
 };
 
 export const DENIED = [
   { path: '.env*', base: 'work', scope: 'not-the-shell', why: "a repository's own secrets" },
+  // The kit denies it whole too: INN-39, his question 2.
   { path: '.agent-profiles', scope: 'all', why: 'the token store, the archive and every profile' },
   { path: 'tokens', base: 'profiles', scope: 'file-tools', why: "the teams' tokens and the agents' GitHub token" },
   { path: 'archive', base: 'profiles', scope: 'file-tools', why: 'the tokens moved aside at logout' },
@@ -55,9 +60,9 @@ export const deniedBy = (entry, channel, role = null) => {
 const baseOf = (e) => e.base ?? 'home';
 const both = (p) => [`Read(${p})`, `Read(${p}/**)`];
 
-/** Claude Code's Read rules of `channel` (`file`) for `role` (`seat`, `lead` or `colly`): a home entry as itself, which names a file such
- * as ~/.claude.json, and with /**, which names what a folder holds; a work entry as ./<path>; a profiles entry under ~/.agent-profiles.
- * With `profiles`, the profiles folder by its absolute path too, whole and with its entries, for one outside home. */
+/** Claude Code's Read rules of `channel` (`file`, or `kit`) for `role` (`seat`, `lead` or `colly`): a home entry as itself, which names a
+ * file such as ~/.claude.json, and with /**, which names what a folder holds; a work entry as ./<path>; a profiles entry under
+ * ~/.agent-profiles. With `profiles`, the profiles folder by its absolute path too, whole and with its entries, for one outside home. */
 export const readRules = ({ channel = 'file', role = null, profiles = null } = {}) => [
   ...DENIED.filter((e) => deniedBy(e, channel, role)).flatMap((e) => ({
     work: () => [`Read(./${e.path})`],
@@ -78,3 +83,8 @@ export const codexPaths = (home, profiles) => [
   ...[...new Set([...homeOf('codex').map((p) => `${home}/${p}`), profiles])].flatMap((p) => (p.includes('*') ? [p, `${p}/**`] : [p])),
   ...DENIED.filter((e) => baseOf(e) === 'work' && deniedBy(e, 'codex')).map((e) => `/**/${e.path}`),
 ];
+
+/** kit/.claude/settings.json's text: the kit's Read rules alone, two spaces, a final newline. */
+export const kitSettings = () => `${JSON.stringify({ permissions: { deny: readRules({ channel: 'kit' }) } }, null, 2)}\n`;
+
+if (process.argv[1]?.endsWith('/deny-read.mjs') && process.argv[2] === 'kit') process.stdout.write(kitSettings());

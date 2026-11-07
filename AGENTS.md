@@ -165,7 +165,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - **H6**: Tools are commands; permissions live outside the instructions.
   Checked by: the deny rules `bin/seat` and `packs/pstack/bin/lead` give each session (`denyOf` in `bin/lib/seat.mjs`
   and in `packs/pstack/bin/lead.mjs`), whose paths come from the one list in `bin/lib/deny-read.mjs`, and their tests; the kit's
-  `kit/.claude/settings.json` binds Claude Code only (#134).
+  `kit/.claude/settings.json`, that list's rendering, binds Claude Code only (#134).
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
