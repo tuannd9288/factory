@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from '../packs/pstack/bin/lead.mjs';
 import { main, noPushGitEnv } from '../bin/lib/factory.mjs';
-import { readRules } from '../bin/lib/deny-read.mjs';
+import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
 import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
 import { HOST_ENV } from './helpers.mjs';
 
@@ -96,6 +96,14 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
       assert.ok(allowed(command), command);
     for (const command of ['factory account add colly', 'factory account remove ann', 'factory store ann', 'bin/factory account add ann --node macbook', 'node bin/lib/factory.mjs account remove ann', 'node bin/lib/factory.mjs store ann'])
       assert.ok(deny.some((r) => bashMatches(r, command)), command);
+    // Its shell runs in Claude Code's sandbox with no network (FAC-79 (b)): it reads none of the list's shell paths, writes only its folder
+    // and the temporary folder, and runs only `factory` outside it, its Monitors (`factory events`) included.
+    assert.deepEqual(settings.sandbox, {
+      enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
+      filesystem: { denyRead: sandboxPaths(state, join(state, '.agent-profiles')), allowWrite: [process.cwd(), fs.realpathSync(tmpdir())] },
+      network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
+      excludedCommands: ['factory *'],
+    });
     result = { status: 7 };
     assert.equal(await main(['colly'], env), 7);
     result = { error: { code: 'ENOENT' } };
@@ -257,5 +265,25 @@ test('colly supplies the brief and status line, records its socket, and reuses t
     t.mock.restoreAll();
     syncBuiltinESMExports();
     fs.rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('Colly\'s MacBook Monitor, events --local, follows the fixed share here, and is refused on the Mac mini (FAC-79 (b))', async (t) => {
+  const calls = [];
+  t.mock.method(childProcess, 'spawnSync', (cmd, args) => {
+    calls.push({ cmd, args });
+    return { status: 0 };
+  });
+  t.mock.method(console, 'error', () => {});
+  syncBuiltinESMExports();
+  try {
+    const env = { HOME: '/nonexistent-home', FACTORY_HOST_USER: 'nobody-here' };
+    assert.equal(await main(['events', '--follow', '--local', '--after', '3'], env), 0);
+    assert.deepEqual(calls, [{ cmd: fileURLToPath(new URL('../bin/factory-events', import.meta.url)), args: ['--follow', '--file', '/Users/Shared/factory/events.jsonl', '--after', '3'] }]);
+    assert.equal(await main(['events', '--follow', '--local'], { ...env, ...HOST_ENV }), 2);
+    assert.equal(calls.length, 1);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
   }
 });

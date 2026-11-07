@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tokenStoreDeny } from '../bin/lib/seat.mjs';
-import { readRules } from '../bin/lib/deny-read.mjs';
+import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
 import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
 import { freeWord, teamsOf } from '../bin/lib/team-names.mjs';
 import { HOST_ENV, factory } from './helpers.mjs';
@@ -127,6 +127,14 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
     } finally {
       w.done();
     }
+    // Its shell runs in Claude Code's sandbox (FAC-79 (b)): it reads none of the list's shell paths, writes here, in the runs folder and
+    // the temporary folder, reaches only GitHub's two hosts, and, as a user that starts no seat, runs only `factory` outside it.
+    assert.deepEqual(settingsOf(args).sandbox, {
+      enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
+      filesystem: { denyRead: sandboxPaths(s.home, join(s.dir, 'profiles')), allowWrite: [realpathSync(factory), join(s.home, 'factory-runs'), realpathSync(tmpdir())] },
+      network: { strictAllowlist: true, allowedDomains: ['github.com', 'api.github.com'], allowLocalBinding: false },
+      excludedCommands: ['factory *'],
+    });
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
     assert.equal(statSync(empty).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(empty), []);
@@ -418,7 +426,7 @@ exit "$(cat "$FAKE/host.exit" 2>/dev/null || echo 0)"
   chmodSync(file, 0o755);
 }
 
-test('linear refuses a usage error on the MacBook before any ssh, and a body that names a file', () => {
+test('linear refuses a usage error on the MacBook before any ssh, and a body file it cannot read', () => {
   const s = world();
   try {
     hostFactory(s);
@@ -470,6 +478,11 @@ test('linear hands a title with quotes and a dollar sign to the host unchanged, 
     assert.deepEqual(s.nuls('host.args'), args);
     assert.equal(s.read('host.stdin'), body);
     assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '/);
+    // A body the session wrote as a file goes on stdin too (FAC-79 (b)), since a pipe would keep the call in its sandbox.
+    writeFileSync(join(s.dir, 'body.md'), 'from a file\n');
+    s.fac(['linear', 'comment', 'FAC-12', '--team', 'lead', '--body-file', join(s.dir, 'body.md')]);
+    assert.deepEqual(s.nuls('host.args'), ['linear', 'comment', 'FAC-12', '--team', 'lead', '--body-file', '-']);
+    assert.equal(s.read('host.stdin'), 'from a file\n');
     s.w('ssh-down', '');
     assert.equal(s.fac(['linear', 'read', 'FAC-12']).code, 255, 'ssh\'s own exit code when it cannot reach the host');
   } finally {
@@ -807,6 +820,21 @@ test('wake refuses a bad repository, issue or team, a flag twice and any other w
       assert.match(r.out, /usage: bin\/factory/);
     }
     assert.equal(s.calls(), '', 'no ssh call');
+  } finally {
+    s.done();
+  }
+});
+
+test('events sends the Mac mini only the words it checked, and refuses any other text before any ssh (FAC-79 (b))', () => {
+  const s = world();
+  try {
+    // The fake ssh runs the remote command through a shell, as the Mac mini's does: text that reached it would make the marker.
+    const marker = join(s.dir, 'marker');
+    for (const args of [['--follow', '--after', `1; touch ${marker}`], ['--follow', '--file', marker]]) assert.equal(s.fac(['events', ...args]).code, 2, args.join(' '));
+    assert.equal(existsSync(marker), false);
+    assert.equal(s.calls(), '', 'no ssh call');
+    s.fac(['events', '--follow', '--after', '5']);
+    assert.equal(s.calls(), "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory events --follow --after 5'\n");
   } finally {
     s.done();
   }

@@ -340,7 +340,8 @@ never the token. The sweep does the same for a new comment, by a login other tha
 The live verifier's Codex profile and its login are in `packs/pstack/INSTALL.md`, "The live verifier's login". What unattended runs
 need, and how `bin/seat` picks the team, the account and the seat, sets the permission mode and the grants, and handles the
 researcher and its known limits, are in the header of `bin/seat`. The worker's and the reviewer's commands run in a sandbox
-with no network and no read of the credential folders (#183).
+with no network and no read of the credential folders (#183). So do the MacBook Lead's, which reaches GitHub alone, and Colly's,
+with `factory` (and that Lead's `bin/seat`) let out: open gaps, named in the header of `bin/lib/deny-read.mjs` (FAC-79).
 
 No session reads a profile's folder (#185). A session finds pstack's files in a plugin folder outside the profiles, installed
 only from the factory's own pin, and reads its own earlier transcripts from copies outside them; no seat reads a Lead's
