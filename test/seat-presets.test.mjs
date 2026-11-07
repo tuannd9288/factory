@@ -10,7 +10,7 @@ const lib = () => import('../bin/lib/seat.mjs');
 const RUN = '/r/issue-1';
 const WORK = '/r/w';
 const HOME = '/h';
-const SCHEMA = '{"type":"object","additionalProperties":false,"required":["conclusion","evidence","couldNotRead","needsLead","foundOutside","findings"],"properties":{"conclusion":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"couldNotRead":{"type":"array","items":{"type":"string"}},"needsLead":{"type":"array","items":{"type":"string"}},"foundOutside":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["kind","claim","blocking"],"properties":{"kind":{"type":"string","pattern":"^[a-z0-9]+(-[a-z0-9]+)*$","maxLength":40},"claim":{"type":"string"},"blocking":{"type":"boolean"}}}}}}';
+const SCHEMA = '{"type":"object","additionalProperties":false,"required":["conclusion","evidence","couldNotRead","needsLead","foundOutside"],"properties":{"conclusion":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"couldNotRead":{"type":"array","items":{"type":"string"}},"needsLead":{"type":"array","items":{"type":"string"}},"foundOutside":{"type":"array","items":{"type":"string"}}}}';
 
 const DENY = [
   'Bash(*factory account add*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs store*)',
@@ -25,11 +25,10 @@ const RESEARCHER_ALLOW = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash
 // Write, Edit and redirects only in the session's own folders: the run folder and the work folder (#188); the researcher's only.
 const EDITS = ['Edit(//r/issue-1/**)', 'Edit(//r/w/**)'];
 
-const ALERTS = JSON.stringify({ hooks: { SessionStart: [{ matcher: 'startup|resume', hooks: [{ type: 'command', command: join(factory, 'bin/factory-alerts'), timeout: 10 }] }] } });
-// The worker's and the reviewer's settings add the sandbox (#183), whose content test/seat-sandbox.test.mjs pins.
+// The worker's and the reviewer's settings are the sandbox (#183), whose content test/seat-sandbox.test.mjs pins.
 const sandboxed = async () => {
   const { sandboxSettings } = await lib();
-  return JSON.stringify({ ...JSON.parse(ALERTS), sandbox: sandboxSettings({ home: HOME, run: RUN, work: WORK }) });
+  return JSON.stringify({ sandbox: sandboxSettings({ home: HOME, run: RUN, work: WORK }) });
 };
 const tail = ['--output-format', 'stream-json', '--verbose', '--json-schema', SCHEMA];
 
@@ -61,7 +60,6 @@ test('researcher: opus, high effort, 300 turns, the web and git only through bin
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'researcher', run: RUN, home: HOME, work: WORK }), [
     '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'default',
-    '--settings', ALERTS,
     '--add-dir', RUN,
     '--allowedTools', ...RESEARCHER_ALLOW, ...EDITS, 'StructuredOutput',
     '--disallowedTools', ...DENY.filter((r) => r !== 'WebFetch' && r !== 'WebSearch'), 'Bash(git:*)',
