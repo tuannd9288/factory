@@ -10,11 +10,13 @@
 #   once; a refused follow is told and the run goes on with the copy as it is. Then ~/.local/bin/factory becomes a symlink to its bin/factory. It replaces a symlink whose target ends in
 #   /bin/factory (the old one into a clone included) and nothing else: a file, a folder or a link to another place is named and left as it is.
 #   On the Mac mini, enables this repository's commit-msg hook from this main checkout, unless a hooksPath or executable default hook already exists.
-#   On the MacBook only, run as its `factory` user (#366), it then writes the relay's job (bin/factory-relay plist) and the queue's
-#   (bin/factory-queue plist --daemon), which starts the node's own daemon, as LaunchDaemons run by that user, to
-#   $FACTORY_STATE/plist-wanted/, runs each one's check (the queue's runs one sweep as the agents and is not ready until the node holds their
-#   GitHub token: factory store <agents account>), and prints the one sudo line that installs them in /Library/LaunchDaemons and loads them,
-#   as the Mac mini's queue is installed. A plist installed as the copy renders it is left out. It says each step in a line.
+#   On the MacBook only, run as its `factory` user (#366; any other user is refused, exit 1, after the link), it then runs the checks of the
+#   relay's job (bin/factory-relay plist) and the queue's (bin/factory-queue plist --daemon), which starts the node's own daemon, as
+#   LaunchDaemons run by that user (the queue's check runs one sweep as the agents and is not ready until the node holds their GitHub token:
+#   factory store <agents account>), writes their plists to $FACTORY_STATE/plist-wanted/ with each one's sha256, user and program, and prints
+#   the numbered steps the Human runs one at a time in his own terminal: his own user's old LaunchAgents out, the loaded jobs out, and one
+#   sudo command that installs in /Library/LaunchDaemons only copies it checked against those sha256, and loads them (bin/lib/install-factory.mjs).
+#   A plist installed as the copy renders it is left out. It says each step in a line.
 # A clone anywhere else, its branches and its uncommitted edits change nothing that runs; only a change that lands on main reaches the copy.
 set -euo pipefail
 [ "$#" -eq 0 ] || { echo "usage: bin/install-factory" >&2; exit 2; }
@@ -88,5 +90,5 @@ if [ "$(node "$helper" place)" != macbook ]; then
   exit 0
 fi
 # #366: the relay's job and the queue's (which starts the node's own daemon, as the agents with the node's token), as LaunchDaemons run by
-# this user, so they run with nobody logged in: their plists, their checks, and the one sudo line the Human runs (bin/lib/install-factory.mjs).
+# this user, so they run with nobody logged in: their checks, their plists, and the steps the Human runs (bin/lib/install-factory.mjs).
 exec node "$helper" daemons

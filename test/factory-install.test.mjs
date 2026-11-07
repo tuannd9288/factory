@@ -31,9 +31,9 @@ function world(f) {
     mkdirSync(home);
     mkdirSync(fake);
     writeFileSync(join(fake, 'launchctl'), ['#!/bin/sh', 'echo "$*" >>"$HOME/launchctl.log"',
-      // Each job is loaded or not by its label: the last part of print's and bootout's target, the plist's name for bootstrap.
-      'case "$1" in', 'print) [ -f "$HOME/loaded-${2##*/}" ] || exit 113 ;;',
-      'bootstrap) : >"$HOME/loaded-$(basename "$3" .plist)" ;;', 'bootout) rm -f "$HOME/loaded-${2##*/}" ;;', 'esac', ''].join('\n'));
+      // Each job is loaded or not by its domain and label: $HOME/loaded-<domain>_<label>, with each / of print's and bootout's target as _.
+      'case "$1" in', 'print) [ -f "$HOME/loaded-$(echo "$2" | tr / _)" ] || exit 113 ;;',
+      'bootstrap) : >"$HOME/loaded-$2_$(basename "$3" .plist)" ;;', 'bootout) [ -f "$HOME/loaded-$(echo "$2" | tr / _)" ] || exit 3; rm "$HOME/loaded-$(echo "$2" | tr / _)" ;;', 'esac', ''].join('\n'));
     writeFileSync(join(fake, 'ssh'), ['#!/bin/sh', 'case "$*" in *--newest*) echo 4 ;; esac', ''].join('\n'));
     // #366: gh as the queue's check meets it on the MacBook: the agents with their token in GH_TOKEN, the Human otherwise.
     writeFileSync(join(fake, 'gh'), ['#!/bin/sh', 'case "$*" in', '  "api user"*) if [ "$GH_TOKEN" = made-up-agents-token ]; then echo agent-bot; else echo tuannd9288; fi ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
@@ -50,19 +50,26 @@ function world(f) {
       link: join(home, '.local/bin/factory'),
       wanted: join(dir, 'state/plist-wanted'),
       daemons: join(dir, 'LaunchDaemons'),
-      // The code that runs is the clone's own bin/install-factory, whose HOME and place are the test's.
+      // The code that runs is the clone's own bin/install-factory, whose HOME and place are the test's: by default the MacBook's `factory`
+      // user, the agents' user (this test's own) on a machine that is not the host.
       install: (args = [], env = {}, from = join(factory, 'bin/install-factory')) =>
         run(factory, 'bash', [from, ...args], {
           HOME: home, PATH: `${fake}:${process.env.PATH}`, FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'),
-          FACTORY_INSTALL_ORIGIN: origin, FACTORY_HOST_USER: 'nobody-here', FACTORY_CHECKOUT: '', XDG_DATA_HOME: '',
+          FACTORY_INSTALL_ORIGIN: origin, ...HOST_ENV, FACTORY_HOST_NAME: 'another-machine', FACTORY_CHECKOUT: '', XDG_DATA_HOME: '',
           AGENT_PROFILES: join(dir, 'profiles'), FACTORY_AGENT: 'fake-agent', FACTORY_PLIST_DIR: join(dir, 'LaunchDaemons'), ...env,
         }),
-      // The line the run printed for the Human's sudo, run as he would, with the fakes; null when it printed none.
+      // The numbered steps the run printed for the Human's own terminal, run one at a time as he would, with the fakes, until one fails;
+      // the last result, or null when it printed none. A step "by hand" is his to do, and is passed over.
       sudo: (out) => {
-        const line = out.split('\n').find((l) => l.startsWith('install-factory: to install and load them, run: '));
-        if (!line) return null;
+        const steps = out.split('\n').map((l) => /^install-factory: \d+, step: (.*)$/.exec(l)?.[1]).filter(Boolean);
+        if (!steps.length) return null;
         mkdirSync(join(dir, 'LaunchDaemons'), { recursive: true });
-        return run(dir, 'sh', ['-c', line.slice('install-factory: to install and load them, run: '.length)], { HOME: home, PATH: `${fake}:${process.env.PATH}` });
+        let r;
+        for (const step of steps) {
+          r = run(dir, 'sh', ['-c', step], { HOME: home, PATH: `${fake}:${process.env.PATH}` });
+          if (r.code !== 0) break;
+        }
+        return r;
       },
       launchctl: () => (existsSync(join(home, 'launchctl.log')) ? readFileSync(join(home, 'launchctl.log'), 'utf8').split('\n').filter(Boolean) : []),
       push: (text) => {
@@ -183,6 +190,11 @@ test('on the MacBook it writes the relay\'s and the queue\'s LaunchDaemons, run 
   }
   assert.ok(!w.launchctl().some((c) => /^(bootstrap|bootout|load)/.test(c)), 'it loads nothing itself');
   assert.match(r.out, /^check: gh login agent-bot$/m);
+  // He reads what he is about to install as root: each job's user and program.
+  for (const [label, tool] of [[LABELS[0], 'bin/factory-relay'], [LABELS[1], 'bin/factory-queue']]) {
+    assert.ok(r.out.split('\n').some((l) => l.includes(label) && l.endsWith(` ${userInfo().username}`)), `${label}: its user`);
+    assert.ok(r.out.split('\n').some((l) => l.includes(label) && l.includes(` ${join(w.root, tool)}`)), `${label}: its program`);
+  }
   // The line, run as the Human runs it, installs the two plists and loads each after its install.
   const sudo = w.sudo(r.out);
   assert.equal(sudo?.code, 0, sudo?.out ?? r.out);
@@ -201,6 +213,19 @@ test('on the MacBook it writes the relay\'s and the queue\'s LaunchDaemons, run 
   assert.equal(w.sudo(without.out), null);
 }));
 
+test('a plist changed in the agents\' folder after it was rendered fails the sudo line\'s check, and nothing is installed or loaded (#366)', () => world((w) => {
+  const r = w.install();
+  assert.equal(r.code, 0, r.out);
+  // Anything running as the agents' user can write that folder: here, a plist that would run as root.
+  const wanted = join(w.wanted, `${LABELS[1]}.plist`);
+  writeFileSync(wanted, readFileSync(wanted, 'utf8').replace(/(<key>UserName<\/key>\s*<string>)[^<]*/, '$1root'));
+  const sudo = w.sudo(r.out);
+  assert.notEqual(sudo?.code, 0, sudo?.out ?? r.out);
+  assert.match(sudo.out, /FAILED/);
+  assert.ok(!existsSync(join(w.daemons, `${LABELS[0]}.plist`)) && !existsSync(join(w.daemons, `${LABELS[1]}.plist`)), 'neither plist is installed');
+  assert.deepEqual(w.launchctl().filter((c) => c.startsWith('bootstrap')), []);
+}));
+
 test('a loaded job whose plist changed is booted out before its install, and the queue\'s daemon is named to stop (#366)', () => world((w) => {
   const first = w.install();
   assert.equal(w.sudo(first.out)?.code, 0, first.out);
@@ -211,8 +236,35 @@ test('a loaded job whose plist changed is booted out before its install, and the
   assert.match(r.out, /daemon\.lock.*SIGTERM/);
   const before = w.launchctl().length;
   assert.equal(w.sudo(r.out)?.code, 0, r.out);
-  assert.deepEqual(w.launchctl().slice(before), [`bootout system/${LABELS[1]}`, `bootstrap system ${installed}`], 'the relay\'s, unchanged, is left as it is');
+  // The bootout is a step of its own, so he can stop the daemon after it and before the install.
+  assert.deepEqual(w.launchctl().slice(before).filter((c) => !c.includes(' gui/')), [`bootout system/${LABELS[1]}`, `bootstrap system ${installed}`], 'the relay\'s, unchanged, is left as it is');
   assert.equal(readFileSync(installed, 'utf8'), readFileSync(join(w.wanted, `${LABELS[1]}.plist`), 'utf8'));
+}));
+
+test('his own user\'s LaunchAgents from before, the relay\'s and the queue\'s, are booted out and their plists removed by the first step (#366)', () => world((w) => {
+  const agents = join(w.home, 'Library/LaunchAgents');
+  mkdirSync(agents, { recursive: true });
+  for (const label of LABELS) {
+    writeFileSync(join(agents, `${label}.plist`), '<plist/>\n');
+    writeFileSync(join(w.home, `loaded-gui_${process.getuid()}_${label}`), '');
+  }
+  const r = w.install();
+  assert.equal(r.code, 0, r.out);
+  assert.equal(w.sudo(r.out)?.code, 0, r.out);
+  for (const label of LABELS) {
+    assert.ok(w.launchctl().includes(`bootout gui/${process.getuid()}/${label}`), label);
+    assert.ok(!existsSync(join(w.home, `loaded-gui_${process.getuid()}_${label}`)), `${label} is not loaded`);
+    assert.ok(!existsSync(join(agents, `${label}.plist`)), `${label}'s plist is gone`);
+  }
+}));
+
+test('as a user that is not the agents\', his own on the MacBook, it makes the link and refuses the jobs: no plist, no step (#366)', () => world((w) => {
+  const r = w.install([], { FACTORY_HOST_USER: 'nobody-here' });
+  assert.notEqual(r.code, 0, r.out);
+  assert.equal(readlinkSync(w.link), join(w.root, 'bin/factory'), 'factory is on his PATH');
+  assert.match(r.out, /is not the agents' user nobody-here.*no job was written/);
+  for (const label of LABELS) assert.ok(!existsSync(join(w.wanted, `${label}.plist`)), label);
+  assert.equal(w.sudo(r.out), null);
 }));
 
 test('it fails when check fails: a job whose log or state sits under Desktop is not ready', () => world((w) => {

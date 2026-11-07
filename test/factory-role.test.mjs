@@ -29,7 +29,7 @@ test('lead --here passes the pack role as an appended system prompt; run as a us
       assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], {
         HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', CLAUDE_CODE_OAUTH_TOKEN: 'made-up-wrong-node-token',
         ANTHROPIC_API_KEY: 'made-up-key', ANTHROPIC_AUTH_TOKEN: 'made-up-auth', CLAUDE_CODE_PLUGIN_CACHE_DIR: join(state, 'other-plugins'),
-        FACTORY_TEAM: 'other-gamma',
+        FACTORY_TEAM: 'other-gamma', FACTORY_HOST_NAME: 'another-machine',
       }), 0);
       const { cmd, args, options } = calls.at(-1);
       assert.equal(options.env.CLAUDE_CODE_OAUTH_TOKEN, 'made-up-local-token');
@@ -43,6 +43,7 @@ test('lead --here passes the pack role as an appended system prompt; run as a us
       assert.equal(options.env.FACTORY_TEAM, undefined);
       // Nor the setting that names the agents' user to bin/seat, which the caller's environment here has (`nobody-here`).
       assert.equal(options.env.FACTORY_HOST_USER, undefined);
+      assert.equal(options.env.FACTORY_HOST_NAME, undefined, 'nor the one that names the factory host\'s machine');
       assert.equal(JSON.parse(args[args.indexOf('--settings') + 1]).permissions.allow, undefined);
       const index = args.indexOf('--append-system-prompt');
       assert.ok(index >= 0, 'the launch must supply the role prompt');
