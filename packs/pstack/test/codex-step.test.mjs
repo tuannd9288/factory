@@ -265,3 +265,26 @@ test('a .codex/config.toml planted in the work folder, with an MCP server and a 
   assert.equal(w.run(['--role', 'cross-judge']).code, 0);
   assert.ok(w.execs()[0].args.includes('--ignore-user-config'), w.execs()[0].args.join(' '));
 });
+
+test('bin/factory refuses factory codex when the caller\'s environment carries a startup hook, before any code of its own or of node runs', () => {
+  // A seat's sandbox runs `factory codex` outside it with the seat's environment (#182). bash reads BASH_ENV before a bash script's
+  // first line, and node reads NODE_OPTIONS before any module, so the check is the script's first stage, under #!/bin/sh.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'codex-step-env-')));
+  dirs.push(dir);
+  const marker = join(dir, 'ran');
+  writeFileSync(join(dir, 'startup.sh'), `touch ${marker}\n`);
+  writeFileSync(join(dir, 'require.cjs'), `require('fs').writeFileSync(${JSON.stringify(marker)}, '');\n`);
+  const run = (extra) => spawnSync(join(factory, 'bin/factory'), ['codex', '--role', 'cross-judge', '--model', 'gpt-5'], { input: BRIEF, encoding: 'utf8', env: { ...process.env, FACTORY_HOST_USER: userInfo().username, ...extra } });
+  for (const [name, value] of [['BASH_ENV', join(dir, 'startup.sh')], ['NODE_OPTIONS', `--require ${join(dir, 'require.cjs')}`], ['ENV', join(dir, 'startup.sh')], ['NODE_PATH', dir], ['LD_PRELOAD', join(dir, 'x.so')], ['LD_LIBRARY_PATH', dir]]) {
+    const r = run({ [name]: value });
+    assert.equal(r.status, 2, `${name}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`factory codex: refused: ${name} is set`), name);
+    assert.equal(existsSync(marker), false, `${name}: a startup hook ran`);
+  }
+});
+
+test('a DYLD_ variable never reaches the node that runs factory codex: SIP strips it at the protected /bin/sh', { skip: process.platform !== 'darwin' }, () => {
+  const r = spawnSync(join(factory, 'bin/factory'), ['codex', '--role', 'cross-judge', '--model', 'gpt-5'], { input: BRIEF, encoding: 'utf8', env: { ...process.env, FACTORY_HOST_USER: userInfo().username, DYLD_PRINT_LIBRARIES: '1' } });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stderr, /dyld\[/);
+});
