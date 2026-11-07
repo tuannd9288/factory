@@ -374,6 +374,7 @@ const USAGE = `usage: bin/factory account list [--all] [--json]
        bin/factory lead --resume-session <id> [--check]
        bin/factory gh <gh arguments>   (under the agents' login: here, with this node's stored agents GitHub token; otherwise, on the MacBook, on the Mac mini)
        bin/factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
+       bin/factory codex --role <role> [--effort <e>] [--write <folder>]   (a pstack step on another model family, on Codex, #182; the brief on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
@@ -967,6 +968,37 @@ async function linearCmd(args, env) {
   return r.status ?? 1;
 }
 
+/** `factory codex --role <role> ...` (#182): a pstack step that asks for another model family, on Codex (packs/pstack/bin/codex-step.mjs
+ * has the options, the profile and the wait). On the factory host it runs there, on the verifier's Codex profile; on the MacBook the same
+ * command runs on the host over ssh, stdin kept, in a new temporary folder there that is removed after, so Codex reads the brief alone: a
+ * step that writes (--write) is refused here, and this folder's repository goes along as --repo for the wait log. */
+async function codexCmd(args, env) {
+  const step = await import('../../packs/pstack/bin/codex-step.mjs');
+  if (placeOf(env) === 'factory') return step.main(args, env);
+  let o;
+  try {
+    o = step.parse(args);
+  } catch (e) {
+    console.error(`bin/factory: codex: ${e.message}`);
+    return 2;
+  }
+  if (o.write !== undefined) {
+    console.error('bin/factory: codex: --write runs only on the factory host, where its folder is');
+    return 2;
+  }
+  const repo = o.repo ?? step.repoOf(process.cwd());
+  const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
+  const line = ['~/WORKSPACES/bin/factory', 'codex', ...[...args, ...(o.repo || !repo ? [] : ['--repo', repo])].map(word)].join(' ');
+  const script = `d=$(mktemp -d) && cd "$d" || exit 2; ${line}; c=$?; cd /; rm -rf "$d"; exit $c`;
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { stdio: 'inherit', env });
+  // ssh's own failure is 255: the step waits, as it does for Codex, and never runs on Claude.
+  if (r.error || r.status === 255) {
+    console.log(`codex: ${o.role} waits for Codex: the factory host could not be reached by ssh. This step does not run on Claude; say so, and go on with other work.`);
+    return 3;
+  }
+  return r.status ?? 3;
+}
+
 /** The line told once seat 1's account has a token: the old file moved aside, never deleted. */
 function movedOld(agentProfiles, state) {
   const to = retireSeat1File(agentProfiles, state);
@@ -1417,6 +1449,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'lead') return lead(rest, env);
   if (cmd === 'gh') return ghCmd(rest, env);
   if (cmd === 'linear') return linearCmd(rest, env);
+  if (cmd === 'codex') return codexCmd(rest, env);
   if (cmd === 'wake') return wake(rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);
