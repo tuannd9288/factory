@@ -22,7 +22,12 @@ import { releaseLock, takeLock } from './queue.mjs';
 import { listStreams } from './streams.mjs';
 import { createHash } from 'node:crypto';
 
-export const SETTING_FILE = join(dirname(fileURLToPath(import.meta.url)), 'reader.json');
+/** The setting the repository ships, changed by pull request. */
+export const REPO_SETTING = join(dirname(fileURLToPath(import.meta.url)), 'reader.json');
+
+/** Where the setting is read from, at each call: FACTORY_READER_SETTING when it is set, as FACTORY_STATE and FACTORY_RUNS are, else the
+ * shipped one. The tests set it, so a pull request that turns the shipped switch off changes no sweep test (#518). */
+export const settingPath = (env = process.env) => env.FACTORY_READER_SETTING || REPO_SETTING;
 export const LIMIT = 400_000;
 export const MAX_CALLS = 3;
 export const TIMEOUT_MS = 10 * 60_000;
@@ -79,7 +84,7 @@ export const OFF = 'off';
 /** The setting as { side, model, effort } for the side it picks (or `override`, for --try), { side: 'off' } when the switch is off and no
  * side is named, or a refusal (error.cause 'setting'): a side the reader does not have, a missing model, an effort the side does not take,
  * any other key. The file is checked whole, both sides, so switching back on finds them as they were. */
-export function loadSetting(file = SETTING_FILE, override = undefined) {
+export function loadSetting(file = settingPath(), override = undefined) {
   let s;
   try {
     s = JSON.parse(readFileSync(file, 'utf8'));
@@ -346,7 +351,7 @@ const eventText = (e) => `${flat(e.session)} ${e.kind}: "${flat(e.quote)}" (${fl
  * end, as the first pass ever does) and holds one `reader-off` condition, of a scope of its own so that a pass cannot end it: it starts once.
  * On, it ends a held reader-off. A setting that does not load counts as on, so the pass reports it, as before. The silence watch does not
  * read the switch. */
-export function readerSwitch({ state, settingFile = SETTING_FILE, now = Date.now() }) {
+export function readerSwitch({ state, settingFile = settingPath(), now = Date.now() }) {
   let side = null;
   try {
     side = loadSetting(settingFile).side;
@@ -417,7 +422,7 @@ export function watchSilence({ state, runs, now = Date.now() }) {
 /** One pass. Returns { status: 'ok' | 'running' | 'crashed', calls, events, failed, chars } (`failed`: the causes of reader-failed this pass had;
  * `chars`: the characters sent to the model). Every pass but a 'running' one writes the same fields, with the time, to reader/last.json, and
  * appends them as one line to reader/passes.jsonl, so a day's calls and characters are the sum of its lines (#476). */
-export async function runPass({ state, runs, settingFile = SETTING_FILE, home = process.env.HOME, env = process.env, timeoutMs = TIMEOUT_MS, now = Date.now(), provider = runModel }) {
+export async function runPass({ state, runs, settingFile = settingPath(), home = process.env.HOME, env = process.env, timeoutMs = TIMEOUT_MS, now = Date.now(), provider = runModel }) {
   const dir = join(state, 'reader');
   mkdirSync(dir, { recursive: true });
   const lock = takeLock(join(state, 'reader.lock'));
@@ -544,8 +549,8 @@ async function readAndSend({ state, dir, runs, setting, home, env, timeoutMs, no
 /** `--try <file> [--side pi|codex]`: the file reduced, sent once, the answer printed with the quote check. It reads no cursor and writes no
  * event, lock or file but its temporary input, which is removed. Returns the exit code. */
 async function tryFile(file, side, env = process.env) {
-  const setting = loadSetting(SETTING_FILE, side);
-  if (setting.side === OFF) throw new Error(`the model pass is off in ${SETTING_FILE}; name a side with --side pi|codex`);
+  const setting = loadSetting(settingPath(env), side);
+  if (setting.side === OFF) throw new Error(`the model pass is off in ${settingPath(env)}; name a side with --side pi|codex`);
   // The header of the one part is `try <first 8 characters of the file's name>`: a file has no run folder or session id to name.
   const header = `try ${basename(file).replace(/\.jsonl$/, '').slice(0, 8)}`;
   const w = wholeLines(file, 0);
@@ -595,7 +600,7 @@ async function main(argv) {
   if (argv.length) throw new Error('usage: factory-reader [--try <file> [--side pi|codex]]');
   const r = await runPass({ state: stateDir, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
   if (r.status === OFF) {
-    console.log(`reader: off in ${SETTING_FILE}; no model call`);
+    console.log(`reader: off in ${settingPath()}; no model call`);
     return 0;
   }
   console.log(`reader: ${r.status}, ${r.calls} call(s), ${r.events} event(s)${r.failed.length ? `, failed: ${r.failed.join(' ')}` : ''}`);

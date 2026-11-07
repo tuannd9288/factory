@@ -7,6 +7,12 @@ import { fileURLToPath } from 'node:url';
 
 export const factory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+// The reader's setting every test runs with (#518): the model pass on, on its pi side, so a pull request that turns the shipped switch
+// (bin/lib/reader.json) off changes no sweep test. A child a test starts with this process's environment gets it too. The one test of the
+// shipped file reads it by its own path (REPO_SETTING).
+export const READER_ON = join(factory, 'test/fixtures/reader/setting-on.json');
+process.env.FACTORY_READER_SETTING ??= READER_ON;
+
 // Commits made by the tests name a throwaway author and run no hooks unless a test asks for them. They also start no
 // background gc or maintenance: git's own default starts one detached after a commit, and it can write into a test's
 // folder (objects/info/packs) while the test removes it, which fails the removal with ENOTEMPTY.

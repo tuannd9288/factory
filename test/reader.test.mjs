@@ -9,7 +9,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { factory } from './helpers.mjs';
+import { READER_ON, factory } from './helpers.mjs';
 
 process.env.TZ = 'UTC';
 
@@ -174,10 +174,11 @@ test('the redaction is one function: events.mjs uses it and keeps every pattern 
 // ---- the setting ----------------------------------------------------------------------------------------------------------
 
 test('the setting file defaults to the existing pi Flash path', async () => {
-  const { loadSetting, SETTING_FILE } = await reader();
-  assert.equal(SETTING_FILE, join(factory, 'bin/lib/reader.json'));
-  assert.deepEqual(JSON.parse(readFileSync(SETTING_FILE, 'utf8')), DEFAULT);
-  assert.deepEqual(loadSetting(SETTING_FILE), { side: 'pi', model: 'antigravity/gemini-3.8-flash', effort: 'high' });
+  const { loadSetting, REPO_SETTING, settingPath } = await reader();
+  assert.equal(REPO_SETTING, join(factory, 'bin/lib/reader.json'));
+  assert.equal(settingPath({}), REPO_SETTING, 'with no FACTORY_READER_SETTING the shipped file is read');
+  assert.deepEqual(JSON.parse(readFileSync(REPO_SETTING, 'utf8')), DEFAULT);
+  assert.deepEqual(loadSetting(REPO_SETTING), { side: 'pi', model: 'antigravity/gemini-3.8-flash', effort: 'high' });
 });
 
 test('each side\'s command is built from the setting alone, exactly', async () => {
@@ -800,7 +801,7 @@ test('the sweep starts a pass when 15 minutes have passed since the last began a
       started.push({ cmd, args, opts });
       return { unref() {}, on() {} };
     };
-    const env = { HOME: '/h', PATH: '/opt/homebrew/bin:/usr/bin' };
+    const env = { HOME: '/h', PATH: '/opt/homebrew/bin:/usr/bin', FACTORY_READER_SETTING: READER_ON };
     const go = (now) => startReader({ state, runs, now, spawnFn, env });
     assert.equal(go(T0), false, 'no stream exists to read');
     writeFileSync(join(runs, 'issue-333/run-fix9.jsonl'), '');
