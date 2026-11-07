@@ -1,6 +1,7 @@
 // bin/lib/plugins.mjs (#185): where a profile's plugins are cached, and how a work folder's enabled plugins get there. Claude Code
 // caches a plugin under CLAUDE_CONFIG_DIR, which the deny rules hide (secretsRead), so a session's plugin files would be
-// unreadable. Each profile gets its own root outside ~/.agent-profiles, set as CLAUDE_CODE_PLUGIN_CACHE_DIR; the install runs
+// unreadable. Each profile gets its own root outside ~/.agent-profiles, which bin/seat and packs/pstack/bin/lead set as
+// CLAUDE_CODE_PLUGIN_CACHE_DIR after installing into it before the session; the install runs
 // against a throwaway config folder of its own, so no profile's folder is touched. Nothing here reads a credential or logs in.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
