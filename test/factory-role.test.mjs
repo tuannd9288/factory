@@ -40,6 +40,8 @@ test('lead --here passes the pack role as an appended system prompt; run as a us
       // Seats run only as the agents' user (#366 (a)): bin/seat refuses a start with no FACTORY_TEAM (bin/lib/seat.mjs), one in the
       // caller's shell included, and nothing grants bin/seat or names it in the role.
       assert.equal(options.env.FACTORY_TEAM, undefined);
+      // Nor the setting that names the agents' user to bin/seat, which the caller's environment here has (`nobody-here`).
+      assert.equal(options.env.FACTORY_HOST_USER, undefined);
       assert.equal(JSON.parse(args[args.indexOf('--settings') + 1]).permissions.allow, undefined);
       const index = args.indexOf('--append-system-prompt');
       assert.ok(index >= 0, 'the launch must supply the role prompt');
