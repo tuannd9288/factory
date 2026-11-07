@@ -565,6 +565,9 @@ function main(argv) {
         continue;
       }
       if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= queued || NEWS_KINDS.has(e.kind) !== news) continue;
+      // A share's reader takes no claim: the claim is a git push, which Colly's user may not make, and the Mac mini's Monitor delivers an INN
+      // answer (#366). So a share's INN answer is passed over, and the lines after it are not held behind it (#509 review).
+      if (shared && e.kind === 'inn-answer') continue;
       queued = e.seq;
       pending.push({ seq: e.seq, line: l, event: e });
     }

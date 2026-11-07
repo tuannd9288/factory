@@ -708,6 +708,30 @@ test('factory-events --file follows a share and keeps its cursor in its own stat
     }));
 });
 
+// #509 review: an INN answer's claim is a git push, which Colly's user may not make; the Mac mini's Monitor delivers that line.
+test('factory-events --file leaves an INN answer to the Mac mini: no git call, and the lines after it still come', async () => {
+  const e = await events();
+  withDir((dir) => {
+    const daemon = join(dir, 'daemon-state');
+    const file = join(dir, 'Shared/factory/events.jsonl');
+    mkdirSync(join(dir, 'Shared'));
+    withShare(file, () => {
+      e.innAnswer({ state: daemon, event: { kind: 'commentCreated', id: 'c1', issueIdentifier: 'INN-9' }, now: T0 });
+      e.appendStart({ state: daemon, kind: 'watch_fired', key: 'watch_fired a', text: 'a Lead is silent', now: T0 + MIN });
+    });
+    assert.deepEqual(readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).kind), ['inn-answer', 'watch_fired']);
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(join(dir, 'git-calls'))}\nexit 1\n`);
+    chmodSync(join(bin, 'git'), 0o755);
+    const colly = join(dir, 'colly-state');
+    const r = spawnSync(join(factory, 'bin/factory-events'), ['--file', file], { encoding: 'utf8', timeout: 5000, env: { ...eventsEnv(colly), PATH: `${bin}:${process.env.PATH}`, FACTORY_EVENTS_RETRY_MS: '200' } });
+    assert.equal(r.status, 0, `${r.error?.code ?? ''} ${r.stderr}`);
+    assert.deepEqual(r.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).key), ['watch_fired a']);
+    assert.ok(!existsSync(join(dir, 'git-calls')), 'no git call');
+  });
+});
+
 test('factory-events --file refuses a share in a folder of another user, through a link, or in a file others can write, in one line', () => {
   withDir((dir) => {
     const { mine, theirs } = plantings(dir);
