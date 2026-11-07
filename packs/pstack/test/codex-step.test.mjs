@@ -1,11 +1,13 @@
 // `factory codex` (#182, FAC-4): a pstack step that asks for another model family runs on Codex, on the verifier's profile, and
-// waits, never on Claude, when Codex cannot run. Against a fake codex and a fake claude on PATH, in a repository with an origin.
+// waits, never on Claude, when Codex cannot run. Against a fake codex and a fake claude, in a repository with an origin. The step reaches
+// the fakes only through main()'s seam, which this file alone passes; every run carries a caller environment that points elsewhere.
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { factory, git } from '../../../test/helpers.mjs';
 import { DENY_READ } from '../../../bin/lib/seat.mjs';
 
@@ -18,14 +20,15 @@ function profileOf(args) {
   return JSON.parse(table.slice(table.indexOf('=') + 1).replaceAll('"="', '":"'));
 }
 
-// codex: as $FAKE/codex.json says (loggedIn, mode); every call appended to $FAKE/codex-calls with CODEX_HOME and the names of its
-// environment. The folder is written into it, since the step strips the environment. From the live verifier's fake (before-fac-8).
-const FAKE_CODEX = (fake) => String.raw`#!/usr/bin/env node
+// codex: as $FAKE/codex.json says (loggedIn, mode); every call appended to $FAKE/codex-calls with CODEX_HOME, the names of its
+// environment and the values of HOME, PATH and TMPDIR. The folder and node are written into it, since the step strips the
+// environment. From the live verifier's fake (before-fac-8).
+const FAKE_CODEX = (fake) => String.raw`#!${process.execPath}
 const fs = require('fs');
 const fake = ${JSON.stringify(fake)};
 const conf = JSON.parse(fs.readFileSync(fake + '/codex.json', 'utf8'));
 const a = process.argv.slice(2);
-fs.appendFileSync(fake + '/codex-calls', JSON.stringify({ args: a, home: process.env.CODEX_HOME, env: Object.keys(process.env) }) + '\n');
+fs.appendFileSync(fake + '/codex-calls', JSON.stringify({ args: a, home: process.env.CODEX_HOME, env: Object.keys(process.env), vals: { HOME: process.env.HOME, PATH: process.env.PATH, TMPDIR: process.env.TMPDIR } }) + '\n');
 if (a[0] === '--version') { console.log('codex-cli 0.159.2'); process.exit(0); }
 if (a[0] === 'login' && a[1] === 'status') {
   if (conf.loggedIn) { console.log('Logged in using ChatGPT'); process.exit(0); }
@@ -42,6 +45,10 @@ process.exit(0);
 const FAKE_CLAUDE = (fake) => `#!/bin/sh\necho "$*" >> ${JSON.stringify(join(fake, 'claude-calls'))}\nexit 0\n`;
 
 const BRIEF = 'Judge the two candidates against the rubric.\n';
+const STEP = pathToFileURL(join(factory, 'packs/pstack/bin/codex-step.mjs')).href;
+// The seam: main(args, { home, codex }), called in a node of its own; no caller of `factory codex` can pass it. argv[1] is node's own
+// path, a real file that is no module's, since bin/lib/seat.mjs reads argv[1] as a path when it is imported.
+const RUN = `const [, seam, ...args] = process.argv.slice(1); const m = await import(${JSON.stringify(STEP)}); process.exitCode = m.main(args, JSON.parse(seam));`;
 const dirs = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -59,14 +66,18 @@ function world({ loggedIn = true, mode = 'ok' } = {}) {
   chmodSync(join(dir, 'bin/claude'), 0o755);
   git(w.repo, 'init', '-q', '-b', 'main');
   git(w.repo, 'remote', 'add', 'origin', 'https://github.com/o/app.git');
+  // A caller's environment that points every path the step uses somewhere else, as a seat could set it (#182).
+  w.poison = join(dir, 'poison');
+  for (const d of ['home', 'profiles', 'tmp', 'state', 'codex-home']) mkdirSync(join(w.poison, d), { recursive: true });
   w.run = (args, { cwd = w.repo, input = BRIEF } = {}) => {
     const { NODE_TEST_CONTEXT, ...outer } = process.env;
     const env = {
-      ...outer, HOME: w.home, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, FACTORY_STATE: w.state, FACTORY_HOST_USER: userInfo().username,
-      GH_TOKEN: 'not-for-codex', CLAUDE_CONFIG_DIR: join(dir, 'not-for-codex'),
+      ...outer, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-for-codex', CLAUDE_CONFIG_DIR: join(dir, 'not-for-codex'),
+      HOME: join(w.poison, 'home'), AGENT_PROFILES: join(w.poison, 'profiles'), TMPDIR: join(w.poison, 'tmp'), FACTORY_STATE: join(w.poison, 'state'),
+      CODEX_HOME: join(w.poison, 'codex-home'),
     };
-    delete env.AGENT_PROFILES;
-    const r = spawnSync(join(factory, 'bin/factory'), ['codex', ...args], { cwd, input, encoding: 'utf8', env });
+    const seam = JSON.stringify({ home: w.home, codex: join(dir, 'bin/codex') });
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', RUN, process.execPath, seam, ...args], { cwd, input, encoding: 'utf8', env });
     return { code: r.status, out: r.stdout, err: r.stderr };
   };
   const read = (name) => (existsSync(join(w.fake, name)) ? readFileSync(join(w.fake, name), 'utf8') : '');
@@ -74,7 +85,9 @@ function world({ loggedIn = true, mode = 'ok' } = {}) {
   w.execs = () => w.calls().filter((c) => c.args[0] === 'exec');
   w.prompt = () => read('prompt');
   w.claude = () => read('claude-calls');
-  w.waits = () => (existsSync(join(w.state, 'codex-waits.jsonl')) ? readFileSync(join(w.state, 'codex-waits.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  const waitsAt = (file) => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  w.waits = () => waitsAt(join(w.home, '.local/state/factory/codex-waits.jsonl'));
+  w.poisonWaits = () => waitsAt(join(w.poison, 'state/codex-waits.jsonl'));
   return w;
 }
 
@@ -158,6 +171,10 @@ test('refuses any option outside its list, a missing or unknown role and an empt
     assert.equal(w.run(['--role', 'cross-judge']).code, 0, `the right call after ${args.join(' ')}`);
     assert.equal(w.execs().length, 1);
   }
+  // bin/factory codex reaches the same step: a refused option exits 2 there before anything runs.
+  const r = spawnSync(join(factory, 'bin/factory'), ['codex', '--role', 'cross-judge', '--model', 'gpt-5'], { input: BRIEF, encoding: 'utf8', env: { ...process.env, FACTORY_HOST_USER: userInfo().username } });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /usage: factory codex/);
 });
 
 test('--write gives Codex workspace-write in a folder of the repository, and refuses one outside it', () => {
@@ -180,4 +197,35 @@ test('--write gives Codex workspace-write in a folder of the repository, and ref
   const r = w.run(['--role', 'arena-runner', '--write', outside]);
   assert.equal(r.code, 2, r.out + r.err);
   assert.equal(w.execs().length, 2, 'no third exec');
+});
+
+test('a caller\'s HOME, AGENT_PROFILES, TMPDIR, FACTORY_STATE or CODEX_HOME moves neither CODEX_HOME, nor the deny list, nor the wait', () => {
+  // A seat's sandbox runs factory codex outside it with the seat's environment (#182); none of it may choose the step's paths.
+  const w = world();
+  assert.equal(w.run(['--role', 'arena-runner']).code, 0);
+  const [exec] = w.execs();
+  assert.equal(exec.home, join(w.home, '.agent-profiles/verifier/codex'));
+  assert.equal(exec.vals.HOME, w.home);
+  for (const v of [exec.vals.PATH, exec.vals.TMPDIR ?? '']) assert.ok(!v.includes(w.poison) && !v.includes(join(w.dir, 'bin')), v);
+  const profile = profileOf(exec.args);
+  for (const d of ['.agent-profiles', '.ssh', '.config/gh']) assert.equal(profile[join(w.home, d)], 'deny', d);
+  assert.ok(!Object.keys(profile).some((p) => p.includes(w.poison)), Object.keys(profile).join(' '));
+  const out = world({ loggedIn: false });
+  assert.equal(out.run(['--role', 'cross-judge']).code, 3);
+  assert.deepEqual(out.waits().map((x) => x.cause), ['not-logged-in']);
+  assert.deepEqual(out.poisonWaits(), []);
+  assert.deepEqual(readdirSync(join(out.poison, 'state')), []);
+});
+
+test('the step\'s own paths come from the factory user\'s home by getpwuid, never the environment, and CODEX_HOME is never under /tmp', () => {
+  const home = userInfo().homedir;
+  const poison = { HOME: '/tmp/codex-step-home', AGENT_PROFILES: '/tmp/codex-step-profiles', TMPDIR: '/tmp/codex-step-tmp', FACTORY_STATE: '/tmp/codex-step-state', CODEX_HOME: '/tmp/codex-step-codex' };
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', `const m = await import(${JSON.stringify(STEP)}); console.log(JSON.stringify(m.paths()));`, process.execPath], { encoding: 'utf8', env: { ...process.env, ...poison } });
+  assert.equal(r.status, 0, r.stderr);
+  const p = JSON.parse(r.stdout);
+  assert.equal(p.home, home);
+  assert.equal(p.codexHome, join(home, '.agent-profiles/verifier/codex'));
+  assert.equal(p.waits, join(home, '.local/state/factory/codex-waits.jsonl'));
+  for (const v of [p.codexHome, p.profiles, p.waits, p.scratch]) assert.ok(!/^(\/private)?\/tmp\//.test(v), v);
+  assert.ok(!p.tmp.some((t) => t.includes('codex-step-tmp')), p.tmp.join(' '));
 });

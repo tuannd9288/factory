@@ -971,10 +971,11 @@ async function linearCmd(args, env) {
 /** `factory codex --role <role> ...` (#182): a pstack step that asks for another model family, on Codex (packs/pstack/bin/codex-step.mjs
  * has the options, the profile and the wait). On the factory host it runs there, on the verifier's Codex profile; on the MacBook the same
  * command runs on the host over ssh, stdin kept, in a new temporary folder there that is removed after, so Codex reads the brief alone: a
- * step that writes (--write) is refused here, and this folder's repository goes along as --repo for the wait log. */
+ * step that writes (--write) is refused here, and this folder's repository goes along as --repo for the wait log. The step gets the
+ * arguments alone: it takes nothing of the caller's environment (#182), and its second argument is a seam for its tests only. */
 async function codexCmd(args, env) {
   const step = await import('../../packs/pstack/bin/codex-step.mjs');
-  if (placeOf(env) === 'factory') return step.main(args, env);
+  if (placeOf(env) === 'factory') return step.main(args);
   let o;
   try {
     o = step.parse(args);
