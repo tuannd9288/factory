@@ -36,7 +36,8 @@ export const SCHEMA = {
 // The researcher's only git (#181).
 export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta.url));
 
-/** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get. It covers Bash
+/** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get; bin/lib/factory.mjs builds the MacBook
+ * Lead's and Colly's on it, with their own writes, hosts and excluded commands (FAC-79 (b)). It covers Bash
  * only: the Read tool, the hooks and the MCP servers run outside it, so the Read denies stay permission rules. Paths are absolute
  * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
  * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. What it denies is bin/lib/deny-read.mjs's sandbox

@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { HOST, TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
-import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
+import { liveOfAccount, sandboxSettings, tokenStoreDeny } from './seat.mjs';
 import { readRules } from './deny-read.mjs';
 import { markOnboarded, quote, roleFor, copyHook } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
@@ -606,6 +606,19 @@ function markTrusted(config, folder) {
   }
 }
 
+/** Claude Code's own sandbox for a session the factory starts in this terminal (FAC-79 (b)): the seats' block (bin/lib/seat.mjs,
+ * sandboxSettings), so its shell reads none of bin/lib/deny-read.mjs's shell paths nor the profiles folder, writes only the working folder,
+ * `writes` and the temporary folder besides Claude Code's defaults, reaches only `hosts` through the sandbox's proxy, and runs only
+ * `excluded` outside it. Each excluded command runs with full access: an open gap, named in bin/lib/deny-read.mjs's header. */
+const hereSandbox = ({ home, cwd, profiles, writes = null, hosts = [], excluded }) => {
+  const base = sandboxSettings({ home, run: writes, work: cwd, profiles: resolve(profiles) });
+  return { ...base, excludedCommands: excluded, network: { ...base.network, allowedDomains: hosts } };
+};
+
+/** The lines colly.md gives Colly for its Monitors on the events (`…bin/factory-events --follow…`, in backticks), as the role text it is
+ * started with has them: they are written only there, so its sandbox's exclusions are read from that text and follow it. */
+export const collyMonitors = (roleText) => [...roleText.matchAll(/`([^`]*bin\/factory-events --follow[^`]*)`/g)].map((m) => m[1]);
+
 /** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
  * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
  * command the Lead runs whatever its shell profile does to PATH: an empty GH_CONFIG_DIR and empty GH_TOKEN and GITHUB_TOKEN (gh has
@@ -725,6 +738,14 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     // Claude's and Codex's folders, the profiles, by their absolute path too), not only the profiles (FAC-38); its own config folder is under
     // the profiles, already denied, which Claude Code reads itself and the Read tool never needs.
     permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...readRules({ profiles: agentProfiles, role: 'lead' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
+    // Its shell runs in Claude Code's sandbox (FAC-79 (b)), as seatworks-v3 runs its Lead and the factory its seats. It writes the runs
+    // folder too, where the pack Lead's --add-dir lets it write: its issues' run folders and worktrees, its seats' run folders and its own
+    // transcripts. It reaches GitHub for git (github.com) and for scripts/ship's gh (api.github.com). `factory` reaches the Mac mini by
+    // ssh, which the sandbox refuses, and a Lead that starts seats runs bin/seat, which reads the tokens by design: both run outside it.
+    sandbox: hereSandbox({
+      home: env.HOME, cwd, profiles: agentProfiles, writes: contextOf(env).runs, hosts: ['github.com', 'api.github.com'],
+      excluded: ['factory *', ...(seat ? [`${seat} *`] : [])],
+    }),
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -878,6 +899,13 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
         'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs account remove*)', 'Bash(*lib/factory.mjs store*)',
       ],
     },
+    // Its shell runs in Claude Code's sandbox with no network (FAC-79 (b)). `factory` reaches the Mac mini by ssh, which the sandbox refuses,
+    // and so does one of its two Monitors; the other writes its cursor in the state folder. So `factory` and those two lines, exactly, with
+    // the `--after <seq>` they restart with, run outside it.
+    sandbox: hereSandbox({
+      home: env.HOME, cwd: process.cwd(), profiles: agentProfiles,
+      excluded: ['factory *', ...collyMonitors(roleText).flatMap((line) => [line, `${line} --after *`])],
+    }),
   };
   // /login is the only sign-in: no token or key from the caller's shell, and no other profile's plugin cache.
   const childEnv = { ...env, CLAUDE_CONFIG_DIR: config };

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tokenStoreDeny } from '../bin/lib/seat.mjs';
-import { readRules } from '../bin/lib/deny-read.mjs';
+import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
 import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
 import { freeWord, teamsOf } from '../bin/lib/team-names.mjs';
 import { HOST_ENV, factory } from './helpers.mjs';
@@ -127,6 +127,14 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
     } finally {
       w.done();
     }
+    // Its shell runs in Claude Code's sandbox (FAC-79 (b)): it reads none of the list's shell paths, writes here, in the runs folder and
+    // the temporary folder, reaches only GitHub's two hosts, and, as a user that starts no seat, runs only `factory` outside it.
+    assert.deepEqual(settingsOf(args).sandbox, {
+      enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
+      filesystem: { denyRead: sandboxPaths(s.home, join(s.dir, 'profiles')), allowWrite: [realpathSync(factory), join(s.home, 'factory-runs'), realpathSync(tmpdir())] },
+      network: { strictAllowlist: true, allowedDomains: ['github.com', 'api.github.com'], allowLocalBinding: false },
+      excludedCommands: ['factory *'],
+    });
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
     assert.equal(statSync(empty).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(empty), []);
