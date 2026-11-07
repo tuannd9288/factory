@@ -2,7 +2,8 @@
 import { test as nodeTest } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -210,6 +211,44 @@ test('a sweep that judged a holder dead, then finds another sweep took the lock 
     assert.equal(b, null, 'both sweeps took over');
     assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).token, a.token, 'the live lock was not put back');
   } finally {
+    await w.cleanup();
+  }
+});
+
+// FAC-83, report B's finding B2: A reads a dead holder; B takes over in that gap; A's rename moves B's live lock aside; C takes the empty path.
+// The schedule runs only where the lock reads a holder and renames; the assertions hold for any lock.
+test('three sweeps on a dead lock: exactly one holds it, and no other takes it until it lets go', async () => {
+  const w = world();
+  const realRename = fs.renameSync;
+  const take = () => queue.takeLock(w.lockFile);
+  try {
+    writeFileSync(w.lockFile, JSON.stringify(holder({ pid: spawnSync('true').pid, token: 'dead' })));
+    let b;
+    let c;
+    fs.renameSync = (from, to) => {
+      realRename(from, to);
+      if (from === w.lockFile && b !== undefined && c === undefined) c = take();
+    };
+    syncBuiltinESMExports();
+    const a = queue.takeLock(w.lockFile, {
+      afterRead: () => {
+        if (b === undefined) b = take();
+      },
+    });
+    fs.renameSync = realRename;
+    syncBuiltinESMExports();
+    if (b === undefined) b = take();
+    if (c === undefined) c = take();
+    const holders = [a, b, c].filter(Boolean);
+    assert.equal(holders.length, 1, `${holders.length} sweeps hold the lock at once`);
+    assert.equal(take(), null, 'a fourth sweep took the held lock');
+    queue.releaseLock(w.lockFile, holders[0].token);
+    const next = take();
+    assert.ok(next, 'nobody could take the lock once it was let go');
+    queue.releaseLock(w.lockFile, next.token);
+  } finally {
+    fs.renameSync = realRename;
+    syncBuiltinESMExports();
     await w.cleanup();
   }
 });
