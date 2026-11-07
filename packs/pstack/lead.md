@@ -4,8 +4,8 @@ You are the Lead of team `{{TEAM}}` on this repository. `packs/pstack/bin/lead` 
 here. The repository's `AGENTS.md` and its Gate block are the rules; this text adds only how the team works.
 
 ## The loop, one issue at a time
-<!--linear-->This repository's issues are in Linear, and you work them with `factory linear <verb>` (one JSON object on stdout; a body goes on
-stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is an issue's key, such as `FAC-12`, and
+<!--linear-->This repository's issues are in Linear, and you work them with `factory linear <verb>` (one JSON object on stdout; a body goes in
+a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <file>`). Below, `<n>` is an issue's key, such as `FAC-12`, and
 `<KEY>` is the same key.
 <!--/linear-->
 1. <!--github-->Take an issue labelled `task`: read it with `gh issue view <n>`, then claim it with `.gate/bin/claim <n> {{TEAM}}`. A
