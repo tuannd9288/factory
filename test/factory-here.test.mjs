@@ -8,7 +8,7 @@ import { createServer } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { tokenStoreDeny } from '../bin/lib/seat.mjs';
+import { DENY_READ, denyReadRules, tokenStoreDeny } from '../bin/lib/seat.mjs';
 import { freeWord, teamsOf } from '../bin/lib/team-names.mjs';
 import { factory } from './helpers.mjs';
 
@@ -116,7 +116,9 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_CONFIG_KEY_2: push, GIT_CONFIG_VALUE_2: 'git@github.com:',
       GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
     });
-    assert.deepEqual(permissions.deny, [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${join(s.dir, 'profiles')}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)']);
+    assert.deepEqual(permissions.deny, [...tokenStoreDeny, ...denyReadRules, `Read(/${join(s.dir, 'profiles')}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)']);
+    // It runs as the user of this Mac: its Read tool is denied each folder the seats' sandbox denies, ssh and gh's login among them (FAC-38).
+    for (const d of DENY_READ) for (const rule of [`Read(~/${d})`, `Read(~/${d}/**)`]) assert.ok(permissions.deny.includes(rule), rule);
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
     assert.equal(statSync(empty).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(empty), []);
