@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../bin/lib/factory.mjs';
 import { roleFor } from '../packs/pstack/bin/lead.mjs';
+import { HOST_ENV } from './helpers.mjs';
 
 test('lead --here passes the pack role as an appended system prompt; run as a user other than the agents\', the Human\'s own, it starts no seat: no FACTORY_TEAM, no bin/seat grant, and a role with no seat path (#366)', async (t) => {
   const state = mkdtempSync(join(tmpdir(), 'factory-role-'));
@@ -58,6 +59,36 @@ test('lead --here passes the pack role as an appended system prompt; run as a us
       HOME: state, FACTORY_STATE: state, FACTORY_HOST_USER: 'nobody-here', CLAUDE_CODE_OAUTH_TOKEN: 'made-up-wrong-node-token',
     }), 2);
     assert.ok(!calls.some((c) => c.cmd === 'claude'), 'no fallback to another node or inherited token');
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('lead --here run as the agents\' user on a machine that is not the host, the MacBook\'s `factory`, starts its seats: FACTORY_TEAM, the installed copy\'s bin/seat granted and named in its role (#366)', async (t) => {
+  const state = mkdtempSync(join(tmpdir(), 'factory-role-'));
+  const calls = [];
+  t.mock.method(childProcess, 'spawnSync', (cmd, args, options) => {
+    calls.push({ cmd, args, options });
+    return { status: 0, stdout: 'name:Fixture\nemail:fixture@example.invalid\n' };
+  });
+  syncBuiltinESMExports();
+  try {
+    mkdirSync(join(state, '.agent-profiles/tokens'), { recursive: true });
+    writeFileSync(join(state, '.agent-profiles/tokens/fixture'), 'made-up-local-token');
+    writeFileSync(join(state, 'accounts'), 'factory/alpha-beta=fixture\n');
+    assert.equal(await main(['lead', 'alpha', '--team', 'beta', '--here'], {
+      HOME: state, FACTORY_STATE: state, ...HOST_ENV, FACTORY_HOST_NAME: 'another-machine', FACTORY_TEAM: 'other-gamma',
+    }), 0);
+    const { cmd, args, options } = calls.at(-1);
+    assert.equal(cmd, 'claude');
+    const seat = join(state, '.local/share/factory/checkout/bin/seat');
+    assert.equal(options.env.FACTORY_TEAM, 'alpha-beta', 'its own team, not the caller\'s');
+    assert.deepEqual(JSON.parse(args[args.indexOf('--settings') + 1]).permissions.allow, [`Bash(${seat}:*)`]);
+    const role = args[args.indexOf('--append-system-prompt') + 1];
+    assert.ok(role.includes(seat), 'the role names the bin/seat its grant allows');
+    assert.equal(role, roleFor(readFileSync(new URL('../packs/pstack/lead.md', import.meta.url), 'utf8'), { linear: null, team: 'beta', seat, runs: join(state, 'factory-runs') }));
   } finally {
     t.mock.restoreAll();
     syncBuiltinESMExports();
