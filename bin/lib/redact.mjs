@@ -73,3 +73,9 @@ export function redact(text) {
     .replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '[redacted]')
     .replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]')));
 }
+
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** A value with every string in it redacted, before it is written as JSON: the escaping (`\"`, `\n`) hides a quoted secret value and a
+ * token after a line break from `redact`, which sees only the escaped text if it runs after. */
+export const redactDeep = (v) => (typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(redactDeep) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x)])) : v);
