@@ -19,6 +19,9 @@
 # 5. stops, just before arming and on a fresh read, on a pull request that is ready to merge (gh would merge it), and
 #    when GitHub refuses the arm because auto-merge is off: the Human merges it.
 # Exit 0 a step taken or nothing to do, 1 refused or stopped, 2 could not run.
+# It runs the lib/ship.mjs beside it: a repository's scripts/lib/ once the pack is installed, or the pack's own source in the factory,
+# whose scripts/ship runs this file (FAC-14).
 set -uo pipefail
+lib="$(cd "$(dirname "$0")" && pwd)/lib/ship.mjs" || exit 2
 cd "$(git rev-parse --show-toplevel)" || exit 2
-exec node scripts/lib/ship.mjs "$@"
+exec node "$lib" "$@"
