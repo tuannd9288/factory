@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -469,3 +469,106 @@ for (const title of ['Revert "fix(queue): update stale pull requests"', 'revert:
     assert.match(digest(rows, revertPeriod), /Reverted PRs: o\/r#1/);
   });
 }
+
+// INN-40: a fix names the change it repairs with the kernel's `Fixes: <sha> ("<title>")`, resolved by git in the clone, and the
+// digest reports DORA's change fail rate. A clone with a real merge commit (#1) and a real squash commit (#2) on main.
+function fixtureClone() {
+  const dir = mkdtempSync(join(tmpdir(), 'fix-clone-'));
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.invalid' };
+  const git = (...args) => {
+    const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', env });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  git('init', '-q', '-b', 'main');
+  git('commit', '-q', '--allow-empty', '-m', 'start');
+  git('switch', '-q', '-c', 'a');
+  git('commit', '-q', '--allow-empty', '-m', 'feat(a): add A');
+  git('switch', '-q', 'main');
+  git('merge', '-q', '--no-ff', 'a', '-m', 'Merge pull request #1 from o/a', '-m', 'feat(a): add A');
+  const merge = git('rev-parse', 'HEAD');
+  git('commit', '-q', '--allow-empty', '-m', 'feat(b): add B (#2)');
+  return { dir, merge, squash: git('rev-parse', 'HEAD') };
+}
+
+test('a fix PR\'s Fixes: line names the PR it repairs by its merge or squash commit, and the change fail rate counts that PR (INN-40)', () => {
+  const clone = fixtureClone();
+  try {
+    const rows = revertRows(
+      mergedPR(1, 'feat(a): add A', '2026-10-15T10:00:00Z'),
+      mergedPR(2, 'feat(b): add B', '2026-10-15T11:00:00Z'),
+      mergedPR(3, 'fix(a): repair A', '2026-10-16T10:00:00Z', `Why.\n\nFixes: ${clone.merge.slice(0, 12)} ("feat(a): add A")\nFixes FAC-12\nIssue: FAC-12\n`),
+      mergedPR(4, 'fix(b): repair B', '2026-10-16T11:00:00Z', `Fixes: ${clone.squash} ("feat(b): add B")`),
+      mergedPR(5, 'fix(c): no line', '2026-10-17T10:00:00Z', 'Fixes #12'),
+      mergedPR(6, 'chore: names nothing', '2026-10-17T11:00:00Z', 'Fixes: 0123456789ab ("not a commit")'),
+    );
+    ledger.resolveFixes(rows, () => ledger.commitPullRequest(clone.dir));
+    const c = ledger.failCount(rows, revertPeriod);
+    assert.deepEqual({ n: c.n, k: c.k }, { n: 6, k: 2 });
+    assert.deepEqual(c.failed, [{ repo: 'o/r', number: 1, by: ['fixed by #3'] }, { repo: 'o/r', number: 2, by: ['fixed by #4'] }]);
+    assert.deepEqual(c.unmarked, [{ repo: 'o/r', number: 5 }], 'a fix(…) PR with no Fixes: line shows, so a missed habit is seen');
+    assert.deepEqual(c.unresolved, [{ repo: 'o/r', number: 6, sha: '0123456789ab' }]);
+    const text = digest(rows, revertPeriod);
+    assert.match(text, /\n- Change fail rate \(reverted or fixed\): 2\/6 /);
+    assert.match(text, /\n- Fixes: lines not resolved: o\/r#6 \(0123456789ab\)\n/);
+    assert.deepEqual(countOf(rows).reverted, [], 'a fix is no revert: the revert count is unchanged');
+  } finally {
+    rmSync(clone.dir, { recursive: true, force: true });
+  }
+});
+
+test('a late fix counts in the week it lands, on its own line, and stays out of that week\'s rate (INN-40)', () => {
+  const rows = revertRows(
+    mergedPR(1, 'feat(a): add A', '2026-10-01T10:00:00Z'),
+    mergedPR(9, 'fix(a): repair A', '2026-10-16T10:00:00Z', 'Fixes: 867711bc96ad ("feat(a): add A")'),
+    mergedPR(10, 'fix(a): repair A again', '2026-10-22T10:00:00Z', 'Fixes: 867711bc96ad ("feat(a): add A")'),
+  );
+  ledger.resolveFixes(rows, () => (sha) => (sha === '867711bc96ad' ? 1 : null));
+  const c = ledger.failCount(rows, revertPeriod);
+  assert.deepEqual({ n: c.n, k: c.k }, { n: 1, k: 0 }, 'the week holds the fix alone, which nothing repairs');
+  assert.deepEqual(c.earlier, [{ repo: 'o/r', number: 1, by: [9] }], 'the fix merged after the period is next week\'s');
+  assert.match(digest(rows, revertPeriod), /\n- Fixed this period, merged earlier: 1 \(o\/r#1 fixed by #9\)\n/);
+});
+
+test('each repository is counted over the window since its merge switch last moved, its first sight with no move (INN-40)', () => {
+  const state = mkdtempSync(join(tmpdir(), 'switch-window-'));
+  try {
+    writeFileSync(join(state, 'queue-o-r.position'), `${JSON.stringify({ position: '1-2', move: { from: 'none', to: '1-2', at: '2026-10-10T00:00:00.000Z' } })}\n`);
+    writeFileSync(join(state, 'queue-o-s.position'), `${JSON.stringify({ position: 'all', move: null })}\n`);
+    utimesSync(join(state, 'queue-o-s.position'), new Date('2026-10-12T00:00:00Z'), new Date('2026-10-12T00:00:00Z'));
+    const asked = [];
+    const merged = (repo, from, to) => {
+      asked.push([repo, new Date(from).toISOString(), new Date(to).toISOString()]);
+      return repo === 'o/r'
+        ? [{ number: 1, title: 'feat(a): add A', body: '', merged: '2026-10-11T10:00:00Z' }, { number: 2, title: 'fix(a): repair A', body: 'Fixes: 867711bc96ad ("feat(a): add A")', merged: '2026-10-20T10:00:00Z' }]
+        : [];
+    };
+    const to = Date.parse('2026-10-21T23:59:59Z');
+    const switches = ledger.switchWindows(['o/r', 'o/s', 'o/t'], { state, to, merged, resolverOf: () => () => 1 });
+    assert.deepEqual(asked, [['o/r', '2026-10-10T00:00:00.000Z', '2026-10-21T23:59:59.000Z'], ['o/s', '2026-10-12T00:00:00.000Z', '2026-10-21T23:59:59.000Z']]);
+    assert.deepEqual(switches.get('o/r'), { position: '1-2', since: '2026-10-10T00:00:00.000Z', n: 2, k: 1 }, 'a fix ten days after its PR still counts');
+    assert.equal(switches.get('o/t'), null);
+    const text = digest([], { ...revertPeriod, switches });
+    assert.match(text, /\n {2}- o\/r: merge switch 1-2 since 2026-10-10; change fail rate since then 1\/2 /);
+    assert.match(text, /\n {2}- o\/s: merge switch all since 2026-10-12; change fail rate since then none yet \(n=0\)\n/);
+    assert.match(text, /\n {2}- o\/t: merge switch not read\n/);
+  } finally {
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('the window\'s merged PRs come from GitHub\'s search, page by page, inside the window only (INN-40)', () => {
+  const calls = [];
+  const pages = [
+    { pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [{ number: 1, title: 'a', body: null, mergedAt: '2026-10-09T23:00:00Z' }, { number: 2, title: 'b', body: 'x', mergedAt: '2026-10-11T00:00:00Z' }] },
+    { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ number: 3, title: 'c', body: 'y', mergedAt: '2026-10-30T00:00:00Z' }] },
+  ];
+  const run = (args) => {
+    calls.push(args);
+    return JSON.stringify({ data: { search: pages[calls.length - 1] } });
+  };
+  const got = ledger.mergedIn('o/r', Date.parse('2026-10-10T00:00:00Z'), Date.parse('2026-10-21T23:59:59Z'), run);
+  assert.deepEqual(got, [{ number: 2, title: 'b', body: 'x', merged: '2026-10-11T00:00:00Z' }]);
+  assert.ok(calls[0].includes('q=repo:o/r is:pr is:merged merged:>=2026-10-10'));
+  assert.ok(calls[1].includes('after=c1') && !calls[0].some((a) => a.startsWith('after=')));
+});

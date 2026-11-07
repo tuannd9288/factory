@@ -108,7 +108,12 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    turn with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was
    opened (the reviewer's raise, a `needs-human` label). The body also carries <!--github-->`Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`,<!--/github--><!--linear-->`Fixes <KEY>`, so Linear closes the issue on merge, `Issue: <KEY>`
-   and `Team: {{TEAM}}` (and `Claim: <sha>`, once `.gate/bin/claim` takes a key),<!--/linear--> outside that block. The title uses Conventional Commits `type(scope): subject`, no trailing period, at most 72 characters; type is `feat`, `fix`, `docs`, `refactor`, `test`, `chore` or `perf`; scope is the area; subject is short, imperative and names a real symbol when one carries the change. It carries no issue number (`ship`
+   and `Team: {{TEAM}}` (and `Claim: <sha>`, once `.gate/bin/claim` takes a key),<!--/linear--> outside that block. When the
+   pull request repairs a fault that a merged pull request of this repository brought in, the body also carries, for each, one
+   line `Fixes: <sha> ("<title>")`: the first 12 characters of the commit `main` got when that pull request merged, and its
+   title, from `printf 'Fixes: %s ("%s")\n' "$(git log -1 --format=%h --abbrev=12 <commit>)" "$(git log -1 --format=%b <commit> | head -n 1)"`
+   for a merge commit, or `--format=%s` in place of the second `%b` for a squash commit. It feeds the digest's change fail
+   rate and is never a check. The title uses Conventional Commits `type(scope): subject`, no trailing period, at most 72 characters; type is `feat`, `fix`, `docs`, `refactor`, `test`, `chore` or `perf`; scope is the area; subject is short, imperative and names a real symbol when one carries the change. It carries no issue number (`ship`
    drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a
