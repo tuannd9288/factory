@@ -1,7 +1,7 @@
 // Claude Code's formats (INN-39 item 3): the one parser of what Claude Code writes, which hands the rest of the factory its own shapes.
 // Claude Code owns these formats and changes them without notice: the stream-json events of `claude -p`, its rate_limit_event lines, a
 // transcript's assistant entries, the status line's rate_limits, the hook events it names, and `claude auth status`'s JSON.
-// The fixtures were captured from Claude Code 2.1.308 (test/fixtures/ledger-entry-2.1.308.json, the reader's and the seats' stream fixtures).
+// Claude Code 2.1.308 fixtures: test/fixtures/ledger-entry-2.1.308.json, quota/{real,synthetic}-statusline.jsonl; the other fixtures' version was not recorded.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
