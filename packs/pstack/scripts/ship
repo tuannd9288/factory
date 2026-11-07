@@ -4,20 +4,27 @@
 #   scripts/ship [--body-file <file>] [--title <title>] [--base <parent-branch>]
 # 1. no pull request: opens it, only when origin's copy of the branch is HEAD (push first; the same before arming) and HEAD
 #    has a red-check stamp against origin/main (.gate/bin/red-check leaves it in the git dir; the full suite runs on CI);
-#    the body is --body-file, with `Closes #<issue>` filled in.
+#    the body is --body-file, with `Closes #<issue>` filled in; a draft at drafts "landable". In the factory, which runs the pack
+#    from its source, it opens with no stamp: the factory has no .gate/config.sh, and its CI runs scripts/verify.
 #    --base opens a child on its parent's branch when origin/main's .gate/driver.json has stacks absent or "pstack";
 #    "off" keeps the main-only refusal. A child waits unarmed until its parent merges into main, then ship retargets it to
 #    main, unless GitHub already did, and the queue merges origin/main into it, for either merge method. An old verdict
 #    survives only when the patch-id matches.
+# 1b. a draft stays one until verify passed on its head with no conflict; a child moved onto main also until its parent landed and
+#    its head holds that landing (INN-38 A). Then ship readies it, just before it arms it (FAC-55): the queue never readies a draft.
 # 2. an armed pull request whose local HEAD has commits it lacks: disarms it first.
 # 3. stops while the pull request carries needs-human; arms a tier 3 (labels, or .gate/bin/tier on the paths) like any
 #    other, then stops with "tier 3 waits for the Human's approval (unless the merge switch is at all)" until its tier
-#    check ends.
-# 4. arms only on a base of main; origin/main's .gate/driver.json selects merge: absent or "squash" arms --auto --squash;
-#    "merge" arms --auto --merge.
-# 5. stops, just before arming and on a fresh read, on a pull request that is ready to merge (gh would merge it), and
-#    when GitHub refuses the arm because auto-merge is off: the Human merges it.
+#    check ends; in the factory every pull request waits for the Human.
+# 4. arms only on a base of main, with --match-head-commit; origin/main's .gate/driver.json selects merge: "squash" arms
+#    --auto --squash, "merge" --auto --merge, and absent the repository's own method: merge commits where squash is not
+#    allowed (the factory), else squash.
+# 5. stops, just before arming a pull request that was ready already, on a fresh read, when it is ready to merge (gh would
+#    merge it), and when GitHub refuses the arm because auto-merge is off: the Human merges it.
 # Exit 0 a step taken or nothing to do, 1 refused or stopped, 2 could not run.
+# It runs the lib/ship.mjs beside it: a repository's scripts/lib/ once the pack is installed, or the pack's own source in the factory,
+# whose scripts/ship runs this file (FAC-14).
 set -uo pipefail
+lib="$(cd "$(dirname "$0")" && pwd)/lib/ship.mjs" || exit 2
 cd "$(git rev-parse --show-toplevel)" || exit 2
-exec node scripts/lib/ship.mjs "$@"
+exec node "$lib" "$@"
