@@ -528,6 +528,8 @@ describe('review, verdict, tier and rounds', () => {
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
         '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
         '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
+        // FAC-41: the pull request's last base change (history.mjs moved): it never changed.
+        '  *BASE_REF_CHANGED_EVENT*) echo \'{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}\' ;;',
         '  *HEAD_REF_FORCE_PUSHED_EVENT*) cat "$FAKE/forced.json" 2>/dev/null || echo \'{"data":{"repository":{"pullRequest":{"baseRefOid":"base","timelineItems":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}\' ;;',
         '  *compare/base...old*) cat "$FAKE/overwritten.json" ;;',
         // #379: the pull request's comments, kept in $FAKE/comments.json by comments.mjs; a write fails while nowrite exists.

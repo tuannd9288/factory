@@ -2,7 +2,7 @@
 // temporary AGENT_PROFILES, and FACTORY_RUNS and FACTORY_STATE of their own.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
 import { factory } from './helpers.mjs';
@@ -44,7 +44,8 @@ process.stdin.on('end', () => {
     parentHasToken: parent.includes('CLAUDE_CODE_OAUTH_TOKEN'), parentSeen: parent.includes('PATH='),
     env: { gh: e.GH_CONFIG_DIR, config: e.CLAUDE_CONFIG_DIR, token: e.CLAUDE_CODE_OAUTH_TOKEN ?? null, spec: e.FACTORY_SEAT_SUPERVISE ?? null,
       GH_TOKEN: 'GH_TOKEN' in e, GITHUB_TOKEN: 'GITHUB_TOKEN' in e, ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' in e, ANTHROPIC_AUTH_TOKEN: 'ANTHROPIC_AUTH_TOKEN' in e,
-      pluginCache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null, sandbox: e.FACTORY_SANDBOX ?? null, clones: e.FACTORY_RESEARCH_CLONES ?? null } }));
+      pluginCache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null, sandbox: e.FACTORY_SANDBOX ?? null, clones: e.FACTORY_RESEARCH_CLONES ?? null,
+      author: [e.GIT_AUTHOR_NAME, e.GIT_AUTHOR_EMAIL, e.GIT_COMMITTER_NAME, e.GIT_COMMITTER_EMAIL] } }));
   const line = (o) => console.log(JSON.stringify(o));
   const sid = e.FAKE_SID ?? 'sess-1';
   line({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-sonnet-5-5' });
@@ -140,9 +141,10 @@ export async function world(body, { tokenFile = `${TOKEN}\n` } = {}) {
   w.accounts = (text) => writeFileSync(join(w.state, 'accounts'), text);
   w.out = (n = 'a') => join(w.fake, `${n}.json`);
   // A null in extra takes the variable out (FACTORY_TEAM: null is a start with no team).
+  // The test's own user is the agents' (FACTORY_HOST_USER), as the Mac mini's `factory` runs the seats.
   w.env = (extra = {}) => Object.fromEntries(Object.entries({
     PATH: `${w.bin}:${dirname(process.execPath)}`, HOME: w.home, AGENT_PROFILES: w.profiles, FACTORY_RUNS: w.runs, FACTORY_STATE: w.state,
-    FACTORY_TEAM: w.team, FACTORY_ROOT: w.froot, FAKE_OUT: w.out(), ...extra,
+    FACTORY_TEAM: w.team, FACTORY_ROOT: w.froot, FAKE_OUT: w.out(), FACTORY_HOST_USER: userInfo().username, ...extra,
   }).filter(([, v]) => v !== null));
   w.seat = (args, extra = {}) => {
     const r = spawnSync(process.execPath, [SEAT_JS, ...args], { encoding: 'utf8', env: w.env(extra), cwd: w.root, timeout: 20000 });
