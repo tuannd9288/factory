@@ -169,10 +169,9 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   `kit/.claude/settings.json`, that list's rendering, binds Claude Code only (#134).
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: `test/models.test.mjs`: each launcher takes its model and effort
-  from the table it is given, refuses a missing role, and today's approved defaults in `bin/lib/models.json` are one matrix; the files
-  that build a model's argv name no model (a launcher in another file is left to review); the Watcher takes its own from its frozen
-  `bin/lib/reader.json` (`test/reader.test.mjs`); the gate's reviewer takes its own from the kit's `kit/.gate/bin/lib/reviewer.json`
-  (`test/claude-reviewer.test.mjs`).
+  from the table it is given, refuses a missing role, and today's approved defaults in `bin/lib/models.json` are one matrix; the
+  Watcher takes its own from its frozen `bin/lib/reader.json` (`test/reader.test.mjs`); the gate's reviewer takes its own from the
+  kit's `kit/.gate/bin/lib/reviewer.json` (`test/claude-reviewer.test.mjs`).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
   Checked by: `.github/CODEOWNERS:4`.

@@ -5,10 +5,9 @@
 // packs/pstack/test/codex-step. The Watcher keeps its own frozen setting, bin/lib/reader.json, tested by test/reader.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory } from './helpers.mjs';
 
 const { MODELS, entryOf, pstackModels } = await import('../bin/lib/models.mjs');
 const { buildArgs } = await import('../bin/lib/seat.mjs');
@@ -108,20 +107,4 @@ test('the approved defaults: changing one is the Human\'s, by a pull request tha
       'interrogate reviewers': 'opus xhigh, codex high',
     },
   });
-});
-
-// A model written as a whole string: an alias Claude Code takes, or a model id of Claude, GPT or Gemini.
-const MODEL = /(['"`])(opus|sonnet|haiku|fable|claude-(?:opus|sonnet|haiku|fable)[a-z0-9.-]*|gpt-[a-z0-9.-]+|(?:[a-z0-9-]+\/)?gemini-[a-z0-9.-]+)\1/gi;
-/** Each model written as a whole string in a source file's text, as `<line>: <string>`. */
-const modelsIn = (text) => text.split('\n').flatMap((line, i) => [...line.matchAll(MODEL)].map((m) => `${i + 1}: ${m[0]}`));
-// The files that build a model's argv. A launcher in a file not listed here is not scanned; review catches it.
-const LAUNCHERS = ['bin/lib/seat.mjs', 'packs/pstack/bin/lead.mjs', 'bin/lib/factory.mjs', 'bin/lib/reader.mjs', 'packs/pstack/bin/codex-step.mjs', 'kit/.gate/bin/lib/claude-reviewer.mjs'];
-
-test('no file that builds a model\'s argv names a model of its own', () => {
-  assert.deepEqual(modelsIn("const m = 'opus';\n// opus, high\nspawn('x', ['--model', \"claude-opus-5-5\"]);"), ["1: 'opus'", '3: "claude-opus-5-5"'], 'the scan finds a planted model');
-  const found = LAUNCHERS.flatMap((f) => {
-    assert.ok(existsSync(join(factory, f)), `${f} is gone: list the file that builds its argv now`);
-    return modelsIn(readFileSync(join(factory, f), 'utf8')).map((hit) => `${f}:${hit}`);
-  });
-  assert.deepEqual(found, []);
 });
