@@ -584,10 +584,12 @@ function ownRepo(root) {
 }
 
 /** The merge switch of the factory's own repository (#333), which the sweep does not otherwise read: its rules in force on main, one
- * call, and none of its pull requests. Not read where there is no checkout, or when `swept` holds it already. A failure is told in a
- * line and leaves the switch's condition as it was. `rulesRead` holds the rules the news read already took this sweep (repo -> pages):
- * they are used in place of a second read. */
+ * call, and none of its pull requests. Read on the factory host alone: a node off it (#366) has a checkout of the factory too, its
+ * installed copy, and would tell the same move again. Not read where there is no checkout, or when `swept` holds it already. A failure
+ * is told in a line and leaves the switch's condition as it was. `rulesRead` holds the rules the news read already took this sweep
+ * (repo -> pages): they are used in place of a second read. */
 function watchOwn(state, swept, switches, rulesRead = new Map()) {
+  if (placeOf() !== 'factory') return;
   const root = checkoutRoot();
   if (!root) return;
   let own;
