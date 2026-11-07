@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The factory's scripts/ship (FAC-14): the pstack pack's ship, run from its source, so `scripts/ship` opens this repository's pull
+# requests as it does in a repository that installed the pack. What it does, and its exit codes, are in packs/pstack/scripts/ship.
+exec "$(dirname "$0")/../packs/pstack/scripts/ship" "$@"
