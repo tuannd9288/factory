@@ -253,6 +253,7 @@ test('--brief-file reads the brief from a file of the repository or the temporar
     assert.equal(r.code, 2, `${file}: ${r.out}${r.err}`);
   }
   assert.equal(w.execs().length, 2, 'no codex call for a refused brief file');
+});
 
 test('a .codex/config.toml planted in the work folder, with an MCP server and a hook, cannot be trusted: Codex loads no user config', () => {
   // Codex loads a folder's own config, its MCP servers and hooks only when its user config.toml trusts that folder (rust-v0.163.0,
