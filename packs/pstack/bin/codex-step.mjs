@@ -37,19 +37,25 @@ const USAGE = `usage: factory codex --role <${ROLES.join('|')}> [--effort ${EFFO
 const QUOTA = /usage limit|usage_limit|rate.?limit|quota|\b429\b/i;
 const PROFILE = 'factory-codex-step';
 const ENV_FILES = '/**/.env*';
+// What Codex's own workspace-write keeps read-only in a writable folder (rust-v0.163.0, protocol/src/permissions.rs:40-43 and
+// :2360-2400): a hook, a config or a credential helper planted there would run later, outside the sandbox.
+const KEEP_READ_ONLY = ['.git', '.agents', '.codex', '.aws'];
 
 /**
  * The `-c` overrides that make Codex's permission profile for this step (Codex 0.163.0's `[permissions]` table, selected by
  * `default_permissions`, which cannot go with a sandbox mode): read `:root` but the seats' DENY_READ under home and the profiles
- * folder; with write, write the folder and the temporary folders too. No `network` table leaves the network off. Codex's `*` stops at
- * one path part, so a glob is denied twice, as itself and with `/**` for what lies under what it names. Shown on `codex sandbox`
- * with a temporary home: each denied path refused, the work folder read (#182).
+ * folder; with write, write the folder and the temporary folders too, but not the folder's KEEP_READ_ONLY. No `network` table
+ * leaves the network off. Codex's `*` stops at one path part, so a glob is denied twice, as itself and with `/**` for what lies
+ * under what it names. Shown on `codex sandbox` with a temporary home: each denied path refused, the work folder read, and a
+ * write to <write>/.git/hooks refused (#182).
  */
 export function permissionArgs({ home, profiles, write = null, tmp = [] }) {
   const deny = [...new Set([...DENY_READ.map((d) => `${home}/${d}`), profiles])].flatMap((p) => (p.includes('*') ? [p, `${p}/**`] : [p]));
   // The kit denies a session `Read(./.env*)` (kit/.claude/settings.json); Codex reads every folder, so its .env files go everywhere.
   deny.push(ENV_FILES);
   const entries = [[':root', 'read'], ...deny.map((p) => [p, 'deny']), ...(write ? [...new Set([write, ...tmp])].map((p) => [p, 'write']) : [])];
+  // The more specific path wins over the folder's write, whether or not it exists yet.
+  if (write) entries.push(...KEEP_READ_ONLY.map((name) => [`${write}/${name}`, 'read']));
   const table = `{${entries.map(([path, mode]) => `${JSON.stringify(path)}=${JSON.stringify(mode)}`).join(',')}}`;
   return ['-c', `permissions.${PROFILE}.filesystem=${table}`, '-c', `default_permissions="${PROFILE}"`];
 }

@@ -170,9 +170,14 @@ test('--write gives Codex workspace-write in a folder of the repository, and ref
   assert.ok(!exec.args.includes('-s'), exec.args.join(' '));
   assert.equal(profileOf(exec.args)[inside], 'write');
   assert.equal(profileOf(exec.args)[join(w.home, '.agent-profiles')], 'deny');
+  // As Codex's own workspace-write does, the folder's .git, .agents, .codex and .aws stay read-only, so no hook or config is planted
+  // that runs later outside the sandbox; at the repository's top folder too, and whether or not they exist yet.
+  assert.equal(w.run(['--role', 'arena-runner', '--write', w.repo]).code, 0);
+  for (const [folder, args] of [[inside, w.execs()[0].args], [w.repo, w.execs()[1].args]])
+    for (const name of ['.git', '.agents', '.codex', '.aws']) assert.equal(profileOf(args)[join(folder, name)], 'read', `${folder}/${name}`);
   const outside = join(w.dir, 'elsewhere');
   mkdirSync(outside);
   const r = w.run(['--role', 'arena-runner', '--write', outside]);
   assert.equal(r.code, 2, r.out + r.err);
-  assert.equal(w.execs().length, 1, 'no second exec');
+  assert.equal(w.execs().length, 2, 'no third exec');
 });
