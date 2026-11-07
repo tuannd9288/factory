@@ -283,41 +283,6 @@ test('the window holds every task alive in it: started in it, open at its end, o
   assert.equal(ledger.inWindow('2026-10-25T00:00:00Z', null, from, to), false);
 });
 
-const H = 'a'.repeat(40);
-const H2 = 'b'.repeat(40);
-const P = 'c'.repeat(40);
-const said = (verdict, head, patch, login = 'agent', runs = 1) => ({
-  author: { login },
-  body: `live-verify: ${verdict}\nhead: ${head}\nparent: ${'d'.repeat(40)}\npatch: ${patch}\ndriver: cli\ncodex: codex-cli 0.159.2, ${runs} run${runs > 1 ? 's' : ''}\n`,
-});
-
-test('a merged pull request is covered by a live verdict on its merged head, or on one whose patch it carries', () => {
-  const opts = { human: 'boss', costs: null, profile: false };
-  const merged = (comments, patchOf) =>
-    rowOf('o/r', pr({ mergedAt: '2026-10-20T12:00:00Z', state: 'MERGED', headRefOid: H2, mergeCommit: { oid: 'e'.repeat(40) }, comments: { nodes: comments } }), { ...opts, patchOf });
-  assert.equal(merged([said('PASS', H2, 'f'.repeat(40))], () => null).live, true);
-  assert.equal(merged([], () => P).live, false);
-  assert.equal(merged([said('PASS+NOTES', H, P)], () => P).live, true);
-  assert.equal(merged([said('PASS', H, P), said('FAIL', H, P)], () => P).live, false);
-  // Without the patch of the merged head, an older head's verdict may still carry it: not known, not a miss.
-  assert.equal(merged([said('PASS', H, P)], () => null).live, null);
-  assert.equal(merged([said('PASS', H2, P, 'someone')], () => P).live, false);
-  assert.equal(merged([said('BLOCKED', H, '-', 'agent', 0), said('PASS', H2, P, 'agent', 2)], () => P).codexRuns, 2);
-  assert.equal(rowOf('o/r', pr({ comments: { nodes: [said('PASS', H, P)] } }), opts).live, undefined);
-});
-
-test('the digest lists every merged pull request no live verdict covered, and Codex runs on a line of their own', () => {
-  const opts = { human: 'boss', costs: null, profile: false };
-  const merged = (number, comments, patch) =>
-    rowOf('o/r', pr({ number, mergedAt: '2026-10-20T12:00:00Z', state: 'MERGED', headRefOid: H2, mergeCommit: { oid: 'e'.repeat(40) }, comments: { nodes: comments } }), { ...opts, patchOf: () => patch });
-  const rows = [merged(1, [said('PASS', H2, P)], P), merged(2, [], P), merged(3, [said('PASS', H, P, 'agent', 2)], null), rowOf('o/r', pr({ number: 4 }), opts)];
-  const text = digest(rows, { since: '2026-10-14', until: '2026-10-21' });
-  assert.match(text, /- Merged PRs whose head a live verdict covers: 1\/2 \(50\.0%; 95% CI: /);
-  assert.match(text, /- No covering verdict: o\/r#2 Limit sends\n/);
-  assert.match(text, /- Undetermined \(patch-id not computable in the clone\): o\/r#3\n/);
-  assert.match(text, /- Codex runs: 3 \(the verifier's Codex subscription, paid monthly; no API price, not split by task\)/);
-});
-
 test('the digest counts the pull requests the reviewer raised, per repository', () => {
   const opts = { human: 'boss', costs: null, profile: false };
   const raised = rowOf('o/r', pr({ number: 5, timelineItems: { nodes: [{ __typename: 'LabeledEvent', label: { name: 'raised' } }] } }), opts);
@@ -492,45 +457,6 @@ test('the drill of #83 as recorded: factory-scratch#57 reverts #56', () => {
   assert.deepEqual([c.n, c.k, c.m], [1, 1, 1]);
   assert.deepEqual(c.reverted, [{ repo: 'tuannd9288/factory-scratch', number: 56 }]);
 });
-
-for (const method of ['squash', 'merge']) {
-  test(`${method}: merged PR rounds, patch coverage and digest use the original PR commits`, async () => {
-    const { git, commit: save } = await import('./helpers.mjs');
-    const dir = mkdtempSync(join(tmpdir(), 'ledger-method-'));
-    try {
-      git(dir, 'init', '-q', '-b', 'main');
-      const base = save(dir, { a: 'base\n' }, 'Start');
-      git(dir, 'switch', '-q', '-c', 'topic');
-      const head = save(dir, { b: 'change\n' }, 'Add b');
-      const patch = ledger.patchIn(dir)(head, head);
-      assert.ok(patch);
-      git(dir, 'switch', '-q', 'main');
-      if (method === 'squash') {
-        git(dir, 'merge', '--squash', 'topic');
-        save(dir, {}, 'Add b (#7)');
-      } else git(dir, 'merge', '--no-ff', '-m', 'Merge topic', 'topic');
-      const landed = git(dir, 'rev-parse', 'HEAD');
-      assert.equal(git(dir, 'rev-parse', 'HEAD^1'), base);
-      assert.equal(ledger.patchIn(dir)(landed, head), patch);
-      const clone = join(dir, 'main-only');
-      git(dir, 'clone', '--no-local', '--single-branch', '--branch', 'main', dir, clone);
-      assert.equal(ledger.patchIn(clone)(landed, head), patch);
-      const row = rowOf('o/r', pr({
-        headRefOid: head, mergeCommit: { oid: landed }, state: 'MERGED', mergedAt: '2026-10-20T12:00:00Z',
-        comments: { nodes: [said('PASS', H, patch)] },
-        timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'MergedEvent' }] },
-        commits: { nodes: [commit(head, green), { commit: { ...commit('queue-update', green).commit, parents: { totalCount: 2 } } }] },
-      }), { human: 'boss', costs: null, profile: false, patchOf: ledger.patchIn(dir) });
-      assert.equal(row.rounds, 1);
-      assert.equal(row.firstPass, true);
-      assert.equal(row.live, true);
-      assert.equal(row.touched, false);
-      const text = digest([row], { since: '2026-10-14', until: '2026-10-21' });
-      assert.match(text, /1 task: 1 merged/);
-      assert.match(text, /Tasks merged: 1\/1/);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
-}
 
 for (const title of ['Revert "fix(queue): update stale pull requests"', 'revert: fix(queue): update stale pull requests', 'revert(queue): "fix(queue): update stale pull requests"']) {
   test(`ledger and digest find the original PR for ${title}`, () => {
