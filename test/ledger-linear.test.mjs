@@ -32,7 +32,7 @@ test('the Issue: line is read in its key form, one line at the start of a line',
 });
 
 const prRow = (number, over = {}) => ({
-  repo: 'o/on', number, title: `PR ${number}`, url: `u/${number}`, prs: [number], livePRs: [], merges: [], codexRuns: 0, who: 'agent', tier: 1, state: 'open', rounds: 1,
+  repo: 'o/on', number, title: `PR ${number}`, url: `u/${number}`, prs: [number], merges: [], who: 'agent', tier: 1, state: 'open', rounds: 1,
   firstPass: true, noRed: false, raised: false, touched: false, touchedWhy: '', cost: 1, costNote: '', created: '2026-11-03T10:00:00Z', merged: null, hours: null, ...over,
 });
 

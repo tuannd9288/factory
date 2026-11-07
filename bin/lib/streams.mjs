@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 const SESSION_COPY = /^([0-9a-f]{8})(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.jsonl$/;
 const SEAT_FILE = /^run(?:-(.+))?\.(?:jsonl|err|log)$/;
+const NOT_SEATS = new Set(['w', 'transcripts']);
 
 const entries = (dir) => {
   try {
@@ -27,7 +28,8 @@ export function listStreams(runs, state) {
   };
   for (const d of entries(runs).filter((e) => e.isDirectory())) {
     seats(d.name);
-    for (const sub of entries(join(runs, d.name)).filter((e) => e.isDirectory())) seats(`${d.name}/${sub.name}`);
+    // w/ is a pack Lead's worktree, whose root may hold a product repository's run.log, and transcripts/ a Lead's copies: no seat folders.
+    for (const sub of entries(join(runs, d.name)).filter((e) => e.isDirectory() && !NOT_SEATS.has(e.name))) seats(`${d.name}/${sub.name}`);
     for (const f of entries(join(runs, d.name, 'transcripts')).filter((e) => e.isFile())) {
       const m = SESSION_COPY.exec(f.name);
       if (m) found.push({ key: `${d.name}/transcripts/${f.name}`, file: join(runs, d.name, 'transcripts', f.name), header: `${d.name} ${m[1] ?? 'run'}` });
