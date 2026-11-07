@@ -15,12 +15,12 @@
 // in the wait log when the folder is not its clone (a MacBook run, on the host by ssh). No other option reaches codex.
 // Exit 0 with Codex's last message on stdout; 2 a refused call (nothing run); 3 the step waits for Codex: codex is not installed,
 // the profile is not logged in, the account is out of quota, the run timed out or failed. A wait says so, appends
-// {at, cause, role, repo, cwd} to $FACTORY_STATE/codex-waits.jsonl, where the ledger can count the waits by cause (the Human,
+// {at, cause, role, repo, cwd} to ~/.local/state/factory/codex-waits.jsonl, where the ledger can count the waits by cause (the Human,
 // 2026-10-30: he judges Codex's quota from them), and runs nothing on Claude. The runner's arguments come from the live verifier
 // (before-fac-8, packs/pstack/scripts/lib/live-verify.mjs:106-116 and :137-150).
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DENY_READ } from '../../../bin/lib/seat.mjs';
@@ -30,8 +30,11 @@ const ROLES = ['arena-runner', 'architect-runner', 'interrogate-reviewer', 'cros
 const REVIEW = new Set(['interrogate-reviewer', 'cross-judge', 'trail-reviewer', 'verifier']);
 const EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 const MINUTES = 30;
-// Codex and what it runs get the shell's basics and the verifier's profile, nothing of the session that called it.
-const KEEP = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TERM'];
+// Nothing of the caller's environment chooses a path or a program here: a seat's sandbox runs `factory codex` outside it with the
+// seat's environment (#182). Codex and git are found in fixed folders and get a fixed PATH; every other path comes from paths().
+const SAFE_PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+const CODEX_BINS = ['/opt/homebrew/bin/codex', '/usr/local/bin/codex'];
+const GIT = '/usr/bin/git';
 const USAGE = `usage: factory codex --role <${ROLES.join('|')}> [--effort ${EFFORTS.join('|')}] [--write <folder>] [--repo <owner/name>], the brief on stdin`;
 // What Codex prints when the account's usage limit is reached; checked on the Mac mini's first real wait (#182).
 const QUOTA = /usage limit|usage_limit|rate.?limit|quota|\b429\b/i;
@@ -60,8 +63,12 @@ export function permissionArgs({ home, profiles, write = null, tmp = [] }) {
   return ['-c', `permissions.${PROFILE}.filesystem=${table}`, '-c', `default_permissions="${PROFILE}"`];
 }
 
-/** The temporary folders a writing step may use, by their real paths, as Codex's workspace-write allowed them. */
-function tmpFolders(env) {
+/**
+ * The step's own paths, from the factory user's home as getpwuid gives it (os.userInfo), never from HOME, AGENT_PROFILES, TMPDIR,
+ * FACTORY_STATE or CODEX_HOME, which the caller sets: the profiles folder and Codex's login in it, the waits file, a scratch folder
+ * no seat's sandbox may write, and the temporary folders a writing step may use (/tmp and macOS's own per-user one, by getconf).
+ */
+export function paths(home = userInfo().homedir) {
   const real = (p) => {
     try {
       return realpathSync(p);
@@ -69,7 +76,17 @@ function tmpFolders(env) {
       return null;
     }
   };
-  return [...new Set([real(env.TMPDIR ?? tmpdir()), real('/tmp')].filter(Boolean))];
+  const darwinTmp = process.platform === 'darwin' ? spawnSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8', env: {} }).stdout?.trim() : '';
+  const profiles = join(home, '.agent-profiles');
+  const state = join(home, '.local/state/factory');
+  return {
+    home,
+    profiles,
+    codexHome: join(profiles, 'verifier/codex'),
+    waits: join(state, 'codex-waits.jsonl'),
+    scratch: join(state, 'codex-step'),
+    tmp: [...new Set([real('/tmp'), darwinTmp ? real(darwinTmp) : null].filter(Boolean))],
+  };
 }
 
 /** The options, from a closed list, each once; throws with the usage on anything else. */
@@ -89,7 +106,8 @@ export function parse(args) {
 
 const git = (cwd, args) => {
   try {
-    return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    // git reads its config from GIT_* variables too, so it gets a fixed environment of its own.
+    return execFileSync(GIT, ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: SAFE_PATH } }).trim();
   } catch {
     return null;
   }
@@ -109,7 +127,11 @@ function scoreLine() {
   return `The Human's rule for every reviewer: "${m[1]}"`;
 }
 
-export function main(args, env = process.env) {
+/**
+ * One step. The seam, { home, codex }, is for the tests alone: no caller of `factory codex` can pass it (the verb takes the closed
+ * option list and nothing else), and nothing here reads the caller's environment.
+ */
+export function main(args, { home: seamHome, codex: seamCodex } = {}) {
   let o;
   let prompt;
   let dir;
@@ -137,36 +159,44 @@ export function main(args, env = process.env) {
     return 2;
   }
 
-  const profiles = env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles');
-  const home = join(profiles, 'verifier/codex');
-  const codexEnv = { ...Object.fromEntries(KEEP.filter((k) => env[k] !== undefined).map((k) => [k, env[k]])), CODEX_HOME: home };
+  const p = paths(seamHome);
+  const home = p.codexHome;
+  const codex = seamCodex ?? CODEX_BINS.find((b) => existsSync(b)) ?? CODEX_BINS[0];
+  const me = userInfo();
+  // Codex gets the factory user's own basics and its profile: no variable of the caller's.
+  const codexEnv = { PATH: SAFE_PATH, HOME: p.home, USER: me.username, LOGNAME: me.username, SHELL: me.shell ?? '/bin/zsh', LANG: 'en_US.UTF-8', ...(p.tmp[1] ? { TMPDIR: p.tmp[1] } : {}), CODEX_HOME: home };
   const wait = (cause, why) => {
     console.log(`codex: ${o.role} waits for Codex: ${why}. This step does not run on Claude; say so, and go on with other work.`);
-    const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
     try {
-      mkdirSync(state, { recursive: true });
-      appendFileSync(join(state, 'codex-waits.jsonl'), `${JSON.stringify({ at: new Date().toISOString(), cause, role: o.role, repo: o.repo ?? repoOf(cwd), cwd })}\n`);
+      mkdirSync(dirname(p.waits), { recursive: true });
+      appendFileSync(p.waits, `${JSON.stringify({ at: new Date().toISOString(), cause, role: o.role, repo: o.repo ?? repoOf(cwd), cwd })}\n`);
     } catch (e) {
       console.error(`codex: the wait was not logged: ${e.code ?? e.message}`);
     }
     return 3;
   };
 
-  const which = spawnSync('codex', ['--version'], { env: codexEnv, encoding: 'utf8' });
+  const which = spawnSync(codex, ['--version'], { env: codexEnv, encoding: 'utf8' });
   if (which.error || which.status !== 0) return wait('not-installed', 'codex is not installed on this machine');
-  if (spawnSync('codex', ['login', 'status'], { env: codexEnv, stdio: 'ignore' }).status !== 0)
+  if (spawnSync(codex, ['login', 'status'], { env: codexEnv, stdio: 'ignore' }).status !== 0)
     return wait('not-logged-in', `the verifier's Codex profile (CODEX_HOME=${home}) is not logged in; the Human logs it in, an agent never does`);
 
-  const scratch = mkdtempSync(join(tmpdir(), 'codex-step-'));
+  // Under the factory's state folder, which no seat's sandbox may write, so nobody swaps the answer file for a link.
+  mkdirSync(p.scratch, { recursive: true, mode: 0o700 });
+  const scratch = mkdtempSync(join(p.scratch, 'run-'));
   try {
     const out = join(scratch, 'last.md');
     // The step's permission profile (above); no approval prompt to wait on, no execpolicy rules and no AGENTS.md of the folder, no
     // bypass of any of it.
-    const argv = ['exec', '-C', dir, ...permissionArgs({ home: env.HOME, profiles, write: o.write === undefined ? null : dir, tmp: tmpFolders(env) }), '-c', 'approval_policy="never"', '-c', 'project_doc_max_bytes=0'];
+    const argv = ['exec', '-C', dir, ...permissionArgs({ home: p.home, profiles: p.profiles, write: o.write === undefined ? null : dir, tmp: p.tmp }), '-c', 'approval_policy="never"', '-c', 'project_doc_max_bytes=0'];
     if (o.effort) argv.push('-c', `model_reasoning_effort="${o.effort}"`);
     if (git(dir, ['rev-parse', '--is-inside-work-tree']) !== 'true') argv.push('--skip-git-repo-check');
-    argv.push('--ignore-rules', '--ephemeral', '-o', out, '-');
-    const r = spawnSync('codex', argv, { env: codexEnv, input: prompt, encoding: 'utf8', maxBuffer: 256 << 20, timeout: MINUTES * 60_000 });
+    // --ignore-user-config: Codex loads a folder's own .codex/config.toml (and a config.toml in the folder), with its MCP servers, hooks
+    // and exec policies, only when its user config.toml trusts that folder (rust-v0.163.0, config/src/loader/mod.rs:130-134, :375-383).
+    // A worker writes the folder, so no user config is loaded and nothing is trusted (:520-528); auth still reads CODEX_HOME. A `-c`
+    // that marks the folder untrusted did not undo a trust the user config grants (codex mcp list, 0.163.0), so it is not used.
+    argv.push('--ignore-user-config', '--ignore-rules', '--ephemeral', '-o', out, '-');
+    const r = spawnSync(codex, argv, { env: codexEnv, input: prompt, encoding: 'utf8', maxBuffer: 256 << 20, timeout: MINUTES * 60_000 });
     if (r.error?.code === 'ETIMEDOUT') return wait('timeout', `codex exec ran past ${MINUTES} minutes`);
     if (r.error || r.status !== 0) {
       const said = `${r.stdout ?? ''}${r.stderr ?? ''}`;
