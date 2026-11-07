@@ -5,11 +5,17 @@ import console from 'node:console';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { subjectProblem, titleProblem } from '../../.gate/bin/lib/subject.mjs';
+
+// Installed, this file is a repository's scripts/lib/ship.mjs, beside the kit's .gate/. In the factory it runs from the pack's own source,
+// packs/pstack/scripts/lib/, and the kit is under kit/ (FAC-14): the same subject rules scripts/verify applies, and no red-check, since the
+// factory has no .gate/config.sh; its CI runs scripts/verify.
+const installed = existsSync(new URL('../../.gate/bin/lib/subject.mjs', import.meta.url));
+const FACTORY = !installed && existsSync(new URL('../../../../kit/.gate/bin/lib/subject.mjs', import.meta.url));
+const { subjectProblem, titleProblem } = await import(FACTORY ? '../../../../kit/.gate/bin/lib/subject.mjs' : '../../.gate/bin/lib/subject.mjs');
 
 // The template's issue lines. A body for a repository on Linear carries `Fixes <KEY>` and `Issue: <KEY>` in their place and passes (#404).
 const PLACEHOLDER = '<issue labelled task>';
-const FIELDS = 'number,title,url,baseRefName,headRefOid,labels,isDraft,autoMergeRequest,statusCheckRollup';
+const FIELDS = 'number,title,url,baseRefName,headRefOid,labels,isDraft,mergeable,autoMergeRequest,statusCheckRollup';
 // gh pr merge --auto merges these outright, whatever the repository's auto-merge setting.
 const READY = ['CLEAN', 'HAS_HOOKS', 'UNSTABLE'];
 
@@ -46,11 +52,11 @@ function open(branch, head, args, drafts) {
     return say(1, 'refused: there is no origin/main to judge the head against; fetch it');
   }
   const redStamp = join(stamps, `red-check-${head}-${main}`);
-  if (!existsSync(redStamp)) {
+  if (!FACTORY && !existsSync(redStamp)) {
     say(1, `refused: HEAD ${short} has no red-check stamp against origin/main ${main.slice(0, 7)}; run .gate/bin/red-check --base origin/main`);
     return say(1, dirty);
   }
-  const noRed = readFileSync(redStamp, 'utf8').trim();
+  const noRed = FACTORY ? '' : readFileSync(redStamp, 'utf8').trim();
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);
   const bodyFile = args.bodyFile ?? '.github/pull_request_template.md';
@@ -76,6 +82,8 @@ function open(branch, head, args, drafts) {
  * tier-<n>, so the labels are the main signal and GitHub still requires the approval.
  */
 function tierWait(pr) {
+  // The factory's own pull requests all wait for the Human (its CODEOWNERS), and its root has no .gate/bin/tier.
+  if (FACTORY) return true;
   const names = pr.labels.map((l) => l.name);
   if (!names.includes('tier-3') && !names.includes('raised')) {
     const r = spawnSync('.gate/bin/tier', ['--base', 'origin/main', '--head', 'HEAD', '--labels', names.join(',')], { encoding: 'utf8' });
@@ -84,6 +92,37 @@ function tierWait(pr) {
   }
   const tier = (pr.statusCheckRollup ?? []).find((c) => (c.name ?? c.context) === 'tier');
   return !(tier && (tier.conclusion === 'SUCCESS' || tier.state === 'SUCCESS'));
+}
+
+/** The latest run of a check on the pull request's head, by start time: a re-run's, not the run it replaced. */
+const latest = (pr, name) =>
+  (pr.statusCheckRollup ?? []).filter((c) => (c.name ?? c.context) === name).sort((a, b) => String(a.startedAt ?? '').localeCompare(String(b.startedAt ?? ''))).at(-1);
+
+// The pull request's last base change and its head commit; a change GitHub made itself, when the old base's branch was deleted on merge,
+// names the bases oldBase and newBase.
+const MOVED = 'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){'
+  + 'timelineItems(last:1,itemTypes:[BASE_REF_CHANGED_EVENT,AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT]){nodes{'
+  + '... on BaseRefChangedEvent{previousRefName currentRefName createdAt} ... on AutomaticBaseChangeSucceededEvent{previousRefName:oldBase currentRefName:newBase createdAt}}}}}}';
+
+/**
+ * Why a draft is not readied yet, or '' (FAC-55): verify has not passed on its head, it conflicts with main, or it is a stack's child moved
+ * onto main that INN-38 A (2026-11-07 07:33:46 +07) holds: its parent has not landed on main, or its head does not hold the commit that
+ * landed it, so it is not restacked yet (by ancestry, never a committer's clock). The queue's merge of main into it restacks it.
+ */
+function draftWait(pr) {
+  const verify = latest(pr, 'verify');
+  if (!(verify && (verify.conclusion === 'SUCCESS' || verify.state === 'SUCCESS'))) return 'verify has not passed on its head';
+  if (pr.mergeable === 'CONFLICTING') return 'it conflicts with main; merge main into it and push';
+  const data = JSON.parse(gh(['api', 'graphql', '-F', 'owner={owner}', '-F', 'name={repo}', '-F', `number=${pr.number}`, '-f', `query=${MOVED}`]));
+  const move = data.data?.repository?.pullRequest?.timelineItems?.nodes?.[0];
+  if (!move || move.currentRefName !== 'main' || move.previousRefName === 'main') return '';
+  const parents = JSON.parse(gh(['pr', 'list', '--head', move.previousRefName, '--base', 'main', '--state', 'merged', '--json', 'headRefOid,mergeCommit']));
+  const landings = parents.map((p) => p.mergeCommit?.oid).filter(Boolean);
+  if (!landings.length) return `it moved onto main, and its parent ${move.previousRefName} has not landed there`;
+  for (const oid of [pr.headRefOid, ...landings])
+    if (!quietGit(['cat-file', '-e', `${oid}^{commit}`])) spawnSync('git', ['fetch', '--quiet', 'origin', oid], { stdio: 'ignore' });
+  if (landings.some((oid) => quietGit(['merge-base', '--is-ancestor', oid, pr.headRefOid]))) return '';
+  return `its parent ${move.previousRefName} landed, and its head does not hold that landing: the queue's restack, its merge of main into it, is pending`;
 }
 
 function step(pr, head, branch, stacks, merge, drafts) {
@@ -107,7 +146,10 @@ function step(pr, head, branch, stacks, merge, drafts) {
   }
   const problem = titleProblem(pr.title) || (merge === 'squash' && subjectProblem(`${pr.title} (#${n})`));
   if (problem) return say(1, `refused title for #${n}: ${problem}`);
-  if (drafts === 'landable' && pr.isDraft) return say(0, `#${n} waits for verify and no conflict; the queue marks it ready and arms auto-merge`);
+  // A draft is its owner's hold, and readying it is the owner's step, as in every reference system (FAC-55): the queue only turns a red or
+  // conflicting pull request back into a draft. ship readies it, just before it arms it, once nothing below stops the arming.
+  const hold = pr.isDraft ? draftWait(pr) : '';
+  if (hold) return say(0, `#${n} stays a draft: ${hold}; run ship again then`);
   const known = quietGit(['cat-file', '-e', `${pr.headRefOid}^{commit}`]);
   const ahead = head !== pr.headRefOid && known && !quietGit(['merge-base', '--is-ancestor', head, pr.headRefOid]);
 
@@ -128,11 +170,14 @@ function step(pr, head, branch, stacks, merge, drafts) {
   if (gap) return say(1, `refused: ${gap}`);
 
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
-  // Read fresh: CI may have ended, and arming a ready pull request would merge it.
-  if (READY.includes(JSON.parse(gh(['pr', 'view', String(n), '--json', 'mergeStateStatus'])).mergeStateStatus))
+  // A draft is readied and armed at once, as the queue did before FAC-55. A pull request that was ready already is read fresh: CI may have
+  // ended, and arming a ready pull request would merge it.
+  if (pr.isDraft) gh(['pr', 'ready', String(n)]);
+  else if (READY.includes(JSON.parse(gh(['pr', 'view', String(n), '--json', 'mergeStateStatus'])).mergeStateStatus))
     return say(1, `stopped on #${n}: it is ready to merge and not armed; the Human merges it`);
   try {
-    gh(['pr', 'merge', String(n), '--auto', `--${merge}`]);
+    // --match-head-commit reaches enablePullRequestAutoMerge's expectedHeadOid (gh 2.102.0, pkg/cmd/pr/merge/http.go:77-95): only the head judged here lands.
+    gh(['pr', 'merge', String(n), '--auto', `--${merge}`, '--match-head-commit', pr.headRefOid]);
   } catch (error) {
     if (!String(error.stderr).includes('Auto merge is not allowed for this repository')) throw error;
     return say(1, `stopped on #${n}: auto-merge is off on this repository; the Human merges it`);
@@ -165,7 +210,11 @@ function main(argv) {
     ? JSON.parse(git(['show', 'origin/main:.gate/driver.json'])) : {};
   policy.drafts ??= 'landable';
   const stacks = policy.stacks !== 'off';
-  const merge = policy.merge === 'merge' ? 'merge' : 'squash';
+  // main's driver names the merge method; with none, the repository's own: merge commits where squash is not allowed (the factory), else
+  // squash, as the queue armed before FAC-55.
+  const methods = () => JSON.parse(gh(['repo', 'view', '--json', 'squashMergeAllowed,mergeCommitAllowed']));
+  const merge = policy.merge != null ? (policy.merge === 'merge' ? 'merge' : 'squash')
+    : pr && ((m) => !m.squashMergeAllowed && m.mergeCommitAllowed)(methods()) ? 'merge' : 'squash';
   if (!pr && !stacks && args.base && args.base !== 'main')
     return say(1, `refused to open: its base is ${args.base}, not main`);
   return pr ? step(pr, head, branch, stacks, merge, policy.drafts) : open(branch, head, args, policy.drafts);

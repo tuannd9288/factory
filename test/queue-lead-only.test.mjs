@@ -172,8 +172,6 @@ for (const policy of ['absent', 'no-key', 'pstack']) {
       ]);
       const r = w.sweep();
       assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), policy === 'pstack' ? [] : [
-        'pr ready 1 --repo o/factory',
-        'pr merge 1 --repo o/factory --auto --squash --match-head-commit h1',
         'pr ready 2 --repo o/factory --undo',
         'pr ready 3 --repo o/factory --undo',
       ], r.out);
@@ -181,22 +179,3 @@ for (const policy of ['absent', 'no-key', 'pstack']) {
   });
 }
 
-test('factory with no driver uses its allowed merge method once per sweep, only when arming', () => {
-  const w = world();
-  try {
-    writeFileSync(join(w.dir, 'methods.json'), JSON.stringify({ squashMergeAllowed: false, mergeCommitAllowed: true }));
-    w.put([pull(1, { isDraft: true, mergeable: 'CONFLICTING' })]);
-    assert.deepEqual(w.sweep().calls.filter((c) => c.startsWith('repo view')), []);
-    w.put([pull(1, { isDraft: true }), pull(2, { isDraft: true })]);
-    const r = w.sweep();
-    assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
-      'pr ready 1 --repo o/factory',
-      'pr merge 1 --repo o/factory --auto --merge --match-head-commit h1',
-      'pr ready 2 --repo o/factory',
-      'pr merge 2 --repo o/factory --auto --merge --match-head-commit h2',
-    ], r.out);
-    assert.deepEqual(r.calls.filter((c) => c.startsWith('repo view')), [
-      'repo view o/factory --json squashMergeAllowed,mergeCommitAllowed',
-    ]);
-  } finally { w.cleanup(); }
-});
