@@ -131,7 +131,7 @@ test('the logs of other accounts, and logs with no account and no old row, are n
     assert.equal(chooseSeat({ runs, account: A }).seat, 2);
     assert.equal(chooseSeat({ runs, account: A, seatRows: { 2: A } }).seat, 2, 'seat 1 has no old row');
     assert.equal(chooseSeat({ runs, account: A, seatRows: { 1: A } }).seat, null, 'seat 1\'s old row names it');
-    assert.equal(accountEvent(runs, A, { 1: A }).info.status, 'rejected');
+    assert.equal(accountEvent(runs, A, { 1: A }).windows.status, 'rejected');
     assert.equal(accountEvent(runs, A), null);
   });
 });

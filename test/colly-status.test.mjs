@@ -9,6 +9,8 @@ import { join } from 'node:path';
 process.env.TZ = 'UTC';
 
 const top = () => import('../bin/lib/colly-status.mjs');
+// parseLog reads Claude Code's stream, so it lives in the one module that does (INN-39 item 3).
+const claudeCode = () => import('../bin/lib/claude-code.mjs');
 
 const NOW = Date.parse('2026-10-31T12:00:00Z');
 const line = (o) => `${JSON.stringify(o)}\n`;
@@ -137,7 +139,7 @@ test('leadRunning is true when some process is a Lead of the repository, whichev
 });
 
 test('parseLog reads model, turns, tokens, context and the last result cost; a resumed log takes the last total', async () => {
-  const { parseLog } = await top();
+  const { parseLog } = await claudeCode();
   const u = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100 };
   const p = parseLog(init('/x') + assistant('m1', u) + assistant('m1', u) + assistant('m2', { ...u, output_tokens: 7 }) + result({ total_cost_usd: 0.4 }) + result({ total_cost_usd: 0.9, num_turns: 2 }));
   assert.equal(p.model, 'claude-sonnet-5-5');
@@ -149,7 +151,7 @@ test('parseLog reads model, turns, tokens, context and the last result cost; a r
 });
 
 test('parseLog gives null, never a guess, for what the log does not hold', async () => {
-  const { parseLog } = await top();
+  const { parseLog } = await claudeCode();
   const p = parseLog(init('/x'));
   assert.equal(p.cost, null);
   assert.equal(p.ctx, null);

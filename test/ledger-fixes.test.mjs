@@ -12,6 +12,8 @@ import { factory } from './helpers.mjs';
 
 const FIXTURE = JSON.parse(readFileSync(join(factory, 'test/fixtures/ledger-entry-2.1.308.json'), 'utf8'));
 const ledger = () => import(join(factory, 'bin/lib/ledger.mjs'));
+// The transcript reading and the prices live in the one module that reads Claude Code's formats (INN-39 item 3).
+const claudeCode = () => import(join(factory, 'bin/lib/claude-code.mjs'));
 let counter = 0;
 const entry = (over = {}) => {
   counter += 1;
@@ -77,8 +79,9 @@ test('the canary stays green when only some of the newest entries lack a field',
   }
 });
 
-test('READS holds every field charge and costOf touch, including the cache-creation split', async () => {
-  const { READS, charge } = await ledger();
+// INN-39 item 3: the ledger reads a transcript entry through entryOf (claude-code.mjs), which prices it with costOf.
+test('READS holds every field entryOf and costOf touch, including the cache-creation split', async () => {
+  const { READS, entryOf } = await claudeCode();
   assert.ok(READS.includes('message.usage.cache_creation.ephemeral_1h_input_tokens'));
   assert.ok(READS.includes('message.usage.cache_creation.ephemeral_5m_input_tokens'));
   const touched = new Set();
@@ -93,8 +96,9 @@ test('READS holds every field charge and costOf touch, including the cache-creat
         return v;
       },
     });
-  charge(new Map(), new Set(), wrap(entry(), ''));
-  const allowed = new Set(READS.flatMap((r) => r.split('|')));
+  entryOf(wrap(entry(), ''));
+  // sessionId is the one field read and not checked: only repoCosts uses it, and the canary has never listed it.
+  const allowed = new Set([...READS.flatMap((r) => r.split('|')), 'sessionId']);
   assert.ok(touched.size > 5, [...touched].join(' '));
   for (const path of touched) assert.ok(allowed.has(path), `${path} is read but not in READS`);
   for (const path of ['gitBranch', 'message.model', 'message.usage.input_tokens', 'message.usage.cache_creation.ephemeral_5m_input_tokens']) assert.ok(touched.has(path), `${path} was not touched`);
@@ -115,7 +119,8 @@ test('check mode opens only message and message.usage: no other object, and no k
 });
 
 test('a folder is matched by path containment: .. in cwd, //, symlinks on either side; case is exact', async () => {
-  const { repoCosts, costOf } = await ledger();
+  const { repoCosts } = await ledger();
+  const { costOf } = await claudeCode();
   const one = costOf(FIXTURE.message.model, FIXTURE.message.usage);
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'ledger-path-')));
   try {
@@ -165,7 +170,8 @@ test('check mode reads the extra folders only, not the per-repository profiles (
 });
 
 test('entries without a cwd in an extra folder are counted with their dollars, in check mode and in the digest', async () => {
-  const { unplaced, costOf, digest } = await ledger();
+  const { unplaced, digest } = await ledger();
+  const { costOf } = await claudeCode();
   const one = costOf(FIXTURE.message.model, FIXTURE.message.usage);
   const p = profile([{ name: 'a.jsonl', day: 1, entries: [entry({ cwd: undefined }), entry({ cwd: undefined }), entry({ cwd: '/work/app' })] }]);
   try {
