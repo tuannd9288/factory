@@ -115,7 +115,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    check is red, read `.claude/skills/gate-red/SKILL.md` first.
 9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes that issue's worktree.
    Where the repository has a Feature Map and `~/factory-runs/<repo>-map-pass/date` does not hold today's date (one file
-   for the repository, whichever team), write today's date there, run `git fetch origin` and
+   for the repository, whichever team), write today's date there, run `git fetch origin`; if
+   `~/factory-runs/<repo>-map-pass/w` is still there, run `git worktree remove --force` on it first; then run
    `git worktree add --detach ~/factory-runs/<repo>-map-pass/w origin/main`, and start one reviewer seat on it as step 6
    does, with `--run ~/factory-runs/<repo>-map-pass` and `--tag mappass-<YYYY-MM-DD>`. Its brief's first line is
    `/pstack:maintain-verification-skill` (where a seat's log shows that line did not start the skill, the brief tells it
