@@ -7,6 +7,16 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { factory, git } from '../../../test/helpers.mjs';
+import { DENY_READ } from '../../../bin/lib/seat.mjs';
+
+/** The permission profile a codex call names (`-c default_permissions=` and its `-c permissions.<name>.filesystem=` table), as an object. */
+function profileOf(args) {
+  const values = args.filter((_, i) => args[i - 1] === '-c');
+  const name = /^default_permissions="([^"]+)"$/.exec(values.find((v) => v.startsWith('default_permissions=')) ?? '')?.[1];
+  const table = values.find((v) => name && v.startsWith(`permissions.${name}.filesystem=`));
+  assert.ok(table, `no permission profile in: ${args.join(' ')}`);
+  return JSON.parse(table.slice(table.indexOf('=') + 1).replaceAll('"="', '":"'));
+}
 
 // codex: as $FAKE/codex.json says (loggedIn, mode); every call appended to $FAKE/codex-calls with CODEX_HOME and the names of its
 // environment. The folder is written into it, since the step strips the environment. From the live verifier's fake (before-fac-8).
@@ -76,8 +86,18 @@ test('runs the brief on codex exec, read-only in the folder, on the verifier\'s 
   const [exec] = w.execs();
   assert.equal(exec.home, join(w.home, '.agent-profiles/verifier/codex'));
   for (const name of ['GH_TOKEN', 'CLAUDE_CONFIG_DIR', 'FACTORY_STATE']) assert.ok(!exec.env.includes(name), name);
+  assert.equal(exec.args[exec.args.indexOf('-C') + 1], w.repo);
+  // No sandbox mode: Codex's own permission profile reads the disk but the seats' denied folders (#182), and writes nothing.
+  assert.ok(!exec.args.includes('-s') && !exec.args.includes('--sandbox'), exec.args.join(' '));
+  const profile = profileOf(exec.args);
+  assert.equal(profile[':root'], 'read');
+  for (const d of ['.agent-profiles', '.ssh', '.config/gh', '.claude', '.codex', ...DENY_READ]) assert.equal(profile[join(w.home, d)], 'deny', d);
+  // Codex's * stops at one path part, so a glob also denies what lies under what it names.
+  for (const d of DENY_READ.filter((x) => x.includes('*'))) assert.equal(profile[`${join(w.home, d)}/**`], 'deny', d);
+  // Every .env* file, which the kit denies a session too.
+  assert.equal(profile['/**/.env*'], 'deny');
+  assert.ok(!Object.values(profile).includes('write'));
   const args = exec.args.join(' ');
-  assert.match(args, new RegExp(`-C ${w.repo} -s read-only `));
   for (const part of ['-c approval_policy="never"', '-c model_reasoning_effort="high"', '--ignore-rules', '--ephemeral']) assert.ok(args.includes(part), part);
   assert.equal(w.prompt(), BRIEF);
   assert.deepEqual(w.waits(), []);
@@ -145,10 +165,19 @@ test('--write gives Codex workspace-write in a folder of the repository, and ref
   const inside = join(w.repo, '.claude/worktrees/candidate-2');
   mkdirSync(inside, { recursive: true });
   assert.equal(w.run(['--role', 'arena-runner', '--write', inside]).code, 0);
-  assert.match(w.execs()[0].args.join(' '), new RegExp(`-C ${inside} -s workspace-write `));
+  const [exec] = w.execs();
+  assert.equal(exec.args[exec.args.indexOf('-C') + 1], inside);
+  assert.ok(!exec.args.includes('-s'), exec.args.join(' '));
+  assert.equal(profileOf(exec.args)[inside], 'write');
+  assert.equal(profileOf(exec.args)[join(w.home, '.agent-profiles')], 'deny');
+  // As Codex's own workspace-write does, the folder's .git, .agents, .codex and .aws stay read-only, so no hook or config is planted
+  // that runs later outside the sandbox; at the repository's top folder too, and whether or not they exist yet.
+  assert.equal(w.run(['--role', 'arena-runner', '--write', w.repo]).code, 0);
+  for (const [folder, args] of [[inside, w.execs()[0].args], [w.repo, w.execs()[1].args]])
+    for (const name of ['.git', '.agents', '.codex', '.aws']) assert.equal(profileOf(args)[join(folder, name)], 'read', `${folder}/${name}`);
   const outside = join(w.dir, 'elsewhere');
   mkdirSync(outside);
   const r = w.run(['--role', 'arena-runner', '--write', outside]);
   assert.equal(r.code, 2, r.out + r.err);
-  assert.equal(w.execs().length, 1, 'no second exec');
+  assert.equal(w.execs().length, 2, 'no third exec');
 });
