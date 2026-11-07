@@ -111,6 +111,12 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a
    check is red, read `.claude/skills/gate-red/SKILL.md` first.
 9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes the worktree.
+   Where the repository has a Feature Map and `~/factory-runs/<repo>-{{TEAM}}/map-pass` does not hold today's date,
+   write today's date there, make a fresh worktree of `main` as step 2 does, and start one reviewer seat on it as step 6
+   does, with `--tag mappass<k>`. Its brief's first line is `/pstack:maintain-verification-skill`; it names `feature-map/`
+   as step 0's target and edit scope, orders steps 0 to 3 from the source and step 4 not run (no session can run the app
+   until #264), and asks for the outcome, `blocked`, with each confirmed drift, its feature file and its source path.
+   File the confirmed drift as one issue of this repository, as step 4 files a finding.
 
 ## What you ask the Human
 Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login, a
