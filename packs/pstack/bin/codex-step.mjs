@@ -6,9 +6,13 @@
 // The roles are the steps the factory maps to Codex: a panel's other-family seat (arena-runner, architect-runner,
 // interrogate-reviewer), arena's cross-judge (cross-judge, eval's judge too), show-me-your-work's review of the trail
 // (trail-reviewer) and Orchestrate's verifier (verifier). A review role's prompt ends with the Human's score-and-file sentence,
-// read from kit/.gate/gate-section.md, its one home. Codex runs read-only in the current folder; --write gives it workspace-write
-// in a folder of the current repository instead (a runner's or an adversary's worktree). --repo names the repository in the wait
-// log when the folder is not its clone (a MacBook run, on the host by ssh). No other option reaches codex.
+// read from kit/.gate/gate-section.md, its one home. Codex runs in the current folder under its own permission profile, not a
+// sandbox mode: it reads the whole disk but the folders the seats' sandbox denies (DENY_READ, bin/lib/seat.mjs: the profiles and
+// their tokens, gh's, ssh's, Claude Code's and Codex's own) and every .env* file, writes nothing, and has no network. The profile
+// binds only the commands Codex runs (codex-rs/sandboxing/src/manager.rs:437-473 wraps each in /usr/bin/sandbox-exec), so Codex
+// itself still reads its login and config under the denied profiles folder; --write lets it write in one
+// folder of the current repository (a runner's or an adversary's worktree) and the temporary folders. --repo names the repository
+// in the wait log when the folder is not its clone (a MacBook run, on the host by ssh). No other option reaches codex.
 // Exit 0 with Codex's last message on stdout; 2 a refused call (nothing run); 3 the step waits for Codex: codex is not installed,
 // the profile is not logged in, the account is out of quota, the run timed out or failed. A wait says so, appends
 // {at, cause, role, repo, cwd} to $FACTORY_STATE/codex-waits.jsonl, where the ledger can count the waits by cause (the Human,
@@ -19,6 +23,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmS
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DENY_READ } from '../../../bin/lib/seat.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const ROLES = ['arena-runner', 'architect-runner', 'interrogate-reviewer', 'cross-judge', 'trail-reviewer', 'verifier'];
@@ -30,6 +35,36 @@ const KEEP = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'LC_
 const USAGE = `usage: factory codex --role <${ROLES.join('|')}> [--effort ${EFFORTS.join('|')}] [--write <folder>] [--repo <owner/name>], the brief on stdin`;
 // What Codex prints when the account's usage limit is reached; checked on the Mac mini's first real wait (#182).
 const QUOTA = /usage limit|usage_limit|rate.?limit|quota|\b429\b/i;
+const PROFILE = 'factory-codex-step';
+const ENV_FILES = '/**/.env*';
+
+/**
+ * The `-c` overrides that make Codex's permission profile for this step (Codex 0.163.0's `[permissions]` table, selected by
+ * `default_permissions`, which cannot go with a sandbox mode): read `:root` but the seats' DENY_READ under home and the profiles
+ * folder; with write, write the folder and the temporary folders too. No `network` table leaves the network off. Codex's `*` stops at
+ * one path part, so a glob is denied twice, as itself and with `/**` for what lies under what it names. Shown on `codex sandbox`
+ * with a temporary home: each denied path refused, the work folder read (#182).
+ */
+export function permissionArgs({ home, profiles, write = null, tmp = [] }) {
+  const deny = [...new Set([...DENY_READ.map((d) => `${home}/${d}`), profiles])].flatMap((p) => (p.includes('*') ? [p, `${p}/**`] : [p]));
+  // The kit denies a session `Read(./.env*)` (kit/.claude/settings.json); Codex reads every folder, so its .env files go everywhere.
+  deny.push(ENV_FILES);
+  const entries = [[':root', 'read'], ...deny.map((p) => [p, 'deny']), ...(write ? [...new Set([write, ...tmp])].map((p) => [p, 'write']) : [])];
+  const table = `{${entries.map(([path, mode]) => `${JSON.stringify(path)}=${JSON.stringify(mode)}`).join(',')}}`;
+  return ['-c', `permissions.${PROFILE}.filesystem=${table}`, '-c', `default_permissions="${PROFILE}"`];
+}
+
+/** The temporary folders a writing step may use, by their real paths, as Codex's workspace-write allowed them. */
+function tmpFolders(env) {
+  const real = (p) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return null;
+    }
+  };
+  return [...new Set([real(env.TMPDIR ?? tmpdir()), real('/tmp')].filter(Boolean))];
+}
 
 /** The options, from a closed list, each once; throws with the usage on anything else. */
 export function parse(args) {
@@ -96,7 +131,8 @@ export function main(args, env = process.env) {
     return 2;
   }
 
-  const home = join(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'), 'verifier/codex');
+  const profiles = env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles');
+  const home = join(profiles, 'verifier/codex');
   const codexEnv = { ...Object.fromEntries(KEEP.filter((k) => env[k] !== undefined).map((k) => [k, env[k]])), CODEX_HOME: home };
   const wait = (cause, why) => {
     console.log(`codex: ${o.role} waits for Codex: ${why}. This step does not run on Claude; say so, and go on with other work.`);
@@ -118,9 +154,9 @@ export function main(args, env = process.env) {
   const scratch = mkdtempSync(join(tmpdir(), 'codex-step-'));
   try {
     const out = join(scratch, 'last.md');
-    // Read-only, or workspace-write in the one folder; no approval prompt to wait on, no execpolicy rules and no AGENTS.md of the
-    // folder, no bypass of any of it.
-    const argv = ['exec', '-C', dir, '-s', o.write === undefined ? 'read-only' : 'workspace-write', '-c', 'approval_policy="never"', '-c', 'project_doc_max_bytes=0'];
+    // The step's permission profile (above); no approval prompt to wait on, no execpolicy rules and no AGENTS.md of the folder, no
+    // bypass of any of it.
+    const argv = ['exec', '-C', dir, ...permissionArgs({ home: env.HOME, profiles, write: o.write === undefined ? null : dir, tmp: tmpFolders(env) }), '-c', 'approval_policy="never"', '-c', 'project_doc_max_bytes=0'];
     if (o.effort) argv.push('-c', `model_reasoning_effort="${o.effort}"`);
     if (git(dir, ['rev-parse', '--is-inside-work-tree']) !== 'true') argv.push('--skip-git-repo-check');
     argv.push('--ignore-rules', '--ephemeral', '-o', out, '-');

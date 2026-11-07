@@ -72,12 +72,17 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
     autoAllowBashIfSandboxed: false,
     allowUnsandboxedCommands: false,
     filesystem: {
-      denyRead: [...new Set([...['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'].map((d) => `${home}/${d}`), ...(profiles ? [profiles] : [])])],
+      denyRead: [...new Set([...DENY_READ.map((d) => `${home}/${d}`), ...(profiles ? [profiles] : [])])],
       allowWrite: [...new Set([work, run, tmp].filter(Boolean))],
     },
     network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
   };
 }
+
+/** The folders under home that no sandboxed command reads: the agent profiles and their tokens, Claude Code's and Codex's own, gh's
+ * and ssh's. The seats' sandbox above denies them (#183), and so does `factory codex`'s Codex profile (packs/pstack/bin/codex-step.mjs,
+ * #182). An entry with * is a glob. */
+export const DENY_READ = ['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'];
 
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
