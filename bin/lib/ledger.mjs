@@ -6,11 +6,12 @@
 // See bin/factory-ledger for the arguments.
 import { revertedTitle } from '../../kit/.gate/bin/lib/subject.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
+import { STALE_RUN, assistantEntries, inspect } from './claude-code.mjs';
 import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
@@ -19,7 +20,6 @@ import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const PRICES = JSON.parse(readFileSync(join(here, 'prices.json'), 'utf8')).models;
 export const REQUIRED = requiredChecks(join(here, '../../kit'));
 
 /** The 95% Wilson interval of k successes in n, as fractions; null when n is 0. */
@@ -41,65 +41,17 @@ export function rate(k, n) {
   return `${k}/${n} (${pct(k / n)}; 95% CI: ${pct(a)}–${pct(b)})`;
 }
 
-/** Dollars of one assistant message's usage at API prices; null for a model the table does not price. */
-export function costOf(model, usage) {
-  const price = PRICES[model];
-  if (!price || !usage) return null;
-  const w1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-  const w5m = usage.cache_creation?.ephemeral_5m_input_tokens ?? Math.max(0, (usage.cache_creation_input_tokens ?? 0) - w1h);
-  return (
-    ((usage.input_tokens ?? 0) * price.input +
-      (usage.output_tokens ?? 0) * price.output +
-      w5m * price.write5m +
-      w1h * price.write1h +
-      (usage.cache_read_input_tokens ?? 0) * price.read) /
-    1e6
-  );
-}
-
-function jsonlFiles(dir) {
-  const out = [];
-  const walk = (d) => {
-    for (const name of readdirSync(d)) {
-      const p = join(d, name);
-      const s = statSync(p);
-      if (s.isDirectory()) walk(p);
-      else if (name.endsWith('.jsonl')) out.push(p);
-    }
-  };
-  if (existsSync(dir)) walk(dir);
-  return out;
-}
-
-/** Every assistant entry with usage in a profile folder's session files, in file order, parsed. */
-function* assistantEntries(profileDir) {
-  for (const file of jsonlFiles(join(profileDir, 'projects'))) {
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
-      let entry;
-      try {
-        entry = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (entry.type === 'assistant' && entry.message?.usage) yield entry;
-    }
-  }
-}
-
-/** Adds an assistant entry's cost to its git branch's row; an entry without a branch, or seen before, adds nothing. */
+/** Adds an assistant entry's cost to its git branch's row; an entry without a branch, or seen before, adds nothing. The entry is in the
+ * factory's shape (entryOf in claude-code.mjs): { key, session, branch, cwd, model, dollars }. */
 export function charge(byBranch, seen, entry) {
-  const message = entry.message;
-  if (!entry.gitBranch) return;
-  const key = message.id ?? entry.requestId ?? entry.uuid;
-  if (seen.has(key)) return;
-  seen.add(key);
-  const row = byBranch.get(entry.gitBranch) ?? { dollars: 0, models: new Set(), unpriced: new Set() };
-  const dollars = costOf(message.model, message.usage);
-  if (dollars === null) row.unpriced.add(message.model);
-  else row.dollars += dollars;
-  row.models.add(message.model);
-  byBranch.set(entry.gitBranch, row);
+  if (!entry.branch) return;
+  if (seen.has(entry.key)) return;
+  seen.add(entry.key);
+  const row = byBranch.get(entry.branch) ?? { dollars: 0, models: new Set(), unpriced: new Set() };
+  if (entry.dollars === null) row.unpriced.add(entry.model);
+  else row.dollars += entry.dollars;
+  row.models.add(entry.model);
+  byBranch.set(entry.branch, row);
 }
 
 /** Cost per git branch from a Claude Code profile's session files: dollars, models, and unpriced models. */
@@ -139,7 +91,7 @@ export function repoCosts({ extra = [], root, name, seat = null, recorded = new 
   for (const folder of extra) {
     if (!existsSync(folder)) continue;
     any = true;
-    for (const entry of assistantEntries(folder)) if (!recorded.has(entry.sessionId) && within(entry.cwd, dir)) charge(byBranch, seen, entry);
+    for (const entry of assistantEntries(folder)) if (!recorded.has(entry.session) && within(entry.cwd, dir)) charge(byBranch, seen, entry);
   }
   for (const [branch, s] of seat ?? []) {
     any = true;
@@ -159,94 +111,15 @@ export function unplaced(folders) {
   for (const folder of folders) {
     for (const entry of existsSync(folder) ? assistantEntries(folder) : []) {
       if (typeof entry.cwd === 'string' && entry.cwd) continue;
-      const key = entry.message.id ?? entry.requestId ?? entry.uuid;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(entry.key)) continue;
+      seen.add(entry.key);
       total.entries += 1;
-      total.dollars += costOf(entry.message.model, entry.message.usage) ?? 0;
+      total.dollars += entry.dollars ?? 0;
     }
   }
   return total;
 }
 
-/** The fields of an assistant entry the ledger reads: a path, or paths of which one is enough. */
-export const READS = [
-  'type',
-  'gitBranch',
-  'cwd',
-  'message.model',
-  'message.usage.input_tokens',
-  'message.usage.output_tokens',
-  'message.usage.cache_read_input_tokens',
-  'message.usage.cache_creation_input_tokens',
-  'message.usage.cache_creation.ephemeral_1h_input_tokens',
-  'message.usage.cache_creation.ephemeral_5m_input_tokens',
-  'message.id|requestId|uuid',
-];
-// The canary opens only these objects: message, message.usage and the objects inside usage. Any other object is
-// printed as `object` and never opened, so a key it holds (a map keyed by an id, a tool name) cannot reach the output.
-const OPENED = (path) => path === 'message' || path === 'message.usage' || path.startsWith('message.usage.');
-
-const valueAt = (entry, path) => path.split('.').reduce((v, k) => (v && typeof v === 'object' ? v[k] : undefined), entry);
-const kind = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
-const has = (e, r) => r.split('|').some((p) => valueAt(e, p) !== undefined && valueAt(e, p) !== null);
-const STALE_RUN = 10;
-
-/** The canary: over the latest `latest` distinct assistant entries of the profile folders (newest files first by
- * modification time), which fields the ledger reads are present in none of them (`missing`), absent from every entry of
- * the newest session file or from the newest 10 entries (`stale`: the format changed lately), absent from some
- * (`partly`), and every key path with its types and counts. It reads values only to learn their type and reports none. */
-export function inspect(profileDirs, { latest = 50 } = {}) {
-  const dated = [];
-  for (const dir of profileDirs)
-    for (const file of jsonlFiles(join(dir, 'projects'))) dated.push({ file, time: statSync(file).mtimeMs });
-  dated.sort((a, b) => a.time - b.time);
-  const entries = [];
-  for (const { file } of dated) {
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
-      try {
-        const e = JSON.parse(line);
-        if (e.type === 'assistant' && e.message?.usage) entries.push({ e, file });
-      } catch {}
-    }
-  }
-  const seen = new Set();
-  const distinct = entries.filter(({ e }) => {
-    const key = e.message.id ?? e.requestId ?? e.uuid;
-    return key === undefined || !seen.has(key) ? (seen.add(key), true) : false;
-  });
-  const sampleItems = distinct.slice(-latest);
-  const sample = sampleItems.map((x) => x.e);
-  const newestFile = dated.length ? dated[dated.length - 1].file : null;
-  const inNewest = distinct.filter((x) => x.file === newestFile).map((x) => x.e);
-  const paths = new Map();
-  const walk = (value, path, seenHere) => {
-    for (const [k, v] of Object.entries(value)) {
-      const p = path ? `${path}.${k}` : k;
-      const row = paths.get(p) ?? { types: new Set(), count: 0 };
-      row.types.add(kind(v));
-      if (!seenHere.has(p)) row.count += 1;
-      seenHere.add(p);
-      paths.set(p, row);
-      if (v && typeof v === 'object' && !Array.isArray(v) && OPENED(p)) walk(v, p, seenHere);
-    }
-  };
-  for (const e of sample) walk(e, '', new Set());
-  const missing = READS.filter((r) => !sample.some((e) => has(e, r)));
-  const newest = sample.slice(-STALE_RUN);
-  const stale = READS.filter(
-    (r) => !missing.includes(r) && ((inNewest.length && inNewest.every((e) => !has(e, r))) || (newest.length && newest.every((e) => !has(e, r)))),
-  );
-  const partly = READS.filter((r) => !missing.includes(r) && !stale.includes(r) && sample.some((e) => !has(e, r))).map((r) => `${r} (${sample.filter((e) => has(e, r)).length}/${sample.length})`);
-  return {
-    entries: sample.length,
-    missing,
-    stale,
-    partly,
-    paths: [...paths].map(([path, r]) => ({ path, types: [...r.types].sort(), count: r.count })).sort((a, b) => a.path.localeCompare(b.path)),
-  };
-}
 
 /** One line for the digest when the canary could not read what the ledger needs; null when it can, or has nothing. */
 export function canaryLine(report) {

@@ -37,13 +37,14 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RATE_SOURCE, leadStateOf } from './claude-code.mjs';
 import { claimJob } from './job-claim.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountEvent, accountOut } from './seat.mjs';
-import { quotaRows, alertLines, windowsOf } from './quota.mjs';
+import { quotaRows, alertLines } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
-import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
+import { leadOf, readProcesses } from './colly-status.mjs';
 
 /** How long a required check may sit unstarted before it is told: half as much again as the slowest normal wait seen on 2026-11-02
  * (1,208 s on a busy self-hosted runner, from the run's creation), so only a real stall passes it. */
@@ -152,9 +153,9 @@ export function accountsOut({ runs, state, agentProfiles, now }) {
   return accounts.flatMap(({ name, letter }) => {
     const why = accountOut(runs, name, seatRows, now);
     if (why) return [{ key: `out-of-quota ${letter}`, scope: 'quota', text: `account ${letter} is ${why}` }];
-    const info = accountEvent(runs, name, seatRows)?.info;
-    if (info?.status !== 'allowed_warning') return [];
-    const [warned] = alertLines([{ profile: `account ${letter}`, source: 'rate_limit_event', windows: windowsOf(info), resetsAt: info.resetsAt ?? null }], { now });
+    const e = accountEvent(runs, name, seatRows);
+    if (e?.windows.status !== 'allowed_warning') return [];
+    const [warned] = alertLines([{ profile: `account ${letter}`, source: RATE_SOURCE, windows: e.windows, resetsAt: e.resetsAt }], { now });
     return warned ? [{ key: `quota-warning ${letter}`, scope: 'quota', text: warned }] : [];
   });
 }

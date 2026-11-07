@@ -1,39 +1,15 @@
 // The quota windows (#63, K2 option B): what Claude Code itself reports, and nothing else. Source 1 is the rate_limit_event of
 // a stream-json log, source 3 the status line's rate_limits (#62); Codex refusals use its JSON errors (#474). Nothing here reads a credential, a
-// profile or the network; a window that was not reported is null, never a guess.
+// profile or the network; a window that was not reported is null, never a guess. Claude Code's two formats are read by claude-code.mjs
+// (INN-39 item 3), which gives the windows here.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { RATE_SOURCE, statusLineWindows } from './claude-code.mjs';
 import { accountEvent, resetPassed, runFiles } from './seat.mjs';
 import { teamAccounts } from './teams.mjs';
 import { seatAccounts } from './token.mjs';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-
-/** One window as { use, resetsAt }, use a fraction 0 to 1; null when the report holds no number for it. */
-const windowOf = (use, resetsAt) => (num(use) === null ? null : { use, resetsAt: num(resetsAt) });
-
-/** The windows of a rate_limit_info (source 1: utilization is a fraction). A window is rejected only by `status`: the
- * recorded events carry overageStatus "rejected" while status is "allowed", and that is the extra usage, not the window. */
-export function windowsOf(info) {
-  const w = info?.unifiedWindows ?? {};
-  return {
-    five_hour: windowOf(w.five_hour?.utilization, w.five_hour?.resetsAt),
-    seven_day: windowOf(w.seven_day?.utilization, w.seven_day?.resetsAt),
-    status: info?.status ?? null,
-    type: info?.rateLimitType ?? null,
-    rejected: info?.status === 'rejected',
-  };
-}
-
-/** The windows of one status-line record (source 3): used_percentage is a percentage by its name, so it is divided by 100.
- * Only 0 has been seen (#62), so that scale is not yet measured above 0. null for a record that has no rate_limits, as the
- * ones before the first API response do. */
-export function statusLineWindows(record) {
-  const r = record?.rate_limits;
-  if (!r || typeof r !== 'object') return null;
-  const pct = (w) => (num(w?.used_percentage) === null ? null : windowOf(w.used_percentage / 100, w.resets_at));
-  return { five_hour: pct(r.five_hour), seven_day: pct(r.seven_day), status: null, type: null, rejected: false };
-}
 
 /** The last record of a status-line file that holds rate_limits, as { windows, asOf } (the record's `at`, else the file's
  * time), or null when the file is absent, unreadable or holds none. The file is one that a status-line command already
@@ -96,7 +72,7 @@ export function quotaRows({ runs, state = null, root, accounts = null, statusFil
   const seatRows = state ? seatAccounts(state) : {};
   const rows = (accounts ?? (state ? teamAccounts(state, root) : [])).map((account) => {
     const e = accountEvent(runs, account, seatRows);
-    return { profile: `account ${account}`, source: 'rate_limit_event', account, windows: e ? windowsOf(e.info) : null, resetsAt: num(e?.info.resetsAt), asOf: e?.asOf ?? null, missing: 'no session has run on it' };
+    return { profile: `account ${account}`, source: RATE_SOURCE, account, windows: e?.windows ?? null, resetsAt: e?.resetsAt ?? null, asOf: e?.asOf ?? null, missing: 'no session has run on it' };
   });
   // Both the factory's run folders and hand-run <repo>/<seat>/run.jsonl folders. No profile traversal.
   let folders = [];

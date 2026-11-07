@@ -7,8 +7,8 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
-import { REQUIRED, clonesUnder, costOf, readSessions } from './ledger.mjs';
-import { windowsOf } from './quota.mjs';
+import { leadStateOf, parseLog } from './claude-code.mjs';
+import { REQUIRED, clonesUnder, readSessions } from './ledger.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 
@@ -18,53 +18,9 @@ const GH_MS = 60_000;
 const CALL_MS = 15_000;
 const WORKING_MS = 120_000;
 const GONE_MS = 24 * 3600_000;
-const LOGIN_MS = 60_000;
 const ROLE_ORDER = ['lead', 'worker', 'reviewer', 'researcher'];
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-
-/** What one stream-json log (or a Lead's transcript copy) says, from its events alone; null where it says nothing. Tokens
- * add each assistant message once (by id): `tokensIn` is input, cache-creation and cache-read tokens, `tokensOut` output;
- * `ctx` is the last message's input side. A resumed log holds several results: turns add up, the cost is the last total. */
-export function parseLog(text) {
-  const messages = new Map();
-  const results = [];
-  let init = null;
-  let rate = null;
-  for (const l of text.split('\n')) {
-    if (!l.trim()) continue;
-    let e;
-    try {
-      e = JSON.parse(l);
-    } catch {
-      continue;
-    }
-    if (e?.type === 'system' && e.subtype === 'init') init = e;
-    else if (e?.type === 'assistant' && e.message?.usage) messages.set(e.message.id ?? e.uuid ?? messages.size, e.message);
-    else if (e?.type === 'result') results.push(e);
-    else if (e?.type === 'rate_limit_event' && e.rate_limit_info) rate = e.rate_limit_info;
-  }
-  const usages = [...messages.values()];
-  const side = (u) => (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-  const last = results.at(-1) ?? null;
-  // A <synthetic> message (Claude Code's own, with no usage) says nothing of the model, the context or the price.
-  const real = usages.filter((m) => m.model !== '<synthetic>');
-  const priced = real.map((m) => costOf(m.model, m.usage));
-  const turnSum = results.some((r) => num(r.num_turns) !== null) ? results.reduce((s, r) => s + (num(r.num_turns) ?? 0), 0) : null;
-  return {
-    model: init?.model ?? real.at(-1)?.model ?? null,
-    cwd: init?.cwd ?? null,
-    turns: turnSum ?? (usages.length ? usages.length : null),
-    ctx: real.length ? side(real.at(-1).usage) : null,
-    tokensIn: usages.length ? usages.reduce((s, m) => s + side(m.usage), 0) : null,
-    tokensOut: usages.length ? usages.reduce((s, m) => s + (m.usage.output_tokens ?? 0), 0) : null,
-    cost: num(last?.total_cost_usd),
-    estCost: real.length && priced.every((c) => c !== null) ? priced.reduce((s, c) => s + c, 0) : null,
-    isError: typeof last?.is_error === 'boolean' ? last.is_error : null,
-    apiStatus: last?.api_error_status ?? null,
-    rate: rate ? { ...windowsOf(rate), resetsAt: num(rate.resetsAt) } : null,
-  };
-}
 
 const readText = (file) => {
   try {
@@ -192,31 +148,6 @@ export function local(ms, now) {
   return startOfDay(ms) === startOfDay(now) ? hm(ms) : `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${hm(ms)}`;
 }
 
-// The Lead's state from its newest hook event (packs/pstack/bin/transcript-copy.mjs writes state.json): Claude Code's Notification
-// types and the hooks the launcher sets. It is data, to be adjusted from what real Leads send; an event it does not name leaves the
-// state the Lead's log gives.
-const LEAD_STATES = {
-  'Notification:permission_prompt': 'waiting',
-  'Notification:elicitation_dialog': 'waiting',
-  'Notification:idle_prompt': 'idle',
-  Stop: 'idle',
-  SessionStart: 'idle',
-  UserPromptSubmit: 'working',
-};
-
-/** The Lead's state from state.json's event and its process: { state, stateAt, waitNote? }, or null to leave it to the log. An event
- * older than the process belongs to an earlier session. A process that carries the new SessionStart hook, is over a minute old and
- * has run none of its hooks waits at the login or the folder trust. That is an inference: whether SessionStart fires only after the
- * trust dialog has not been seen yet; it is seen at zalo-gateway's first Lead start. A Lead started before the hook existed never
- * gets this line. */
-export function leadStateOf({ event, command, ageMs, now }) {
-  const at = event ? Date.parse(event.at) : NaN;
-  if (Number.isFinite(at) && (ageMs == null || at >= now - ageMs)) {
-    const state = LEAD_STATES[event.type ? `${event.event}:${event.type}` : event.event];
-    return state ? { state, stateAt: at } : null;
-  }
-  return /"SessionStart"/.test(command) && ageMs > LOGIN_MS ? { state: 'waiting', waitNote: 'login or folder trust?' } : null;
-}
 
 function shape(p, { record, role, name, issue, folder, seat, live, mtime, start, cwd, repo, branch, harness, now, override = null, pane = null, team = null }) {
   const ageMs = now - mtime;

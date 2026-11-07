@@ -14,6 +14,7 @@ import { accessSync, constants, chmodSync, existsSync, lstatSync, mkdirSync, rea
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readClaude } from './claude-code.mjs';
 import { TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
@@ -93,18 +94,6 @@ function call(cmd, args, { extra = {}, cwd, env, timeout }) {
   return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`, stdout: r.stdout ?? '', error };
 }
 
-/** What claude auth status prints, reduced to the logged-in flag, the local part of the address and the plan; the rest is dropped. */
-export function readClaude(text) {
-  let j;
-  try {
-    j = JSON.parse(text.slice(text.indexOf('{')));
-  } catch {
-    return null;
-  }
-  if (typeof j?.loggedIn !== 'boolean') return null;
-  const email = typeof j.email === 'string' ? j.email.split('@')[0] : null;
-  return { loggedIn: j.loggedIn, account: email || null, plan: typeof j.subscriptionType === 'string' ? j.subscriptionType : null };
-}
 
 const readGh = (text) => {
   const m = /Logged in to \S+ account (\S+)/.exec(text);
