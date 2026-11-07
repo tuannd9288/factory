@@ -9,8 +9,9 @@
 //   The folder is no file, so tokenAccounts, accountList, the table of `factory` and `factory use` never see it; the name is refused as an account.
 //   The mint (client credentials, 30 days) runs under tokens/linear-app/mint.lock, a folder made with mkdir. After taking it the caller re-reads
 //   access.json: a token another caller stored meanwhile, and not one this caller found dead, is used and nothing is minted.
-//   Renewal: `renew()` mints when less than RENEW_AHEAD_MS (7 days) is left. The daemon's pass runs it once a minute (bin/lib/daemon-pass.mjs), so
-//   a token is replaced for every caller long before it ends. A host with no credentials stored is not an error: renew says 'unconfigured'.
+//   Renewal: `renew()` mints when less than RENEW_AHEAD_MS (7 days) is left. Each node's daemon pass runs it once a minute (bin/lib/daemon-pass.mjs),
+//   so a node's token is replaced for every caller on it long before it ends. A node with no credentials stored is not an error: renew says
+//   'unconfigured'.
 //   An authentication failure (HTTP 401, or an error whose code says authentication, or a message that says "authenticate"): the caller re-reads
 //   the store and retries once with a token another caller stored there; if it still fails, it mints once under the lock and retries once; if that
 //   fails too it raises the condition `linear-auth-failed` (a `start` line in events.jsonl and a line in `factory colly --brief`, bin/lib/events.mjs) and
