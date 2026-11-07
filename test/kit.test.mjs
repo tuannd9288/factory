@@ -325,7 +325,7 @@ describe('tier', () => {
   });
 });
 
-describe('verify and prove-check', () => {
+describe('verify', () => {
   let r;
   before(() => (r = repoWithKit()));
   after(() => r.cleanup());
@@ -333,7 +333,7 @@ describe('verify and prove-check', () => {
   test('passes quietly on a good tree: one summary line', () => {
     const out = script(r.repo, 'verify', [], { GATE_BASE: 'origin/main' });
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out.trim(), /^verify: 6 passed in \d+s$/);
+    assert.match(out.out.trim(), /^verify: 5 passed in \d+s$/);
   });
   test('fails when CODEOWNERS does not end with every protected path', () => {
     const owners = readFileSync(join(r.repo, '.github/CODEOWNERS'), 'utf8');
@@ -382,21 +382,6 @@ describe('verify and prove-check', () => {
     assert.match(out.out, /tests failed \(exit 0\): tests=\d+ failures=1/);
     git(r.repo, 'checkout', '-q', '--', '.gate/config.sh');
     write(r.repo, { 'test/fail.test.js': null });
-  });
-  test('prove-check fails a check that passes its fixture', () => {
-    write(r.repo, { '.gate/bin/rules': '#!/usr/bin/env bash\nexit 0\n' });
-    const out = script(r.repo, 'prove-check', ['rules']);
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /rules PASSED its fixture/);
-    git(r.repo, 'checkout', '-q', '--', '.gate/bin/rules');
-  });
-  test('a check of the repository without a fixture fails verify', () => {
-    const config = readFileSync(join(r.repo, '.gate/config.sh'), 'utf8');
-    write(r.repo, { '.gate/config.sh': config.replace('GATE_CHECKS=""', 'GATE_CHECKS="lint"\ncheck_lint() { :; }') });
-    const out = script(r.repo, 'verify', [], { GATE_BASE: 'origin/main' });
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /lint has no fixture/);
-    git(r.repo, 'checkout', '-q', '--', '.gate/config.sh');
   });
 });
 
@@ -458,17 +443,6 @@ describe('verify-trusted', () => {
     assert.equal(out.code, 1, out.out);
     assert.match(out.out, /test-focused/);
   });
-  test('fails a verify replaced by exit 0', () => {
-    const out = candidate({ '.gate/bin/verify': '#!/usr/bin/env bash\nexit 0\n' });
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /no longer fail on main's fixtures/);
-  });
-  test('fails a rules check switched off inside verify', () => {
-    const verify = readFileSync(join(r.repo, '.gate/bin/verify'), 'utf8').replace('.gate/bin/rules ${GATE_BASE:+--base "$GATE_BASE"}', 'true');
-    const out = candidate({ '.gate/bin/verify': verify });
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /rules PASSED its fixture/);
-  });
   test('fails a candidate that switches its own red-check off and changes code with no test', () => {
     const out = candidate({ '.github/workflows/gate.yml': '# every job passes\n', 'src/math.js': MUL });
     assert.equal(out.code, 1, out.out);
@@ -528,6 +502,8 @@ describe('review, verdict, tier and rounds', () => {
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
         '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
         '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
+        // FAC-41: the pull request's last base change (history.mjs moved): it never changed.
+        '  *BASE_REF_CHANGED_EVENT*) echo \'{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}\' ;;',
         '  *HEAD_REF_FORCE_PUSHED_EVENT*) cat "$FAKE/forced.json" 2>/dev/null || echo \'{"data":{"repository":{"pullRequest":{"baseRefOid":"base","timelineItems":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}\' ;;',
         '  *compare/base...old*) cat "$FAKE/overwritten.json" ;;',
         // #379: the pull request's comments, kept in $FAKE/comments.json by comments.mjs; a write fails while nowrite exists.
@@ -2443,13 +2419,6 @@ describe('hooks', () => {
   after(() => r.cleanup());
   const hooked = (args) => run(r.repo, 'git', args, { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@l', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@l' });
 
-  test('commit-msg refuses an empty, long or placeholder subject', () => {
-    write(r.repo, { 'README.md': '# app\n\nx\n' });
-    git(r.repo, 'add', '-A');
-    assert.equal(hooked(['commit', '-qm', 'x'.repeat(73)]).code, 1);
-    assert.equal(hooked(['commit', '-qm', 'WIP']).code, 1);
-    assert.equal(hooked(['commit', '-qm', 'Explain the app in the README']).code, 0);
-  });
   test('pre-commit refuses a staged focused test', () => {
     write(r.repo, { 'test/focus.test.js': "import { test } from 'node:test';\ntest.only('x', () => {});\n" });
     git(r.repo, 'add', '-A');

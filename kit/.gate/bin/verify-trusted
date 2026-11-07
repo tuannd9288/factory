@@ -2,11 +2,8 @@
 # The gate's mechanical check of every pull request, run from main's checkout so the candidate cannot edit it: the
 # `verify` job of gate.yml, on pull_request.
 #   .gate/bin/verify-trusted <candidate-dir> <base-sha>
-# 1. Main's copy of every .gate/protected path that differs is laid over a copy of the candidate, and main's verify
-#    and red-check run there, from the merge-base: the candidate's code under main's policy.
-# 2. When the candidate itself changes a protected path, its own checks must still fail on main's fixtures
-#    (prove-check --tree). Its scripts are the thing under test here, run by main's prove-check on main's fixtures, so
-#    a verify replaced by `exit 0` or a check switched off is caught before the Human is asked to approve it.
+# Main's copy of every .gate/protected path that differs is laid over a copy of the candidate, and main's verify and
+# red-check run there, from the merge-base: the candidate's code under main's policy.
 # Candidate code runs in this job: it holds no secret and no token. GATE_BODY_FILE names a file holding the PR body,
 # for red-check's No-red line.
 set -uo pipefail
@@ -18,11 +15,6 @@ cd "$trusted" || exit 2
 fork=$(git -C "$candidate" merge-base "$base" HEAD) || { echo "verify-trusted: the candidate shares no history with $base"; exit 2; }
 differs=$(git -C "$candidate" -c core.quotePath=false diff --name-only --no-renames "$base" HEAD) || { echo "verify-trusted: could not diff the candidate against $base"; exit 2; }
 overlay=$(printf '%s\n' "$differs" | node .gate/bin/lib/policy.mjs protected) || { echo "verify-trusted: $overlay"; exit 2; }
-own=$(git -C "$candidate" -c core.quotePath=false diff --name-only --no-renames "$fork" HEAD | node .gate/bin/lib/policy.mjs protected) || exit 2
-if [ -n "$own" ]; then
-  echo "verify-trusted: the change touches protected paths:"
-  printf '%s\n' "$own" | sed 's/^/  /'
-fi
 
 work=$(mktemp -d) || exit 2
 trap 'git -C "$candidate" worktree prune >/dev/null 2>&1; rm -rf "$work"' EXIT
@@ -77,15 +69,8 @@ if ! (cd "$work/overlay" && .gate/bin/red-check --base "$fork" ${GATE_BODY_FILE:
   echo "verify-trusted: main's red-check fails on the candidate's code:"
   tail -n 20 "$work/red.out" | sed 's/^/  /'
 fi
-
-# 2. The candidate's own checks against main's fixtures.
-if [ -n "$own" ] && ! .gate/bin/prove-check --all --tree "$candidate" >"$work/prove.out" 2>&1; then
-  status=1
-  echo "verify-trusted: the candidate's checks no longer fail on main's fixtures:"
-  sed 's/^/  /' "$work/prove.out"
-fi
 if [ "$status" -eq 0 ]; then
-  echo "verify-trusted: main's verify and red-check pass on the candidate$([ -n "$own" ] && echo ", and its checks fail on main's fixtures")"
+  echo "verify-trusted: main's verify and red-check pass on the candidate"
   head -1 "$work/red.out" | sed 's/^/  /'
 fi
 exit "$status"

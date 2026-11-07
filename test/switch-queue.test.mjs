@@ -31,7 +31,7 @@ function world() {
       '  *graphql*) cat "$Q/prs.json" ;;',
       '  "run rerun --job "*) case " $(cat "$Q/fail" 2>/dev/null) " in *" $4 "*) echo "HTTP 403: Workflow run cannot be rerun" >&2; exit 1 ;; esac ;;',
       '  "repo view "*) echo \'{"squashMergeAllowed":true,"mergeCommitAllowed":true}\' ;;',
-      '  "pr ready "*|"pr merge "*) ;;',
+      '  "pr ready "*|"pr merge "*|"pr update-branch "*) ;;',
       '  *) exit 1 ;;',
       'esac',
       '',
@@ -542,13 +542,42 @@ for (const drafts of ['landable', undefined]) test(`${drafts ?? 'default'} sweep
     assert.equal(r.code, 0, r.out);
     assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
       'pr ready 1 --repo o/app',
-      'pr merge 1 --repo o/app --auto --squash',
+      'pr merge 1 --repo o/app --auto --squash --match-head-commit h1',
       'pr ready 5 --repo o/app --undo',
       'pr ready 6 --repo o/app --undo',
       'pr ready 8 --repo o/app --undo',
       'pr ready 10 --repo o/app',
-      'pr merge 10 --repo o/app --auto --squash',
+      'pr merge 10 --repo o/app --auto --squash --match-head-commit h10',
       'pr ready 11 --repo o/app --undo',
+    ]);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('a child moved to main when its parent landed is first brought up to main, then readied and armed on that new head (FAC-13)', () => {
+  const w = world();
+  try {
+    w.policy('landable');
+    w.rules('1-2');
+    const child = (number, { mergeable = 'MERGEABLE', committedDate = '2026-11-07T00:00:00Z' } = {}) => {
+      const p = pull(number, { draft: true, labels: [], auto: false });
+      p.mergeable = mergeable;
+      p.timelineItems = { nodes: [{ previousRefName: 'parent', currentRefName: 'main', createdAt: '2026-11-07T01:00:00Z' }] };
+      const c = p.commits.nodes[0].commit;
+      c.committedDate = committedDate;
+      Object.assign(c.statusCheckRollup.contexts.nodes[0], { name: 'verify', conclusion: 'SUCCESS' });
+      return p;
+    };
+    // 1: its head predates the move, so its green verify ran against the parent's branch. 2: the same, but it conflicts with
+    // main, which its Lead resolves. 3: its head was made after the move (the queue's merge of main), so its verify is its own.
+    w.pulls([child(1), child(2, { mergeable: 'CONFLICTING' }), child(3, { committedDate: '2026-11-07T01:05:00Z' })]);
+    const r = w.sweep();
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
+      'pr update-branch 1 --repo o/app',
+      'pr ready 3 --repo o/app',
+      'pr merge 3 --repo o/app --auto --squash --match-head-commit h3',
     ]);
   } finally {
     w.cleanup();
@@ -589,7 +618,7 @@ for (const merge of [undefined, 'squash', 'merge']) {
       assert.equal(r.calls.filter((c) => c.startsWith('repo view')).length, merge === undefined ? 1 : 0);
       assert.deepEqual(r.calls.filter((c) => c.startsWith('pr ')), [
         'pr ready 1 --repo o/app',
-        `pr merge 1 --repo o/app --auto --${merge ?? 'squash'}`,
+        `pr merge 1 --repo o/app --auto --${merge ?? 'squash'} --match-head-commit h1`,
       ]);
     } finally {
       w.cleanup();
