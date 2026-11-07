@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
 import { RATE_LIMIT_LINE, keptEvent, rateReadingOf, resultOf } from './claude-code.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
+import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
@@ -39,8 +40,9 @@ export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta
 /** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get. It covers Bash
  * only: the Read tool, the hooks and the MCP servers run outside it, so the Read denies stay permission rules. Paths are absolute
  * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
- * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. Only ~/.config/gh is denied of ~/.config, so
- * git keeps the settings it finds there. profiles, when given, is denied whole: it holds the tokens, the archive and the seats.
+ * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. What it denies is bin/lib/deny-read.mjs's sandbox
+ * paths (of ~/.config only the named stores, ~/.config/gh and ~/.config/claude-credit, so git keeps the settings it finds there), and
+ * profiles, when given, whole: it holds the tokens, the archive and the seats.
  * Writes are allowed to the work folder, the run folder and the temporary folder (by its real path) that the tests use, and, by
  * Claude Code's defaults, to each --add-dir and to its own session temporary folder. No domain is allowed and no local binding:
  * the strict allowlist is empty, so there is no network. */
@@ -57,24 +59,14 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
     autoAllowBashIfSandboxed: false,
     allowUnsandboxedCommands: false,
     filesystem: {
-      denyRead: [...new Set([...DENY_READ.map((d) => `${home}/${d}`), ...(profiles ? [profiles] : [])])],
+      denyRead: sandboxPaths(home, profiles),
       allowWrite: [...new Set([work, run, tmp].filter(Boolean))],
     },
     network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
   };
 }
 
-/** The folders under home that no sandboxed command reads: the agent profiles and their tokens, Claude Code's and Codex's own, gh's
- * and ssh's. The seats' sandbox above denies them (#183), and so does `factory codex`'s Codex profile (packs/pstack/bin/codex-step.mjs,
- * #182). An entry with * is a glob. */
-export const DENY_READ = ['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'];
-/** DENY_READ as Claude Code's Read rules, for a session with no sandbox of ours (the MacBook Lead and Colly, FAC-38): each entry under
- * home as itself, which names a file such as ~/.claude.json, and with /**, which names what a folder holds. */
-export const denyReadRules = DENY_READ.flatMap((d) => [`Read(~/${d})`, `Read(~/${d}/**)`]);
-
-// The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
-// denied for every role but the researcher.
-export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
+// The paths no seat reads are bin/lib/deny-read.mjs's list (INN-39 item 2): its sandbox paths above, its Read rules below.
 // No agent runs `factory account add` or `factory store` (#177): the Human alone puts a token in the store. The leading `*` takes
 // `factory` by name, by a relative or an absolute path and after other words; the two library rules close the `node` grant.
 // `factory account remove` stays the Human's alone. Colly may run `factory use` and `factory lead` on his spoken word
@@ -83,12 +75,12 @@ export const tokenStoreDeny = [
   'Bash(*factory account add*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs store*)',
   'Bash(*factory use*)', 'Bash(*factory account remove*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs account remove*)',
 ];
-// The copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185): only the Lead reads its own, so every seat role is
-// denied them. The Lead's own deny list takes secretsRead alone.
-export const leadTranscripts = 'Read(~/factory-runs/*/transcripts/**)';
-const denyOf = (home, web) => [
+// The deny list of every role, with env and printenv for every role and seat (#181). WebFetch and WebSearch are denied for every role but
+// the researcher. The read rules are a seat's: among them the copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185),
+// which only the Lead reads, and the profiles folder whole, by its absolute path too when it is given.
+const denyOf = (home, web, profiles) => [
   ...tokenStoreDeny, 'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
-  'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead, leadTranscripts,
+  'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...readRules({ profiles, role: 'seat' }),
   // The keychain of the user the seat runs as, which on the MacBook can hold logins the factory never put there (#366).
   'Bash(security:*)', 'Bash(/usr/bin/security:*)',
 ];
@@ -125,9 +117,8 @@ export const PRESETS = {
 export const ROLES = Object.keys(PRESETS);
 
 /** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories); skills become
- * Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, adds three deny
- * rules for every seat (#178): the tokens folder, the archive folder and seat 1's old token file; deny is a run's own extra deny
- * rules (#92), which come after the role's and before those three. The mode is auto and the only grants are StructuredOutput,
+ * Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, is denied whole by its absolute path for
+ * every seat (#178), beside ~/.agent-profiles; deny is a run's own extra deny rules (#92), which come after the role's. The mode is auto and the only grants are StructuredOutput,
  * the skills and the run's own allow, the deny rules staying whole (#307). With hideKey the mode is default (the scrub forces it,
  * Claude Code 2.1.308, #188), with the role's allow list and one Edit rule for each of the session's own folders (run, work and
  * each --add-dir): Write, Edit and redirects reach those only. */
@@ -135,7 +126,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
   const edits = p.hideKey ? [...new Set([run, work, ...addDirs].filter(Boolean))].map((d) => `Edit(/${d}/**)`) : [];
-  const deny = [...denyOf(home, p.web), ...(p.deny ?? []), ...extraDeny, ...(profiles ? [`Read(/${profiles}/tokens/**)`, `Read(/${profiles}/archive/**)`, `Read(/${profiles}/seats/1/oauth-token)`] : [])];
+  const deny = [...denyOf(home, p.web, profiles), ...(p.deny ?? []), ...extraDeny];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
