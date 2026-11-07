@@ -1,16 +1,20 @@
 // The factory's events (#309): the queue's sweep writes one line to $FACTORY_STATE/events.jsonl when one of its conditions
 // begins (`start`) and one when it ends (`clear`); a condition that holds writes nothing more. A line is one JSON object:
 // { seq, at, type, kind, key, text }. `seq` counts up from 1 across the file and is what a reader's cursor holds; `key` names the
-// condition (it begins with the kind), so a clear matches its start. The first five kinds:
+// condition (it begins with the kind), so a clear matches its start. The sweep's seven kinds:
 //   check-not-started  a check `main` requires is missing from the head commit of a pull request waiting on auto-merge, or is there
 //                      and has not started, for NOT_STARTED_MS from the first sweep that saw it (a dead runner leaves it so)
 //   waiting-on-human   a tier-3 or needs-human pull request whose tier check did not succeed, or an open issue labelled needs-human
 //   lead-at-dialog     a Lead whose newest hook event is a permission prompt or an elicitation dialog
-//   out-of-quota       an account Claude Code has rejected until a reset that has not come
+//   out-of-quota       an account Claude Code has rejected until a reset that has not come, or a Codex seat's usage limit refused (#474)
 //   gh-refused         the sweep's own gh refused for a rate limit or a login
-// and a sixth (#333):
-//   switch-moved       a repository's merge switch moved since the sweep before; held 24 hours from the sweep that saw it
-// The sweep writes them (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
+//   switch-moved       a repository's merge switch moved since the sweep before; held 24 hours from the sweep that saw it (#333)
+//   model-at-capacity  a Codex seat whose model is at capacity (#474)
+// and one it keeps with no line, codex-seat: the account a Codex seat's log last named, so a move to another is told once, as a one-time
+// `account-moved` start line (#474). Two more kinds come through record from elsewhere: linear-auth-failed, the Factory app's Linear token
+// refused (bin/lib/linear.mjs; the Linear source's is `linear-auth-failed source`, bin/lib/linear-listen.mjs), and inn-answer, his answer on
+// an INN issue, which is never cleared (innAnswer, #414).
+// The sweep writes its kinds (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
 // of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
 // which are no condition and are never cleared; the sweep writes one too, a `comment` line when it wakes a Lead for a new comment (#351,
 // bin/lib/comment-wake.mjs), and one line of its own for each piece of news of a Lead's seats, checks and pull request (#370,
