@@ -13,6 +13,7 @@ import { ask, socketPath } from './daemon-proto.mjs';
 import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
+import { MODELS, claudeModelArgs, entryOf } from './models.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
 import { repoOk } from './repos.mjs';
@@ -93,10 +94,11 @@ const denyOf = (home, web, profiles) => [
  *   (run-71tx.sh, run-71rc.sh). Its git goes through bin/research-git, and every other form of git is denied (#181).
  * deny is a role's own deny rules, after the common ones. A preset without hideKey runs in auto mode with no role allow list and
  * no scrub, holding the team's key, and keeps every deny rule (the Human, 2026-11-01, #307). hideKey: true is the researcher's
- * switch alone (below); only a pull request the Human approves changes it. */
+ * switch alone (below); only a pull request the Human approves changes it. Each role's model and effort are its seats.<role> entry in
+ * the factory's one table, bin/lib/models.json (INN-39, contract H7). */
 export const PRESETS = {
-  worker: { model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, web: false, sandbox: true },
-  reviewer: { model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, web: false, sandbox: true },
+  worker: { turns: 400, resumeTurns: 200, web: false, sandbox: true },
+  reviewer: { turns: 300, resumeTurns: 300, web: false, sandbox: true },
   researcher: {
     // hideKey: true is today's setup: the scrub, the default mode, the short allow list below and seat 2. false makes it run like
     // the rest of the team (the Human, 2026-11-01: "Làm, mặc định giấu"). Flipping it is a pull request the Human approves,
@@ -105,7 +107,7 @@ export const PRESETS = {
     // The Lead's proposal (review of #91, #6), agreed by Colly on 2026-10-26: the researcher reads untrusted pages and can send
     // them out with WebFetch, so it never runs on seat 1. Since #178 seat 2 holds a token too; its grants were reviewed for that
     // (AGENTS.md): no tool of its own returns a file's content but Read, which the deny rules refuse on the tokens.
-    model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, web: true, seats: [2],
+    turns: 300, resumeTurns: 200, web: true, seats: [2],
     allow: () => [
       'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${RESEARCH_GIT}:*)`,
       'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)',
@@ -121,15 +123,16 @@ export const ROLES = Object.keys(PRESETS);
  * every seat (#178), beside ~/.agent-profiles; deny is a run's own extra deny rules (#92), which come after the role's. The mode is auto and the only grants are StructuredOutput,
  * the skills and the run's own allow, the deny rules staying whole (#307). With hideKey the mode is default (the scrub forces it,
  * Claude Code 2.1.308, #188), with the role's allow list and one Edit rule for each of the session's own folders (run, work and
- * each --add-dir): Write, Edit and redirects reach those only. */
-export function buildArgs({ role, run, work = null, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, profiles = null }) {
+ * each --add-dir): Write, Edit and redirects reach those only. models is the table the role's model and effort come from. */
+export function buildArgs({ role, run, work = null, home, resume = null, skills = [], allow = [], deny: extraDeny = [], addDirs = [], maxTurns = null, profiles = null, models = MODELS }) {
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
+  const entry = entryOf(models, 'seats', role);
   const edits = p.hideKey ? [...new Set([run, work, ...addDirs].filter(Boolean))].map((d) => `Edit(/${d}/**)`) : [];
   const deny = [...denyOf(home, p.web, profiles), ...(p.deny ?? []), ...extraDeny];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
-    '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
+    ...claudeModelArgs(entry), '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
     '--permission-mode', p.hideKey ? 'default' : 'auto',
     ...(p.sandbox ? ['--settings', JSON.stringify({ sandbox: sandboxSettings({ home, run, work, profiles }) })] : []),
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
@@ -393,6 +396,9 @@ const onPath = (name, PATH) => (PATH ?? '').split(':').some((d) => d && existsSy
 export function launch(argv, env = process.env) {
   const o = parseArgs(argv);
   if (!Object.hasOwn(PRESETS, o.role)) throw new Refused(`unknown role ${o.role}; the roles are ${ROLES.join(', ')}`);
+  // The role's entry in the factory's one table (INN-39), checked before anything is read or claimed; buildArgs passes the same entry.
+  let model;
+  try { ({ model } = entryOf(MODELS, 'seats', o.role)); } catch (e) { throw new Refused(e.message); }
   // Seats run only as the agents' macOS user (#366 (a)): `factory`, on the Mac mini and on the MacBook, never the Human's own user, whose
   // files and Keychain a seat would hold. A Lead's role says so; this is the permission (H6), checked before anything is read or claimed.
   if (!isAgentsUser(env)) throw new Refused(`this account, ${userInfo().username}, is not the agents' user ${env.FACTORY_HOST_USER || 'factory'}: a seat runs only as that user (#366), so nothing was started`);
@@ -440,7 +446,7 @@ export function launch(argv, env = process.env) {
     if (started.moved) throw new Moved(started.head);
     const { seat, pidFile, unclaim, name } = started.value;
     try {
-      return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, team, name });
+      return spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, team, name, model });
     } catch (e) {
       rmSync(join(run, `run-${tag}.name`), { force: true }); // a refused start leaves nothing
       throw e;
@@ -506,7 +512,7 @@ function register({ o, runs, state, run, tag, account }) {
   }
 }
 
-function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, team, name }) {
+function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag, pidFile, seat, account, team, name, model }) {
   const tokenPath = join(tokenDir(profiles), account);
   readToken(tokenPath, seat, account); // refuses now; the supervisor reads it again, just before it starts claude
 
@@ -533,7 +539,7 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
-    childFile: join(run, `run-${tag}.child`), tokenPath, account, team, role: o.role, seat, tag, name, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
+    childFile: join(run, `run-${tag}.child`), tokenPath, account, team, role: o.role, seat, tag, name, run, state, model, resume: o.resume ?? null, start: new Date().toISOString(),
   };
   for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });

@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { freeWord } from '../../../bin/lib/team-names.mjs';
+import { MODELS, claudeModelArgs, pstackModels } from '../../../bin/lib/models.mjs';
 
 const real = fileURLToPath(new URL('../../..', import.meta.url));
 const PSTACK = JSON.parse(readFileSync(join(real, 'packs/pstack/settings.json'), 'utf8'));
@@ -52,7 +53,6 @@ function world(body, { settings = PSTACK } = {}) {
   cpSync(join(real, 'packs/pstack/bin/lead.mjs'), join(w.tree, 'packs/pstack/bin/lead.mjs'));
   cpSync(join(real, 'packs/pstack/bin/transcript-copy.mjs'), join(w.tree, 'packs/pstack/bin/transcript-copy.mjs')); // copied into the run folder (#257)
   cpSync(join(real, 'packs/pstack/settings.json'), join(w.tree, 'packs/pstack/settings.json')); // the factory's pin
-  cpSync(join(real, 'packs/pstack/pstack-models.md'), join(w.tree, 'packs/pstack/pstack-models.md'));
   writeFileSync(join(w.tree, 'packs/pstack/lead.md'), '# role\n');
   const repo = join(w.tree, 'zalo');
   mkdirSync(join(repo, '.git'), { recursive: true });
@@ -112,7 +112,7 @@ describe('lead --dry-run', () => {
     // The hook runs a copy in the Lead's run folder (#257); a dry run names it and makes none.
     assert.match(lines[3], new RegExp(`^transcript hook: '${w.bin}/node' '${w.home}/factory-runs/zalo-lead/hooks/transcript-copy-[0-9a-f]{7}\\.mjs' '${w.home}/factory-runs/zalo-lead/transcripts'$`));
     assert.ok(!existsSync(join(w.home, 'factory-runs')), 'a dry run copied nothing');
-    assert.match(lines[4], /^direnv exec \. claude --model opus .* --settings \{"autoMemoryEnabled":false,"hooks":\{"SessionStart":/);
+    assert.match(lines[4], new RegExp(`^direnv exec \\. claude ${claudeModelArgs(MODELS.lead.remote).join(' ')} .* --settings \\{"autoMemoryEnabled":false,"hooks":\\{"SessionStart":`));
     assert.deepEqual(w.log(), []);
     assert.ok(!existsSync(w.pluginRoot));
   }));
@@ -159,7 +159,7 @@ describe('lead resumes by default', () => {
     assert.equal(resumed(w.log().at(-1)), null);
     const rule = join(w.config, 'rules/pstack-models.md');
     const first = readFileSync(rule);
-    assert.deepEqual(first, readFileSync(join(real, 'packs/pstack/pstack-models.md')));
+    assert.equal(first.toString(), pstackModels(MODELS.pstack));
     assert.equal(w.lead().code, 0);
     assert.deepEqual(readFileSync(rule), first);
 

@@ -7,6 +7,8 @@ import { factory } from './helpers.mjs';
 import { readRules } from '../bin/lib/deny-read.mjs';
 
 const lib = () => import('../bin/lib/seat.mjs');
+// Each role's model and effort are the factory's one table's (INN-39): the pins below read them from it.
+const { MODELS, claudeModelArgs } = await import('../bin/lib/models.mjs');
 
 const RUN = '/r/issue-1';
 const WORK = '/r/w';
@@ -34,10 +36,10 @@ const sandboxed = async () => {
 };
 const tail = ['--output-format', 'stream-json', '--verbose', '--json-schema', SCHEMA];
 
-test('worker: sonnet, medium effort, 400 turns, auto mode, no role allow list and the common deny list (#307)', async () => {
+test('worker: the table\'s model and effort, 400 turns, auto mode, no role allow list and the common deny list (#307)', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'worker', run: RUN, home: HOME, work: WORK }), [
-    '-p', '--model', 'sonnet', '--effort', 'medium', '--max-turns', '400', '--permission-mode', 'auto',
+    '-p', ...claudeModelArgs(MODELS.seats.worker), '--max-turns', '400', '--permission-mode', 'auto',
     '--settings', await sandboxed(),
     '--add-dir', RUN,
     '--allowedTools', 'StructuredOutput',
@@ -46,10 +48,10 @@ test('worker: sonnet, medium effort, 400 turns, auto mode, no role allow list an
   ]);
 });
 
-test('reviewer: opus, high effort, 300 turns, auto mode, no role allow list and the common deny list (#307)', async () => {
+test('reviewer: the table\'s model and effort, 300 turns, auto mode, no role allow list and the common deny list (#307)', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'reviewer', run: RUN, home: HOME, work: WORK }), [
-    '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'auto',
+    '-p', ...claudeModelArgs(MODELS.seats.reviewer), '--max-turns', '300', '--permission-mode', 'auto',
     '--settings', await sandboxed(),
     '--add-dir', RUN,
     '--allowedTools', 'StructuredOutput',
@@ -58,10 +60,10 @@ test('reviewer: opus, high effort, 300 turns, auto mode, no role allow list and 
   ]);
 });
 
-test('researcher: opus, high effort, 300 turns, the web and git only through bin/research-git, and no WebFetch or WebSearch deny', async () => {
+test('researcher: the table\'s model and effort, 300 turns, the web and git only through bin/research-git, and no WebFetch or WebSearch deny', async () => {
   const { buildArgs } = await lib();
   assert.deepEqual(buildArgs({ role: 'researcher', run: RUN, home: HOME, work: WORK }), [
-    '-p', '--model', 'opus', '--effort', 'high', '--max-turns', '300', '--permission-mode', 'default',
+    '-p', ...claudeModelArgs(MODELS.seats.researcher), '--max-turns', '300', '--permission-mode', 'default',
     '--add-dir', RUN,
     '--allowedTools', ...RESEARCHER_ALLOW, ...EDITS, 'StructuredOutput',
     '--disallowedTools', ...DENY.filter((r) => r !== 'WebFetch' && r !== 'WebSearch'), 'Bash(git:*)',
@@ -72,10 +74,10 @@ test('researcher: opus, high effort, 300 turns, the web and git only through bin
 test('a resume names the session, takes the role\'s resume turns, and keeps the preset otherwise', async () => {
   const { buildArgs } = await lib();
   const worker = buildArgs({ role: 'worker', run: RUN, home: HOME, work: WORK, resume: 'sid-1' });
-  assert.deepEqual(worker.slice(0, 9), ['-p', '--resume', 'sid-1', '--model', 'sonnet', '--effort', 'medium', '--max-turns', '200']);
+  assert.deepEqual(worker.slice(0, 9), ['-p', '--resume', 'sid-1', ...claudeModelArgs(MODELS.seats.worker), '--max-turns', '200']);
   assert.deepEqual(worker.slice(9), buildArgs({ role: 'worker', run: RUN, home: HOME, work: WORK }).slice(7));
   const reviewer = buildArgs({ role: 'reviewer', run: RUN, home: HOME, resume: 'sid-2' });
-  assert.deepEqual(reviewer.slice(0, 9), ['-p', '--resume', 'sid-2', '--model', 'opus', '--effort', 'high', '--max-turns', '300']);
+  assert.deepEqual(reviewer.slice(0, 9), ['-p', '--resume', 'sid-2', ...claudeModelArgs(MODELS.seats.reviewer), '--max-turns', '300']);
 });
 
 test('--skill adds Skill(<name>) and --allow a run\'s own rule, after the preset\'s, and --add-dir and --max-turns are honoured', async () => {
@@ -112,7 +114,7 @@ test('an unknown role is refused by name', async () => {
 test('a researcher\'s resume takes 200 turns', async () => {
   const { buildArgs } = await lib();
   const resumed = buildArgs({ role: 'researcher', run: RUN, home: HOME, resume: 'sid-3' });
-  assert.deepEqual(resumed.slice(0, 9), ['-p', '--resume', 'sid-3', '--model', 'opus', '--effort', 'high', '--max-turns', '200']);
+  assert.deepEqual(resumed.slice(0, 9), ['-p', '--resume', 'sid-3', ...claudeModelArgs(MODELS.seats.researcher), '--max-turns', '200']);
   assert.deepEqual(resumed.slice(9), buildArgs({ role: 'researcher', run: RUN, home: HOME }).slice(7));
 });
 

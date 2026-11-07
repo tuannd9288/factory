@@ -1,0 +1,36 @@
+{
+  "$comment": "Every factory role's model and effort, in one place (INN-39, contract H7); bin/lib/models.mjs reads it. inherit, or a key left out: pass no model or effort, so the harness's own default applies. lead.remote is the pack Lead on the Mac mini, lead.here the MacBook's own Lead; they stay apart until the Human chooses one value. The gate's reviewer keeps its own pin in the kit, kit/.gate/bin/lib/reviewer.json, which every served repository carries. The Watcher keeps its own frozen setting, bin/lib/reader.json (docs/decisions.md, The Watcher's freeze, 2026-11-07). On a model change, re-check FAC-73. A change here is a pull request.",
+  "seats": {
+    "worker": { "model": "sonnet", "effort": "medium" },
+    "reviewer": { "model": "opus", "effort": "high" },
+    "researcher": { "model": "opus", "effort": "high" }
+  },
+  "lead": {
+    "remote": { "model": "opus", "effort": "high" },
+    "here": { "model": "inherit", "effort": "inherit" }
+  },
+  "colly": { "model": "inherit", "effort": "inherit" },
+  "codex": { "model": "inherit" },
+  "pstack": {
+    "budget": "large (xhigh)",
+    "roles": {
+      "feature, refactoring": "inherit-parent",
+      "bug-fix": "inherit-parent",
+      "perf-issue": "inherit-parent",
+      "hillclimb": "inherit-parent",
+      "judgment and prose": "opus xhigh",
+      "hardest tasks": "opus xhigh",
+      "how explorer": "inherit-parent",
+      "how explainer": "opus xhigh",
+      "why investigators": "inherit-parent",
+      "why synthesizer": "opus xhigh",
+      "reflect tooling": "inherit-parent",
+      "reflect judgment, divergent, synthesizer": "opus xhigh",
+      "arena runners": "opus xhigh, codex high",
+      "arena cross-judge pool": "codex high",
+      "swarm workers": "inherit-parent",
+      "architect runners": "opus xhigh, codex high",
+      "interrogate reviewers": "opus xhigh, codex high"
+    }
+  }
+}
