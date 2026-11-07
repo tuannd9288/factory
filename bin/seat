@@ -2,6 +2,8 @@
 # bin/seat <role> <brief> --run <run folder> --work <work folder> [options] (#91): starts one unattended `claude -p` session
 # in the background, on a seat, with the role's preset, and appends its record to $FACTORY_STATE/sessions.jsonl when it ends.
 # Exits 2 on a usage error, a missing seat token or no free seat. See bin/lib/seat.mjs.
+# It starts nothing unless it runs as the agents' macOS user, FACTORY_HOST_USER (default `factory`), on the Mac mini and on the MacBook alike:
+# never as the Human's own user, whose files and Keychain a seat would hold (#366 (a); isAgentsUser, bin/lib/node.mjs). Exits 2 then too.
 # Right after that append the supervisor posts { verb: 'seat-ended', run, tag, session } to the daemon's socket, $FACTORY_STATE/daemon.sock
 # (#399, bin/lib/daemon.mjs), 2 s at most, so the seat's Lead is woken within seconds and not at the next pass. It never starts the daemon (its
 # pass needs the job's environment, not a seat's account), and a post that fails changes nothing about the seat: one line in run-<tag>.err.
@@ -56,7 +58,7 @@
 # gives its https URL and a pushed commit, never a path, the factory's own repository included.
 # Known limit (#311): a session can set FACTORY_TEAM itself in a command it types, and so start a seat on another team's
 # account; lead.md says it must not. Known limit: the token files sit on disk, and the team holds the key by decision (#307). The
-# worker's and the reviewer's Bash runs in Claude Code's sandbox (#183), set in the one --settings value with the alerts hook: it
+# worker's and the reviewer's Bash runs in Claude Code's sandbox (#183), set in the one --settings value they get: it
 # denies reading the profiles folder, `~/.claude*`, `~/.codex*`, `~/.config/gh`, `~/.ssh` and `~/.local/share/claude`, allows
 # writes to the work folder, the run folder, the temporary folder, each `--add-dir` and Claude Code's own session temporary
 # folder (its defaults), and allows no network, and a sandbox that cannot start ends the session. bin/seat sets FACTORY_SANDBOX=1

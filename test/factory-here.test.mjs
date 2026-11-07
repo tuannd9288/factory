@@ -116,7 +116,7 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_CONFIG_KEY_2: push, GIT_CONFIG_VALUE_2: 'git@github.com:',
       GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
     });
-    assert.deepEqual(permissions.deny, [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${join(s.dir, 'profiles')}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)']);
+    assert.deepEqual(permissions.deny, [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${join(s.dir, 'profiles')}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)']);
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
     assert.equal(statSync(empty).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(empty), []);
@@ -413,6 +413,30 @@ test('linear refuses a usage error on the MacBook before any ssh, and a body tha
     }
     assert.equal(s.calls(), '', 'no ssh call');
     assert.equal(s.read('host.args'), '');
+  } finally {
+    s.done();
+  }
+});
+
+test('linear runs on this node when its token store holds the Factory app\'s credentials, else on the host; Colly\'s verbs on the host (FAC-38)', () => {
+  const s = world();
+  try {
+    hostFactory(s);
+    const list = ['linear', 'list', '--team-key', 'ZZZ'];
+    assert.equal(s.fac(list).code, 0);
+    assert.deepEqual(s.nuls('host.args'), list, 'with no app credentials here, on the host');
+    const app = join(s.dir, 'profiles/tokens/linear-app');
+    mkdirSync(app, { recursive: true });
+    for (const name of ['client-id', 'client-secret']) writeFileSync(join(app, name), `invented-${name}\n`);
+    s.w('calls.log', '');
+    s.w('host.args', '');
+    const r = s.fac(list);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /team ZZZ is not the team of a repository on Linear/, 'run here, on this node\'s own registry, before any request');
+    assert.equal(s.calls(), '', 'no ssh call');
+    const close = ['linear', 'decision-close', 'INN-7', '--body-file', '-'];
+    assert.equal(s.fac(close, 'done\n').code, 0);
+    assert.deepEqual(s.nuls('host.args'), close, 'a verb that acts as Colly still runs on the host');
   } finally {
     s.done();
   }
