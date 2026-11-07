@@ -5,11 +5,14 @@
 // Only rows.jsonl is published. Costs are already in sessions.jsonl; the ledger's quota reader (seat.accountEvent) reads rate_limit_event
 // lines from run*.jsonl one level under FACTORY_RUNS. No assistant text, transcripts, sidecars or profile files are copied.
 // FAC-38: the writer runs in the daemon at each ping, pass and seat end, so it works in proportion to what is new. shared-records.cursors.json
-// holds, for the outbox head it was written at, the size of the local copy of that head's rows (shared-records.rows) and how far each file was
-// taken (whole lines). A file that grew is read from there; one that did not is not opened; nothing is fetched while the head is the pushed
-// one, and a head that only adds commits to the pushed tip, which origin still has, is pushed without reading origin's rows. When the cursors
-// do not match the head (the first run, a crash between the two writes, a file that shrank), every file and the head's rows are read once.
+// holds, for the outbox head it was written at, the size of the local copy of that head's rows (shared-records.rows) and, for each file, how
+// far it was taken (whole lines), a hash of the 4 KiB before that point and its mtime. A file that grew is read from there; one unchanged in
+// size and mtime is not opened; one emptied and written again (a seat's log when its tag runs again) no longer has those bytes and is read from
+// its start. Nothing is fetched while the head is the pushed one, and a head that only adds commits to the pushed tip, which origin still has,
+// is pushed without reading origin's rows. When the cursors do not match the head (the first run, a crash between the two writes), every file
+// and the head's rows are read once.
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, truncateSync, writeFileSync, appendFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
@@ -33,73 +36,96 @@ const sizeOf = (file) => {
 };
 
 const CHUNK = Buffer.alloc(1 << 20);
+const TAIL = 4096;
 const RATE_LIMIT = '"type":"rate_limit_event"'; // seat.accountEvent's selector, verbatim
 
-/** Calls `each` with the bytes of each whole line of `file` from byte `at` to its last newline, read 1 MiB at a time into one buffer (larger
- * only for a longer line), so a long log is never in memory whole and only the lines kept are decoded; the bytes are valid during the call.
- * Returns the position after the last line, or null when the file is shorter than `at`. */
-function eachLine(file, at, each) {
-  const size = sizeOf(file);
-  if (size === null || size === at) return at;
-  if (size < at) return null;
+/** Calls `each` with the bytes of each whole line of `fd` from byte `at` to its last newline before `size`, read 1 MiB at a time into one
+ * buffer (larger only for a longer line), so a long log is never in memory whole and only the lines kept are decoded; the bytes are valid
+ * during the call. Returns the position after the last line. */
+function eachLine(fd, at, size, each) {
+  let buf = CHUNK;
+  let kept = 0; // the start of a line that the next read completes
+  let pos = at;
+  let end = at;
+  while (pos < size) {
+    if (kept === buf.length) {
+      const bigger = Buffer.alloc(buf.length * 2);
+      buf.copy(bigger, 0, 0, kept);
+      buf = bigger;
+    }
+    const n = readSync(fd, buf, kept, Math.min(buf.length - kept, size - pos), pos);
+    if (!n) break;
+    pos += n;
+    const len = kept + n;
+    const read = buf.subarray(0, len);
+    let start = 0;
+    for (let nl = read.indexOf(10); nl !== -1; nl = read.indexOf(10, start)) {
+      each(read.subarray(start, nl));
+      start = nl + 1;
+    }
+    if (start) end = pos - (len - start);
+    buf.copy(buf, 0, start, len);
+    kept = len - start;
+  }
+  return end;
+}
+
+/** A hash of the bytes of `fd` just before `at`, up to 4 KiB: the end of what was taken, which a log emptied and written again no longer has. */
+function tailOf(fd, at) {
+  const k = Math.min(at, TAIL);
+  const buf = CHUNK.subarray(0, k);
+  let got = 0;
+  for (let n; got < k; got += n) if (!(n = readSync(fd, buf, got, k - got, at - k + got))) break;
+  return createHash('sha256').update(buf.subarray(0, got)).digest('base64url');
+}
+
+/** Takes the whole lines of `file` past `was` ({ at, tail, mtime }: the position after the lines taken before, the hash of the bytes just before
+ * it, and the file's mtime then) and returns the new { at, tail, mtime }; `was` itself when the file is gone, or unchanged in size and mtime,
+ * which is not opened. A file shorter than `at`, or whose bytes before `at` are no longer those taken, was emptied and written again (a seat's
+ * log when its tag runs again, bin/lib/seat.mjs), so it is read from its start. */
+function take(file, was, each) {
+  let st;
+  try {
+    st = statSync(file);
+  } catch (error) {
+    if (error.code === 'ENOENT') return was;
+    throw error;
+  }
+  if (was && st.size === was.at && st.mtimeMs === was.mtime) return was;
   const fd = openSync(file, 'r');
   try {
-    let buf = CHUNK;
-    let kept = 0; // the start of a line that the next read completes
-    let pos = at;
-    let end = at;
-    while (pos < size) {
-      if (kept === buf.length) {
-        const bigger = Buffer.alloc(buf.length * 2);
-        buf.copy(bigger, 0, 0, kept);
-        buf = bigger;
-      }
-      const n = readSync(fd, buf, kept, Math.min(buf.length - kept, size - pos), pos);
-      if (!n) break;
-      pos += n;
-      const len = kept + n;
-      const read = buf.subarray(0, len);
-      let start = 0;
-      for (let nl = read.indexOf(10); nl !== -1; nl = read.indexOf(10, start)) {
-        each(read.subarray(start, nl));
-        start = nl + 1;
-      }
-      if (start) end = pos - (len - start);
-      buf.copy(buf, 0, start, len);
-      kept = len - start;
-    }
-    return end;
+    const at = was && st.size >= was.at && tailOf(fd, was.at) === was.tail ? was.at : 0;
+    const end = eachLine(fd, at, st.size, each);
+    return { at: end, tail: tailOf(fd, end), mtime: st.mtimeMs };
   } finally {
     closeSync(fd);
   }
 }
 
-/** The rows of the local files past the positions in `from` (by file: 'sessions.jsonl', '<folder>/<run*.jsonl>'), and the new positions; a
- * file that is gone keeps its position. null when a file is shorter than its position, so the caller reads every file again. */
+/** The rows of the local files past their cursors in `from` (by file: 'sessions.jsonl', '<folder>/<run*.jsonl>'), and the new cursors; a
+ * file that is gone keeps its cursor. */
 function localRows(state, runs, node, from = {}) {
   const out = [];
   const files = { ...from };
-  const sessions = eachLine(join(state, 'sessions.jsonl'), from['sessions.jsonl'] ?? 0, (bytes) => {
+  const sessions = take(join(state, 'sessions.jsonl'), from['sessions.jsonl'], (bytes) => {
     const row = bytes.toString('utf8');
     if (!row.trim()) return;
     JSON.parse(row); // Never advance past a damaged session record.
     out.push(`{"v":1,"node":${JSON.stringify(node)},"kind":"session","row":${row}}`);
   });
-  if (sessions === null) return null;
   if (sessions) files['sessions.jsonl'] = sessions;
   for (const folder of existsSync(runs) ? readdirSync(runs, { withFileTypes: true }) : []) {
     if (!folder.isDirectory()) continue;
     for (const name of readdirSync(join(runs, folder.name))) {
       if (!name.startsWith('run') || !name.endsWith('.jsonl')) continue;
       const key = `${folder.name}/${name}`;
-      const end = eachLine(join(runs, key), from[key] ?? 0, (bytes) => {
+      const log = take(join(runs, key), from[key], (bytes) => {
         if (!bytes.includes(RATE_LIMIT)) return;
         const line = bytes.toString('utf8');
         try { JSON.parse(line); } catch { return; }
         out.push(`{"v":1,"node":${JSON.stringify(node)},"kind":"log","run":${JSON.stringify(key)},"line":${line}}`);
       });
-      if (end === null) return null;
-      if (end) files[key] = end;
+      if (log) files[key] = log;
     }
   }
   return { rows: out, files };
@@ -170,7 +196,8 @@ export function recordsWriter({ state, runs, remote = REMOTE, node = nodeName(),
   const readCursors = () => {
     try {
       const c = JSON.parse(readFileSync(cursorsFile, 'utf8'));
-      return typeof c?.head === 'string' && Number.isInteger(c.rowsBytes) && c.files && typeof c.files === 'object' ? c : null;
+      const fileOk = (f) => Number.isInteger(f?.at) && typeof f.tail === 'string' && typeof f.mtime === 'number';
+      return typeof c?.head === 'string' && Number.isInteger(c.rowsBytes) && c.files && typeof c.files === 'object' && Object.values(c.files).every(fileOk) ? c : null;
     } catch {
       return null;
     }

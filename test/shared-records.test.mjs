@@ -134,13 +134,15 @@ test('a flush reads only what is new: bytes it took are not read again, and noth
   const rows = () => git(remote, 'show', 'records/test-node:rows.jsonl').split('\n').map(JSON.parse);
   try {
     writeFileSync(join(state, 'sessions.jsonl'), `${JSON.stringify({ tag: 'a' })}\n${JSON.stringify({ tag: 'b' })}\n`);
-    writeFileSync(log, `${rate(1)}\n${other}\n`);
+    // More than 4 KiB of stream lines after the second line, which the writer checks to know the log is the one it read.
+    const rest = `${other}\n`.repeat(60);
+    writeFileSync(log, `${rate(1)}\n${other}\n${rest}`);
     await flush();
     assert.deepEqual(errors, []);
     assert.equal(rows().length, 3);
     gitRan();
     // The stream line it took is rewritten in place into a rate limit line: a flush that read it again would publish it.
-    writeFileSync(log, `${rate(1)}\n${twin}\n`);
+    writeFileSync(log, `${rate(1)}\n${twin}\n${rest}`);
     await flush();
     assert.deepEqual(errors, []);
     assert.equal(rows().length, 3, 'bytes already taken are not read again');
@@ -151,6 +153,13 @@ test('a flush reads only what is new: bytes it took are not read again, and noth
     assert.deepEqual(rows().at(-1).line, JSON.parse(rate(2)));
     assert.equal(rows().length, 4, 'only the appended line is new');
     assert.deepEqual(gitRan().filter((c) => ['show', 'fetch'].includes(c)), [], 'a head that only adds to the pushed tip is pushed without reading rows');
+    // The tag runs again: bin/seat empties its log, and the new run writes past where the old one ended before the next flush.
+    writeFileSync(log, '');
+    appendFileSync(log, `${rate(3)}\n${rest}${rest}`);
+    await flush();
+    assert.deepEqual(errors, []);
+    assert.deepEqual(rows().at(-1).line, JSON.parse(rate(3)), 'a log written again is read from its start');
+    assert.equal(rows().length, 5);
   } finally {
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
     Object.assign(process.env, saved);
