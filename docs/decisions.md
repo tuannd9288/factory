@@ -248,7 +248,7 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   Data leaving the machine, needing a server or costing money is a warning, never a reason to reject; use what exists before building (21/10, 03/11).
 - **The Watcher's freeze, 2026-11-07.** On INN-39 he ticked box 3, which read "3. Đóng băng Watcher (bộ đọc log cho
   Colly): không mở rộng thêm, cắt khi model đọc thẳng được (đề xuất)" (14:43:52 +07, 07:43:52Z). He then accepted the
-  independent review's amendment, which replaces the box's end condition with "until he revisits its scope on
+  independent review's amendment, which replaces the box's end condition with "until the Human revisits its scope on
   evidence": "Theo đề xuất của mày và Advisor đi" (15:15:36 +07, 08:15:36Z). What holds: the Watcher's detector is
   frozen, its kinds (`KINDS` and `watch_fired` in `bin/lib/reader.mjs`) and its sides (`SIDES`, `bin/lib/reader.json`),
   until the Human revisits its scope on evidence. The Watcher stays on by default, as he decided on 2026-11-06. Its
