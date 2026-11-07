@@ -12,6 +12,10 @@
 # accounts file's ($FACTORY_STATE/accounts) old seat rows name it only for an older record that has none.
 # --rows prints one tab-separated row per task (one pull request opened in the window); --digest (the default) prints
 # the digest; --post files it as an issue labelled "digest" in the named repository, which must be private (#209).
+# The digest's change fail rate (INN-40) counts a merged PR as failed when a revert undoes it or a later PR's "Fixes: <sha>"
+# line names it; the sha is resolved by git in the repository's clone, never gh. A fix of a PR merged before the period is
+# counted in the week it lands. Each repository's rate is also given since its merge switch last moved, from the sweep's
+# $FACTORY_STATE/queue-<owner>-<name>.position and one GitHub search of that window. Data only: nothing gates on it.
 # --last-week is the 7 days that end yesterday, in place of --since and --until. The job posts it to
 # tuannd9288/better-factory every Monday at 09:00.
 # --check is the canary: over the latest N assistant entries of the --profile-dir
