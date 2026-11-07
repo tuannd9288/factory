@@ -78,7 +78,7 @@ function world({ driver = true, stacks, merge, drafts = 'pstack' } = {}) {
   mkdirSync(sh);
   git(repo, 'init', '-q', '-b', 'main');
   commit(repo, { 'cli.js': 'console.log(1);\n' }, 'start');
-  git(dir, 'init', '-q', '--bare', 'origin.git');
+  git(dir, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
   git(repo, 'remote', 'add', 'origin', join(dir, 'origin.git'));
   git(repo, 'push', '-q', 'origin', 'main');
   git(repo, 'fetch', '-q', 'origin');
@@ -224,7 +224,7 @@ describe('opening the pull request', () => {
     chmodSync(join(dir, 'bin/gh'), 0o755);
     git(repo, 'init', '-q', '-b', 'main');
     commit(repo, {}, 'start');
-    git(dir, 'init', '-q', '--bare', 'origin.git');
+    git(dir, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
     git(repo, 'remote', 'add', 'origin', join(dir, 'origin.git'));
     git(repo, 'push', '-q', 'origin', 'main');
     git(repo, 'fetch', '-q', 'origin');
