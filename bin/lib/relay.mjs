@@ -18,15 +18,16 @@
 // mini's sweep does for ~/WORKSPACES, with `live` from liveRuns of the run folders and no Lead counted; a refusal is in
 // $FACTORY_STATE/queue-checkout.failed, and the status goes to the log only when it differs from the last pass's (relay.checkout in the
 // state folder), since a laptop is often offline. The pass then relays; a failed follow never stops it.
-// `plist` is the LaunchAgent that runs a pass every 60 s under the Human's own user (no sudo): its program and folder are the installed
-// copy; its PATH holds the folder `which` finds node in, ssh's folder and the system folders. `check` fails, naming the path, when the
-// program, the folder, the installed copy (by real path), the log or the state folder sits under a protected folder, when the installed
-// ~/Library/LaunchAgents plist names such a path, when the program is not there and executable, and, for a loaded job, when `launchctl
-// print` reports a last exit code other than 0 (no launchctl, or not loaded: skipped). It probes ssh with the SSH_AUTH_SOCK `launchctl
-// getenv` gives, which is what launchd gives the job, and none when that is empty; it reads the newest seq, relays nothing, and sets the
-// cursor only when there is none.
+// `plist` is the LaunchDaemon that runs a pass every 60 s as the MacBook's `factory` user, the one that prints it (#366), with nobody
+// logged in; the Human installs it with sudo, as the Mac mini's queue (bin/install-factory prints the line). Its program and folder are the
+// installed copy; its PATH holds the folder `which` finds node in, ssh's folder and the system folders. `check` fails, naming the path,
+// when the program, the folder, the installed copy (by real path), the log or the state folder sits under a protected folder, when the
+// installed /Library/LaunchDaemons plist names such a path, when the program is not there and executable, and, for a loaded job, when
+// `launchctl print system/<label>` reports a last exit code other than 0 (no launchctl, or not loaded: skipped). It probes ssh with no ssh
+// agent, as the job has none; it reads the newest seq, relays nothing, and sets the cursor only when there is none.
 import { spawnSync } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { followMain } from './checkout.mjs';
@@ -194,17 +195,22 @@ function which(name, path) {
   return null;
 }
 
-/** The LaunchAgent's job, in the shape queue.mjs's plist renders: `run` every 60 s from the installed copy (installedRoot), with a PATH that
- * finds node and ssh, logging to ~/Library/Logs/factory/relay.log (launchd does not make the folder; `check` does). No user: it runs under
- * whoever loads it. The settings that move the copy or the state are kept in its environment, so the job finds the same ones. */
+/** The LaunchDaemon's job (#366), in the shape queue.mjs's plist renders: `run` every 60 s from the installed copy (installedRoot), as the user
+ * that printed it (UserName) with that user's HOME, as the Mac mini's queue runs, so it runs with nobody logged in; a PATH that finds node and
+ * ssh; logging to ~/Library/Logs/factory/relay.log (launchd does not make the folder; `check` does). The copy is named in FACTORY_CHECKOUT,
+ * so the plist is the same whether the shell that prints it set that or not: the sweep, which compares the installed plist with what the
+ * code renders (checkPlists, bin/lib/checkout.mjs), runs with it set. The settings that move the state or the place are kept. */
 export function job(env = process.env) {
   const node = which('node', env.PATH) ?? process.execPath;
   const ssh = which('ssh', env.PATH) ?? '/usr/bin/ssh';
   // The folder `which` finds node in, as the shell has it (Homebrew's link folder, which an upgrade keeps), not the versioned one `process.execPath` names.
   const path = [...new Set([dirname(node), dirname(ssh), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
-  const kept = Object.fromEntries(['FACTORY_STATE', 'FACTORY_HOST_USER', 'FACTORY_CHECKOUT', 'XDG_DATA_HOME'].filter((k) => env[k]).map((k) => [k, env[k]]));
+  const kept = Object.fromEntries(['FACTORY_STATE', 'FACTORY_HOST_USER', 'FACTORY_HOST_NAME', 'XDG_DATA_HOME'].filter((k) => env[k]).map((k) => [k, env[k]]));
   const root = installedRoot(env);
-  return { label: LABEL, interval: 60, calendar: null, program: [join(root, 'bin/factory-relay'), 'run'], cwd: root, env: { PATH: path, ...kept }, log: join(env.HOME, 'Library/Logs/factory/relay.log'), user: null };
+  return {
+    label: LABEL, interval: 60, calendar: null, program: [join(root, 'bin/factory-relay'), 'run'], cwd: root,
+    env: { PATH: path, HOME: env.HOME, ...kept, FACTORY_CHECKOUT: root }, log: join(env.HOME, 'Library/Logs/factory/relay.log'), user: userInfo().username,
+  };
 }
 
 /** The folders macOS refuses a launchd job, under the home folder. */
@@ -246,7 +252,7 @@ function preflight(j, state, env, launchd) {
   } catch {
     problems.push(`${j.program[0]} is not there or not executable; run bin/install-factory from a clone`);
   }
-  const installed = join(env.HOME, 'Library/LaunchAgents', `${LABEL}.plist`);
+  const installed = join(env.FACTORY_PLIST_DIR ?? '/Library/LaunchDaemons', `${LABEL}.plist`);
   if (existsSync(installed)) {
     const names = [...readFileSync(installed, 'utf8').matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]).filter((s) => s.startsWith('/'));
     for (const path of names) {
@@ -254,23 +260,21 @@ function preflight(j, state, env, launchd) {
       if (folder) problems.push(`the installed ${installed} names ${path}, under ${folder}, which macOS refuses a launchd job; run bin/install-factory again`);
     }
   }
-  // Not loaded, or no launchctl: nothing to read, which is not a failure.
-  const printed = launchd(['print', `gui/${process.getuid?.()}/${LABEL}`]);
+  // Not loaded, or no launchctl: nothing to read, which is not a failure. A system job's record needs no sudo to read.
+  const printed = launchd(['print', `system/${LABEL}`]);
   const last = printed.status === 0 ? /last exit code = (\d+)/.exec(printed.stdout ?? '') : null;
   if (last && last[1] !== '0') problems.push(`the loaded job's last exit code is ${last[1]}; run bin/install-factory again to load it anew`);
   return problems;
 }
 
-/** Before the Human loads the job (and after bin/install-factory loads it): makes the log's folder, fails on what launchd would refuse the
- * job (see preflight), and says whether ssh to the Mac mini works with no prompt (with the SSH_AUTH_SOCK `launchctl getenv` gives, which is
- * the job's, and none when that is empty) and whether the news can be read there. It relays nothing and posts nothing: it sets the cursor
+/** Before the Human loads the job (bin/install-factory runs it): makes the log's folder, fails on what launchd would refuse the job (see
+ * preflight), and says whether ssh to the Mac mini works with no prompt and no ssh agent, as a LaunchDaemon has none, and whether the
+ * news can be read there. It relays nothing and posts nothing: it sets the cursor
  * to the newest seq only when there is none. Returns the exit code. */
 export function check(env = process.env) {
   const j = job(env);
-  const base = { HOME: env.HOME, USER: env.USER ?? '', TMPDIR: env.TMPDIR ?? '/tmp', ...j.env };
-  const launchd = (args) => spawnSync('launchctl', args, { env: base, encoding: 'utf8' });
-  const sock = launchd(['getenv', 'SSH_AUTH_SOCK']);
-  const jobEnv = { ...base, ...(sock.status === 0 && sock.stdout?.trim() ? { SSH_AUTH_SOCK: sock.stdout.trim() } : {}) };
+  const jobEnv = { USER: env.USER ?? '', TMPDIR: env.TMPDIR ?? '/tmp', ...j.env };
+  const launchd = (args) => spawnSync('launchctl', args, { env: jobEnv, encoding: 'utf8' });
   const say = (line) => console.log(`check: ${line}`);
   mkdirSync(dirname(j.log), { recursive: true });
   say(`node ${spawnSync('node', ['--version'], { env: jobEnv, encoding: 'utf8' }).stdout?.trim() || 'not found'}`);

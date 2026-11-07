@@ -1,12 +1,13 @@
 // #177, #390: bin/install-factory. Run from a clone, it makes the machine's installed copy of the factory (or brings it to origin/main), runs
 // that copy's own bin/install-factory, and that points ~/.local/bin/factory at the copy's bin/factory, replacing nothing else; on the MacBook
-// it also loads the relay's LaunchAgent. Each test runs it under a temporary HOME, against a local bare repository as the origin and a fake
-// launchctl and ssh first on PATH; nothing here touches the real ~/.local/bin, ~/Library or ~/WORKSPACES, and nothing reaches the network.
+// it also writes the relay's and the queue's LaunchDaemons and prints the sudo line that installs them (#366). Each test runs it under a
+// temporary HOME and LaunchDaemons folder, against a local bare repository as the origin and a fake launchctl, ssh, sudo and install first on
+// PATH; nothing here touches the real ~/.local/bin, ~/Library, /Library or ~/WORKSPACES, and nothing reaches the network.
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { HOST_ENV, factory, git, quiet, run } from './helpers.mjs';
 
@@ -29,15 +30,17 @@ function world(f) {
     const fake = join(dir, 'fake');
     mkdirSync(home);
     mkdirSync(fake);
-    writeFileSync(join(fake, 'launchctl'), ['#!/bin/sh', 'echo "$*" >>"$HOME/launchctl.log"', // $HOME/linger counts how many more prints still find the job after a bootout, and a bootstrap in that gap fails (the race).
+    writeFileSync(join(fake, 'launchctl'), ['#!/bin/sh', 'echo "$*" >>"$HOME/launchctl.log"',
       // Each job is loaded or not by its label: the last part of print's and bootout's target, the plist's name for bootstrap.
-      'n=$(cat "$HOME/linger" 2>/dev/null || echo 0)', 'case "$1" in',
-      'print) [ -f "$HOME/loaded-${2##*/}" ] && exit 0; [ "$n" -gt 0 ] || exit 1; echo $((n - 1)) >"$HOME/linger" ;;',
-      'bootstrap) [ "$n" -eq 0 ] || exit 5; : >"$HOME/loaded-$(basename "$3" .plist)" ;;', 'bootout) rm -f "$HOME/loaded-${2##*/}" ;;', 'esac', ''].join('\n'));
+      'case "$1" in', 'print) [ -f "$HOME/loaded-${2##*/}" ] || exit 113 ;;',
+      'bootstrap) : >"$HOME/loaded-$(basename "$3" .plist)" ;;', 'bootout) rm -f "$HOME/loaded-${2##*/}" ;;', 'esac', ''].join('\n'));
     writeFileSync(join(fake, 'ssh'), ['#!/bin/sh', 'case "$*" in *--newest*) echo 4 ;; esac', ''].join('\n'));
     // #366: gh as the queue's check meets it on the MacBook: the agents with their token in GH_TOKEN, the Human otherwise.
     writeFileSync(join(fake, 'gh'), ['#!/bin/sh', 'case "$*" in', '  "api user"*) if [ "$GH_TOKEN" = made-up-agents-token ]; then echo agent-bot; else echo tuannd9288; fi ;;', '  *) exit 1 ;;', 'esac', ''].join('\n'));
-    for (const name of ['launchctl', 'ssh', 'gh']) chmodSync(join(fake, name), 0o755);
+    // What the Human's sudo line runs: sudo runs its command; install (-o root -g wheel -m 644 <from> <to>) copies.
+    writeFileSync(join(fake, 'sudo'), '#!/bin/sh\nexec "$@"\n');
+    writeFileSync(join(fake, 'install'), '#!/bin/sh\n[ "$1 $2 $3 $4 $5 $6" = "-o root -g wheel -m 644" ] || exit 64\ncp "$7" "$8"\n');
+    for (const name of ['launchctl', 'ssh', 'gh', 'sudo', 'install']) chmodSync(join(fake, name), 0o755);
     // The agents' GitHub token in the node's own store (#366); a test takes it away to see the queue's check refuse.
     mkdirSync(join(dir, 'profiles/tokens'), { recursive: true });
     writeFileSync(join(dir, 'profiles/tokens/fake-agent'), 'made-up-agents-token\n');
@@ -45,14 +48,22 @@ function world(f) {
       dir, home, origin, seed,
       root: join(home, '.local/share/factory/checkout'),
       link: join(home, '.local/bin/factory'),
-      plist: join(home, 'Library/LaunchAgents/io.github.tuannd9288.factory.relay.plist'),
+      wanted: join(dir, 'state/plist-wanted'),
+      daemons: join(dir, 'LaunchDaemons'),
       // The code that runs is the clone's own bin/install-factory, whose HOME and place are the test's.
       install: (args = [], env = {}, from = join(factory, 'bin/install-factory')) =>
         run(factory, 'bash', [from, ...args], {
           HOME: home, PATH: `${fake}:${process.env.PATH}`, FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'),
           FACTORY_INSTALL_ORIGIN: origin, FACTORY_HOST_USER: 'nobody-here', FACTORY_CHECKOUT: '', XDG_DATA_HOME: '',
-          AGENT_PROFILES: join(dir, 'profiles'), FACTORY_AGENT: 'fake-agent', ...env,
+          AGENT_PROFILES: join(dir, 'profiles'), FACTORY_AGENT: 'fake-agent', FACTORY_PLIST_DIR: join(dir, 'LaunchDaemons'), ...env,
         }),
+      // The line the run printed for the Human's sudo, run as he would, with the fakes; null when it printed none.
+      sudo: (out) => {
+        const line = out.split('\n').find((l) => l.startsWith('install-factory: to install and load them, run: '));
+        if (!line) return null;
+        mkdirSync(join(dir, 'LaunchDaemons'), { recursive: true });
+        return run(dir, 'sh', ['-c', line.slice('install-factory: to install and load them, run: '.length)], { HOME: home, PATH: `${fake}:${process.env.PATH}` });
+      },
       launchctl: () => (existsSync(join(home, 'launchctl.log')) ? readFileSync(join(home, 'launchctl.log'), 'utf8').split('\n').filter(Boolean) : []),
       push: (text) => {
         writeFileSync(join(seed, 'note'), text);
@@ -157,40 +168,51 @@ test('it replaces a link whose target ends in /bin/factory (the old one into a d
   assert.equal(w.launchctl().length, loaded, 'a refused link loads nothing');
 }));
 
-test('on the MacBook it writes the relay\'s LaunchAgent and the queue\'s for the copy through a rename, loads them, and runs their checks (#366)', () => world((w) => {
+const LABELS = ['io.github.tuannd9288.factory.relay', 'io.github.tuannd9288.factory.queue'];
+
+test('on the MacBook it writes the relay\'s and the queue\'s LaunchDaemons, run by this user from the copy, runs their checks, loads nothing, and prints the sudo line that installs and loads both (#366)', () => world((w) => {
   const r = w.install();
   assert.equal(r.code, 0, r.out);
-  const text = readFileSync(w.plist, 'utf8');
-  assert.ok(text.includes(join(w.root, 'bin/factory-relay')));
-  assert.ok(!text.includes(factory), 'the job names nothing of the clone that ran it');
-  const queue = join(w.home, 'Library/LaunchAgents/io.github.tuannd9288.factory.queue.plist');
-  assert.deepEqual(readdirSync(join(w.home, 'Library/LaunchAgents')).sort(), ['io.github.tuannd9288.factory.queue.plist', 'io.github.tuannd9288.factory.relay.plist']);
-  // The node's daemon starts from the copy's queue job, which follows the copy, runs as his user and holds no token.
-  const job = readFileSync(queue, 'utf8');
-  assert.ok(job.includes(join(w.root, 'bin/factory-queue')) && !job.includes(factory), job);
-  assert.match(job, new RegExp(`<key>FACTORY_CHECKOUT</key>\\s*<string>${w.root}</string>`));
-  assert.doesNotMatch(job, /UserName|made-up-agents-token/);
-  const calls = w.launchctl();
-  for (const plist of [w.plist, queue]) assert.ok(calls.some((c) => c.startsWith('bootstrap gui/') && c.endsWith(plist)), calls.join('\n'));
-  assert.ok(!calls.some((c) => c.startsWith('bootout')), 'nothing was loaded to unload');
-  assert.match(r.out, /check: ready/);
+  for (const [label, tool] of [[LABELS[0], 'bin/factory-relay'], [LABELS[1], 'bin/factory-queue']]) {
+    const text = readFileSync(join(w.wanted, `${label}.plist`), 'utf8');
+    // A LaunchDaemon runs with nobody logged in, as this user, from the copy, which it names; it holds no token.
+    assert.ok(text.includes(join(w.root, tool)) && !text.includes(factory), text);
+    assert.match(text, new RegExp(`<key>UserName</key>\\s*<string>${userInfo().username}</string>`));
+    assert.match(text, new RegExp(`<key>FACTORY_CHECKOUT</key>\\s*<string>${w.root}</string>`));
+    assert.doesNotMatch(text, /made-up-agents-token/);
+  }
+  assert.ok(!w.launchctl().some((c) => /^(bootstrap|bootout|load)/.test(c)), 'it loads nothing itself');
   assert.match(r.out, /^check: gh login agent-bot$/m);
-  assert.match(r.out, /^check: ready; the Human loads the job$/m);
+  // The line, run as the Human runs it, installs the two plists and loads each after its install.
+  const sudo = w.sudo(r.out);
+  assert.equal(sudo?.code, 0, sudo?.out ?? r.out);
+  for (const label of LABELS) assert.equal(readFileSync(join(w.daemons, `${label}.plist`), 'utf8'), readFileSync(join(w.wanted, `${label}.plist`), 'utf8'));
+  assert.deepEqual(w.launchctl().filter((c) => c.startsWith('bootstrap')), LABELS.map((l) => `bootstrap system ${join(w.daemons, `${l}.plist`)}`));
+  // Run again with both installed as the copy renders them: nothing to do.
+  const again = w.install();
+  assert.equal(again.code, 0, again.out);
+  assert.equal(w.sudo(again.out), null, again.out);
   // Without the agents' token in the node's store, the queue's check is not ready and says why, and so is the run.
+  rmSync(join(w.daemons, `${LABELS[1]}.plist`));
   rmSync(join(w.dir, 'profiles/tokens/fake-agent'));
   const without = w.install();
   assert.notEqual(without.code, 0, without.out);
   assert.match(without.out, /^check: not ready: this node holds no GitHub token for the agents/m);
+  assert.equal(w.sudo(without.out), null);
 }));
 
-test('a loaded job is unloaded before the new one is loaded', () => world((w) => {
-  assert.equal(w.install().code, 0);
+test('a loaded job whose plist changed is booted out before its install, and the queue\'s daemon is named to stop (#366)', () => world((w) => {
+  const first = w.install();
+  assert.equal(w.sudo(first.out)?.code, 0, first.out);
+  const installed = join(w.daemons, `${LABELS[1]}.plist`);
+  writeFileSync(installed, `${readFileSync(installed, 'utf8')}<!-- an older plist -->\n`);
+  const r = w.install();
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /daemon\.lock.*SIGTERM/);
   const before = w.launchctl().length;
-  assert.equal(w.install().code, 0);
-  const calls = w.launchctl().slice(before);
-  const out = calls.findIndex((c) => c.startsWith('bootout gui/') && c.endsWith('/io.github.tuannd9288.factory.relay'));
-  const inn = calls.findIndex((c) => c.startsWith('bootstrap gui/'));
-  assert.ok(out >= 0 && inn > out, calls.join('\n'));
+  assert.equal(w.sudo(r.out)?.code, 0, r.out);
+  assert.deepEqual(w.launchctl().slice(before), [`bootout system/${LABELS[1]}`, `bootstrap system ${installed}`], 'the relay\'s, unchanged, is left as it is');
+  assert.equal(readFileSync(installed, 'utf8'), readFileSync(join(w.wanted, `${LABELS[1]}.plist`), 'utf8'));
 }));
 
 test('it fails when check fails: a job whose log or state sits under Desktop is not ready', () => world((w) => {
@@ -270,13 +292,14 @@ test('run from the copy, it follows main first and runs itself once more from th
   git(w.seed, 'push', '-q', w.origin, 'main');
   const tip = git(w.seed, 'rev-parse', 'HEAD');
   rmSync(w.link);
-  rmSync(w.plist);
+  const relay = join(w.wanted, `${LABELS[0]}.plist`);
+  rmSync(relay);
   const r = w.install([], {}, join(w.root, 'bin/install-factory'));
   assert.equal(r.code, 0, r.out);
   assert.equal(git(w.root, 'rev-parse', 'HEAD'), tip);
   assert.equal(r.out.split('newer code ran').length - 1, 1, r.out);
   assert.equal(readlinkSync(w.link), join(w.root, 'bin/factory'));
-  assert.ok(existsSync(w.plist));
+  assert.ok(existsSync(relay));
 }));
 
 test('run from the copy, a refused follow is told and the run goes on with the copy as it is', () => world((w) => {
@@ -290,26 +313,6 @@ test('run from the copy, a refused follow is told and the run goes on with the c
   assert.match(r.out, /not moved/);
   assert.equal(git(w.root, 'rev-parse', 'HEAD'), before);
   assert.equal(readlinkSync(w.link), join(w.root, 'bin/factory'));
-}));
-
-test('after bootout it waits until the job is gone before it loads the new one', () => world((w) => {
-  assert.equal(w.install().code, 0);
-  writeFileSync(join(w.home, 'linger'), '3');
-  const before = w.launchctl().length;
-  const r = w.install();
-  assert.equal(r.code, 0, r.out);
-  const calls = w.launchctl().slice(before);
-  const out = calls.findIndex((c) => c.startsWith('bootout '));
-  const inn = calls.findIndex((c) => c.startsWith('bootstrap '));
-  assert.ok(calls.slice(out + 1, inn).filter((c) => c.startsWith('print ')).length >= 3, calls.join('\n'));
-}));
-
-test('when the job is still there after the wait, bootstrap fails and a line says so and to run it again', () => world((w) => {
-  assert.equal(w.install().code, 0);
-  writeFileSync(join(w.home, 'linger'), '1000');
-  const r = w.install([], { FACTORY_INSTALL_WAIT: '1' });
-  assert.notEqual(r.code, 0);
-  assert.match(r.out, /install-factory: launchctl bootstrap of io\.github\.tuannd9288\.factory\.relay failed; run this same line again/);
 }));
 
 test('takes no argument', () => world((w) => {

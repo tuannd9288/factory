@@ -10,10 +10,11 @@
 #   once; a refused follow is told and the run goes on with the copy as it is. Then ~/.local/bin/factory becomes a symlink to its bin/factory. It replaces a symlink whose target ends in
 #   /bin/factory (the old one into a clone included) and nothing else: a file, a folder or a link to another place is named and left as it is.
 #   On the Mac mini, enables this repository's commit-msg hook from this main checkout, unless a hooksPath or executable default hook already exists.
-#   On the MacBook only, it then writes the relay's LaunchAgent (bin/factory-relay plist) to ~/Library/LaunchAgents through a temporary name
-#   and a rename, unloads the old job when one is loaded, waits (10 seconds at most) until the job is gone, loads the new one and runs `bin/factory-relay check`.
-#   Then the same for the queue's job (bin/factory-queue plist, #366), which starts the node's own daemon; its check runs one sweep as the agents
-#   and is not ready until the node holds their GitHub token (factory store <agents account>). It says each step in a line.
+#   On the MacBook only, run as its `factory` user (#366), it then writes the relay's job (bin/factory-relay plist) and the queue's
+#   (bin/factory-queue plist --daemon), which starts the node's own daemon, as LaunchDaemons run by that user, to
+#   $FACTORY_STATE/plist-wanted/, runs each one's check (the queue's runs one sweep as the agents and is not ready until the node holds their
+#   GitHub token: factory store <agents account>), and prints the one sudo line that installs them in /Library/LaunchDaemons and loads them,
+#   as the Mac mini's queue is installed. A plist installed as the copy renders it is left out. It says each step in a line.
 # A clone anywhere else, its branches and its uncommitted edits change nothing that runs; only a change that lands on main reaches the copy.
 set -euo pipefail
 [ "$#" -eq 0 ] || { echo "usage: bin/install-factory" >&2; exit 2; }
@@ -86,35 +87,6 @@ if [ "$(node "$helper" place)" != macbook ]; then
   echo "install-factory: core.hooksPath set to $here/.githooks"
   exit 0
 fi
-agents=$HOME/Library/LaunchAgents
-mkdir -p "$agents"
-domain=gui/$(id -u)
-tmp=
-trap 'rm -f "${tmp:-}"' EXIT
-# One LaunchAgent: <label>'s plist from `bin/<tool> plist`, written through a temporary name and a rename; the old job unloaded when one is
-# loaded and waited for; the new one loaded; then `bin/<tool> check`, whose failure ends the run.
-install_agent() {
-  label=$1
-  tool=$2
-  plist=$agents/$label.plist
-  tmp=$plist.tmp-$$
-  "$here/bin/$tool" plist > "$tmp"
-  mv -f "$tmp" "$plist"
-  echo "install-factory: wrote $plist"
-  if launchctl print "$domain/$label" >/dev/null 2>&1; then
-    launchctl bootout "$domain/$label"
-    echo "install-factory: unloaded the old job"
-    # bootout returns before the job is gone; bootstrap in that gap fails. Wait until it is not found, 10 seconds at most (FACTORY_INSTALL_WAIT).
-    waited=0
-    while launchctl print "$domain/$label" >/dev/null 2>&1 && [ "$waited" -lt $(( ${FACTORY_INSTALL_WAIT:-10} * 2 )) ]; do
-      sleep 0.5
-      waited=$((waited + 1))
-    done
-  fi
-  launchctl bootstrap "$domain" "$plist" || { echo "install-factory: launchctl bootstrap of $label failed; run this same line again" >&2; exit 1; }
-  echo "install-factory: loaded $label"
-  "$here/bin/$tool" check
-}
-install_agent io.github.tuannd9288.factory.relay factory-relay
-# #366: the node's own daemon, through the queue's job, as on the Mac mini but under his user; it runs as the agents with the node's token.
-install_agent io.github.tuannd9288.factory.queue factory-queue
+# #366: the relay's job and the queue's (which starts the node's own daemon, as the agents with the node's token), as LaunchDaemons run by
+# this user, so they run with nobody logged in: their plists, their checks, and the one sudo line the Human runs (bin/lib/install-factory.mjs).
+exec node "$helper" daemons
