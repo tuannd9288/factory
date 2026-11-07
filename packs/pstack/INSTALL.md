@@ -29,6 +29,10 @@ auto-merge once `verify` passed on its head and it has no conflict, and the queu
 (#455); the queue never readies a draft (FAC-55). A stack's child moved onto `main` is readied only once its parent landed and its head
 holds that landing, which the queue's merge of `main` into it brings (INN-38 A, 2026-11-07 07:33:46 +07).
 
+A repository that copied `scripts/ship` before FAC-55 copies it again, step 1, in a pack refresh pull request: the queue readies no
+draft now, and an older copy cannot ready one. A kit older than the one whose `.gate/bin/lib/subject.mjs` exports `titleProblem`, which
+`ship` imports, is brought up first with `bin/kit-update`.
+
 ## The live verifier's login
 
 The verifier's Codex profile, for pstack's steps on another model family (#182), is one for every repository,

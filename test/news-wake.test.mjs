@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { observe, readLines, NOT_STARTED_MS } from '../bin/lib/events.mjs';
-import { SEAT_GRACE_MS, detect, teamOfBody, wakeOnNews, wakeOnSeats, wakeStarted } from '../bin/lib/news-wake.mjs';
+import { DRAFT_REMIND_MS, SEAT_GRACE_MS, detect, teamOfBody, wakeOnNews, wakeOnSeats, wakeStarted } from '../bin/lib/news-wake.mjs';
 import { QUERY } from '../bin/lib/queue.mjs';
 import { newsLine } from '../bin/lib/wake.mjs';
 
@@ -88,6 +88,18 @@ test("a draft wakes its Lead once verify passed on its head, though tier waits o
   assert.deepEqual(kinds({ verify: ok(), tier: ok('FAILURE') }), ['checks-green']);
   assert.deepEqual(kinds({ verify: ok('PENDING'), tier: ok('FAILURE') }), []);
   assert.deepEqual(kinds({ verify: ok(), tier: ok('FAILURE') }, false), [], 'a ready one waits on the Human, not on its Lead');
+});
+
+test('a draft still green and still a draft DRAFT_REMIND_MS after its verify passed wakes its Lead once more, on the same head (FAC-55)', () => {
+  const now = Date.parse('2026-11-08T12:00:00Z');
+  const keys = (minutesAgo, isDraft = true) => {
+    const verify = { ...ok(), completedAt: new Date(now - minutesAgo * 60_000).toISOString() };
+    return detect({ repo: REPO, prs: [pr(1, { checks: { verify, tier: ok('FAILURE') }, isDraft, labels: ['tier-3'] })], required: REQUIRED, now }).map((e) => e.key);
+  };
+  const told = `checks-green ${REPO}#1 11111111`;
+  assert.deepEqual(keys(60), [told]);
+  assert.deepEqual(keys(DRAFT_REMIND_MS / 60_000 + 1), [told, `${told} still a draft`]);
+  assert.deepEqual(keys(DRAFT_REMIND_MS / 60_000 + 1, false), [], 'a ready one is not reminded');
 });
 
 test('a red `tier` is no failure while another required check has not concluded (Entire Gates pending), and is once all have', () => {

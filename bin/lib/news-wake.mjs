@@ -11,7 +11,8 @@
 //                   another required check has not concluded: under Entire it is red until Entire Gates concludes; and while the queue
 //                   re-runs it in this sweep, as pickReruns says: an approval, or Entire's conclusion, after it started)
 //   checks-green    every required check of the head succeeded; for a draft, verify  pull request and head
-//                   did, since tier waits on the Human and only its Lead's scripts/ship readies it, once its review passed (FAC-55)
+//                   did, since tier waits on the Human and only its Lead's scripts/ship readies it, once its review passed (FAC-55);
+//                   and once more, `… still a draft`, when it is still a draft DRAFT_REMIND_MS after that verify completed
 //   conflict        `mergeable` is CONFLICTING (UNKNOWN, which GitHub says for a while after a push, is none)   pull request and head
 //   merged          the pull request merged                                          pull request
 // The six lines are the Lead's, not Colly's: bin/factory-events leaves them out (NEWS_KINDS) and `--news` prints only them.
@@ -58,6 +59,10 @@ export const MERGED_FIELDS = `merged: pullRequests(states:MERGED,first:${MERGED}
 /** How long a run's process may be gone, with no record, before the run counts as ended without a result: a supervisor's record is written
  * just before it exits, and a sweep that reads between the two must not call it lost. */
 export const SEAT_GRACE_MS = 3 * 60_000;
+
+/** How long a green draft waits before its Lead is reminded once (FAC-55): a guess, the day the switch watch also allows a hold. It times one
+ * reminder and gates nothing. */
+export const DRAFT_REMIND_MS = 24 * 60 * 60_000;
 
 const readJson = (file) => {
   try {
@@ -106,6 +111,10 @@ export function detect({ repo, prs, merged = [], required, now = Date.now() }) {
       found.push({ ...base, kind: 'checks-red', key: `checks-red ${repo}#${p.number} ${p.head}`, what: `${at}: required check ${red.join(', ')} failed`, runs: Object.fromEntries(red.map((name) => [name, runOf(checkOf(p, name))])) });
     if (p.isDraft ? checkOf(p, 'verify')?.state === 'SUCCESS' : required.length && required.every((name) => checkOf(p, name)?.state === 'SUCCESS'))
       found.push({ ...base, kind: 'checks-green', key: `checks-green ${repo}#${p.number} ${p.head}`, what: p.isDraft ? `${at}: verify succeeded on the draft; run scripts/ship once its review has passed` : `${at}: every required check succeeded` });
+    // A draft forgotten after that wake: one reminder on the same head, by GitHub's clock.
+    const done = Date.parse(checkOf(p, 'verify')?.completedAt);
+    if (p.isDraft && checkOf(p, 'verify')?.state === 'SUCCESS' && now - done >= DRAFT_REMIND_MS)
+      found.push({ ...base, kind: 'checks-green', key: `checks-green ${repo}#${p.number} ${p.head} still a draft`, what: `${at}: still a draft a day after verify succeeded; run scripts/ship once its review has passed, or say on its issue why it is held` });
     if (p.mergeable === 'CONFLICTING') found.push({ ...base, kind: 'conflict', key: `conflict ${repo}#${p.number} ${p.head}`, what: `${at} conflicts with its base` });
   }
   // A merged pull request counts only within the keep window: the list is by update, so an old one that comes back on a comment is no news.
