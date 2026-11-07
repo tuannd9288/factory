@@ -313,7 +313,7 @@ The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line whe
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, an account Claude Code warns is
 near its limit, the sweep's own `gh` refused,
 a repository's merge switch moved, the Factory app's Linear token refused, raised by `bin/lib/linear.mjs`)
-and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh; its header has the command,
+and one when it ends. Colly wakes only on a `start` line, from `bin/factory-events --follow` over ssh, and from the MacBook's own events, through the share the MacBook's daemon writes (`packs/colly/colly.md` has both commands); its header has the command,
 and `bin/lib/events.mjs` the conditions. Without `--follow` it only looks; to look, use `factory top`. When the Monitor ends, Colly
 starts it again with `--after <the last seq Colly saw>`; a new session, which knows no seq, leaves `--after` out. The sweep also writes
 a one-time `comment` start line, like the reader's and no condition, when it wakes a Lead (#351); six more kinds of the same sort tell a
