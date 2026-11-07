@@ -113,8 +113,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
 9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes the worktree.
 
 ## What you ask the Human
-Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login or a
-cost.
+Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login, a
+cost, or, once for each repository taken in, typing `/repo-refresh` in audit mode in your session.
 Number each question and give your recommended answer. While you wait on any decision, <!--github-->label your issue `needs-human`;
 remove the label once the answer is on the issue or its pull request.<!--/github--><!--linear-->move your issue to Needs Human with
 `factory linear ask`; move it back with `factory linear answered` once the answer is on the issue or its pull request, and acknowledge it

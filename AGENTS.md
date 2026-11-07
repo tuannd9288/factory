@@ -30,7 +30,7 @@ His standing rules for building the factory, approved on INN-24 (A, 2026-11-05 1
 - Every Linear label has a written purpose (04/11).
 - Data leaving the machine, needing a server or costing money is a warning, never a reason to reject; use what exists before building (21/10, 03/11).
 - English is plain, and speaks in features rather than mechanics (31/10, 02/11).
-- A repository's product description is pstack's Feature Map, files in the repository, one short file per feature, from the user's side, updated in the same pull request as the code; flow diagrams are drawn only for a complex flow; Linear Documents hold only writing he reads; the rule reaches every repository in release 1 (#428), the Feature Map after it (#422) (INN-23 A, 2026-11-04 23:37:50 +07).
+- A repository's product description is pstack's Feature Map, files in `feature-map/` at the repository root (INN-37 A, 2026-11-07 07:32:48 +07), one short file per feature, from the user's side, updated in the same pull request as the code; flow diagrams are drawn only for a complex flow; Linear Documents hold only writing he reads; the rule reaches every repository in release 1 (#428), the Feature Map after it (#422) (INN-23 A, 2026-11-04 23:37:50 +07).
 
 ## Decisions
 
