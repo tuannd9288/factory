@@ -1,5 +1,5 @@
-// #209, round 2: a failed weekly --post leaves $FACTORY_STATE/digest.failed, which bin/lib/alerts.mjs tells the Human;
-// a successful post clears it, as a clean queue sweep clears its own. A fake gh; no network.
+// #209, round 2: a failed weekly --post leaves $FACTORY_STATE/digest.failed, which Colly's status line and brief list (queueOf in
+// bin/lib/colly-status.mjs); a successful post clears it, as a clean queue sweep clears its own. A fake gh; no network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commit, factory, git, quiet } from './helpers.mjs';
-import { lines } from '../bin/lib/alerts.mjs';
+import { queueOf } from '../bin/lib/colly-status.mjs';
 
 const FAKE_GH = '#!/bin/sh\necho "$*" >>"$Q/calls"\ncase "$*" in\n  "repo view"*) echo "{\\"visibility\\":\\"$VIS\\"}" ;;\n  "api --paginate"*) echo "[[]]" ;;\n  "api repos/o/app/actions/secrets") echo \'{"secrets":[]}\' ;;\n  "issue list"*) echo "[]" ;;\n  "issue create"*) [ -n "$FAIL_CREATE" ] && { echo "HTTP 502" >&2; exit 1; }; echo https://github.com/o/better-factory/issues/99 ;;\n  "label create"*) ;;\n  *) exit 1 ;;\nesac\n';
 
@@ -36,15 +36,16 @@ function withMachine(body) {
   }
 }
 
-test('a refused post to a public repository leaves digest.failed with the time and the cause, and alerts lists it', () => {
+test('a refused post to a public repository leaves digest.failed with the time and the cause, and Colly\'s status lists it', () => {
   withMachine(({ run, report, state }) => {
     const r = run(['--post', 'o/factory'], { VIS: 'PUBLIC' });
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(readFileSync(report, 'utf8'), /^20\d\d-\d\d-\d\dT\S+ .*o\/factory is PUBLIC/);
     assert.equal(readFileSync(report, 'utf8').trim().split('\n').length, 1);
-    const { lines: told } = lines(state);
-    assert.equal(told.length, 1);
-    assert.match(told[0], /^factory: digest\.failed \(.*\): 20\d\d-.*PUBLIC/);
+    const { failed } = queueOf(state);
+    assert.equal(failed.length, 1);
+    assert.equal(failed[0].file, 'digest.failed');
+    assert.match(failed[0].text, /^20\d\d-.*PUBLIC/);
   });
 });
 
