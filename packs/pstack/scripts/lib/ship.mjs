@@ -138,19 +138,10 @@ function step(pr, head, branch, stacks, merge, drafts) {
     git(['fetch', '--quiet', 'origin', 'main']);
     if (merge === 'merge' && !parents.some((p) => quietGit(['merge-base', '--is-ancestor', p.headRefOid, 'origin/main'])))
       return say(0, `#${n} waits for its parent ${pr.baseRefName} in origin/main; nothing was armed`);
-    if (head !== pr.headRefOid) return say(1, `refused: HEAD ${short} is not the pull request's head; pull or push so they agree`);
-    if (git(['status', '--porcelain'])) return say(1, 'refused: commit or remove what git status shows before restacking');
-    if (merge === 'squash') {
-      if (!quietGit(['cat-file', '-e', `${parents[0].headRefOid}^{commit}`]))
-        git(['fetch', '--quiet', 'origin', parents[0].headRefOid]);
-      git(['rebase', '--onto', 'origin/main', parents[0].headRefOid]);
-      gh(['pr', 'edit', String(n), '--base', 'main']);
-      return say(0, `retargeted #${n} to main and rebased onto origin/main; push with --force-with-lease, then run ship again`);
-    }
+    // Only the move, which GitHub makes itself where the parent's branch is deleted on merge: the queue then merges main into the child
+    // (by a merge for either method, never a rewrite), and live-verify --covered compares the new base/head patch-id with the old verdict.
     gh(['pr', 'edit', String(n), '--base', 'main']);
-    git(['merge', '--no-ff', '--no-edit', 'origin/main']);
-    // live-verify --covered compares the new base/head patch-id with the old verdict on the next run.
-    return say(0, `retargeted #${n} to main and merged origin/main; push HEAD, then run ship again`);
+    return say(0, `retargeted #${n} to main; the queue merges main into it, then pull before your next commit and run ship again`);
   }
   const problem = titleProblem(pr.title) || (merge === 'squash' && subjectProblem(`${pr.title} (#${n})`));
   if (problem) return say(1, `refused title for #${n}: ${problem}`);
