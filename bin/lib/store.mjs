@@ -10,6 +10,7 @@
 //            linear:<KEY> is each Linear team's newest handled event time in milliseconds, initially now minus ten minutes.
 //   linear_events  one row per Linear comment id or issue id plus updatedAt, with kind, issue identifier, team key, actor id and time (ms).
 //                  wake_delay_ms measures comment creation to a successful wake for slice 4.
+//                  via (FAC-38) is `stream` once the live stream delivered the event, else `catch-up`; rows from before it are null.
 //                  Each new event and its team's monotonic offset are committed in the same transaction.
 //   posts    each seat end the daemon took: when it arrived (ms), the verb, the run and tag, the session, when its wake went out (woke_at, ms) or
 //            why it did not (why), and the seq of the events line. Slice 4 measures a seat's end to its Lead's wake from this table.
@@ -45,7 +46,11 @@ export const MIGRATIONS = [
    );`,
   `ALTER TABLE linear_events ADD COLUMN wake_delay_ms INTEGER;`,
   `ALTER TABLE linear_events ADD COLUMN description TEXT;`,
+  `ALTER TABLE linear_events ADD COLUMN via TEXT;`,
 ];
+
+/** The row key of a Linear event: a comment by its id, an issue update by its id and updatedAt (ms). */
+export const linearKey = ({ kind, id, time }) => (kind === 'commentCreated' ? id : `${id}:${time}`);
 
 const KEEP_BACKUPS = 3;
 const BACKUP_NAME = /^pre-v(\d+)-(\d+)-(\d{4}-\d{2}-\d{2})\.db$/;
@@ -138,14 +143,16 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
     /** Settles a post: `wokeAt` (ms) when its wake went out, else `why` it did not; `seq` is the events line it wrote, if any. */
     settle: (id, { wokeAt = null, why = null, seq = null }) => void settle.run(wokeAt, why, seq, id),
     posts: () => allPosts.all().map((r) => ({ ...r })),
-    /** Linear's own ids deduplicate stream and catch-up; the cursor commits with the row. */
-    linearEvent: ({ kind, id, issueIdentifier, teamKey, actorId = null, time, description = null }) => {
-      const key = kind === 'commentCreated' ? id : `${id}:${time}`;
+    /** Linear's own ids deduplicate stream and catch-up; the cursor commits with the row. A known event the stream delivers again only marks
+     * its row `stream`, and still returns false. */
+    linearEvent: ({ kind, id, issueIdentifier, teamKey, actorId = null, time, description = null, via = null }) => {
+      const key = linearKey({ kind, id, time });
       db.exec('BEGIN IMMEDIATE');
       try {
-        const added = q('INSERT OR IGNORE INTO linear_events (event_key, kind, id, issue_identifier, team_key, actor_id, time, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(key, kind, id, issueIdentifier, teamKey, actorId, time, description).changes > 0;
+        const added = q('INSERT OR IGNORE INTO linear_events (event_key, kind, id, issue_identifier, team_key, actor_id, time, description, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(key, kind, id, issueIdentifier, teamKey, actorId, time, description, via).changes > 0;
         if (added) setOffset.run(`linear:${teamKey}`, Math.max(time, Number(getOffset.get(`linear:${teamKey}`)?.value ?? 0)), now());
+        else if (via === 'stream') q("UPDATE linear_events SET via = 'stream' WHERE event_key = ?").run(key);
         db.exec('COMMIT');
         return added;
       } catch (error) {
@@ -155,7 +162,11 @@ export function openStore(file, { migrations = MIGRATIONS, now = () => Date.now(
     },
     /** Last description observed, and deduplication before the INN history queries. */
     linearPrevious: (id) => q('SELECT * FROM linear_events WHERE kind = ? AND id = ? ORDER BY time DESC LIMIT 1').get('issueUpdated', id),
-    linearSeen: ({ kind, id, time }) => Boolean(q('SELECT 1 FROM linear_events WHERE event_key = ?').get(kind === 'commentCreated' ? id : `${id}:${time}`)),
+    linearSeen: (event) => Boolean(q('SELECT 1 FROM linear_events WHERE event_key = ?').get(linearKey(event))),
+    /** The end-of-day check (FAC-38): which of `keys` no row holds, and the rows with time in [since, until] by `via` (null as `unmarked`). */
+    linearMissing: (keys) => keys.filter((key) => !q('SELECT 1 FROM linear_events WHERE event_key = ?').get(key)),
+    linearVia: (since, until) => Object.fromEntries(q('SELECT COALESCE(via, ?) AS via, COUNT(*) AS n FROM linear_events WHERE time BETWEEN ? AND ? GROUP BY 1')
+      .all('unmarked', since, until).map((r) => [r.via, Number(r.n)])),
     /** Delay from comment creation to a successful async wake, in milliseconds. */
     linearWake: (id, delay) => void q('UPDATE linear_events SET wake_delay_ms = ? WHERE event_key = ?').run(delay, id),
     linearEvents: () => q('SELECT * FROM linear_events ORDER BY time, event_key').all().map((r) => ({ ...r })),
