@@ -5,9 +5,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory, git } from './helpers.mjs';
+import { HOST_ENV, factory, git } from './helpers.mjs';
 import { HOST, check, follow, job, pass, readNewest, readNews } from '../bin/lib/relay.mjs';
 import { installedRoot } from '../bin/lib/factory.mjs';
 import { plist } from '../bin/lib/queue.mjs';
@@ -211,7 +211,7 @@ test('plist renders a LaunchAgent that runs the relay every 60 s with no user ke
 
 test('installedRoot: FACTORY_CHECKOUT first, ~/WORKSPACES on the factory host, XDG_DATA_HOME or ~/.local/share on the MacBook', () => {
   const home = '/home/someone';
-  const host = { HOME: home, FACTORY_HOST_USER: userInfo().username };
+  const host = { HOME: home, ...HOST_ENV };
   assert.equal(installedRoot({ ...host, FACTORY_CHECKOUT: '/x/checkout' }), '/x/checkout');
   assert.equal(installedRoot({ ...MAC, HOME: home, FACTORY_CHECKOUT: '/x/checkout' }), '/x/checkout');
   assert.equal(installedRoot(host), join(home, 'WORKSPACES'));
@@ -320,11 +320,11 @@ test('a copy that cannot follow stays where it was, and the refusal is in queue-
 
 /** The commands, as processes, with a fake ssh first on PATH that exits `code` after printing `out` to stdout; it logs its arguments and
  * SSH_AUTH_SOCK to $HOME/calls, which is the job's too. */
-function command(args, { code = 0, out = '', hostUser = 'nobody-here' } = {}) {
+function command(args, { code = 0, out = '', place = MAC } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'relay-cmd-'));
   writeFileSync(join(dir, 'ssh'), ['#!/bin/sh', 'printf \'%s sock=%s\\n\' "$*" "$SSH_AUTH_SOCK" >>"$HOME/calls"', `printf '%s' '${out}'`, `exit ${code}`, ''].join('\n'));
   chmodSync(join(dir, 'ssh'), 0o755);
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir, FACTORY_STATE: join(dir, 'state'), FACTORY_HOST_USER: hostUser };
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, HOME: dir, FACTORY_STATE: join(dir, 'state'), ...place };
   const r = spawnSync(join(factory, 'bin/factory-relay'), args, { encoding: 'utf8', env });
   const calls = existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean) : [];
   return { dir, code: r.status, out: r.stdout + r.stderr, calls, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
@@ -472,7 +472,7 @@ test('run reads the newest seq by ssh with BatchMode on its first pass and sets 
 
 test('run and check refuse to run as the factory host user, and call no ssh', () => {
   for (const verb of ['run', 'check']) {
-    const r = command([verb], { hostUser: userInfo().username });
+    const r = command([verb], { place: HOST_ENV });
     try {
       assert.equal(r.code, 2, r.out);
       assert.deepEqual(r.calls, []);

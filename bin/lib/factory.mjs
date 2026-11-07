@@ -14,7 +14,7 @@ import { accessSync, constants, chmodSync, existsSync, lstatSync, mkdirSync, rea
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TOKEN_GIT, installedRoot, nodeGithubToken, placeOf } from './node.mjs';
+import { HOST, TOKEN_GIT, installedRoot, nodeGithubToken, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
@@ -26,7 +26,6 @@ import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
 import { APP_FOLDERS, accountList, accountRefusal, archiveToken, nodeAccountList, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAdded, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
-const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
 
 const claude = (profile, role, env, login) => ({ profile, role, kind: 'claude', check: { cmd: 'claude', args: ['auth', 'status'], env }, login });

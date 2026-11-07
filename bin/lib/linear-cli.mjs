@@ -33,7 +33,7 @@
 // The registry, $FACTORY_STATE/linear/repos.json { "<repo>": { key, teamId } }, is written only by `onboard`, atomically; a repository
 // not in it is on GitHub. `onLinear(repo)` reads it.
 import { join } from 'node:path';
-import { nodeName } from './shared-records.mjs';
+import { nodeName } from './node.mjs';
 import { createLinear } from './linear.mjs';
 import { TEAM_KEY, onLinear, readRegistry, registryFile, updateRegistry } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';

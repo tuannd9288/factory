@@ -6,13 +6,9 @@
 // lines from run*.jsonl one level under FACTORY_RUNS. No assistant text, transcripts, sidecars or profile files are copied.
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-
-export function nodeName() {
-  return hostname().split('.')[0].toLowerCase();
-}
+import { nodeName } from './node.mjs';
 
 const exec = promisify(execFile);
 // Same private destination as ledger.mjs's DIGEST_REPO; the digest itself is unchanged.

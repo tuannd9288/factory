@@ -34,11 +34,12 @@ import { oneLine } from './events.mjs';
 import { contextOf, installedRoot, placeOf, wakeFile } from './factory.mjs';
 import { parseTeam } from './names.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
+import { HOST as HOST_NAME } from './node.mjs';
 import { plist } from './queue.mjs';
 import { liveRuns } from './seat.mjs';
 import { newsLine, post as postLine, recordedPath } from './wake.mjs';
 
-export const HOST = 'factory@tuans-mac-mini';
+export const HOST = `factory@${HOST_NAME}`;
 export const REMOTE = '/Users/factory/WORKSPACES/bin/factory-events';
 export const LABEL = 'io.github.tuannd9288.factory.relay';
 export const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3'];

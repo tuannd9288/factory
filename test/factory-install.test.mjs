@@ -6,9 +6,9 @@ import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory, git, quiet, run } from './helpers.mjs';
+import { HOST_ENV, factory, git, quiet, run } from './helpers.mjs';
 
 const COPIED = ['bin', 'packs', 'kit', '.githooks'];
 
@@ -200,7 +200,7 @@ test('it fails when check fails: a job whose log or state sits under Desktop is 
 }));
 
 test('on the Mac mini it makes the link only: no launchd step, no plist, and the copy is ~/WORKSPACES', () => world((w) => {
-  const r = w.install([], { FACTORY_HOST_USER: userInfo().username });
+  const r = w.install([], HOST_ENV);
   assert.equal(r.code, 0, r.out);
   assert.equal(readlinkSync(w.link), join(w.home, 'WORKSPACES/bin/factory'));
   assert.deepEqual(w.launchctl(), []);
@@ -208,7 +208,7 @@ test('on the Mac mini it makes the link only: no launchd step, no plist, and the
 }));
 
 test('Mac mini setup installs shared subject hooks and preserves existing hook configurations', () => world((w) => {
-  const env = { HOME: w.home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '0', FACTORY_HOST_USER: userInfo().username };
+  const env = { HOME: w.home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '0', ...HOST_ENV };
   const root = join(w.home, 'WORKSPACES');
   const config = (...args) => run(root, 'git', ['config', ...args], env);
   const installed = w.install([], env);
