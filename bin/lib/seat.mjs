@@ -42,7 +42,10 @@ export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta
  * git keeps the settings it finds there. profiles, when given, is denied whole: it holds the tokens, the archive and the seats.
  * Writes are allowed to the work folder, the run folder and the temporary folder (by its real path) that the tests use, and, by
  * Claude Code's defaults, to each --add-dir and to its own session temporary folder. No domain is allowed and no local binding:
- * the strict allowlist is empty, so there is no network. */
+ * the strict allowlist is empty, so there is no network. `factory codex` alone runs outside it (excludedCommands, #182): Codex
+ * reads its login under the denied profiles folder and needs the network, and runs its own commands under a permission profile
+ * that denies DENY_READ too (packs/pstack/bin/codex-step.mjs). Claude Code keeps a call sandboxed unless every part matches, and
+ * whatever the entry when it holds a cd, a substitution or a redirect, so the brief goes by --brief-file, not stdin. */
 export function sandboxSettings({ home, run, work, profiles = null }) {
   let tmp = tmpdir();
   try {
@@ -60,6 +63,7 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
       allowWrite: [...new Set([work, run, tmp].filter(Boolean))],
     },
     network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
+    excludedCommands: [CODEX_STEP_COMMAND],
   };
 }
 
@@ -67,6 +71,11 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
  * and ssh's. The seats' sandbox above denies them (#183), and so does `factory codex`'s Codex profile (packs/pstack/bin/codex-step.mjs,
  * #182). An entry with * is a glob. */
 export const DENY_READ = ['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'];
+
+/** pstack's other-model-family steps on Codex (#182): every seat is granted the factory's verb, never `codex` itself (denied
+ * below), and the sandboxed seats run it outside their sandbox (sandboxSettings above). */
+const CODEX_STEP_COMMAND = 'factory codex *';
+const CODEX_STEP_GRANT = 'Bash(factory codex:*)';
 
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.
@@ -138,7 +147,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
     '--permission-mode', p.hideKey ? 'default' : 'auto',
     ...(p.sandbox ? ['--settings', JSON.stringify({ sandbox: sandboxSettings({ home, run, work, profiles }) })] : []),
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
-    '--allowedTools', ...(p.hideKey ? p.allow(run) : []), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
+    '--allowedTools', ...(p.hideKey ? p.allow(run) : []), ...edits, 'StructuredOutput', CODEX_STEP_GRANT, ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
     '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA),
   ];

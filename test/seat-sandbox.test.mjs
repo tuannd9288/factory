@@ -6,6 +6,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as seat from '../bin/lib/seat.mjs';
 import { until, world } from './seat-world.mjs';
+import { matches, rulesAfter } from './bash-rule.mjs';
 
 const RUN = '/r/issue-1';
 const WORK = '/r/w';
@@ -56,9 +57,23 @@ for (const role of ['worker', 'reviewer']) {
         allowWrite: [WORK, RUN, realpathSync(tmpdir())],
       },
       network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
+      // The one command that runs outside the sandbox (#182), under Codex's own read profile.
+      excludedCommands: ['factory codex *'],
     });
   });
 }
+
+test('every seat is granted factory codex and still denied codex; a sandboxed seat runs factory codex alone outside its sandbox (#182)', () => {
+  for (const role of seat.ROLES) {
+    const args = build(role, { profiles: PROFILES });
+    assert.ok(rulesAfter(args, '--allowedTools').some((r) => matches(r, 'factory codex --role cross-judge --brief-file /tmp/b.md')), role);
+    assert.ok(rulesAfter(args, '--disallowedTools').some((r) => matches(r, 'codex exec -')), role);
+    assert.ok(!rulesAfter(args, '--allowedTools').some((r) => matches(r, 'codex exec -')), role);
+    const { sandbox } = settingsOf(args);
+    // Codex reads its login under the denied profiles folder and needs the network, so the sandbox cannot hold it.
+    if (sandbox) assert.deepEqual(sandbox.excludedCommands, ['factory codex *'], role);
+  }
+});
 
 test('of the roles, only the worker and the reviewer get a sandbox', () => {
   for (const role of seat.ROLES) assert.equal(Object.hasOwn(settingsOf(build(role)), 'sandbox'), role === 'worker' || role === 'reviewer', role);
