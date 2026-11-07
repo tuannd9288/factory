@@ -166,7 +166,9 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Checked by: the deny rules `bin/seat` and `packs/pstack/bin/lead` give each session (`denyOf` in `bin/lib/seat.mjs`
   and in `packs/pstack/bin/lead.mjs`), and their tests; the kit's `kit/.claude/settings.json` binds Claude Code only (#134).
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
-- **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
+- **H7**: Model choice lives outside the way of working. Checked by: `test/models.test.mjs`: every launcher takes its model and effort
+  from `bin/lib/models.json`, and no source file under `bin/`, `packs/pstack/bin/` or `kit/.gate/bin/` names a model; the gate's
+  reviewer from the kit's `kit/.gate/bin/lib/reviewer.json` (`test/claude-reviewer.test.mjs`).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
   Checked by: `.github/CODEOWNERS:4`.
@@ -255,7 +257,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory-relay` | The MacBook's relay of a Lead's news (#370): `run` is one pass that reads the Mac mini's news lines by ssh and posts those it could not deliver into the socket file of the Lead that runs there; `plist` prints its LaunchAgent (his own user, every 60 s), which runs from the installed copy, since macOS refuses a launchd job `~/Desktop`, `~/Documents` and `~/Downloads`; each `run` pass first brings that copy to `origin/main`, as the Mac mini's sweep does for `~/WORKSPACES`; `check` fails when a path of the job or of the installed plist sits under those folders or the loaded job's last exit code is not 0, says, in the job's environment, whether ssh and the read of the news work, sets the first cursor and relays nothing; the header of `bin/lib/relay.mjs` has the rest |
 | `bin/factory-reader` | The stream reader's pass (#339): `bin/factory-reader` reads what the Leads and the seats wrote since the last pass and tells Colly, through the events file, what code cannot see (a seat's `StructuredOutput` report included); `--try <file> [--side pi\|codex]` sends one stream file once and prints the answer and the quote check, writing nothing; the sweep starts a pass every 15 minutes |
 | `bin/lib/reader.mjs` | The reader's code: the reduction to the assistant's text, the tool names and a seat's `StructuredOutput` report, the two commands, the cursors, the quote check; the header has the rest |
-| `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, or `codex`) and, for each side, its model and effort |
+| `bin/lib/models.json` | The factory's one table of models and efforts (INN-39, H7), changed by pull request and read by `bin/lib/models.mjs`: the seats, the pack Lead, the MacBook Lead, Colly, `factory codex`, the pstack role lines a Lead's profile gets as `rules/pstack-models.md`, and the reader's setting: the side (`pi` with Antigravity, or `codex`) and, for each side, its model and effort; `inherit` passes none, so the harness's default applies; the gate's reviewer keeps its own pin, `kit/.gate/bin/lib/reviewer.json` |
 | `bin/lib/streams.mjs` | Finds the two kinds of stream the reader reads, a seat's `run-<tag>.jsonl` and a Lead's `transcripts/<session>.jsonl` |
 | `bin/lib/redact.mjs` | The one redaction: the events' patterns (#309) and seatwork's, used by `bin/lib/events.mjs` and the reader |
 | `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { factory, git } from '../../../test/helpers.mjs';
 import { DENY_READ } from '../../../bin/lib/seat.mjs';
+import { MODELS } from '../../../bin/lib/models.mjs';
 
 /** The permission profile a codex call names (`-c default_permissions=` and its `-c permissions.<name>.filesystem=` table), as an object. */
 function profileOf(args) {
@@ -102,6 +103,8 @@ test('runs the brief on codex exec, read-only in the folder, on the verifier\'s 
   assert.equal(exec.args[exec.args.indexOf('-C') + 1], w.repo);
   // No sandbox mode: Codex's own permission profile reads the disk but the seats' denied folders (#182), and writes nothing.
   assert.ok(!exec.args.includes('-s') && !exec.args.includes('--sandbox'), exec.args.join(' '));
+  // Codex's model is the factory's one table's (INN-39): inherit passes none, so Codex's own default applies.
+  assert.deepEqual(exec.args.includes('-m') ? exec.args.slice(exec.args.indexOf('-m'), exec.args.indexOf('-m') + 2) : [], MODELS.codex.model === 'inherit' ? [] : ['-m', MODELS.codex.model]);
   const profile = profileOf(exec.args);
   assert.equal(profile[':root'], 'read');
   for (const d of ['.agent-profiles', '.ssh', '.config/gh', '.claude', '.codex', ...DENY_READ]) assert.equal(profile[join(w.home, d)], 'deny', d);

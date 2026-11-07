@@ -94,6 +94,9 @@ test('the shared fixture adds no account team before a Lead is launched', () => 
   } finally { s.done(); }
 });
 
+// The MacBook Lead's model and effort are the factory's one table's (INN-39); inherit passes none, so the account's default applies.
+const { MODELS, claudeModelArgs } = await import('../bin/lib/models.mjs');
+
 test('lead --here starts claude here with the empty gh folder, the agents\' git identity, no credential helper and gh auth denied', () => {
   const s = world();
   try {
@@ -101,6 +104,7 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
     const r = s.fac(['lead', 'alpha', '--here']);
     assert.equal(r.code, 0, r.out);
     const args = s.nuls('claude.args');
+    assert.deepEqual(args.slice(0, args.indexOf('--append-system-prompt')), claudeModelArgs(MODELS['lead-here']));
     const { env, permissions } = settingsOf(args);
     const empty = join(s.state, 'lead-here/gh-empty');
     const push = 'url.file:///nonexistent/factory-lead-pushes-from-the-mac-mini/.pushInsteadOf';

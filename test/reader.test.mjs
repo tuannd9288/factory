@@ -173,11 +173,12 @@ test('the redaction is one function: events.mjs uses it and keeps every pattern 
 
 // ---- the setting ----------------------------------------------------------------------------------------------------------
 
-test('the setting file defaults to the existing pi Flash path', async () => {
+test('the setting is the watcher entry of the factory\'s one table of models', async () => {
   const { loadSetting, SETTING_FILE } = await reader();
-  assert.equal(SETTING_FILE, join(factory, 'bin/lib/reader.json'));
-  assert.deepEqual(JSON.parse(readFileSync(SETTING_FILE, 'utf8')), DEFAULT);
-  assert.deepEqual(loadSetting(SETTING_FILE), { side: 'pi', model: 'antigravity/gemini-3.8-flash', effort: 'high' });
+  assert.equal(SETTING_FILE, join(factory, 'bin/lib/models.json'));
+  const { watcher } = JSON.parse(readFileSync(SETTING_FILE, 'utf8'));
+  assert.ok(watcher.sides[watcher.side], 'the side it picks is one of its sides');
+  assert.deepEqual(loadSetting(SETTING_FILE), { side: watcher.side, ...watcher.sides[watcher.side] });
 });
 
 test('each side\'s command is built from the setting alone, exactly', async () => {

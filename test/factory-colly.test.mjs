@@ -53,7 +53,10 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
     const { cmd, args, options } = calls.at(-1);
     assert.equal(cmd, 'claude');
     assert.equal(options.stdio, 'inherit');
-    assert.deepEqual(args.slice(0, 4), ['--append-system-prompt', role, '--name', 'colly']);
+    // Colly's model and effort are the factory's one table's (INN-39); inherit passes none, so the account's default applies.
+    const { MODELS, claudeModelArgs } = await import('../bin/lib/models.mjs');
+    const lead = claudeModelArgs(MODELS.colly);
+    assert.deepEqual(args.slice(0, lead.length + 4), [...lead, '--append-system-prompt', role, '--name', 'colly']);
     const settings = JSON.parse(args[args.indexOf('--settings') + 1]);
     assert.equal(settings.env.GH_TOKEN, '');
     assert.equal(settings.env.GITHUB_TOKEN, '');

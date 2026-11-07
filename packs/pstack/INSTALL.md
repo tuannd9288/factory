@@ -74,11 +74,11 @@ seat's run shows it reading `docs/harness/claude-code.md` and `references/explai
 Cursor's names as the adapter says; before that, the plugin was cached under the profile, which `secretsRead` denies, and the
 model mapped them itself (#193's seat run). The factory does not use these parts:
 
-- `/setup-pstack`: the launcher now writes `$CLAUDE_CONFIG_DIR/rules/pstack-models.md` at every start, with the
-  skill defaults mapped by the adapter: a `grok` role runs on the session model, and the seats that exist to be another
+- `/setup-pstack`: the launcher now writes `$CLAUDE_CONFIG_DIR/rules/pstack-models.md` at every start, rendered from the
+  factory's one table of models, `bin/lib/models.json` (INN-39), with the skill defaults mapped by the adapter: a `grok` role runs on the session model, and the seats that exist to be another
   model family (the second seat of arena, architect and interrogate, and arena's cross-judge) are `codex high`, run through
-  `factory codex` on the verifier's Codex profile, never on Claude; a change of model is the Human's; whether Claude
-  Code loads a profile's own `$CLAUDE_CONFIG_DIR/rules/` instead is not checked (#182).
+  `factory codex` on the verifier's Codex profile, never on Claude; a change of model is the Human's. Claude Code 2.1.319
+  loads a profile's own `$CLAUDE_CONFIG_DIR/rules/` with the user memory, read from its binary's strings, not by a run (INN-39).
 - Autopilot's owners and swarm of verifiers: the adapter runs a Cursor cloud agent as a worktree subagent of the
   session, outside `bin/seat` (#182).
 - The transcript readers (recall, reflect, session pickup, eval, show-me-your-work's audit): the adapter points them

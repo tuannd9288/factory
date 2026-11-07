@@ -25,6 +25,7 @@ import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
 import { APP_FOLDERS, accountList, accountRefusal, archiveToken, nodeAccountList, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAdded, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
+import { MODELS, claudeModelArgs } from './models.mjs';
 
 const HOST = 'tuans-mac-mini';
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -750,7 +751,8 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     delete childEnv.FACTORY_HOST_USER;
   }
   for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
-  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, ...mode, '--settings', JSON.stringify(settings),
+  // Its model and effort come from the factory's one table (INN-39); inherit passes none, so the account's default applies.
+  const r = spawnSync('claude', [...claudeModelArgs(MODELS['lead-here']), '--append-system-prompt', roleText, '--name', `${repo}-${team}`, ...mode, '--settings', JSON.stringify(settings),
     ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: childEnv, cwd });
   if (r.error) {
     console.error(`bin/factory: lead --here: claude did not run (${r.error.code ?? 'error'})`);
@@ -877,7 +879,8 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
   // /login is the only sign-in: no token or key from the caller's shell, and no other profile's plugin cache.
   const childEnv = { ...env, CLAUDE_CONFIG_DIR: config };
   for (const key of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
-  const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', 'colly', '--permission-mode', 'auto', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env: childEnv });
+  // Its model and effort come from the factory's one table (INN-39); inherit passes none, so the account's default applies.
+  const r = spawnSync('claude', [...claudeModelArgs(MODELS.colly), '--append-system-prompt', roleText, '--name', 'colly', '--permission-mode', 'auto', '--settings', JSON.stringify(settings)], { stdio: 'inherit', env: childEnv });
   if (r.error) {
     console.error(`bin/factory: colly: claude did not run (${r.error.code ?? 'error'})`);
     return 1;

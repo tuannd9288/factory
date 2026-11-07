@@ -1,0 +1,41 @@
+{
+  "$comment": "Every factory role's model and effort, in one place (INN-39, contract H7); bin/lib/models.mjs reads it, and test/models.test.mjs fails when a launcher names a model of its own. inherit: pass no model or effort, so the harness's own default applies. The gate's reviewer keeps its own pin in the kit, kit/.gate/bin/lib/reviewer.json, which every served repository carries. A change here is a pull request.",
+  "seats": {
+    "worker": { "model": "sonnet", "effort": "medium" },
+    "reviewer": { "model": "opus", "effort": "high" },
+    "researcher": { "model": "opus", "effort": "high" }
+  },
+  "lead": { "model": "opus", "effort": "high" },
+  "lead-here": { "model": "inherit", "effort": "inherit" },
+  "colly": { "model": "inherit", "effort": "inherit" },
+  "codex": { "model": "inherit" },
+  "watcher": {
+    "side": "pi",
+    "sides": {
+      "pi": { "model": "antigravity/gemini-3.8-flash", "effort": "high" },
+      "codex": { "model": "gpt-6-luna", "effort": "high" }
+    }
+  },
+  "pstack": {
+    "budget": "large (xhigh)",
+    "roles": {
+      "feature, refactoring": "inherit-parent",
+      "bug-fix": "inherit-parent",
+      "perf-issue": "inherit-parent",
+      "hillclimb": "inherit-parent",
+      "judgment and prose": "opus xhigh",
+      "hardest tasks": "opus xhigh",
+      "how explorer": "inherit-parent",
+      "how explainer": "opus xhigh",
+      "why investigators": "inherit-parent",
+      "why synthesizer": "opus xhigh",
+      "reflect tooling": "inherit-parent",
+      "reflect judgment, divergent, synthesizer": "opus xhigh",
+      "arena runners": "opus xhigh, codex high",
+      "arena cross-judge pool": "codex high",
+      "swarm workers": "inherit-parent",
+      "architect runners": "opus xhigh, codex high",
+      "interrogate reviewers": "opus xhigh, codex high"
+    }
+  }
+}

@@ -18,7 +18,8 @@ import { releaseLock, takeLock } from './queue.mjs';
 import { listStreams } from './streams.mjs';
 import { createHash } from 'node:crypto';
 
-export const SETTING_FILE = join(dirname(fileURLToPath(import.meta.url)), 'reader.json');
+// The Watcher's setting is its entry in the factory's one table of models (INN-39): { side, sides }, as reader.json held it.
+export const SETTING_FILE = join(dirname(fileURLToPath(import.meta.url)), 'models.json');
 export const LIMIT = 400_000;
 export const MAX_CALLS = 3;
 export const TIMEOUT_MS = 10 * 60_000;
@@ -78,6 +79,7 @@ export function loadSetting(file = SETTING_FILE, override = undefined) {
   } catch {
     return refuse(`${file} is not readable JSON`);
   }
+  if (isObject(s?.watcher)) s = s.watcher;
   if (!isObject(s) || Object.keys(s).some((k) => !['side', 'sides'].includes(k)) || !isObject(s.sides)) return refuse('it holds { side, sides } and nothing else');
   for (const [name, v] of Object.entries(s.sides)) {
     if (!SIDES[name]) return refuse(`unknown side ${JSON.stringify(name)}`);

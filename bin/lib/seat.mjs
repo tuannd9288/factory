@@ -11,6 +11,7 @@ import { ROOT, reexec, withStartLock } from './checkout.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
+import { MODELS, claudeModelArgs } from './models.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
 import { repoOk } from './repos.mjs';
@@ -97,10 +98,11 @@ const denyOf = (home, web) => [
  *   (run-71tx.sh, run-71rc.sh). Its git goes through bin/research-git, and every other form of git is denied (#181).
  * deny is a role's own deny rules, after the common ones. A preset without hideKey runs in auto mode with no role allow list and
  * no scrub, holding the team's key, and keeps every deny rule (the Human, 2026-11-01, #307). hideKey: true is the researcher's
- * switch alone (below); only a pull request the Human approves changes it. */
+ * switch alone (below); only a pull request the Human approves changes it. Each role's model and effort come from the factory's one
+ * table, bin/lib/models.json (INN-39, contract H7). */
 export const PRESETS = {
-  worker: { model: 'sonnet', effort: 'medium', turns: 400, resumeTurns: 200, web: false, sandbox: true },
-  reviewer: { model: 'opus', effort: 'high', turns: 300, resumeTurns: 300, web: false, sandbox: true },
+  worker: { ...MODELS.seats.worker, turns: 400, resumeTurns: 200, web: false, sandbox: true },
+  reviewer: { ...MODELS.seats.reviewer, turns: 300, resumeTurns: 300, web: false, sandbox: true },
   researcher: {
     // hideKey: true is today's setup: the scrub, the default mode, the short allow list below and seat 2. false makes it run like
     // the rest of the team (the Human, 2026-11-01: "Làm, mặc định giấu"). Flipping it is a pull request the Human approves,
@@ -109,7 +111,7 @@ export const PRESETS = {
     // The Lead's proposal (review of #91, #6), agreed by Colly on 2026-10-26: the researcher reads untrusted pages and can send
     // them out with WebFetch, so it never runs on seat 1. Since #178 seat 2 holds a token too; its grants were reviewed for that
     // (AGENTS.md): no tool of its own returns a file's content but Read, which the deny rules refuse on the tokens.
-    model: 'opus', effort: 'high', turns: 300, resumeTurns: 200, web: true, seats: [2],
+    ...MODELS.seats.researcher, turns: 300, resumeTurns: 200, web: true, seats: [2],
     allow: () => [
       'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', `Bash(${RESEARCH_GIT}:*)`,
       'Bash(ls:*)', 'Bash(wc:*)', 'Bash(mkdir:*)', 'Bash(date:*)', 'Bash(cd:*)',
@@ -134,7 +136,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
   const deny = [...denyOf(home, p.web), ...(p.deny ?? []), ...extraDeny, ...(profiles ? [`Read(/${profiles}/tokens/**)`, `Read(/${profiles}/archive/**)`, `Read(/${profiles}/seats/1/oauth-token)`] : [])];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
-    '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
+    ...claudeModelArgs(p), '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
     '--permission-mode', p.hideKey ? 'default' : 'auto',
     ...(p.sandbox ? ['--settings', JSON.stringify({ sandbox: sandboxSettings({ home, run, work, profiles }) })] : []),
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),

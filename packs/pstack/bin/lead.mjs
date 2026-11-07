@@ -24,6 +24,7 @@ import { TEAM, firstFree } from '../../../bin/lib/names.mjs';
 import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, secretsRead, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
+import { MODELS, claudeModelArgs, pstackModels } from '../../../bin/lib/models.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
 const USAGE = 'usage: factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]   (--team names the team, use the only existing team, pick a nickname when none exists, refuse when several exist; --new-team picks a free nickname; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
@@ -144,7 +145,7 @@ export function leadArgs({ repo, team, home, root, roleText, node, resume = null
     hook,
     argv: [
       'direnv', 'exec', '.', 'claude',
-      '--model', 'opus', '--effort', 'high',
+      ...claudeModelArgs(MODELS.lead),
       '--append-system-prompt', roleText,
       '--permission-mode', 'auto',
       '--add-dir', join(home, 'factory-runs'),
@@ -239,10 +240,11 @@ export function markOnboarded(config) {
   }
 }
 
-/** Copy pstack's mapped skill defaults into the Lead profile on every start (#436). Model changes are the Human's. */
-export function writeModels(config, root) {
+/** Write pstack's mapped skill defaults into the Lead profile on every start (#436), rendered from the factory's one table of models,
+ * bin/lib/models.json (INN-39); Claude Code loads the profile's rules/ with its user memory (2.1.319). Model changes are the Human's. */
+export function writeModels(config) {
   const file = join(config, 'rules/pstack-models.md');
-  const text = readFileSync(join(root, 'packs/pstack/pstack-models.md'));
+  const text = pstackModels();
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
@@ -444,7 +446,7 @@ function main(argv, env) {
   const token = t.token;
   try {
     markOnboarded(config);
-    writeModels(config, root);
+    writeModels(config);
   } catch (e) {
     process.stderr.write(`bin/lead: ${e.message}\n`);
     return 2;

@@ -108,7 +108,9 @@ describe('claude-reviewer', () => {
   test('calls claude with the model, effort, bound, read-only tools and a sealed context', () => {
     assert.equal(review({}).code, 0);
     const a = calls.argv.join('\u0000');
-    for (const pair of [['--model', 'claude-opus-5-5'], ['--effort', 'max'], ['--tools', 'Read,Grep,Glob'], ['--output-format', 'stream-json']])
+    // The model and effort are the kit's own table's, reviewer.json (INN-39, H7): a served repository's CI reads no factory file.
+    const pin = JSON.parse(readFileSync(join(factory, 'kit/.gate/bin/lib/reviewer.json'), 'utf8'));
+    for (const pair of [['--model', pin.model], ['--effort', pin.effort], ['--tools', 'Read,Grep,Glob'], ['--output-format', 'stream-json']])
       assert.ok(a.includes(pair.join('\u0000')), `missing ${pair.join(' ')}: ${calls.argv.join(' ')}`);
     for (const flag of ['-p', '--restricted', '--add-dir', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--verbose', '--json-schema', '--system-prompt', '--max-turns'])
       assert.ok(calls.argv.includes(flag), `missing ${flag}`);
@@ -546,8 +548,8 @@ describe('the pinned install and the workflow', () => {
     assert.equal(pkg.dependencies['@anthropic-ai/claude-code'], pin.version);
     assert.equal(lock.packages['node_modules/@anthropic-ai/claude-code'].version, pin.version);
     assert.match(lock.packages['node_modules/@anthropic-ai/claude-code'].integrity, /^sha512-/);
-    assert.equal(pin.model, 'claude-opus-5-5');
-    assert.equal(pin.effort, 'max');
+    assert.match(pin.model, /^[A-Za-z0-9][\w.-]*$/);
+    assert.match(pin.effort, /^[a-z]+$/);
   });
 
   test('review gives the reviewer the job\'s start and length, and the length is the job\'s timeout', () => {

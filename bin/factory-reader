@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The Watcher (#476), extending the stream reader (#339); the queue's sweep starts it every 15 minutes (bin/lib/queue.mjs, startReader), and it needs no one to run it:
 #   bin/factory-reader                                 one pass: what the Leads and the seats wrote since the last pass goes to the model
-#                                                      the setting picks (bin/lib/reader.json), and what it finds becomes lines in the
+#                                                      the setting picks (the watcher entry of bin/lib/models.json), and what it finds becomes lines in the
 #                                                      events file (bin/factory-events prints them)
 #   bin/factory-reader --try <file> [--side pi|codex]  reduce one stream file, send it once to the side named (else the setting's), and
 #                                                      print the parsed answer and the result of the quote check; it reads no cursor and
