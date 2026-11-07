@@ -310,9 +310,7 @@ every open pull request, since with the ruleset off each would land unjudged. Th
 behind, except a stack's child moved onto `main`, which the queue brings up to `main` (FAC-13). GitHub kept the Human's
 approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
 
-Claude Code updates itself on the stable channel; nothing in the factory pins the version its sessions run (the canary,
-#24, is at the tag `before-271`). The gate's reviewer on CI pins its own, 2.1.308
-(`kit/.gate/bin/reviewer/package.json`, `kit/.gate/bin/lib/reviewer.json`). The digest's job is in `bin/factory-ledger`'s header.
+Sessions take Claude Code's own updates (#290); only the gate's reviewer runs a pinned version (`kit/.gate/bin/lib/reviewer.json`).
 
 The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of eight conditions begins (a required check
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, an account Claude Code warns is
@@ -338,27 +336,12 @@ never the token. The sweep does the same for a new comment, by a login other tha
 
 The live verifier's Codex profile and its login are in `packs/pstack/INSTALL.md`, "The live verifier's login". What unattended runs
 need, and how `bin/seat` picks the team, the account and the seat, sets the permission mode and the grants, and handles the
-researcher and its known limits, are in the header of `bin/seat`. The worker's and the reviewer's Bash runs in Claude Code's
-sandbox, which denies reading the credential folders, allows no network and allows writes to the work folder, the run folder,
-the temporary folder, each `--add-dir` and Claude Code's own session temporary folder (#183).
+researcher and its known limits, are in the header of `bin/seat`. The worker's and the reviewer's commands run in a sandbox
+with no network and no read of the credential folders (#183).
 
-What a session may read under a profile is nothing: the deny list holds `Read(~/.agent-profiles/**)` whole (#185). Claude
-Code caches a plugin under the profile's `CLAUDE_CONFIG_DIR`, so the cache is moved out: each profile has its own plugin
-root, `~/.local/share/factory/plugins/<path of the profile's config dir under ~/.agent-profiles>`, mode 700, which
-`bin/seat` and `packs/pstack/bin/lead` set as `CLAUDE_CODE_PLUGIN_CACHE_DIR`. Both install the work folder's enabled
-plugins into it before the session (`bin/lib/plugins.mjs`), through a throwaway config folder of their own under
-`~/.local/share/factory/plugin-install/`, so no profile's folder is touched. The marketplace comes only from the
-factory's own pin, `packs/pstack/settings.json` of the checkout that runs, never from the work folder, which may be a
-candidate branch and would otherwise re-point the root every later session on the profile shares. The work folder decides
-only whether to install: its `.claude/settings.json` must enable the pin's `pstack@<name>` and no other plugin, and declare
-no marketplace but the pin, with the pin's own source; anything else (an older pin included: take the kit update), a
-name that is not plain letters, digits, dot, dash and underscore, stops the start before any folder is made or any `claude`
-call is run, and so does a failed install. A session reads its own earlier transcripts from copies outside every profile: a
-seat's `run-<tag>.jsonl` in its run folder, and a Lead's `~/factory-runs/<repo>-<team>/transcripts/`, which a Stop and
-SessionEnd hook of the launcher (`packs/pstack/bin/transcript-copy.mjs`) fills with the one transcript its input names.
-The hook runs it with the `node` that `PATH` names when `lead` starts (`/opt/homebrew/bin/node`, a link `brew upgrade`
-keeps, not its Cellar path), and `lead` refuses to start with none. Only the Lead reads those copies: every seat role is
-denied `Read(~/factory-runs/*/transcripts/**)` (only a Lead's folder has a `transcripts/`).
+No session reads a profile's folder (#185). A session finds pstack's files in a plugin folder outside the profiles, installed
+only from the factory's own pin, and reads its own earlier transcripts from copies outside them; no seat reads a Lead's
+copies. `bin/lib/plugins.mjs` and `packs/pstack/bin/transcript-copy.mjs` have the rest.
 
 A pack is a folder a team copies; the kit lays none (#132). What `packs/pstack/` holds and how it is copied are at the opening of
 `packs/pstack/INSTALL.md`. The pstack Lead's start (`factory lead <repo>`), its resume and `--dry-run`, its login and the Herdr notes
