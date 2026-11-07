@@ -2,10 +2,10 @@
 // for every role that runs from the factory checkout, and the kit's own pin for the gate's reviewer (test/claude-reviewer.test.mjs). The
 // launchers here get a made-up table, so every expectation is written out, never read from models.json; the approved defaults are one
 // matrix of their own. The MacBook Lead, Colly and `factory codex` get theirs in test/factory-here, test/factory-colly and
-// packs/pstack/test/codex-step.
+// packs/pstack/test/codex-step. The Watcher keeps its own frozen setting, bin/lib/reader.json, tested by test/reader.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
@@ -13,7 +13,6 @@ import { factory } from './helpers.mjs';
 const { MODELS, entryOf, pstackModels } = await import('../bin/lib/models.mjs');
 const { buildArgs } = await import('../bin/lib/seat.mjs');
 const { leadArgs, writeModels } = await import('../packs/pstack/bin/lead.mjs');
-const { commandOf, loadSetting } = await import('../bin/lib/reader.mjs');
 
 // Every role a model and effort no other role has, so a launcher that reads another role's entry fails.
 const SYNTHETIC = {
@@ -23,12 +22,10 @@ const SYNTHETIC = {
     researcher: { model: 'mock-researcher', effort: 'researchereffort' },
   },
   lead: { remote: { model: 'mock-lead-remote', effort: 'remoteeffort' }, here: { model: 'mock-lead-here', effort: 'hereeffort' } },
-  watcher: { side: 'codex', sides: { pi: { model: 'mock/pi-model', effort: 'minimal' }, codex: { model: 'mock-codex-watcher', effort: 'low' } } },
   pstack: { budget: 'mock budget', roles: { 'mock role': 'mock value', 'other role': 'inherit-parent' } },
 };
 const SEAT = { run: '/r/issue-1', home: '/h', work: '/r/w' };
 const LEAD = { repo: 'app', team: 'lead', home: '/h', root: '/f', roleText: 'role', node: '/n' };
-const after = (args, flag) => args[args.indexOf(flag) + 1];
 
 test('each seat and the pack Lead pass their own entry of the table they are given', () => {
   assert.deepEqual(buildArgs({ role: 'worker', ...SEAT, models: SYNTHETIC }).slice(0, 6), ['-p', '--model', 'mock-worker', '--effort', 'workereffort', '--max-turns']);
@@ -62,27 +59,6 @@ test('a missing role, the old flat shape or a value that is no plain name is ref
   assert.throws(() => pstackModels({ budget: 'b', roles: { r: 'v\nsneaked: line' } }), /no usable entry for pstack/);
 });
 
-test('the Watcher takes the side and model of the table\'s watcher entry, and refuses a table without a usable one', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'models-'));
-  try {
-    const file = join(dir, 'models.json');
-    const paths = { input: 'in', inputFile: '/i', schemaFile: '/s', empty: '/e', home: '/h' };
-    writeFileSync(file, JSON.stringify(SYNTHETIC));
-    const codex = commandOf(loadSetting(file), paths);
-    assert.equal(codex.command, 'codex');
-    assert.equal(after(codex.args, '-m'), 'mock-codex-watcher');
-    assert.ok(codex.args.includes('model_reasoning_effort=low'), codex.args.join(' '));
-    const pi = commandOf(loadSetting(file, 'pi'), paths);
-    assert.deepEqual([pi.command, after(pi.args, '--model'), after(pi.args, '--thinking')], ['pi', 'mock/pi-model', 'minimal']);
-    writeFileSync(file, JSON.stringify({ seats: SYNTHETIC.seats }));
-    assert.throws(() => loadSetting(file), (e) => e.cause === 'setting');
-    writeFileSync(file, JSON.stringify({ watcher: { side: 'pi', sides: { pi: { model: '--verbose', effort: 'high' } } } }));
-    assert.throws(() => loadSetting(file), /side pi has no usable model/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 test('a Lead profile\'s rules/pstack-models.md is the given table\'s pstack lines, in pstack\'s own rule-file shape', () => {
   const dir = mkdtempSync(join(tmpdir(), 'models-'));
   try {
@@ -107,7 +83,6 @@ test('the approved defaults: changing one is the Human\'s, by a pull request tha
     colly: inherit,
     codex: inherit,
   });
-  assert.deepEqual(MODELS.watcher, { side: 'pi', sides: { pi: { model: 'antigravity/gemini-3.8-flash', effort: 'high' }, codex: { model: 'gpt-6-luna', effort: 'high' } } });
   assert.deepEqual(MODELS.pstack, {
     budget: 'large (xhigh)',
     roles: {

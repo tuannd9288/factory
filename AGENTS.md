@@ -170,8 +170,9 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: `test/models.test.mjs`: each launcher takes its model and effort
   from the table it is given, refuses a missing role, and today's approved defaults in `bin/lib/models.json` are one matrix; the files
-  that build a model's argv name no model (a launcher in another file is left to review); the gate's reviewer takes its own from the
-  kit's `kit/.gate/bin/lib/reviewer.json` (`test/claude-reviewer.test.mjs`).
+  that build a model's argv name no model (a launcher in another file is left to review); the Watcher takes its own from its frozen
+  `bin/lib/reader.json` (`test/reader.test.mjs`); the gate's reviewer takes its own from the kit's `kit/.gate/bin/lib/reviewer.json`
+  (`test/claude-reviewer.test.mjs`).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
   Checked by: `.github/CODEOWNERS:4`.
@@ -261,7 +262,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory-reader` | The stream reader's pass (#339): `bin/factory-reader` reads what the Leads and the seats wrote since the last pass and tells Colly, through the events file, what code cannot see (a seat's `StructuredOutput` report included); `--try <file> [--side pi\|codex]` sends one stream file once and prints the answer and the quote check, writing nothing; the sweep starts a pass every 15 minutes |
 | `bin/lib/reader.mjs` | The reader's code: the reduction to the assistant's text, the tool names and a seat's `StructuredOutput` report, the two commands, the cursors, the quote check; the header has the rest |
 | `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, `codex`, or `off`, under which no new model pass starts while the silence watch runs; the reader's header has the rest) and, for each side, its model and effort |
-| `bin/lib/models.json` | The factory's one table of models and efforts (INN-39, H7), changed by pull request and read by `bin/lib/models.mjs`: the seats, the pack Lead (`lead.remote`), the MacBook Lead (`lead.here`), Colly, `factory codex`, the pstack role lines a Lead's profile gets as `rules/pstack-models.md`, and the reader's setting: the side (`pi` with Antigravity, or `codex`) and, for each side, its model and effort; `inherit` passes none, so the harness's default applies; the gate's reviewer keeps its own pin, `kit/.gate/bin/lib/reviewer.json` |
+| `bin/lib/models.json` | The factory's one table of models and efforts (INN-39, H7), changed by pull request and read by `bin/lib/models.mjs`: the seats, the pack Lead (`lead.remote`), the MacBook Lead (`lead.here`), Colly, `factory codex`, and the pstack role lines a Lead's profile gets as `rules/pstack-models.md`; `inherit` passes none, so the harness's default applies; the Watcher keeps its own frozen file, `bin/lib/reader.json` (`docs/decisions.md`, "The Watcher's freeze, 2026-11-07"), and the gate's reviewer its own pin, `kit/.gate/bin/lib/reviewer.json` |
 | `bin/lib/streams.mjs` | Finds the two kinds of stream the reader reads, a seat's `run-<tag>.jsonl` and a Lead's `transcripts/<session>.jsonl` |
 | `bin/lib/redact.mjs` | The one redaction: the events' patterns (#309) and seatwork's, used by `bin/lib/events.mjs` and the reader |
 | `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
