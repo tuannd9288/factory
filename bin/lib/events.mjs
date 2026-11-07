@@ -24,8 +24,13 @@
 // `bin/factory-events` read those files. Before printing an INN answer, factory-events takes its shared Git claim; only the holder prints it.
 // `bin/factory-events [--follow]` prints the start lines after its cursor ($FACTORY_STATE/events.cursor);
 // only --follow moves the cursor and then follows the file, and no run prints a clear line. A text holds no token and no e-mail address.
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+// The share (FAC-43): where FACTORY_EVENTS_SHARE names a file, as the MacBook's queue job does, each write also appends its lines there, under
+// the same lock, so a user other than the daemon's (the MacBook's Colly) can follow them with `bin/factory-events --file <that file>` without
+// reading the state folder. Every local user can read the share's lines (redacted, as above), and nothing else of the state folder.
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { claimJob } from './job-claim.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
@@ -187,9 +192,9 @@ export function readActive(state) {
   }
 }
 
-/** The lines of the events file, parsed; a torn or foreign line is skipped. */
-export function readLines(state) {
-  return readText(join(state, 'events.jsonl')).split('\n').flatMap((l) => {
+/** The lines of an events file, parsed; a torn or foreign line is skipped. */
+const linesOf = (file) =>
+  readText(file).split('\n').flatMap((l) => {
     try {
       const e = l.trim() ? JSON.parse(l) : null;
       return Number.isInteger(e?.seq) ? [e] : [];
@@ -197,6 +202,69 @@ export function readLines(state) {
       return [];
     }
   });
+
+/** The lines of the state folder's events file. */
+export const readLines = (state) => linesOf(join(state, 'events.jsonl'));
+
+/** Where the MacBook's queue job puts the share (FAC-43, bin/lib/queue.mjs job): a folder of its own in /Users/Shared, which every local user
+ * can reach. */
+export const MACBOOK_SHARE = '/Users/Shared/factory/events.jsonl';
+
+/** Why a share's folder or file (`what`) may not be used, from its lstat, or null: it must be a real folder or file (a link is not), owned by
+ * one of `owners` (uids), and writable by no one else. /Users/Shared is writable by every account, so an account could make the folder first,
+ * or put a link in it, and own the lines Colly reads. */
+export function shareRefusal(st, what, owners) {
+  if (st.isSymbolicLink()) return `${what} is a link`;
+  if (what === 'folder' ? !st.isDirectory() : !st.isFile()) return `${what} is not a ${what}`;
+  if (!owners.includes(st.uid)) return `${what} is owned by uid ${st.uid}`;
+  if (st.mode & 0o022) return `${what} is writable by others (mode ${(st.mode & 0o777).toString(8)})`;
+  return null;
+}
+
+/** The uids a reader of a share accepts as its owner: this user's, and the agents' user's (FACTORY_HOST_USER, else `factory`) where this machine
+ * has that user. */
+export function ownersOf(env = process.env) {
+  const r = spawnSync('id', ['-u', env.FACTORY_HOST_USER || 'factory'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const agents = r.status === 0 ? Number(r.stdout.trim()) : NaN;
+  return [process.getuid(), ...(Number.isInteger(agents) ? [agents] : [])];
+}
+
+/** Appends `text`, the lines just written to events.jsonl, to the share, under the caller's events lock. The folder is made mode 0755 and the file
+ * 0644, and both must pass shareRefusal with this process's user as their owner; otherwise nothing is written there and
+ * $state/events-share.failed says why, in one line. A failed share never stops the write to events.jsonl. */
+function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
+  if (!file) return;
+  const failed = join(state, 'events-share.failed');
+  try {
+    const dir = dirname(file);
+    try {
+      mkdirSync(dir, { mode: 0o755 });
+      chmodSync(dir, 0o755);
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    const owners = [process.getuid()];
+    const why = shareRefusal(lstatSync(dir), 'folder', owners);
+    if (why) throw new Error(why);
+    // O_NOFOLLOW: a link as the file itself is refused by the open, not followed.
+    const fd = openSync(file, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o644);
+    try {
+      const st = fstatSync(fd);
+      const bad = shareRefusal(st, 'file', owners);
+      if (bad) throw new Error(bad);
+      if ((st.mode & 0o777) !== 0o644) fchmodSync(fd, 0o644);
+      writeSync(fd, text);
+    } finally {
+      closeSync(fd);
+    }
+    rmSync(failed, { force: true });
+  } catch (error) {
+    try {
+      writeFileSync(failed, `${new Date().toISOString()} the events share ${file} was not written: ${error.code === 'ELOOP' ? 'file is a link' : error.message}\n`);
+    } catch {
+      // the state folder could not be written either: the events write below it has already failed or will say so
+    }
+  }
 }
 
 export function writeAtomic(file, text) {
@@ -251,7 +319,9 @@ export function appendStart({ state, kind, key, text, extra = {}, now = Date.now
   return withEventsLock(state, () => {
     const active = readActive(state);
     const seq = Math.max(active.seq, ...readLines(state).map((e) => e.seq)) + 1;
-    appendFileSync(join(state, 'events.jsonl'), `${JSON.stringify({ ...extra, seq, at: new Date(now).toISOString(), type: 'start', kind, key, text: oneLine(text) })}\n`);
+    const line = `${JSON.stringify({ ...extra, seq, at: new Date(now).toISOString(), type: 'start', kind, key, text: oneLine(text) })}\n`;
+    appendFileSync(join(state, 'events.jsonl'), line);
+    share(state, line);
     writeAtomic(join(state, 'events-active.json'), `${JSON.stringify({ seq, conditions: active.conditions })}\n`);
     return seq;
   });
@@ -282,7 +352,9 @@ function recordLocked({ state, found, read, now = Date.now(), started }) {
   if (changes.length) {
     seq = Math.max(seq, ...readLines(state).map((e) => e.seq));
     const at = new Date(now).toISOString();
-    appendFileSync(join(state, 'events.jsonl'), changes.map(([type, c]) => `${JSON.stringify({ seq: ++seq, at, type, kind: c.kind, key: c.key, text: c.text })}\n`).join(''));
+    const lines = changes.map(([type, c]) => `${JSON.stringify({ seq: ++seq, at, type, kind: c.kind, key: c.key, text: c.text })}\n`).join('');
+    appendFileSync(join(state, 'events.jsonl'), lines);
+    share(state, lines);
   }
   const body = `${JSON.stringify({ seq, conditions: next })}\n`;
   if (body !== readText(join(state, 'events-active.json'))) writeAtomic(join(state, 'events-active.json'), body);
@@ -364,7 +436,8 @@ function main(argv) {
   let news = false;
   let newest = false;
   let after = null;
-  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>] [--news [--newest]]');
+  let shared = null;
+  const usage = () => new Error('usage: factory-events [--follow] [--after <seq>] [--news [--newest]] [--file <share>]');
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--follow') follow = true;
     else if (argv[i] === '--news') news = true;
@@ -373,17 +446,41 @@ function main(argv) {
       const v = argv[++i] ?? '';
       if (!/^\d+$/.test(v) || !Number.isSafeInteger(Number(v))) throw usage();
       after = Number(v);
-    } else throw usage();
+    } else if (argv[i] === '--file' && argv[i + 1]) shared = resolve(argv[++i]);
+    else throw usage();
   }
   if (newest && (!news || follow || after !== null)) throw usage();
   const state = stateDir();
-  const file = join(state, 'events.jsonl');
+  const file = shared ?? join(state, 'events.jsonl');
+  // --file (FAC-43) reads another user's share, so it and its folder must pass shareRefusal, owned by the agents' user (FACTORY_HOST_USER, else
+  // `factory`) or by this user, which is the MacBook daemon's until it moves to the MacBook's `factory` user. Otherwise one line says why and
+  // the run ends, at the start or at any later read. A missing file is waited for.
+  const owners = shared ? ownersOf() : [];
+  const guard = () => {
+    if (!shared) return;
+    for (const [path, what] of [[dirname(file), 'folder'], [file, 'file']]) {
+      let st;
+      try {
+        st = lstatSync(path);
+      } catch (error) {
+        if (error.code === 'ENOENT') return;
+        throw error;
+      }
+      const why = shareRefusal(st, what, owners);
+      if (why) {
+        console.error(`factory-events: ${file}: its ${why}; not followed`);
+        process.exit(2);
+      }
+    }
+  };
+  guard();
   // `--news --newest` prints the highest seq of a news line, or 0, and nothing else; it moves no cursor. The relay's first pass reads only this.
-  if (newest) return void console.log(Math.max(0, ...readLines(state).filter((e) => e.type === 'start' && NEWS_KINDS.has(e.kind)).map((e) => e.seq)));
-  // --news has a cursor of its own: Colly's never moves for it.
-  const cursorFile = join(state, news ? 'events.news.cursor' : 'events.cursor');
+  if (newest) return void console.log(Math.max(0, ...linesOf(file).filter((e) => e.type === 'start' && NEWS_KINDS.has(e.kind)).map((e) => e.seq)));
+  // --news has a cursor of its own: Colly's never moves for it. A share has one of its own too, in this user's state, named by its path.
+  const of = shared ? `.file-${createHash('sha256').update(shared).digest('hex').slice(0, 12)}` : '';
+  const cursorFile = join(state, `${news ? 'events.news' : 'events'}${of}.cursor`);
   let cursor = Number(readText(cursorFile).trim()) || 0;
-  const highest = Math.max(0, ...readLines(state).map((e) => e.seq));
+  const highest = Math.max(0, ...linesOf(file).map((e) => e.seq));
   let queued = after ?? cursor;
   if (queued > highest) {
     console.error(`factory-events: ${after === null ? 'the cursor' : '--after'} ${queued} is above the highest seq in events.jsonl (${highest}); starting from its first line`);
@@ -436,6 +533,7 @@ function main(argv) {
   };
   process.stdout.on('error', () => process.exit(0));
   const drain = () => {
+    guard();
     let size;
     try {
       size = statSync(file).size;
@@ -450,7 +548,7 @@ function main(argv) {
     }
     if (size === offset) return;
     const buf = Buffer.alloc(size - offset);
-    const fd = openSync(file, 'r');
+    const fd = openSync(file, constants.O_RDONLY | (shared ? constants.O_NOFOLLOW : 0));
     try {
       readSync(fd, buf, 0, buf.length, offset);
     } finally {
@@ -467,6 +565,9 @@ function main(argv) {
         continue;
       }
       if (e?.type !== 'start' || !Number.isInteger(e.seq) || e.seq <= queued || NEWS_KINDS.has(e.kind) !== news) continue;
+      // A share's reader takes no claim: the claim is a git push, which Colly's user may not make, and the Mac mini's Monitor delivers an INN
+      // answer (#366). So a share's INN answer is passed over, and the lines after it are not held behind it (#509 review).
+      if (shared && e.kind === 'inn-answer') continue;
       queued = e.seq;
       pending.push({ seq: e.seq, line: l, event: e });
     }
