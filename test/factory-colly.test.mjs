@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from '../packs/pstack/bin/lead.mjs';
 import { main, noPushGitEnv } from '../bin/lib/factory.mjs';
-import { denyReadRules } from '../bin/lib/seat.mjs';
+import { readRules } from '../bin/lib/deny-read.mjs';
 import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
 import { HOST_ENV } from './helpers.mjs';
 
@@ -83,7 +83,7 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
       w.done();
     }
     assert.deepEqual(settings.permissions.deny, [
-      ...denyReadRules, 'Read(~/.config/**)', 'Read(./.env*)', `Read(/${join(state, '.agent-profiles')}/**)`,
+      ...readRules({ profiles: join(state, '.agent-profiles'), role: 'colly' }),
       'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)',
       'Bash(*factory account add*)', 'Bash(*factory account remove*)', 'Bash(*factory store*)',
       'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs account remove*)', 'Bash(*lib/factory.mjs store*)',

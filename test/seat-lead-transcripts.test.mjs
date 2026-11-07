@@ -11,8 +11,7 @@ const RULE = 'Read(~/factory-runs/*/transcripts/**)'; // a team's folder is <rep
 const denied = (args) => args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--output-format'));
 
 test('the deny covers the transcripts of any team\'s folder, and a seat\'s own run log stays readable (#196)', async () => {
-  const { leadTranscripts } = await import('../bin/lib/seat.mjs');
-  const glob = /^Read\(~\/(.*)\)$/.exec(leadTranscripts)[1];
+  const glob = /^Read\(~\/(.*)\)$/.exec(RULE)[1];
   // `*` is one path segment and `**` the rest, as in a gitignore pattern
   const re = new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*')}$`);
   for (const folder of ['zalo-lead', 'zalo-b', 'factory-probe-pstack']) assert.ok(re.test(`factory-runs/${folder}/transcripts/s.jsonl`), folder);
@@ -35,8 +34,7 @@ test('heldNames reads the name file of every folder under the runs folder, a tea
 });
 
 test('every seat role, on either seat, is denied the Lead\'s transcript copies; the Lead is not', async () => {
-  const { ROLES, buildArgs, leadTranscripts } = await import('../bin/lib/seat.mjs');
-  assert.equal(leadTranscripts, RULE);
+  const { ROLES, buildArgs } = await import('../bin/lib/seat.mjs');
   assert.deepEqual(ROLES.length > 0, true);
   for (const role of ROLES) {
     for (const seat of [1, 2]) assert.ok(denied(buildArgs({ role, run: '/r', home: '/h', work: '/w', seat, tokenPath: '/p/oauth-token' })).includes(RULE), `${role} on seat ${seat}`);
