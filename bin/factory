@@ -25,7 +25,8 @@
 #                                  token store, gh runs here with it, refusing only the gh auth commands above (#366)
 #   factory linear <verb> ...      a Lead's steps on a repository on Linear (#404; bin/lib/linear-cli.mjs has the verbs): take, release, read, list, comment, ask,
 #                                  answered, create and onboard, as the Factory app; one JSON object on stdout, exit 0, 1 (Linear refused) or 2 (usage); a
-#                                  body comes on stdin (--body-file -); on the MacBook the same command runs on the Mac mini by ssh, stdin kept
+#                                  body comes on stdin (--body-file -); it runs on a node whose own token store holds the Factory app's credentials,
+#                                  else on the Mac mini by ssh, stdin kept; Colly's decision-create and decision-close always run on the Mac mini
 #   factory codex --role <role> [--effort <e>] [--write <folder>]  a pstack step that asks for another model family, on Codex on the verifier's
 #                                  profile, never on Claude (#182; packs/pstack/bin/codex-step.mjs has the roles and the rest): the brief on stdin,
 #                                  Codex's answer on stdout; exit 3 when it waits for Codex (logged out, out of quota, failed), logged with its
