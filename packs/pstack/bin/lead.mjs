@@ -33,20 +33,23 @@ const SEAT_TOKEN = '{{SEAT}}'; // in lead.md: the absolute path of the bin/seat 
 const RUNS_TOKEN = '{{RUNS}}'; // in lead.md: the absolute runs folder, whose paths the seats' records carry (#366)
 
 /** lead.md for one Lead: the form of its repository, its team, its Linear team key, the bin/seat its grant names and its runs folder.
- * Each value goes in as written (a function replacement, so no `$` in a path is read as a pattern). */
-export const roleFor = (text, { linear, team, seat, runs }) => roleOf(text, Boolean(linear))
-  .replaceAll(TEAM_TOKEN, () => team).replaceAll(TEAM_KEY_TOKEN, () => linear?.key ?? '').replaceAll(SEAT_TOKEN, () => seat).replaceAll(RUNS_TOKEN, () => runs);
+ * With no `seat` (a MacBook Lead that does not run as the agents' user, #366) it takes the <!--noseat--> form, which starts no seat, and
+ * names no bin/seat. Each value goes in as written (a function replacement, so no `$` in a path is read as a pattern). */
+export const roleFor = (text, { linear, team, seat = null, runs }) => formOf(roleOf(text, Boolean(linear)), seat ? 'seat' : 'noseat', seat ? 'noseat' : 'seat')
+  .replaceAll(TEAM_TOKEN, () => team).replaceAll(TEAM_KEY_TOKEN, () => linear?.key ?? '').replaceAll(SEAT_TOKEN, () => seat ?? '').replaceAll(RUNS_TOKEN, () => runs);
+
+/** The text with each span of `drop` taken out, markers included (a span that starts a line takes its line break with it), and the markers
+ * of `keep` taken out around their text. */
+const formOf = (text, keep, drop) => text
+  .replace(new RegExp(`^<!--${drop}-->[\\s\\S]*?<!--/${drop}-->\\n`, 'gm'), '')
+  .replace(new RegExp(`<!--${drop}-->[\\s\\S]*?<!--/${drop}-->`, 'g'), '')
+  .replaceAll(`<!--${keep}-->`, '')
+  .replaceAll(`<!--/${keep}-->`, '');
 
 /** lead.md holds each issue step twice, between <!--github-->…<!--/github--> and <!--linear-->…<!--/linear-->. The text for a repository keeps
- * one form and drops the other, markers included, so a Lead never sees both (#404). A span that starts a line takes its line break with it. */
+ * one form and drops the other, markers included, so a Lead never sees both (#404). */
 export function roleOf(text, linear) {
-  const drop = linear ? 'github' : 'linear';
-  const keep = linear ? 'linear' : 'github';
-  return text
-    .replace(new RegExp(`^<!--${drop}-->[\\s\\S]*?<!--/${drop}-->\\n`, 'gm'), '')
-    .replace(new RegExp(`<!--${drop}-->[\\s\\S]*?<!--/${drop}-->`, 'g'), '')
-    .replaceAll(`<!--${keep}-->`, '')
-    .replaceAll(`<!--/${keep}-->`, '');
+  return linear ? formOf(text, 'linear', 'github') : formOf(text, 'github', 'linear');
 }
 
 const ROLE_CHANGED = '[factory] your role changed:'; // the head of a resumed session's first message (#316)

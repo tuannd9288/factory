@@ -227,8 +227,8 @@ describe('lead role.sha (#316)', () => {
     assert.equal(prompt(), 'Take: GH issue for lead.\nend\n');
   }));
 
-  test('the role names bin/seat by the absolute path the Lead\'s grant allows, and the runs folder its seats\' records carry (#366)', () => world((w) => {
-    setRole(w, 'Start {{SEAT}} worker; its record has {{RUNS}}/zalo-lead.\n');
+  test('the role takes its seat form and names bin/seat by the absolute path the Lead\'s grant allows, and the runs folder its seats\' records carry (#366)', () => world((w) => {
+    setRole(w, 'Start <!--seat-->{{SEAT}} worker<!--/seat--><!--noseat-->no seat<!--/noseat-->; its record has {{RUNS}}/zalo-lead.\n');
     assert.equal(w.lead(['--new']).code, 0);
     const { argv } = w.log().at(-1);
     const seat = join(w.tree, 'bin/seat');

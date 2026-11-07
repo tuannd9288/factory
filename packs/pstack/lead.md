@@ -38,9 +38,11 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    branch. Work the issue needs is not a finding; the worker does it. Tell every seat to stop on a refused action,
    report its exact message to you and never retry it in another form, with another tool or a script. You handle
    approvals; seat briefs do not describe them.
-4. Start the worker by `bin/seat`'s absolute path, the one your grant names:
+4. Start the worker <!--seat-->by `bin/seat`'s absolute path, the one your grant names:
    `{{SEAT}} worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
-   the background: end the turn. A `seat-ended` wake says it ended; only then check, with Grep, once,
+   the background: end the turn.<!--/seat--><!--noseat-->only as this MacBook's `factory` user, the agents' own: you run as another
+   user, so you have no grant to start a seat and start none (#366). Tell the Human that the issue's work waits for a Lead that runs
+   as `factory`, and stop there.<!--/noseat--> A `seat-ended` wake says it ended; only then check, with Grep, once,
    that `~/.local/state/factory/sessions.jsonl` holds its record, a line that matches
    `"tag":"worker".*"run":"{{RUNS}}/<repo>-<n>"` (other fields sit between the two); a
    `"type":"result"` line in its log is not the end. The record's
