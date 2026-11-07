@@ -14,11 +14,11 @@ import { accessSync, constants, chmodSync, existsSync, lstatSync, mkdirSync, rea
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HOST, TOKEN_GIT, installedRoot, nodeGithubToken, placeOf } from './node.mjs';
+import { HOST, TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
-import { markOnboarded, quote, roleOf, copyHook } from '../../packs/pstack/bin/lead.mjs';
+import { markOnboarded, quote, roleFor, copyHook } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
@@ -486,14 +486,15 @@ const gitConfigEnv = (pairs) => ({
  * an unreachable one (GIT_CONFIG), so a push can never use the Human's own credential helper or SSH key. Fetches are untouched. */
 export const noPushGitEnv = () => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, ...gitConfigEnv(GIT_CONFIG) });
 
-// What the auto-mode classifier of a MacBook Lead and of Colly is told is inside its boundary (#366, #365): it trusts only the working
-// folder and its remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat
-// goes through that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
-// "$defaults" keeps the built-in entries, which a list without it replaces.
-const AUTO_MODE_ENVIRONMENT = [
+// What the auto-mode classifier of a MacBook Lead is told is inside its boundary (#366): it trusts only the working folder and its
+// remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat goes through
+// that ssh. Claude Code reads autoMode from --settings, never from a project's .claude/ (code.claude.com/docs/en/auto-mode-config);
+// "$defaults" keeps the built-in entries, which a list without it replaces. `seat` is the bin/seat this Lead starts its workers with, or
+// null when it starts none (it does not run as the agents' user).
+const autoModeEnvironment = (seat) => [
   '$defaults',
-  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). The factory's sessions on this MacBook (a team's Lead, and Colly, the Human's own assistant) run their routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), a Lead's workers with /Users/factory/WORKSPACES/bin/seat, Colly's watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow, and reads of that account's git settings.`,
-  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear and factory wake run on ${HOST} over that ssh. factory use and factory account add are the Human's, never a Lead's.`,
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), and reads of that account's git settings.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear and factory wake run on ${HOST} over that ssh. factory use and factory account add are the Human's, never this Lead's.${seat ? ` ${seat}, of this MacBook's installed copy of the factory, starts this Lead's workers and reviewers on this MacBook, on the team's own account.` : ''}`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh. Pushes to them go over HTTPS as the agents' GitHub account: from this MacBook when it holds the agents' GitHub token, otherwise from ${HOST}.`,
 ];
 
@@ -614,7 +615,12 @@ function markTrusted(config, folder) {
  * GitHub's ssh addresses go over HTTPS; and the git identity comes from GitHub with that token (hostIdentity), so the team ships with the
  * Mac mini off. Without that token, everything above holds as it is.
  * The session runs on the team's own profile and token, in auto mode with the factory host and its commands inside the classifier's
- * boundary (AUTO_MODE_ENVIRONMENT), and the folder it starts in is trusted in that profile, so a first start asks nothing (#366). */
+ * boundary (autoModeEnvironment), and the folder it starts in is trusted in that profile, so a first start asks nothing (#366).
+ * Its seats run only as the agents' user (#366 (a)), so a seat never runs with the Human's files and Keychain; bin/seat itself refuses any
+ * other user. Run as the MacBook's `factory` user, the agents' (isAgentsUser) on a machine that is not the host (placeOf), it gets three
+ * things: FACTORY_TEAM=<repo>-<team>, the grant of this node's installed copy's bin/seat, and that path in its role (lead.md's {{SEAT}} and
+ * {{RUNS}}). Run as any other user, the Human's own included, it gets none of them and its role's <!--noseat--> form, which stops at the
+ * worker step and says the work waits for a Lead run as `factory`. */
 function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   if (placeOf(env) === 'factory') {
     console.error('bin/factory: lead --here runs on the MacBook; on the Mac mini use factory lead without it');
@@ -649,11 +655,13 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     return 1;
   }
   const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/pstack/lead.md');
+  // As the agents' user the Lead starts its seats with the bin/seat of this node's installed copy, which follows main (#390), whatever clone
+  // runs this; as any other user it starts none.
+  const seat = isAgentsUser(env) ? join(installedRoot(env), 'bin/seat') : null;
   let roleText;
   try {
     const linear = onLinear(repo, state);
-    roleText = existsSync(rolePath) ? roleOf(readFileSync(rolePath, 'utf8'), Boolean(linear))
-      .replaceAll('{{TEAM}}', team).replaceAll('{{TEAMKEY}}', () => linear?.key ?? '') : '';
+    roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat, runs: contextOf(env).runs }) : '';
   } catch (e) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 2;
@@ -696,7 +704,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   // $GH_TOKEN from the session's environment, and GitHub's ssh addresses rewritten to HTTPS. Without it, pushes stay blocked (GIT_CONFIG).
   const gitConfig = token ? TOKEN_GIT : GIT_CONFIG;
   const settings = {
-    autoMode: { environment: AUTO_MODE_ENVIRONMENT },
+    autoMode: { environment: autoModeEnvironment(seat) },
     hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },
     // The team's quota for `factory account list` on this node (#365 B5): the newest rate_limits Claude Code shows the status line.
     statusLine: { type: 'command', command: [process.execPath, statusHook, statusFile(contextOf(env).runs, repo, team)].map(quote).join(' ') },
@@ -708,8 +716,9 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     },
     // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
     // env and printenv as for every role and seat (#181): the session's environment holds the team's Claude token and, with a stored
-    // agents token, GH_TOKEN.
-    permissions: { defaultMode: 'auto', deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)'] },
+    // agents token, GH_TOKEN. FACTORY_HOST_USER names the agents' user to bin/seat (isAgentsUser): a command that sets it to another user
+    // would start a seat as that user, so none may carry it; nothing a Lead runs needs it.
+    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, 'Read(~/.agent-profiles/**)', `Read(/${agentProfiles}/**)`, 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)'] },
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -728,7 +737,15 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   // Auto mode, as the Mac mini's Lead and the seats start (#273), unless what follows -- names a mode. A key or a plugin cache in the
   // caller's shell would override the team's token or point at another profile's plugins, so neither reaches claude.
   const mode = passed.some((a) => a === '--permission-mode' || a.startsWith('--permission-mode=')) ? [] : ['--permission-mode', 'auto'];
-  const childEnv = { ...env, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: '' } : {}), CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: claudeToken.token };
+  // FACTORY_TEAM is the team bin/seat starts each seat on (#311), as packs/pstack/bin/lead sets it on the Mac mini: only for a Lead that starts
+  // seats, and one the caller's shell has goes no further.
+  const childEnv = { ...env, ...(token ? { GH_TOKEN: token, GITHUB_TOKEN: '' } : {}), CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_OAUTH_TOKEN: claudeToken.token, FACTORY_TEAM: `${repo}-${team}` };
+  // A Lead that starts no seat runs as a user other than the agents', and gets no FACTORY_HOST_USER: one it inherited could only point
+  // bin/seat at another user. A Lead run as the agents' user keeps it, since it names that user.
+  if (!seat) {
+    delete childEnv.FACTORY_TEAM;
+    delete childEnv.FACTORY_HOST_USER;
+  }
   for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_PLUGIN_CACHE_DIR']) delete childEnv[key];
   const r = spawnSync('claude', ['--append-system-prompt', roleText, '--name', `${repo}-${team}`, ...mode, '--settings', JSON.stringify(settings),
     ...(index === -1 ? ['--session-id', session] : []), ...passed], { stdio: 'inherit', env: childEnv, cwd });

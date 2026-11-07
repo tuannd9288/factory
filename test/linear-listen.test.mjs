@@ -131,6 +131,9 @@ test('a stream event is recorded once, after every catch-up page and only for se
   await tick();
   assert.equal(f.store.linearEvents().filter((r) => r.id === 'live-only').length, 1);
   assert.equal(f.store.offset('linear:FAC'), 5000);
+  assert.deepEqual(f.store.linearEvents().map((r) => [r.id, r.time, r.via]), [
+    ['older', 1000, 'catch-up'], ['issue-1', 2000, 'stream'], ['comment-1', 3000, 'stream'], ['issue-1', 4000, 'stream'], ['live-only', 5000, 'stream'],
+  ], 'a row the catch-up found first is marked stream once the stream delivers it too; only "older" was found by catch-up alone');
 });
 
 test('1001 reconnect catches an event posted while down once', async (t) => {
@@ -172,6 +175,11 @@ test('1001 reconnect catches an event posted while down once', async (t) => {
   assert.equal(f.logs.filter((line) => line.includes('watching INN only')).length, 1);
   assert.equal(f.store.linearEvents().some((r) => r.id === 'excluded'), false);
   assert.equal(f.store.linearEvents().some((r) => r.id === 'inn-only'), true);
+  const via = Object.fromEntries(f.store.linearEvents().map((r) => [r.id, r.via]));
+  assert.deepEqual([via['new-team'], via['late-team']], ['catch-up', 'catch-up'], 'found only by the catch-up after the close');
+  assert.deepEqual([via.before, via.during, via['newer-inn'], via['inn-only']], ['stream', 'stream', 'stream', 'stream']);
+  assert.equal(f.logs.filter((line) => /closed \(1001\)/.test(line)).length, 2, 'one log line for each close, with its code');
+  assert.equal(f.logs.filter((line) => /source connected/.test(line)).length, 3, 'one log line for each connect');
 });
 
 test('restart catches up from the persisted cursor without duplicates', async (t) => {
@@ -193,6 +201,35 @@ test('restart catches up from the persisted cursor without duplicates', async (t
   await tick();
   assert.deepEqual(f.store.linearEvents().map((r) => r.id), ['before', 'after']);
   assert.equal(f.store.offset('linear:FAC'), 6000);
+});
+
+test('linear-check lists the events of a window that the store lacks, as the daemon answers it (FAC-38)', async (t) => {
+  const f = fixture(t);
+  const { linearCheck, linearCheckMain } = await import('../bin/lib/linear-listen.mjs');
+  const { handleLine } = await import('../bin/lib/daemon.mjs');
+  f.store.linearEvent({ kind: 'commentCreated', id: 'seen', issueIdentifier: 'FAC-1', teamKey: 'FAC', time: 20_000, via: 'catch-up' });
+  f.store.linearEvent({ kind: 'issueUpdated', id: 'issue-a', issueIdentifier: 'INN-1', teamKey: 'INN', time: 30_000, via: 'stream' });
+  const nodes = { comments: [comment('seen', 20), comment('lost', 25), { ...comment('edited', 5), updatedAt: time(26) }], issues: [issue('issue-a', 30), issue('issue-b', 40)] };
+  const asked = [];
+  const fetchCatchUp = async (query, { filter }) => {
+    const collection = query.includes('comments(') ? 'comments' : 'issues';
+    asked.push(filter.updatedAt);
+    const [key] = (filter.issue?.team ?? filter.team).key.in;
+    return { [collection]: page(nodes[collection].filter((n) => (n.issue ?? n).team.key === key)) };
+  };
+  const ask = async (request) => {
+    const { response } = handleLine({ store: f.store }, JSON.stringify(request));
+    return response.ok ? { ok: true, result: response.result } : { ok: false, why: response.error.message };
+  };
+  const r = await linearCheck({ state: f.state, since: 10_000, until: 50_000, fetchCatchUp, ask });
+  assert.deepEqual(asked[0], { gte: time(10), lte: time(50) });
+  assert.deepEqual(r.missing.map((e) => [e.kind, e.id]), [['commentCreated', 'lost'], ['issueUpdated', 'issue-b']]);
+  assert.equal(r.total, 4, 'a comment written before the window and edited in it is not counted');
+  assert.deepEqual(r.via, { stream: 1, 'catch-up': 1 });
+  const run = (argv) => linearCheckMain(argv, { env: { FACTORY_STATE: f.state }, fetchCatchUp, ask, print: () => {} });
+  assert.equal(await run(['--since', time(10), '--until', time(50)]), 1, 'something is missing');
+  assert.equal(await run(['--since', time(26), '--until', time(29)]), 0);
+  assert.equal(await run(['--until', time(50)]), 2, 'no --since');
 });
 
 test('authentication failures mint, pause, preserve the condition across other callers and recover on a stored token', async (t) => {

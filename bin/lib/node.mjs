@@ -25,10 +25,12 @@ export function nodeName() {
   return name;
 }
 
-/** The factory host is the machine named HOST (FACTORY_HOST_NAME in tests) when the command runs as its user, FACTORY_HOST_USER, `factory`
- * unless the setting names another. A `factory` user on any other machine is a node (#366). */
-export const placeOf = (env = process.env) =>
-  (userInfo().username === (env.FACTORY_HOST_USER || 'factory') && nodeName() === (env.FACTORY_HOST_NAME || HOST) ? 'factory' : 'macbook');
+/** Whether this process runs as the agents' macOS user: FACTORY_HOST_USER, `factory` unless the setting names another (#366). */
+export const isAgentsUser = (env = process.env) => userInfo().username === (env.FACTORY_HOST_USER || 'factory');
+
+/** The factory host is the machine named HOST (FACTORY_HOST_NAME in tests) when the command runs as the agents' user there. The agents'
+ * `factory` user on any other machine is a node (#366). */
+export const placeOf = (env = process.env) => (isAgentsUser(env) && nodeName() === (env.FACTORY_HOST_NAME || HOST) ? 'factory' : 'macbook');
 
 /** Where this machine's installed copy of the factory is (#390): $FACTORY_CHECKOUT; on the factory host ~/WORKSPACES, as the queue's
  * checkoutRoot has it; on the MacBook ${XDG_DATA_HOME:-~/.local/share}/factory/checkout, outside the folders macOS refuses a launchd job.
