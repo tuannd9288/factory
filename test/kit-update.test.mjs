@@ -98,6 +98,9 @@ describe('bin/kit-update', () => {
       assert.equal(calls.filter((c) => c.startsWith('label create')).length, 6);
       assert.equal(calls.filter((c) => c.startsWith('pr create')).length, 1);
       assert.ok(calls.every((c) => !c.startsWith('api')), calls.join('\n'));
+      // It opens as a draft, so GitHub asks no code owner yet, and the body names the repository's ship as what readies it (request 21).
+      assert.ok(w.created().includes('--draft'), w.created().join(' '));
+      assert.match(text, /`scripts\/ship`/);
     } finally {
       w.cleanup();
     }
