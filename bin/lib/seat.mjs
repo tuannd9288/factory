@@ -68,6 +68,9 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
  * and ssh's. The seats' sandbox above denies them (#183), and so does `factory codex`'s Codex profile (packs/pstack/bin/codex-step.mjs,
  * #182). An entry with * is a glob. */
 export const DENY_READ = ['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'];
+/** DENY_READ as Claude Code's Read rules, for a session with no sandbox of ours (the MacBook Lead and Colly, FAC-38): each entry under
+ * home as itself, which names a file such as ~/.claude.json, and with /**, which names what a folder holds. */
+export const denyReadRules = DENY_READ.flatMap((d) => [`Read(~/${d})`, `Read(~/${d}/**)`]);
 
 // The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
 // denied for every role but the researcher.

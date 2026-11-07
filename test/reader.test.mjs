@@ -307,20 +307,23 @@ test('the quote check keeps a quote across a `"` or a line break of a report, in
   assert.deepEqual(r.dropped.map((e) => e.quote), [quotes.madeUpPlain, quotes.madeUpEscaped]);
 });
 
-test('a malformed answer writes reader-failed answer and no event, and moves no cursor', async () => {
-  await withDir(async (dir) => {
-    const w = world(dir);
-    w.put(w.seatFile(), say('first line'));
-    await w.pass({ now: T0 });
-    const before = w.cursors();
-    appendFileSync(w.seatFile(), say('I keep going in circles on this test'));
-    w.answer('this is not json');
-    const r = await w.pass({ now: T0 + 15 * MIN });
-    assert.equal(w.calls().length, 1);
-    assert.deepEqual(w.shape(), ['start reader-failed answer']);
-    assert.deepEqual(w.cursors(), before);
-    assert.deepEqual(r.failed, ['answer']);
-  });
+test('a malformed answer, or one whose event kind is outside KINDS, writes reader-failed answer and no event, and moves no cursor', async () => {
+  // The second answer's quote is verbatim, so only the refusal of its kind keeps it out (the frozen set, docs/decisions.md).
+  for (const bad of ['this is not json', { events: [{ kind: 'unknown-kind', session: 'issue-333 fix9', quote: 'going in circles on this test', why: 'w' }] }]) {
+    await withDir(async (dir) => {
+      const w = world(dir);
+      w.put(w.seatFile(), say('first line'));
+      await w.pass({ now: T0 });
+      const before = w.cursors();
+      appendFileSync(w.seatFile(), say('I keep going in circles on this test'));
+      w.answer(bad);
+      const r = await w.pass({ now: T0 + 15 * MIN });
+      assert.equal(w.calls().length, 1);
+      assert.deepEqual(w.shape(), ['start reader-failed answer'], JSON.stringify(bad));
+      assert.deepEqual(w.cursors(), before);
+      assert.deepEqual(r.failed, ['answer']);
+    });
+  }
 });
 
 test('a quote that is not in the input, in another session\'s part or too short writes reader-failed answer, never the event', async () => {
