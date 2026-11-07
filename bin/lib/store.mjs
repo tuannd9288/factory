@@ -14,7 +14,7 @@
 //                  Each new event and its team's monotonic offset are committed in the same transaction.
 //   posts    each seat end the daemon took: when it arrived (ms), the verb, the run and tag, the session, when its wake went out (woke_at, ms) or
 //            why it did not (why), and the seq of the events line. Slice 4 measures a seat's end to its Lead's wake from this table.
-// One module wraps node:sqlite, so a Node upgrade that changes it fails here, in the store's test.
+// node:sqlite is wrapped here and in bin/lib/lock.mjs, so a Node upgrade that changes it fails in their tests.
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, closeSync, mkdirSync, openSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';

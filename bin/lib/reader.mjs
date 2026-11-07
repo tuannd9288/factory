@@ -21,7 +21,7 @@ import { reduceLine, turnEnded } from './claude-code.mjs';
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
 export { reduce } from './claude-code.mjs';
 import { redact, redactDeep } from './redact.mjs';
-import { releaseLock, takeLock } from './queue.mjs';
+import { takeLock } from './lock.mjs';
 import { listStreams } from './streams.mjs';
 import { createHash } from 'node:crypto';
 
@@ -425,7 +425,7 @@ export async function runPass({ state, runs, settingFile = settingPath(), home =
     } catch {
       // this pass is missing from the day's lines
     }
-    releaseLock(join(state, 'reader.lock'), lock.token);
+    lock.release();
   }
   return final;
 }
