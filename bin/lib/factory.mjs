@@ -373,7 +373,7 @@ const USAGE = `usage: bin/factory account list [--all] [--json]
        bin/factory lead <repo> [--team <name> | --new-team] --here [-- <claude arguments>]   (on the MacBook: a Lead with no GitHub login of the Human's)
        bin/factory lead --resume-session <id> [--check]
        bin/factory gh <gh arguments>   (under the agents' login: here, with this node's stored agents GitHub token; otherwise, on the MacBook, on the Mac mini)
-       bin/factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; on the MacBook: the same on the Mac mini, a body on stdin)
+       bin/factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; here when this node's store holds the Factory app's credentials, else on the Mac mini, a body on stdin; decision-create and decision-close always on the Mac mini)
        bin/factory codex --role <role> [--effort <e>] [--write <folder>]   (a pstack step on another model family, on Codex, #182; the brief on stdin)
        bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
 
@@ -495,7 +495,7 @@ export const noPushGitEnv = () => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, 
 const AUTO_MODE_ENVIRONMENT = [
   '$defaults',
   `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). The factory's sessions on this MacBook (a team's Lead, and Colly, the Human's own assistant) run their routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), a Lead's workers with /Users/factory/WORKSPACES/bin/seat, Colly's watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow, and reads of that account's git settings.`,
-  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear and factory wake run on ${HOST} over that ssh. factory use and factory account add are the Human's, never a Lead's.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear runs on this MacBook itself when its own token store holds the Factory app's credentials, otherwise on ${HOST} over that ssh, and Colly's decision-create and decision-close always run on ${HOST}; factory wake runs on ${HOST} over that ssh. factory use and factory account add are the Human's, never a Lead's.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh. Pushes to them go over HTTPS as the agents' GitHub account: from this MacBook when it holds the agents' GitHub token, otherwise from ${HOST}.`,
 ];
 
@@ -505,7 +505,7 @@ const AUTO_MODE_ENVIRONMENT = [
 const COLLY_AUTO_MODE_ENVIRONMENT = [
   '$defaults',
   `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). Colly, the Human's own assistant on this MacBook, runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list) and its watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow.`,
-  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login, on ${HOST} over ssh factory@${HOST}, or on this MacBook itself when its token store holds the agents' GitHub token; factory linear and factory wake run on ${HOST}. On the Human's spoken word Colly runs factory use and factory lead; factory account add, factory account remove and factory store are the Human's, never Colly's.`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login, on ${HOST} over ssh factory@${HOST}, or on this MacBook itself when its token store holds the agents' GitHub token; factory linear runs on this MacBook itself when its token store holds the Factory app's credentials, else on ${HOST}, and decision-create and decision-close always run on ${HOST}; factory wake runs on ${HOST}. On the Human's spoken word Colly runs factory use and factory lead; factory account add, factory account remove and factory store are the Human's, never Colly's.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it. Colly reads them, and reads and writes their issues and pull requests only through factory gh, as the agents. Colly pushes nothing and makes no source-control write of its own: its git cannot push to GitHub, and a git push, a force push, or a branch or tag write by Colly is never routine.`,
 ];
 
@@ -823,7 +823,7 @@ async function colly(args, env) {
   }
   const record = { type: 'command', command: [process.execPath, hook, socket].map(quote).join(' ') };
   // The wrapper is carried in the settings, so its bytes stay with this session, like the hash-named socket hook.
-  // SessionStart additionalContext uses the same documented shape as alerts.mjs.
+  // SessionStart additionalContext is the documented hook output (code.claude.com/docs/en/hooks).
   // bin/factory is a Bash wrapper; run its Node entry point directly with this session's Node.
   const factory = fileURLToPath(import.meta.url);
   const brief = `const {spawnSync}=require('node:child_process');
@@ -943,12 +943,16 @@ function ghCmd(args, env) {
 }
 
 /** `factory linear <verb> ...` (#404): a Lead's steps on a repository on Linear (bin/lib/linear-cli.mjs). On the factory host it runs there and
- * reads the Factory app's token in its own process; on the MacBook it runs the same command on the host, in the host user's login shell over ssh,
- * with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of this Mac is
- * involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
+ * reads the Factory app's token in its own process. On another node it runs there too when the node's own token store holds the app's
+ * client id and secret (FAC-38, #490's shape for `factory gh`): the node mints its own token, which leaves the host's alive, and reads its
+ * own registry. Otherwise, and always for the verbs that act as Colly, it runs the same command on the host, in the host user's login shell
+ * over ssh, with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of
+ * this Mac is involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
 async function linearCmd(args, env) {
   const cli = await import('./linear-cli.mjs');
-  if (placeOf(env) === 'factory') return cli.main(args, env);
+  const { appStored } = await import('./linear.mjs');
+  const here = !cli.COLLY_VERBS.includes(args[0]) && appStored(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
+  if (placeOf(env) === 'factory' || here) return cli.main(args, env);
   try {
     cli.parse(args);
   } catch (e) {
@@ -967,10 +971,11 @@ async function linearCmd(args, env) {
 /** `factory codex --role <role> ...` (#182): a pstack step that asks for another model family, on Codex (packs/pstack/bin/codex-step.mjs
  * has the options, the profile and the wait). On the factory host it runs there, on the verifier's Codex profile; on the MacBook the same
  * command runs on the host over ssh, stdin kept, in a new temporary folder there that is removed after, so Codex reads the brief alone: a
- * step that writes (--write) is refused here, and this folder's repository goes along as --repo for the wait log. */
+ * step that writes (--write) is refused here, and this folder's repository goes along as --repo for the wait log. The step gets the
+ * arguments alone: it takes nothing of the caller's environment (#182), and its second argument is a seam for its tests only. */
 async function codexCmd(args, env) {
   const step = await import('../../packs/pstack/bin/codex-step.mjs');
-  if (placeOf(env) === 'factory') return step.main(args, env);
+  if (placeOf(env) === 'factory') return step.main(args);
   let o;
   try {
     o = step.parse(args);

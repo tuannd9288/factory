@@ -3,7 +3,7 @@
 // --force, each linked worktree that is on the head branch of a merged pull request, that is clean, whose HEAD holds no commit on
 // none of the clone's remote refs, and that no live run holds. The branch and the run folder, its logs and transcripts stay. A
 // worktree of merged work that is not clean or holds an unpushed commit is kept and named in queue-worktrees.failed, so the Human
-// sees it in the alerts.
+// sees it in Colly's status line and brief and in the digest.
 import { spawnSync } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -52,7 +52,7 @@ export function sweepWorktrees({ clones, state, live, merged, now = Date.now() }
     }
     git('worktree', 'prune');
   }
-  // alerts.mjs shows the first line alone, so it names the first path.
+  // Colly's status (queueOf in colly-status.mjs) and the digest show the first line alone, so it names the first path.
   if (kept.length) {
     const more = kept.length > 1 ? ` and ${kept.length - 1} more` : '';
     writeFileSync(report, `${new Date(now).toISOString()} ${kept.length} worktree${kept.length > 1 ? 's' : ''} of merged work kept: ${kept[0]}${more}\n${kept.join('\n')}\n`);

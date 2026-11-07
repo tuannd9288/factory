@@ -1,5 +1,5 @@
 // bin/seat (#183): the worker's and the reviewer's Bash runs in Claude Code's sandbox, set in the one --settings value buildArgs
-// passes; the researcher's settings stay the alerts hook alone. The marker FACTORY_SANDBOX tells the tests they are inside it.
+// passes; the researcher gets no --settings. The marker FACTORY_SANDBOX tells the tests they are inside it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, realpathSync } from 'node:fs';
@@ -12,15 +12,14 @@ const RUN = '/r/issue-1';
 const WORK = '/r/w';
 const HOME = '/h';
 const PROFILES = '/p/profiles';
-const settingsOf = (args) => JSON.parse(args[args.indexOf('--settings') + 1]);
+const settingsOf = (args) => (args.includes('--settings') ? JSON.parse(args[args.indexOf('--settings') + 1]) : {});
 const build = (role, extra = {}) => seat.buildArgs({ role, run: RUN, home: HOME, work: WORK, ...extra });
 
 for (const role of ['worker', 'reviewer']) {
-  test(`${role}: one --settings holds the alerts hook and the sandbox, which fails closed and grants nothing more`, () => {
+  test(`${role}: one --settings holds the sandbox, which fails closed and grants nothing more`, () => {
     const args = build(role);
     assert.equal(args.filter((a) => a === '--settings').length, 1);
     const s = settingsOf(args);
-    assert.deepEqual(s.hooks, JSON.parse(seat.ALERTS_SETTINGS).hooks);
     assert.equal(s.sandbox.enabled, true);
     assert.equal(s.sandbox.failIfUnavailable, true);
     assert.equal(s.sandbox.autoAllowBashIfSandboxed, false);
@@ -74,12 +73,6 @@ test('every seat is granted factory codex and still denied codex; a sandboxed se
     // Codex reads its login under the denied profiles folder and needs the network, so the sandbox cannot hold it.
     if (sandbox) assert.deepEqual(sandbox.excludedCommands, ['factory codex *'], role);
   }
-});
-
-test('the researcher has the alerts hook alone, byte for byte, and no sandbox key', () => {
-  const args = build('researcher', { profiles: PROFILES });
-  assert.equal(args[args.indexOf('--settings') + 1], seat.ALERTS_SETTINGS);
-  assert.equal(Object.hasOwn(settingsOf(args), 'sandbox'), false);
 });
 
 test('of the roles, only the worker and the reviewer get a sandbox', () => {
