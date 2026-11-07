@@ -530,6 +530,21 @@ test('a late fix counts in the week it lands, on its own line, and stays out of 
   assert.match(digest(rows, revertPeriod), /\n- Fixed this period, merged earlier: 1 \(o\/r#1 fixed by #9\)\n/);
 });
 
+// The digest alone, as it existed before INN-40 too: a revert and a late fix that it left out of any rate.
+test('the digest\'s change fail rate counts a revert, and a late fix gets its own line in the week it lands (INN-40)', () => {
+  const rows = revertRows(
+    mergedPR(1, 'feat(a): add A', '2026-10-01T10:00:00Z'),
+    mergedPR(2, 'feat(b): add B', '2026-10-15T10:00:00Z'),
+    mergedPR(3, 'revert: feat(b): add B', '2026-10-16T10:00:00Z', 'Reverts #2'),
+    mergedPR(4, 'fix(a): repair A', '2026-10-17T10:00:00Z', 'Fixes: 867711bc96ad ("feat(a): add A")'),
+  );
+  // The entry as main() leaves it once resolveFixes has read the clone: its Fixes: line names #1.
+  rows[3].merges[0].fixes = [{ sha: '867711bc96ad', number: 1 }];
+  const text = digest(rows, revertPeriod);
+  assert.match(text, /\n- Change fail rate \(reverted or fixed\): 1\/2 /, '#2 reverted, of #2 and #4; the revert #3 is not counted');
+  assert.match(text, /\n- Fixed this period, merged earlier: 1 \(o\/r#1 fixed by #4\)\n/);
+});
+
 test('each repository is counted over the window since its merge switch last moved, its first sight with no move (INN-40)', () => {
   const state = mkdtempSync(join(tmpdir(), 'switch-window-'));
   try {
