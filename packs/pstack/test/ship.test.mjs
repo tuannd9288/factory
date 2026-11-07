@@ -155,6 +155,39 @@ describe('opening the pull request', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr create')));
   });
 
+  // FAC-14: the factory runs the pack from its source. Its root has scripts/verify and scripts/ship, the kit under kit/, no .gate/ and no
+  // pull request template, so no red-check; CI runs scripts/verify.
+  test('in a checkout shaped like the factory, scripts/ship opens a draft on main with the body as given, and no red-check stamp (FAC-14)', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
+    directories.push(dir);
+    const repo = join(dir, 'factory');
+    const sh = join(dir, 'sh');
+    for (const path of ['kit', 'packs/pstack/scripts', 'packs/pstack/.gate', 'scripts']) cpSync(join(factory, path), join(repo, path), { recursive: true });
+    mkdirSync(sh);
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'bin/gh'), FAKE_GH);
+    chmodSync(join(dir, 'bin/gh'), 0o755);
+    git(repo, 'init', '-q', '-b', 'main');
+    commit(repo, {}, 'start');
+    git(dir, 'init', '-q', '--bare', 'origin.git');
+    git(repo, 'remote', 'add', 'origin', join(dir, 'origin.git'));
+    git(repo, 'push', '-q', 'origin', 'main');
+    git(repo, 'fetch', '-q', 'origin');
+    git(repo, 'switch', '-q', '-c', 'fac-14-ship-here');
+    commit(repo, { 'bin/x.mjs': 'export const x = 1;\n' }, 'feat(factory): add x');
+    git(repo, 'push', '-q', 'origin', 'fac-14-ship-here');
+    const body = BODY.replace('Closes #3\n', 'Issue: FAC-14\nTeam: lead\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n');
+    writeFileSync(join(dir, 'body.md'), body);
+    writeFileSync(join(sh, 'head'), git(repo, 'rev-parse', 'HEAD'));
+    writeFileSync(join(sh, 'base'), git(repo, 'rev-parse', 'origin/main'));
+    const out = run(repo, join(repo, 'scripts/ship'), ['--body-file', join(dir, 'body.md')], { ...quiet, SH: sh, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-a-token' });
+    assert.equal(out.code, 0, out.out);
+    const create = readFileSync(join(sh, 'gh-calls'), 'utf8').split('\n').find((c) => c.startsWith('pr create'));
+    assert.match(create, /--base main --head fac-14-ship-here --title feat\(factory\): add x /);
+    assert.ok(create.includes('--draft'));
+    assert.equal(readFileSync(join(sh, 'created-body'), 'utf8'), body);
+  });
+
   test('is refused when origin/main moved past the base red-check judged', () => {
     const w = world();
     w.passed();

@@ -5,7 +5,13 @@ import console from 'node:console';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { subjectProblem, titleProblem } from '../../.gate/bin/lib/subject.mjs';
+
+// Installed, this file is a repository's scripts/lib/ship.mjs, beside the kit's .gate/. In the factory it runs from the pack's own source,
+// packs/pstack/scripts/lib/, and the kit is under kit/ (FAC-14): the same subject rules scripts/verify applies, and no red-check, since the
+// factory has no .gate/config.sh; its CI runs scripts/verify.
+const installed = existsSync(new URL('../../.gate/bin/lib/subject.mjs', import.meta.url));
+const FACTORY = !installed && existsSync(new URL('../../../../kit/.gate/bin/lib/subject.mjs', import.meta.url));
+const { subjectProblem, titleProblem } = await import(FACTORY ? '../../../../kit/.gate/bin/lib/subject.mjs' : '../../.gate/bin/lib/subject.mjs');
 
 // The template's issue lines. A body for a repository on Linear carries `Fixes <KEY>` and `Issue: <KEY>` in their place and passes (#404).
 const PLACEHOLDER = '<issue labelled task>';
@@ -46,11 +52,11 @@ function open(branch, head, args, drafts) {
     return say(1, 'refused: there is no origin/main to judge the head against; fetch it');
   }
   const redStamp = join(stamps, `red-check-${head}-${main}`);
-  if (!existsSync(redStamp)) {
+  if (!FACTORY && !existsSync(redStamp)) {
     say(1, `refused: HEAD ${short} has no red-check stamp against origin/main ${main.slice(0, 7)}; run .gate/bin/red-check --base origin/main`);
     return say(1, dirty);
   }
-  const noRed = readFileSync(redStamp, 'utf8').trim();
+  const noRed = FACTORY ? '' : readFileSync(redStamp, 'utf8').trim();
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);
   const bodyFile = args.bodyFile ?? '.github/pull_request_template.md';
