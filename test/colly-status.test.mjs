@@ -108,13 +108,13 @@ const readSnapshot = async (w) => {
 };
 
 test('a Lead runs while a claude process names it with --name <repo>-lead, the rule the sessions use (#179)', async () => {
-  const { leadRunning } = await top();
+  const { leadTeams } = await top();
   const ps = (...commands) => () => commands.map((command, i) => ({ pid: i + 1, command }));
-  assert.equal(leadRunning('factory', ps('claude --model opus --name factory-lead --continue')), true);
-  assert.equal(leadRunning('factory', ps('claude --name factory-lead')), true);
-  assert.equal(leadRunning('factory', ps('claude --name other-lead', 'vim --name factory-lead x')), false);
-  assert.equal(leadRunning('factory', ps('claude --name factory-lead-two')), false);
-  assert.equal(leadRunning('factory', ps()), false);
+  assert.deepEqual(leadTeams('factory', ps('claude --model opus --name factory-lead --continue')), ['lead']);
+  assert.deepEqual(leadTeams('factory', ps('claude --name factory-lead')), ['lead']);
+  assert.deepEqual(leadTeams('factory', ps('claude --name other-lead', 'vim --name factory-lead x')), []);
+  assert.deepEqual(leadTeams('factory', ps('claude --name factory-lead-two')), []);
+  assert.deepEqual(leadTeams('factory', ps()), []);
 });
 
 test('leadOf reads { repo, team } from --name <repo>-<team>, splitting at the last dash, and needs a claude command and a valid team (#196)', async () => {
@@ -130,12 +130,12 @@ test('leadOf reads { repo, team } from --name <repo>-<team>, splitting at the la
   assert.equal(leadOf('vim --name factory-lead x'), null);
 });
 
-test('leadRunning is true when some process is a Lead of the repository, whichever its team (#196)', async () => {
-  const { leadRunning } = await top();
+test('leadTeams names every team of the repository whose Lead runs, and no other repository\'s (#196)', async () => {
+  const { leadTeams } = await top();
   const ps = (...commands) => () => commands.map((command, i) => ({ pid: i + 1, command }));
-  assert.equal(leadRunning('factory-probe', ps('claude --name factory-probe-b')), true);
-  assert.equal(leadRunning('factory', ps('claude --name factory-probe-b')), false);
-  assert.equal(leadRunning('factory-probe', ps('claude --name factory-probe-b', 'claude --name factory-probe-lead')), true);
+  assert.deepEqual(leadTeams('factory-probe', ps('claude --name factory-probe-b')), ['b']);
+  assert.deepEqual(leadTeams('factory', ps('claude --name factory-probe-b')), []);
+  assert.deepEqual(leadTeams('factory-probe', ps('claude --name factory-probe-b', 'claude --name factory-probe-lead')), ['b', 'lead']);
 });
 
 test('parseLog reads model, turns, tokens, context and the last result cost; a resumed log takes the last total', async () => {

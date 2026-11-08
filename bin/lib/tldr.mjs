@@ -2,8 +2,7 @@
 // Vietnamese with the terms in English, so the Human reads and approves a tier-3 pull request from them, then `**TL;DR**` with
 // the same three in English (You decide, Recommendation, Risk). They are the same layout as kit/.github/pull_request_template.md,
 // and the Vietnamese block is the repository's only Vietnamese (docs/decisions.md, Language); a decision for him is numbered in Đề xuất,
-// each with a recommendation, and each changed setting is named once, there. A fourth line (Nếu không trả lời / If no answer) is
-// written only when a caller passes `silence`, `{ vi, en }`; bin/onboard and bin/kit-update pass none.
+// each with a recommendation, and each changed setting is named once, there.
 //
 //   node bin/lib/tldr.mjs onboard <name> < evidence
 //   node bin/lib/tldr.mjs kit-update <name> <added> <updated> <removed> <kept> < evidence
@@ -86,20 +85,19 @@ const REVERT = 'muốn bỏ thì revert PR này';
 const REVERT_EN = 'to undo, revert this PR';
 
 const LABELS = {
-  vi: { head: '**Tóm tắt cho anh**', decide: 'Anh quyết', recommend: 'Đề xuất', risk: 'Rủi ro', silence: 'Nếu không trả lời' },
-  en: { head: '**TL;DR**', decide: 'You decide', recommend: 'Recommendation', risk: 'Risk', silence: 'If no answer' },
+  vi: { head: '**Tóm tắt cho anh**', decide: 'Anh quyết', recommend: 'Đề xuất', risk: 'Rủi ro' },
+  en: { head: '**TL;DR**', decide: 'You decide', recommend: 'Recommendation', risk: 'Risk' },
 };
 
-/** One block: the heading and the bullets in the order the Human reads them (what he decides, the answer, the risk), then the
- * line for silence when the caller gave one. */
-const block = (lang, { decide, recommend, risk, silence }) => {
+/** One block: the heading and the bullets in the order the Human reads them (what he decides, the answer, the risk). */
+const block = (lang, { decide, recommend, risk }) => {
   const l = LABELS[lang];
-  const pairs = [[l.decide, decide], [l.recommend, recommend], [l.risk, risk], ...(silence ? [[l.silence, silence]] : [])];
+  const pairs = [[l.decide, decide], [l.recommend, recommend], [l.risk, risk]];
   return [l.head, ...pairs.map(([k, v]) => `- **${k}:** ${v}`)].join('\n');
 };
 
-/** The two blocks, Vietnamese then English, with a blank line between. `silence` is { vi, en } or none. */
-const section = (vi, en, silence) => [block('vi', { ...vi, silence: silence?.vi }), block('en', { ...en, silence: silence?.en })].join('\n\n');
+/** The two blocks, Vietnamese then English, with a blank line between. */
+const section = (vi, en) => [block('vi', vi), block('en', en)].join('\n\n');
 
 /** The decisions for the changed settings, numbered on: those with an old value we can see, then those whose old value the
  * factory cannot see (the base held them in a form the kit does not use, so it cannot say whether they changed). */
@@ -139,7 +137,7 @@ function reviewClause(rows, en = false) {
   return en ? ', an AI review runs on this PR' : ', review AI chạy trên PR này';
 }
 
-export function onboardTldr(name, evidence, silence) {
+export function onboardTldr(name, evidence) {
   const rows = settingsOf(evidence);
   const settings = rows.map(say).join('; ');
   const settingsEn = rows.map((r) => say(r.en)).join('; ');
@@ -154,11 +152,10 @@ export function onboardTldr(name, evidence, silence) {
       recommend: `Approve, if the settings above are what you want and ${name}'s session has listed the files it edits in the detail.`,
       risk: `verify stays red until this PR merges, which is normal and does not block the merge, and no AI review has run yet; ${REVERT_EN}.`,
     },
-    silence,
   );
 }
 
-export function kitUpdateTldr(name, { added, updated, removed, kept }, evidence, silence) {
+export function kitUpdateTldr(name, { added, updated, removed, kept }, evidence) {
   const rows = settingsOf(evidence);
   const changed = rows.filter((r) => r.changed);
   const moves = changed.filter((r) => r.from);
@@ -182,7 +179,6 @@ export function kitUpdateTldr(name, { added, updated, removed, kept }, evidence,
       recommend: changed.length ? settingDecisionsEn(changed) : 'Approve.',
       risk: `${touches ? `It edits ${touches} files the repository already has` : 'It edits no file the repository already has'}${reviewClause(rows, true)}; ${REVERT_EN}.`,
     },
-    silence,
   );
 }
 

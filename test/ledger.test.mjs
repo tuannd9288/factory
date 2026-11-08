@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { takeLock } from '../bin/lib/lock.mjs';
 import * as ledger from '../bin/lib/ledger.mjs';
-import { branchCosts, digest, rate, rowOf, wilson } from '../bin/lib/ledger.mjs';
+import { digest, rate, repoCosts, rowOf, wilson } from '../bin/lib/ledger.mjs';
 import { costOf } from '../bin/lib/claude-code.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,9 +36,9 @@ test('counts a message once although its blocks repeat its usage, per branch', (
   try {
     mkdirSync(join(dir, 'projects/p'), { recursive: true });
     const line = (id, branch, model = 'claude-sonnet-5-5') =>
-      JSON.stringify({ type: 'assistant', gitBranch: branch, message: { id, model, usage: { input_tokens: 1e6 } } });
+      JSON.stringify({ type: 'assistant', cwd: '/work/app', gitBranch: branch, message: { id, model, usage: { input_tokens: 1e6 } } });
     writeFileSync(join(dir, 'projects/p/s.jsonl'), [line('m1', 'a'), line('m1', 'a'), line('m2', 'b'), line('m3', 'b', 'mystery-model'), '{not json'].join('\n'));
-    const costs = branchCosts(dir);
+    const costs = repoCosts({ extra: [dir], root: '/work', name: 'app' });
     assert.equal(costs.get('a').dollars, 2);
     assert.equal(costs.get('b').dollars, 2);
     assert.deepEqual([...costs.get('b').unpriced], ['mystery-model']);
@@ -78,7 +78,7 @@ test('a pull request merged by rule after two judged commits: two rounds, not fi
       timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'MergedEvent' }] },
       commits: { nodes: [commit('a', [run('verify', 'FAILURE')]), commit('b', green), commit('c', []), { commit: { ...commit('m', green).commit, parents: { totalCount: 2 } } }] },
     }),
-    { human: 'boss', costs: new Map([['limit', { dollars: 1.5, models: new Set(['claude-sonnet-5-5']), unpriced: new Set() }]]), profile: true },
+    { human: 'boss', costs: new Map([['limit', { dollars: 1.5, models: new Set(['claude-sonnet-5-5']), unpriced: new Set() }]]) },
   );
   assert.equal(row.state, 'landed');
   assert.equal(row.tier, 2);
@@ -91,7 +91,7 @@ test('a pull request merged by rule after two judged commits: two rounds, not fi
 });
 
 test('a merge by the agents\' login without auto-merge is a team merge; only the Human\'s own merge, or an unknown actor, is a touch', () => {
-  const opts = { human: 'boss', costs: null, profile: false };
+  const opts = { human: 'boss', costs: null };
   const merged = (actor) =>
     rowOf('o/r', pr({ mergedAt: '2026-10-20T11:00:00Z', timelineItems: { nodes: [{ __typename: 'MergedEvent', ...(actor ? { actor: { login: actor } } : {}) }] } }), opts);
   assert.equal(merged('agent').touched, false);
@@ -105,17 +105,17 @@ test('a merge by the agents\' login without auto-merge is a team merge; only the
 });
 
 test('the Human is counted as touching a pull request he approved, labelled needs-human, or merged by hand', () => {
-  const opts = { human: 'boss', costs: null, profile: false };
+  const opts = { human: 'boss', costs: null };
   assert.equal(rowOf('o/r', pr({ reviews: { nodes: [{ author: { login: 'boss' }, state: 'APPROVED' }] } }), opts).touchedWhy, 'reviewed');
   assert.equal(rowOf('o/r', pr({ labels: { nodes: [{ name: 'needs-human' }] } }), opts).touchedWhy, 'needs-human');
   const manual = rowOf('o/r', pr({ mergedAt: '2026-10-20T11:00:00Z', timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'AutoMergeDisabledEvent' }, { __typename: 'MergedEvent' }] } }), opts);
   assert.equal(manual.touchedWhy, 'manual merge');
-  assert.equal(manual.costNote, 'no profile');
+  assert.equal(manual.costNote, 'no session on the branch');
   assert.equal(rowOf('o/r', pr({ reviews: { nodes: [{ author: { login: 'agent' }, state: 'APPROVED' }] } }), opts).touched, false);
 });
 
 test('the digest gives every rate with its count, and lists what waits for the Human', () => {
-  const opts = { human: 'boss', costs: null, profile: false };
+  const opts = { human: 'boss', costs: null };
   const rows = [
     rowOf('o/r', pr({ number: 1, labels: { nodes: [{ name: 'tier-3' }] } }), opts),
     rowOf('o/r', pr({ number: 2, mergedAt: '2026-10-20T11:00:00Z', commits: { nodes: [commit('a', green)] }, timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'MergedEvent' }] } }), opts),
@@ -130,7 +130,7 @@ test('the digest gives every rate with its count, and lists what waits for the H
   assert.match(text, /Tasks merged: 1\/2 \(50\.0%; 95% CI: /);
   assert.match(text, /Merged tasks the Human had to touch: 0\/1 /);
   assert.match(text, /Green at the first commit the gate judged: 1\/1 /);
-  assert.match(text, /\| \? \(no profile\) \|/);
+  assert.match(text, /\| \? \(no session on the branch\) \|/);
   assert.match(text, /\| Repo \| Task \| PR \| Who \| Tier \| Rounds \| API cost \| Human touched \| Outcome \|/);
 });
 
@@ -168,7 +168,7 @@ test('one conflicting pull request, whose verify never runs, does not stop the q
 });
 
 test('the queue re-runs the failed tier job alone once someone other than the author approved the head after it started', async () => {
-  const { pickReruns } = await import('../bin/lib/queue.mjs');
+  const { pickReruns } = await import('../bin/lib/checks.mjs');
   const pr = (approvals, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', jobId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals, checks: checks({ tier, verdict: { state: 'FAILURE', jobId: '43' } }) });
   assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), [{ number: 7, jobId: '42' }]);
   // An approval that landed while the job ran, after it read the reviews, still re-runs it.
@@ -180,7 +180,7 @@ test('the queue re-runs the failed tier job alone once someone other than the au
 });
 
 test('the queue re-runs a failed tier job once another App\'s Entire Gates check on the head concluded after it started (#155)', async () => {
-  const { pickReruns } = await import('../bin/lib/queue.mjs');
+  const { pickReruns } = await import('../bin/lib/checks.mjs');
   const pr = (entire, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', jobId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals: [], checks: checks({ tier }), apps: entire ? { 'Entire Gates': entire } : {} });
   assert.deepEqual(pickReruns([pr({ state: 'SUCCESS', completedAt: '2026-10-21T10:03:00Z' })]), [{ number: 7, jobId: '42' }]);
   // tier decides what a conclusion means; the queue only re-runs it once.
@@ -249,7 +249,7 @@ const issue = (over) => ({
 });
 
 test('a task runs from its assignment to its close, across every pull request that closes it', () => {
-  const opts = { human: 'boss', costs: new Map([['limit', { dollars: 1, models: new Set(['claude-sonnet-5-5']), unpriced: new Set() }], ['limit-2', { dollars: 2, models: new Set(['claude-sonnet-5-5']), unpriced: new Set() }]]), profile: true };
+  const opts = { human: 'boss', costs: new Map([['limit', { dollars: 1, models: new Set(['claude-sonnet-5-5']), unpriced: new Set() }], ['limit-2', { dollars: 2, models: new Set(['claude-sonnet-5-5']), unpriced: new Set() }]]) };
   const dropped = rowOf('o/r', pr({ number: 7, state: 'CLOSED', labels: { nodes: [{ name: 'tier-2' }] }, commits: { nodes: [commit('a', [run('verify', 'FAILURE')])] } }), opts);
   const merged = rowOf('o/r', pr({ number: 8, headRefName: 'limit-2', createdAt: '2026-10-20T10:00:00Z', mergedAt: '2026-10-20T13:00:00Z', state: 'MERGED', commits: { nodes: [commit('b', green)] }, timelineItems: { nodes: [{ __typename: 'AutoMergeEnabledEvent' }, { __typename: 'MergedEvent' }] } }), opts);
   const row = ledger.taskRow('o/r', issue({ state: 'CLOSED', closedAt: '2026-10-20T13:00:00Z' }), [merged, dropped]);
@@ -286,7 +286,7 @@ test('the window holds every task alive in it: started in it, open at its end, o
 });
 
 test('the digest counts the pull requests the reviewer raised, per repository', () => {
-  const opts = { human: 'boss', costs: null, profile: false };
+  const opts = { human: 'boss', costs: null };
   const raised = rowOf('o/r', pr({ number: 5, timelineItems: { nodes: [{ __typename: 'LabeledEvent', label: { name: 'raised' } }] } }), opts);
   const kept = rowOf('o/r', pr({ number: 6, labels: { nodes: [{ name: 'raised' }, { name: 'tier-3' }] } }), opts);
   const plain = rowOf('o/s', pr({ number: 7 }), opts);
@@ -297,7 +297,7 @@ test('the digest counts the pull requests the reviewer raised, per repository', 
 });
 
 test('the digest counts raised on task rows, the rows it is made of', () => {
-  const opts = { human: 'boss', costs: null, profile: false };
+  const opts = { human: 'boss', costs: null };
   const raised = rowOf('o/r', pr({ number: 8, labels: { nodes: [{ name: 'raised' }] } }), opts);
   const plain = rowOf('o/r', pr({ number: 9 }), opts);
   const task = ledger.taskRow('o/r', issue({}), [raised, plain]);
@@ -334,7 +334,7 @@ test('the digest counts the pstack steps that waited for Codex in the week, by c
 // Reverted pull requests (#83): a body line `Reverts #N` or `Reverts o/r#N`, or the title `Revert "<title>"`.
 const revertPeriod = { since: '2026-10-14', until: '2026-10-21' };
 const mergedPR = (number, title, mergedAt, body = '') => pr({ number, title, body, mergedAt, state: 'MERGED' });
-const revertRows = (...prs) => prs.map((p) => rowOf('o/r', p, { human: 'boss', costs: null, profile: false }));
+const revertRows = (...prs) => prs.map((p) => rowOf('o/r', p, { human: 'boss', costs: null }));
 const countOf = (rows, period = revertPeriod) => {
   const c = ledger.revertCount(rows, period);
   return { n: c.n, k: c.k, m: c.m, reverted: c.reverted.map((p) => `${p.repo}#${p.number}`) };
@@ -454,7 +454,7 @@ test('the drill of #83 as recorded: factory-scratch#57 reverts #56', () => {
   const rows = [
     drill(56, 'Add a README line for the revert drill (factory#83)', 'The change for the revert drill of tuannd9288/factory#83: one line in `README.md`. Its revert, the next pull request, is what the drill times.\n\nNo-red: a README line only; no behaviour changes, so no test can fail first.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n', '2026-10-25T20:44:12Z', '2026-10-25T20:44:32Z'),
     drill(57, 'Revert the README line of the revert drill (factory#83)', 'Reverts #56.\n\nThe revert drill of tuannd9288/factory#83: `git revert -m 1` of #56\'s merge commit, through the gate like any change. The drill times it from the decision to revert to this merge.\n\nNo-red: a revert of a README line; no behaviour changes, so no test can fail first.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n', '2026-10-25T20:45:48Z', '2026-10-25T20:46:15Z'),
-  ].map((p) => rowOf('tuannd9288/factory-scratch', p, { human: 'boss', costs: null, profile: false }));
+  ].map((p) => rowOf('tuannd9288/factory-scratch', p, { human: 'boss', costs: null }));
   const c = ledger.revertCount(rows, { since: '2026-10-19', until: '2026-10-26' });
   assert.deepEqual([c.n, c.k, c.m], [1, 1, 1]);
   assert.deepEqual(c.reverted, [{ repo: 'tuannd9288/factory-scratch', number: 56 }]);

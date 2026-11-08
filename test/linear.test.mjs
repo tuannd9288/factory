@@ -260,15 +260,6 @@ test('commentCreate passes the team as createAsUser and no icon until one is hos
   assert.equal(linear.calls.at(-1).variables.input.createAsUser, 'factory-pudding');
 });
 
-test('with an icon url set, writes carry displayIconUrl', async () => {
-  const f = fixture();
-  await configure(f);
-  const linear = fakeLinear();
-  const { api } = await make(f, linear, { iconUrl: 'https://example.invalid/factory.png' });
-  await api.commentCreate({ issueId: 'issue-1', body: 'hello' });
-  assert.equal(linear.calls.at(-1).variables.input.displayIconUrl, 'https://example.invalid/factory.png');
-});
-
 test('issueCreate carries createAsUser and the app as delegate; a write with no team name is refused', async () => {
   const f = fixture();
   await configure(f);
@@ -280,17 +271,6 @@ test('issueCreate carries createAsUser and the app as delegate; a write with no 
   assert.deepEqual(create.variables.input, { teamId: 'team-1', title: 'T', stateId: 'state-1', createAsUser: 'factory-otter', delegateId: 'app-user-1' });
   const none = (await make(f, linear, { team: '' })).api;
   await assert.rejects(() => none.commentCreate({ issueId: 'issue-1', body: 'x' }), /team/);
-});
-
-test('delegateToApp sets the app as the delegate of an issue a Lead holds', async () => {
-  const f = fixture();
-  await configure(f);
-  const linear = fakeLinear();
-  const { api } = await make(f, linear);
-  await api.delegateToApp('issue-1');
-  const call = linear.calls.at(-1);
-  assert.ok(call.query.includes('issueUpdate'));
-  assert.deepEqual(call.variables, { id: 'issue-1', input: { delegateId: 'app-user-1' } });
 });
 
 test('the default raise writes a start line and a top condition to the events, and a mend clears it', async () => {

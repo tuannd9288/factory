@@ -9,7 +9,8 @@ import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
 import { writeAtomic } from './files.mjs';
 import { hookStateOf, parseLog } from './claude-code.mjs';
-import { REQUIRED, readSessions } from './ledger.mjs';
+import { REQUIRED } from './ledger.mjs';
+import { readSessions } from './records.mjs';
 import { byName, cloneRepo, clonesUnder } from './repos.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
@@ -105,11 +106,8 @@ export function leadOf(command) {
   return m && TEAM.test(m[2]) && /\bclaude\b/.test(command) ? { repo: m[1], team: m[2] } : null;
 }
 
-/** The teams whose Lead runs on a repository, sorted. */
+/** The teams whose Lead runs on a repository, sorted: the rule `factory use` restarts a Lead by (#179). */
 export const leadTeams = (repo, processes = psList) => [...new Set(processes().map((p) => leadOf(p.command)).filter((l) => l?.repo === repo).map((l) => l.team))].sort();
-
-/** Whether a Lead of a repository runs: the rule used by `factory use` (#179). */
-export const leadRunning = (repo, processes = psList) => leadTeams(repo, processes).length > 0;
 
 function branchIn(cwd) {
   if (!cwd) return null;
@@ -222,7 +220,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     }
     for (const n of names) {
       const m = /^run-(.+)\.jsonl$/.exec(n);
-      if (!m || m[1].endsWith('.claim')) continue;
+      if (!m) continue;
       const tag = m[1];
       const file = join(dir, n);
       let st;

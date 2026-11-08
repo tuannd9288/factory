@@ -32,7 +32,7 @@ export function listStreams(runs, state) {
     for (const sub of entries(join(runs, d.name)).filter((e) => e.isDirectory() && !NOT_SEATS.has(e.name))) seats(`${d.name}/${sub.name}`);
     for (const f of entries(join(runs, d.name, 'transcripts')).filter((e) => e.isFile())) {
       const m = SESSION_COPY.exec(f.name);
-      if (m) found.push({ key: `${d.name}/transcripts/${f.name}`, file: join(runs, d.name, 'transcripts', f.name), header: `${d.name} ${m[1] ?? 'run'}` });
+      if (m) found.push({ key: `${d.name}/transcripts/${f.name}`, file: join(runs, d.name, 'transcripts', f.name), header: `${d.name} ${m[1]}` });
     }
   }
   if (state) {
