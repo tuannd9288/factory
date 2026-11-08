@@ -47,7 +47,7 @@ import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { MACBOOK_SHARE, noteGh, observe, resetNotes } from './events.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
-import { clonesUnder } from './repos.mjs';
+import { clonesUnder, githubRepo } from './repos.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
@@ -475,10 +475,9 @@ function followCheckout(state) {
   return moved;
 }
 
-/** The factory's own repository, named by the origin of the checkout at `root`, or undefined. */
+/** The factory's own repository, named by the origin of the checkout at `root`, or null; it throws when git cannot read the origin. */
 function ownRepo(root) {
-  const origin = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  return /github\.com[:/](.+?)(?:\.git)?\/?$/.exec(origin)?.[1];
+  return githubRepo(execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
 }
 
 /** The merge switch of the factory's own repository (#333), which the sweep does not otherwise read: its rules in force on main, one
