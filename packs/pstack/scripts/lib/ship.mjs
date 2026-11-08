@@ -223,8 +223,10 @@ function step(pr, head, branch, stacks, merge, drafts) {
   if (pr.labels.some((l) => l.name === 'needs-human')) return say(1, `stopped on #${n}: it carries needs-human; the Human decides`);
   const wait = tierWait(pr);
   if (typeof wait === 'string') return say(2, `could not judge the tier (${wait})`);
-  const stop = () => (wait ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval (unless the merge switch is at all)`) : 0);
-  if (armed) return stop() || say(0, `#${n} is armed; nothing to do`);
+  // ship reads no merge switch, so it does not say whether a tier 3 waits for the Human: the tier check says it, and at `all` it merges on
+  // its required checks alone (#333).
+  const waits = () => say(0, `#${n} is armed; it waits for its required checks`);
+  if (armed) return wait ? waits() : say(0, `#${n} is armed; nothing to do`);
   if (ahead) return say(1, `refused: HEAD ${short} has commits #${n} lacks; git push first`);
 
   const gap = behind(branch, head);
@@ -250,8 +252,8 @@ function step(pr, head, branch, stacks, merge, drafts) {
   }
   say(0, `armed #${n} at HEAD ${short}${review ? `: reviewer PASS ${review.record.tag}, session ${review.record.session}`
     : '; no reviewer record is required here: Colly and the supervising session review this repository\'s pull requests'}`);
-  if (raised) return say(1, `stopped on #${n}: its reviewer raised it (${raise.split('\n')[0].slice(0, 200)}); it carries needs-human and waits for the Human as tier 3`);
-  return stop();
+  if (raised) return say(1, `#${n} is armed; its reviewer raised it (${raise.split('\n')[0].slice(0, 200)}): it carries needs-human and waits for the Human's approval`);
+  return wait ? waits() : 0;
 }
 
 function parse(argv) {

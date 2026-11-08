@@ -254,14 +254,15 @@ describe('opening the pull request', () => {
     assert.match(create, /--base main --head fac-14-ship-here --title feat\(factory\): add x /);
     assert.ok(create.includes('--draft'));
     assert.equal(readFileSync(join(sh, 'created-body'), 'utf8'), body);
-    // Once verify passed, ship readies it and arms it with this repository's own method, merge commits: every pull request here waits
-    // for the Human, so it stops there.
+    // Once verify passed, ship readies it and arms it with this repository's own method, merge commits, and says it waits for its required
+    // checks: whether they hold it for the Human is the merge switch's (#333), which ship does not read.
     writeFileSync(join(sh, 'methods.json'), JSON.stringify({ squashMergeAllowed: false, mergeCommitAllowed: true }));
     const pr = JSON.parse(readFileSync(join(sh, 'pr.json'), 'utf8'));
     writeFileSync(join(sh, 'pr.json'), JSON.stringify({ ...pr, statusCheckRollup: [{ name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS' }] }));
     const armed = ship();
-    assert.equal(armed.code, 1, armed.out);
-    assert.match(armed.out, /waits for the Human's approval/);
+    assert.equal(armed.code, 0, armed.out);
+    assert.match(armed.out, /waits for its required checks/);
+    assert.doesNotMatch(armed.out, /stopped/);
     assert.deepEqual(calls().filter((c) => c.startsWith('pr ready') || c.startsWith('pr merge')), ['pr ready 7', `pr merge 7 --auto --merge --match-head-commit ${pr.headRefOid}`]);
   });
 
@@ -423,13 +424,14 @@ describe('the steps after it opened', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
   });
 
-  test('arms a tier-3 pull request, then stops while its tier check waits, and is done once it is green', () => {
+  test('arms a tier-3 pull request and says it waits for its required checks while its tier check runs, and is done once it is green', () => {
     const w = opened();
     w.pr({ labels: [{ name: 'tier-3' }], statusCheckRollup: [{ name: 'tier', status: 'IN_PROGRESS', conclusion: '' }] });
     let out = w.ship();
-    assert.equal(out.code, 1, out.out);
+    assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.match(out.out, /waits for its required checks/);
+    assert.doesNotMatch(out.out, /stopped/);
     assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`));
     w.pr({ statusCheckRollup: [{ name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     out = w.ship();
@@ -556,17 +558,17 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
     assert.equal(w.read('tier-calls'), '--base origin/main --head HEAD --labels task,tier-2\n');
   });
 
-  test('arms it, then stops with the line, and a later run stops again', () => {
+  test('arms it and says it waits for its required checks, and a later run says so again and arms nothing more', () => {
     const w = opened(3);
     w.pr({ statusCheckRollup: waiting });
     let out = w.ship();
-    assert.equal(out.code, 1, out.out);
+    assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.match(out.out, /waits for its required checks/);
     assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`));
     out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /waits for its required checks/);
     assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 1);
   });
 
@@ -615,23 +617,23 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     return w;
   };
 
-  test('by the label: armed, then stopped, and stopped again on the next run', () => {
+  test('by the label: armed, waiting for its required checks, and still waiting on the next run', () => {
     const w = opened(3, ['tier-3']);
     let out = w.ship();
-    assert.equal(out.code, 1, out.out);
+    assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.match(out.out, /waits for its required checks/);
     out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /waits for its required checks/);
     assert.doesNotMatch(out.out, /nothing to do/);
   });
 
   test('by .gate/bin/tier on the paths: the same', () => {
     const w = opened(3);
     const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /waits for its required checks/);
   });
 
   test('below tier 3 a red tier check is no wait of the Human\'s', () => {
