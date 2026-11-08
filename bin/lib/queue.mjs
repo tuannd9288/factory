@@ -55,7 +55,7 @@ import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
 import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
-import { installedRoot, nodeLogin, placeOf } from './node.mjs';
+import { humanOf, installedRoot, nodeLogin, placeOf, profilesOf, rootOf, runsOf, stateOf as stateFolder } from './node.mjs';
 import { holderOf, isHeld, takeLock } from './lock.mjs';
 
 const CALL_MS = 60_000;
@@ -454,12 +454,11 @@ function preflight(state, human, who) {
  * compared with what the code renders. A refusal or a failure is told in queue-checkout.failed and never stops the sweep. Returns whether it
  * moved the checkout (#399: the daemon exits after that pass, so the job's next run starts the new code). */
 function followCheckout(state) {
-  const home = process.env.HOME;
   const root = checkoutRoot();
   if (!root) return false;
   let moved = false;
   try {
-    const r = followMain({ root, state, live: () => liveRuns(process.env.FACTORY_RUNS ?? join(home, 'factory-runs')) });
+    const r = followMain({ root, state, live: () => liveRuns(runsOf()) });
     if (r.status === 'updated') {
       moved = true;
       console.log(`queue: checkout ${r.from.slice(0, 7)}..${r.to.slice(0, 7)} (${r.behind} commits)`);
@@ -509,7 +508,7 @@ function sweepLanded(state) {
   const merged = (repo) =>
     new Set(JSON.parse(gh(['pr', 'list', '-R', repo, '--state', 'merged', '--limit', '1000', '--json', 'headRefName'])).map((p) => p.headRefName));
   try {
-    const runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs');
+    const runs = runsOf();
     // A worktree is held when a live run's folder is its parent: the run files of that folder alone are listed.
     const live = (path) => liveRuns(runs, (dir, ext) => runFiles(dir, ext).filter((f) => path.startsWith(`${dirname(f)}/`)));
     const own = ownRepo(root);
@@ -528,10 +527,9 @@ function sweepLanded(state) {
 function recordEvents(state, reads, switches) {
   const failure = join(state, 'queue-events.failed');
   try {
-    const home = process.env.HOME;
-    const runs = process.env.FACTORY_RUNS ?? join(home, 'factory-runs');
+    const runs = runsOf();
     const seen = new Set();
-    observe({ state, reads, switches, runs, agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles'), onStart: (condition) => wakeStarted({ condition, reads, runs, seen }) });
+    observe({ state, reads, switches, runs, agentProfiles: profilesOf(), onStart: (condition) => wakeStarted({ condition, reads, runs, seen }) });
     rmSync(failure, { force: true });
   } catch (error) {
     mkdirSync(state, { recursive: true });
@@ -572,7 +570,7 @@ export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, en
 function startReaderPass(state) {
   const failure = join(state, 'queue-reader.failed');
   try {
-    startReader({ state, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
+    startReader({ state, runs: runsOf() });
     rmSync(failure, { force: true });
   } catch (error) {
     mkdirSync(state, { recursive: true });
@@ -585,7 +583,7 @@ function startReaderPass(state) {
 function checkSilence(state) {
   const failure = join(state, 'queue-silence.failed');
   try {
-    watchSilence({ state, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
+    watchSilence({ state, runs: runsOf() });
     rmSync(failure, { force: true });
   } catch (error) {
     try {
@@ -685,7 +683,7 @@ async function check(repos, human) {
   const j = job(repos);
   const say = (line) => console.log(`check: ${line}`);
   // #366: off the factory host the job's sweep runs as the agents, with the node's own token, as the daemon does (bin/lib/node.mjs).
-  const agents = nodeLogin(process.env, process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'));
+  const agents = nodeLogin(process.env, stateFolder());
   if (agents.refusal) {
     say(`not ready: ${agents.refusal}`);
     return 1;
@@ -696,14 +694,14 @@ async function check(repos, human) {
   const login = who.status === 0 ? who.stdout.trim() : '';
   say(`gh login ${login || `none: ${String(who.stderr || who.error?.message || '').trim()}`}`);
   say(`node ${spawnSync('node', ['--version'], { env, encoding: 'utf8' }).stdout?.trim() || 'not found'}`);
-  say(`state folder ${env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')}`);
+  say(`state folder ${stateFolder(env)}`);
   say(`log ${j.log}`);
   // One pass in this process, under the lock (--once): the job's own command would hand it to the daemon (#399).
   const run = spawnSync(j.program[0], [...j.program.slice(1), '--once'], { cwd: j.cwd, env, encoding: 'utf8', timeout: 10 * CALL_MS });
   const out = `${run.stdout ?? ''}${run.stderr ?? ''}`;
   for (const line of out.trim().split('\n').filter(Boolean).slice(-10)) say(`  ${line}`);
   say(`one sweep exited ${run.status}`);
-  const up = await ask(socketPath(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory')), { verb: 'ping' }, { timeoutMs: 1000 });
+  const up = await ask(socketPath(stateFolder(env)), { verb: 'ping' }, { timeoutMs: 1000 });
   say(up.ok ? `the daemon answers (pid ${up.result?.pid})` : `the daemon does not answer (${up.why}); the job starts it`);
   const why = !login
     ? 'gh is not logged in'
@@ -741,9 +739,9 @@ export function runPass({ repos = [], human, state }) {
     if (refused) return { ...out, code: refused };
     // No --repo: the repositories taken in, found as the ledger finds them (#211).
     const skip = (folder, why) => console.log(`queue: skipped ${folder}: ${why}`);
-    const clones = clonesUnder(process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..'), skip);
+    const clones = clonesUnder(rootOf(), skip);
     const swept = repos.length ? repos : [...clones.keys()];
-    const runs = process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs');
+    const runs = runsOf();
     if (!swept.length) console.log('queue: no repository taken in under the factory root; nothing swept');
     let failed = 0;
     for (const repo of swept) {
@@ -764,7 +762,7 @@ export function runPass({ repos = [], human, state }) {
     const heldBy = new Map([...reads.values()].map((d) => [d.folder, holders(d.claims)]));
     const rulesRead = new Map();
     if (!repos.length) {
-      const root = process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+      const root = rootOf();
       for (const { repo, folder } of leadOnly({ state, root, taken: new Set([...clones.values()].map((d) => basename(d))) })) {
         try {
           heldBy.set(folder, sweepNews(repo, folder, state, runs, rulesRead, root));
@@ -876,10 +874,10 @@ async function main(argv) {
     repos.push(rest[++i]);
   }
   if (!['sweep', 'plist', 'check'].includes(command)) throw new Error('usage: factory-queue sweep|plist|check [--repo owner/name...] [--once]');
-  const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
+  const human = humanOf();
   if (command === 'plist') return void process.stdout.write(plist(job(repos, process.env, daemon)));
   if (command === 'check') return check(repos, human);
-  const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+  const state = stateFolder();
   // The job's command, with no repository named, hosts the pass in the daemon (#399); one named, or --once, runs one pass here.
   if (!repos.length && !once) return ensureDaemon(state);
   return runPass({ repos, human, state }).code;
@@ -897,7 +895,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     // check are the Human's, run by hand, and keep no queue state.
     if (!['plist', 'check'].includes(process.argv[2])) {
       try {
-        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+        const state = stateFolder();
         mkdirSync(state, { recursive: true });
         writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
       } catch {}

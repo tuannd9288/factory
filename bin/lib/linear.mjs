@@ -28,6 +28,7 @@ import { lstatSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readActive, record } from './events.mjs';
 import { parseTeam } from './names.mjs';
+import { profilesOf, stateOf } from './node.mjs';
 import { redact } from './redact.mjs';
 import { APP_FOLDERS, appDir, readTokenFile, tokenDir, writeAppFile } from './token.mjs';
 
@@ -68,8 +69,8 @@ export function isAuthFailure(status, body) {
 }
 
 export function createLinear({
-  agentProfiles = process.env.AGENT_PROFILES ?? join(process.env.HOME, '.agent-profiles'),
-  state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'),
+  agentProfiles = profilesOf(),
+  state = stateOf(),
   fetchFn = globalThis.fetch,
   now = Date.now,
   sleep = defaultSleep,

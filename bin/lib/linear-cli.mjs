@@ -36,7 +36,7 @@
 // The registry, $FACTORY_STATE/linear/repos.json { "<repo>": { key, teamId } }, is written only by `onboard`, atomically; a repository
 // not in it is on GitHub. `onLinear(repo)` reads it.
 import { join } from 'node:path';
-import { nodeName } from './node.mjs';
+import { nodeName, profilesOf, stateOf } from './node.mjs';
 import { createLinear } from './linear.mjs';
 import { TEAM_KEY, onLinear, readRegistry, registryFile, updateRegistry } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
@@ -472,8 +472,8 @@ async function stdinText() {
 
 /** The command on the factory host: prints the JSON, returns the exit code. A tty on stdin gives an empty body, which a verb that needs one refuses. */
 export async function main(argv, env = process.env, { api, readStdin = () => (process.stdin.isTTY ? Promise.resolve('') : stdinText()) } = {}) {
-  const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
-  const agentProfiles = env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles');
+  const state = stateOf(env);
+  const agentProfiles = profilesOf(env);
   const run = createCli({ api: api ?? createLinear({ state, agentProfiles }), collyApi: createLinear({ state, agentProfiles, colly: true }), state, readStdin });
   const { code, out } = await run(argv);
   console.log(JSON.stringify(out));

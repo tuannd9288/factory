@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { createLinear } from './linear.mjs';
 import { announceTakeOn, commentsOfIssue, isHolderLine } from './linear-cli.mjs';
 import { TEAM_KEY, onLinear } from './linear-repos.mjs';
+import { runsOf, stateOf } from './node.mjs';
 import { redact } from './redact.mjs';
 
 import { pickTeam } from './team-names.mjs';
@@ -139,7 +140,7 @@ const done = (data, what) => {
   return data[what];
 };
 
-export function createMove({ gh = ghRun, api, state, home = process.env.HOME, runs = join(home, 'factory-runs') }) {
+export function createMove({ gh = ghRun, api, state, home = process.env.HOME, runs = runsOf({ ...process.env, HOME: home }) }) {
   let fullTeam = null;
   /** A GraphQL read; a number goes as -F, a string as -f, a null is left out. */
   const graphql = (query, vars) => {
@@ -387,9 +388,9 @@ export async function main(argv, env = process.env, { api, gh } = {}) {
     console.error('usage: factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--rewrites <dir>] [--only <n>,...] [--limit N] [--project <name> --in-project <n>,...] (see bin/lib/move.mjs)');
     return 2;
   }
-  const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
+  const state = stateOf(env);
   try {
-    const out = await createMove({ gh, api: api ?? createLinear({ state }), state, home: env.HOME, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs') }).run(opts, (line) => console.log(line));
+    const out = await createMove({ gh, api: api ?? createLinear({ state }), state, home: env.HOME, runs: runsOf(env) }).run(opts, (line) => console.log(line));
     if (!out.applied) for (const l of out.lines) console.log(l);
     console.log(JSON.stringify({ ok: true, applied: out.applied, count: out.count }));
     return 0;

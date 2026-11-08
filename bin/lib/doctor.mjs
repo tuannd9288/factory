@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { MAX_BYTES, MAX_LINES, carrierProblems, countLines, entryIn, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { SETTINGS, TRUSTED, runnerProblems } from './gate-settings.mjs';
 import { POLICY_VERSION, current, gateState, gh, identify, left, reviewOf, switchNow, wanted, withReview } from './owner.mjs';
+import { agentOf, humanOf } from './node.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WIDTH = 120;
@@ -214,7 +215,7 @@ function checkEvidence(ctx) {
   const commitFile = entryOf(ctx.clone, head, '.gate/kit-commit');
   const commit = regular(commitFile) ? /^([0-9a-f]{40})\n$/.exec(commitFile.bytes.toString('utf8'))?.[1] : undefined;
   if (!commit) return { ok: false, result: `pull request #${kit.number}: .gate/kit-commit at its head is not one factory commit`, reads };
-  const r = spawnSync(join(factory, 'bin/kit-evidence'), ['--factory', factory, '--commit', commit, '--repo', ctx.clone, '--base', base, '--head', head, '--slug', ctx.slug, '--id', String(ctx.id), '--human', process.env.FACTORY_HUMAN || 'tuannd9288'], {
+  const r = spawnSync(join(factory, 'bin/kit-evidence'), ['--factory', factory, '--commit', commit, '--repo', ctx.clone, '--base', base, '--head', head, '--slug', ctx.slug, '--id', String(ctx.id), '--human', humanOf()], {
     encoding: 'utf8',
     maxBuffer: 1 << 28,
     timeout: 300_000,
@@ -251,7 +252,7 @@ function main(argv) {
     console.error(`onboard-doctor: ${problem}; nothing read`);
     return 2;
   }
-  const agent = process.env.FACTORY_AGENT ?? 'tuan9288-agent';
+  const agent = agentOf();
   const who = identify('onboard-doctor', { slug, id, agent, read: get });
   if (who.refusal) {
     console.error(who.refusal);
