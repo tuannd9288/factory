@@ -1,4 +1,4 @@
-// #133: what GitHub and bash read in the kit's workflows and in .gate/bin/verify-timeout: the fork guard of `review`, the
+// #133: what GitHub and bash read in the kit's workflows and in .gate/bin/verify-timeout: the
 // timeout that comes from .gate/config.sh, the runner a candidate's code gets and the runner of gate-trusted's jobs. Nothing
 // here reads the wording of a rule.
 import { describe, test } from 'node:test';
@@ -14,71 +14,7 @@ const gate = yaml('gate.yml');
 const trusted = yaml('gate-trusted.yml');
 const TIMEOUT = join(factory, 'kit/.gate/bin/verify-timeout');
 
-describe('the fork guard of review (item 12)', () => {
-  const steps = trusted.jobs.review.steps;
-  const guard = steps[0];
-
-  test('review is not skipped by a condition: a skipped required job passes', () => {
-    assert.equal(trusted.jobs.review.if, undefined);
-    assert.equal(guard.if, undefined);
-  });
-
-  test('the first step compares the repository ids of the head and the base, before the checkout, the install and any secret', () => {
-    assert.equal(guard.uses, undefined);
-    assert.equal(typeof guard.run, 'string');
-    assert.deepEqual(Object.keys(guard.env).sort(), ['BASE_REPO', 'HEAD_REPO']);
-    assert.equal(guard.env.HEAD_REPO, '${{ github.event.pull_request.head.repo.id }}');
-    assert.equal(guard.env.BASE_REPO, '${{ github.event.pull_request.base.repo.id }}');
-    assert.doesNotMatch(JSON.stringify(guard), /secrets\./);
-    const withSecret = steps.findIndex((s) => /secrets\./.test(JSON.stringify(s)));
-    assert.ok(withSecret > 0, 'the credential is read by a later step');
-    assert.equal(steps.filter((s) => /secrets\./.test(JSON.stringify(s))).length, 1, 'one step holds the credential');
-    assert.ok(steps.findIndex((s) => String(s.uses).startsWith('actions/checkout')) > 0);
-    assert.ok(steps.findIndex((s) => /npm ci/.test(String(s.run))) > 0);
-  });
-
-  /** Why a failing guard would not stop this review job, or '' when it does: the guard cannot continue on error, and no later
-   * step runs after a failure, a cancel or always. */
-  const letsReviewRun = (job) => {
-    if (job['continue-on-error'] !== undefined) return 'the job continues on error';
-    if (job.steps[0]['continue-on-error'] !== undefined) return 'the guard continues on error';
-    const late = job.steps.slice(1).find((step) => /\b(always|failure|cancelled)\s*\(/.test(String(step.if ?? '')));
-    return late ? `step "${late.name ?? late.uses ?? 'run'}" runs after the guard failed` : '';
-  };
-  const mutant = (change) => {
-    const copy = structuredClone(trusted.jobs.review);
-    change(copy);
-    return copy;
-  };
-
-  test('a failing guard stops review: it cannot continue on error, and no later step runs after a failure, a cancel or always', () => {
-    assert.equal(letsReviewRun(trusted.jobs.review), '');
-  });
-
-  test('that test sees the two regressions it exists for: a guard that continues on error, a later step that runs always', () => {
-    assert.match(letsReviewRun(mutant((job) => { job.steps[0]['continue-on-error'] = true; })), /guard continues on error/);
-    assert.match(letsReviewRun(mutant((job) => { job.steps[1].if = 'always()'; })), /runs after the guard failed/);
-    assert.match(letsReviewRun(mutant((job) => { job.steps[2].if = "success() || failure()"; })), /runs after the guard failed/);
-    assert.match(letsReviewRun(mutant((job) => { job['continue-on-error'] = true; })), /job continues/);
-  });
-
-  const guarded = (env) => spawnSync('bash', ['-c', guard.run], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
-
-  test('the step passes for one repository and fails for another, an empty head (a deleted fork) or no ids at all', () => {
-    assert.equal(guarded({ HEAD_REPO: '42', BASE_REPO: '42' }).status, 0);
-    assert.equal(guarded({ HEAD_REPO: '99', BASE_REPO: '42' }).status, 1);
-    assert.equal(guarded({ HEAD_REPO: '', BASE_REPO: '42' }).status, 1);
-    assert.equal(guarded({ HEAD_REPO: '', BASE_REPO: '' }).status, 1);
-    assert.equal(guarded({ BASE_REPO: '42' }).status, 1);
-  });
-
-  test('a refusal is a review result of class fork, which `rounds` does not count as a red head', () => {
-    const out = guarded({ HEAD_REPO: '99', BASE_REPO: '42' }).stdout;
-    assert.match(out, /^::notice title=review-result::unavailable: fork$/m);
-  });
-});
-
-describe('the runners and the reviewer, which bin/onboard fills in (item 10, #154, #335)', () => {
+describe('the runners, which bin/onboard fills in (item 10, #154, #335)', () => {
   const main = yaml('main.yml');
   test('every job of the kit\'s workflows runs on GitHub-hosted Ubuntu, a literal list, until bin/onboard fills it in', () => {
     for (const [file, workflow] of [['main.yml', main], ['gate.yml', gate], ['gate-trusted.yml', trusted]]) {
