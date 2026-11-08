@@ -110,9 +110,11 @@ export function plan(argv, env = process.env) {
     // no such clone
   }
   if (!made) throw new Refused(`${first}: no clone of that name; make one with clone`);
+  // A read needs no transport. A clone's config can name a promisor remote, and git then fetches a missing object by itself, over what
+  // that config names (FAC-115): no transport at all, and no lazy fetch. Only clone keeps https.
   return {
-    args: [...BASE, `--git-dir=${join(dir, '.git')}`, `--work-tree=${dir}`, sub, ...(NO_PROGRAMS.includes(sub) ? ['--no-textconv', '--no-ext-diff'] : []), ...args],
-    env: gitEnv,
+    args: [...BASE, '-c', 'protocol.allow=never', `--git-dir=${join(dir, '.git')}`, `--work-tree=${dir}`, sub, ...(NO_PROGRAMS.includes(sub) ? ['--no-textconv', '--no-ext-diff'] : []), ...args],
+    env: { ...gitEnv, GIT_NO_LAZY_FETCH: '1' },
   };
 }
 

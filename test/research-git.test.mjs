@@ -90,7 +90,7 @@ test('a read runs git on the clone\'s own .git and work tree, every switch off, 
     [['rev-parse', 'HEAD'], false], [['ls-files', '-o', '--exclude=*.o'], false], [['log', '-S', 'two'], true]]) {
     const r = w.rg(['r', ...args]);
     assert.equal(r.code, 0, r.out);
-    assert.deepEqual(w.called().argv, [...BASE, `--git-dir=${join(dir, '.git')}`, `--work-tree=${dir}`, args[0], ...(extra ? ['--no-textconv', '--no-ext-diff'] : []), ...args.slice(1)]);
+    assert.deepEqual(w.called().argv, [...BASE, '-c', 'protocol.allow=never', `--git-dir=${join(dir, '.git')}`, `--work-tree=${dir}`, args[0], ...(extra ? ['--no-textconv', '--no-ext-diff'] : []), ...args.slice(1)]);
   }
 }));
 
@@ -130,8 +130,8 @@ test('a name that is taken, by a folder, a file or a symlink, is refused for a c
 test('git gets none of the caller\'s environment but PATH and HOME, and global, system and caller-set configuration are off', () => world((w) => {
   w.rg(['r', 'rev-parse', 'HEAD'], { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.pager', GIT_CONFIG_VALUE_0: 'x', GIT_DIR: '/x', GIT_EXTERNAL_DIFF: 'x', CALLER_MARK: '1' });
   const { env } = w.called();
-  assert.deepEqual(Object.keys(env).filter((k) => k.startsWith('GIT_')).sort(), ['GIT_ALLOW_PROTOCOL', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_TERMINAL_PROMPT']);
-  assert.deepEqual([env.GIT_ALLOW_PROTOCOL, env.GIT_CONFIG_GLOBAL, env.GIT_CONFIG_NOSYSTEM, env.GIT_TERMINAL_PROMPT], ['https', '/dev/null', '1', '0']);
+  assert.deepEqual(Object.keys(env).filter((k) => k.startsWith('GIT_')).sort(), ['GIT_ALLOW_PROTOCOL', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_NO_LAZY_FETCH', 'GIT_TERMINAL_PROMPT']);
+  assert.deepEqual([env.GIT_ALLOW_PROTOCOL, env.GIT_CONFIG_GLOBAL, env.GIT_CONFIG_NOSYSTEM, env.GIT_NO_LAZY_FETCH, env.GIT_TERMINAL_PROMPT], ['https', '/dev/null', '1', '1', '0']);
   assert.equal('CALLER_MARK' in env, false);
   assert.equal('FACTORY_RESEARCH_CLONES' in env, false);
 }));
@@ -224,6 +224,20 @@ test('with the real git, a folder made to look like a clone runs nothing: a bare
   assert.equal(r.code, 128, r.out);
   assert.match(r.out, /not a git repository/);
   assert.equal(existsSync(marker), false, 'the textconv ran');
+}));
+
+// A clone's config can name a promisor remote; git then fetches a missing object by itself, over whatever transport that config names
+// (FAC-115, from #550's review). The proxy is a closed local port, so an attempt shows as a failed connection to it, and nothing leaves.
+test('with the real git, a read of a missing object in a clone whose config names an https promisor remote makes no fetch', () => realClone(({ dir, rg }) => {
+  const blob = git(dir, 'rev-parse', 'HEAD~1:f.txt');
+  rmSync(join(dir, '.git/objects', blob.slice(0, 2), blob.slice(2)));
+  for (const [k, v] of [['core.repositoryformatversion', '1'], ['extensions.partialClone', 'origin'], ['remote.origin.url', 'https://example.invalid/x.git'],
+    ['remote.origin.promisor', 'true'], ['http.proxy', 'http://127.0.0.1:9']]) git(dir, 'config', k, v);
+  const plain = run(dir, 'git', ['show', blob], { GIT_ALLOW_PROTOCOL: 'https' });
+  assert.match(plain.out, /unable to access|127\.0\.0\.1/, 'plain git tries the promisor remote');
+  const r = rg(['c', 'show', blob]);
+  assert.notEqual(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /unable to access|127\.0\.0\.1|example\.invalid/);
 }));
 
 // git runs gpg, which the factory machine has, to check a signature: on --show-signature, and on a format that holds %G.
