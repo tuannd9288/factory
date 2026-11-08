@@ -125,6 +125,63 @@ function draftWait(pr) {
   return `its parent ${move.previousRefName} landed, and its head does not hold that landing: the queue's restack, its merge of main into it, is pending`;
 }
 
+/** The patch-id of a commit's own change, its diff from its merge base with origin/main, as .gate/bin/lib/approval.mjs reads it for the
+ * Human's approval; null when it cannot be read (the commit is not here) or the change is empty. */
+function patchOf(sha) {
+  try {
+    const fork = git(['merge-base', 'origin/main', sha]);
+    const diff = execFileSync('git', ['diff', '--binary', '--no-renames', fork, sha], { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'ignore'] });
+    if (!diff) return null;
+    return execFileSync('git', ['patch-id', '--verbatim'], { input: diff, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).split(' ')[0].trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether this team's reviewer passed the pull request's change (FAC-101): { pass, why, record }. bin/seat's supervisor appends each seat's
+ * record to $FACTORY_STATE/sessions.jsonl when the seat ends, with the head its work folder was at when it started and the reviewer's report
+ * (packs/pstack/lead.md step 6). A record counts when it is a reviewer's, of this repository and of this team (FACTORY_TEAM, which the
+ * Lead's launcher sets and bin/seat records), on the pull request's head or on a head whose patch is the same: a merge of main that leaves
+ * the change as it was keeps the PASS, as the Human's approval is kept; a commit that changes the patch needs a PASS of its own. The newest
+ * such record decides, so a later FAIL beats an earlier PASS.
+ * The references split on enforcing a review before work is taken: zeroshot 0ad6653 enforces it ("The agent that writes the code cannot
+ * approve its own work", README.md:42-45), as pi-herdsman f2064d9 does (docs/guides/customizing-agents.md:150); pstack 4dd1d05 gates
+ * nothing on its reviewers. The Human chose enforcement on 2026-11-08 (FAC-99). Any process of this account can append a record, the Lead
+ * included: the Lead is trusted to hold its own reviewer, as in those references.
+ */
+function reviewOf(pr) {
+  const repo = /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(pr.url ?? '')?.[1] ?? null;
+  const team = process.env.FACTORY_TEAM ?? null;
+  const short = String(pr.headRefOid).slice(0, 7);
+  const state = process.env.FACTORY_STATE ?? join(process.env.HOME ?? '', '.local/state/factory');
+  let text = '';
+  try {
+    text = readFileSync(join(state, 'sessions.jsonl'), 'utf8');
+  } catch {
+    // No record yet.
+  }
+  const patches = new Map();
+  const patch = (sha) => (patches.has(sha) ? patches.get(sha) : patches.set(sha, patchOf(sha)).get(sha));
+  // Newest first: the file is appended to, so the first record that counts, from the end, is the newest.
+  const lines = text.split('\n');
+  let record = null;
+  for (let i = lines.length - 1; i >= 0 && !record; i -= 1) {
+    let r;
+    try {
+      r = JSON.parse(lines[i]);
+    } catch {
+      continue;
+    }
+    if (r?.role !== 'reviewer' || !team || r.team !== team || r.repo !== repo || typeof r.head !== 'string') continue;
+    if (r.head === pr.headRefOid || (patch(pr.headRefOid) && patch(r.head) === patch(pr.headRefOid))) record = r;
+  }
+  const conclusion = String(record?.structured?.conclusion ?? '');
+  if (record && conclusion.startsWith('PASS')) return { pass: true, record };
+  const named = record ? `the newest, ${record.tag} (session ${record.session}), concluded ${conclusion.split('\n')[0].slice(0, 80) || 'nothing'}` : 'there is none';
+  return { pass: false, why: `no reviewer PASS of team ${team ?? '(FACTORY_TEAM is not set)'} covers head ${short} or its patch (${named}); run step 6's reviewer on it` };
+}
+
 function step(pr, head, branch, stacks, merge, drafts) {
   const n = pr.number;
   const short = head.slice(0, 7);
@@ -158,6 +215,10 @@ function step(pr, head, branch, stacks, merge, drafts) {
     return say(0, `disarmed #${n}: ${why}`);
   };
   if (armed && ahead) return disarm(`HEAD ${short} is past what was verified; push it, then run ship again`);
+  // Only a head its reviewer passed is armed (FAC-101), and a push that changes the patch of an armed one disarms it. The factory's own
+  // pull requests are reviewed by Colly and the supervising session and each waits for the Human, so here no reviewer record is required.
+  const review = FACTORY ? null : reviewOf(pr);
+  if (armed && review && !review.pass) return disarm(review.why);
 
   if (pr.labels.some((l) => l.name === 'needs-human')) return say(1, `stopped on #${n}: it carries needs-human; the Human decides`);
   const wait = tierWait(pr);
@@ -170,6 +231,11 @@ function step(pr, head, branch, stacks, merge, drafts) {
   if (gap) return say(1, `refused: ${gap}`);
 
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
+  if (review && !review.pass) return say(1, `refused to arm #${n}: ${review.why}`);
+  // A high risk the reviewer named (lead.md step 6) goes to the Human: needs-human makes the pull request tier 3 (.gate/bin/tier).
+  const raise = String(review?.record.structured?.raise ?? '').trim();
+  const raised = Boolean(raise) && !pr.labels.some((l) => l.name === 'needs-human');
+  if (raised) gh(['pr', 'edit', String(n), '--add-label', 'needs-human']);
   // A draft is readied and armed at once, as the queue did before FAC-55. A pull request that was ready already is read fresh: CI may have
   // ended, and arming a ready pull request would merge it.
   if (pr.isDraft) gh(['pr', 'ready', String(n)]);
@@ -182,7 +248,9 @@ function step(pr, head, branch, stacks, merge, drafts) {
     if (!String(error.stderr).includes('Auto merge is not allowed for this repository')) throw error;
     return say(1, `stopped on #${n}: auto-merge is off on this repository; the Human merges it`);
   }
-  say(0, `armed #${n} at HEAD ${short}`);
+  say(0, `armed #${n} at HEAD ${short}${review ? `: reviewer PASS ${review.record.tag}, session ${review.record.session}`
+    : '; no reviewer record is required here: Colly and the supervising session review this repository\'s pull requests'}`);
+  if (raised) return say(1, `stopped on #${n}: its reviewer raised it (${raise.split('\n')[0].slice(0, 200)}); it carries needs-human and waits for the Human as tier 3`);
   return stop();
 }
 

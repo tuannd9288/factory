@@ -8,11 +8,15 @@
 #    from its source, it opens with no stamp: the factory has no .gate/config.sh, and its CI runs scripts/verify.
 #    --base opens a child on its parent's branch when origin/main's .gate/driver.json has stacks absent or "pstack";
 #    "off" keeps the main-only refusal. A child waits unarmed until its parent merges into main, then ship retargets it to
-#    main, unless GitHub already did, and the queue merges origin/main into it, for either merge method. An old verdict
-#    survives only when the patch-id matches.
+#    main, unless GitHub already did, and the queue merges origin/main into it, for either merge method. A reviewer's PASS
+#    survives that merge only when the patch-id matches (2b).
 # 1b. a draft stays one until verify passed on its head with no conflict; a child moved onto main also until its parent landed and
 #    its head holds that landing (INN-38 A). Then ship readies it, just before it arms it (FAC-55): the queue never readies a draft.
 # 2. an armed pull request whose local HEAD has commits it lacks: disarms it first.
+# 2b. arms only a head its team's reviewer passed (FAC-101): the newest record in $FACTORY_STATE/sessions.jsonl of a reviewer seat
+#    of this repository and team (FACTORY_TEAM) on that head, or on a head with the same patch-id from origin/main, must conclude
+#    PASS; else it refuses and says so, and disarms an armed one. A PASS whose record has a `raise` (lead.md step 6) labels the
+#    pull request needs-human before arming it, then stops on the Human's wait. In the factory no reviewer record is required.
 # 3. stops while the pull request carries needs-human; arms a tier 3 (labels, or .gate/bin/tier on the paths) like any
 #    other, then stops with "tier 3 waits for the Human's approval (unless the merge switch is at all)" until its tier
 #    check ends; in the factory every pull request waits for the Human.
