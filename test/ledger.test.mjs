@@ -168,7 +168,7 @@ test('one conflicting pull request, whose verify never runs, does not stop the q
 });
 
 test('the queue re-runs the failed tier job alone once someone other than the author approved the head after it started', async () => {
-  const { pickReruns } = await import('../bin/lib/queue.mjs');
+  const { pickReruns } = await import('../bin/lib/checks.mjs');
   const pr = (approvals, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', jobId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals, checks: checks({ tier, verdict: { state: 'FAILURE', jobId: '43' } }) });
   assert.deepEqual(pickReruns([pr([{ login: 'boss', oid: 'h', at: '2026-10-21T10:05:00Z' }])]), [{ number: 7, jobId: '42' }]);
   // An approval that landed while the job ran, after it read the reviews, still re-runs it.
@@ -180,7 +180,7 @@ test('the queue re-runs the failed tier job alone once someone other than the au
 });
 
 test('the queue re-runs a failed tier job once another App\'s Entire Gates check on the head concluded after it started (#155)', async () => {
-  const { pickReruns } = await import('../bin/lib/queue.mjs');
+  const { pickReruns } = await import('../bin/lib/checks.mjs');
   const pr = (entire, tier = { state: 'FAILURE', startedAt: '2026-10-21T10:00:00Z', jobId: '42' }) => ({ number: 7, author: 'agent', head: 'h', approvals: [], checks: checks({ tier }), apps: entire ? { 'Entire Gates': entire } : {} });
   assert.deepEqual(pickReruns([pr({ state: 'SUCCESS', completedAt: '2026-10-21T10:03:00Z' })]), [{ number: 7, jobId: '42' }]);
   // tier decides what a conclusion means; the queue only re-runs it once.
