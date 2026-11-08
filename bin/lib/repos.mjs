@@ -8,8 +8,10 @@ import { ROOT } from './checkout.mjs';
 
 export const FACTORY_REPO = 'factory';
 
-// github.com itself as the host: at the start, or after a scheme's // or a user's @, so a look-alike host such as evilgithub.com is none.
-const ON_GITHUB = /(?:^|[/@])github\.com[:/]/;
+// github.com itself as the host, where a host can be: at the start, after a scheme's // and an optional user@, or after a user@ in the
+// scp-like form. A look-alike host (evilgithub.com), github.com in another host's path (https://evil.com/github.com/o/r) or as its user
+// (https://github.com@evil.com/o/r) is none.
+const ON_GITHUB = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@/]+@)?github\.com[:/]/i;
 
 /** The GitHub owner/name an origin URL names, or null: https://github.com/o/r, ssh://git@github.com/o/r or git@github.com:o/r, with
  * any scheme or user before the host, with or without a trailing .git and /, and a path that is exactly an owner and a name in
@@ -18,7 +20,7 @@ export function githubRepo(url) {
   const text = String(url ?? '').trim();
   const at = ON_GITHUB.exec(text);
   if (!at) return null;
-  return /^([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(text.slice(at.index + at[0].length))?.[1] ?? null;
+  return /^([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(text.slice(at[0].length))?.[1] ?? null;
 }
 
 /** The owner/name of the clone at dir, from its origin, or null where git cannot tell. */

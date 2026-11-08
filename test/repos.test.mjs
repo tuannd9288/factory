@@ -8,12 +8,15 @@ test('githubRepo reads owner/name from every shape of a GitHub origin, and nothi
   for (const url of [
     'https://github.com/o/app', 'https://github.com/o/app.git', 'https://github.com/o/app/', 'https://github.com/o/app.git/',
     'ssh://git@github.com/o/app', 'ssh://git@github.com/o/app.git', 'git@github.com:o/app', 'git@github.com:o/app.git',
-    'https://agent@github.com/o/app.git', 'http://github.com/o/app', 'git://github.com/o/app.git', 'https://github.com/o/app\n',
+    'https://agent@github.com/o/app.git', 'http://github.com/o/app', 'git://github.com/o/app.git', 'deploy@github.com:o/app.git',
+    'https://github.com/o/app\n',
   ]) assert.equal(githubRepo(url), 'o/app', url);
   assert.equal(githubRepo('git@github.com:Org-1/my.repo_2.git'), 'Org-1/my.repo_2');
   assert.equal(githubRepo('https://github.com/o/user.github.io'), 'o/user.github.io');
   for (const url of [
     'https://evilgithub.com/o/app', 'git@evilgithub.com:o/app', 'https://github.com.evil.com/o/app', 'https://gitlab.com/o/app',
+    // github.com in the path, or as a user, of another host.
+    'https://evil.com/github.com/o/app', 'ssh://git@evil.com/github.com/o/app.git', 'git@evil.com:github.com/o/app', 'https://github.com@evil.com/o/app',
     'https://github.com/justone', 'https://github.com/o/app/extra', 'ssh://git@github.com:22/o/app', '', null, undefined,
   ]) assert.equal(githubRepo(url), null, String(url));
 });
