@@ -14,7 +14,7 @@ import { pushHook } from '../../../bin/lib/force-push.mjs';
 // and given once, as the first message of a resume.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -245,8 +245,16 @@ export function readRole(runDir) {
 
 /** Writes <runDir>/role.sha through a temporary file in the same folder (exclusive create) and a rename. */
 export function writeRole(runDir, text) {
+  const file = join(runDir, 'role.sha');
+  const tmp = `${file}.${process.pid}.tmp`;
   mkdirSync(runDir, { recursive: true });
-  writeAtomic(join(runDir, 'role.sha'), text);
+  try {
+    writeFileSync(tmp, text, { flag: 'wx' });
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
 /** Puts role.sha back as readRole saw it: its raw text, or no file. */
