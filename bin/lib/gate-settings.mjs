@@ -163,8 +163,8 @@ export function sharedRunners(values) {
 
 /** The runner rule with the Human's exception (#155): with the reviewer entire and no reviewer secret in the environment
  * `reviewer`, the jobs hold no reviewer credential and may share self-hosted runners. The factory reads no secret, so the
- * condition is the Human's to keep. Only a main on the kit before FAC-100 can name entire; whether the exception ends or is
- * restated when it moves is the Human's call (FAC-102). */
+ * condition is the Human's to keep. Only a main on the kit before FAC-100 can name entire. The exception ends (the Human's X1,
+ * 2026-11-08): at FAC-102 its owner moves zalo-gateway's tier onto GitHub-hosted runners. */
 export const runnerProblems = (values) => (values.reviewer === 'entire' ? [] : sharedRunners(values));
 
 /** The settings the options give: { values } with each option given in the form the files hold, or { problem }. */

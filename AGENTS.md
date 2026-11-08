@@ -72,7 +72,7 @@ The change sets the tier, by the paths it touches (`.gate/bin/tier`), never the 
 | Tier | Trigger | Must be true to merge | The Human |
 |---|---|---|---|
 | 1 | no tier-2 or tier-3 path | `verify` and `tier` green on the head commit | none |
-| 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
+| 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same as tier 1 | reads it in the weekly digest and on the deploy page |
 | 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), or the label `needs-human` | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the Vietnamese summary |
 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once

@@ -12,7 +12,7 @@ file. What a program enforces: `.gate/enforced-rules.md`.
   changed (`--tests <files>`) and `.gate/bin/red-check --base origin/main`; the full suite runs on CI, as `verify`.
 - For a feature new to this repository, search GitHub (`gh search repos`, `gh search code`) and existing products for projects that already do it, and compare their approaches before writing it from scratch. Judge a project by its mechanism, never its stars or age. Adding a library, service or dependency is the Human's choice: propose it with the comparison.
 - A source change carries a test that fails at the base. Where none can, the pull request body says
-  `No-red: <why, 20 characters or more>`; the reviewer judges it (where Entire reviews, the Human: tier 3).
+  `No-red: <why, 20 characters or more>`; nobody judges it, and it raises no tier.
 - `.gate/bin/tier` prints the tier. Tier 2: commit the failing test first, alone, with `Failing-test: <command>`.
   Tier 3 (a path in `.gate/protected`, this block included): the Human approves the head commit, unless the repository's merge switch is at `all`.
 - Two checks decide on the exact head commit, from `main`'s copies: `verify` and `tier`. When one is red, read

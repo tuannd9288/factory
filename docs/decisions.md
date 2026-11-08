@@ -256,9 +256,10 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   kit's gate requires `verify` and `tier` alone, and pstack's live verifier stays. This settles what "The gate's
   reviewer" left to the probe's numbers. Until its kit moves, factory-probe's reviewer is the stub, which he sets
   himself; grading by /merge-risk is parked in Triage. On FAC-100 he then took pstack's way on three points: a
-  `No-red:` line of 20 characters or more passes, nobody judges it and it raises no tier, and the ledger counts it and
-  the digest names its pull requests; tier 2 is information, its triggers, label and digest column kept, and it asks
-  what tier 1 asks to merge; the runner rule keeps its reason in the label token and in what only `tier` asks, and his
-  #155 exception for zalo-gateway stays as written until FAC-102 moves that repository (X1). A repository still on the
-  kit before this keeps its own reviewer jobs until FAC-102 moves it. Sources: his five answers on the review-placement
-  page, as FAC-99 on Linear records them, and his three answers on FAC-100, relayed by Colly at 08:35 +07.
+  `No-red:` line of 20 characters or more passes on its own, nobody judges it, it raises no tier, and nothing new is
+  built for it; tier 2 gets no new rule and stays a label and a column of the digest, asking what tier 1 asks to merge;
+  and his #155 exception to the runner rule ends (X1): zalo-gateway's `tier` will run on GitHub-hosted runners, a
+  workflow change its owner makes at FAC-102, and meanwhile the rule's reason is the label token and what only `tier`
+  asks. A repository still on the kit before this keeps its own reviewer jobs until FAC-102 moves it. Sources: his five
+  answers on the review-placement page, as FAC-99 on Linear records them, and his answers on FAC-100, recorded there and
+  relayed by Colly at 10:36 +07.

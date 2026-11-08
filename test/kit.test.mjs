@@ -405,7 +405,7 @@ describe('verify-trusted', () => {
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /main's verify and red-check pass on the candidate/);
   });
-  test('hands the PR body to red-check, so a No-red line passes it there and review judges the reason', () => {
+  test('hands the PR body to red-check, so a No-red line passes it there', () => {
     assert.equal(candidate({ 'src/math.js': MUL }).code, 1);
     write(r.dir, { 'body.txt': 'Summary\nTeam: team-x\nNo-red: adds a helper nothing calls yet\n' });
     const out = candidate({ 'src/math.js': MUL }, { GATE_BODY_FILE: join(r.dir, 'body.txt') });
@@ -622,7 +622,7 @@ console.log('{}');
     assert.equal(out.code, 0, out.out);
     assert.match(out.edits, /pr edit 7 --repo o\/app --add-label tier-2/);
   });
-  test('a protected path and a needs-human label each make tier 3, which waits for the Human\'s approval', () => {
+  test('a protected path and a needs-human label each make tier 3, which waits for the Human\'s approval; a No-red line raises no tier', () => {
     const cases = [
       ['a protected path', { 'AGENTS.md': '# app\n' }, [], {}],
       ['a needs-human label', { 'src/math.js': MUL }, ['needs-human'], {}],
@@ -637,6 +637,14 @@ console.log('{}');
       reviews([review('tuannd9288', 'APPROVED', out.head)]);
       assert.equal(again('tier', out.head, { ...pr, ...env }).code, 0, `${what}: the approval of the head did not land it`);
     }
+    // The Human's answer on FAC-100: a No-red line passes red-check in verify, nobody judges it, and it raises no tier.
+    write(r.dir, { 'nored-body.txt': 'Summary\nTeam: team-x\nNo-red: a refactor that moves code and changes no behaviour\n' });
+    labels();
+    reviews([]);
+    const out = job('tier', { 'src/math.js': MUL }, { ...pr, GATE_BODY_FILE: join(r.dir, 'nored-body.txt') });
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^tier 1$/m);
+    assert.doesNotMatch(out.out, /waits for @tuannd9288/);
   });
   // #133: tier compares the pull request's Claim: line with the tip of claim/<n> on origin, read when tier runs.
   const dropClaim = () => run(trusted, 'git', ['push', '-q', 'origin', ':refs/heads/claim/7'], quiet);

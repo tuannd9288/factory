@@ -12,7 +12,7 @@ as `prose` and gets one, or is deleted, within 30 days.
 | Secrets only in an environment, never at repository level: every branch's jobs read those; the gate's jobs need none | prose; the weekly digest lists repository-level secrets |
 | Do not test the wording of a prompt, rule, template or skill; the rule lives in the prompt or `AGENTS.md`, and review reads it | the reviewer |
 | Checks green on the exact head commit before merge | ruleset: `verify` and `tier` pinned to GitHub Actions, branch up to date |
-| No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `.gate/bin/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2 |
+| No focused, skipped or deleted tests; no lost assertions; no debugger; no placeholder bodies; no whole-file suppressions; TLS checks stay on; no hard-coded secrets | `.gate/bin/rules` (seatwork's hand-in rules) in pre-commit and in `verify`; a dropped test's proof: `red-check`, and `tier` makes it tier 2, which asks no more than tier 1 and shows in the weekly digest |
 | A new test fails at the base and passes at the head | `red-check`, inside `verify` |
 | A failing test committed first is not weakened later | `.gate/bin/rules` (`failing-test-edited`) |
 | Every pull request is judged by `main`'s scripts, whatever it changes | `gate.yml` (base checkout, `.gate/bin/verify-trusted`), `gate-trusted.yml` (`pull_request_target`) |
@@ -46,15 +46,16 @@ the trailer `Failing-test: <test command>`; later commits never edit those test 
 `red-check` lays the new or changed tests onto the base commit and requires them to fail there as tests, not as load errors.
 A new name in an existing module: import the module (`import * as m from`), not the missing name. A new file: load it inside
 the test with `await import()`. When no test can fail first (a pure refactor, a rename), put one line in the PR body:
-`No-red: <why, 20 characters or more>`. `review` fails unless the reviewer accepts the reason. Where Entire reviews
-(`GATE_REVIEWER: 'entire'`), `tier` makes the change tier 3 instead: the Human judges the reason.
+`No-red: <why, 20 characters or more>`. `red-check` passes on it; nobody judges the reason and it raises no tier. The
+ledger counts it.
 
 ## Exceptions
 
 A block finding that is wrong for one line is allowed on that line only, in a comment:
 `gate-allow <rule-id>: <why, 20 characters or more>`; `.gate/bin/rules` prints that line, with the id, under a block.
-The reviewer sees the line in the diff and judges it.
+The line is in the diff, where the reviewer beside the workers reads it; no check judges it.
 A deleted test file or lost assertions need one added line naming the test kept in their place and a break that
 turns it red: `gate-allow test-deleted: <path>; kept: <test file> "<test name>"; red: <source file> "<from>" -> "<to>"`
 (or `assertions-removed`; JSON strings). `red-check` needs the kept test red under the break and green without it,
-for the failing test above; the change is tier 2, and the reviewer judges whether the kept test covers what went.
+for the failing test above; the change is tier 2, which asks no more than tier 1, and whether the kept test covers what
+went is for the reviewer beside the workers.
