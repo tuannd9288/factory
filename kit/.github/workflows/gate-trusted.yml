@@ -11,7 +11,8 @@
 #            (.gate/bin/lib/claim.mjs check).
 # It runs again when a label is added, since a needs-human label makes tier 3 on a pull request whose tier was green. The
 # labels tier writes itself use GITHUB_TOKEN, whose events start no workflow run, so it never starts itself. A removed label
-# starts nothing: a tier never drops.
+# starts nothing: a tier never drops. It also runs again when a draft is marked ready, since tier asks no code owner while the
+# pull request is a draft: one opened as a draft, or drafted while verify ran, asks for their review once it is ready (#377).
 # The required checks are verify (gate.yml) and tier (.gate/ruleset.json). No required job here has `needs`: a job skipped
 # because a job it needs failed counts as passing. No job counts a pull request's red heads: the three-round rule is the
 # workers' (FAC-100).
@@ -24,7 +25,7 @@ name: gate-trusted
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, edited, labeled]
+    types: [opened, synchronize, reopened, edited, labeled, ready_for_review]
 
 permissions:
   contents: read
