@@ -14,9 +14,9 @@ import { pushHook } from '../../../bin/lib/force-push.mjs';
 // and given once, as the first message of a resume.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { onLinear } from '../../../bin/lib/linear-repos.mjs';
@@ -25,6 +25,7 @@ import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 import { readRules } from '../../../bin/lib/deny-read.mjs';
+import { which } from '../../../bin/lib/launchd.mjs';
 import { setJsonKey, writeAtomic } from '../../../bin/lib/files.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
@@ -111,21 +112,8 @@ const denyOf = (cwd) => [
 
 export const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 
-/** The first `node` that PATH names, as PATH names it (a link stays a link: brew upgrade keeps /opt/homebrew/bin/node and removes
- * the Cellar path behind it), or null. Only absolute folders count. */
-export function findNode(PATH) {
-  for (const dir of (PATH ?? '').split(':')) {
-    if (!isAbsolute(dir)) continue;
-    const path = join(dir, 'node');
-    try {
-      accessSync(path, constants.X_OK);
-      if (statSync(path).isFile()) return path;
-    } catch {
-      // not here
-    }
-  }
-  return null;
-}
+/** The first `node` that PATH names, as PATH names it, or null: the one `which` of the factory's launchd jobs (bin/lib/launchd.mjs). */
+export const findNode = (PATH) => which('node', PATH);
 
 // The hooks that run transcript-copy.mjs: it copies the transcript on Stop and SessionEnd, and on all five tells `top` the Lead's state (#286).
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop', 'SessionEnd'];

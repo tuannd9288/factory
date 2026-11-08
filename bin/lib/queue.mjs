@@ -37,15 +37,15 @@
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { accessSync, closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { userInfo } from 'node:os';
+import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkPlists, checkoutRoot, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
 import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
-import { MACBOOK_SHARE, noteGh, observe, resetNotes } from './events.mjs';
+import { noteGh, observe, resetNotes } from './events.mjs';
+import { JOBS, job as launchdJob, plist, runEnv } from './launchd.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
 import { clonesUnder, githubRepo } from './repos.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
@@ -584,87 +584,17 @@ function checkSilence(state) {
   }
 }
 
-const LABEL = 'io.github.tuannd9288.factory.queue';
+const LABEL = JOBS.queue.label;
 
-/** The first executable `name` on a PATH, or null. */
-function which(name, path) {
-  for (const dir of (path ?? '').split(':').filter(Boolean)) {
-    try {
-      accessSync(join(dir, name), constants.X_OK);
-      return join(dir, name);
-    } catch {}
-  }
-  return null;
+/** The launchd job that sweeps `repos` once a minute (#48), as the table has it (bin/lib/launchd.mjs). #366: off the factory host the sweep
+ * follows the node's installed copy (#390), which checkoutRoot knows only by FACTORY_CHECKOUT. No token is ever here: the daemon reads the
+ * node's own (bin/lib/node.mjs). Its events also go to the share, which Colly, in another user, follows (FAC-43). */
+function job(repos, env = process.env, daemon = false) {
+  return launchdJob('queue', { repos, env, daemon, place: placeOf(env), installed: installedRoot(env) });
 }
 
-/** The launchd job that sweeps `repos` once a minute (#48): this clone's bin/factory-queue, with the gh and the node
- * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
- * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
- * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (the digest's):
- * its label, tool, verb, log name and interval, and more variables to keep; the
- * defaults are the queue's own. The digest's job (#209) gives no verb, `args` before the repositories, and a
- * `calendar` (launchd's StartCalendarInterval) in place of the interval. */
-export function job(repos, env = process.env, daemon = false, as = {}) {
-  const gh = which('gh', env.PATH);
-  if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
-  const node = which('node', env.PATH) ?? process.execPath;
-  const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, calendar = null, args = [], keep = [] } = as;
-  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
-  const found = which('node', path);
-  if (!found || realpathSync(found) !== realpathSync(node))
-    throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);
-  const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN', ...keep].filter((k) => env[k]).map((k) => [k, env[k]]));
-  // #366: off the factory host the sweep follows the node's installed copy (#390), which checkoutRoot knows only by this name. No token is ever
-  // here: the daemon reads the node's own (bin/lib/node.mjs). Its events also go to the share, which Colly, in another user, follows (FAC-43).
-  const copy = placeOf(env) === 'factory' ? {} : { FACTORY_CHECKOUT: installedRoot(env), FACTORY_EVENTS_SHARE: MACBOOK_SHARE };
-  return {
-    label,
-    interval: calendar ? null : interval,
-    calendar,
-    program: [join(factory, tool), ...(verb ? [verb] : []), ...args, ...repos.flatMap((repo) => ['--repo', repo])],
-    cwd: factory,
-    env: { PATH: path, ...kept, ...copy, ...(daemon ? { HOME: env.HOME } : {}) },
-    log: join(env.HOME, 'Library/Logs/factory', log),
-    // #24: a LaunchDaemon runs as the account that printed it, the agents' own, with that account's HOME.
-    user: daemon ? userInfo().username : null,
-  };
-}
-
-/** The job as a property list, for ~/Library/LaunchAgents/io.github.tuannd9288.factory.queue.plist, or with a user for
- * /Library/LaunchDaemons/, which the Human loads with sudo. Never KeepAlive: a sweep exits after each run. */
-export function plist(j) {
-  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const str = (s) => `<string>${esc(s)}</string>`;
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  ${str(j.label)}
-${j.user ? `  <key>UserName</key>\n  ${str(j.user)}\n` : ''}  <key>ProgramArguments</key>
-  <array>
-${j.program.map((a) => `    ${str(a)}`).join('\n')}
-  </array>
-  <key>WorkingDirectory</key>
-  ${str(j.cwd)}
-  <key>EnvironmentVariables</key>
-  <dict>
-${Object.entries(j.env).map(([k, v]) => `    <key>${esc(k)}</key>\n    ${str(v)}`).join('\n')}
-  </dict>
-${j.calendar
-    ? `  <key>StartCalendarInterval</key>\n  <dict>\n${Object.entries(j.calendar).map(([k, v]) => `    <key>${esc(k)}</key>\n    <integer>${v}</integer>`).join('\n')}\n  </dict>\n  <key>RunAtLoad</key>\n  <false/>`
-    : `  <key>StartInterval</key>\n  <integer>${j.interval ?? 60}</integer>\n  <key>RunAtLoad</key>\n  <true/>`}
-  <key>ProcessType</key>
-  <string>Background</string>
-  <key>StandardOutPath</key>
-  ${str(j.log)}
-  <key>StandardErrorPath</key>
-  ${str(j.log)}
-</dict>
-</plist>
-`;
-}
+// Moved to launchd.mjs (FAC-85) and exported here too while callers still import it from here.
+export { plist };
 
 /** Runs one sweep as the job would, before the Human loads it: the job's PATH and variables over what launchd gives
  * every job (HOME, USER, TMPDIR), and nothing of this shell's. It makes the log's folder, which launchd needs. */
@@ -677,7 +607,7 @@ async function check(repos, human) {
     say(`not ready: ${agents.refusal}`);
     return 1;
   }
-  const env = { HOME: process.env.HOME, USER: process.env.USER ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', ...j.env, ...agents.env };
+  const env = { ...runEnv(j), ...agents.env };
   mkdirSync(dirname(j.log), { recursive: true });
   const who = spawnSync('gh', ['api', 'user', '--jq', '.login'], { env, encoding: 'utf8', timeout: CALL_MS });
   const login = who.status === 0 ? who.stdout.trim() : '';
