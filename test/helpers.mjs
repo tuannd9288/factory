@@ -1,4 +1,5 @@
 // A throwaway repository with the kit installed by bin/onboard, and helpers to change it and run its scripts.
+import './caller-env.mjs';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';

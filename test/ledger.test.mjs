@@ -1,4 +1,5 @@
 // The ledger's arithmetic and its reading of pull requests and session files, on fixtures; no network.
+import './caller-env.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
