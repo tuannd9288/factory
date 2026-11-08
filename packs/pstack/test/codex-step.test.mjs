@@ -4,7 +4,7 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -231,6 +231,31 @@ test('the step\'s own paths come from the factory user\'s home by getpwuid, neve
   assert.ok(!p.tmp.some((t) => t.includes('codex-step-tmp')), p.tmp.join(' '));
 });
 
+test('--brief-file reads the brief from a file of the repository or the temporary folder, and refuses one a seat could not read', () => {
+  // A seat's sandbox runs factory codex outside it only with no redirect or pipe in the call, so a seat passes its brief as a file.
+  const w = world();
+  const inTmp = join(realpathSync(tmpdir()), `codex-step-brief-${process.pid}.md`);
+  writeFileSync(inTmp, 'Judge the brief from the temporary folder.\n');
+  dirs.push(inTmp);
+  writeFileSync(join(w.repo, 'brief.md'), 'Judge the brief from the repository.\n');
+  assert.equal(w.run(['--role', 'arena-runner', '--brief-file', inTmp], { input: '' }).code, 0);
+  assert.equal(w.prompt(), 'Judge the brief from the temporary folder.\n');
+  assert.equal(w.run(['--role', 'arena-runner', '--brief-file', 'brief.md'], { input: '' }).code, 0);
+  assert.equal(w.prompt(), 'Judge the brief from the repository.\n');
+  // Unread by a seat: a denied folder (by a link too), a .env file, a file outside the repository and the temporary folder.
+  mkdirSync(join(w.home, '.agent-profiles/tokens'), { recursive: true });
+  writeFileSync(join(w.home, '.agent-profiles/tokens/x'), 'dummy\n');
+  mkdirSync(join(w.home, '.claude-x'), { recursive: true });
+  writeFileSync(join(w.home, '.claude-x/y'), 'dummy\n');
+  symlinkSync(join(w.home, '.agent-profiles/tokens/x'), join(w.repo, 'link.md'));
+  writeFileSync(join(w.repo, '.env.local'), 'dummy\n');
+  for (const file of [join(w.home, '.agent-profiles/tokens/x'), join(w.home, '.claude-x/y'), join(w.repo, 'link.md'), join(w.repo, '.env.local'), '/etc/hosts', join(w.repo, 'none.md')]) {
+    const r = w.run(['--role', 'arena-runner', '--brief-file', file], { input: '' });
+    assert.equal(r.code, 2, `${file}: ${r.out}${r.err}`);
+  }
+  assert.equal(w.execs().length, 2, 'no codex call for a refused brief file');
+});
+
 test('a .codex/config.toml planted in the work folder, with an MCP server and a hook, cannot be trusted: Codex loads no user config', () => {
   // Codex loads a folder's own config, its MCP servers and hooks only when its user config.toml trusts that folder (rust-v0.163.0,
   // config/src/loader/mod.rs:130-134 and :1068-1110); a worker writes the folder, and the verifier's config.toml is the Human's.
@@ -240,4 +265,27 @@ test('a .codex/config.toml planted in the work folder, with an MCP server and a 
   writeFileSync(join(w.repo, 'config.toml'), '[mcp_servers.planted]\ncommand = "/bin/sh"\n');
   assert.equal(w.run(['--role', 'cross-judge']).code, 0);
   assert.ok(w.execs()[0].args.includes('--ignore-user-config'), w.execs()[0].args.join(' '));
+});
+
+test('bin/factory refuses factory codex when the caller\'s environment carries a startup hook, before any code of its own or of node runs', () => {
+  // A seat's sandbox runs `factory codex` outside it with the seat's environment (#182). bash reads BASH_ENV before a bash script's
+  // first line, and node reads NODE_OPTIONS before any module, so the check is the script's first stage, under #!/bin/sh.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'codex-step-env-')));
+  dirs.push(dir);
+  const marker = join(dir, 'ran');
+  writeFileSync(join(dir, 'startup.sh'), `touch ${marker}\n`);
+  writeFileSync(join(dir, 'require.cjs'), `require('fs').writeFileSync(${JSON.stringify(marker)}, '');\n`);
+  const run = (extra) => spawnSync(join(factory, 'bin/factory'), ['codex', '--role', 'cross-judge', '--model', 'gpt-5'], { input: BRIEF, encoding: 'utf8', env: { ...process.env, FACTORY_HOST_USER: userInfo().username, ...extra } });
+  for (const [name, value] of [['BASH_ENV', join(dir, 'startup.sh')], ['NODE_OPTIONS', `--require ${join(dir, 'require.cjs')}`], ['ENV', join(dir, 'startup.sh')], ['NODE_PATH', dir], ['LD_PRELOAD', join(dir, 'x.so')], ['LD_LIBRARY_PATH', dir]]) {
+    const r = run({ [name]: value });
+    assert.equal(r.status, 2, `${name}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`factory codex: refused: ${name} is set`), name);
+    assert.equal(existsSync(marker), false, `${name}: a startup hook ran`);
+  }
+});
+
+test('a DYLD_ variable never reaches the node that runs factory codex: SIP strips it at the protected /bin/sh', { skip: process.platform !== 'darwin' }, () => {
+  const r = spawnSync(join(factory, 'bin/factory'), ['codex', '--role', 'cross-judge', '--model', 'gpt-5'], { input: BRIEF, encoding: 'utf8', env: { ...process.env, FACTORY_HOST_USER: userInfo().username, DYLD_PRINT_LIBRARIES: '1' } });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stderr, /dyld\[/);
 });

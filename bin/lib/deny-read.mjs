@@ -14,12 +14,15 @@
 //     shell   the seats' command sandbox (Claude Code's sandbox.filesystem.denyRead)
 //     codex   Codex's permission profile, which binds its commands, its only way to read
 //   Residual gaps the list does not close: the Read rules bind Claude Code's file tools, so a Lead's or Colly's shell, which runs in no
-//   sandbox, and a hook or an MCP server of any session read what the user can read; `factory codex`, where a seat is granted it, runs
+//   sandbox, and a hook or an MCP server of any session read what the user can read; `factory codex`, which every seat is granted, runs
 //   Codex outside Claude's sandbox, bounded by this list through another enforcer. A command a sandbox excludes (sandbox.excludedCommands)
 //   runs with no filesystem restriction, so an exclusion is a gap until a probe shows it bounded (the excluded command chained with a read
 //   of a synthetic denied file, which must be refused); naming a factory command does not bound it, since every verb and every program a
-//   verb runs would read what the user reads. The seats exclude none and set allowUnsandboxedCommands false (their sandbox object is
-//   pinned whole in test/seat-sandbox.test.mjs), but a work folder's own .claude/settings.json is a settings layer too.
+//   verb runs would read what the user reads. The seats set allowUnsandboxedCommands false and exclude one command, `factory codex *`
+//   (#182; their sandbox object is pinned whole in test/seat-sandbox.test.mjs), but a work folder's own .claude/settings.json is a
+//   settings layer too. That exclusion is an open gap: `factory codex` runs with the factory user's reach, and its `--brief-file` is
+//   checked against this list's shell paths (packs/pstack/bin/codex-step.mjs, briefFrom). Its probe is canary step 3's chained read,
+//   in a real seat: `factory codex --role none ; cat <a synthetic file under ~/.codex*>`, whose read must be refused.
 //   Not here: commands (`Bash(...)` rules, bin/lib/seat.mjs); the gate's reviewer on CI, which denies the runner's system folders
 //   (kit/.gate/bin/lib/claude-reviewer.mjs).
 export const SCOPES = {

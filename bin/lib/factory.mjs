@@ -998,8 +998,8 @@ async function codexCmd(args, env) {
     console.error(`bin/factory: codex: ${e.message}`);
     return 2;
   }
-  if (o.write !== undefined) {
-    console.error('bin/factory: codex: --write runs only on the factory host, where its folder is');
+  if (o.write !== undefined || o.briefFile !== undefined) {
+    console.error(`bin/factory: codex: ${o.write !== undefined ? '--write' : '--brief-file'} runs only on the factory host, where its file is; here, pass the brief on stdin`);
     return 2;
   }
   const repo = o.repo ?? step.repoOf(process.cwd());
