@@ -517,11 +517,14 @@ function groupOf(repo, number, gh, sessions) {
   const merged = Boolean(pr?.mergedAt);
   const closed = issue?.state === 'CLOSED';
   const step = merged ? 'merged' : closed ? 'closed' : pr ? 'PR open' : held ? 'claimed' : gh?.claimsOk === false ? '?' : 'unclaimed';
+  // The kit runs no review job since FAC-100; a repository still on the kit before it runs its own until FAC-102 moves it, and that job
+  // is not among the kit's required checks, so it is read from the rollup.
+  const oldReview = (pr?.statusCheckRollup ?? []).filter((c) => c.name === 'review').at(-1);
   let waiting = '–';
   if (pr && !merged) {
     if (labels.some((l) => l === 'tier-3' || l === 'needs-human') && checks.tier && checks.tier.status === 'COMPLETED' && checks.tier.conclusion !== 'SUCCESS') waiting = 'the Human';
     else if (pr.reviewDecision === 'REVIEW_REQUIRED' && gh.required.every((n) => MARK(checks[n]) === '✓')) waiting = 'the Human';
-    else if (checks.review && checks.review.status !== 'COMPLETED') waiting = 'the reviewer';
+    else if (oldReview && oldReview.status !== 'COMPLETED') waiting = 'the reviewer';
   }
   if (waiting === '–' && sessions.some((s) => s.live)) waiting = 'the team';
   return {
