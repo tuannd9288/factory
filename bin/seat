@@ -75,8 +75,9 @@
 # with the session's environment less every ANTHROPIC_* and FACTORY_SANDBOX, for ten minutes at most; its output is
 # `run-<tag>.prepare.log` in the run folder. By default it runs at the worktree's first start only, and only in a worktree that
 # holds nothing main lacks, so what is installed outside the sandbox is a tree main had; a stamp in $FACTORY_STATE/prepared/, where
-# no seat writes, marks the worktree done. origin/main's `.gate/driver.json` `prepare: every` runs it at every start. A failed
-# install, a command it runs that is not on bin/seat's PATH, or a first start in a worktree with commits or changes main lacks
-# refuses the start before any session, leaving no pid, claim or seat file. A work folder that is no clone, or a main with no
-# `.gate/config.sh`, starts as before. Known limit: past its ten minutes the install's shell is killed, not what it started.
+# no seat writes, marks the worktree done. A first start in a worktree with commits or changes main lacks installs nothing, writes
+# no stamp, says why in that log, and starts as before. origin/main's `.gate/driver.json` `prepare: every` runs it at every start.
+# A failed install, a command it runs that is not on bin/seat's PATH, or a `prepare` it cannot read refuses the start before any
+# session, leaving no pid, claim or seat file. A work folder that is no clone, or a main with no `.gate/config.sh`, starts as
+# before. Known limit: past its ten minutes the install's shell is killed, not what it started.
 exec node "$(dirname "$0")/lib/seat.mjs" "$@"

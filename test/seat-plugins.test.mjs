@@ -112,14 +112,15 @@ test('the install runs at the worktree\'s first start only, whatever the seat re
   assert.equal(prepared(w), 'run\nrun\n');
 }));
 
-test('a first start in a worktree holding a commit main lacks installs nothing and refuses: only a tree main had is installed', () => world(async (w) => {
+test('a first start in a worktree holding a commit main lacks installs nothing, writes no stamp, says why in its log and starts as before', () => world(async (w) => {
   mainWith(w, prepare('echo run >> "$PREP_OUT"'));
   commitTo(w.work, { 'pnpm-lock.yaml': 'a lockfile the branch changed\n' });
   const r = w.start('worker', [], withGit(w));
-  assert.equal(r.code, 2, r.out + r.err);
-  assert.match(r.err, /prepare: the worktree .* holds 1 commit\(s\) main lacks/);
-  assert.equal(prepared(w), '');
-  assert.ok(!existsSync(w.out()));
+  assert.equal(r.code, 0, r.out + r.err);
+  await until(() => w.records().length === 1, 'the record');
+  assert.equal(prepared(w), '', 'only a tree main had is installed outside the sandbox');
+  assert.ok(!existsSync(join(w.state, 'prepared')), 'no stamp');
+  assert.match(readFileSync(join(w.run, 'run-worker.prepare.log'), 'utf8'), /^prepare: not run: the worktree .* holds 1 commit\(s\) main lacks/);
 }));
 
 test('a main with no .gate/config.sh starts as before, even when the worktree has one of its own', () => world(async (w) => {

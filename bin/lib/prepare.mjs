@@ -7,7 +7,8 @@
 //         scrubbed environment, its output in the run folder as run-<tag>.prepare.log. A main with no .gate/config.sh, or a work
 //         folder with no origin/main, installs nothing.
 //   First start: only in a worktree that holds nothing main lacks (HEAD on main's line, nothing changed or added), since what is
-//         installed there is a tree main had. Once it passed, a stamp in $FACTORY_STATE/prepared/, where no seat can write, keyed to the
+//         installed there is a tree main had; any other worktree installs nothing, gets no stamp, says why in that log, and its
+//         session starts as before. Once an install passed, a stamp in $FACTORY_STATE/prepared/, where no seat can write, keyed to the
 //         worktree's real path and folder, says the worktree is ready; a worker that removes anything in its worktree or run folder does
 //         not bring the install back. A worktree removed and made again at the same path is a new folder and installs again.
 import { spawnSync } from 'node:child_process';
@@ -36,8 +37,8 @@ export const stampOf = (state, work) =>
 /**
  * Runs origin/main's gate_prepare in the work folder when the switch asks for it, with env (the session's, scrubbed; no ANTHROPIC_* and
  * no sandbox marker here, since this runs outside the sandbox). Returns the log's path, or null when nothing ran. Throws a PrepareError
- * that says why, the install's own error included, on a failed install, a first start in a worktree that is not on main's line, a
- * command missing from env.PATH, or past its time.
+ * that says why, the install's own error included, where an install was due and did not happen: a failed install, a command missing
+ * from env.PATH, past its time, or a driver.json `prepare` it cannot read.
  */
 export function prepareWork({ work, run, tag, state, env }) {
   // A work folder that is no clone (a worktree's .git is a file) starts as before.
@@ -59,17 +60,20 @@ export function prepareWork({ work, run, tag, state, env }) {
   }
   const when = prepareWhen(driver);
   const stamp = stampOf(state, work);
+  const log = join(run, `run-${tag}.prepare.log`);
   if (when === 'first') {
     if (existsSync(stamp)) return null;
     // A tree main had: HEAD on main's line (behind a moved main still is), with nothing changed and nothing added, untracked files
-    // included, since a lockfile a worker added where main has none would be installed as well.
+    // included, since a lockfile a worker added where main has none would be installed as well. Any other worktree gets no install
+    // and no stamp, and starts as before: a fix round or a reviewer in a worktree from before this, with a no-op gate_prepare too.
     const ahead = git('rev-list', '--count', 'origin/main..HEAD');
     const changed = git('status', '--porcelain', '--untracked-files=all');
-    if (ahead === null || changed === null) throw new PrepareError(`git could not read the worktree ${work}`);
-    if (Number(ahead) > 0 || changed.trim())
-      throw new PrepareError(`the worktree ${work} holds ${Number(ahead) > 0 ? `${Number(ahead)} commit(s) main lacks` : 'changes main lacks'}, and its first install would run them outside the sandbox; make the worktree from origin/main (packs/pstack/lead.md step 2)`);
+    const holds = ahead === null || changed === null ? 'what git could not read' : Number(ahead) > 0 ? `${Number(ahead)} commit(s) main lacks` : changed.trim() ? 'changes main lacks' : null;
+    if (holds) {
+      writeFileSync(log, `prepare: not run: the worktree ${work} holds ${holds}, so its first install would run them outside the sandbox; a worktree made from origin/main gets it\n`);
+      return null;
+    }
   }
-  const log = join(run, `run-${tag}.prepare.log`);
   const r = spawnSync('/bin/bash', ['-c', `${git('show', 'origin/main:.gate/config.sh')}\ngate_prepare "$1"`, 'gate_prepare', work], {
     cwd: work, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: TIME_MS, killSignal: 'SIGKILL', maxBuffer: 64 << 20,
   });
