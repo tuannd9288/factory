@@ -32,12 +32,13 @@ done
 
 # The tools keep state in the folders these name, the machine's own by default; direnv, which bin/onboard runs, records
 # each folder it allows under XDG_DATA_HOME. The tests get fresh empty ones, so a test that gives a tool no folder of its
-# own writes here rather than into the machine's, and the run fails (#35).
+# own writes here rather than into the machine's, and the run fails (#35). The caller's agents' account, Human and GitHub
+# tokens are unset for the run (test/caller-env.mjs says why).
 folders='FACTORY_STATE AGENT_PROFILES FACTORY_ROOT XDG_DATA_HOME'
 sandbox=$(mktemp -d) || { echo "verify: could not make a folder for the tests' state"; exit 2; }
 trap 'rm -rf "$sandbox"' EXIT
 for v in $folders; do mkdir "$sandbox/$v"; done
-out=$(env -u NODE_TEST_CONTEXT FACTORY_STATE="$sandbox/FACTORY_STATE" AGENT_PROFILES="$sandbox/AGENT_PROFILES" \
+out=$(env -u NODE_TEST_CONTEXT -u FACTORY_AGENT -u FACTORY_HUMAN -u GH_TOKEN -u GITHUB_TOKEN FACTORY_STATE="$sandbox/FACTORY_STATE" AGENT_PROFILES="$sandbox/AGENT_PROFILES" \
   FACTORY_ROOT="$sandbox/FACTORY_ROOT" XDG_DATA_HOME="$sandbox/XDG_DATA_HOME" \
   node --test --test-reporter=spec --test-concurrency=4 'test/*.test.mjs' 'packs/*/test/*.test.mjs' 2>&1)
 code=$?
