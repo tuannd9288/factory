@@ -255,10 +255,11 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   switch's own notice, `reader-off`, is outside the freeze. Sources: INN-39 for the box, and the supervising session's
   relay for 15:15:36.
 - **The factory's own merge switch, 2026-11-08.** On his word, Colly moved the ruleset `factory` (25631761) of
-  `tuannd9288/factory` to the merge switch's position `all` at about 08:40 +07: no approval, no code-owner review and
+  `tuannd9288/factory` to the merge switch's position `all` at 08:31:11 +07: no approval, no code-owner review and
   no approval of the last push are required, and `verify` stays required. A pull request of this repository lands once
   the team's Supervisor has accepted it and Colly's review passed, with `verify` green, armed by `scripts/ship`. He
   still approves a release, a first design, and a change to a design or architecture: such a pull request carries
   `needs-human`, which `scripts/ship` stops on, and Colly takes it to him. `.github/ruleset.json` holds the same
-  parameters. Source: Colly's relay to team pig, 2026-11-08, 08:38 +07.
+  parameters. Source: the Human, in his chat with Colly, 2026-11-08 shortly before 08:31 +07, paraphrased; recorded on
+  INN-42 the same morning.
 
