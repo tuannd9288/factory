@@ -26,12 +26,13 @@
 // `launchctl print system/<label>` reports a last exit code other than 0 (no launchctl, or not loaded: skipped). It probes ssh with no ssh
 // agent, as the job has none; it reads the newest seq, relays nothing, and sets the cursor only when there is none.
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { followMain } from './checkout.mjs';
 import { oneLine } from './events.mjs';
+import { writeAtomic } from './files.mjs';
 import { contextOf, installedRoot, placeOf, wakeFile } from './factory.mjs';
 import { parseTeam } from './names.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
@@ -79,9 +80,7 @@ function readCursor(file) {
 
 function writeCursor(file, seq) {
   mkdirSync(dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${seq}\n`);
-  renameSync(tmp, file);
+  writeAtomic(file, `${seq}\n`);
 }
 
 const parse = (text) =>
@@ -150,9 +149,7 @@ export function follow({ root, state, runs, env = process.env, log = console.log
   if (last === line) return;
   log(`relay: ${line}`);
   mkdirSync(state, { recursive: true });
-  const tmp = `${kept}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${line}\n`);
-  renameSync(tmp, kept);
+  writeAtomic(kept, `${line}\n`);
 }
 
 /** One pass. `fetch`, `newest`, `post` and `follower` are passed in for tests; with a `root`, the installed copy follows main first. Returns 0,

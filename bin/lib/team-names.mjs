@@ -1,10 +1,8 @@
 // Team nicknames ported from piggery v0.10.3 internal/core/names.go.
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from './checkout.mjs';
 import { parseTeam } from './names.mjs';
 import { readAccounts } from './token.mjs';
-import { teamRows } from './teams.mjs';
 import { leadTeams } from './colly-status.mjs';
 
 // The living-person block, elon through mira, is omitted: teams must not be named after real people.
@@ -57,14 +55,14 @@ export function freeWord(key, taken) {
   for (let i = 2; ; i++) if (!held.has(`${WORDS[start]}${i}`)) return `${WORDS[start]}${i}`;
 }
 
-export function teamsOf(repo, { home = process.env.HOME, state = process.env.FACTORY_STATE ?? join(home, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(home, 'factory-runs'), root = ROOT, processes } = {}) {
+export function teamsOf(repo, { home = process.env.HOME, state = process.env.FACTORY_STATE ?? join(home, '.local/state/factory'), runs = process.env.FACTORY_RUNS ?? join(home, 'factory-runs'), processes } = {}) {
   let folders = [];
   try { folders = readdirSync(runs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); }
   catch (e) { if (e.code !== 'ENOENT') throw e; }
   let sockets = [];
   try { sockets = readdirSync(join(state, 'lead-here')).filter((n) => n.endsWith('.socket')).map((n) => n.slice(0, -7)); }
   catch (e) { if (e.code !== 'ENOENT') throw e; }
-  const names = [...folders, ...sockets, ...Object.keys(readAccounts(state)).filter((r) => r.startsWith('factory/')).map((r) => r.slice(8)), ...teamRows(state, root).map((t) => t.name)];
+  const names = [...folders, ...sockets, ...Object.keys(readAccounts(state)).filter((r) => r.startsWith('factory/')).map((r) => r.slice(8))];
   return [...new Set([...names.map(parseTeam).filter((t) => t?.repo === repo).map((t) => t.team), ...leadTeams(repo, processes)])].sort();
 }
 

@@ -191,6 +191,16 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
 
+Versions follow Semantic Versioning 2.0.0: a version is a tag `v<major>.<minor>.<patch>` on `main`, cut on his word and never
+moved or deleted (the tag ruleset `factory-versions`, `.github/ruleset-versions.json`, which he sets, refuses a deletion and a
+force push). Its public API is the
+contracts H1–H9; the required check names (3a); the record shapes `events.jsonl` (`bin/lib/events.mjs`) and `sessions.jsonl`
+(`bin/lib/seat.mjs`); the commands `factory`, `bin/seat`,
+`bin/onboard`, `bin/onboard-owner`, `bin/onboard-doctor` and `bin/kit-update`; and what a served repository holds of the kit:
+the Gate block, the `.gate/bin/` commands, the keys of `.gate/config.sh` and `.gate/driver.json` and the line forms of
+`.gate/protected`. Everything else is internal. An incompatible change to the API is MAJOR; a new compatible contract,
+command or key, or a deprecation, is MINOR; a fix is PATCH.
+
 ## This root
 
 - No `CLAUDE.md` here. With one, Claude Code reads it and skips the `AGENTS.md` of every repository below
@@ -268,6 +278,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
 | `scripts/ship` | Opens, readies and arms this repository's pull requests as a repository that installed the pstack pack does: it runs `packs/pstack/scripts/ship` from its source, with no red-check stamp, since this root has no `.gate/config.sh` and CI runs `scripts/verify` (FAC-14) |
+| `CHANGELOG.md` | Each version's notes, one section `## vX.Y.Z - <date>`, written in its release pull request; `.github/workflows/release.yml` publishes the section (`scripts/release-notes <tag>`) to the version's GitHub Release when its tag is pushed, or by hand for an existing tag; the workflow's header has the steps |
 | `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
 

@@ -125,7 +125,7 @@ function draftWait(pr) {
   return `its parent ${move.previousRefName} landed, and its head does not hold that landing: the queue's restack, its merge of main into it, is pending`;
 }
 
-function step(pr, head, branch, stacks, merge, drafts) {
+function step(pr, head, branch, stacks, merge) {
   const n = pr.number;
   const short = head.slice(0, 7);
   const armed = Boolean(pr.autoMergeRequest);
@@ -217,7 +217,7 @@ function main(argv) {
     : pr && ((m) => !m.squashMergeAllowed && m.mergeCommitAllowed)(methods()) ? 'merge' : 'squash';
   if (!pr && !stacks && args.base && args.base !== 'main')
     return say(1, `refused to open: its base is ${args.base}, not main`);
-  return pr ? step(pr, head, branch, stacks, merge, policy.drafts) : open(branch, head, args, policy.drafts);
+  return pr ? step(pr, head, branch, stacks, merge) : open(branch, head, args, policy.drafts);
 }
 
 try {

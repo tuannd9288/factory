@@ -34,10 +34,11 @@
 // reading the state folder. Every local user can read the share's lines (redacted, as above), and nothing else of the state folder.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RATE_SOURCE } from './claude-code.mjs';
+import { writeAtomic } from './files.mjs';
 import { claimJob } from './job-claim.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
@@ -53,8 +54,6 @@ export const NOT_STARTED_MS = 30 * 60_000;
 const STARTED = new Set(['IN_PROGRESS', 'COMPLETED']);
 const HUMAN = new Set(['tier-3', 'needs-human']);
 const stateDir = () => process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-
-export { redact };
 
 /** The first non-empty line of a text, redacted, with its control characters gone, at most 200 characters. */
 export const oneLine =(text) => redact(String(text).split('\n').find((l) => l.trim()) ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
@@ -120,8 +119,7 @@ const readText = (file) => {
 /** Condition 3: the Leads running now whose newest hook event is a permission prompt or an elicitation dialog (the `waiting` state of
  * top's LEAD_STATES, read by top's own rule). The guess of a Lead at a login or a folder trust is not a dialog and is left out. A process
  * list that cannot be read throws (readProcesses), unlike top's, which shows none. */
-export const defaultProcesses = readProcesses;
-export function leadsAtDialog({ runs, now, processes = defaultProcesses }) {
+export function leadsAtDialog({ runs, now, processes = readProcesses }) {
   const out = [];
   for (const proc of processes()) {
     const lead = leadOf(proc.command);
@@ -271,12 +269,6 @@ function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
       // the state folder could not be written either: the events write below it has already failed or will say so
     }
   }
-}
-
-export function writeAtomic(file, text) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, file);
 }
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);

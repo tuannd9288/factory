@@ -1,13 +1,11 @@
 // The teams of the accounts file (#311): a row `factory/<repo>-<team>` is a team's when its repository is onboarded (the launcher's
-// own test, refusal() in packs/pstack/bin/lead.mjs) or is the factory's own repository, `factory`, which is the checkout's root
+// own test, refusal() in bin/lib/repos.mjs) or is the factory's own repository, `factory`, which is the checkout's root
 // and not a folder under it. So `factory/lead-alpha`, an old Lead row, is not read as repository `lead`, team `alpha`, and a seat
 // row is no team at all.
 import { ROOT } from './checkout.mjs';
 import { parseTeam } from './names.mjs';
-import { FACTORY_REPO, repoOk } from './repos.mjs';
+import { repoOk } from './repos.mjs';
 import { readAccounts } from './token.mjs';
-
-export { FACTORY_REPO, repoOk };
 
 /** The teams the file names, sorted by name: { name, row, repo, team, account }. */
 export function teamRows(state, root = ROOT) {

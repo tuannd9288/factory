@@ -3,10 +3,11 @@
 // unreadable. Each profile gets its own root outside ~/.agent-profiles, set as CLAUDE_CODE_PLUGIN_CACHE_DIR; the install runs
 // against a throwaway config folder of its own, so no profile's folder is touched. Nothing here reads a credential or logs in.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { privateDir, writeAtomic } from './files.mjs';
 
 export class PluginError extends Error {}
 
@@ -26,12 +27,6 @@ export function pluginPaths(config, { home, profiles }) {
  * no path (no slash, no ..) and no option of claude. Anything else is a PluginError. */
 function plain(name, what) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) throw new PluginError(`the ${what} name ${JSON.stringify(name)} is not a plain name (letters, digits, dot, dash, underscore; not starting with a dot or dash)`);
-}
-
-/** Makes a folder with mode 700, or sets 700 on one that exists. Nothing is ever deleted. */
-function privateDir(dir) {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
 }
 
 /** The pins of a settings text: the marketplaces declared as `settings` sources, by name. */
@@ -119,9 +114,7 @@ export function installPlugins({ work, config, home, profiles, env = process.env
   const folder = join(installConfig, 'marketplaces', pin.name);
   const file = join(folder, '.claude-plugin/marketplace.json');
   privateDir(dirname(file));
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify({ name: pin.name, owner: { name: 'factory' }, plugins: pin.source.plugins }, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmp, file);
+  writeAtomic(file, `${JSON.stringify({ name: pin.name, owner: { name: 'factory' }, plugins: pin.source.plugins }, null, 2)}\n`, { mode: 0o600 });
   run(['marketplace', 'add', folder, '--scope', 'local', '--json'], opts);
   for (const id of wanted) run(['install', id, '--scope', 'local'], opts);
   return root;

@@ -11,11 +11,12 @@
 // (one already running finishes) and says so once (readerSwitch); the silence watch runs whatever the switch says.
 // The detector's kinds and sides are frozen: docs/decisions.md, "The Watcher's freeze, 2026-11-07".
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendStart, oneLine, readActive, record, readLines } from './events.mjs';
+import { writeAtomic } from './files.mjs';
 import { reduceLine, turnEnded } from './claude-code.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
@@ -298,12 +299,6 @@ function runModel({ command, args, stdin, cwd, env, timeoutMs }) {
 }
 
 const isEmpty = (dir) => readdirSync(dir).length === 0;
-
-function writeAtomic(file, text) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, file);
-}
 
 /** The text of one finding, on one line: `<session> <kind>: "<quote>" (<why>)`. The model's words are data; oneLine redacts them. */
 const flat = (s) => s.replace(/\s+/g, ' ').trim();

@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { nodeName } from '../bin/lib/node.mjs';
 import { join } from 'node:path';
 import { createLinear } from '../bin/lib/linear.mjs';
-import { createCli, holderOf, onLinear, parse, registryFile } from '../bin/lib/linear-cli.mjs';
+import { createCli, holderOf, parse } from '../bin/lib/linear-cli.mjs';
+import { onLinear, registryFile } from '../bin/lib/linear-repos.mjs';
 import { writeAppFile } from '../bin/lib/token.mjs';
 
 const json = (status, body) => ({ status, ok: status < 400, text: async () => JSON.stringify(body) });

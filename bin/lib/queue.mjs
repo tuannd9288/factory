@@ -13,8 +13,8 @@
 // and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds; a run that fails
 // before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
 // queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
-// With no --repo it sweeps the repositories taken in (#211), found as the ledger finds them (clonesUnder): a folder
-// of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its
+// With no --repo it sweeps the repositories taken in (#211), found by repos.mjs's clonesUnder, as the ledger finds them: a folder
+// of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/, named by its
 // origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
 // The last step, under the lock, writes the events of #309 (bin/lib/events.mjs): one line to $FACTORY_STATE/events.jsonl when a condition
 // begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call. A sixth (#333) tells each move of a
@@ -47,13 +47,14 @@ import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { MACBOOK_SHARE, noteGh, observe, resetNotes } from './events.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
-import { clonesUnder } from './ledger.mjs';
+import { clonesUnder, githubRepo } from './repos.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
 import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
-import { FACTORY_REPO, teamRows } from './teams.mjs';
+import { FACTORY_REPO } from './repos.mjs';
+import { teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 import { installedRoot, nodeLogin, placeOf } from './node.mjs';
 import { holderOf, isHeld, takeLock } from './lock.mjs';
@@ -84,9 +85,6 @@ export function pickUpdate(prs, required, position) {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return behind[0] ?? null;
 }
-
-// pickReruns is in bin/lib/checks.mjs, where the wake on a Lead's news reads it too (#370); tests and callers still take it from here.
-export { pickReruns };
 
 export const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} ${MERGED_FIELDS} pullRequests(states:OPEN,first:100){nodes{
 number isDraft body mergeable createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
@@ -475,10 +473,9 @@ function followCheckout(state) {
   return moved;
 }
 
-/** The factory's own repository, named by the origin of the checkout at `root`, or undefined. */
+/** The factory's own repository, named by the origin of the checkout at `root`, or null; it throws when git cannot read the origin. */
 function ownRepo(root) {
-  const origin = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  return /github\.com[:/](.+?)(?:\.git)?\/?$/.exec(origin)?.[1];
+  return githubRepo(execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
 }
 
 /** The merge switch of the factory's own repository (#333), which the sweep does not otherwise read: its rules in force on main, one
@@ -613,7 +610,7 @@ function which(name, path) {
  * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
  * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
  * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (the digest's):
- * its label, tool, verb, log name and interval, more variables to keep and more tools to find on the PATH; the
+ * its label, tool, verb, log name and interval, and more variables to keep; the
  * defaults are the queue's own. The digest's job (#209) gives no verb, `args` before the repositories, and a
  * `calendar` (launchd's StartCalendarInterval) in place of the interval. */
 export function job(repos, env = process.env, daemon = false, as = {}) {
@@ -621,9 +618,8 @@ export function job(repos, env = process.env, daemon = false, as = {}) {
   if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
   const node = which('node', env.PATH) ?? process.execPath;
   const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, calendar = null, args = [], keep = [], tools = [] } = as;
-  const extra = tools.map((name) => which(name, env.PATH)).filter(Boolean).map((p) => dirname(p));
-  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), ...extra, '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
+  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, calendar = null, args = [], keep = [] } = as;
+  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
   const found = which('node', path);
   if (!found || realpathSync(found) !== realpathSync(node))
     throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);
