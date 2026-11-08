@@ -9,7 +9,7 @@ import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { factory, git } from '../../../test/helpers.mjs';
-import { DENY_READ } from '../../../bin/lib/seat.mjs';
+import { DENIED, deniedBy } from '../../../bin/lib/deny-read.mjs';
 
 /** The permission profile a codex call names (`-c default_permissions=` and its `-c permissions.<name>.filesystem=` table), as an object. */
 function profileOf(args) {
@@ -104,9 +104,10 @@ test('runs the brief on codex exec, read-only in the folder, on the verifier\'s 
   assert.ok(!exec.args.includes('-s') && !exec.args.includes('--sandbox'), exec.args.join(' '));
   const profile = profileOf(exec.args);
   assert.equal(profile[':root'], 'read');
-  for (const d of ['.agent-profiles', '.ssh', '.config/gh', '.claude', '.codex', ...DENY_READ]) assert.equal(profile[join(w.home, d)], 'deny', d);
+  const home = DENIED.filter((e) => !e.base && deniedBy(e, 'codex')).map((e) => e.path);
+  for (const d of ['.agent-profiles', '.ssh', '.config/gh', '.claude', '.codex', ...home]) assert.equal(profile[join(w.home, d)], 'deny', d);
   // Codex's * stops at one path part, so a glob also denies what lies under what it names.
-  for (const d of DENY_READ.filter((x) => x.includes('*'))) assert.equal(profile[`${join(w.home, d)}/**`], 'deny', d);
+  for (const d of home.filter((x) => x.includes('*'))) assert.equal(profile[`${join(w.home, d)}/**`], 'deny', d);
   // Every .env* file, which the kit denies a session too.
   assert.equal(profile['/**/.env*'], 'deny');
   assert.ok(!Object.values(profile).includes('write'));

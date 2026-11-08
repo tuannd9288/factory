@@ -7,9 +7,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory, run } from './helpers.mjs';
 import * as ledger from '../bin/lib/ledger.mjs';
+import { costOf } from '../bin/lib/claude-code.mjs';
 
 const FIXTURE = JSON.parse(readFileSync(join(factory, 'test/fixtures/ledger-entry-2.1.308.json'), 'utf8'));
-const ONE = ledger.costOf(FIXTURE.message.model, FIXTURE.message.usage);
+const ONE = costOf(FIXTURE.message.model, FIXTURE.message.usage);
 
 const GH = `#!/bin/sh
 case "$*" in

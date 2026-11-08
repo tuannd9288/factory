@@ -59,12 +59,12 @@
 # Known limit (#311): a session can set FACTORY_TEAM itself in a command it types, and so start a seat on another team's
 # account; lead.md says it must not. Known limit: the token files sit on disk, and the team holds the key by decision (#307). The
 # worker's and the reviewer's Bash runs in Claude Code's sandbox (#183), set in the one --settings value they get: it
-# denies reading the profiles folder, `~/.claude*`, `~/.codex*`, `~/.config/gh`, `~/.ssh` and `~/.local/share/claude`, allows
+# denies reading the paths no agent reads that a sandbox takes (bin/lib/deny-read.mjs) and the profiles folder, allows
 # writes to the work folder, the run folder, the temporary folder, each `--add-dir` and Claude Code's own session temporary
 # folder (its defaults), and allows no network, and a sandbox that cannot start ends the session. bin/seat sets FACTORY_SANDBOX=1
 # in such a session, which the tests read to skip those that need `ps`, which the sandbox refuses. The `Read` tool, the hooks and
-# the MCP servers run outside it, so the deny rules for the tokens folder, the archive folder and seat 1's old file (every seat,
-# every role) stay. The researcher is not in the sandbox.
+# the MCP servers run outside it, so every seat and role also keeps the list's Read rules, the tokens folder, the archive folder and
+# seat 1's old file among them. The researcher is not in the sandbox.
 # The researcher reads untrusted pages and can send them out, and since #178 its seat 2 holds a token too; while
 # `hideKey` is `true` its grants were reviewed for that (2026-10-31): it has `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`,
 # `bin/research-git` and `ls`, `wc`, `mkdir`, `date`, `cd`, so the only tool that returns a file's content is `Read`, which the

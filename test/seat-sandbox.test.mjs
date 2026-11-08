@@ -28,7 +28,7 @@ for (const role of ['worker', 'reviewer']) {
 
   test(`${role}: the sandbox denies reading the credential folders by absolute path, ~/.config/gh but not all of ~/.config, and reopens nothing`, () => {
     const { filesystem } = settingsOf(build(role)).sandbox;
-    assert.deepEqual(filesystem.denyRead, ['/h/.agent-profiles', '/h/.claude', '/h/.claude*', '/h/.codex', '/h/.codex*', '/h/.config/gh', '/h/.ssh', '/h/.local/share/claude']);
+    assert.deepEqual(filesystem.denyRead, ['/h/.agent-profiles', '/h/.claude', '/h/.claude*', '/h/.codex', '/h/.codex*', '/h/.config/gh', '/h/.config/claude-credit', '/h/.ssh', '/h/.local/share/claude', '/h/.cursor']);
     assert.ok(!filesystem.denyRead.includes('/h/.config'));
     assert.equal(Object.hasOwn(filesystem, 'allowRead'), false);
   });
@@ -53,7 +53,7 @@ for (const role of ['worker', 'reviewer']) {
       autoAllowBashIfSandboxed: false,
       allowUnsandboxedCommands: false,
       filesystem: {
-        denyRead: ['/h/.agent-profiles', '/h/.claude', '/h/.claude*', '/h/.codex', '/h/.codex*', '/h/.config/gh', '/h/.ssh', '/h/.local/share/claude', PROFILES],
+        denyRead: ['/h/.agent-profiles', '/h/.claude', '/h/.claude*', '/h/.codex', '/h/.codex*', '/h/.config/gh', '/h/.config/claude-credit', '/h/.ssh', '/h/.local/share/claude', '/h/.cursor', PROFILES],
         allowWrite: [WORK, RUN, realpathSync(tmpdir())],
       },
       network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },

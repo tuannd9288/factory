@@ -9,8 +9,8 @@
 // interrogate-reviewer), arena's cross-judge (cross-judge, eval's judge too), show-me-your-work's review of the trail
 // (trail-reviewer) and Orchestrate's verifier (verifier). A review role's prompt ends with the Human's score-and-file sentence,
 // read from kit/.gate/gate-section.md, its one home. Codex runs in the current folder under its own permission profile, not a
-// sandbox mode: it reads the whole disk but the folders the seats' sandbox denies (DENY_READ, bin/lib/seat.mjs: the profiles and
-// their tokens, gh's, ssh's, Claude Code's and Codex's own) and every .env* file, writes nothing, and has no network. The profile
+// sandbox mode: it reads the whole disk but the paths no agent reads (bin/lib/deny-read.mjs: the profiles and their tokens, gh's,
+// ssh's, Claude Code's and Codex's own, every .env* file), writes nothing, and has no network. The profile
 // binds only the commands Codex runs (codex-rs/sandboxing/src/manager.rs:437-473 wraps each in /usr/bin/sandbox-exec), so Codex
 // itself still reads its login and config under the denied profiles folder; --write lets it write in one
 // folder of the current repository (a runner's or an adversary's worktree) and the temporary folders. --repo names the repository
@@ -25,7 +25,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realp
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DENY_READ } from '../../../bin/lib/seat.mjs';
+import { codexPaths, sandboxPaths } from '../../../bin/lib/deny-read.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const ROLES = ['arena-runner', 'architect-runner', 'interrogate-reviewer', 'cross-judge', 'trail-reviewer', 'verifier'];
@@ -41,23 +41,20 @@ const USAGE = `usage: factory codex --role <${ROLES.join('|')}> [--effort ${EFFO
 // What Codex prints when the account's usage limit is reached; checked on the Mac mini's first real wait (#182).
 const QUOTA = /usage limit|usage_limit|rate.?limit|quota|\b429\b/i;
 const PROFILE = 'factory-codex-step';
-const ENV_FILES = '/**/.env*';
 // What Codex's own workspace-write keeps read-only in a writable folder (rust-v0.163.0, protocol/src/permissions.rs:40-43 and
 // :2360-2400): a hook, a config or a credential helper planted there would run later, outside the sandbox.
 const KEEP_READ_ONLY = ['.git', '.agents', '.codex', '.aws'];
 
 /**
  * The `-c` overrides that make Codex's permission profile for this step (Codex 0.163.0's `[permissions]` table, selected by
- * `default_permissions`, which cannot go with a sandbox mode): read `:root` but the seats' DENY_READ under home and the profiles
- * folder; with write, write the folder and the temporary folders too, but not the folder's KEEP_READ_ONLY. No `network` table
- * leaves the network off. Codex's `*` stops at one path part, so a glob is denied twice, as itself and with `/**` for what lies
- * under what it names. Shown on `codex sandbox` with a temporary home: each denied path refused, the work folder read, and a
- * write to <write>/.git/hooks refused (#182).
+ * `default_permissions`, which cannot go with a sandbox mode): read `:root` but bin/lib/deny-read.mjs's codex paths (the paths no
+ * agent reads under home, the profiles folder, every .env* file; a glob twice, since Codex's `*` stops at one path part); with write,
+ * write the folder and the temporary folders too, but not the folder's KEEP_READ_ONLY. No `network` table leaves the network off.
+ * Shown on `codex sandbox` with a temporary home: each denied path refused, the work folder read, and a write to <write>/.git/hooks
+ * refused (#182).
  */
 export function permissionArgs({ home, profiles, write = null, tmp = [] }) {
-  const deny = [...new Set([...DENY_READ.map((d) => `${home}/${d}`), profiles])].flatMap((p) => (p.includes('*') ? [p, `${p}/**`] : [p]));
-  // The kit denies a session `Read(./.env*)` (kit/.claude/settings.json); Codex reads every folder, so its .env files go everywhere.
-  deny.push(ENV_FILES);
+  const deny = codexPaths(home, profiles);
   const entries = [[':root', 'read'], ...deny.map((p) => [p, 'deny']), ...(write ? [...new Set([write, ...tmp])].map((p) => [p, 'write']) : [])];
   // The more specific path wins over the folder's write, whether or not it exists yet.
   if (write) entries.push(...KEEP_READ_ONLY.map((name) => [`${write}/${name}`, 'read']));
@@ -95,7 +92,7 @@ export function paths(home = userInfo().homedir) {
  * The brief from --brief-file, the way a seat passes it: a seat's sandbox runs `factory codex` outside it only when the call holds
  * no redirect or pipe (bin/lib/seat.mjs), and this process then reads with the factory user's whole reach. So the file, by its
  * real path (a link is followed), must be a file of the current repository or a temporary folder, and not in a folder the seats'
- * sandbox denies (DENY_READ, the profiles folder) nor a .env* file: nothing a seat could not read itself.
+ * sandbox denies (bin/lib/deny-read.mjs's shell paths, the profiles folder) nor a .env* file: nothing a seat could not read itself.
  */
 function briefFrom(path, { cwd, p }) {
   let real;
@@ -116,8 +113,7 @@ function briefFrom(path, { cwd, p }) {
     }
   };
   const home = realOr(p.home);
-  const fromHome = relative(home, real);
-  const denied = DENY_READ.some((d) => (d.includes('*') ? !fromHome.startsWith('..') && fromHome.split('/')[0].startsWith(d.replace('*', '')) : under(realOr(join(home, d)))))
+  const denied = sandboxPaths(home).some((d) => (d.endsWith('*') ? real.startsWith(d.slice(0, -1)) : under(realOr(d))))
     || under(realOr(p.profiles)) || basename(real).startsWith('.env');
   const top = git(cwd, ['rev-parse', '--show-toplevel']);
   const roots = [...(top ? [realOr(top)] : []), ...p.tmp];

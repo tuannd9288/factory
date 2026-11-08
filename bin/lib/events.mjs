@@ -17,6 +17,7 @@
 // an INN issue, which is never cleared (innAnswer, #414).
 // The sweep writes its kinds (record), and the stream reader (#339, bin/lib/reader.mjs) writes two more kinds of line: a `reader-failed` condition
 // of scope `reader` (through record, as the sweep's conditions are) and one-time `start` lines for what the model found (appendStart),
+// and the sweep holds a `reader-off` condition, of scope `reader-switch`, while the reader's switch is off (readerSwitch, INN-39);
 // which are no condition and are never cleared; the sweep writes one too, a `comment` line when it wakes a Lead for a new comment (#351,
 // bin/lib/comment-wake.mjs), and one line of its own for each piece of news of a Lead's seats, checks and pull request (#370,
 // bin/lib/news-wake.mjs: seat-ended, seat-no-result, checks-red, checks-green, conflict, merged: NEWS_KINDS, the Lead's, which
@@ -36,11 +37,12 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RATE_SOURCE } from './claude-code.mjs';
 import { claimJob } from './job-claim.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountEvent, accountOut } from './seat.mjs';
-import { quotaRows, alertLines, windowsOf } from './quota.mjs';
+import { quotaRows, alertLines } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
 import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
 
@@ -151,9 +153,9 @@ export function accountsOut({ runs, state, agentProfiles, now }) {
   return accounts.flatMap(({ name, letter }) => {
     const why = accountOut(runs, name, seatRows, now);
     if (why) return [{ key: `out-of-quota ${letter}`, scope: 'quota', text: `account ${letter} is ${why}` }];
-    const info = accountEvent(runs, name, seatRows)?.info;
-    if (info?.status !== 'allowed_warning') return [];
-    const [warned] = alertLines([{ profile: `account ${letter}`, source: 'rate_limit_event', windows: windowsOf(info), resetsAt: info.resetsAt ?? null }], { now });
+    const e = accountEvent(runs, name, seatRows);
+    if (e?.windows.status !== 'allowed_warning') return [];
+    const [warned] = alertLines([{ profile: `account ${letter}`, source: RATE_SOURCE, windows: e.windows, resetsAt: e.resetsAt }], { now });
     return warned ? [{ key: `quota-warning ${letter}`, scope: 'quota', text: warned }] : [];
   });
 }

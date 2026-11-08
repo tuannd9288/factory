@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
+import { readRules } from '../bin/lib/deny-read.mjs';
 
 const lib = () => import('../bin/lib/seat.mjs');
 
@@ -17,8 +18,8 @@ const DENY = [
   'Bash(*factory use*)', 'Bash(*factory account remove*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs account remove*)',
   'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
   'Bash(herdr:*)', 'Bash(/h/.local/bin/herdr:*)', 'Bash(env:*)', 'Bash(printenv:*)', 'WebFetch', 'WebSearch',
-  'Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)',
-  'Read(~/factory-runs/*/transcripts/**)',
+  // The paths no agent reads, as bin/lib/deny-read.mjs renders them; test/deny-read.test.mjs checks each entry.
+  ...readRules({ role: 'seat' }),
   'Bash(security:*)', 'Bash(/usr/bin/security:*)',
 ];
 // The researcher's own allow list, which it keeps while hideKey is true (#307).
@@ -95,11 +96,13 @@ test('with no work folder, the researcher\'s only Edit rule is the run folder\'s
   assert.deepEqual(allowed.filter((r) => r.startsWith('Edit(')), ['Edit(//r/issue-1/**)']);
 });
 
-test('given the profiles folder, every seat adds three deny rules by absolute path: the tokens, the archive and seat 1\'s old file (#178)', async () => {
+test('given the profiles folder, every seat denies by absolute path the tokens, the archive and seat 1\'s old file (#178), and the folder', async () => {
   const { buildArgs } = await lib();
   const denied = (args) => args.slice(args.indexOf('--disallowedTools') + 1, args.indexOf('--output-format'));
-  const rules = [...DENY, 'Read(//p/tokens/**)', 'Read(//p/archive/**)', 'Read(//p/seats/1/oauth-token)'];
-  for (const seat of [1, 2]) assert.deepEqual(denied(buildArgs({ role: 'worker', run: RUN, home: HOME, seat, profiles: '/p' })), rules, `seat ${seat}`);
+  for (const seat of [1, 2]) {
+    const rules = denied(buildArgs({ role: 'worker', run: RUN, home: HOME, seat, profiles: '/p' }));
+    for (const rule of ['Read(//p/tokens/**)', 'Read(//p/archive/**)', 'Read(//p/seats/1/oauth-token)', 'Read(//p/**)']) assert.ok(rules.includes(rule), `seat ${seat}: ${rule}`);
+  }
   assert.deepEqual(denied(buildArgs({ role: 'worker', run: RUN, home: HOME, seat: 2 })), DENY, 'with no folder given, none');
 });
 
