@@ -144,7 +144,7 @@ function state(head, over = {}) {
   const want = wanted({ kitLanded: true, branch: 'main', reviewer: '', target: { include: [TRUSTED], events: ['pull_request_target'] } });
   return {
     login: 'tuannd9288',
-    agent: 'tuan9288-agent',
+    agent: 'nami9288',
     repo: { id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true },
     kitLanded: true,
     collaborator: 'write',
@@ -224,7 +224,7 @@ test('settings: red names each call left, and when the kit is not on the default
   assert.equal(r.code, 1, r.out);
   assert.deepEqual(marks(r), { ...green, settings: 'RED' }, r.out);
   assert.match(flat(r), /environment reviewer/);
-  assert.match(flat(r), /collaborator tuan9288-agent/);
+  assert.match(flat(r), /collaborator nami9288/);
   r = doctor({ held: state(kitMerge, { kitLanded: false }) });
   assert.equal(r.code, 1, r.out);
   assert.equal(mark(r.lines.settings), 'RED');
@@ -398,7 +398,7 @@ test('it refuses to run from a commit that is not on origin/main, or from a kit 
 test('it refuses what onboard-owner refuses: the agents\' login, another id, a renamed repository, no admin right', () => {
   const held = state(kitMerge);
   const refused = (over, args = ['tuannd9288/app', '--id', '1234']) => doctor({ held: { ...held, ...over }, args });
-  assert.equal(refused({ login: 'tuan9288-agent' }).code, 2);
+  assert.equal(refused({ login: 'nami9288' }).code, 2);
   assert.equal(refused({}, ['tuannd9288/app', '--id', '9999']).code, 2);
   assert.equal(refused({}, ['tuannd9288/app']).code, 2);
   assert.equal(refused({ repo: { ...held.repo, full_name: 'tuannd9288/renamed' } }).code, 2);
@@ -417,7 +417,7 @@ test('settings: a line red with many calls left prints every call whole, over mo
   const held = state(kitMerge, { rulesets: [], environment: null, collaborator: 'none' });
   const r = doctor({ held });
   assert.equal(r.code, 1, r.out);
-  const whats = ['collaborator tuan9288-agent (write)', 'environment reviewer', 'environment reviewer deploys from main', ...wanted({ kitLanded: true, branch: 'main', reviewer: '' }).rulesets.map((x) => `ruleset ${x.name}`)];
+  const whats = ['collaborator nami9288 (write)', 'environment reviewer', 'environment reviewer deploys from main', ...wanted({ kitLanded: true, branch: 'main', reviewer: '' }).rulesets.map((x) => `ruleset ${x.name}`)];
   assert.ok(whats.length >= 3);
   for (const what of whats) assert.ok(r.out.includes(what), `${what} is not in:\n${r.out}`);
   const start = r.out.split('\n').findIndex((l) => /^RED\s+settings\s/.test(l));
