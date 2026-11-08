@@ -22,8 +22,9 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    a restart find your issues by those comments (`factory linear read <KEY>` shows them), never by the delegate. An issue you will not finish
    you drop with `factory linear release <KEY> --team {{TEAM}}`: it clears the delegate, moves the issue to Todo and comments the release; only
    the holder may.<!--/linear-->
-2. Make its run folder and worktree from `main`: `mkdir -p ~/factory-runs/<repo>-<n>`, `git fetch origin`, then
-   `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w origin/main`.
+2. Make its run folder and worktree at main's commit as GitHub has it: `mkdir -p ~/factory-runs/<repo>-<n>`, read the commit with
+   `gh api repos/<owner>/<repo>/commits/main --jq .sha`, naming the repository (`{owner}/{repo}` and `origin` read the clone's config,
+   which a seat can write), `git fetch origin`, then `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w <that commit>`.
 3. Save the issue in the run folder: <!--github-->read it with `gh issue view <n> --json body,comments` and write that output to
    `~/factory-runs/<repo>-<n>/issue.json`.<!--/github--><!--linear-->read it with `factory linear read <KEY>` and write that output, which holds
    every comment with its author and time, to `~/factory-runs/<repo>-<n>/issue.md`.<!--/linear--> Write a brief beside it using the fields in
@@ -47,7 +48,9 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    the top three to five user-facing features, with no `SKILL.md` and no run of the app; an existing feature doc moves
    into the map, and its old file is deleted, in the same pull request.
 4. Start the worker <!--seat-->by `bin/seat`'s absolute path, the one your grant names:
-   `{{SEAT}} worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
+   `{{SEAT}} worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree> --main <step 2's commit>`; before the worktree's first
+   session it runs main's `gate_prepare` at that commit, once for each worktree path (a fresh install needs a new path), and keeps the
+   commit, so later starts there may leave `--main` out. It runs in
    the background: end the turn.<!--/seat--><!--noseat-->only as this MacBook's `factory` user, the agents' own: you run as another
    user, so you have no grant to start a seat and start none (#366). Tell the Human that the issue's work waits for a Lead that runs
    as `factory`, and stop there.<!--/noseat--> A `seat-ended` wake says it ended; only then check, with Grep, once,

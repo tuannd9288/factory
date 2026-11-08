@@ -14,6 +14,7 @@ import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
+import { COMMIT, PrepareError, markSession, prepareWork } from './prepare.mjs';
 import { readSessions } from './records.mjs';
 import { githubRepo, repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
@@ -327,8 +328,8 @@ class Moved extends Error {
   }
 }
 
-const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--deny <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
-const VALUE = { '--run': 'run', '--work': 'work', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
+const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--main <commit>] [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--deny <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
+const VALUE = { '--run': 'run', '--work': 'work', '--main': 'main', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
 const LIST = { '--skill': 'skills', '--allow': 'allow', '--deny': 'deny', '--add-dir': 'addDirs' };
 
 const realOf = (path) => {
@@ -370,6 +371,7 @@ export function parseArgs(argv) {
   if (o.maxTurns !== undefined && !/^[1-9][0-9]*$/.test(o.maxTurns)) throw new Refused('--max-turns needs a whole number of at least 1');
   if (o.resume && o.seat === undefined) throw new Refused('a resume stays on its seat; give --seat <n>, the seat the session ran on');
   if (o.tag !== undefined && !/^[A-Za-z0-9._-]+$/.test(o.tag)) throw new Refused('--tag takes letters, digits, dot, dash and underscore');
+  if (o.main !== undefined && !COMMIT.test(o.main)) throw new Refused('--main takes a commit id, 40 or 64 hex digits: main\'s commit as GitHub has it');
   return o;
 }
 
@@ -527,6 +529,16 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
     if (e instanceof PluginError) throw new Refused(`plugins: ${e.message}`);
     throw e;
   }
+  // main's gate_prepare, at the commit the Lead names with --main, makes the worktree ready to test before the session, outside the
+  // sandbox and with the network (FAC-108, bin/lib/prepare.mjs), with the session's environment less every ANTHROPIC_* and the sandbox
+  // marker. A failed install starts nothing.
+  const install = Object.fromEntries(Object.entries(child).filter(([k]) => !k.startsWith('ANTHROPIC_') && k !== 'FACTORY_SANDBOX'));
+  try {
+    prepareWork({ work, run, tag, state, env: install, main: o.main ?? null });
+  } catch (e) {
+    if (e instanceof PrepareError) throw new Refused(`prepare: ${e.message}`);
+    throw e;
+  }
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
@@ -542,6 +554,8 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   writeFileSync(join(run, `run-${tag}.seat`), `${seat}\n`);
   writeFileSync(join(run, `run-${tag}.account`), `${account}\n`);
   writeFileSync(pidFile, `${sup.pid}\n`);
+  // A session began in this worktree: later starts there make no first install (FAC-108, the Human's box A on INN-51).
+  markSession(state, work);
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
 
