@@ -59,13 +59,10 @@ jobs:
         working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}
-      - run: |
-          printf '%s\n' "$BODY" >"$RUNNER_TEMP/pr-body.txt"
-          GATE_BODY_FILE="$RUNNER_TEMP/pr-body.txt" .gate/bin/review tier --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_STEP_SUMMARY"
+      - run: .gate/bin/review tier --base "$BASE" --head "$HEAD" | tee -a "$GITHUB_STEP_SUMMARY"
         shell: bash
         working-directory: trusted
         env:
           GATE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           GATE_BASE_REF: ${{ github.event.pull_request.base.ref }}
-          BODY: ${{ github.event.pull_request.body }}
           GH_TOKEN: ${{ github.token }}
