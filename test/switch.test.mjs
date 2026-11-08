@@ -25,10 +25,10 @@ test('no pull_request rule in force reads as 1-2, the position of a switch nobod
   assert.equal(positionOf([{ type: 'deletion' }, { type: 'non_fast_forward' }]), '1-2');
 });
 
-test('the bootstrap ruleset and the factory\'s own read as none; the kit\'s gate reads as 1-2', () => {
+test('the bootstrap ruleset reads as none, the factory\'s own as all (2026-11-08), the kit\'s gate as 1-2', () => {
   const read = (path) => JSON.parse(readFileSync(join(factory, path), 'utf8')).rules;
   assert.equal(positionOf(read('bin/rulesets/bootstrap.json')), 'none');
-  assert.equal(positionOf(read('.github/ruleset.json')), 'none');
+  assert.equal(positionOf(read('.github/ruleset.json')), 'all');
   assert.equal(positionOf(read('kit/.gate/ruleset.json')), '1-2');
 });
 

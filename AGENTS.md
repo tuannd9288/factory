@@ -63,6 +63,7 @@ The Human's dated decisions, with their sources and his words, are in `docs/deci
 - **The Factory app's Linear key, 2026-11-04.**
 - **Effectiveness, 2026-11-04.**
 - **The Watcher's freeze, 2026-11-07.**
+- **The factory's own merge switch, 2026-11-08.**
 
 ## Tiers
 
@@ -171,7 +172,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
-  Checked by: `.github/CODEOWNERS:4`.
+  Checked by: `scripts/ship`'s stop on `needs-human` (`packs/pstack/scripts/lib/ship.mjs:162`) and
+  `.github/workflows/approval.yml`, which reads his approval of such a pull request from `.github/CODEOWNERS:4`.
   Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
   factory's unattended sessions; 0d does; (2) the record of a task is in its repository's tracker (1b) and in 0d's
@@ -223,10 +225,17 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   GitHub token there (#366); its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
-- Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its `**TL;DR**`
-  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386,
-  #411). Its title carries no issue number, which stays in the body.
+- A pull request of this repository lands once the team's Supervisor has accepted it and Colly's review passed, with
+  `verify` green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
+  One that needs the Human, a release, a first design or a change to a design or architecture, carries `needs-human`
+  (`gh issue edit <n> --add-label needs-human`), and Colly takes it to him. This repository runs no `tier`, so only
+  `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:162`). It goes on
+  when he approves its head on GitHub, which `approval` reads, so the Lead sees it with no relay, or on his word, which
+  Colly records on the issue. Then the Lead removes the label (`gh issue edit <n> --remove-label needs-human`) and runs
+  `scripts/ship` again. GitHub asks his review only on a pull request that changes `.github/CODEOWNERS`. Each body
+  opens with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its
+  `**TL;DR**` block, the same lines in English; they are his only section, and the agents' detail is collapsed below
+  them (#386, #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|
