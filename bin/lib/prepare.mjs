@@ -178,7 +178,7 @@ export function prepareWork({ work, run, tag, state, env, main = null }) {
   main = record?.main ?? main;
   const read = storeOf(work, env);
   const whole = (id, type) => read([[id, type]])[0];
-  const notWhole = `main's commit ${main.slice(0, 7)} is not whole in this clone (git fetch origin, then start again)`;
+  const notWhole = `main's commit ${main.slice(0, 7)} is not whole in this clone, so this worktree gets no install; a worktree made at that commit after git fetch origin gets one`;
   const commit = whole(main, 'commit');
   const root = commit && /^tree ([0-9a-f]+)$/m.exec(commit.toString())?.[1];
   const top = root && whole(root, 'tree');
