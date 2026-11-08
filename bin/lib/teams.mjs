@@ -7,8 +7,6 @@ import { parseTeam } from './names.mjs';
 import { FACTORY_REPO, repoOk } from './repos.mjs';
 import { readAccounts } from './token.mjs';
 
-export { FACTORY_REPO, repoOk };
-
 /** The teams the file names, sorted by name: { name, row, repo, team, account }. */
 export function teamRows(state, root = ROOT) {
   return Object.entries(readAccounts(state))
