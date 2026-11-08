@@ -1,6 +1,6 @@
 ---
 name: gate-red
-description: Use when a pull request's check is red or pending (`verify`, `review`, `verdict` or `tier`), when `tier` says `review is red; tier follows it` or waits for the Human's approval, when a check names the body's `Team:`, `Issue:` or `Claim:` line, when the reviewer's finding looks wrong, or when a push would be the third round. Says how the four checks decide, which jobs to re-run, how to fix or dispute a blocking finding, and when `rounds` hands the pull request to the Human. Not for writing the change or for the local `verify`.
+description: Use when a pull request's check is red or pending (`verify` or `tier`), when `tier` waits for the Human's approval, when a check names the body's `Team:`, `Issue:` or `Claim:` line, when a blocking finding looks wrong, or when a push would be the third round. Says how the two checks decide, when not to re-run `tier`, how to fix or dispute a blocking finding, and when to hand the pull request to the Human. Not for writing the change or for the local `verify`.
 compatibility: Claude Code in a factory repository; the gate's checks run on GitHub Actions.
 ---
 
@@ -8,22 +8,19 @@ compatibility: Claude Code in a factory repository; the gate's checks run on Git
 
 The gate decides from `main`'s scripts. The rules a program enforces are in `.gate/enforced-rules.md`.
 
-## The four checks
+## The two checks
 
-Every pull request needs four checks green on its head commit:
+Every pull request needs two checks green on its head commit:
 
 - `verify` (`gate.yml`): `main`'s verify, rules and red-check, run on your code.
-- `review` and `verdict` (`gate-trusted.yml`): the reviewer reads your change as data once `verify` passed. `verdict` passes
-  at once on tier 1.
-- `tier`: it waits for `review` to end; on tier 3 it then waits for the Human's approval of your change, unless the
-  repository's merge switch is at `all`.
+- `tier` (`gate-trusted.yml`): it reads your change as data and waits for no other check; on tier 3 it waits for the
+  Human's approval of your change, unless the repository's merge switch is at `all`.
 
-The reviewer may raise a change to tier 3 (label `raised`), never lower one. A label never lowers a tier. The Human's
+No check on GitHub runs a reviewer: the review runs beside the workers. A label never lowers a tier. The Human's
 approval holds while the patch is unchanged, as when the queue merges `main` in; a new patch needs a new one.
 
 ## A red or waiting `tier`
 
-- `review is red; tier follows it`: this is not his wait. Re-run the failed jobs, never `review` alone.
 - A `tier` that waits for his approval is his wait. Never re-run it; the queue re-runs it after he approves.
 - A `tier` red on the claim (the body has no `Claim:` line, it is not the tip of `claim/<n>`, or its `Team:` is not the
   team holding the claim): take the issue with `.gate/bin/claim <n> <team>`, which prints the `Claim:` line, or ask the
@@ -34,8 +31,7 @@ approval holds while the patch is unchanged, as when the queue merges `main` in;
 
 `verify` needs one line `Team: <name>`; editing the body runs the checks again. `tier` reads `Issue: #<n>` (or
 `Issue: none`) and `Claim: <sha>`, and on a claimed issue checks that `Team:` names the holder. `Session:` and `Cost:`
-only inform. A pull request from a fork gets a red `review` by
-design: push the branch to this repository.
+only inform.
 
 ## A blocking finding
 

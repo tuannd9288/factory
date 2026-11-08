@@ -40,10 +40,9 @@ describe('.gate/bin/verify-timeout (item 9)', () => {
     return (...args) => run(dir, join(dir, '.gate/bin/verify-timeout'), args);
   };
 
-  test('prints the minutes .gate/config.sh gives, 30 when it gives none, and the seconds with --seconds', () => {
+  test('prints the minutes .gate/config.sh gives, 30 when it gives none, and the largest allowed with --max', () => {
     assert.equal(kit('GATE_CHECKS=""\n')().out.trim(), '30');
     assert.equal(kit('GATE_VERIFY_TIMEOUT=45\n')().out.trim(), '45');
-    assert.equal(kit('GATE_VERIFY_TIMEOUT=45\n')('--seconds').out.trim(), '2700');
     assert.equal(kit('GATE_VERIFY_TIMEOUT=60\n')().out.trim(), '60');
     assert.equal(kit('')('--max').out.trim(), '60');
   });
@@ -54,7 +53,6 @@ describe('.gate/bin/verify-timeout (item 9)', () => {
       assert.equal(r.code, 2, `${bad}: ${r.out}`);
       assert.doesNotMatch(r.out, /^\d+$/m, bad);
     }
-    assert.equal(kit('GATE_VERIFY_TIMEOUT=abc\n')('--seconds').code, 2);
   });
 
   test('a config that cannot be read is exit 2', () => {

@@ -15,12 +15,12 @@ file. What a program enforces: `.gate/enforced-rules.md`.
   `No-red: <why, 20 characters or more>`; the reviewer judges it (where Entire reviews, the Human: tier 3).
 - `.gate/bin/tier` prints the tier. Tier 2: commit the failing test first, alone, with `Failing-test: <command>`.
   Tier 3 (a path in `.gate/protected`, this block included): the Human approves the head commit, unless the repository's merge switch is at `all`.
-- Four checks decide on the exact head commit, from `main`'s copies: `verify`, `review`, `verdict`, `tier` (where Entire
-  reviews, `tier` needs its check `Entire Gates` to be success). When one is red, read `.claude/skills/gate-red/SKILL.md` first.
+- Two checks decide on the exact head commit, from `main`'s copies: `verify` and `tier`. When one is red, read
+  `.claude/skills/gate-red/SKILL.md` first.
 - The Human (2026-10-29), to the reviewer: "Rate each bug from 1 to 10 on how often it would happen and how bad it would be. If the two scores multiplied are below 5, just file it as an issue and leave the code alone." To the writer: "Do not design for rare or future cases nobody asked about."
 - `forcePush` on origin/main defaults to `pstack`: only your own PR branch, with `--force-with-lease`, never main; `off` forbids rewrites. After three red rounds, label the PR `needs-human`, with your recommended answer.
 - Every deploy is the Human's; decide and report anything else that can be undone, and a reversible question never
-  blocks the work. Secrets live only in the environment `reviewer`. A rules finding wrong for one line:
+  blocks the work. Secrets live only in an environment, never at repository level. A rules finding wrong for one line:
   `gate-allow <rule-id>: <why>` (syntax in the file above).
 - A hosted agent assigned on GitHub takes tier 1 and 2 issues only, and never receives the shared bot token.
 <!-- factory:gate:end -->
