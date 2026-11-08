@@ -2,9 +2,10 @@
 // `factory linear` itself (FAC-38). Only `factory linear onboard` writes it (bin/lib/linear-cli.mjs), atomically and under a lock; a repository
 // not in a node's registry is on GitHub for that node. A file that
 // exists and does not parse is an error, never an empty registry: every reader refuses, and `onboard` writes nothing. It imports nothing but
-// node: modules, so the pack's launcher can read it without the rest of the factory.
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+// node: modules and bin/lib/files.mjs, which imports only node: modules, so the pack's launcher can read it without the rest of the factory.
+import { mkdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { readJsonObject, writeAtomic } from './files.mjs';
 
 export const registryFile = (state) => join(state, 'linear', 'repos.json');
 
@@ -17,21 +18,12 @@ const LOCK_WAIT_MS = 30_000;
 /** The registry as { repo: { key, teamId } }: {} when there is no file; throws when the file is there and does not read or parse. */
 export function readRegistry(state) {
   const file = registryFile(state);
-  let text;
   try {
-    text = readFileSync(file, 'utf8');
+    return readJsonObject(file) ?? {};
   } catch (e) {
-    if (e.code === 'ENOENT') return {};
+    if (e.code === 'ENOTOBJECT') throw new Error(`the registry ${file} exists but does not parse as an object; nothing was changed`);
     throw new Error(`the registry ${file} exists but cannot be read (${e.code ?? 'error'}); nothing was changed`);
   }
-  let r;
-  try {
-    r = JSON.parse(text);
-  } catch {
-    r = null;
-  }
-  if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error(`the registry ${file} exists but does not parse as an object; nothing was changed`);
-  return r;
 }
 
 /** The repository's registry entry ({ key, teamId }), or null when it is on GitHub. Throws as readRegistry does. The registry is keyed
@@ -43,12 +35,7 @@ export function onLinear(name, state = process.env.FACTORY_STATE ?? join(process
   return e && typeof e.key === 'string' && TEAM_KEY.test(e.key) && typeof e.teamId === 'string' ? e : null;
 }
 
-function writeRegistry(state, registry) {
-  const file = registryFile(state);
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmp, file);
-}
+const writeRegistry = (state, registry) => writeAtomic(registryFile(state), `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 

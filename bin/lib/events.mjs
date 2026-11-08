@@ -34,10 +34,11 @@
 // reading the state folder. Every local user can read the share's lines (redacted, as above), and nothing else of the state folder.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RATE_SOURCE } from './claude-code.mjs';
+import { writeAtomic } from './files.mjs';
 import { claimJob } from './job-claim.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
@@ -271,12 +272,6 @@ function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
       // the state folder could not be written either: the events write below it has already failed or will say so
     }
   }
-}
-
-export function writeAtomic(file, text) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, file);
 }
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);

@@ -1,8 +1,9 @@
 // The token store of `factory account add` (#177): one file for each account, ~/.agent-profiles/tokens/<account>, mode 600, in a
 // folder of mode 700. This file holds the checks of a name and of a token, the write, the list of the files and the read of a
 // token from stdin. It never prints a token, and no error it raises holds one.
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { privateDir, writeAtomic } from './files.mjs';
 
 const ACCOUNT = /^[a-z0-9][a-z0-9._-]*$/;
 
@@ -54,15 +55,8 @@ export function tokenAdded(agentProfiles, account) {
  * and cannot be mistaken for an account. The caller has checked the account and token. */
 export function writeToken(agentProfiles, account, token) {
   const dir = tokenDir(agentProfiles);
-  let st = null;
-  try {
-    st = lstatSync(dir);
-  } catch {
-    // no store yet: made below
-  }
-  if (st?.isSymbolicLink()) throw new Error(`${dir} is a symlink; nothing was stored`);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
+  privateDir(dir, { refuseLink: true });
+  // Two files, both written before either is renamed, so a token is never stored without its date: not one writeAtomic each.
   const tmp = join(dir, `.${account}.${process.pid}.tmp`);
   const added = join(dir, `.${account}.added`);
   const addedTmp = `${tmp}.added`;
@@ -87,35 +81,10 @@ export const appDir = (agentProfiles, app) => join(tokenDir(agentProfiles), app)
  * file name; the caller has checked the text. */
 export function writeAppFile(agentProfiles, app, name, text) {
   if (!APP_FOLDERS.includes(app) || !/^[a-z][a-z0-9.-]*$/.test(name)) throw new Error('that is not a file of an app folder');
-  const dir = tokenDir(agentProfiles);
-  let st = null;
-  try {
-    st = lstatSync(dir);
-  } catch {
-    // no store yet: made below
-  }
-  if (st?.isSymbolicLink()) throw new Error(`${dir} is a symlink; nothing was stored`);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
+  privateDir(tokenDir(agentProfiles), { refuseLink: true });
   const folder = appDir(agentProfiles, app);
-  let fst = null;
-  try {
-    fst = lstatSync(folder);
-  } catch {
-    // no folder yet: made below
-  }
-  if (fst?.isSymbolicLink()) throw new Error(`${folder} is a symlink; nothing was stored`);
-  mkdirSync(folder, { recursive: true, mode: 0o700 });
-  chmodSync(folder, 0o700);
-  const tmp = join(folder, `.${name}.${process.pid}.tmp`);
-  rmSync(tmp, { force: true });
-  try {
-    writeFileSync(tmp, text.endsWith('\n') ? text : `${text}\n`, { mode: 0o600, flag: 'wx' });
-    renameSync(tmp, join(folder, name));
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw e;
-  }
+  privateDir(folder, { refuseLink: true });
+  writeAtomic(join(folder, name), text.endsWith('\n') ? text : `${text}\n`, { mode: 0o600 });
 }
 
 /** The accounts that have a token file, sorted; a file whose name is not an account name (a temporary file, say) is not one. */
@@ -180,15 +149,7 @@ export function setAccount(state, profile, account) {
   const at = lines.findIndex((l) => !l.trimStart().startsWith('#') && l.indexOf('=') > 0 && l.slice(0, l.indexOf('=')).trim() === profile);
   if (at >= 0) lines[at] = `${profile}=${account}`;
   else lines.push(`${profile}=${account}`);
-  const tmp = join(state, `.accounts.${process.pid}.tmp`);
-  rmSync(tmp, { force: true });
-  try {
-    writeFileSync(tmp, `${lines.join('\n')}\n`, { mode: 0o600, flag: 'wx' });
-    renameSync(tmp, file);
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw e;
-  }
+  writeAtomic(file, `${lines.join('\n')}\n`, { mode: 0o600 });
 }
 
 const stampOf = (at) => at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
