@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# scripts/release-notes <tag> [file] (INN-40 item 5): prints a version's notes, the tag's own section of CHANGELOG.md
+# (the repository's, or the file named) from its heading `## <tag> - <date>` up to the next `## ` heading, without the heading
+# and with no leading blank line; .github/workflows/release.yml publishes them as the version's GitHub Release. The heading
+# is matched with the space after the tag, so v1.0.1 never takes v1.0.10's section. Ported from piggery's release workflow
+# (.github/workflows/release.yml:104-108@67c083e). Exit 0 printed, 1 the file has no section for the tag, 2 usage.
+set -uo pipefail
+if [ $# -lt 1 ] || [ $# -gt 2 ] || [ -z "$1" ]; then
+  echo "usage: scripts/release-notes <tag> [file]" >&2
+  exit 2
+fi
+tag=$1
+file=${2:-"$(dirname "$0")/../CHANGELOG.md"}
+[ -f "$file" ] || { echo "release-notes: $file is missing" >&2; exit 2; }
+notes=$(awk -v h="## ${tag} " 'index($0, h) == 1 {f = 1; next} f && /^## / {exit} f && (s || NF) {s = 1; print}' "$file")
+[ -n "$notes" ] || { echo "release-notes: $file has no section for $tag" >&2; exit 1; }
+printf '%s\n' "$notes"

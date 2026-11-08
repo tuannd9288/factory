@@ -17,6 +17,7 @@ import { seatAccounts } from './token.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { job, plist } from './queue.mjs';
+import { cloneRepo, clonesUnder } from './repos.mjs';
 import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
@@ -646,40 +647,8 @@ export async function linearTaskRows({ repo, api, teamKey, allPulls, pullRow, fr
   return { rows, keys: new Set(tasks.map((t) => t.identifier)) };
 }
 
-/** The owner/name of the clone at dir, from its github.com origin, or null: the factory's own repository, whose clone is the root. */
-function originRepo(dir) {
-  try {
-    const url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const m = /github\.com[:/](.+)$/.exec(url.replace(/\/$/, '').replace(/\.git$/, ''));
-    return m && /^[\w.-]+\/[\w.-]+$/.test(m[1]) ? m[1] : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The factory's clones under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose
- * `origin` is on github.com. The merge queue (bin/lib/queue.mjs) finds the repositories taken in by the same rule.
- * The name is the origin less one trailing `/` and a trailing `.git`, as bin/onboard takes it. A kit clone whose origin
- * cannot be read, or whose name is not owner/name, is left out and `skip(folder, why)` is called for it. */
-export function clonesUnder(root, skip = () => {}) {
-  const out = new Map();
-  for (const name of existsSync(root) ? readdirSync(root) : []) {
-    const dir = join(root, name);
-    if (!existsSync(join(dir, '.gate/config.sh')) || !existsSync(join(dir, '.git'))) continue;
-    let url;
-    try {
-      url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-    } catch (error) {
-      skip(dir, `origin cannot be read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
-      continue;
-    }
-    const m = /github\.com[:/](.+)$/.exec(url.replace(/\/$/, '').replace(/\.git$/, ''));
-    if (!m) continue;
-    if (/^[\w.-]+\/[\w.-]+$/.test(m[1])) out.set(m[1], dir);
-    else skip(dir, `origin ${url} does not name owner/name`);
-  }
-  return out;
-}
+// Moved to repos.mjs (FAC-85), which owns a repository's identity, and exported here too while callers still import it from here.
+export { clonesUnder };
 
 /** `--check`: the canary, printed. Exit 1 when a field the ledger reads is missing or stale, or there is nothing to read. */
 function check(dirs, latest, extra) {
@@ -906,7 +875,7 @@ async function main(argv) {
     // A registry or a Linear read that fails leaves this repository's tasks out and says so; the rest of the digest is written.
     let team = null;
     try {
-      team = onLinear(repo, state);
+      team = onLinear(repo.slice(repo.indexOf('/') + 1), state);
     } catch (error) {
       unreadBecause(repo, error);
     }
@@ -935,7 +904,7 @@ async function main(argv) {
   }
   rows.sort((a, b) => a.created.localeCompare(b.created));
   // A `Fixes:` line names a commit; the repository's own clone says which pull request it came from (INN-40), never gh.
-  const own = originRepo(root);
+  const own = cloneRepo(root);
   const resolvers = new Map();
   const resolverOf = (repo) => {
     if (!resolvers.has(repo)) {

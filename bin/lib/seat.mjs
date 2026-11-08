@@ -15,7 +15,7 @@ import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { readSessions } from './records.mjs';
-import { repoOk } from './repos.mjs';
+import { githubRepo, repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
 
 /** What a session reports back through --json-schema.
@@ -555,7 +555,7 @@ function placeOf(dir) {
       return null;
     }
   };
-  const repo = /^(?:https:\/\/|git@|ssh:\/\/git@)github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(git('remote', 'get-url', 'origin') ?? '')?.[1] ?? null;
+  const repo = githubRepo(git('remote', 'get-url', 'origin'));
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
   return { repo, branch: branch && branch !== 'HEAD' ? branch : null };
 }

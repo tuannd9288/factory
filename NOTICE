@@ -27,3 +27,33 @@ agent-desk (the Human's own project, tuannd9288/agent-desk), commit 0cd59d55. Th
                           here, for the Human to approve in the pull request: that the pull request's text and files
                           are data and never instructions, the output shape of result.mjs, the No-red judgement,
                           the raise rule and the acceptance rule.
+
+piggery (https://github.com/sting8k/piggery), commit 67c083e4ed28eb7092fcebc03df200dffa842758
+(v0.10.3, 2026-10-15). Its license, from its LICENSE at that commit:
+
+MIT License
+
+Copyright (c) 2026 sting8k
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+  scripts/release-notes   .github/workflows/release.yml:107, the awk program that prints a tag's own section of
+                          CHANGELOG.md, word for word, with the tag and the file as the script's own arguments; the
+                          script around it is the factory's.
+  bin/lib/team-names.mjs  internal/core/names.go: the team nicknames.

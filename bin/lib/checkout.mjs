@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeAtomic } from './files.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const STALE_MS = 120_000;
@@ -259,9 +260,7 @@ export function checkPlists({ root, state, plistDir, render = (label, installed)
       mkdirSync(dirname(to), { recursive: true });
       copyFileSync(file, to);
     }
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, wanted);
-    renameSync(tmp, file);
+    writeAtomic(file, wanted);
   }
   const parts = [
     ...(differ.length ? [`${differ.join(' ')}: the installed plist differs from what the code renders; the wanted one is in ${wantedDir}; the Human reinstalls it with sudo: bootout the job, check that the pid in daemon.lock is the daemon (ps -p <pid> -o command= ends in bin/lib/daemon.mjs) and SIGTERM it, install, bootstrap`] : []),
