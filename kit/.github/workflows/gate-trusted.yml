@@ -12,11 +12,11 @@
 # The required checks are verify (gate.yml) and tier (.gate/ruleset.json). No required job here has `needs`: a job skipped
 # because a job it needs failed counts as passing. No job counts a pull request's red heads: the three-round rule is the
 # workers' (FAC-100).
-# GATE_REVIEWER below and every job's runs-on are the repository's own settings, which bin/onboard fills in and a pull
-# request changes, at tier 3 (#335): no repository variable holds them, since one changes without a pull request. The
-# runner is GitHub-hosted Ubuntu in the kit, and never a runner a candidate's, main's or a deploy's job uses, nor one
-# another workflow can reach, for the tier job holds a token that writes labels, and it alone asks for the Human's
-# approval and checks the claim (.gate/enforced-rules.md, which names the Human's one exception, with GATE_REVIEWER=entire).
+# The job's runs-on is the repository's own setting, which bin/onboard fills in and a pull request changes, at tier 3 (#335):
+# no repository variable holds it, since one changes without a pull request. The runner is GitHub-hosted Ubuntu in the kit,
+# and never a runner a candidate's, main's or a deploy's job uses, nor one another workflow can reach, for the tier job
+# holds a token that writes labels, and it alone asks for the Human's approval and checks the claim (.gate/enforced-rules.md,
+# which names the Human's one exception).
 name: gate-trusted
 
 on:
@@ -31,8 +31,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Read by no job: no reviewer runs on Actions (FAC-100). bin/onboard fills it in until the gate's settings drop it.
-  GATE_REVIEWER: ''
   BASE: ${{ github.event.pull_request.base.sha }}
   HEAD: ${{ github.event.pull_request.head.sha }}
   GATE_HEAD: ${{ github.event.pull_request.head.sha }}

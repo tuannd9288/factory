@@ -2,14 +2,13 @@
 # Brings an onboarded repository up to the factory's main: the counterpart of bin/onboard for a repository that already
 # has the kit. It works on the clone onboard made, $FACTORY_ROOT/<name>, and opens "chore(kit): update to
 # factory main <sha7>" from the branch factory/kit-<sha7>; its commit keeps "Bring the kit up to factory main <sha7>".
-#   bin/kit-update <repo-url|name> [--no-pr] [--reviewer <name>]
-#     [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]
+#   bin/kit-update <repo-url|name> [--no-pr] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]
 # From a fresh branch off origin/main, for every path of kit/ at this clone's HEAD (bin/lib/kitupdate.mjs):
 #   - the Gate block of AGENTS.md is replaced and nothing else of it: the repository's head and tail stay byte for byte;
 #     a text with no block, malformed markers, a CLAUDE.md that does not reach AGENTS.md, or a result over 150 lines
 #     or 32 KiB stops it, to merge by hand. CLAUDE.md is otherwise left as it is. CODEOWNERS is rendered as onboard does;
-#   - the gate's settings (#335), which the three workflows hold, are carried from the base; --reviewer, --runner,
-#     --pr-runner and --trusted-runner change one, in the form bin/onboard takes. A base whose workflows still read the
+#   - the gate's settings (#335), which the three workflows hold, are carried from the base; --runner, --pr-runner
+#     and --trusted-runner change one, in the form bin/onboard takes. A base whose workflows still read the
 #     repository variables (the kit before #335) holds none, so its update must name each from its variable's value;
 #   - the kit's review-categories block of .gitattributes (kit/.gate/review-categories, #380) is replaced and nothing else of it,
 #     as the Gate block is; a .gitattributes with no block gets it at its start, none gets a file of the block alone; malformed
@@ -59,14 +58,14 @@ settings=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --no-pr) open_pr=0; shift ;;
-    --reviewer | --runner | --pr-runner | --trusted-runner)
+    --runner | --pr-runner | --trusted-runner)
       [ "$#" -ge 2 ] || { echo "kit-update: $1 needs a value; nothing done"; exit 2; }
       settings+=("$1" "$2"); shift 2 ;;
     -*) echo "kit-update: unknown argument $1; nothing done"; exit 2 ;;
     *) [ -z "$target" ] || { echo "kit-update: unknown argument $1; nothing done"; exit 2; }; target=$1; shift ;;
   esac
 done
-[ -n "$target" ] || { echo "usage: bin/kit-update <repo-url|name> [--no-pr] [--reviewer <name>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]"; exit 2; }
+[ -n "$target" ] || { echo "usage: bin/kit-update <repo-url|name> [--no-pr] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]"; exit 2; }
 path=${target%/}
 path=${path%.git}
 name=$(basename "$path")

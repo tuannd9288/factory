@@ -57,9 +57,6 @@ if (path.startsWith(repo + '/actions/policies')) {
   if (id) { const p = (state.actionsPolicies ?? []).find((x) => x.id === Number(id)); p ? out(p) : missing(); }
   out({ total_count: (state.actionsPolicies ?? []).length, policies: (state.actionsPolicies ?? []).map(({ conditions, rules, ...entry }) => entry) });
 }
-const env = repo + '/environments/reviewer';
-if (path === env) state.environment ? out(state.environment) : missing();
-if (path === env + '/deployment-branch-policies') state.environment ? out({ branch_policies: state.environment.policies ?? [] }) : missing();
 process.stderr.write('fake gh: no answer for ' + path + '\n');
 process.exit(1);
 `;
@@ -68,9 +65,8 @@ const FAKE_TOKEN = 'ghp_FAKEtoken0123456789';
 const OTHER_VALUE = 'zz-other-variable-value';
 const OLD_VALUE = 'zz-old-gate-variable-value';
 /** The gate's settings the target is onboarded with (#335): three self-hosted runners that share no machine. */
-const SETTINGS = ['--reviewer', 'claude', '--runner', '["self-hosted","zz-main-label"]', '--pr-runner', '["self-hosted","zz-pr-label"]', '--trusted-runner', '["self-hosted","zz-trusted-label"]'];
+const SETTINGS = ['--runner', '["self-hosted","zz-main-label"]', '--pr-runner', '["self-hosted","zz-pr-label"]', '--trusted-runner', '["self-hosted","zz-trusted-label"]'];
 const LABELS = ['settings', 'merge', 'gate-block', 'verify', 'claude-md', 'size', 'kit-evidence'];
-const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
 
 let dir;
 let fake;
@@ -141,7 +137,7 @@ function variant(name, files) {
 /** What the fake GitHub holds of a repository that is as the factory wants it, with `over` laid over it. */
 function state(head, over = {}) {
   // The Actions event policy the kit's gate-trusted.yml on main needs (#337): that file, and the one event it runs on.
-  const want = wanted({ kitLanded: true, branch: 'main', reviewer: '', target: { include: [TRUSTED], events: ['pull_request_target'] } });
+  const want = wanted({ kitLanded: true, branch: 'main', target: { include: [TRUSTED], events: ['pull_request_target'] } });
   return {
     login: 'tuannd9288',
     agent: 'tuan9288-agent',
@@ -151,7 +147,6 @@ function state(head, over = {}) {
     invitations: [],
     rulesets: want.rulesets.map((r, i) => ({ ...r, id: 100 + i })),
     actionsPolicies: [{ ...want.actionsPolicy, id: 900 }],
-    environment: { name: 'reviewer', deployment_branch_policy: BRANCH_POLICY, policies: [{ name: 'main', type: 'branch' }] },
     variables: [{ name: 'OTHER', value: OTHER_VALUE }],
     prs: [
       { number: 5, headRefName: 'factory/kit', mergeCommit: { oid: kitMerge }, mergedAt: '2026-10-01T00:00:00Z' },
@@ -220,19 +215,13 @@ test('merge: red only when the rules in force cannot be read as a position (#333
 });
 
 test('settings: red names each call left, and when the kit is not on the default branch', () => {
-  let r = doctor({ held: state(kitMerge, { environment: null, collaborator: 'none' }) });
+  let r = doctor({ held: state(kitMerge, { collaborator: 'none' }) });
   assert.equal(r.code, 1, r.out);
   assert.deepEqual(marks(r), { ...green, settings: 'RED' }, r.out);
-  assert.match(flat(r), /environment reviewer/);
   assert.match(flat(r), /collaborator tuan9288-agent/);
   r = doctor({ held: state(kitMerge, { kitLanded: false }) });
   assert.equal(r.code, 1, r.out);
   assert.equal(mark(r.lines.settings), 'RED');
-  const extra = { name: 'reviewer', deployment_branch_policy: BRANCH_POLICY, policies: [{ name: 'main', type: 'branch' }, { name: 'dev', type: 'branch' }] };
-  r = doctor({ held: state(kitMerge, { environment: extra }) });
-  assert.equal(r.code, 1, r.out);
-  assert.equal(mark(r.lines.settings), 'RED');
-  assert.match(flat(r), /RED settings .*dev/);
   // #337: the Actions event policy main's gate-trusted.yml needs, missing or allowing other events than its on: block names.
   const policy = { id: 900, name: 'factory gate: pull_request_target', enforcement: 'active', conditions: { workflow_path: { include: [TRUSTED], exclude: [] } } };
   for (const actionsPolicies of [[], [{ ...policy, rules: [{ type: 'restrict_action_events', parameters: { allowed_events: ['pull_request'] } }] }]]) {
@@ -247,14 +236,12 @@ test('settings: red names each call left, and when the kit is not on the default
 const onMain = (path) => git(target, 'show', `main:${path}`);
 const flat = (r) => r.out.replace(/\n\s+/g, ' ');
 
-test('settings: red names a reviewer left empty, a runner not in the kit\'s form, and runners that break the rule; green as onboarded (#335)', () => {
+test('settings: red names a runner not in the kit\'s form and runners that break the rule; green as onboarded (#335)', () => {
   const TRUSTED = '.github/workflows/gate-trusted.yml';
   const MAIN = '.github/workflows/main.yml';
   const trusted = onMain(TRUSTED);
   const main = onMain(MAIN);
-  assert.match(trusted, /GATE_REVIEWER: 'claude'/);
   const cases = [
-    ['empty', { [TRUSTED]: trusted.replace("GATE_REVIEWER: 'claude'", "GATE_REVIEWER: ''") }, /no reviewer: GATE_REVIEWER is empty in \.github\/workflows\/gate-trusted\.yml/],
     ['two-runners', { [MAIN]: `${main}  other:\n    runs-on: ["ubuntu-latest"]\n    steps:\n      - run: true\n` }, /main's runner is not in \.github\/workflows\/main\.yml in the kit's form/],
     ['shared', { [TRUSTED]: trusted.replaceAll('zz-trusted-label', 'zz-main-label') }, /the trusted runner is self-hosted and shares a machine with main's runner/],
   ];
@@ -269,15 +256,15 @@ test('settings: red names a reviewer left empty, a runner not in the kit\'s form
   assert.equal(mark(doctor({ held: state(v.head), url: v.url }).lines.settings), 'ok');
 });
 
-test('settings: shared runners under entire are green, the #155 exception; the same runners under claude are red (#210, #335)', () => {
+test('settings: shared runners on a main on the kit before FAC-100 that names entire are green, the #155 exception; on the kit\'s own main they are red (#210, #335)', () => {
   const TRUSTED = '.github/workflows/gate-trusted.yml';
   const shared = (text) => text.replace(/runs-on: \[.*\]/g, 'runs-on: ["self-hosted","zz-shared-label"]');
   const files = Object.fromEntries(['.github/workflows/main.yml', '.github/workflows/gate.yml', TRUSTED].map((p) => [p, shared(onMain(p))]));
   const entire = wanted({ kitLanded: true, branch: 'main', reviewer: 'entire' }).rulesets.map((r, i) => ({ ...r, id: 100 + i }));
-  let v = variant('entire-shared', { ...files, [TRUSTED]: files[TRUSTED].replace("GATE_REVIEWER: 'claude'", "GATE_REVIEWER: 'entire'") });
+  let v = variant('entire-shared', { ...files, [TRUSTED]: files[TRUSTED].replace(/^env:\n/m, "env:\n  GATE_REVIEWER: 'entire'\n") });
   let r = doctor({ held: state(v.head, { rulesets: entire }), url: v.url });
   assert.equal(mark(r.lines.settings), 'ok', r.out);
-  v = variant('claude-shared', files);
+  v = variant('kit-shared', files);
   r = doctor({ held: state(v.head), url: v.url });
   assert.equal(mark(r.lines.settings), 'RED', r.out);
   assert.match(flat(r), /the trusted runner is self-hosted and shares a machine with main's runner/);
@@ -369,7 +356,7 @@ test('every gh call is a read: a GET with its query in the path, or a list or a 
 });
 
 test('no variable value and no token reaches the output, green or red', () => {
-  for (const [held, code] of [[state(kitMerge), 0], [state(kitMerge, { environment: null, kitLanded: false, prs: [] }), 1]]) {
+  for (const [held, code] of [[state(kitMerge), 0], [state(kitMerge, { kitLanded: false, prs: [] }), 1]]) {
     const r = doctor({ held });
     assert.equal(r.code, code, r.out);
     for (const secret of [FAKE_TOKEN, OTHER_VALUE]) assert.ok(!r.out.includes(secret), `${secret} printed:\n${r.out}`);
@@ -414,10 +401,10 @@ test('DOCTOR_CLONE_URL takes only an absolute local folder', () => {
 });
 
 test('settings: a line red with many calls left prints every call whole, over more lines, none cut', () => {
-  const held = state(kitMerge, { rulesets: [], environment: null, collaborator: 'none' });
+  const held = state(kitMerge, { rulesets: [], collaborator: 'none' });
   const r = doctor({ held });
   assert.equal(r.code, 1, r.out);
-  const whats = ['collaborator tuan9288-agent (write)', 'environment reviewer', 'environment reviewer deploys from main', ...wanted({ kitLanded: true, branch: 'main', reviewer: '' }).rulesets.map((x) => `ruleset ${x.name}`)];
+  const whats = ['collaborator tuan9288-agent (write)', ...wanted({ kitLanded: true, branch: 'main' }).rulesets.map((x) => `ruleset ${x.name}`)];
   assert.ok(whats.length >= 3);
   for (const what of whats) assert.ok(r.out.includes(what), `${what} is not in:\n${r.out}`);
   const start = r.out.split('\n').findIndex((l) => /^RED\s+settings\s/.test(l));
@@ -458,7 +445,7 @@ test('a green settings line is one line, and its tag names every read it makes',
   const lines = r.out.split('\n');
   const at = lines.findIndex((l) => /^ok\s+settings\s/.test(l));
   assert.ok(lines[at].length <= 120 && /^ok\s/.test(lines[at + 1]), r.out);
-  for (const read of ['rulesets', 'env', 'collab', 'invites', 'kit', 'vars', 'workflows']) assert.ok(lines[at].includes(read), `${read}: ${lines[at]}`);
+  for (const read of ['rulesets', 'collab', 'invites', 'kit', 'vars', 'workflows']) assert.ok(lines[at].includes(read), `${read}: ${lines[at]}`);
 });
 
 test('kit-evidence is called with --human, as bin/onboard and bin/kit-update call it', () => {
