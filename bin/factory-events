@@ -27,8 +27,6 @@
 # `what` and `where`. `--news --newest` (alone: no `--follow`, no `--after`) prints the highest seq of a news line, or 0, and nothing
 # else, and moves no cursor; it is how the relay's first pass, and its reset when its cursor is above the file's, learn where to start
 # without reading the lines.
-# A non-login ssh command has PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no node, so the places Homebrew puts it are added here.
-PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
-export PATH
-command -v node >/dev/null 2>&1 || { echo "factory-events: node is not on PATH ($PATH)" >&2; exit 127; }
+# A non-login ssh command has PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no node, so bin/lib/prelude.sh adds the places Homebrew puts it.
+. "$(dirname "$0")/lib/prelude.sh"
 exec node "$(dirname "$0")/lib/events.mjs" "$@"

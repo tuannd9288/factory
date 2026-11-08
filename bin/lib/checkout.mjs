@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { JOBS, nameOf } from './launchd.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const STALE_MS = 120_000;
@@ -208,20 +209,19 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
   }
 }
 
-// The relay's is installed on the MacBook alone (#366), and is skipped where it is not, as every one is.
-export const PLISTS = ['io.github.tuannd9288.factory.queue', 'io.github.tuannd9288.factory.digest', 'io.github.tuannd9288.factory.relay'];
-// Each tool, with the flags its `plist` takes for the LaunchDaemon.
-const TOOLS = { queue: ['bin/factory-queue', '--daemon'], digest: ['bin/factory-ledger', '--daemon'], relay: ['bin/factory-relay'] };
+// The factory's jobs (bin/lib/launchd.mjs). The relay's is installed on the MacBook alone (#366), and is skipped where it is not, as every
+// one is.
+export const PLISTS = Object.values(JOBS).map((j) => j.label);
 
 /** The repositories an installed plist names (its --repo arguments), in order. */
 export function reposOf(text) {
   return [...text.matchAll(/<string>--repo<\/string>\s*<string>([^<]+)<\/string>/g)].map((m) => m[1]);
 }
 
-/** What this checkout's code renders for the plist of `label`, with the repositories the installed one names: the tools'
- * own `plist` for the LaunchDaemon, run in this process's environment, which for a daemon is the plist's. */
+/** What this checkout's code renders for the plist of `label`, with the repositories the installed one names: the job's tool's
+ * own `plist` with the flags for the LaunchDaemon, run in this process's environment, which for a daemon is the plist's. */
 export function renderPlist(root, label, installed, env = process.env) {
-  const [tool, ...flags] = TOOLS[label.split('.').slice(4).join('.')];
+  const { tool, flags } = JOBS[nameOf(label)];
   const r = spawnSync(join(root, tool), ['plist', ...flags, ...reposOf(installed).flatMap((repo) => ['--repo', repo])], { encoding: 'utf8', env, timeout: 30_000 });
   if (r.status !== 0) throw new Error(first(r.stderr) || `exit ${r.status}`);
   return r.stdout;

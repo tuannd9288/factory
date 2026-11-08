@@ -27,7 +27,6 @@
 // agent, as the job has none; it reads the newest seq, relays nothing, and sets the cursor only when there is none.
 import { spawnSync } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
-import { userInfo } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { followMain } from './checkout.mjs';
@@ -36,13 +35,13 @@ import { contextOf, installedRoot, placeOf, wakeFile } from './factory.mjs';
 import { parseTeam } from './names.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { HOST as HOST_NAME } from './node.mjs';
-import { plist } from './queue.mjs';
+import { JOBS, job as launchdJob, plist, runEnv } from './launchd.mjs';
 import { liveRuns } from './seat.mjs';
 import { newsLine, post as postLine, recordedPath } from './wake.mjs';
 
 export const HOST = `factory@${HOST_NAME}`;
 export const REMOTE = '/Users/factory/WORKSPACES/bin/factory-events';
-export const LABEL = 'io.github.tuannd9288.factory.relay';
+export const LABEL = JOBS.relay.label;
 export const SSH_OPTIONS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3'];
 const SSH_MS = 60_000;
 
@@ -184,33 +183,13 @@ export async function pass({ state, root = null, runs = null, env = process.env,
   return 0;
 }
 
-/** The first executable `name` on a PATH, or null. */
-function which(name, path) {
-  for (const dir of (path ?? '').split(':').filter(Boolean)) {
-    try {
-      accessSync(join(dir, name), constants.X_OK);
-      return join(dir, name);
-    } catch {}
-  }
-  return null;
-}
-
-/** The LaunchDaemon's job (#366), in the shape queue.mjs's plist renders: `run` every 60 s from the installed copy (installedRoot), as the user
- * that printed it (UserName) with that user's HOME, as the Mac mini's queue runs, so it runs with nobody logged in; a PATH that finds node and
- * ssh; logging to ~/Library/Logs/factory/relay.log (launchd does not make the folder; `check` does). The copy is named in FACTORY_CHECKOUT,
- * so the plist is the same whether the shell that prints it set that or not: the sweep, which compares the installed plist with what the
- * code renders (checkPlists, bin/lib/checkout.mjs), runs with it set. The settings that move the state or the place are kept. */
+/** The LaunchDaemon's job (#366), as the table has it (bin/lib/launchd.mjs): `run` every 60 s from the installed copy (installedRoot), as the
+ * user that printed it (UserName) with that user's HOME, as the Mac mini's queue runs, so it runs with nobody logged in; a PATH that finds
+ * node and ssh; logging to ~/Library/Logs/factory/relay.log (launchd does not make the folder; `check` does). The copy is named in
+ * FACTORY_CHECKOUT, so the plist is the same whether the shell that prints it set that or not: the sweep, which compares the installed plist
+ * with what the code renders (checkPlists, bin/lib/checkout.mjs), runs with it set. The settings that move the state or the place are kept. */
 export function job(env = process.env) {
-  const node = which('node', env.PATH) ?? process.execPath;
-  const ssh = which('ssh', env.PATH) ?? '/usr/bin/ssh';
-  // The folder `which` finds node in, as the shell has it (Homebrew's link folder, which an upgrade keeps), not the versioned one `process.execPath` names.
-  const path = [...new Set([dirname(node), dirname(ssh), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
-  const kept = Object.fromEntries(['FACTORY_STATE', 'FACTORY_HOST_USER', 'FACTORY_HOST_NAME', 'XDG_DATA_HOME'].filter((k) => env[k]).map((k) => [k, env[k]]));
-  const root = installedRoot(env);
-  return {
-    label: LABEL, interval: 60, calendar: null, program: [join(root, 'bin/factory-relay'), 'run'], cwd: root,
-    env: { PATH: path, HOME: env.HOME, ...kept, FACTORY_CHECKOUT: root }, log: join(env.HOME, 'Library/Logs/factory/relay.log'), user: userInfo().username,
-  };
+  return launchdJob('relay', { env, place: placeOf(env), installed: installedRoot(env) });
 }
 
 /** The folders macOS refuses a launchd job, under the home folder. */
@@ -273,7 +252,7 @@ function preflight(j, state, env, launchd) {
  * to the newest seq only when there is none. Returns the exit code. */
 export function check(env = process.env) {
   const j = job(env);
-  const jobEnv = { USER: env.USER ?? '', TMPDIR: env.TMPDIR ?? '/tmp', ...j.env };
+  const jobEnv = runEnv(j, env);
   const launchd = (args) => spawnSync('launchctl', args, { env: jobEnv, encoding: 'utf8' });
   const say = (line) => console.log(`check: ${line}`);
   mkdirSync(dirname(j.log), { recursive: true });

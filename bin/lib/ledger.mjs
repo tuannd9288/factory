@@ -16,7 +16,8 @@ import { quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 import { seatAccounts } from './token.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
-import { job, plist } from './queue.mjs';
+import { DIGEST_REPO, job, plist } from './launchd.mjs';
+import { installedRoot, placeOf } from './node.mjs';
 import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
@@ -709,8 +710,8 @@ export function lastWeek(now = new Date()) {
   return { since: day(7), until: day(1) };
 }
 
-/** The digest's own launchd job (#209), `plist [--daemon] --repo owner/name...`: Monday 09:00 in the machine's local
- * time, posting last week's digest to the private repository where the Human reads it. */
+/** The digest's own launchd job (#209), `plist [--daemon] --repo owner/name...`, as the table has it (bin/lib/launchd.mjs): Monday 09:00
+ * in the machine's local time, posting last week's digest to the private repository where the Human reads it. */
 function digestJob(argv) {
   const repos = [];
   let daemon = false;
@@ -719,19 +720,9 @@ function digestJob(argv) {
     else if (argv[i] === '--repo' && /^[\w.-]+\/[\w.-]+$/.test(argv[i + 1] ?? '')) repos.push(argv[++i]);
     else throw new Error(`plist takes --daemon and --repo owner/name, not ${JSON.stringify(argv[i] === '--repo' ? argv[i + 1] ?? '' : argv[i])}`);
   }
-  const as = {
-    label: 'io.github.tuannd9288.factory.digest',
-    tool: 'bin/factory-ledger',
-    verb: null,
-    args: ['--post', DIGEST_REPO, '--last-week'],
-    log: 'digest.log',
-    calendar: { Weekday: 1, Hour: 9, Minute: 0 },
-    keep: ['FACTORY_ROOT', 'AGENT_PROFILES'],
-  };
-  process.stdout.write(plist(job(repos, process.env, daemon, as)));
+  const env = process.env;
+  process.stdout.write(plist(job('digest', { repos, env, daemon, place: placeOf(env), installed: installedRoot(env) })));
 }
-
-const DIGEST_REPO = 'tuannd9288/better-factory';
 
 /** #366: the issue's shared-records contract (no multi-node reader in the references).
  * Fetch into a disposable bare repository so a failed fetch can never use yesterday's local files.
