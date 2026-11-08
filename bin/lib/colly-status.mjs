@@ -1,12 +1,13 @@
 // Colly status text and shared session readers (#429).
 // --line and --brief share top-github.json, preserving the existing cache and deadlines.
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
+import { writeAtomic } from './files.mjs';
 import { hookStateOf, parseLog } from './claude-code.mjs';
 import { REQUIRED, clonesUnder, readSessions } from './ledger.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
@@ -368,10 +369,7 @@ function readSharedGithub(state) {
 function writeSharedGithub(state, data, good) {
   try {
     mkdirSync(state, { recursive: true });
-    const file = join(state, GH_FILE);
-    const tmp = `${file}.tmp-${process.pid}`;
-    writeFileSync(tmp, JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
-    renameSync(tmp, file);
+    writeAtomic(join(state, GH_FILE), JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
   } catch {
     // a view that cannot write the file reads GitHub again next time
   }

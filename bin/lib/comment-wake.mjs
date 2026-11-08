@@ -7,9 +7,10 @@
 // before it wakes, so a comment is never woken twice; a wake that fails is told in its line and not tried again, and the comment waits on GitHub.
 // A comment makes its issue the most recently updated, so it is among the first issues the query returns. Limits: ISSUES issues of
 // COMMENTS comments each in one sweep, and CLAIMS claim refs.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { appendStart } from './events.mjs';
+import { writeAtomic } from './files.mjs';
 import { wakeLine, postSync } from './wake.mjs';
 
 export const ISSUES = 30;
@@ -35,10 +36,7 @@ export function readCursor(state, repo) {
 
 function writeCursor(state, repo, cursor) {
   mkdirSync(state, { recursive: true });
-  const file = fileOf(state, repo);
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(cursor)}\n`);
-  renameSync(tmp, file);
+  writeAtomic(fileOf(state, repo), `${JSON.stringify(cursor)}\n`);
 }
 
 const after = (a, b) => a.at > b.at || (a.at === b.at && a.id > b.id);
