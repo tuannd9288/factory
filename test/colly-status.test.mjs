@@ -297,6 +297,14 @@ test('an ended run with no record takes its repository from its work folder\'s o
   assert.equal(asked.filter((x) => x === a).length, 1);
 });
 
+test('a Lead whose short name two owners share is given no repository, rather than the first of them (FAC-85)', async () => {
+  const w = world();
+  const { snapshot } = await top();
+  const clones = new Map([...w.opts.clones, ['other/factory', join(w.root, 'WORKSPACES/other-factory')]]);
+  const snap = await withPath(w.bin, () => snapshot({ ...w.opts, clones }));
+  assert.equal(snap.sessions.find((s) => s.role === 'lead').repo, null);
+});
+
 test('the claim reader writes nothing into the clone: it fetches into a bare cache of its own under the state folder', async () => {
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
