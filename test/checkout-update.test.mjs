@@ -6,8 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory, git } from './helpers.mjs';
-import { skipPs } from './ps-skip.mjs';
+import { OWN_PROCESS, factory, git } from './helpers.mjs';
 
 const lib = () => import('../bin/lib/checkout.mjs');
 const seatLib = () => import('../bin/lib/seat.mjs');
@@ -136,15 +135,15 @@ test('a deferral past two hours leaves queue-checkout.failed that names the comm
   assert.match(w.failed(), /2 commits behind for 2 h: runs are live/);
 }));
 
-test('a start that registered first is counted, so the update defers; a start holding the lock makes it wait', { skip: skipPs }, () => world(async (w) => {
+test('a start that registered first is counted, so the update defers; a start holding the lock makes it wait', () => world(async (w) => {
   const { liveRuns } = await seatLib();
   const { withStartLock } = await lib();
   const before = w.head();
   w.advance();
   mkdirSync(join(w.runs, 'issue-1'));
   writeFileSync(join(w.runs, 'issue-1', 'run-a.claim.pid'), `${process.pid}\n`);
-  assert.equal(liveRuns(w.runs), 1, 'a claim counts');
-  assert.equal((await w.follow({ live: () => liveRuns(w.runs) })).status, 'deferred');
+  assert.equal(liveRuns(w.runs, { ps: OWN_PROCESS }), 1, 'a claim counts');
+  assert.equal((await w.follow({ live: () => liveRuns(w.runs, { ps: OWN_PROCESS }) })).status, 'deferred');
   rmSync(join(w.runs, 'issue-1', 'run-a.claim.pid'));
   const { followMain } = await lib();
   const out = withStartLock(w.state, w.checkout, () => followMain({ root: w.checkout, state: w.state, live: () => 0 }), { wait: 50, loaded: before });
@@ -160,6 +159,10 @@ test('a start that waits for the lock gives up after its wait, and a lock a cras
     const held = join(dir, 'checkout.lock');
     mkdirSync(held);
     assert.throws(() => withStartLock(dir, dir, () => 1, { wait: 60 }), /update of the checkout is in progress/);
+    writeFileSync(join(held, 'holder'), '4242 the update of the checkout\n');
+    let ran = false;
+    assert.throws(() => withStartLock(dir, dir, () => { ran = true; }, { wait: 60 }), /held by the update of the checkout \(pid 4242\)/);
+    assert.equal(ran, false, 'a refused start registers nothing');
     const old = new Date(Date.now() - 600_000);
     utimesSync(held, old, old);
     assert.equal(withStartLock(dir, dir, () => 7, { wait: 60 }).value, 7);
@@ -180,17 +183,20 @@ test('a start that loaded an older commit than the checkout holds now does not r
   assert.equal(same.value, 'ran');
 }));
 
-test('bin/seat started on an older commit starts again on the current one, once, and runs the session once', async () => {
-  const { world: seatWorld } = await import('./seat-world.mjs');
-  await seatWorld(async (w) => {
-    const r = w.start('worker', [], { FACTORY_LOADED_HEAD: '0'.repeat(40) });
-    assert.equal(r.code, 0, r.out + r.err);
-    assert.match(r.err, /the checkout moved to [0-9a-f]{7}; started again on it/);
-    const { until } = await import('./seat-world.mjs');
-    await until(() => w.records().length === 1, 'the one record');
-    assert.equal(w.records().length, 1);
-  });
-});
+test('a start on a moved checkout starts the same command again, once: the second start runs whatever the checkout holds', () => world(async (w) => {
+  const { withStartLock, reexec } = await lib();
+  const script = join(w.state, 'again.mjs');
+  const out = join(w.state, 'again.out');
+  writeFileSync(script, "import { writeFileSync } from 'node:fs';\nwriteFileSync(process.argv[2], process.env.FACTORY_REEXEC ?? 'unset');\nprocess.exit(3);\n");
+  assert.equal(reexec([script, out], 'a'.repeat(40)), 3, 'its exit code is the command\'s');
+  assert.equal(readFileSync(out, 'utf8'), '1', 'started again with FACTORY_REEXEC');
+  process.env.FACTORY_REEXEC = '1';
+  try {
+    assert.equal(withStartLock(w.state, w.checkout, () => 'ran', { loaded: '0'.repeat(40) }).value, 'ran', 'no third start');
+  } finally {
+    delete process.env.FACTORY_REEXEC;
+  }
+}));
 
 test('moves an ignored file in the way into the archive and deletes nothing', () => world(async (w) => {
   writeFileSync(join(w.checkout, 'gen.txt'), 'mine, ignored\n');
@@ -204,7 +210,7 @@ test('moves an ignored file in the way into the archive and deletes nothing', ()
   assert.equal(readFileSync(join(w.state, 'archive', folder, 'gen.txt'), 'utf8'), 'mine, ignored\n');
 }));
 
-test('liveRuns counts a live session of either seat and not a dead pid', { skip: skipPs }, async () => {
+test('liveRuns counts a live session of either seat and not a dead pid', async () => {
   const { liveRuns } = await seatLib();
   const runs = mkdtempSync(join(tmpdir(), 'checkout-runs-'));
   try {
@@ -214,7 +220,7 @@ test('liveRuns counts a live session of either seat and not a dead pid', { skip:
       writeFileSync(join(runs, 'issue-1', `run-${n}.seat`), `${seat}\n`);
     }
     writeFileSync(join(runs, 'issue-1', 'run-dead.pid'), '1\n');
-    assert.equal(liveRuns(runs), 2);
+    assert.equal(liveRuns(runs, { ps: OWN_PROCESS }), 2);
   } finally {
     rmSync(runs, { recursive: true, force: true });
   }
@@ -428,29 +434,6 @@ test('the plugin install runs with no checkout.lock held and with the start\'s c
       assert.equal(c.lock, false, `checkout.lock was held during ${c.argv.join(' ')}`);
       assert.equal(c.claimed, true, `no claim during ${c.argv.join(' ')}`);
     }
-  });
-});
-
-test('a start that finds checkout.lock held refuses as busy and leaves no pid, claim or seat file', async () => {
-  const { world: seatWorld } = await import('./seat-world.mjs');
-  await seatWorld(async (w) => {
-    mkdirSync(join(w.state, 'checkout.lock'));
-    const r = w.start('worker', [], { FACTORY_CHECKOUT_LOCK_WAIT_MS: '100' });
-    assert.equal(r.code, 2, r.out + r.err);
-    assert.match(r.err, /checkout/);
-    assert.deepEqual(readdirSync(w.run).filter((n) => /^run-worker\./.test(n)), []);
-    assert.deepEqual(w.records(), []);
-  });
-});
-
-test('the refusal after the wait names the holder when the lock records one', async () => {
-  const { world: seatWorld } = await import('./seat-world.mjs');
-  await seatWorld(async (w) => {
-    mkdirSync(join(w.state, 'checkout.lock'));
-    writeFileSync(join(w.state, 'checkout.lock', 'holder'), '4242 the update of the checkout\n');
-    const r = w.start('worker', [], { FACTORY_CHECKOUT_LOCK_WAIT_MS: '100' });
-    assert.equal(r.code, 2, r.out + r.err);
-    assert.match(r.err, /held by the update of the checkout \(pid 4242\)/);
   });
 });
 

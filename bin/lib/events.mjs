@@ -426,8 +426,9 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
 /** `factory-events [--follow] [--after <seq>]`: the start lines after the cursor (or after <seq>, which the reader says it got as far
  * as, in place of the cursor), one JSON line each. Without --follow it prints them and leaves the cursor; with it, a line moves the
  * cursor only once its write succeeded, lines go out one at a time, and the file is followed. It never prints a clear line. A cursor
- * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. */
-function main(argv) {
+ * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. A claim that failed
+ * is tried again after retryMs, which only a test passes (the command takes none). */
+export function main(argv, { retryMs = 60_000 } = {}) {
   let follow = false;
   let news = false;
   let newest = false;
@@ -486,7 +487,6 @@ function main(argv) {
   let offset = 0;
   let partial = '';
   const pending = [];
-  const retryMs = Number(process.env.FACTORY_EVENTS_RETRY_MS) || 60_000;
   let writing = false;
   // One line at a time; the cursor moves in the write's callback, and only when the write succeeded.
   const pump = () => {

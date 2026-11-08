@@ -10,7 +10,7 @@
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,7 @@ import { HOST, TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf 
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
 import { MACBOOK_SHARE } from './events.mjs';
+import { which } from './launchd.mjs';
 import { liveOfAccount, sandboxSettings, tokenStoreDeny } from './seat.mjs';
 import { readRules } from './deny-read.mjs';
 import { markOnboarded, quote, roleFor, copyHook } from '../../packs/pstack/bin/lead.mjs';
@@ -816,14 +817,8 @@ async function colly(args, env) {
     let pane = '';
     try { pane = readFileSync(join(parent, 'pane'), 'utf8').trim(); } catch {}
     console.log(`Colly is already running in ${pane ? `pane ${pane}` : 'a pane (not recorded)'}`);
-    if (pane) {
-      for (const dir of (env.PATH ?? '').split(':').filter(Boolean)) {
-        const herdr = join(dir, 'herdr');
-        try { accessSync(herdr, constants.X_OK); } catch { continue; }
-        spawnSync(herdr, ['agent', 'focus', pane], { stdio: 'ignore', env });
-        break;
-      }
-    }
+    const herdr = pane ? which('herdr', env.PATH) : null;
+    if (herdr) spawnSync(herdr, ['agent', 'focus', pane], { stdio: 'ignore', env });
     return 0;
   }
   const rolePath = resolve(fileURLToPath(import.meta.url), '../../../packs/colly/colly.md');

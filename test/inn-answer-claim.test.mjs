@@ -79,8 +79,10 @@ if (first) {
   chmodSync(hook, 0o755);
   innAnswer({ state, event: { kind: 'commentCreated', id: 'retry-answer', issueIdentifier: 'INN-1' }, now: 123 });
   appendStart({ state, kind: 'later', key: 'later line', text: 'waits behind the answer', now: 124 });
-  const child = spawn(process.execPath, [join(factory, 'bin/lib/events.mjs'), '--follow'], {
-    env: { ...process.env, ...quiet, GIT_CONFIG_VALUE_2: hooks, FACTORY_EVENTS_RETRY_MS: '200', HOME: dir, FACTORY_ROOT: root, FACTORY_STATE: state },
+  // `factory-events --follow` as the command runs it, with a 200 ms retry passed to main, which the command never passes.
+  const follow = `const m = await import(${JSON.stringify(join(factory, 'bin/lib/events.mjs'))}); m.main(['--follow'], { retryMs: 200 });`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', follow], {
+    env: { ...process.env, ...quiet, GIT_CONFIG_VALUE_2: hooks, HOME: dir, FACTORY_ROOT: root, FACTORY_STATE: state },
   });
   let out = '', err = '', closed = false;
   child.stdout.on('data', (data) => { out += data; });
