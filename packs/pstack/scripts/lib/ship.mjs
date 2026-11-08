@@ -156,6 +156,10 @@ function patchOf(sha) {
  * included: the Lead is trusted to hold its own reviewer, as in those references.
  */
 function reviewOf(pr) {
+  // A head made on GitHub, as the queue's update-branch makes one when main moves, is not in this clone yet: fetch it, and main with it, as
+  // draftWait does, or its patch could not be read and its PASS would not be found. main too, since against a stale origin/main the new
+  // head's patch would carry main's new commits.
+  if (!quietGit(['cat-file', '-e', `${pr.headRefOid}^{commit}`])) spawnSync('git', ['fetch', '--quiet', 'origin', 'main', pr.headRefOid], { stdio: 'ignore' });
   const repo = repoOf(pr);
   const team = process.env.FACTORY_TEAM ?? null;
   const short = String(pr.headRefOid).slice(0, 7);

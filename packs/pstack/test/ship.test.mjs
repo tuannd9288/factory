@@ -959,3 +959,27 @@ test('squash refuses malformed titles before opening or arming a pull request', 
   assert.match(w.ship().out, /refused title/);
   assert.ok(!w.calls().some((c) => c.includes('--auto')));
 });
+
+// The queue's update-branch (bin/lib/queue.mjs:352) merges main into an armed pull request on GitHub, and the Lead's clone has not fetched
+// that head when it runs ship again (Colly's review of #548).
+describe('an armed pull request the queue brought up to main', () => {
+  test('a merge of main pushed on GitHub, not fetched here, keeps the PASS of the same patch', () => {
+    const w = world({ reviewed: false });
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    w.review();
+    let out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /armed #7/);
+    const other = join(w.dir, 'other');
+    git(w.dir, 'clone', '-q', join(w.dir, 'origin.git'), other);
+    commit(other, { 'other.js': 'x\n' }, 'feat(other): add other');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(other, 'switch', '-q', '-c', 'work', 'origin/work');
+    git(other, 'merge', '--no-ff', '--no-edit', 'main');
+    git(other, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: git(other, 'rev-parse', 'HEAD') });
+    out = w.ship();
+    assert.doesNotMatch(out.out, /disarmed/, out.out);
+  });
+});
