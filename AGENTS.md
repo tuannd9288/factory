@@ -283,6 +283,7 @@ command or key, or a deprecation, is MINOR; a fix is PATCH.
 | `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
 | `scripts/ship` | Opens, readies and arms this repository's pull requests as a repository that installed the pstack pack does: it runs `packs/pstack/scripts/ship` from its source, with no red-check stamp, since this root has no `.gate/config.sh` and CI runs `scripts/verify` (FAC-14) |
+| `CHANGELOG.md` | Each version's notes, one section `## vX.Y.Z - <date>`, written in its release pull request; `.github/workflows/release.yml` publishes the section (`scripts/release-notes <tag>`) to the version's GitHub Release when its tag is pushed, or by hand for an existing tag; the workflow's header has the steps |
 | `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
 
