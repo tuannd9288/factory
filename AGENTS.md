@@ -225,16 +225,17 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   GitHub token there (#366); its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
-- A pull request of this repository lands once the supervising session has accepted it, Colly's review passed and
-  `verify` is green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
+- A pull request of this repository lands once the team's Supervisor has accepted it and Colly's review passed, with
+  `verify` green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
   One that needs the Human, a release, a first design or a change to a design or architecture, carries `needs-human`
   (`gh issue edit <n> --add-label needs-human`), and Colly takes it to him. This repository runs no `tier`, so only
   `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:162`). It goes on
   when he approves its head on GitHub, which `approval` reads, so the Lead sees it with no relay, or on his word, which
   Colly records on the issue. Then the Lead removes the label (`gh issue edit <n> --remove-label needs-human`) and runs
-  `scripts/ship` again. GitHub asks his review only on a pull request that changes `.github/CODEOWNERS`. Each body opens with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language,
-  in Decisions), then its `**TL;DR**` block, the same lines in English; they are his only section, and the agents'
-  detail is collapsed below them (#386, #411). Its title carries no issue number, which stays in the body.
+  `scripts/ship` again. GitHub asks his review only on a pull request that changes `.github/CODEOWNERS`. Each body
+  opens with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its
+  `**TL;DR**` block, the same lines in English; they are his only section, and the agents' detail is collapsed below
+  them (#386, #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|

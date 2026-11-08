@@ -1,4 +1,4 @@
-# Every change to the factory changes every repository's gate at its next kit pull request: all of it is tier 3.
-# Since 2026-11-08 the ruleset `factory` is at all; a pull request that needs the Human carries needs-human, and approval.yml
-# reads his approval from the owner named below. The line names this file alone, so GitHub asks his review on no other PR.
+# The owner whose approval .github/workflows/approval.yml reads (kit/.gate/bin/lib/approval.mjs) in this repository.
+# Since 2026-11-08 the ruleset `factory` is at all: his approval is asked only of a pull request labelled needs-human.
+# The line names this file alone, so GitHub asks his review on no other pull request.
 /.github/CODEOWNERS @tuannd9288
