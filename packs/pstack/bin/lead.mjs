@@ -355,7 +355,7 @@ function main(argv, env) {
   const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
   let linear;
   try {
-    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), root, newTeam: flags.includes('--new-team') });
+    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), newTeam: flags.includes('--new-team') });
     linear = onLinear(repo, stateDir);
   } catch (e) {
     // A registry that does not parse would give every repository the GitHub form without a word: no start instead.

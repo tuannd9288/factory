@@ -163,12 +163,12 @@ export function runFiles(runs, ext) {
   return out;
 }
 
-/** The seat a run's file belongs to: its .seat file, else fallback (a session from before there were seats ran on seat 2). */
-const seatOf = (file, fallback = null) => {
+/** The seat a run's file belongs to: its .seat file, else null (a run from before there were seats). */
+const seatOf = (file) => {
   try {
     return readFileSync(file.replace(/\.[^./]*$/, '.seat'), 'utf8').trim();
   } catch (e) {
-    if (e.code === 'ENOENT') return fallback; // never there, or a start backing off removed its claim meanwhile
+    if (e.code === 'ENOENT') return null; // never there, or a start backing off removed its claim meanwhile
     throw e;
   }
 };

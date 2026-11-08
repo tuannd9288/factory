@@ -9,7 +9,7 @@ import { kitUpdateTldr, onboardTldr, settingsOf } from '../bin/lib/tldr.mjs';
 // The rows as bin/kit-evidence prints them: a plain value, or the value and `, CHANGED from <value>`, or the value and
 // `, CHANGED: the base held none in the kit's form (…)`.
 const block = (...rows) =>
-  ['kit-evidence: PASS', "settings (the gate's, as the head's workflows hold them; a pull request changes one at tier 3):", ...rows.map((r) => `  ${r}`), "replaced (the repository's own at the base, now the kit's):", '  none'].join('\n');
+  ['kit-evidence: PASS', "settings (the gate's, as the head's workflows hold them; a pull request changes one at tier 3):", ...rows.map((r) => `  ${r}`)].join('\n');
 const NONE = 'none (review and verdict fail closed)';
 const UNSEEN = ", CHANGED: the base held none in the kit's form (a repository variable, before #335)";
 const rowsOf = (reviewer = 'claude', pr = '["ubuntu-latest"]') => [
