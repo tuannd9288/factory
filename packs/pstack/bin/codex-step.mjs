@@ -18,6 +18,7 @@
 // {at, cause, role, repo, cwd} to ~/.local/state/factory/codex-waits.jsonl, where the ledger can count the waits by cause (the Human,
 // 2026-10-30: he judges Codex's quota from them), and runs nothing on Claude. The runner's arguments come from the live verifier
 // (before-fac-8, packs/pstack/scripts/lib/live-verify.mjs:106-116 and :137-150).
+import { githubRepo } from '../../../bin/lib/repos.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
@@ -112,9 +113,7 @@ const git = (cwd, args) => {
 
 /** owner/name of the folder's origin on github.com, or null. */
 export function repoOf(cwd) {
-  const url = git(cwd, ['remote', 'get-url', 'origin']);
-  const m = url && /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(url);
-  return m ? m[1] : null;
+  return githubRepo(git(cwd, ['remote', 'get-url', 'origin']));
 }
 
 /** The Human's score-and-file sentence (#171), as the kit's Gate block quotes it. */

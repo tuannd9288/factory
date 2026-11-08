@@ -28,9 +28,10 @@
 // Exit 0 done, 1 refused or failed (the reason is the first line of the message, never a token), 2 usage.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readJsonObject, writeAtomic } from './files.mjs';
 import { createLinear } from './linear.mjs';
 import { announceTakeOn, commentsOfIssue, isHolderLine } from './linear-cli.mjs';
 import { TEAM_KEY, onLinear } from './linear-repos.mjs';
@@ -109,30 +110,21 @@ export const mapFile =(state, repo) => join(state, 'linear', 'moved', `${repo.re
 
 /** The map as { version, issues }: empty when there is no file; throws when the file is there and does not read or parse. */
 export function readMap(file) {
-  let text;
-  try {
-    text = readFileSync(file, 'utf8');
-  } catch (e) {
-    if (e.code === 'ENOENT') return { version: 1, issues: {} };
-    throw new Refused(`the map file ${file} exists but cannot be read (${e.code ?? 'error'}); nothing was changed`);
-  }
   let m;
   try {
-    m = JSON.parse(text);
-  } catch {
+    m = readJsonObject(file);
+  } catch (e) {
+    if (e.code !== 'ENOTOBJECT') throw new Refused(`the map file ${file} exists but cannot be read (${e.code ?? 'error'}); nothing was changed`);
     m = null;
   }
-  if (!m || typeof m !== 'object' || Array.isArray(m) || !m.issues || typeof m.issues !== 'object' || Array.isArray(m.issues) || !Object.values(m.issues).every(entryOk)) {
+  if (m === undefined) return { version: 1, issues: {} };
+  if (!m || !m.issues || typeof m.issues !== 'object' || Array.isArray(m.issues) || !Object.values(m.issues).every(entryOk)) {
     throw new Refused(`the map file ${file} exists but does not parse as a map; nothing was changed`);
   }
   return m;
 }
 
-function writeMap(file, map) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(map, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmp, file);
-}
+const writeMap = (file, map) => writeAtomic(file, `${JSON.stringify(map, null, 2)}\n`, { mode: 0o600 });
 
 const done = (data, what) => {
   if (!data?.[what]?.success) throw new Refused(`Linear did not confirm ${what}`);
@@ -199,7 +191,7 @@ export function createMove({ gh = ghRun, api, state, home = process.env.HOME, ru
     fullTeam = `${name}-${leadTeam}`;
     let entry;
     try {
-      entry = onLinear(repo, state);
+      entry = onLinear(name, state);
     } catch (e) {
       throw new Refused(e.message);
     }

@@ -34,7 +34,7 @@
 // not. `--team` is a team name of the factory's grammar (bin/lib/names.mjs). A corrupt registry file refuses every verb that reads it.
 // The Human is found, never stored: the one workspace owner who is not an app; any other count refuses.
 // The registry, $FACTORY_STATE/linear/repos.json { "<repo>": { key, teamId } }, is written only by `onboard`, atomically; a repository
-// not in it is on GitHub. `onLinear(repo)` reads it.
+// not in it is on GitHub. `onLinear(<repo>)`, with the repository's name, reads it.
 import { join } from 'node:path';
 import { nodeName } from './node.mjs';
 import { createLinear } from './linear.mjs';

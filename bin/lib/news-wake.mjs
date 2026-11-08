@@ -34,11 +34,12 @@
 // woken by one of them and never twice. A key leaves `sent` when its event no longer holds, except a conflict while the same head reads UNKNOWN, and a merged one for 14
 // days. A red event wakes again on the same head when a check recorded before fails in a run other than the one recorded (a re-run that failed again,
 // though no sweep saw it not red); the old failed run still counts while a re-run is queued, and a second check failing is no news.
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { failedCheck, pickReruns } from './checks.mjs';
 import { holders } from './comment-wake.mjs';
 import { appendStart, oneLine, withEventsLock } from './events.mjs';
+import { writeAtomic } from './files.mjs';
 import { readSessions } from './records.mjs';
 import { runFiles, runLive } from './seat.mjs';
 import { newsLine, postSync, recordedPath } from './wake.mjs';
@@ -75,9 +76,7 @@ const readJson = (file) => {
 
 function writeJson(file, value) {
   mkdirSync(join(file, '..'), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(value)}\n`);
-  renameSync(tmp, file);
+  writeAtomic(file, `${JSON.stringify(value)}\n`);
 }
 
 const plain = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});

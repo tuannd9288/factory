@@ -6,7 +6,7 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { POSITIONS } from '../../kit/.gate/bin/lib/switch.mjs';
-import { writeAtomic } from './events.mjs';
+import { writeAtomic } from './files.mjs';
 
 const fileOf = (state, repo) => join(state, `queue-${repo.replace('/', '-')}.position`);
 
