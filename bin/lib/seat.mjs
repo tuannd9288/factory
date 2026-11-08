@@ -14,6 +14,7 @@ import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
+import { PrepareError, prepareWork } from './prepare.mjs';
 import { readSessions } from './records.mjs';
 import { githubRepo, repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
@@ -525,6 +526,15 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
     child.CLAUDE_CODE_PLUGIN_CACHE_DIR = installPlugins({ work, config: child.CLAUDE_CONFIG_DIR, home, profiles, env });
   } catch (e) {
     if (e instanceof PluginError) throw new Refused(`plugins: ${e.message}`);
+    throw e;
+  }
+  // origin/main's gate_prepare makes the worktree ready to test before the session, outside the sandbox and with the network (FAC-108,
+  // bin/lib/prepare.mjs), with the session's environment less every ANTHROPIC_* and the sandbox marker. A failed install starts nothing.
+  const install = Object.fromEntries(Object.entries(child).filter(([k]) => !k.startsWith('ANTHROPIC_') && k !== 'FACTORY_SANDBOX'));
+  try {
+    prepareWork({ work, run, tag, state, env: install });
+  } catch (e) {
+    if (e instanceof PrepareError) throw new Refused(`prepare: ${e.message}`);
     throw e;
   }
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
