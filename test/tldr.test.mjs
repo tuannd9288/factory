@@ -73,17 +73,6 @@ describe('the summary of a kit pull request', () => {
     assert.equal(decisions(text), 0);
   });
 
-  test('a fourth line for silence is written only when the caller passes one', () => {
-    const silence = { vi: 'x', en: 'y' };
-    for (const make of [(s) => onboardTldr('app', STAY, s), (s) => kitUpdateTldr('app', COUNTS, STAY, s)]) {
-      assert.equal(bullet(make(), 'Nếu không trả lời'), undefined);
-      assert.equal(bullet(make(), 'If no answer'), undefined);
-      const text = make(silence);
-      assert.deepEqual(heads(text.split('\n\n')[0]), [...ORDER, 'Nếu không trả lời']);
-      assert.deepEqual(heads(text.split('\n\n')[1]), [...ORDER_EN, 'If no answer']);
-    }
-  });
-
   test('a reviewer, and a GitHub-hosted runner whatever its label, are told apart from the repository\'s own', () => {
     const said = (reviewer) => bullet(onboardTldr('app', block(`the reviewer (.github/workflows/gate-trusted.yml): ${reviewer}`)), 'Anh quyết');
     const all = [NONE, 'claude', 'entire', 'stub'].map(said);

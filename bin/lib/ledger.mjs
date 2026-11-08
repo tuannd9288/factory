@@ -12,7 +12,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
 import { STALE_RUN, assistantEntryOf, canaryOf } from './claude-code.mjs';
-import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { seatAccounts } from './token.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { job, plist } from './queue.mjs';
@@ -962,7 +963,7 @@ async function main(argv) {
   const report = inspect(shared ? [] : folders, { latest: opts.latest });
   // Each repository's change fail rate since its merge switch last moved (INN-40), from GitHub's search for that window.
   const switches = switchWindows(opts.repos, { state, to, merged: (repo, a, b) => mergedIn(repo, a, b), resolverOf });
-  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared, switches });
+  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : seatAccounts(state), shared, switches });
   if (!opts.post) {
     process.stdout.write(text);
     return;
