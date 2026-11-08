@@ -1,5 +1,5 @@
 # The factory's releases (INN-40 item 5): a version's GitHub Release, whose notes are the tag's own section of CHANGELOG.md
-# (scripts/release-notes), published as written in the release pull request he approved. A change here is tier 3 (CODEOWNERS).
+# (scripts/release-notes), published as written in the release pull request he approved. It creates no tag.
 # - On the push of a `v*` tag, which item 3 cuts on his word on the release pull request's merge commit.
 # - By hand for an existing tag, the retry path: `gh workflow run release.yml -f tag=vX.Y.Z`. That runs main's copy of this file and
 #   of scripts/release-notes, and still reads CHANGELOG.md at the tag, so a failed first run is fixed by a pull request and a
