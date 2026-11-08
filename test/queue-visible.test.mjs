@@ -35,6 +35,13 @@ test('a queue run that fails before its repository loop leaves queue-run.failed 
     out = sweep();
     assert.equal(out.status, 2, out.stdout + out.stderr);
     assert.match(readFileSync(report, 'utf8'), /^20\d\d-.*not logged in/);
+    // gh's stderr is redacted in the marker (FAC-85, fix 12): a token-shaped string in it never reaches the file.
+    const token = `ghp_${'a1B2c3D4e5'.repeat(4)}`;
+    writeFileSync(join(dir, 'gh'), `#!/bin/sh\necho "HTTP 401: Bad credentials (${token})" >&2\nexit 1\n`);
+    out = sweep();
+    assert.equal(out.status, 2, out.stdout + out.stderr);
+    assert.match(readFileSync(report, 'utf8'), /^20\d\d-.*HTTP 401: Bad credentials \(\[redacted\]\)/);
+    assert.ok(!readFileSync(report, 'utf8').includes(token));
     writeFileSync(join(dir, 'gh'), '#!/bin/sh\ncase "$*" in\n  "api user"*) echo agent-bot ;;\n  *graphql*) echo \'{"data":{"repository":{"pullRequests":{"nodes":[]}}}}\' ;;\n  *rules/branches*) echo "[]" ;;\n  *) exit 1 ;;\nesac\n');
     out = sweep();
     assert.equal(out.status, 0, out.stdout + out.stderr);

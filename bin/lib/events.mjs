@@ -34,7 +34,7 @@
 // reading the state folder. Every local user can read the share's lines (redacted, as above), and nothing else of the state folder.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RATE_SOURCE } from './claude-code.mjs';
@@ -46,6 +46,7 @@ import { accountEvent, accountOut } from './seat.mjs';
 import { quotaRows, alertLines } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
 import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
+import { clearFailed, markFailed } from './status.mjs';
 
 /** How long a required check may sit unstarted before it is told: half as much again as the slowest normal wait seen on 2026-11-02
  * (1,208 s on a busy self-hosted runner, from the run's creation), so only a real stall passes it. */
@@ -241,7 +242,6 @@ export function ownersOf(env = process.env) {
  * $state/events-share.failed says why, in one line. A failed share never stops the write to events.jsonl. */
 function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
   if (!file) return;
-  const failed = join(state, 'events-share.failed');
   try {
     const dir = dirname(file);
     try {
@@ -264,13 +264,9 @@ function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
     } finally {
       closeSync(fd);
     }
-    rmSync(failed, { force: true });
+    clearFailed(state, 'events-share');
   } catch (error) {
-    try {
-      writeFileSync(failed, `${new Date().toISOString()} the events share ${file} was not written: ${error.code === 'ELOOP' ? 'file is a link' : error.message}\n`);
-    } catch {
-      // the state folder could not be written either: the events write below it has already failed or will say so
-    }
+    markFailed(state, 'events-share', `the events share ${file} was not written: ${error.code === 'ELOOP' ? 'file is a link' : error.message}`);
   }
 }
 
