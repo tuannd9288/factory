@@ -8,8 +8,8 @@ import { ROOT } from './checkout.mjs';
 
 export const FACTORY_REPO = 'factory';
 
-// The host, github.com, then the path.
-const ON_GITHUB = /github\.com[:/]/;
+// github.com itself as the host: at the start, or after a scheme's // or a user's @, so a look-alike host such as evilgithub.com is none.
+const ON_GITHUB = /(?:^|[/@])github\.com[:/]/;
 
 /** The GitHub owner/name an origin URL names, or null: https://github.com/o/r, ssh://git@github.com/o/r or git@github.com:o/r, with
  * any scheme or user before the host, with or without a trailing .git and /, and a path that is exactly an owner and a name in

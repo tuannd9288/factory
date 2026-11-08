@@ -13,7 +13,7 @@ test('githubRepo reads owner/name from every shape of a GitHub origin, and nothi
   assert.equal(githubRepo('git@github.com:Org-1/my.repo_2.git'), 'Org-1/my.repo_2');
   assert.equal(githubRepo('https://github.com/o/user.github.io'), 'o/user.github.io');
   for (const url of [
-    'https://github.com.evil.com/o/app', 'https://gitlab.com/o/app',
+    'https://evilgithub.com/o/app', 'git@evilgithub.com:o/app', 'https://github.com.evil.com/o/app', 'https://gitlab.com/o/app',
     'https://github.com/justone', 'https://github.com/o/app/extra', 'ssh://git@github.com:22/o/app', '', null, undefined,
   ]) assert.equal(githubRepo(url), null, String(url));
 });

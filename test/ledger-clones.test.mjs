@@ -22,6 +22,8 @@ test('clonesUnder skips a clone with no readable origin or no owner/name, report
     clone(root, 'lib', 'git@github.com:o/lib.git');
     clone(root, 'stray', null);
     clone(root, 'odd', 'https://github.com/justone');
+    // A look-alike host is not GitHub (FAC-85): left out, as a clone on another host is, and not reported.
+    clone(root, 'evil', 'https://evilgithub.com/o/evil.git');
     const skipped = [];
     const found = clonesUnder(root, (folder, why) => skipped.push([folder, why]));
     assert.deepEqual([...found.keys()].sort(), ['o/app', 'o/lib']);
