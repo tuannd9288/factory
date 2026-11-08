@@ -49,7 +49,8 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    into the map, and its old file is deleted, in the same pull request.
 4. Start the worker <!--seat-->by `bin/seat`'s absolute path, the one your grant names:
    `{{SEAT}} worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree> --main <step 2's commit>`; before the worktree's first
-   session it runs main's `gate_prepare` at that commit and keeps the commit, so later starts there may leave `--main` out. It runs in
+   session it runs main's `gate_prepare` at that commit, once for each worktree path (a fresh install needs a new path), and keeps the
+   commit, so later starts there may leave `--main` out. It runs in
    the background: end the turn.<!--/seat--><!--noseat-->only as this MacBook's `factory` user, the agents' own: you run as another
    user, so you have no grant to start a seat and start none (#366). Tell the Human that the issue's work waits for a Lead that runs
    as `factory`, and stop there.<!--/noseat--> A `seat-ended` wake says it ended; only then check, with Grep, once,

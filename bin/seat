@@ -78,8 +78,9 @@
 # worktree's first start records that commit in $FACTORY_STATE/prepared/, where no seat writes, and later starts read main there. By
 # default it runs only before the worktree's first session (bin/seat marks there when one begins), and only when the worktree's
 # files are that commit's tree, compared file by file, so what is installed outside the sandbox is a tree main had; a stamp beside
-# the record marks the worktree done. Any other start, a commit not whole in the clone, or a start with no `--main` and no record
-# installs nothing, says why in that log, and starts as before. That commit's
+# the record marks the worktree done. The three are keyed by the worktree's path alone, so a worktree made again at the same path,
+# by the Lead or by a seat, gets no install: a fresh install needs a new path. Any other start, a commit not whole in the clone, or a
+# start with no `--main` and no record installs nothing, says why in that log, and starts as before. That commit's
 # `.gate/driver.json` `prepare: every` runs it at every start. A failed install, a command it runs that is not on bin/seat's PATH,
 # or a `prepare` it cannot read refuses the start before any session, leaving no pid, claim or seat file. A work folder that is no
 # clone, or a main with no `.gate/config.sh`, starts as before. Known limit: past its ten minutes the install's shell is killed,

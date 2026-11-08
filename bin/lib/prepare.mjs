@@ -17,15 +17,15 @@
 //         commit's tree, compared file by file here (no git status, index or fsmonitor, which a seat can set), since what is installed
 //         outside the sandbox must be a tree main had. Any other start installs nothing, gets no stamp, says why in that log, and its
 //         session starts as before; a start refused by a failed install ran no session and may try again. The stamp, the record and the
-//         session mark live in $FACTORY_STATE/prepared/, where no seat can write, keyed to the worktree's real path and folder, and a
-//         stamped worktree, or one whose first session ran, is decided on before the store is read. A worktree removed and made again at
-//         the same path is a new folder.
+//         session mark live in $FACTORY_STATE/prepared/, where no seat can write, keyed to the worktree's path alone, and a stamped
+//         worktree, or one whose first session ran, is decided on before the store is read. A worktree made again at the same path, by
+//         the Lead or by a seat, is the same worktree and gets no install: a fresh install needs a new worktree path.
 // Every git call takes research-git's guard (bin/lib/research-git.mjs BASE), no transport at all and no lazy fetch, and no replace
 // objects; the hash check is the defence.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 export class PrepareError extends Error {}
 
@@ -48,9 +48,10 @@ const BASE = ['--no-pager', '-c', 'safe.bareRepository=explicit', '-c', 'core.ho
 
 const lastLine = (text) => text.trim().split('\n').at(-1)?.slice(0, 300) ?? '';
 
-/** The stamp of a worktree's first install: its real path and its folder's inode, so a folder made again at the same path is new. */
-export const stampOf = (state, work) =>
-  join(state, 'prepared', createHash('sha256').update(`${realpathSync(work)}\0${statSync(work).ino}`).digest('hex').slice(0, 32));
+/** The stamp of a worktree's first install, keyed by the work folder's path alone (path.resolve, not realpath). The folder sits in the
+ * run folder, which a seat can write: renamed and made again, or made a symlink, a folder key (its inode, its birth time, its real path)
+ * would read as a new worktree and bring the first install back. One first install per worktree path, on every filesystem. */
+export const stampOf = (state, work) => join(state, 'prepared', createHash('sha256').update(resolve(work)).digest('hex').slice(0, 32));
 
 /** Marks that a session began in the work folder (bin/seat, once the supervisor runs): later starts there install nothing in `first` mode,
  * since the Human's box A installs only before a worktree's first session. A work folder that is no clone gets no mark. */

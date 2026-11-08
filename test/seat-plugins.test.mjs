@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { prepareWork } from '../bin/lib/prepare.mjs';
@@ -103,7 +103,7 @@ test('a failed gate_prepare refuses the start before any session: its output is 
   assert.deepEqual(w.records(), []);
 }));
 
-test('the install runs at the worktree\'s first start only, whatever the seat removes; prepare every in main\'s driver.json runs it at each start', () => world(async (w) => {
+test('the install runs at the worktree\'s first start only, whatever the seat removes, and not again in a worktree made at the same path; prepare every in main\'s driver.json runs it at each start', () => world(async (w) => {
   const main = mainWith(w, prepare('echo run >> "$PREP_OUT"'));
   assert.equal(w.start('worker', ['--main', main], withGit(w)).code, 0);
   await until(() => w.records().length === 1, 'the first record');
@@ -112,12 +112,18 @@ test('the install runs at the worktree\'s first start only, whatever the seat re
   assert.equal(w.start('worker', ['--tag', 'fix1'], withGit(w)).code, 0);
   await until(() => w.records().length === 2, 'the fix round\'s record');
   assert.equal(prepared(w), 'run\n');
-  // A new worktree made at main's next commit, which says every: each of its starts installs.
+  // A worktree made again at the same path is the same worktree: no install, whatever main's next commit says.
   const next = advance(w, { '.gate/driver.json': JSON.stringify({ prepare: 'every' }) });
   rmSync(w.work, { recursive: true, force: true });
   git(w.root, 'clone', '-q', join(w.root, 'origin.git'), w.work);
-  for (const [n, tag] of [[3, 'fix2'], [4, 'fix3']]) {
-    assert.equal(w.start('worker', ['--tag', tag, '--main', next], withGit(w)).code, 0);
+  assert.equal(w.start('worker', ['--tag', 'fix2', '--main', next], withGit(w)).code, 0);
+  await until(() => w.records().length === 3, 'fix2\'s record');
+  assert.equal(prepared(w), 'run\n');
+  // A worktree at a new path, made at that commit, which says every: each of its starts installs.
+  const fresh = join(w.root, 'work2');
+  git(w.root, 'clone', '-q', join(w.root, 'origin.git'), fresh);
+  for (const [n, tag] of [[4, 'fix3'], [5, 'fix4']]) {
+    assert.equal(w.seat(['worker', join(w.run, 'BRIEF.md'), '--run', w.run, '--work', fresh, '--tag', tag, '--main', next], withGit(w)).code, 0);
     await until(() => w.records().length === n, `${tag}'s record`);
   }
   assert.equal(prepared(w), 'run\nrun\nrun\n');
@@ -231,6 +237,17 @@ test('a missing object in a clone whose config names a promisor remote is not fe
   prepareAt(w, 't1', main, loose);
   assert.ok(!existsSync(join(w.root, 'SSH-RAN')), 'no transport ran');
   assert.equal(prepared(w), '');
+}));
+
+test('a seat that renames its worktree and makes it again gets no second install: the key is the worktree\'s path', () => world(async (w) => {
+  const main = mainWith(w, prepare('echo run >> "$PREP_OUT"'));
+  assert.equal(w.start('worker', ['--main', main], withGit(w)).code, 0);
+  await until(() => w.records().length === 1, 'the first record');
+  renameSync(w.work, `${w.work}.old`);
+  git(w.root, 'clone', '-q', join(w.root, 'origin.git'), w.work);
+  assert.equal(w.start('worker', ['--tag', 'fix1', '--main', main], withGit(w)).code, 0);
+  await until(() => w.records().length === 2, 'the second record');
+  assert.equal(prepared(w), 'run\n');
 }));
 
 test('a worktree whose first session ran without an install installs nothing at a later start, even once it matches main', () => world(async (w) => {
