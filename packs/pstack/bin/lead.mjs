@@ -58,7 +58,7 @@ const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 /** The Lead's earlier session, from the copies transcript-copy.mjs keeps in dir (~/factory-runs/<repo>-<team>/transcripts), never from
  * a profile: { id, count } for the newest regular file by mtime whose name is a plain session id plus .jsonl, or null. */
-export function newestSession(dir) {
+function newestSession(dir) {
   let names;
   try {
     names = readdirSync(dir);
@@ -107,9 +107,6 @@ const denyOf = (cwd) => [
   // The paths no agent reads (bin/lib/deny-read.mjs), the whole profiles folder among them (#178).
   ...readRules({ role: 'lead' }),
 ];
-
-// The reason to refuse a start, or null, lives in bin/lib/repos.mjs (#311), which bin/seat and the teams use too.
-export { refusal };
 
 export const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 
@@ -162,7 +159,7 @@ export function leadArgs({ repo, team, home, root, roleText, node, resume = null
 /** Where the hooks' script is copied to (#257): <run folder>/hooks/transcript-copy-<sha7 of its bytes>.mjs. A Lead pane stays open
  * for days, and its Stop hook would otherwise run whatever the checkout holds by then; the script imports only node: modules, so the
  * copy runs alone. */
-export function hookPath({ root, runDir }) {
+function hookPath({ root, runDir }) {
   const sha = createHash('sha256').update(readFileSync(join(root, 'packs/pstack/bin/transcript-copy.mjs'))).digest('hex').slice(0, 7);
   return join(runDir, 'hooks', `transcript-copy-${sha}.mjs`);
 }
@@ -256,13 +253,13 @@ export function writeModels(config, root) {
 }
 
 /** The role text's hash (#316): SHA-256 hex of the exact string that goes to --append-system-prompt. */
-export const roleHash = (roleText) => createHash('sha256').update(roleText).digest('hex');
+const roleHash = (roleText) => createHash('sha256').update(roleText).digest('hex');
 
 const ROLE_RECORD = /^([0-9a-f]{64}) ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n$/;
 
 /** What <runDir>/role.sha holds: { raw, hash, session }. raw is the file's text, or null when it is missing or unreadable; hash and
  * session are null unless it is one line, 64 lowercase hex characters, a space, a session id and a newline (an older one-field file is none). */
-export function readRole(runDir) {
+function readRole(runDir) {
   let raw = null;
   try {
     raw = readFileSync(join(runDir, 'role.sha'), 'utf8');
@@ -274,7 +271,7 @@ export function readRole(runDir) {
 }
 
 /** Writes <runDir>/role.sha through a temporary file in the same folder (exclusive create) and a rename. */
-export function writeRole(runDir, text) {
+function writeRole(runDir, text) {
   const file = join(runDir, 'role.sha');
   const tmp = `${file}.${process.pid}.tmp`;
   mkdirSync(runDir, { recursive: true });
@@ -288,14 +285,14 @@ export function writeRole(runDir, text) {
 }
 
 /** Puts role.sha back as readRole saw it: its raw text, or no file. */
-export function restoreRole(runDir, raw) {
+function restoreRole(runDir, raw) {
   if (raw === null) rmSync(join(runDir, 'role.sha'), { force: true });
   else writeRole(runDir, raw);
 }
 
 /** The Lead's name (#286): the file <runDir>/name when it is there, else the first animal no live run and no Lead holds, written
  * to it. Every Lead's name is held for as long as its file exists, so the name stays across restarts. */
-export function leadName(runDir, state) {
+function leadName(runDir, state) {
   const file = join(runDir, 'name');
   try {
     return readFileSync(file, 'utf8').trim();
