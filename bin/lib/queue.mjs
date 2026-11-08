@@ -53,7 +53,8 @@ import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
 import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
-import { FACTORY_REPO, teamRows } from './teams.mjs';
+import { FACTORY_REPO } from './repos.mjs';
+import { teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 import { installedRoot, nodeLogin, placeOf } from './node.mjs';
 import { holderOf, isHeld, takeLock } from './lock.mjs';
@@ -84,9 +85,6 @@ export function pickUpdate(prs, required, position) {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return behind[0] ?? null;
 }
-
-// pickReruns is in bin/lib/checks.mjs, where the wake on a Lead's news reads it too (#370); tests and callers still take it from here.
-export { pickReruns };
 
 export const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} ${MERGED_FIELDS} pullRequests(states:OPEN,first:100){nodes{
 number isDraft body mergeable createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
@@ -612,7 +610,7 @@ function which(name, path) {
  * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
  * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
  * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (the digest's):
- * its label, tool, verb, log name and interval, more variables to keep and more tools to find on the PATH; the
+ * its label, tool, verb, log name and interval, and more variables to keep; the
  * defaults are the queue's own. The digest's job (#209) gives no verb, `args` before the repositories, and a
  * `calendar` (launchd's StartCalendarInterval) in place of the interval. */
 export function job(repos, env = process.env, daemon = false, as = {}) {
@@ -620,9 +618,8 @@ export function job(repos, env = process.env, daemon = false, as = {}) {
   if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
   const node = which('node', env.PATH) ?? process.execPath;
   const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, calendar = null, args = [], keep = [], tools = [] } = as;
-  const extra = tools.map((name) => which(name, env.PATH)).filter(Boolean).map((p) => dirname(p));
-  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), ...extra, '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
+  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, calendar = null, args = [], keep = [] } = as;
+  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
   const found = which('node', path);
   if (!found || realpathSync(found) !== realpathSync(node))
     throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);

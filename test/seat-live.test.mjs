@@ -21,11 +21,11 @@ function runs(body) {
 }
 
 test('a pid file holding pid 1, a process of another user, is not a live session', async () => {
-  const { liveCount } = await lib();
+  const { liveRuns } = await lib();
   runs((root, put) => {
     put('init', 1, 'pid');
     put('init', 2, 'seat');
-    assert.equal(liveCount(root, 2), 0);
+    assert.equal(liveRuns(root), 0);
   });
 });
 
@@ -48,14 +48,14 @@ test('a pid no process has is not live and ps is not asked; any other answer of 
 });
 
 test('a pid file written before its process started is a reused pid, not a live session; one written after counts', { skip: skipPs }, async () => {
-  const { liveCount } = await lib();
+  const { liveRuns } = await lib();
   runs((root, put) => {
     const file = join(root, 'issue-1', 'run-old.pid');
     put('old', process.pid, 'pid');
     put('old', 2, 'seat');
-    assert.equal(liveCount(root, 2), 1, 'written after this process started');
+    assert.equal(liveRuns(root), 1, 'written after this process started');
     const past = new Date(Date.now() - 3600 * 1000);
     utimesSync(file, past, past);
-    assert.equal(liveCount(root, 2), 0, 'written an hour ago, before this process started');
+    assert.equal(liveRuns(root), 0, 'written an hour ago, before this process started');
   });
 });

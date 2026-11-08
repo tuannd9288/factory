@@ -170,8 +170,3 @@ export function roleMapLines(kept, accounts = {}) {
   ];
 }
 
-/** The account of each seat as { 1: 'name', 2: 'name' }, from the accounts file in the state folder (#178), the one source of a
- * row's account. */
-export function accountsOf(state) {
-  return seatAccounts(state);
-}

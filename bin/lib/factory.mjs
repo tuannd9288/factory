@@ -26,7 +26,8 @@ import { readRules } from './deny-read.mjs';
 import { markOnboarded, quote, roleFor, copyHook } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
-import { FACTORY_REPO, repoOk, teamRows } from './teams.mjs';
+import { FACTORY_REPO, repoOk } from './repos.mjs';
+import { teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
 import { writeAtomic } from './files.mjs';
@@ -150,12 +151,6 @@ function check(p, ctx) {
   return read ? { ...read, note: '' } : { loggedIn: null, account: null, plan: null, note: `${p.check.cmd} printed nothing readable` };
 }
 
-/** The account of each profile the accounts file names ("<profile>=<name>" a line): the expected one for a profile whose account
- * is read, the one used for a row of the Mac mini. No file: every account not read is unknown. */
-export function expectedAccounts(env, state) {
-  return readAccounts(state);
-}
-
 export function contextOf(env = process.env) {
   const home = env.HOME;
   return {
@@ -219,9 +214,6 @@ export function readPlace(place, ctx) {
   }
   return rows;
 }
-
-// accountList moved to token.mjs, so that colly-status.mjs can use it without importing this file, which `bin/factory` runs as its main module.
-export { accountList };
 
 /** Rows of piggery's two profiles through pig on the Mac mini, by ssh. */
 export function readPiggery(ctx) {
@@ -1145,15 +1137,15 @@ async function store(args, env) {
  * already covers a Mac mini that cannot be reached); 60 seconds for every other. */
 export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
 
-/** `use` from the MacBook runs on the Mac mini: the arguments are checked here first (a row is a number,
- * a letter is a to z, an account matches the account pattern), then the host runs the command in a login shell over ssh, on the
+/** `use` and `wake` from the MacBook run on the Mac mini: `use`'s arguments are checked here first (a row is a number or
+ * <repo>-<team>, a letter is a to z), then the host runs the command in a login shell over ssh, on the
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
 function remote(cmd, args, env) {
   const bad = cmd === 'wake'
     ? null // checked by wake() before it comes here
     : cmd === 'use'
     ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) && !parseTeam(args[0]) ? 'the row is a number or <repo>-<team>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
-    : (args.length === 1 ? accountRefusal(args[0]) : 'account remove takes one account');
+    : null;
   if (bad) {
     console.error(`bin/factory: ${bad}\n${USAGE}`);
     return 2;
@@ -1170,7 +1162,7 @@ function remote(cmd, args, env) {
 /** The Mac mini's list as text: the numbered rows and the lettered accounts, and the line about seat 1's old file while it is there. */
 function listing(ctx, env) {
   const rows = readPlace('factory', ctx);
-  finish(rows, expectedAccounts(env, ctx.state));
+  finish(rows, readAccounts(ctx.state));
   const text = tableText(rows, { accounts: accountsText(rows, accountList(ctx), ctx) });
   return { rows, text: existsSync(seat1File(ctx.agentProfiles)) ? `${text}\n\nseats/1/oauth-token (seat 1's old token file) is still there; it moves aside, never deleted, at the next factory account add or factory use once seat 1's account has a token.` : text };
 }
@@ -1472,7 +1464,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   }
   // On the MacBook a plain run is --all (the Human, 2026-10-31); --all stays accepted.
   const all = place === 'macbook';
-  if (place === 'factory' && !all) {
+  if (place === 'factory') {
     const { rows, text } = listing(ctx, env);
     console.log(argv.includes('--json') ? JSON.stringify(rows) : text);
     return 0;
@@ -1482,7 +1474,7 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   const lettered = nodeAccountList(ctx.agentProfiles);
   const accounts = lettered.length ? accountsText(rows.filter((r) => r.place === 'macbook'), lettered, { ...ctx, title: 'ACCOUNTS ON macbook' }) : null;
   if (all) rows.push(...readFactory(ctx), ...readPiggery(ctx));
-  finish(rows, expectedAccounts(env, ctx.state));
+  finish(rows, readAccounts(ctx.state));
   console.log(argv.includes('--json') ? JSON.stringify(rows) : tableText(rows, { accounts }));
   return 0;
 }
