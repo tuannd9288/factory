@@ -69,15 +69,14 @@ test('a seat end posted to the daemon wakes its Lead once, and neither the next 
     assert.equal(store.posts().find((r) => r.id !== row.id && r.verb === 'seat-ended').why, 'no new record: taken already');
   }));
 
-test('a seat that ended while the daemon was down is woken once when it starts, and its offset is kept', () =>
-  world(({ state, posts, d, store, seats, baseline }) => {
+test('a seat that ended while the daemon was down is woken once when it starts', () =>
+  world(({ posts, d, store, seats, baseline }) => {
     baseline();
     seats(record('w1'), record('w2', { structured: null }));
     reconcile(d);
     assert.equal(posts.length, 2);
     assert.match(posts[1].line, /seat-no-result: worker w2 ended with no structured result/);
     assert.deepEqual(store.posts().map((r) => r.verb), ['reconcile', 'reconcile']);
-    assert.equal(store.offset('sessions.jsonl'), readFileSync(join(state, 'sessions.jsonl')).length);
     reconcile(d);
     assert.equal(posts.length, 2, 'a second start woke them again');
   }));

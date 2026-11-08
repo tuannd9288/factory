@@ -56,8 +56,6 @@ const STARTED = new Set(['IN_PROGRESS', 'COMPLETED']);
 const HUMAN = new Set(['tier-3', 'needs-human']);
 const stateDir = () => process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
 
-export { redact };
-
 /** The first non-empty line of a text, redacted, with its control characters gone, at most 200 characters. */
 export const oneLine =(text) => redact(String(text).split('\n').find((l) => l.trim()) ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
 
@@ -122,8 +120,7 @@ const readText = (file) => {
 /** Condition 3: the Leads running now whose newest hook event is a permission prompt or an elicitation dialog (the `waiting` state of
  * top's LEAD_STATES, read by top's own rule). The guess of a Lead at a login or a folder trust is not a dialog and is left out. A process
  * list that cannot be read throws (readProcesses), unlike top's, which shows none. */
-export const defaultProcesses = readProcesses;
-export function leadsAtDialog({ runs, now, processes = defaultProcesses }) {
+export function leadsAtDialog({ runs, now, processes = readProcesses }) {
   const out = [];
   for (const proc of processes()) {
     const lead = leadOf(proc.command);
