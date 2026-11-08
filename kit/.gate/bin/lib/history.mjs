@@ -1,7 +1,6 @@
 // What a pull request's history on GitHub says, read with gh: every label it ever had, which removing a label does
-// not erase, how many of its head commits the gate judged red, and where a check stands on one commit.
+// not erase, and where a check stands on one commit.
 //   node .gate/bin/lib/history.mjs labels --repo <owner/name> --pr <n>                  the labels, comma-separated
-//   node .gate/bin/lib/history.mjs rounds --repo <owner/name> --pr <n> --checks <a,b>   commits a named check failed on
 //   node .gate/bin/lib/history.mjs check --repo <owner/name> --head <sha> --name <check>
 //     the latest GitHub Actions run of that check on the commit: its conclusion, or pending before it completes
 //   node .gate/bin/lib/history.mjs entire --repo <owner/name> --branch <name> --head <sha>
@@ -38,10 +37,6 @@ import { execFileSync } from 'node:child_process';
 // request with more than 100 timeline items of any kind fails closed here: a liveness risk only, never a wrong pass.
 const LABELS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
 timelineItems(first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes{... on LabeledEvent{createdAt actor{login} label{name}}}}}}}`;
-const ROUNDS = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
-commits(last:100){pageInfo{hasPreviousPage} nodes{commit{oid checkSuites(first:20){nodes{app{slug} checkRuns(first:50){nodes{databaseId name conclusion}}}}}}}}}}`;
-const FORCED = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){baseRefOid
-timelineItems(first:100,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){pageInfo{hasNextPage} nodes{... on HeadRefForcePushedEvent{beforeCommit{oid}}}}}}}`;
 // The last base change only, so no page is left unread; GitHub's event for its own change names the bases oldBase and newBase.
 const MOVED = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
 timelineItems(last:1,itemTypes:[BASE_REF_CHANGED_EVENT,AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT]){nodes{__typename ... on BaseRefChangedEvent{createdAt previousRefName currentRefName}
@@ -49,7 +44,6 @@ timelineItems(last:1,itemTypes:[BASE_REF_CHANGED_EVENT,AUTOMATIC_BASE_CHANGE_SUC
 // A parent missed past these (a branch name reused more than 20 times) only leaves the approval asked again.
 const PARENT = `query($owner:String!,$name:String!,$head:String!,$base:String!){repository(owner:$owner,name:$name){
 pullRequests(states:MERGED,headRefName:$head,baseRefName:$base,first:20,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{headRefOid mergedAt isCrossRepository}}}}`;
-const RED = new Set(['FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE']);
 const ENTIRE = 'Entire Gates';
 
 const args = process.argv.slice(2);
@@ -219,37 +213,7 @@ try {
         .at(-1);
       console.log(`${at} ${parent?.headRefOid ?? 'none'}`);
     } else console.log('');
-  } else if (args[0] === 'rounds') {
-    const checks = new Set(opt('--checks').split(',').filter(Boolean));
-    // A review or verdict that ended because the reviewer was unavailable judged nothing: it is no round. Its annotations are
-    // read by REST (asking for them in the query would cost 1,021 points of the 1,000 an hour), for red runs of those two only.
-    const onlyUnavailable = (c) =>
-      (c.name === 'review' || c.name === 'verdict') &&
-      Number.isInteger(c.databaseId) &&
-      api(`${base}/check-runs/${c.databaseId}/annotations?per_page=100`).some((n) => n.title === 'review-result' && n.annotation_level === 'notice' && /^unavailable: /.test(String(n.message)));
-    const commits = pull(ROUNDS).commits;
-    if (commits.pageInfo?.hasPreviousPage !== false) throw new Error('the commits are more than one page, or GitHub sent no pageInfo');
-    // A force-push removes commits from the PR connection, but its timeline keeps the old tip.
-    const past = pull(FORCED);
-    if (past.timelineItems?.pageInfo?.hasNextPage !== false) throw new Error('the force-push history is more than one page, or unreadable');
-    const nodes = new Map(commits.nodes.map((n) => [n.commit.oid, n]));
-    for (const event of past.timelineItems.nodes) {
-      const tip = event.beforeCommit?.oid;
-      if (!tip) throw new Error('a force-push has no readable old head');
-      const comparison = api(`${base}/compare/${past.baseRefOid}...${tip}?per_page=100`);
-      if (!Array.isArray(comparison.commits) || comparison.total_commits !== comparison.commits.length) throw new Error('the overwritten commits are more than one page, or unreadable');
-      for (const { sha } of comparison.commits) {
-        if (nodes.has(sha)) continue;
-        const listing = api(`${base}/commits/${sha}/check-runs?filter=all&per_page=100`);
-        if (!Array.isArray(listing.check_runs) || listing.total_count !== listing.check_runs.length) throw new Error('the overwritten checks are more than one page, or unreadable');
-        nodes.set(sha, { commit: { oid: sha, checkSuites: { nodes: listing.check_runs.map((c) => ({ app: c.app, checkRuns: { nodes: [{ ...c, databaseId: c.id, conclusion: c.conclusion?.toUpperCase() }] } })) } } });
-      }
-    }
-    const red = [...nodes.values()].filter(({ commit }) =>
-      commit.checkSuites.nodes.some((s) => s.app?.slug === 'github-actions' && s.checkRuns.nodes.some((c) => checks.has(c.name) && RED.has(c.conclusion) && !onlyUnavailable(c))),
-    );
-    console.log(red.length);
-  } else throw new Error('usage: history.mjs labels|raised-at|moved|rounds|check|entire|raise|verdict|reuse --repo owner/name --pr n|--head sha|--run id [--checks a,b] [--name c] [--branch b]');
+  } else throw new Error('usage: history.mjs labels|raised-at|moved|check|entire|raise|verdict|reuse --repo owner/name --pr n|--head sha|--run id [--name c] [--branch b]');
 } catch (error) {
   console.log(`history: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
   process.exit(2);

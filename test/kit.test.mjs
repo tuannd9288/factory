@@ -501,7 +501,6 @@ describe('review, verdict, tier and rounds', () => {
         // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
         '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
-        '  *"commits(last:100){pageInfo{hasPreviousPage} nodes"*checkSuites*) cat "$FAKE/rounds.json" ;;',
         // FAC-41: the pull request's last base change (history.mjs moved): it never changed.
         '  *BASE_REF_CHANGED_EVENT*) echo \'{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}\' ;;',
         '  *HEAD_REF_FORCE_PUSHED_EVENT*) cat "$FAKE/forced.json" 2>/dev/null || echo \'{"data":{"repository":{"pullRequest":{"baseRefOid":"base","timelineItems":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}\' ;;',
@@ -1118,21 +1117,6 @@ console.log('{}');
     assert.deepEqual(result(failed), result(ok));
     assert.match(failed.out, /could not edit the risk score/);
   });
-  test('rounds requests the code owners with needs-human at the third red head, unless the switch is at all or unreadable', () => {
-    const red = (oid, name = 'verify', conclusion = 'FAILURE') => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion }] } }] } } });
-    write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes: [red('a'), red('b', 'review'), red('c', 'verdict', 'TIMED_OUT')] } } } } }) });
-    let out = job('rounds', { 'src/math.js': MUL }, pr);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.edits, /--add-label needs-human/);
-    assert.match(out.requests, ask);
-    for (const rules of [switchRules(0, false), 'not json']) {
-      rulesAre(rules);
-      out = job('rounds', { 'src/math.js': MUL }, pr);
-      assert.equal(out.code, 0, out.out);
-      assert.match(out.edits, /--add-label needs-human/);
-      assert.equal(out.requests, '');
-    }
-  });
   test('on tier 3, tier is red when the rules in force cannot be read, whatever they might say', () => {
     for (const rules of ['not json', '{}', JSON.stringify([{ type: 'pull_request', parameters: {} }]), '']) {
       rulesAre(rules);
@@ -1389,46 +1373,6 @@ console.log('{}');
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /tier 3\n {2}label needs-human[\s\S]*tuannd9288 approved/);
   });
-  test('rounds labels the pull request needs-human at its third head commit judged red', () => {
-    const red = (oid, name = 'verify', conclusion = 'FAILURE') => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion }] } }] } } });
-    const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes } } } } }) });
-    rounds(red('a'), red('b', 'review'), red('c', 'verify', 'SUCCESS'), red('d', 'tier'));
-    let out = job('rounds', { 'src/math.js': MUL }, pr);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /2 head commits judged red/);
-    assert.equal(out.edits, '');
-    rounds(red('a'), red('b', 'review'), red('c', 'verdict', 'TIMED_OUT'));
-    out = job('rounds', { 'src/math.js': MUL }, pr);
-    assert.match(out.edits, /--add-label needs-human/);
-  });
-  test('rounds counts the nodes it got when no earlier page exists, and fails when one does', () => {
-    const red = (oid) => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name: 'verify', conclusion: 'FAILURE' }] } }] } } });
-    const rounds = (hasPreviousPage) =>
-      write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage }, nodes: [red('a')] } } } } }) });
-    rounds(false);
-    let out = job('rounds', { 'src/math.js': MUL }, pr);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /1 head commits judged red/);
-    rounds(true);
-    out = job('rounds', { 'src/math.js': MUL }, pr);
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /rounds: the pull request's rounds could not be read: history: .*more than one page/);
-    write(fake, { 'rounds.json': '{"data":{"repository":{"pullRequest":{"commits":{"nodes":[]}}}}}' });
-    out = job('rounds', { 'src/math.js': MUL }, pr);
-    assert.equal(out.code, 1, out.out);
-  });
-  test('rounds keeps overwritten red heads and counts each SHA once', () => {
-    const red = (oid) => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name: 'verify', conclusion: 'FAILURE' }] } }] } } });
-    write(fake, {
-      'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes: [red('a')] } } } } }),
-      'forced.json': JSON.stringify({ data: { repository: { pullRequest: { baseRefOid: 'base', timelineItems: { pageInfo: { hasNextPage: false }, nodes: [{ beforeCommit: { oid: 'old' } }, { beforeCommit: { oid: 'old' } }] } } } } }),
-      'overwritten.json': JSON.stringify({ total_commits: 3, commits: [{ sha: 'a' }, { sha: 'b' }, { sha: 'c' }] }),
-      'verify.json': JSON.stringify({ total_count: 1, check_runs: [{ id: 123, name: 'verify', conclusion: 'failure', app: { slug: 'github-actions' } }] }),
-    });
-    const out = job('rounds', { 'src/math.js': MUL }, pr);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /three red rounds/);
-  });
 
   test('approval survives a rewritten head only for an unchanged patch', () => {
     labels();
@@ -1484,17 +1428,6 @@ console.log('{}');
       git(trusted, 'fetch', '-q', r.repo, 'rv');
       const out = again('tier', git(r.repo, 'rev-parse', 'HEAD'), pr);
       assert.equal(out.code, 0, out.out);
-    });
-    test(`${method}: rounds reads the PR heads, not the landing commit`, () => {
-      const red = (oid) => ({ commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name: 'verify', conclusion: 'FAILURE' }] } }] } } });
-      write(fake, { 'forced.json': JSON.stringify({ data: { repository: { pullRequest: { baseRefOid: 'base', timelineItems: { pageInfo: { hasNextPage: false }, nodes: [] } } } } }) });
-      write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: {
-        mergeCommit: { oid: 'landed', parents: { totalCount: method === 'squash' ? 1 : 2 } },
-        commits: { pageInfo: { hasPreviousPage: false }, nodes: [red('a'), red('b')] },
-      } } } }) });
-      const out = job('rounds', { 'src/math.js': MUL }, pr);
-      assert.equal(out.code, 0, out.out);
-      assert.match(out.out, /2 head commits judged red/);
     });
   }
 
@@ -1688,19 +1621,6 @@ e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(
     reviewJob('success');
     annotations();
   });
-  test('rounds does not count a head whose review or verdict was only unavailable, read by REST for red runs only', () => {
-    const node = (oid, name, conclusion, databaseId) => ({
-      commit: { oid, checkSuites: { nodes: [{ app: { slug: 'github-actions' }, checkRuns: { nodes: [{ name, conclusion, databaseId }] } }] } },
-    });
-    const rounds = (...nodes) => write(fake, { 'rounds.json': JSON.stringify({ data: { repository: { pullRequest: { commits: { pageInfo: { hasPreviousPage: false }, nodes } } } } }) });
-    const unavailable = JSON.stringify([NOTE('review-result', 'unavailable: quota')]);
-    write(fake, { 'ann601.json': unavailable, 'ann777.json': unavailable });
-    // 601 and 777 were unavailable; 501 is a review that judged (its annotations read none); verify's are never read.
-    rounds(node('a', 'review', 'FAILURE', 601), node('b', 'verdict', 'FAILURE', 777), node('c', 'review', 'FAILURE', 501), node('d', 'verify', 'FAILURE', 900), node('e', 'review', 'SUCCESS', 902));
-    const out = job('rounds', { 'src/math.js': MUL }, pr);
-    assert.match(out.out, /2 head commits judged red/);
-    assert.equal(out.edits, '');
-  });
   test('an unset or unknown reviewer, a refused result and a crashed reviewer are unavailable, not red rounds; a leak stays red', () => {
     claude({ output: { blocking: [], noRed: 'unjudged' } });
     let out = job('review', { 'src/math.js': MUL }, { GATE_REVIEWER: '', ...pr });
@@ -1842,7 +1762,6 @@ describe('gate-trusted.yml permissions', () => {
     review: { actions: 'read', checks: 'read', issues: 'read', 'pull-requests': 'read' },
     verdict: { actions: 'read', checks: 'read', 'pull-requests': 'read' },
     tier: { issues: 'read', 'pull-requests': 'write' },
-    rounds: { checks: 'read', 'pull-requests': 'write' },
   };
   const jobs = readFileSync(join(factory, 'kit/.github/workflows/gate-trusted.yml'), 'utf8').split(/^ {2}(?=\w+:\n {4}name:)/m).slice(1);
   test('review holds no write scope and tier has 75 minutes for its wait', () => {
@@ -1987,11 +1906,6 @@ describe('workflows and ruleset', () => {
       }
     }
     assert.ok(candidate > 0, 'no job runs the candidate\'s code');
-  });
-  test('rounds runs only after a red review or verdict', () => {
-    const { rounds } = yaml('.github/workflows/gate-trusted.yml').jobs;
-    assert.deepEqual(rounds.needs, ['review', 'verdict']);
-    assert.equal(rounds.if, 'failure()');
   });
   test('the ruleset keeps an approval through a push, for the tier check binds it to the patch', () => {
     const rule = ruleset.rules.find((r) => r.type === 'pull_request');

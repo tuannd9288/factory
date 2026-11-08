@@ -3,7 +3,6 @@
 # candidate's commits were fetched with no work tree, so nothing of the candidate runs and none of its instruction,
 # hook, skill or settings files is on disk for a reviewer to load.
 #   .gate/bin/review review|verdict|tier --base <sha> --head <sha>
-#   .gate/bin/review rounds
 #   review   the reviewer's findings, on every pull request; a No-red line in the PR body (GATE_BODY_FILE) needs the
 #            reviewer's explicit acceptance
 #   verdict  review's verdict from tier 2, read from the review job of its own workflow run (GITHUB_RUN_ID) for this head and
@@ -27,9 +26,6 @@
 #            Once the tier is final it also writes it for Linear's Reviews (#379): post_risk below, one comment of the pull
 #            request that holds a `linear:extension` riskScore block for the head, at every tier and every switch position;
 #            a failed write prints one line and leaves the result as it was
-#   rounds   counts the head commits the gate judged red; at three it labels the pull request needs-human (tier 3) and,
-#            unless the merge switch is at `all` or cannot be read, requests the same owners' review (#374), since tier
-#            does not see the label until the next event
 # The tier is main's policy on the diff from the merge-base, raised by every label the pull request ever had (GATE_PR
 # and GITHUB_REPOSITORY, read with gh). GATE_HEAD, the pull request's head, must be the head judged.
 # GATE_REVIEWER picks the reviewer; gate-trusted.yml on main holds it, filled in by bin/onboard, so only a pull request the
@@ -46,8 +42,8 @@
 # A reviewer's result counts only through .gate/bin/lib/result.mjs: a missing, malformed or unbound one fails. After it, `review`
 # prints the annotation `review-verdict` (head=<sha> base=<sha> nored=<hash|none> acc=<hash|none> reviewer=<name> pass|block) that `verdict` reads. A reviewer that gave no
 # verdict at all (a usage limit, a bad token, a timeout, a result result.mjs refuses, a reviewer that crashed or is not
-# configured) leaves `review-result: unavailable: <class>` instead and fails: the check is red, `rounds` does not count the
-# head, and `tier` says the reviewer was unavailable. A reviewer output that held a token (exit 4) stays an ordinary red.
+# configured) leaves `review-result: unavailable: <class>` instead and fails: the check is red, and the result says the reviewer was
+# unavailable. A reviewer output that held a token (exit 4) stays an ordinary red.
 set -uo pipefail
 trusted=$(git rev-parse --show-toplevel) || exit 2
 cd "$trusted" || exit 2
@@ -62,7 +58,7 @@ while [ "$#" -gt 0 ]; do
   esac
   shift 2
 done
-case "$job" in review | verdict | tier | rounds) ;; *) echo "usage: .gate/bin/review review|verdict|tier --base <sha> --head <sha>, or .gate/bin/review rounds"; exit 2 ;; esac
+case "$job" in review | verdict | tier) ;; *) echo "usage: .gate/bin/review review|verdict|tier --base <sha> --head <sha>"; exit 2 ;; esac
 # Requests the review of the code owners of .github/CODEOWNERS (main's) other than the author, so the pull request is in their
 # review queue while it waits for their approval (#374). Users only: a team owner is named, not requested. One POST for each
 # owner, since GitHub refuses a whole request (422) when one of its users is not a collaborator. A failed request prints one
@@ -119,20 +115,6 @@ post_risk() {
   echo "$job: wrote the risk score for Linear's Reviews (tier $level at ${head:0:8})"
   return 0
 }
-# A red round is a head commit on which a required check other than tier failed; tier waits on the Human, not the writer.
-if [ "$job" = rounds ]; then
-  checks=$(node .gate/bin/lib/policy.mjs checks | grep -vx tier | paste -sd, -) &&
-    n=$(node .gate/bin/lib/history.mjs rounds --repo "${GITHUB_REPOSITORY:-}" --pr "${GATE_PR:-}" --checks "$checks") ||
-    { echo "rounds: the pull request's rounds could not be read: ${n:-$checks}"; exit 1; }
-  echo "rounds: $n head commits judged red"
-  [ "$n" -ge 3 ] || exit 0
-  gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label needs-human >/dev/null || { echo "rounds: could not add the label needs-human"; exit 1; }
-  echo "rounds: labelled needs-human after three red rounds; the tier check now waits for the Human's approval; at the merge switch's position all it does not wait for one"
-  # Where his approval is asked, he is requested too, so the pull request is in his queue; a position that cannot be read asks nothing.
-  position=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/rules/branches/${GATE_BASE_REF:-main}" 2>&1 | node .gate/bin/lib/switch.mjs) &&
-    [ "$position" != all ] && request_owners
-  exit 0
-fi
 head=$(git rev-parse --verify --quiet "${head:-none}^{commit}") && fork=$(git merge-base "${base:-none}" "$head" 2>/dev/null) ||
   { echo "$job: the base or the head is not in this checkout; fetch the candidate's commits first"; exit 2; }
 if [ -n "${GATE_HEAD:-}" ] && [ "$GATE_HEAD" != "$head" ]; then
@@ -357,7 +339,7 @@ case "${GATE_REVIEWER:-}" in
 esac
 checked=$(node .gate/bin/lib/result.mjs --job "$job" --base "$fork" --head "$head" $claim <"$result")
 code=$?
-# A result result.mjs refuses says nothing about the change: unavailable, not a red round.
+# A result result.mjs refuses says nothing about the change: unavailable.
 [ "$code" -eq 2 ] && { echo "::notice title=review-result::unavailable: malformed"; echo "$job: reviewer unavailable (malformed); the reviewer's result does not count, so this check fails closed"; }
 printf '%s\n' "$checked"
 # review's verdict for verdict to read: fixed text, the SHAs it judged, the No-red line and the closing issues (each by

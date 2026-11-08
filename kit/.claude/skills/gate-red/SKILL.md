@@ -44,5 +44,5 @@ design: push the branch to this repository.
 
 ## Rounds
 
-At the third head commit judged red, `rounds` labels the pull request `needs-human`, which makes it tier 3: the Human
-decides. Stop pushing until the Human answers.
+After three red rounds, label the pull request `needs-human` with your recommended answer, which makes it tier 3: the
+Human decides. No check counts the rounds. Stop pushing until the Human answers.

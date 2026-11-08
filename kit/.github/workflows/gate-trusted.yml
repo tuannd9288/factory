@@ -27,10 +27,8 @@
 #   With GATE_REVIEWER=entire (#155) Entire reviews outside Actions: `review` passes at once and `verdict` on its verdict.
 # The required checks are verify (gate.yml), review, verdict and tier (.gate/ruleset.json); with GATE_REVIEWER=entire,
 # verify, tier and Entire Gates (bin/onboard-owner writes that ruleset from GATE_REVIEWER as main holds it). No required job
-# here has `needs`: a job skipped because a job it needs failed counts as passing. rounds, not required, runs after a red
-# review or verdict (both fail while verify is red) and labels needs-human at the third head commit judged red; it then
-# also requests the code owners' review (#374), unless the merge switch is at all or cannot be read, so its step carries
-# GATE_PR_AUTHOR and GATE_BASE_REF for that.
+# here has `needs`: a job skipped because a job it needs failed counts as passing. No job counts a pull request's red heads:
+# the three-round rule is the workers' (FAC-100).
 # GATE_REVIEWER below and every job's runs-on are the repository's own settings, which bin/onboard fills in and a pull
 # request changes, at tier 3 (#335): no repository variable holds them, since one changes without a pull request. The
 # runner is GitHub-hosted Ubuntu in the kit, and never a runner a candidate's, main's or a deploy's job uses, nor one
@@ -76,7 +74,7 @@ jobs:
       # First, before the checkout, the install and the step that reads the credential: a pull request whose head is in another
       # repository (a fork) is refused, red. A job-level `if:` would show the job skipped, and a skipped required job counts as
       # passing. An empty head (a deleted fork) is a refusal too: the test is "the same repository", not "another one". The
-      # result is the unavailable class `fork`, so `rounds` does not count it as a red head.
+      # result is the unavailable class `fork`.
       - name: Refuse a pull request from another repository
         run: |
           if [ -z "$HEAD_REPO" ] || [ "$HEAD_REPO" != "$BASE_REPO" ]; then
@@ -183,29 +181,4 @@ jobs:
           GATE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           GATE_BASE_REF: ${{ github.event.pull_request.base.ref }}
           BODY: ${{ github.event.pull_request.body }}
-          GH_TOKEN: ${{ github.token }}
-
-  rounds:
-    name: rounds
-    needs: [review, verdict]
-    if: failure()
-    runs-on: ["ubuntu-latest"]
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: trusted
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-      - run: .gate/bin/review rounds
-        working-directory: trusted
-        env:
-          GATE_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          GATE_BASE_REF: ${{ github.event.pull_request.base.ref }}
           GH_TOKEN: ${{ github.token }}
