@@ -1,14 +1,13 @@
 // Whether a tier-3 pull request has the Human's approval of its change, read from the reviews JSON on stdin (GitHub's
 // list of a pull request's reviews; pages from `gh api --paginate --slurp` are flattened). Run in a checkout holding
 // the commits.
-//   node .gate/bin/lib/approval.mjs --owners <CODEOWNERS> --author <login> --head <sha> [--base <sha>] [--after <time>]
+//   node .gate/bin/lib/approval.mjs --owners <CODEOWNERS> --author <login> --head <sha> [--base <sha>]
 //     [--moved-at <time> --parent-head <sha|none>]
 // Approved means: a user named in CODEOWNERS who is not the author, whose latest approving or blocking review is an
 // approval of the head commit, or, with --base, of a commit whose own patch the head carries unchanged: the same
 // `git patch-id --verbatim` of the change from its merge-base with the base, as after the queue merged main into the
 // branch. Any change to the patch needs a new approval. GitHub's own code-owner rule is not enough: it asks nothing of
-// an author who owns the code. With --after, an approval counts only when submitted after that time: the Human reads the
-// reviewer's reason when the pull request is raised, so an approval given before the raise does not stand for it.
+// an author who owns the code.
 // --moved-at is the time of the pull request's last base change and --parent-head the head of the old base's pull request
 // merged into the new base, or none (history.mjs moved). An approval given before that change showed the diff from the
 // old base, so not even the head commit stands for it by itself: it counts only when the approved commit's patch from the
@@ -77,12 +76,11 @@ const carried = (r) =>
     ? own !== '' && sha(parent) && patchOf(r.commit_id, parent) === own
     : r.commit_id === head || (own !== '' && patchOf(r.commit_id) === own);
 
-const after = opt('--after') ?? '';
 const latest = new Map();
 for (const r of [...reviews].sort((a, b) => String(a.submitted_at).localeCompare(String(b.submitted_at)))) {
   if (['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) latest.set(r.user?.login?.toLowerCase(), r);
 }
-const standing = [...latest.entries()].filter(([login, r]) => owners.has(login) && login !== author && r.state === 'APPROVED' && String(r.submitted_at) > after);
+const standing = [...latest.entries()].filter(([login, r]) => owners.has(login) && login !== author && r.state === 'APPROVED');
 const approvals = standing.filter(([, r]) => carried(r));
 const eligible = [...owners].filter((o) => o !== author);
 if (approvals.length) {

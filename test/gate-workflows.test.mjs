@@ -194,7 +194,7 @@ describe('the ceilings that follow the timeout (item 9)', () => {
     assert.ok(jobs.tier['timeout-minutes'] >= jobs.verdict['timeout-minutes'] + 5);
     const script = readFileSync(join(factory, 'kit/.gate/bin/review'), 'utf8');
     const waits = [...script.matchAll(/GATE_REVIEW_WAIT:-(\d+)/g)].map((m) => Number(m[1]));
-    assert.ok(waits.length >= 2);
+    assert.ok(waits.length >= 1);
     for (const w of waits) assert.ok(w / 60 >= review + 10, `GATE_REVIEW_WAIT ${w}`);
     for (const w of waits) assert.ok(w / 60 + 5 <= jobs.tier['timeout-minutes'], `tier ends before a wait of ${w}`);
   });

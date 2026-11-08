@@ -11,15 +11,10 @@
 # The reviewer runs only once `verify` (gate.yml, on pull_request) passed on the head: the cheaper judge first, and a
 # red head needs a new commit anyway. The job waits for it up to GATE_WAIT seconds (default: the minutes
 # GATE_VERIFY_TIMEOUT of .gate/config.sh gives verify, which .gate/bin/verify-timeout reads), then fails closed.
-#   tier     labels the tier; it waits for `review` of its own workflow run (GITHUB_RUN_ID, up to GATE_REVIEW_WAIT, default
-#            6000 s), tier 3 included (#333: so the merge switch is read when the gate's run is nearly over), so it is never
-#            green before the reviewer ended, and follows it: a red or cancelled `review` fails it. It reads the review's
-#            result annotation whatever the conclusion; below tier 3 a raise there (or in any review on this head) labels
-#            the pull request raised and tier-3, and a result left absent fails it. A raise needs an approval given after
-#            it. Text drawn from the pull request is printed between ::stop-commands:: markers with a random token. On tier 3
+#   tier     labels the tier and waits for nothing (FAC-100): the paths and every label the pull request ever had. Text drawn
+#            from the pull request is printed between ::stop-commands:: markers with a random token. On tier 3
 #            it requires a code owner who is not the author to have approved the head commit, or a commit whose own patch the head carries unchanged
-#            (.gate/bin/lib/approval.mjs); the queue re-runs it after that approval, so the reviewer never runs again for a
-#            click. Before that it reads the repository's merge switch (#333, .gate/bin/lib/switch.mjs) from the rules in
+#            (.gate/bin/lib/approval.mjs); the queue re-runs it after that approval. Before that it reads the repository's merge switch (#333, .gate/bin/lib/switch.mjs) from the rules in
 #            force on the base branch and records the position on its own check run (the annotation "merge switch"): on
 #            tier 3, at `all` the approval is not asked, at `1-2` and `none` it is, and rules it cannot read as a position
 #            fail it; below tier 3 nothing is read. The claim, the labels and the other checks are asked at every position;
@@ -47,11 +42,6 @@
 #           is `review-result: unavailable: acceptance`, with no reviewer call. The stub reads none.
 #   entire  Entire (entire.com) reviews, outside Actions (#155): `review` passes at once, with no wait for verify and no
 #           reviewer, and leaves the verdict `verdict` reads; the ruleset onboard-owner writes for it requires neither.
-#           `tier` passes only once the "Entire Gates" check of the App the rules in force on the base branch
-#           (GATE_BASE_REF) pin concluded success on the head: neutral and skipped, which GitHub counts as passing, are
-#           red. Under the kit's own ruleset that pins no such App, tier is red, so nothing merges unreviewed. A No-red line
-#           in the body (GATE_BODY_FILE), which no reviewer judges here, makes the change tier 3. The queue re-runs tier
-#           once that check concludes after it started.
 #   unset   fails closed: no reviewer is configured, so nothing merges on this gate
 # A reviewer's result counts only through .gate/bin/lib/result.mjs: a missing, malformed or unbound one fails. After it, `review`
 # prints the annotation `review-verdict` (head=<sha> base=<sha> nored=<hash|none> acc=<hash|none> reviewer=<name> pass|block) that `verdict` reads. A reviewer that gave no
@@ -183,55 +173,6 @@ claim_check() {
   claim_msg=$msg
 }
 
-# Waits for the `review` job of this workflow run and reads its result annotation, whatever its conclusion: sets
-# $review_red when it ended red or cancelled, and $did_raise and $raised (one line) when it reported a raise. A review
-# that ended green and left no result annotation is read again GATE_RESULT_TRIES times (the listing may lag the job), then
-# fails closed: absence is never "no raise". Fails closed on a timeout, GATE_REVIEW_WAIT (default 6000 s), which is not
-# GATE_WAIT, the wait for verify.
-wait_review() {
-  local deadline=$((SECONDS + ${GATE_REVIEW_WAIT:-6000})) state tries=0
-  raised="" did_raise="" review_red="" unavailable=""
-  [ -n "${GITHUB_RUN_ID:-}" ] || { echo "tier: GITHUB_RUN_ID is unset, so the review of this run cannot be found, and this check fails closed"; return 1; }
-  while :; do
-    state=$(node .gate/bin/lib/history.mjs raise --repo "${GITHUB_REPOSITORY:-}" --run "$GITHUB_RUN_ID" --head "$head") ||
-      { echo "tier: the review of run $GITHUB_RUN_ID could not be read ($state), so this check fails closed"; return 1; }
-    case "$state" in
-      pending)
-        [ "$SECONDS" -lt "$deadline" ] || { echo "tier: review did not finish in time, so this check fails closed"; return 1; }
-        sleep "${GATE_POLL:-20}"
-        continue
-        ;;
-      "ok none" | "red none") ;;
-      "red absent") ;;
-      "ok unavailable "* | "red unavailable "*) unavailable=${state#* unavailable } ;;
-      "ok absent")
-        tries=$((tries + 1))
-        [ "$tries" -lt "${GATE_RESULT_TRIES:-6}" ] || { echo "tier: the review ended and left no result annotation after $tries reads, so this check fails closed"; return 1; }
-        sleep "${GATE_RESULT_POLL:-10}"
-        continue
-        ;;
-      "ok raise "* | "red raise "*) did_raise=1; raised=${state#* raise }; [ -n "$raised" ] || raised="(no reason given)" ;;
-      *) echo "tier: the review of run $GITHUB_RUN_ID gave an answer this check does not know, so it fails closed"; return 1 ;;
-    esac
-    [ "${state%% *}" = red ] && review_red=1
-    return 0
-  done
-}
-
-# Under Entire, the "Entire Gates" check on this head of the App the rules in force on the base branch pin, read now:
-# only success passes. Entire concluded neutral while a gate blocked (factory-onboard-scratch#23, 2026-10-29).
-entire_check() {
-  local state
-  state=$(node .gate/bin/lib/history.mjs entire --repo "${GITHUB_REPOSITORY:-}" --branch "${GATE_BASE_REF:-}" --head "$head") ||
-    { echo "tier: Entire's check on ${head:0:8} could not be read ($state), so this check fails closed"; return 1; }
-  case "$state" in
-    success) echo "tier: Entire Gates passed ${head:0:8}" ;;
-    unpinned) echo "tier: the rules in force on $GATE_BASE_REF do not require Entire Gates from one App, so its check cannot be told from a copy, and this check fails closed; the owner runs bin/onboard-owner --apply once main's gate-trusted.yml holds GATE_REVIEWER: 'entire'"; return 1 ;;
-    pending) echo "tier: Entire Gates has not concluded on ${head:0:8}; the queue re-runs this check when it does"; return 1 ;;
-    *) echo "tier: Entire Gates is $state on ${head:0:8}; only success passes (Entire is neutral while a gate blocks), so this check fails"; return 1 ;;
-  esac
-}
-
 # Waits for the `review` job of this workflow run and passes only with a review that passed for this head and base: its
 # review-verdict annotation names both. A result for another head or base, a blocking or absent one, or a review that
 # ended without one fails closed. Prints the unavailable notice first when review had no verdict.
@@ -269,58 +210,6 @@ case "$job" in
   tier)
     out=$(tier_of) || { guarded "$out"; exit 1; }
     n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
-    # A moved claim fails at once, and again after the wait, which can last an hour: the claim is read when tier ends.
-    claim_check || exit 1
-    entire=""
-    [ "${GATE_REVIEWER:-}" = entire ] && entire=1
-    if [ -n "$entire" ] && [ "$n" != 3 ] && [ -n "${GATE_BODY_FILE:-}" ] && grep -Eq '^No-red: .{20,}' "$GATE_BODY_FILE"; then
-      out="tier 3
-  a No-red line, which no reviewer judges under Entire: the Human does"
-      n=3
-    fi
-    # Every tier waits for the review of its own run, tier 3 too (#333): the switch is read, and recorded, only once the review
-    # is in, so the position tier records is the one in force when the gate's run is nearly over, not at its first seconds.
-    # Paths and labels already giving tier 3, a raise adds nothing. Every line that prints the reviewer's reason starts with a
-    # fixed prefix and holds it on one line with `##[` broken. Entire's review is read below, not waited for.
-    was=$n
-    if [ -n "${GATE_PR:-}" ] && [ -z "$entire" ]; then
-      wait_review || exit 1
-      if [ -n "$unavailable" ]; then
-        guarded "$out"
-        echo "tier: reviewer unavailable ($unavailable); this is not a finding on the change, so this check fails closed. Re-run the failed jobs when the reviewer is back"
-        exit 1
-      fi
-      # At tier 3 a raise adds nothing: it labels nothing, prints nothing, and must not set the time an approval has to follow
-      # (the approval check below reads $did_raise), so an approval given before this run still counts.
-      [ "$was" != 3 ] || did_raise=""
-      if [ -n "$did_raise" ]; then
-        # Adding a label a pull request already has makes no event, and the approval must follow this one's: remove first.
-        if ! gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label raised >/dev/null 2>&1; then
-          # A failed remove is fine when raised is not there. When another account's raised is, tier would add nothing new
-          # and leave no event of its own, so it fails closed.
-          have=$(node .gate/bin/lib/history.mjs labels --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") ||
-            { echo "tier: the label raised could not be removed, and the labels could not be read ($have), so this check fails closed"; exit 1; }
-          case ",$have," in *,raised,*) echo "tier: the label raised is on the pull request and could not be removed, so tier cannot make its own event for the raise, and this check fails closed"; exit 1 ;; esac
-        fi
-        gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --add-label raised --add-label tier-3 >/dev/null ||
-          { echo "tier: the reviewer raised this change, and the labels raised and tier-3 could not be added; if raised does not exist, create it: gh label create raised --repo ${GITHUB_REPOSITORY:-}"; exit 1; }
-      fi
-      # The labels are read again: a label added during the wait counts. A tier never drops, so a tier 3 needs no second read.
-      if [ "$was" != 3 ]; then
-        out=$(tier_of) || { guarded "$out"; exit 1; }
-        n=$(echo "$out" | sed -n '1s/^tier \([123]\)$/\1/p')
-      fi
-      if [ -n "$did_raise" ]; then
-        out="tier 3
-  raised by the reviewer: $raised"
-        n=3
-      fi
-      if [ -n "$review_red" ]; then
-        guarded "$out"
-        echo "tier: review is red; tier follows it, so this check fails"
-        exit 1
-      fi
-    fi
     claim_check || exit 1
     guarded "$out"
     [ -z "$claim_msg" ] || guarded "$claim_msg"
@@ -331,7 +220,6 @@ case "$job" in
         [ "$k" -lt "$n" ] && gh pr edit "$GATE_PR" --repo "$GITHUB_REPOSITORY" --remove-label "tier-$k" >/dev/null 2>&1
       done
     fi
-    [ -z "$entire" ] || entire_check || exit 1
     [ "$n" = 3 ] || exit 0
     # The merge switch (#333), read from the rules in force on the base branch (GATE_BASE_REF): at all, the Human's approval of
     # tier 3 is not asked; at 1-2 and none it is, as before. Rules that cannot be read as a position fail closed. The position
@@ -346,19 +234,13 @@ case "$job" in
       exit 0
     fi
     reviews=$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY:-}/pulls/${GATE_PR:-}/reviews") || { echo "tier: tier 3 needs the Human's approval, and the reviews could not be read"; exit 1; }
-    # A raised pull request needs an approval given after the raise: the Human reads the reason, not an earlier head.
-    after=""
-    if [ -n "${GATE_PR:-}" ]; then
-      after=$(node .gate/bin/lib/history.mjs raised-at --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") || { echo "tier: when the pull request was raised could not be read ($after), so this check fails closed"; exit 1; }
-      [ -n "$after" ] || [ -z "${did_raise:-}" ] || after=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    fi
     # An approval given before the base last changed showed the diff from the old base: it counts only through the old base's merged
     # pull request (FAC-41: a stack's child moved onto main before its parent landed carries the parent's change).
     moved=""
     if [ -n "${GATE_PR:-}" ]; then
       moved=$(node .gate/bin/lib/history.mjs moved --repo "${GITHUB_REPOSITORY:-}" --pr "$GATE_PR") || { echo "tier: the base changes of the pull request could not be read ($moved), so this check fails closed"; exit 1; }
     fi
-    printf '%s' "$reviews" | node .gate/bin/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" --base "$base" ${after:+--after "$after"} ${moved:+--moved-at "${moved%% *}" --parent-head "${moved#* }"}
+    printf '%s' "$reviews" | node .gate/bin/lib/approval.mjs --owners .github/CODEOWNERS --author "${GATE_PR_AUTHOR:-}" --head "$head" --base "$base" ${moved:+--moved-at "${moved%% *}" --parent-head "${moved#* }"}
     code=$?
     # Waiting for his approval (exit 1): request his review, then fail as before.
     [ "$code" -ne 0 ] || exit 0
