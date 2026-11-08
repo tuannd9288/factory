@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { POSITIONS, PARAMETERS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
 import { SETTINGS, TRUSTED, WORKFLOWS, readsVariables, sharedRunners, targetOf, valuesIn } from './gate-settings.mjs';
 import { FACTORY_REPO } from './repos.mjs';
+import { agentOf } from './node.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FILES = {
@@ -393,7 +394,7 @@ function main(argv) {
     console.error('usage: bin/onboard-owner <owner/name> --id <repository id> [--apply] [--merge all|1-2|none]');
     return 2;
   }
-  const agent = process.env.FACTORY_AGENT ?? 'tuan9288-agent';
+  const agent = agentOf();
   const who = identify('onboard-owner', { slug, id, agent });
   if (who.refusal) {
     console.error(who.refusal);

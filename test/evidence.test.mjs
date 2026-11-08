@@ -147,7 +147,7 @@ const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, a.join(' ') + '\n');
 const said = (s) => { process.stdout.write(s + '\n'); process.exit(0); };
-if (a[0] === 'api' && a[1] === 'user') said('tuan9288-agent');
+if (a[0] === 'api' && a[1] === 'user') said('nami9288');
 if (a[0] === 'api' && a[1] === 'repos/tuannd9288/app/rules/branches/main') said('[{"type":"pull_request"}]');
 if (a[0] === 'api' && a[1] === 'repos/tuannd9288/app') said('1234');
 if (a[0] === 'repo' && a[1] === 'view') said('tuannd9288/app');
