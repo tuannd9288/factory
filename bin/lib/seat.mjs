@@ -239,22 +239,16 @@ export function heldNames(runs, state = null) {
 /** The name a resumed session had in its earlier record, or null. */
 export const nameOfSession = (state, session) => readSessions(state).findLast((r) => r.session === session)?.name ?? null;
 
-/** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
- * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off removes
- * run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the listing, so none can finish between two
- * equal listings; one seen half done counts that start twice at worst. list is the listing, passed in so a test can force the
- * interleaving. */
-export function liveCount(runs, seat, list = runFiles) {
-  return countLive(runs, (p) => seatOf(p, '2') === String(seat), list);
-}
-
-/** How many runs are live whatever their seat, claims included (#257): the update of the checkout waits
- * for none. Infinity when the folders never held still. */
+/** How many runs are live whatever their seat, claims included (#257): the update of the checkout waits for none. Infinity when
+ * the folders never held still. The count is taken between two listings of the .pid files, claims included, and is made again when
+ * they differ. A start's hand-off removes run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the
+ * listing, so none can finish between two equal listings; one seen half done counts that start twice at worst. list is the
+ * listing, passed in so a test can force the interleaving. */
 export function liveRuns(runs, list = runFiles) {
   return countLive(runs, () => true, list);
 }
 
-/** How many runs of an account have a live process (#311), counted as liveCount does. A run with no .account file counts under the
+/** How many runs of an account have a live process (#311), counted as liveRuns does. A run with no .account file counts under the
  * account its seat's old row names (seatRows, { seat: account }) while that row is in the file, as accountEvent reads it. */
 export function liveOfAccount(runs, account, seatRows = {}, list = runFiles) {
   return countLive(runs, (p) => accountOf(p, seatRows) === account, list);

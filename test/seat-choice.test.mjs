@@ -68,16 +68,15 @@ test('an account with ten live sessions is still chosen: no number of sessions p
   });
 });
 
-test('liveCount: a session whose process is gone does not count, a pid file with no seat file counts for seat 2, and the run folders are all counted', { skip: skipPs }, async () => {
-  const { liveCount } = await lib();
+test('liveRuns: a session whose process is gone does not count, and the run folders are all counted, whatever their seat', { skip: skipPs }, async () => {
+  const { liveRuns } = await lib();
   world((runs, add) => {
     for (let i = 0; i < 4; i += 1) add(2, { live: false });
-    assert.equal(liveCount(runs, 2), 0);
+    assert.equal(liveRuns(runs), 0);
     for (let i = 0; i < 4; i += 1) add(null);
     for (let i = 0; i < 4; i += 1) add(2, { folder: `issue-${i}` });
     add(1);
-    assert.equal(liveCount(runs, 2), 8);
-    assert.equal(liveCount(runs, 1), 1);
+    assert.equal(liveRuns(runs), 9);
   });
 });
 
