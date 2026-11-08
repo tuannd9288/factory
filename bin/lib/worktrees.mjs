@@ -5,8 +5,7 @@
 // worktree of merged work that is not clean or holds an unpushed commit is kept and named in queue-worktrees.failed, so the Human
 // sees it in Colly's status line and brief and in the digest.
 import { spawnSync } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { clearFailed, markFailed } from './status.mjs';
 
 const first = (r) => String(r.stderr || r.stdout || r.error?.message || `exit ${r.status}`).trim().split('\n')[0].slice(0, 200);
 
@@ -26,7 +25,6 @@ function linked(git) {
  * branches of its merged pull requests; one that throws skips that clone this sweep. Returns {removed, kept}, kept being the
  * lines written to queue-worktrees.failed (removed when none). */
 export function sweepWorktrees({ clones, state, live, merged, now = Date.now() }) {
-  const report = join(state, 'queue-worktrees.failed');
   let removed = 0;
   const kept = [];
   for (const { repo, dir } of clones) {
@@ -55,8 +53,8 @@ export function sweepWorktrees({ clones, state, live, merged, now = Date.now() }
   // Colly's status (queueOf in colly-status.mjs) and the digest show the first line alone, so it names the first path.
   if (kept.length) {
     const more = kept.length > 1 ? ` and ${kept.length - 1} more` : '';
-    writeFileSync(report, `${new Date(now).toISOString()} ${kept.length} worktree${kept.length > 1 ? 's' : ''} of merged work kept: ${kept[0]}${more}\n${kept.join('\n')}\n`);
+    markFailed(state, 'queue-worktrees', `${kept.length} worktree${kept.length > 1 ? 's' : ''} of merged work kept: ${kept[0]}${more}`, { now, more: kept });
   }
-  else rmSync(report, { force: true });
+  else clearFailed(state, 'queue-worktrees');
   return { removed, kept };
 }

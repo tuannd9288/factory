@@ -46,12 +46,12 @@
 # waits until the factory's main has moved on. A block that main reverted later still passes while it is not older than the
 # base's. The variable GATE_FACTORY_URL is for tests and takes only an absolute local folder.
 # FACTORY_ROOT (default: this clone) is where repositories live; FACTORY_HUMAN (default: tuannd9288) is the code owner
-# of tier 3; FACTORY_AGENT (default: tuan9288-agent) the agents' account.
+# of tier 3; FACTORY_AGENT (default: nami9288) the agents' account.
 set -euo pipefail
 factory=$(cd "$(dirname "$0")/.." && pwd)
 root=${FACTORY_ROOT:-$factory}
 human=${FACTORY_HUMAN:-tuannd9288}
-agent=${FACTORY_AGENT:-tuan9288-agent}
+agent=${FACTORY_AGENT:-nami9288}
 open_pr=1
 target=""
 settings=()

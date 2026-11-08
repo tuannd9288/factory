@@ -7,6 +7,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
+import { readMarkers } from './status.mjs';
 import { writeAtomic } from './files.mjs';
 import { hookStateOf, parseLog } from './claude-code.mjs';
 import { REQUIRED } from './ledger.mjs';
@@ -300,13 +301,9 @@ export function eventsOf(state) {
 
 /** The queue's and the alerts' state: the time in the newest `queue-*.ok`, the `queue-*.failed` files, every `*.failed` file. */
 export function queueOf(dir) {
-  let names = [];
-  try {
-    names = readdirSync(dir).sort();
-  } catch {}
-  const first = (f) => readText(join(dir, f)).split('\n')[0].trim();
-  const oks = names.filter((f) => /^queue-.*\.ok$/.test(f)).map(first).filter(Boolean).sort();
-  const failed = names.filter((f) => f.endsWith('.failed')).map((f) => ({ file: f, text: first(f) }));
+  const markers = readMarkers(dir) ?? [];
+  const oks = markers.filter((m) => m.kind === 'ok' && m.name.startsWith('queue-')).map((m) => m.line).filter(Boolean).sort();
+  const failed = markers.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line }));
   return { lastSweep: oks.at(-1) ?? null, queueFailed: failed.filter((f) => f.file.startsWith('queue-')).length, failed };
 }
 

@@ -50,6 +50,7 @@ import { ask, socketPath } from './daemon-proto.mjs';
 import { clonesUnder, githubRepo } from './repos.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
+import { clearFailed, markFailed, markOk, repoMarker } from './status.mjs';
 import { listStreams } from './streams.mjs';
 import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
@@ -430,20 +431,19 @@ function sweepNews(repo, folder, state, runs, rulesRead, root) {
  * `queue-<owner>-<name>.failed` can take) with the time and the cause, so the digest shows it; a run that gets past
  * them removes it. Returns the exit code on failure, null to go on; `who.login` is the sweep's own login once it is read. */
 function preflight(state, human, who) {
-  const report = join(state, 'queue-run.failed');
   let why;
   try {
     const login = gh(['api', 'user', '--jq', '.login']).trim();
     who.login = login;
     if (login.toLowerCase() !== human.toLowerCase()) {
-      rmSync(report, { force: true });
+      clearFailed(state, 'queue-run');
       return null;
     }
     why = `runs as the agents' account, not the Human's (${human}); log gh in as the agents' account`;
   } catch (error) {
     why = String(error.stderr || error.message).trim();
   }
-  writeFileSync(report, `${new Date().toISOString()} ${why}\n`);
+  markFailed(state, 'queue-run', why);
   console.error(`factory-queue: ${why}`);
   return 2;
 }
@@ -466,8 +466,7 @@ function followCheckout(state) {
     const differ = checkPlists({ root, state, plistDir: process.env.FACTORY_PLIST_DIR ?? '/Library/LaunchDaemons' }).differ;
     if (differ.length) console.log(`queue: installed plist differs from the code's: ${differ.join(' ')}`);
   } catch (error) {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, 'queue-checkout.failed'), `${new Date().toISOString()} the update raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    markFailed(state, 'queue-checkout', `the update raised ${error.name}: ${error.message}`);
     console.error(`queue: checkout: ${error.message}`);
   }
   return moved;
@@ -514,8 +513,7 @@ function sweepLanded(state) {
     const r = sweepWorktrees({ clones, state, live, merged });
     if (r.removed || r.kept.length) console.log(`queue: worktrees removed ${r.removed}, kept ${r.kept.length}${r.kept.length ? ' (queue-worktrees.failed names them)' : ''}`);
   } catch (error) {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, 'queue-worktrees.failed'), `${new Date().toISOString()} the sweep raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    markFailed(state, 'queue-worktrees', `the sweep raised ${error.name}: ${error.message}`);
     console.error(`queue: worktrees: ${error.message}`);
   }
 }
@@ -523,16 +521,14 @@ function sweepLanded(state) {
 /** The last step of a sweep (#309), under its lock: the conditions written to the events file from what the sweep read and from the
  * Leads and the accounts on this host (bin/lib/events.mjs). A failure is told in queue-events.failed and never changes the sweep's result. */
 function recordEvents(state, reads, switches) {
-  const failure = join(state, 'queue-events.failed');
   try {
     const home = process.env.HOME;
     const runs = process.env.FACTORY_RUNS ?? join(home, 'factory-runs');
     const seen = new Set();
     observe({ state, reads, switches, runs, agentProfiles: process.env.AGENT_PROFILES ?? join(home, '.agent-profiles'), onStart: (condition) => wakeStarted({ condition, reads, runs, seen }) });
-    rmSync(failure, { force: true });
+    clearFailed(state, 'queue-events');
   } catch (error) {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(failure, `${new Date().toISOString()} the events step raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    markFailed(state, 'queue-events', `the events step raised ${error.name}: ${error.message}`);
     console.error(`queue: events: ${error.message}`);
   }
 }
@@ -567,28 +563,23 @@ export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, en
 
 /** The step after the events: a failure is told in queue-reader.failed and never changes the sweep's result. */
 function startReaderPass(state) {
-  const failure = join(state, 'queue-reader.failed');
   try {
     startReader({ state, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
-    rmSync(failure, { force: true });
+    clearFailed(state, 'queue-reader');
   } catch (error) {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(failure, `${new Date().toISOString()} starting the reader raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    markFailed(state, 'queue-reader', `starting the reader raised ${error.name}: ${error.message}`);
     console.error(`queue: reader: ${error.message}`);
   }
 }
 
 /** Every sweep checks silence under queue.lock; a failure never changes the sweep's result. */
 function checkSilence(state) {
-  const failure = join(state, 'queue-silence.failed');
   try {
     watchSilence({ state, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
-    rmSync(failure, { force: true });
+    clearFailed(state, 'queue-silence');
   } catch (error) {
-    try {
-      mkdirSync(state, { recursive: true });
-      writeFileSync(failure, `${new Date().toISOString()} checking silence raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
-    } catch { /* A failure to record the error must not fail the sweep or retain its lock. */ }
+    // markFailed never throws: a marker it cannot write is a line on stderr, so the sweep and its lock go on.
+    markFailed(state, 'queue-silence', `checking silence raised ${error.name}: ${error.message}`);
     console.error(`queue: silence: ${error.message}`);
   }
 }
@@ -743,14 +734,13 @@ export function runPass({ repos = [], human, state }) {
     if (!swept.length) console.log('queue: no repository taken in under the factory root; nothing swept');
     let failed = 0;
     for (const repo of swept) {
-      const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
         sweep(repo, reads, state, switches, { self: who.login, clone: clones.get(repo), folder: clones.has(repo) ? basename(clones.get(repo)) : repo.split('/')[1], runs });
-        rmSync(report, { force: true });
-        writeFileSync(join(state, `queue-${repo.replace('/', '-')}.ok`), `${new Date().toISOString()}\n`);
+        clearFailed(state, repoMarker(repo));
+        markOk(state, repoMarker(repo));
       } catch (error) {
         const why = String(error.stderr || error.message).trim();
-        writeFileSync(report, `${new Date().toISOString()} ${repo}: ${why}\n`);
+        markFailed(state, repoMarker(repo), `${repo}: ${why}`);
         console.error(`queue: ${repo}: ${why}`);
         failed += 1;
       }
@@ -801,8 +791,7 @@ export async function ensureDaemon(state, { ping = ask, spawnFn = spawn, home = 
   const answers = async (ms) => (await ping(sock, { verb: 'ping' }, { timeoutMs: ms })).ok;
   if (await answers(1000)) return 0;
   const fail = (why) => {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
+    markFailed(state, 'queue-run', why);
     console.error(`factory-queue: ${why}`);
     return 1;
   };
@@ -891,12 +880,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exitCode = 2;
     // Best effort: the digest should show a failure before the repository loop, a plist typo among them. plist and
     // check are the Human's, run by hand, and keep no queue state.
-    if (!['plist', 'check'].includes(process.argv[2])) {
-      try {
-        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-        mkdirSync(state, { recursive: true });
-        writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
-      } catch {}
-    }
+    if (!['plist', 'check'].includes(process.argv[2])) markFailed(process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), 'queue-run', why);
   }
 }
