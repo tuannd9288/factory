@@ -12,7 +12,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
 import { STALE_RUN, assistantEntryOf, canaryOf } from './claude-code.mjs';
-import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { seatAccounts } from './token.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { job, plist } from './queue.mjs';
@@ -20,6 +21,7 @@ import { cloneRepo, clonesUnder } from './repos.mjs';
 import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
+import { clearFailed, markFailed, readMarkers, repoMarker } from './status.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import them from here.
 export { READS, costOf } from './claude-code.mjs';
@@ -91,14 +93,6 @@ export function charge(byBranch, seen, entry) {
   else row.dollars += entry.dollars;
   row.models.add(entry.model);
   byBranch.set(entry.branch, row);
-}
-
-/** Cost per git branch from a Claude Code profile's session files: dollars, models, and unpriced models. */
-export function branchCosts(profileDir) {
-  const byBranch = new Map();
-  const seen = new Set();
-  for (const entry of assistantEntries(profileDir)) charge(byBranch, seen, entry);
-  return byBranch;
 }
 
 const real = (p) => {
@@ -174,7 +168,7 @@ export function inWindow(start, end, from, to) {
 }
 
 /** One pull request's row, as the GraphQL query below returns it; a task of its own when it closes no task. */
-export function rowOf(repo, pr, { human, costs, profile }) {
+export function rowOf(repo, pr, { human, costs }) {
   const labels = pr.labels.nodes.map((l) => l.name);
   const tiers = labels.map((l) => /^tier-([123])$/.exec(l)?.[1]).filter(Boolean).map(Number);
   const events = pr.timelineItems.nodes;
@@ -210,8 +204,7 @@ export function rowOf(repo, pr, { human, costs, profile }) {
   const branch = costs?.get(pr.headRefName);
   let cost = null;
   let costNote;
-  if (!profile) costNote = 'no profile';
-  else if (!branch) costNote = 'no session on the branch';
+  if (!branch) costNote = 'no session on the branch';
   else {
     cost = branch.dollars;
     costNote = branch.unpriced.size ? `unpriced: ${[...branch.unpriced].join(', ')}` : '';
@@ -277,16 +270,15 @@ export function taskRow(repo, issue, prRows) {
  * sweep in every `queue-*.ok` file, with a null for each of the ledger's repositories that has no such record (an
  * empty file is none). `missing` is true when the folder itself is not there, so nothing could be checked. */
 export function queueState(dir, repos) {
-  const missing = !existsSync(dir);
-  const names = missing ? [] : readdirSync(dir).sort();
-  const first = (file) => readFileSync(join(dir, file), 'utf8').split('\n')[0].trim();
-  const ok = names.filter((f) => /^queue-.*\.ok$/.test(f)).map((f) => ({ label: f, at: first(f) })).filter((x) => x.at);
+  const markers = readMarkers(dir);
+  const queue = (markers ?? []).filter((m) => m.name.startsWith('queue-'));
+  const ok = queue.filter((m) => m.kind === 'ok' && m.line).map((m) => ({ label: m.file, at: m.line }));
   const known = new Set(ok.map((x) => x.label));
   return {
     dir,
-    missing,
-    failed: names.filter((f) => /^queue-.*\.failed$/.test(f)).map((f) => ({ file: f, text: first(f) })),
-    ok: [...ok, ...repos.filter((repo) => !known.has(`queue-${repo.replace('/', '-')}.ok`)).map((repo) => ({ label: repo, at: null }))],
+    missing: markers === null,
+    failed: queue.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line })),
+    ok: [...ok, ...repos.filter((repo) => !known.has(`${repoMarker(repo)}.ok`)).map((repo) => ({ label: repo, at: null }))],
   };
 }
 
@@ -466,8 +458,6 @@ const at = (number) => (typeof number === 'string' ? ` ${number}` : `#${number}`
 
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
-
-export { lastRecords, readSessions };
 
 /** The sessions that ran in the period, one record each: a resumed session's total_cost_usd covers the whole session, so a
  * session counts once, by its last record; the records of one session are never added (#89). */
@@ -705,7 +695,7 @@ function digestJob(argv) {
     args: ['--post', DIGEST_REPO, '--last-week'],
     log: 'digest.log',
     calendar: { Weekday: 1, Hour: 9, Minute: 0 },
-    keep: ['FACTORY_ROOT', 'AGENT_PROFILES', 'FACTORY_RUNS', 'FACTORY_PROFILE_DIRS', 'FACTORY_STATUSLINE'],
+    keep: ['FACTORY_ROOT', 'AGENT_PROFILES'],
   };
   process.stdout.write(plist(job(repos, process.env, daemon, as)));
 }
@@ -877,7 +867,7 @@ async function main(argv) {
     const pull = (n) => {
       if (!pulls.has(n)) {
         const node = graphql(QUERY, n).pullRequest;
-        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: true }) });
+        pulls.set(n, { node, row: rowOf(repo, node, { human, costs }) });
       }
       return pulls.get(n);
     };
@@ -942,7 +932,7 @@ async function main(argv) {
   const report = inspect(shared ? [] : folders, { latest: opts.latest });
   // Each repository's change fail rate since its merge switch last moved (INN-40), from GitHub's search for that window.
   const switches = switchWindows(opts.repos, { state, to, merged: (repo, a, b) => mergedIn(repo, a, b), resolverOf });
-  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared, switches });
+  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : seatAccounts(state), shared, switches });
   if (!opts.post) {
     process.stdout.write(text);
     return;
@@ -960,7 +950,7 @@ async function main(argv) {
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
   if (shared) writeFileSync(join(state, 'digest-records.json'), `${JSON.stringify(shared.cursor)}\n`);
-  rmSync(join(state, 'digest.failed'), { force: true });
+  clearFailed(state, 'digest');
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
@@ -974,13 +964,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     // leaves queue-run.failed (#209);
     // a run that prints to stdout, and plist, keep no state.
     const args = process.argv.slice(2);
-    if (args[0] !== 'plist' && args.includes('--post')) {
-      try {
-        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-        mkdirSync(state, { recursive: true });
-        writeFileSync(join(state, 'digest.failed'), `${new Date().toISOString()} ${why.split('\n')[0]}\n`);
-      } catch {}
-    }
+    if (args[0] !== 'plist' && args.includes('--post')) markFailed(process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), 'digest', why);
     process.exit(1);
   }
 }

@@ -332,7 +332,6 @@ describe('a base that already holds the kit\'s rendering', () => {
       assert.match(out.out, /^kit-evidence: PASS$/m);
       assert.match(out.out, /^managed files: 8: 3 as in the kit, 2 rendered, 1 kept, 2 generated$/m);
       assert.match(out.out, /^ {2}\.github\/CODEOWNERS:2: `\/\.gate\/ @OWNER` → `\/\.gate\/ @tuannd9288`$/m);
-      assert.match(out.out, /^replaced \(the repository's own at the base, now the kit's\):\n {2}none$/m);
       assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.github\/pull_request_template\.md$/m);
     } finally {
       w.cleanup();

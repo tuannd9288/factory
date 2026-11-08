@@ -7,9 +7,11 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
+import { readMarkers } from './status.mjs';
 import { writeAtomic } from './files.mjs';
 import { hookStateOf, parseLog } from './claude-code.mjs';
-import { REQUIRED, readSessions } from './ledger.mjs';
+import { REQUIRED } from './ledger.mjs';
+import { readSessions } from './records.mjs';
 import { byName, cloneRepo, clonesUnder } from './repos.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
@@ -105,11 +107,8 @@ export function leadOf(command) {
   return m && TEAM.test(m[2]) && /\bclaude\b/.test(command) ? { repo: m[1], team: m[2] } : null;
 }
 
-/** The teams whose Lead runs on a repository, sorted. */
+/** The teams whose Lead runs on a repository, sorted: the rule `factory use` restarts a Lead by (#179). */
 export const leadTeams = (repo, processes = psList) => [...new Set(processes().map((p) => leadOf(p.command)).filter((l) => l?.repo === repo).map((l) => l.team))].sort();
-
-/** Whether a Lead of a repository runs: the rule used by `factory use` (#179). */
-export const leadRunning = (repo, processes = psList) => leadTeams(repo, processes).length > 0;
 
 function branchIn(cwd) {
   if (!cwd) return null;
@@ -222,7 +221,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     }
     for (const n of names) {
       const m = /^run-(.+)\.jsonl$/.exec(n);
-      if (!m || m[1].endsWith('.claim')) continue;
+      if (!m) continue;
       const tag = m[1];
       const file = join(dir, n);
       let st;
@@ -302,13 +301,9 @@ export function eventsOf(state) {
 
 /** The queue's and the alerts' state: the time in the newest `queue-*.ok`, the `queue-*.failed` files, every `*.failed` file. */
 export function queueOf(dir) {
-  let names = [];
-  try {
-    names = readdirSync(dir).sort();
-  } catch {}
-  const first = (f) => readText(join(dir, f)).split('\n')[0].trim();
-  const oks = names.filter((f) => /^queue-.*\.ok$/.test(f)).map(first).filter(Boolean).sort();
-  const failed = names.filter((f) => f.endsWith('.failed')).map((f) => ({ file: f, text: first(f) }));
+  const markers = readMarkers(dir) ?? [];
+  const oks = markers.filter((m) => m.kind === 'ok' && m.name.startsWith('queue-')).map((m) => m.line).filter(Boolean).sort();
+  const failed = markers.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line }));
   return { lastSweep: oks.at(-1) ?? null, queueFailed: failed.filter((f) => f.file.startsWith('queue-')).length, failed };
 }
 

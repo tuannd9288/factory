@@ -88,7 +88,6 @@ function cloneSource(slug) {
   return { url: given, options: [] };
 }
 
-const entryOf = (clone, rev, path) => entryIn(clone, rev, path);
 const regular = (entry) => Boolean(entry) && REGULAR.includes(entry.mode);
 const reasons = (list) => list.join('; ');
 
@@ -153,8 +152,8 @@ function checkMerge(ctx) {
 
 function checkGateBlock(ctx) {
   const reads = 'AGENTS.md, .gate/gate-section.md';
-  const agents = entryOf(ctx.clone, ctx.rev, 'AGENTS.md');
-  const section = entryOf(ctx.clone, ctx.rev, '.gate/gate-section.md');
+  const agents = entryIn(ctx.clone, ctx.rev, 'AGENTS.md');
+  const section = entryIn(ctx.clone, ctx.rev, '.gate/gate-section.md');
   if (!regular(agents)) return { ok: false, result: 'AGENTS.md is missing or not a regular file', reads };
   if (!regular(section)) return { ok: false, result: '.gate/gate-section.md is missing or not a regular file', reads };
   let text;
@@ -191,13 +190,13 @@ function checkVerify(ctx) {
 
 function checkClaude(ctx) {
   const reads = 'CLAUDE.md';
-  const problems = carrierProblems(entryOf(ctx.clone, ctx.rev, 'CLAUDE.md'));
+  const problems = carrierProblems(entryIn(ctx.clone, ctx.rev, 'CLAUDE.md'));
   return { ok: !problems.length, result: problems.length ? reasons(problems) : 'CLAUDE.md reaches AGENTS.md', reads };
 }
 
 function checkSize(ctx) {
   const reads = 'AGENTS.md';
-  const agents = entryOf(ctx.clone, ctx.rev, 'AGENTS.md');
+  const agents = entryIn(ctx.clone, ctx.rev, 'AGENTS.md');
   if (!regular(agents)) return { ok: false, result: 'AGENTS.md is missing or not a regular file', reads };
   const shape = `${countLines(agents.bytes)} lines (at most ${MAX_LINES}), ${agents.bytes.length} bytes (at most ${MAX_BYTES})`;
   return { ok: !sizeProblems(agents.bytes).length, result: shape, reads };
@@ -212,7 +211,7 @@ function checkEvidence(ctx) {
   if (parents.length !== 2 && parents.length !== 3) return { ok: false, result: `pull request #${kit.number}: ${oid.slice(0, 7)} is neither a squash nor a merge commit`, reads };
   const [, base] = parents;
   const head = parents.length === 3 ? parents[2] : oid;
-  const commitFile = entryOf(ctx.clone, head, '.gate/kit-commit');
+  const commitFile = entryIn(ctx.clone, head, '.gate/kit-commit');
   const commit = regular(commitFile) ? /^([0-9a-f]{40})\n$/.exec(commitFile.bytes.toString('utf8'))?.[1] : undefined;
   if (!commit) return { ok: false, result: `pull request #${kit.number}: .gate/kit-commit at its head is not one factory commit`, reads };
   const r = spawnSync(join(factory, 'bin/kit-evidence'), ['--factory', factory, '--commit', commit, '--repo', ctx.clone, '--base', base, '--head', head, '--slug', ctx.slug, '--id', String(ctx.id), '--human', process.env.FACTORY_HUMAN || 'tuannd9288'], {
@@ -275,7 +274,7 @@ function main(argv) {
     const head = tip.stdout.trim();
     // The workflows from the clone, which holds main already; the contents API would be a call more for each.
     const state = gateState(slug, branch, get, (path) => {
-      const entry = entryOf(clone, rev, path);
+      const entry = entryIn(clone, rev, path);
       return entry?.mode === '100644' ? entry.bytes.toString('utf8') : null;
     });
     let merged;

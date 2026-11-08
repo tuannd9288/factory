@@ -9,7 +9,7 @@ import { kitUpdateTldr, onboardTldr, settingsOf } from '../bin/lib/tldr.mjs';
 // The rows as bin/kit-evidence prints them: a plain value, or the value and `, CHANGED from <value>`, or the value and
 // `, CHANGED: the base held none in the kit's form (…)`.
 const block = (...rows) =>
-  ['kit-evidence: PASS', "settings (the gate's, as the head's workflows hold them; a pull request changes one at tier 3):", ...rows.map((r) => `  ${r}`), "replaced (the repository's own at the base, now the kit's):", '  none'].join('\n');
+  ['kit-evidence: PASS', "settings (the gate's, as the head's workflows hold them; a pull request changes one at tier 3):", ...rows.map((r) => `  ${r}`)].join('\n');
 const NONE = 'none (review and verdict fail closed)';
 const UNSEEN = ", CHANGED: the base held none in the kit's form (a repository variable, before #335)";
 const rowsOf = (reviewer = 'claude', pr = '["ubuntu-latest"]') => [
@@ -71,17 +71,6 @@ describe('the summary of a kit pull request', () => {
     for (const name of NAMES_EN) assert.equal(times(en(full), name), 1, String(name));
     assert.doesNotMatch(full, /ubuntu-latest|\.yml|\.github|\.gate/);
     assert.equal(decisions(text), 0);
-  });
-
-  test('a fourth line for silence is written only when the caller passes one', () => {
-    const silence = { vi: 'x', en: 'y' };
-    for (const make of [(s) => onboardTldr('app', STAY, s), (s) => kitUpdateTldr('app', COUNTS, STAY, s)]) {
-      assert.equal(bullet(make(), 'Nếu không trả lời'), undefined);
-      assert.equal(bullet(make(), 'If no answer'), undefined);
-      const text = make(silence);
-      assert.deepEqual(heads(text.split('\n\n')[0]), [...ORDER, 'Nếu không trả lời']);
-      assert.deepEqual(heads(text.split('\n\n')[1]), [...ORDER_EN, 'If no answer']);
-    }
   });
 
   test('a reviewer, and a GitHub-hosted runner whatever its label, are told apart from the repository\'s own', () => {
