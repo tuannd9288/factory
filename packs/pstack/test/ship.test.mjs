@@ -527,15 +527,15 @@ describe('the reviewer\'s PASS', () => {
     assert.deepEqual(arms(w), []);
   });
 
-  test('a PASS with a raise labels the pull request needs-human before arming it, then stops on the Human\'s wait', () => {
+  test('a PASS with a raise labels the pull request needs-human and stops without arming it: at switch all an armed tier 3 would land unseen', () => {
     const w = opened();
     w.review({ structured: { conclusion: 'PASS', raise: 'secrets: cli.js reads the token file' } });
     const out = w.ship();
     assert.equal(out.code, 1, out.out);
     const calls = w.calls();
-    const label = calls.indexOf('pr edit 7 --add-label needs-human');
-    assert.ok(label >= 0 && calls.findIndex((c) => c.includes('--auto')) > label, calls.join('\n'));
-    assert.match(out.out, /needs-human/);
+    assert.ok(calls.includes('pr edit 7 --add-label needs-human'), calls.join('\n'));
+    assert.ok(!calls.some((c) => c.includes('--auto')), calls.join('\n'));
+    assert.match(out.out, /stopped on #7: its reviewer raised it \(secrets: cli\.js reads the token file\): it carries needs-human now; the Human decides/);
   });
 });
 

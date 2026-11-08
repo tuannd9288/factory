@@ -216,7 +216,7 @@ function step(pr, head, branch, stacks, merge, drafts) {
   };
   if (armed && ahead) return disarm(`HEAD ${short} is past what was verified; push it, then run ship again`);
   // Only a head its reviewer passed is armed (FAC-101), and a push that changes the patch of an armed one disarms it. The factory's own
-  // pull requests are reviewed by Colly and the supervising session and each waits for the Human, so here no reviewer record is required.
+  // pull requests are reviewed by Colly and the supervising session, so here no reviewer record is required.
   const review = FACTORY ? null : reviewOf(pr);
   if (armed && review && !review.pass) return disarm(review.why);
 
@@ -234,10 +234,14 @@ function step(pr, head, branch, stacks, merge, drafts) {
 
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
   if (review && !review.pass) return say(1, `refused to arm #${n}: ${review.why}`);
-  // A high risk the reviewer named (lead.md step 6) goes to the Human: needs-human makes the pull request tier 3 (.gate/bin/tier).
+  // A high risk the reviewer named (lead.md step 6) goes to the Human: ship labels the pull request needs-human, which makes it tier 3
+  // (.gate/bin/tier), and stops without arming it, as step 3 stops on every later run. Armed, a tier 3 merges on its checks alone at the
+  // merge switch's position all (#333), so the raise would land unseen.
   const raise = String(review?.record.structured?.raise ?? '').trim();
-  const raised = Boolean(raise) && !pr.labels.some((l) => l.name === 'needs-human');
-  if (raised) gh(['pr', 'edit', String(n), '--add-label', 'needs-human']);
+  if (raise) {
+    gh(['pr', 'edit', String(n), '--add-label', 'needs-human']);
+    return say(1, `stopped on #${n}: its reviewer raised it (${raise.split('\n')[0].slice(0, 200)}): it carries needs-human now; the Human decides`);
+  }
   // A draft is readied and armed at once, as the queue did before FAC-55. A pull request that was ready already is read fresh: CI may have
   // ended, and arming a ready pull request would merge it.
   if (pr.isDraft) gh(['pr', 'ready', String(n)]);
@@ -252,7 +256,6 @@ function step(pr, head, branch, stacks, merge, drafts) {
   }
   say(0, `armed #${n} at HEAD ${short}${review ? `: reviewer PASS ${review.record.tag}, session ${review.record.session}`
     : '; no reviewer record is required here: Colly and the supervising session review this repository\'s pull requests'}`);
-  if (raised) return say(1, `#${n} is armed; its reviewer raised it (${raise.split('\n')[0].slice(0, 200)}): it carries needs-human and waits for the Human's approval`);
   return wait ? waits() : 0;
 }
 
