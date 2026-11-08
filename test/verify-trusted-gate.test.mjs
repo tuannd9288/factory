@@ -7,7 +7,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { commit, git, repoWithKit, run } from './helpers.mjs';
+import { commit, factoryAt, git, repoWithKit, run } from './helpers.mjs';
 
 const lib = () => import('../kit/.gate/bin/lib/instructions.mjs');
 const HEX = (c) => c.repeat(40);
@@ -53,7 +53,7 @@ describe('verify-trusted reads the candidate\'s Gate block as objects', () => {
   after(() => r.cleanup());
 
   const objects = (base = baseSha, env = {}) =>
-    run(trusted, process.execPath, [join(trusted, '.gate/bin/lib/instructions.mjs'), 'objects', '--repo', r.repo, '--base', base], { GATE_FACTORY_URL: factory, ...env });
+    run(trusted, process.execPath, [join(trusted, '.gate/bin/lib/instructions.mjs'), 'objects', '--repo', r.repo, '--base', base], { ...factoryAt(factory), ...env });
   /** A candidate: a commit on `from` (default the base) that writes `files`; the working tree is left as committed. */
   const candidate = (files, from = baseSha) => {
     git(r.repo, 'reset', '-q', '--hard');
@@ -123,7 +123,7 @@ describe('verify-trusted reads the candidate\'s Gate block as objects', () => {
 
   test('a factory that cannot be fetched is red, never a pass', async () => {
     candidate(await update(S2, `${F2}\n`));
-    red(objects(baseSha, { GATE_FACTORY_URL: join(r.dir, 'nowhere.git') }), /could not fetch/);
+    red(objects(baseSha, factoryAt(join(r.dir, 'nowhere.git'))), /could not fetch/);
   });
 
   test('a block taken out, or an AGENTS.md over the limit, is red on the ordinary path too', () => {
@@ -159,7 +159,7 @@ describe('verify-trusted reads the candidate\'s Gate block as objects', () => {
     const verifyTrusted = (env = {}) => {
       const body = join(r.dir, 'team-body.txt');
       writeFileSync(body, 'Team: team-x\n');
-      return run(trusted, join(trusted, '.gate/bin/verify-trusted'), [r.repo, baseSha], { GATE_FACTORY_URL: factory, GATE_BODY_FILE: body, ...env });
+      return run(trusted, join(trusted, '.gate/bin/verify-trusted'), [r.repo, baseSha], { ...factoryAt(factory), GATE_BODY_FILE: body, ...env });
     };
 
     test('a forged pair is red at verify-trusted, with main\'s other checks still run', async () => {

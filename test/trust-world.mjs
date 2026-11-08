@@ -4,7 +4,7 @@
 // only through the merge's second parent); S3 came after and a later commit F3 put S2 back. No network.
 import { mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { commit, git, repoWithKit, run } from './helpers.mjs';
+import { commit, factoryAt, git, repoWithKit, run } from './helpers.mjs';
 import { replaceGate } from '../kit/.gate/bin/lib/instructions.mjs';
 
 export function trustWorld() {
@@ -35,7 +35,7 @@ export function trustWorld() {
   const trusted = join(r.dir, 'trusted');
   git(r.dir, 'clone', '-q', join(r.dir, 'app.git'), trusted);
   const objects = (base = baseSha, env = {}) =>
-    run(trusted, process.execPath, [join(trusted, '.gate/bin/lib/instructions.mjs'), 'objects', '--repo', r.repo, '--base', base], { GATE_FACTORY_URL: factory, ...env });
+    run(trusted, process.execPath, [join(trusted, '.gate/bin/lib/instructions.mjs'), 'objects', '--repo', r.repo, '--base', base], { ...factoryAt(factory), ...env });
   /** A commit on `from` that writes `files`, with `links` (path -> target) made first. */
   const candidate = (files, from = baseSha, links = {}) => {
     git(r.repo, 'reset', '-q', '--hard');

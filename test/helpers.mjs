@@ -6,6 +6,7 @@ import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nodeName } from '../bin/lib/node.mjs';
+import { FACTORY_URL } from '../kit/.gate/bin/lib/instructions.mjs';
 
 export const factory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -36,6 +37,9 @@ export const quiet = {
   GIT_CONFIG_KEY_2: 'core.hooksPath',
   GIT_CONFIG_VALUE_2: '/dev/null',
 };
+
+/** quiet, with the trust check's fetch of the public factory (FACTORY_URL) sent to a local folder by git's own url.<folder>.insteadOf. */
+export const factoryAt = (folder) => ({ ...quiet, GIT_CONFIG_COUNT: '7', GIT_CONFIG_KEY_6: `url.${folder}.insteadOf`, GIT_CONFIG_VALUE_6: FACTORY_URL });
 
 export function run(cwd, command, args = [], env = {}, timeout = undefined) {
   const { NODE_TEST_CONTEXT, ...outer } = process.env;

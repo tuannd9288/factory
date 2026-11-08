@@ -9,9 +9,9 @@
 //   node instructions.mjs section <file>   the kit's gate-section.md is one well-formed block within the kit's budget
 // Exit 0 fine, 1 on a problem, 2 when something cannot be read.
 import { spawnSync } from 'node:child_process';
-import { lstatSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const BEGIN = '<!-- factory:gate:begin -->';
@@ -212,7 +212,8 @@ export function checkWorktree(root) {
 // verify-trusted lays main's AGENTS.md, CLAUDE.md and .gate/ files over the candidate before main's checks run, so those
 // checks see main's bytes. This reads the candidate's own commit with ls-tree and cat-file, never its checkout.
 
-/** The factory whose main vouches for a kit update. Only an environment main's workflow does not set changes it. */
+/** The factory whose main vouches for a kit update. The fetch reads git's own configuration, as every git call does; a test
+ * points it at a local factory with url.<folder>.insteadOf. */
 export const FACTORY_URL = 'https://github.com/tuannd9288/factory.git';
 const SECTION = '.gate/gate-section.md';
 const KIT_COMMIT = '.gate/kit-commit';
@@ -259,21 +260,6 @@ function fetchFactory(url) {
   return { dir, done };
 }
 
-/** Where the factory's main is fetched from: the public factory, unless GATE_FACTORY_URL names a local folder, as an
- * absolute path. That variable is for tests. Anything else it holds (a URL, a file:// URL, a relative path, a path that is
- * no folder) is a problem and not a fallback; unset or empty is the public factory. */
-function factoryLocation(env = process.env) {
-  const given = env.GATE_FACTORY_URL;
-  if (given === undefined || given === '') return { url: FACTORY_URL };
-  let folder = false;
-  try {
-    folder = isAbsolute(given) && statSync(given).isDirectory();
-  } catch {
-    folder = false;
-  }
-  return folder ? { url: given } : { problem: `GATE_FACTORY_URL must be an absolute path to a local folder, and is only for tests; it is ${JSON.stringify(given)}` };
-}
-
 const isAncestor = (dir, older, newer) => git(['-C', dir, 'merge-base', '--is-ancestor', older, newer]).status === 0;
 
 /** Whether a commit is on the first-parent line of the factory's main. A commit that main reaches only through a merge's
@@ -297,7 +283,7 @@ export function objectProblems(options) {
   }
 }
 
-function judgeObjects({ repo, base, head = 'HEAD', location = factoryLocation() }) {
+function judgeObjects({ repo, base, head = 'HEAD' }) {
   const read = (rev) => ({ agents: entryIn(repo, rev, 'AGENTS.md'), claude: entryIn(repo, rev, 'CLAUDE.md'), section: entryIn(repo, rev, SECTION), commit: entryIn(repo, rev, KIT_COMMIT) });
   const b = read(base);
   const c = read(head);
@@ -316,13 +302,10 @@ function judgeObjects({ repo, base, head = 'HEAD', location = factoryLocation() 
   if (!key) problems.push(`${KIT_COMMIT} must be one full factory commit (40 lowercase hex characters) and a newline: this pull request changes the Gate block, its file or that commit`);
   else {
     let factory = null;
-    if (location.problem) problems.push(`could not fetch the factory's main: ${location.problem}: a kit update cannot be judged`);
-    else {
-      try {
-        factory = fetchFactory(location.url);
-      } catch (error) {
-        problems.push(`${error.message}: a kit update cannot be judged`);
-      }
+    try {
+      factory = fetchFactory(FACTORY_URL);
+    } catch (error) {
+      problems.push(`${error.message}: a kit update cannot be judged`);
     }
     if (factory) {
       try {

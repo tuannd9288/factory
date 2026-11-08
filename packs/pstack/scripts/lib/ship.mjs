@@ -12,6 +12,8 @@ import process from 'node:process';
 const installed = existsSync(new URL('../../.gate/bin/lib/subject.mjs', import.meta.url));
 const FACTORY = !installed && existsSync(new URL('../../../../kit/.gate/bin/lib/subject.mjs', import.meta.url));
 const { subjectProblem, titleProblem } = await import(FACTORY ? '../../../../kit/.gate/bin/lib/subject.mjs' : '../../.gate/bin/lib/subject.mjs');
+// The kit's one gh runner (FAC-85). A repository that copies this pack before its kit update brings gh.mjs fails here, at load.
+const { gh } = await import(FACTORY ? '../../../../kit/.gate/bin/lib/gh.mjs' : '../../.gate/bin/lib/gh.mjs');
 
 // The template's issue lines. A body for a repository on Linear carries `Fixes <KEY>` and `Issue: <KEY>` in their place and passes (#404).
 const PLACEHOLDER = '<issue labelled task>';
@@ -20,7 +22,6 @@ const FIELDS = 'number,title,url,baseRefName,headRefOid,labels,isDraft,mergeable
 const READY = ['CLEAN', 'HAS_HOOKS', 'UNSTABLE'];
 
 const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 const quietGit = (args) => spawnSync('git', args, { stdio: 'ignore' }).status === 0;
 const say = (code, line) => {
   console.log(`ship: ${line}`);
