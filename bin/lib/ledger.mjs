@@ -885,7 +885,7 @@ async function main(argv) {
     // A registry or a Linear read that fails leaves this repository's tasks out and says so; the rest of the digest is written.
     let team = null;
     try {
-      team = onLinear(repo, state);
+      team = onLinear(repo.slice(repo.indexOf('/') + 1), state);
     } catch (error) {
       unreadBecause(repo, error);
     }
