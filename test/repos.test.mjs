@@ -18,6 +18,7 @@ test('githubRepo reads owner/name only where git reads github.com as the host, a
     // github.com in the path, the user, the query or the fragment of another host, or after another host's scp-like colon.
     'https://evil.com/github.com/o/app', 'ssh://git@evil.com/github.com/o/app.git', 'git@evil.com:github.com/o/app', 'https://github.com@evil.com/o/app',
     'https://evil.com?@github.com/o/app', 'https://evil.com#@github.com/o/app', 'evil.com:x@github.com:o/app', 'evil::x@github.com:o/app',
+    'https://evil.com\\@github.com/o/app', 'evil.com\\x@github.com:o/app',
     // Local paths to git.
     'github.com/o/app', 'x@github.com/o/app', 'file://github.com/o/app',
     // The host in another case than GitHub's, as no caller read it before.

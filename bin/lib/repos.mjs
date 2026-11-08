@@ -9,11 +9,11 @@ import { ROOT } from './checkout.mjs';
 export const FACTORY_REPO = 'factory';
 
 // Where git reads `host` as the host of an origin: after a scheme git speaks over a network (http, https, ssh, git, git+ssh, ssh+git), its
-// // and an optional user@ with no / ? # in it; or, in the scp-like form, at the start or after a user@ with no / or : in it, before a :.
-// A look-alike host (evilgithub.com), github.com in another host's path, user, query or fragment, after another host's scp-like colon, or
-// in a local path (github.com/o/r, x@github.com/o/r, file://) is none. The host is matched in lower case, as every reader of an origin
-// matched it before (FAC-85).
-const hostAt = (host) => new RegExp(`^(?:(?:https?|ssh|git|git\\+ssh|ssh\\+git):\\/\\/(?:[^@\\/?#\\s]+@)?${host}[:\\/]|(?:[^@\\/:\\s]+@)?${host}:)`);
+// // and an optional user@ with no / \ ? # in it; or, in the scp-like form, at the start or after a user@ with no / \ or : in it, before
+// a :. A look-alike host (evilgithub.com), github.com in another host's path, user, query or fragment, after another host's scp-like
+// colon or a backslash (which a URL parser reads as a / ending the host), or in a local path (github.com/o/r, x@github.com/o/r, file://)
+// is none. The host is matched in lower case, as every reader of an origin matched it before (FAC-85).
+const hostAt = (host) => new RegExp(`^(?:(?:https?|ssh|git|git\\+ssh|ssh\\+git):\\/\\/(?:[^@\\/\\\\?#\\s]+@)?${host}[:\\/]|(?:[^@\\/\\\\:\\s]+@)?${host}:)`);
 // github.com, and www.github.com, which every reader but bin/seat's took.
 const ON_GITHUB = hostAt('(?:www\\.)?github\\.com');
 // GitHub's hosts, with ssh.github.com (its ssh over port 443), for clonesUnder's line about a GitHub origin that names no owner/name.
