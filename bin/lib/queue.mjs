@@ -13,7 +13,7 @@
 // and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds; a run that fails
 // before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
 // queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
-// With no --repo it sweeps the repositories taken in (#211), found as the ledger finds them (clonesUnder): a folder
+// With no --repo it sweeps the repositories taken in (#211), found by repos.mjs's clonesUnder, as the ledger finds them: a folder
 // of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its
 // origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
 // The last step, under the lock, writes the events of #309 (bin/lib/events.mjs): one line to $FACTORY_STATE/events.jsonl when a condition
@@ -47,7 +47,7 @@ import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { MACBOOK_SHARE, noteGh, observe, resetNotes } from './events.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
-import { clonesUnder } from './ledger.mjs';
+import { clonesUnder } from './repos.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
