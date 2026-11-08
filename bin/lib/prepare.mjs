@@ -20,8 +20,8 @@
 //         session mark live in $FACTORY_STATE/prepared/, where no seat can write, keyed to the worktree's path alone, and a stamped
 //         worktree, or one whose first session ran, is decided on before the store is read. A worktree made again at the same path, by
 //         the Lead or by a seat, is the same worktree and gets no install: a fresh install needs a new worktree path.
-// Every git call takes research-git's guard (bin/lib/research-git.mjs BASE), no transport at all and no lazy fetch, and no replace
-// objects; the hash check is the defence.
+// Every git call takes research-git's guard and read environment (bin/lib/research-git.mjs: BASE, an empty GIT_ALLOW_PROTOCOL and
+// GIT_NO_LAZY_FETCH) and no replace objects; the hash check is the defence.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, writeFileSync } from 'node:fs';
@@ -41,10 +41,12 @@ export const COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 // dsh-superagent-prototype gives a workspace's prepare "ten minutes to finish" (docs/003-execution.md:51 at 8c32a9d).
 const TIME_MS = 10 * 60_000;
-// research-git's guard (bin/lib/research-git.mjs): no pager, hooks, fsmonitor, bare repository found by looking, or file transport; and no
-// transport at all, since reading the store never needs one, and a clone whose config names a promisor remote would otherwise fetch a
-// missing object by itself, running what that config names for the transport (core.sshCommand, ...), which a seat can write.
-const BASE = ['--no-pager', '-c', 'safe.bareRepository=explicit', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.file.allow=never', '-c', 'protocol.allow=never'];
+// research-git's guard (bin/lib/research-git.mjs BASE): no pager, hooks, fsmonitor, bare repository found by looking, or file transport.
+// storeOf adds research-git's read environment: an empty GIT_ALLOW_PROTOCOL, so no transport at all whatever the clone's protocol.*
+// settings say (with the variable set git reads none of them, where a clone's own protocol.ssh.allow=always undid -c protocol.allow=
+// never), and GIT_NO_LAZY_FETCH. Reading the store never needs a transport, and a clone whose config names a promisor remote would
+// otherwise fetch a missing object by itself, running what that config names for the transport (core.sshCommand, ...).
+const BASE = ['--no-pager', '-c', 'safe.bareRepository=explicit', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.file.allow=never'];
 
 const lastLine = (text) => text.trim().split('\n').at(-1)?.slice(0, 300) ?? '';
 
@@ -71,7 +73,7 @@ function storeOf(work, env) {
   return (wanted) => {
     if (!wanted.length) return [];
     const r = spawnSync('git', ['-C', work, ...BASE, 'cat-file', '--batch'], {
-      env: { ...env, GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1' }, input: `${wanted.map(([id]) => id).join('\n')}\n`, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 1 << 30, timeout: 60_000,
+      env: { ...env, GIT_NO_REPLACE_OBJECTS: '1', GIT_ALLOW_PROTOCOL: '', GIT_NO_LAZY_FETCH: '1' }, input: `${wanted.map(([id]) => id).join('\n')}\n`, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 1 << 30, timeout: 60_000,
     });
     if (r.error?.code === 'ENOENT') throw new PrepareError(`git is not on bin/seat's PATH (${env.PATH ?? ''}), so main's gate_prepare could not be read`);
     const out = r.stdout ?? Buffer.alloc(0);

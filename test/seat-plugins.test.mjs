@@ -222,7 +222,7 @@ test('a repo-local core.fsmonitor does not run during a first start\'s check', (
   assert.ok(!existsSync(join(w.root, 'MONITOR-RAN')));
 }));
 
-test('a missing object in a clone whose config names a promisor remote is not fetched: its sshCommand does not run', () => world(async (w) => {
+test('a missing object in a clone whose config names a promisor remote, and allows its transport, is not fetched: its sshCommand does not run', () => world(async (w) => {
   const main = mainWith(w, prepare('echo main >> "$PREP_OUT"'));
   const loose = join(w.root, 'loose');
   git(w.root, 'init', '-q', '-b', 'work', loose);
@@ -233,7 +233,7 @@ test('a missing object in a clone whose config names a promisor remote is not fe
   rmSync(join(loose, '.git/objects', blob.slice(0, 2), blob.slice(2)));
   writeFileSync(join(w.root, 'ssh.sh'), `#!/bin/sh\ntouch '${join(w.root, 'SSH-RAN')}'\nexit 1\n`);
   chmodSync(join(w.root, 'ssh.sh'), 0o755);
-  for (const [k, v] of [['core.repositoryformatversion', '1'], ['extensions.partialClone', 'origin'], ['remote.origin.url', 'ssh://git@example.invalid/x.git'], ['remote.origin.promisor', 'true'], ['core.sshCommand', join(w.root, 'ssh.sh')]]) git(loose, 'config', k, v);
+  for (const [k, v] of [['core.repositoryformatversion', '1'], ['extensions.partialClone', 'origin'], ['remote.origin.url', 'ssh://git@example.invalid/x.git'], ['remote.origin.promisor', 'true'], ['core.sshCommand', join(w.root, 'ssh.sh')], ['protocol.ssh.allow', 'always']]) git(loose, 'config', k, v);
   prepareAt(w, 't1', main, loose);
   assert.ok(!existsSync(join(w.root, 'SSH-RAN')), 'no transport ran');
   assert.equal(prepared(w), '');
