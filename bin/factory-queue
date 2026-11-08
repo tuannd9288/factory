@@ -8,8 +8,8 @@
 #     [--daemon]                                   as a LaunchDaemon run by this account (#24), for the Human to load
 #   bin/factory-queue check [--repo owner/name...] run one sweep in that job's environment, before the Human loads it
 # With no --repo, which is how the job runs, a sweep covers every repository taken in (#211), so one with the kit
-# needs no new install. The rule is the ledger's (clonesUnder in bin/lib/ledger.mjs): a folder of the factory's root
-# ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its origin on github.com.
+# needs no new install. The rule is clonesUnder in bin/lib/repos.mjs, which the ledger uses too: a folder of the factory's root
+# ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/, named by its origin on github.com.
 # A kit clone whose origin cannot be read or does not name owner/name is skipped with a line that names its folder.
 # None found is a sweep of nothing that says so, not an error. --repo gives an explicit list in place of the search.
 # A rollback is a revert pull request through the gate. Turning the ruleset off is the Human's emergency step alone,
@@ -35,7 +35,7 @@
 # plist with `sudo install -o root -g wheel -m 644 <plist> /Library/LaunchDaemons/io.github.tuannd9288.factory.queue.plist`,
 # loads it with `sudo launchctl bootstrap system <that path>` and stops it with
 # `sudo launchctl bootout system/io.github.tuannd9288.factory.queue`. That stops the job; the daemon it started runs in a session of its own and
-# lives on a lease from the job's pings (#399): when none has come for 180 s (FACTORY_DAEMON_LEASE_MS) it stops, after the pass in hand, so a
+# lives on a lease from the job's pings (#399): when none has come for 180 s it stops, after the pass in hand, so a
 # bootout ends it within about three minutes. To stop it at once, check that the pid recorded in $FACTORY_STATE/daemon.lock is the
 # daemon (a note a crashed daemon left can name a reused pid): `ps -p <pid> -o command=` shows `node <checkout>/bin/lib/daemon.mjs`, a command
 # that ends in bin/lib/daemon.mjs, since bin/factory-daemon execs node. Then send it SIGTERM. Re-installing a changed plist goes in this

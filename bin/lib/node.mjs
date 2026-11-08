@@ -16,7 +16,7 @@ export const HOST = 'tuans-mac-mini';
 /** The agents' macOS user (FACTORY_HOST_USER where a test names another). */
 export const AGENTS_USER = 'factory';
 /** The agents' and the Human's GitHub logins, when the environment names none. */
-export const AGENT = 'tuan9288-agent';
+export const AGENT = 'nami9288';
 export const HUMAN = 'tuannd9288';
 
 /** The state folder: FACTORY_STATE, else ~/.local/state/factory. */
@@ -62,8 +62,9 @@ export function installedRoot(env = process.env) {
   return join(dataOf(env), 'checkout');
 }
 
-/** The agents' GitHub account, as bin/onboard names it. */
-export const agentOf = (env = process.env) => env.FACTORY_AGENT ?? AGENT;
+/** The agents' GitHub account, as bin/onboard names it: FACTORY_AGENT, else AGENT; an empty FACTORY_AGENT means the default, as
+ * bin/onboard's ${FACTORY_AGENT:-…} has it. */
+export const agentOf = (env = process.env) => env.FACTORY_AGENT || AGENT;
 
 /** The agents' GitHub token in this node's own token store (#366), under the agents' account; undefined on the factory host, whose gh has its
  * own login, and on a node that holds none. */

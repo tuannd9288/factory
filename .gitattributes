@@ -10,7 +10,6 @@ packs/*/skills/** review-agent-guidance
 **/.claude/** review-agent-guidance
 kit/.gate/gate-section.md review-agent-guidance
 kit/.gate/enforced-rules.md review-agent-guidance
-kit/.gate/bin/lib/reviewer-prompt.md review-agent-guidance
 **/.claude/**/scripts/** -review-agent-guidance
 
 # Tests and fixtures.
@@ -27,6 +26,3 @@ packs/*/INSTALL.md -review-agent-guidance review-documentation
 # Exceptions to the lines above.
 **/.claude/settings*.json -review-agent-guidance
 packs/*/yields.md -review-agent-guidance review-documentation
-
-# Written by a tool, not a person.
-kit/.gate/bin/reviewer/package-lock.json review-generated

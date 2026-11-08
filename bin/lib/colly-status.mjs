@@ -1,14 +1,18 @@
 // Colly status text and shared session readers (#429).
 // --line and --brief share top-github.json, preserving the existing cache and deadlines.
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
+import { readMarkers } from './status.mjs';
+import { writeAtomic } from './files.mjs';
 import { hookStateOf, parseLog } from './claude-code.mjs';
-import { REQUIRED, clonesUnder, readSessions } from './ledger.mjs';
+import { REQUIRED } from './ledger.mjs';
+import { readSessions } from './records.mjs';
+import { byName, cloneRepo, clonesUnder } from './repos.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 
@@ -63,12 +67,7 @@ export function roleOf(tag, record) {
 /** owner/name of a work folder's origin, read with git alone; null where git cannot tell. */
 function originIn(cwd) {
   if (!cwd || !existsSync(cwd)) return null;
-  try {
-    const url = execFileSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)?.[1] ?? null;
-  } catch {
-    return null;
-  }
+  return cloneRepo(cwd, 5000);
 }
 
 /** ps's elapsed time ([[dd-]hh:]mm:ss) in milliseconds; null for anything else. */
@@ -108,11 +107,8 @@ export function leadOf(command) {
   return m && TEAM.test(m[2]) && /\bclaude\b/.test(command) ? { repo: m[1], team: m[2] } : null;
 }
 
-/** The teams whose Lead runs on a repository, sorted. */
+/** The teams whose Lead runs on a repository, sorted: the rule `factory use` restarts a Lead by (#179). */
 export const leadTeams = (repo, processes = psList) => [...new Set(processes().map((p) => leadOf(p.command)).filter((l) => l?.repo === repo).map((l) => l.team))].sort();
-
-/** Whether a Lead of a repository runs: the rule used by `factory use` (#179). */
-export const leadRunning = (repo, processes = psList) => leadTeams(repo, processes).length > 0;
 
 function branchIn(cwd) {
   if (!cwd) return null;
@@ -225,7 +221,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     }
     for (const n of names) {
       const m = /^run-(.+)\.jsonl$/.exec(n);
-      if (!m || m[1].endsWith('.claim')) continue;
+      if (!m) continue;
       const tag = m[1];
       const file = join(dir, n);
       let st;
@@ -259,7 +255,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
       const s = statSync(join(dir, n));
       if (!newest || s.mtimeMs > newest.mtimeMs) newest = { file: join(dir, n), mtimeMs: s.mtimeMs, st: s };
     }
-    const repo = [...clones.keys()].find((r) => r.split('/')[1] === repoName) ?? null;
+    const repo = byName(clones.keys(), repoName);
     const cwd = repo ? clones.get(repo) : null;
     let event = null;
     try {
@@ -285,7 +281,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
   for (const s of out) {
     if (s.repo || !s.folder) continue;
     const m = /^(.+)-\d+$/.exec(s.folder);
-    s.repo = m?.[1] === 'issue' ? (root ? originCached(root) : null) : ([...names].find((r) => r.split('/')[1] === m?.[1]) ?? null);
+    s.repo = m?.[1] === 'issue' ? (root ? originCached(root) : null) : byName(names, m?.[1]);
   }
   if (cache) cache.logs = seenLogs;
   const rank = (s) => ROLE_ORDER.indexOf(s.role) === -1 ? ROLE_ORDER.length : ROLE_ORDER.indexOf(s.role);
@@ -305,13 +301,9 @@ export function eventsOf(state) {
 
 /** The queue's and the alerts' state: the time in the newest `queue-*.ok`, the `queue-*.failed` files, every `*.failed` file. */
 export function queueOf(dir) {
-  let names = [];
-  try {
-    names = readdirSync(dir).sort();
-  } catch {}
-  const first = (f) => readText(join(dir, f)).split('\n')[0].trim();
-  const oks = names.filter((f) => /^queue-.*\.ok$/.test(f)).map(first).filter(Boolean).sort();
-  const failed = names.filter((f) => f.endsWith('.failed')).map((f) => ({ file: f, text: first(f) }));
+  const markers = readMarkers(dir) ?? [];
+  const oks = markers.filter((m) => m.kind === 'ok' && m.name.startsWith('queue-')).map((m) => m.line).filter(Boolean).sort();
+  const failed = markers.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line }));
   return { lastSweep: oks.at(-1) ?? null, queueFailed: failed.filter((f) => f.file.startsWith('queue-')).length, failed };
 }
 
@@ -368,10 +360,7 @@ function readSharedGithub(state) {
 function writeSharedGithub(state, data, good) {
   try {
     mkdirSync(state, { recursive: true });
-    const file = join(state, GH_FILE);
-    const tmp = `${file}.tmp-${process.pid}`;
-    writeFileSync(tmp, JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
-    renameSync(tmp, file);
+    writeAtomic(join(state, GH_FILE), JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
   } catch {
     // a view that cannot write the file reads GitHub again next time
   }
@@ -517,11 +506,14 @@ function groupOf(repo, number, gh, sessions) {
   const merged = Boolean(pr?.mergedAt);
   const closed = issue?.state === 'CLOSED';
   const step = merged ? 'merged' : closed ? 'closed' : pr ? 'PR open' : held ? 'claimed' : gh?.claimsOk === false ? '?' : 'unclaimed';
+  // The kit runs no review job since FAC-100; a repository still on the kit before it runs its own until FAC-102 moves it, and that job
+  // is not among the kit's required checks, so it is read from the rollup.
+  const oldReview = (pr?.statusCheckRollup ?? []).filter((c) => c.name === 'review').at(-1);
   let waiting = '–';
   if (pr && !merged) {
     if (labels.some((l) => l === 'tier-3' || l === 'needs-human') && checks.tier && checks.tier.status === 'COMPLETED' && checks.tier.conclusion !== 'SUCCESS') waiting = 'the Human';
     else if (pr.reviewDecision === 'REVIEW_REQUIRED' && gh.required.every((n) => MARK(checks[n]) === '✓')) waiting = 'the Human';
-    else if (checks.review && checks.review.status !== 'COMPLETED') waiting = 'the reviewer';
+    else if (oldReview && oldReview.status !== 'COMPLETED') waiting = 'the reviewer';
   }
   if (waiting === '–' && sessions.some((s) => s.live)) waiting = 'the team';
   return {

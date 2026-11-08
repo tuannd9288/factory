@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { until, world } from './seat-world.mjs';
 import { quiet } from './helpers.mjs';
 import * as seat from '../bin/lib/seat.mjs';
@@ -86,6 +86,18 @@ test('two result events: turns and duration summed, cost and subtype from the la
   assert.equal(rec.total_cost_usd, 2.5);
   assert.equal(rec.ended, 'error_max_turns');
   assert.deepEqual(rec.structured, { conclusion: 'done', evidence: ['a'], couldNotRead: [], needsLead: [], foundOutside: [] });
+}));
+
+test('the record names the commit the work folder was at when the seat started, which scripts/ship keys a reviewer\'s PASS on (FAC-101)', () => world(async (w) => {
+  git(w.work, 'init', '-q', '-b', 'work-1');
+  git(w.work, 'commit', '-q', '--allow-empty', '-m', 'x');
+  const head = spawnSync('git', ['-C', w.work, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  // The world's PATH holds only the fakes and node; a seat finds git on the real one.
+  const gitDir = dirname(spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim());
+  const r = w.start('reviewer', ['--tag', 'review1'], { PATH: `${w.bin}:${dirname(process.execPath)}:${gitDir}` });
+  assert.equal(r.code, 0, r.out + r.err);
+  await until(() => w.records().length === 1, 'the record');
+  assert.equal(w.records()[0].head, head);
 }));
 
 test('a report that lists work found outside the task leaves it in the record as given (#338)', () => world(async (w) => {

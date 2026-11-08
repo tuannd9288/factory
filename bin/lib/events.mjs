@@ -34,11 +34,13 @@
 // reading the state folder. Every local user can read the share's lines (redacted, as above), and nothing else of the state folder.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RATE_SOURCE } from './claude-code.mjs';
+import { writeAtomic } from './files.mjs';
 import { claimJob } from './job-claim.mjs';
+import { MACBOOK_SHARE } from './launchd.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountEvent, accountOut } from './seat.mjs';
@@ -46,6 +48,7 @@ import { quotaRows, alertLines } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
 import { AGENTS_USER, rootOf, stateDirOf } from './node.mjs';
 import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
+import { clearFailed, markFailed } from './status.mjs';
 
 /** How long a required check may sit unstarted before it is told: half as much again as the slowest normal wait seen on 2026-11-02
  * (1,208 s on a busy self-hosted runner, from the run's creation), so only a real stall passes it. */
@@ -54,8 +57,6 @@ export const NOT_STARTED_MS = 30 * 60_000;
 const STARTED = new Set(['IN_PROGRESS', 'COMPLETED']);
 const HUMAN = new Set(['tier-3', 'needs-human']);
 const stateDir = () => stateDirOf();
-
-export { redact };
 
 /** The first non-empty line of a text, redacted, with its control characters gone, at most 200 characters. */
 export const oneLine =(text) => redact(String(text).split('\n').find((l) => l.trim()) ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
@@ -121,8 +122,7 @@ const readText = (file) => {
 /** Condition 3: the Leads running now whose newest hook event is a permission prompt or an elicitation dialog (the `waiting` state of
  * top's LEAD_STATES, read by top's own rule). The guess of a Lead at a login or a folder trust is not a dialog and is left out. A process
  * list that cannot be read throws (readProcesses), unlike top's, which shows none. */
-export const defaultProcesses = readProcesses;
-export function leadsAtDialog({ runs, now, processes = defaultProcesses }) {
+export function leadsAtDialog({ runs, now, processes = readProcesses }) {
   const out = [];
   for (const proc of processes()) {
     const lead = leadOf(proc.command);
@@ -213,9 +213,9 @@ const linesOf = (file) =>
 /** The lines of the state folder's events file. */
 export const readLines = (state) => linesOf(join(state, 'events.jsonl'));
 
-/** Where the MacBook's queue job puts the share (FAC-43, bin/lib/queue.mjs job): a folder of its own in /Users/Shared, which every local user
- * can reach. */
-export const MACBOOK_SHARE = '/Users/Shared/factory/events.jsonl';
+// Where the MacBook's queue job puts the share (FAC-43): a folder of its own in /Users/Shared, which every local user can reach. Its one
+// home is the jobs' table (bin/lib/launchd.mjs), and it is exported here too for the readers that import it from here.
+export { MACBOOK_SHARE };
 
 /** Why a share's folder or file (`what`) may not be used, from its lstat, or null: it must be a real folder or file (a link is not), owned by
  * one of `owners` (uids), and writable by no one else. /Users/Shared is writable by every account, so an account could make the folder first,
@@ -241,7 +241,6 @@ export function ownersOf(env = process.env) {
  * $state/events-share.failed says why, in one line. A failed share never stops the write to events.jsonl. */
 function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
   if (!file) return;
-  const failed = join(state, 'events-share.failed');
   try {
     const dir = dirname(file);
     try {
@@ -264,20 +263,10 @@ function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
     } finally {
       closeSync(fd);
     }
-    rmSync(failed, { force: true });
+    clearFailed(state, 'events-share');
   } catch (error) {
-    try {
-      writeFileSync(failed, `${new Date().toISOString()} the events share ${file} was not written: ${error.code === 'ELOOP' ? 'file is a link' : error.message}\n`);
-    } catch {
-      // the state folder could not be written either: the events write below it has already failed or will say so
-    }
+    markFailed(state, 'events-share', `the events share ${file} was not written: ${error.code === 'ELOOP' ? 'file is a link' : error.message}`);
   }
-}
-
-export function writeAtomic(file, text) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, file);
 }
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);

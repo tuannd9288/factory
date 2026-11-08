@@ -31,7 +31,8 @@ const REFUSED_SHORT = { 'ls-files': 'X', blame: 'S' };
 const NO_PROGRAMS = ['log', 'show', 'diff-tree', 'blame'];
 // Clone's other options can run a program (--upload-pack, --template, -c, --recurse-submodules) or read another folder.
 const CLONE_FLAGS = ['--single-branch', '--no-checkout', '-n', '--quiet', '-q'];
-const CLONE_VALUES = ['--depth', '--branch', '-b', '--filter'];
+// No --filter: a partial clone reads its missing objects by lazy fetch, which every read turns off (FAC-115); --depth makes a small one.
+const CLONE_VALUES = ['--depth', '--branch', '-b'];
 
 // Every call: no pager, no hooks, no fsmonitor, no bare repository found by looking, no file transport.
 const BASE = ['--no-pager', '-c', 'safe.bareRepository=explicit', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.file.allow=never'];
@@ -110,9 +111,12 @@ export function plan(argv, env = process.env) {
     // no such clone
   }
   if (!made) throw new Refused(`${first}: no clone of that name; make one with clone`);
+  // A read needs no transport. A clone's config can name a promisor remote, and git then fetches a missing object by itself, over what
+  // that config names (FAC-115). An empty GIT_ALLOW_PROTOCOL allows no transport at all, whatever the clone's protocol.* settings say
+  // (with the variable set, git reads none of them), and GIT_NO_LAZY_FETCH turns the fetch off. Only clone keeps https.
   return {
     args: [...BASE, `--git-dir=${join(dir, '.git')}`, `--work-tree=${dir}`, sub, ...(NO_PROGRAMS.includes(sub) ? ['--no-textconv', '--no-ext-diff'] : []), ...args],
-    env: gitEnv,
+    env: { ...gitEnv, GIT_ALLOW_PROTOCOL: '', GIT_NO_LAZY_FETCH: '1' },
   };
 }
 

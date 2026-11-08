@@ -2,7 +2,7 @@
 // (origin/main) holds against what the kit's history has held. Reads git objects of both sides (ls-tree, cat-file, log);
 // it runs nothing the repository holds. bin/kit-evidence then proves the result against the same commit.
 //   node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <repo name>
-//     --human <login> [--out <dir>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>]
+//     --human <login> [--out <dir>] [--runner <json>] [--pr-runner <json>]
 //     [--trusted-runner <json>]
 // `plan` only checks; `lay` also writes the files into the repository's working tree and, with --out, one list per
 // kind (added, updated, kept, removed, dropped-kept; one path a line). Per path:
@@ -35,8 +35,6 @@ import { replaceBlock, insertBlock, splitBlock } from './attributes.mjs';
 import { ATTRIBUTES, BLOCK_FILE, CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, KIT_COMMIT, SECTION, SETTINGS, blockFor, denyOf, git, kitFiles, pastBlobs, pastWithBlock, render, renderedAs, tree } from './evidence.mjs';
 import { SETTINGS as GATE_SETTINGS, WORKFLOWS, describe, parseOptions, runnerProblems, valuesIn } from './gate-settings.mjs';
 import { addDeny } from './settings.mjs';
-
-const RENDERED = (path) => Boolean(FILLED[path]);
 
 export function plan({ factory, commit, repo, base, name, human, given = {} }) {
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
@@ -71,7 +69,7 @@ export function plan({ factory, commit, repo, base, name, human, given = {} }) {
       }
       continue;
     }
-    if (RENDERED(path)) {
+    if (FILLED[path]) {
       const to = rendering(path, want);
       if (!had) {
         out.add.push(path);
@@ -252,7 +250,7 @@ function main(argv) {
   const { values: given, problem } = parseOptions(settings);
   if (problem || !['plan', 'lay'].includes(verb) || ['factory', 'commit', 'repo', 'base', 'name', 'human'].some((k) => !opt[k])) {
     if (problem) console.error(`kit-update: ${problem}`);
-    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> [--out <dir>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]');
+    console.error('usage: node bin/lib/kitupdate.mjs plan|lay --factory <dir> --commit <rev> --repo <dir> --base <rev> --name <name> --human <login> [--out <dir>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]');
     return 2;
   }
   const result = plan({ ...opt, given });

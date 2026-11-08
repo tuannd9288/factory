@@ -13,8 +13,8 @@
 // and leaves $FACTORY_STATE/queue-<owner>-<name>.failed until a sweep of that repository succeeds; a run that fails
 // before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
 // queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
-// With no --repo it sweeps the repositories taken in (#211), found as the ledger finds them (clonesUnder): a folder
-// of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its
+// With no --repo it sweeps the repositories taken in (#211), found by repos.mjs's clonesUnder, as the ledger finds them: a folder
+// of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/, named by its
 // origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
 // The last step, under the lock, writes the events of #309 (bin/lib/events.mjs): one line to $FACTORY_STATE/events.jsonl when a condition
 // begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call. A sixth (#333) tells each move of a
@@ -37,23 +37,25 @@
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { accessSync, closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { userInfo } from 'node:os';
+import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkPlists, checkoutRoot, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
 import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
-import { MACBOOK_SHARE, noteGh, observe, resetNotes } from './events.mjs';
+import { noteGh, observe, resetNotes } from './events.mjs';
+import { JOBS, job as launchdJob, plist, runEnv } from './launchd.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
-import { clonesUnder } from './ledger.mjs';
+import { clonesUnder, githubRepo } from './repos.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
+import { clearFailed, markFailed, markOk, repoMarker } from './status.mjs';
 import { listStreams } from './streams.mjs';
 import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
-import { FACTORY_REPO, teamRows } from './teams.mjs';
+import { FACTORY_REPO } from './repos.mjs';
+import { teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 import { humanOf, installedRoot, nodeLogin, placeOf, profilesOf, rootOf, runsOf, stateDirOf } from './node.mjs';
 import { holderOf, isHeld, takeLock } from './lock.mjs';
@@ -84,9 +86,6 @@ export function pickUpdate(prs, required, position) {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return behind[0] ?? null;
 }
-
-// pickReruns is in bin/lib/checks.mjs, where the wake on a Lead's news reads it too (#370); tests and callers still take it from here.
-export { pickReruns };
 
 export const QUERY = `query($owner:String!,$name:String!,$since:DateTime){repository(owner:$owner,name:$name){issues(states:OPEN,labels:["needs-human"],first:50){nodes{number title}} ${FIELDS} ${MERGED_FIELDS} pullRequests(states:OPEN,first:100){nodes{
 number isDraft body mergeable createdAt mergeStateStatus baseRefName autoMergeRequest{enabledAt} author{login} headRefOid labels(first:30){nodes{name}}
@@ -432,20 +431,19 @@ function sweepNews(repo, folder, state, runs, rulesRead, root) {
  * `queue-<owner>-<name>.failed` can take) with the time and the cause, so the digest shows it; a run that gets past
  * them removes it. Returns the exit code on failure, null to go on; `who.login` is the sweep's own login once it is read. */
 function preflight(state, human, who) {
-  const report = join(state, 'queue-run.failed');
   let why;
   try {
     const login = gh(['api', 'user', '--jq', '.login']).trim();
     who.login = login;
     if (login.toLowerCase() !== human.toLowerCase()) {
-      rmSync(report, { force: true });
+      clearFailed(state, 'queue-run');
       return null;
     }
     why = `runs as the agents' account, not the Human's (${human}); log gh in as the agents' account`;
   } catch (error) {
     why = String(error.stderr || error.message).trim();
   }
-  writeFileSync(report, `${new Date().toISOString()} ${why}\n`);
+  markFailed(state, 'queue-run', why);
   console.error(`factory-queue: ${why}`);
   return 2;
 }
@@ -467,17 +465,15 @@ function followCheckout(state) {
     const differ = checkPlists({ root, state, plistDir: process.env.FACTORY_PLIST_DIR ?? '/Library/LaunchDaemons' }).differ;
     if (differ.length) console.log(`queue: installed plist differs from the code's: ${differ.join(' ')}`);
   } catch (error) {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, 'queue-checkout.failed'), `${new Date().toISOString()} the update raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    markFailed(state, 'queue-checkout', `the update raised ${error.name}: ${error.message}`);
     console.error(`queue: checkout: ${error.message}`);
   }
   return moved;
 }
 
-/** The factory's own repository, named by the origin of the checkout at `root`, or undefined. */
+/** The factory's own repository, named by the origin of the checkout at `root`, or null; it throws when git cannot read the origin. */
 function ownRepo(root) {
-  const origin = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  return /github\.com[:/](.+?)(?:\.git)?\/?$/.exec(origin)?.[1];
+  return githubRepo(execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
 }
 
 /** The merge switch of the factory's own repository (#333), which the sweep does not otherwise read: its rules in force on main, one
@@ -516,8 +512,7 @@ function sweepLanded(state) {
     const r = sweepWorktrees({ clones, state, live, merged });
     if (r.removed || r.kept.length) console.log(`queue: worktrees removed ${r.removed}, kept ${r.kept.length}${r.kept.length ? ' (queue-worktrees.failed names them)' : ''}`);
   } catch (error) {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, 'queue-worktrees.failed'), `${new Date().toISOString()} the sweep raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    markFailed(state, 'queue-worktrees', `the sweep raised ${error.name}: ${error.message}`);
     console.error(`queue: worktrees: ${error.message}`);
   }
 }
@@ -525,15 +520,13 @@ function sweepLanded(state) {
 /** The last step of a sweep (#309), under its lock: the conditions written to the events file from what the sweep read and from the
  * Leads and the accounts on this host (bin/lib/events.mjs). A failure is told in queue-events.failed and never changes the sweep's result. */
 function recordEvents(state, reads, switches) {
-  const failure = join(state, 'queue-events.failed');
   try {
     const runs = runsOf();
     const seen = new Set();
     observe({ state, reads, switches, runs, agentProfiles: profilesOf(), onStart: (condition) => wakeStarted({ condition, reads, runs, seen }) });
-    rmSync(failure, { force: true });
+    clearFailed(state, 'queue-events');
   } catch (error) {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(failure, `${new Date().toISOString()} the events step raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    markFailed(state, 'queue-events', `the events step raised ${error.name}: ${error.message}`);
     console.error(`queue: events: ${error.message}`);
   }
 }
@@ -568,114 +561,38 @@ export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, en
 
 /** The step after the events: a failure is told in queue-reader.failed and never changes the sweep's result. */
 function startReaderPass(state) {
-  const failure = join(state, 'queue-reader.failed');
   try {
     startReader({ state, runs: runsOf() });
-    rmSync(failure, { force: true });
+    clearFailed(state, 'queue-reader');
   } catch (error) {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(failure, `${new Date().toISOString()} starting the reader raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
+    markFailed(state, 'queue-reader', `starting the reader raised ${error.name}: ${error.message}`);
     console.error(`queue: reader: ${error.message}`);
   }
 }
 
 /** Every sweep checks silence under queue.lock; a failure never changes the sweep's result. */
 function checkSilence(state) {
-  const failure = join(state, 'queue-silence.failed');
   try {
     watchSilence({ state, runs: runsOf() });
-    rmSync(failure, { force: true });
+    clearFailed(state, 'queue-silence');
   } catch (error) {
-    try {
-      mkdirSync(state, { recursive: true });
-      writeFileSync(failure, `${new Date().toISOString()} checking silence raised ${error.name}: ${String(error.message).split('\n')[0].slice(0, 200)}\n`);
-    } catch { /* A failure to record the error must not fail the sweep or retain its lock. */ }
+    // markFailed never throws: a marker it cannot write is a line on stderr, so the sweep and its lock go on.
+    markFailed(state, 'queue-silence', `checking silence raised ${error.name}: ${error.message}`);
     console.error(`queue: silence: ${error.message}`);
   }
 }
 
-const LABEL = 'io.github.tuannd9288.factory.queue';
+const LABEL = JOBS.queue.label;
 
-/** The first executable `name` on a PATH, or null. */
-function which(name, path) {
-  for (const dir of (path ?? '').split(':').filter(Boolean)) {
-    try {
-      accessSync(join(dir, name), constants.X_OK);
-      return join(dir, name);
-    } catch {}
-  }
-  return null;
+/** The launchd job that sweeps `repos` once a minute (#48), as the table has it (bin/lib/launchd.mjs). #366: off the factory host the sweep
+ * follows the node's installed copy (#390), which checkoutRoot knows only by FACTORY_CHECKOUT. No token is ever here: the daemon reads the
+ * node's own (bin/lib/node.mjs). Its events also go to the share, which Colly, in another user, follows (FAC-43). */
+function job(repos, env = process.env, daemon = false) {
+  return launchdJob('queue', { repos, env, daemon, place: placeOf(env), installed: installedRoot(env) });
 }
 
-/** The launchd job that sweeps `repos` once a minute (#48): this clone's bin/factory-queue, with the gh and the node
- * this shell finds first on its PATH, and the variables the sweep reads that this shell sets. launchd starts a job with
- * a bare PATH and does not make its log's folder. A node found through a link (Homebrew's /opt/homebrew/bin) keeps the
- * link's folder, which an upgrade does not remove. `as` makes it another job of this clone (the digest's):
- * its label, tool, verb, log name and interval, more variables to keep and more tools to find on the PATH; the
- * defaults are the queue's own. The digest's job (#209) gives no verb, `args` before the repositories, and a
- * `calendar` (launchd's StartCalendarInterval) in place of the interval. */
-export function job(repos, env = process.env, daemon = false, as = {}) {
-  const gh = which('gh', env.PATH);
-  if (!gh) throw new Error('gh is not on PATH, so the job could not run it');
-  const node = which('node', env.PATH) ?? process.execPath;
-  const factory = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const { label = LABEL, tool = 'bin/factory-queue', verb = 'sweep', log = 'queue.log', interval = 60, calendar = null, args = [], keep = [], tools = [] } = as;
-  const extra = tools.map((name) => which(name, env.PATH)).filter(Boolean).map((p) => dirname(p));
-  const path = [...new Set([dirname(gh), dirname(node), dirname(process.execPath), ...extra, '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':');
-  const found = which('node', path);
-  if (!found || realpathSync(found) !== realpathSync(node))
-    throw new Error(`${dirname(gh)}, where gh is, holds another node than this shell's ${node}; put both on one folder first`);
-  const kept = Object.fromEntries(['GH_CONFIG_DIR', 'FACTORY_STATE', 'FACTORY_HUMAN', ...keep].filter((k) => env[k]).map((k) => [k, env[k]]));
-  // #366: off the factory host the sweep follows the node's installed copy (#390), which checkoutRoot knows only by this name. No token is ever
-  // here: the daemon reads the node's own (bin/lib/node.mjs). Its events also go to the share, which Colly, in another user, follows (FAC-43).
-  const copy = placeOf(env) === 'factory' ? {} : { FACTORY_CHECKOUT: installedRoot(env), FACTORY_EVENTS_SHARE: MACBOOK_SHARE };
-  return {
-    label,
-    interval: calendar ? null : interval,
-    calendar,
-    program: [join(factory, tool), ...(verb ? [verb] : []), ...args, ...repos.flatMap((repo) => ['--repo', repo])],
-    cwd: factory,
-    env: { PATH: path, ...kept, ...copy, ...(daemon ? { HOME: env.HOME } : {}) },
-    log: join(env.HOME, 'Library/Logs/factory', log),
-    // #24: a LaunchDaemon runs as the account that printed it, the agents' own, with that account's HOME.
-    user: daemon ? userInfo().username : null,
-  };
-}
-
-/** The job as a property list, for ~/Library/LaunchAgents/io.github.tuannd9288.factory.queue.plist, or with a user for
- * /Library/LaunchDaemons/, which the Human loads with sudo. Never KeepAlive: a sweep exits after each run. */
-export function plist(j) {
-  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const str = (s) => `<string>${esc(s)}</string>`;
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  ${str(j.label)}
-${j.user ? `  <key>UserName</key>\n  ${str(j.user)}\n` : ''}  <key>ProgramArguments</key>
-  <array>
-${j.program.map((a) => `    ${str(a)}`).join('\n')}
-  </array>
-  <key>WorkingDirectory</key>
-  ${str(j.cwd)}
-  <key>EnvironmentVariables</key>
-  <dict>
-${Object.entries(j.env).map(([k, v]) => `    <key>${esc(k)}</key>\n    ${str(v)}`).join('\n')}
-  </dict>
-${j.calendar
-    ? `  <key>StartCalendarInterval</key>\n  <dict>\n${Object.entries(j.calendar).map(([k, v]) => `    <key>${esc(k)}</key>\n    <integer>${v}</integer>`).join('\n')}\n  </dict>\n  <key>RunAtLoad</key>\n  <false/>`
-    : `  <key>StartInterval</key>\n  <integer>${j.interval ?? 60}</integer>\n  <key>RunAtLoad</key>\n  <true/>`}
-  <key>ProcessType</key>
-  <string>Background</string>
-  <key>StandardOutPath</key>
-  ${str(j.log)}
-  <key>StandardErrorPath</key>
-  ${str(j.log)}
-</dict>
-</plist>
-`;
-}
+// Moved to launchd.mjs (FAC-85) and exported here too while callers still import it from here.
+export { plist };
 
 /** Runs one sweep as the job would, before the Human loads it: the job's PATH and variables over what launchd gives
  * every job (HOME, USER, TMPDIR), and nothing of this shell's. It makes the log's folder, which launchd needs. */
@@ -688,7 +605,7 @@ async function check(repos, human) {
     say(`not ready: ${agents.refusal}`);
     return 1;
   }
-  const env = { HOME: process.env.HOME, USER: process.env.USER ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', ...j.env, ...agents.env };
+  const env = { ...runEnv(j), ...agents.env };
   mkdirSync(dirname(j.log), { recursive: true });
   const who = spawnSync('gh', ['api', 'user', '--jq', '.login'], { env, encoding: 'utf8', timeout: CALL_MS });
   const login = who.status === 0 ? who.stdout.trim() : '';
@@ -745,14 +662,13 @@ export function runPass({ repos = [], human, state }) {
     if (!swept.length) console.log('queue: no repository taken in under the factory root; nothing swept');
     let failed = 0;
     for (const repo of swept) {
-      const report = join(state, `queue-${repo.replace('/', '-')}.failed`);
       try {
         sweep(repo, reads, state, switches, { self: who.login, clone: clones.get(repo), folder: clones.has(repo) ? basename(clones.get(repo)) : repo.split('/')[1], runs });
-        rmSync(report, { force: true });
-        writeFileSync(join(state, `queue-${repo.replace('/', '-')}.ok`), `${new Date().toISOString()}\n`);
+        clearFailed(state, repoMarker(repo));
+        markOk(state, repoMarker(repo));
       } catch (error) {
         const why = String(error.stderr || error.message).trim();
-        writeFileSync(report, `${new Date().toISOString()} ${repo}: ${why}\n`);
+        markFailed(state, repoMarker(repo), `${repo}: ${why}`);
         console.error(`queue: ${repo}: ${why}`);
         failed += 1;
       }
@@ -803,8 +719,7 @@ export async function ensureDaemon(state, { ping = ask, spawnFn = spawn, home = 
   const answers = async (ms) => (await ping(sock, { verb: 'ping' }, { timeoutMs: ms })).ok;
   if (await answers(1000)) return 0;
   const fail = (why) => {
-    mkdirSync(state, { recursive: true });
-    writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
+    markFailed(state, 'queue-run', why);
     console.error(`factory-queue: ${why}`);
     return 1;
   };
@@ -893,12 +808,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     process.exitCode = 2;
     // Best effort: the digest should show a failure before the repository loop, a plist typo among them. plist and
     // check are the Human's, run by hand, and keep no queue state.
-    if (!['plist', 'check'].includes(process.argv[2])) {
-      try {
-        const state = stateDirOf();
-        mkdirSync(state, { recursive: true });
-        writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
-      } catch {}
-    }
+    if (!['plist', 'check'].includes(process.argv[2])) markFailed(stateDirOf(), 'queue-run', why);
   }
 }

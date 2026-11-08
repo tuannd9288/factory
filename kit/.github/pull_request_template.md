@@ -28,4 +28,4 @@ Team: <your team's name, as in the claim>
 Session: <session id or URL, or none>
 Cost: <amount and harness, or unknown>
 
-<!-- Cannot write a failing test first? Add a line of its own: No-red: <reason, at least 20 characters>. The reviewer must accept the reason, or `review` fails; the ledger counts this line. -->
+<!-- Cannot write a failing test first? Add a line of its own: No-red: <reason, at least 20 characters>. Nobody judges it and it raises no tier; the ledger counts this line. -->

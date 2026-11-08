@@ -11,8 +11,6 @@ import { GATE, MAIN, TRUSTED, render } from '../bin/lib/gate-settings.mjs';
 
 /** The three gate workflows as main holds them once bin/onboard filled them in with `values` (#335). */
 const onMain = (values) => Object.fromEntries([MAIN, GATE, TRUSTED].map((p) => [p, render(p, readFileSync(join(factory, 'kit', p), 'utf8'), values)]));
-/** A gate-trusted.yml as the kit had it before #335: its reviewer is the repository variable's. */
-const OLD_TRUSTED = "on:\n  pull_request_target:\n    types: [opened]\n\njobs:\n  review:\n    runs-on: ${{ fromJSON(vars.GATE_TRUSTED_RUNNER || '\"ubuntu-latest\"') }}\n    steps:\n      - run: .gate/bin/review review\n        env:\n          GATE_REVIEWER: ${{ vars.GATE_REVIEWER }}\n";
 
 // A fake gh that answers the REST calls bin/onboard-owner makes from $GH_STATE and logs each call to $GH_CALLS.
 // `ignore` names a kind of write the fake accepts and drops, so a setting does not read back as set.
@@ -105,17 +103,6 @@ if (path.startsWith(repo + '/actions/policies')) {
   if (id) { const p = state.actionsPolicies.find((x) => x.id === Number(id)); p ? done(p) : missing(); }
   done({ total_count: state.actionsPolicies.length, policies: state.actionsPolicies.map(({ conditions, rules, ...entry }) => entry) });
 }
-const env = repo + '/environments/reviewer';
-if (path === env) {
-  if (method === 'PUT') { if (kept('environment')) state.environment = { name: 'reviewer', ...body }; done(state.environment ?? {}); }
-  state.environment ? done(state.environment) : missing();
-}
-if (path === env + '/deployment-branch-policies') {
-  if (!state.environment) missing();
-  state.environment.policies ??= [];
-  if (method === 'POST') { if (kept('environment')) state.environment.policies.push({ id: 1, ...body }); done(body); }
-  done({ total_count: state.environment.policies.length, branch_policies: state.environment.policies });
-}
 process.stderr.write('fake gh: no answer for ' + method + ' ' + path + '\n');
 process.exit(1);
 `;
@@ -129,13 +116,12 @@ function world(over = {}) {
   chmodSync(join(dir, 'git'), 0o755);
   const state = {
     login: 'tuannd9288',
-    agent: 'tuan9288-agent',
+    agent: 'nami9288',
     repo: { id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true },
     kitLanded: false,
     collaborator: null,
     invitations: [],
     rulesets: [],
-    environment: null,
     next: 100,
     ...over,
   };
@@ -169,7 +155,7 @@ test('the owner script refuses a repository other than the one named, a login wi
     assert.match(out.out, /repository id 1234, not 9999/);
     out = w.owner(['tuannd9288/app', '--apply']);
     assert.equal(out.code, 2, out.out);
-    w.set({ login: 'tuan9288-agent' });
+    w.set({ login: 'nami9288' });
     out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 2, out.out);
     assert.match(out.out, /runs as the Human, the repository's owner, not as the agents' account/);
@@ -183,17 +169,74 @@ test('the owner script refuses a repository other than the one named, a login wi
   }
 });
 
+test('the owner script offers no reviewer: the gate requires verify and tier alone, and no reviewer environment is made (FAC-100)', () => {
+  const w = world({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({}) });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const gate = w.state().rulesets.find((r) => r.name === 'factory-gate');
+    const checks = gate.rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
+    assert.deepEqual(checks, ['verify', 'tier']);
+    assert.ok(!w.writes().some((l) => l.includes('environments/reviewer')), w.writes().join('\n'));
+    assert.doesNotMatch(out.out, /reviewer/);
+  } finally {
+    w.cleanup();
+  }
+});
+
+/** The kit's gate-trusted.yml as a main on the kit before FAC-100 held it with the reviewer entire (#155): the line its tier read. */
+const oldEntire = (files) => ({ ...files, [TRUSTED]: files[TRUSTED].replace(/^env:\n/m, "env:\n  GATE_REVIEWER: 'entire'\n") });
+const checksOf = (w) => w.state().rulesets.find((r) => r.name === 'factory-gate').rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
+
+test('a main on the kit before FAC-100 that names the reviewer entire keeps the Entire ruleset until its kit update, then gets verify and tier (#155, FAC-102)', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
+  const old = oldEntire(onMain({}));
+  assert.notEqual(old[TRUSTED], onMain({})[TRUSTED]);
+  const w = world({ kitLanded: true, collaborator: 'write', invitations: [], apps, files: old });
+  try {
+    let out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(checksOf(w), ['verify', 'tier', ENTIRE_APP.check]);
+    const pinned = w.state().rulesets.find((r) => r.name === 'factory-gate').rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks.at(-1);
+    assert.equal(pinned.integration_id, ENTIRE_APP.id);
+    w.clear();
+    assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
+    assert.deepEqual(w.writes(), []);
+    // Its kit update lands: main names no reviewer, and the next run puts the kit's gate in.
+    w.set({ files: onMain({}) });
+    out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    assert.deepEqual(checksOf(w), ['verify', 'tier']);
+  } finally {
+    w.cleanup();
+  }
+});
+
+test('an Entire App that GitHub does not know by that slug and id is refused before anything changes', async () => {
+  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
+  for (const apps of [{}, { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id + 1, slug: ENTIRE_APP.slug } }]) {
+    const w = world({ kitLanded: true, collaborator: 'write', files: oldEntire(onMain({})), apps });
+    try {
+      const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+      assert.equal(out.code, 2, out.out);
+      assert.match(out.out, new RegExp(`Entire's App ${ENTIRE_APP.slug}`));
+      assert.deepEqual(w.writes(), []);
+    } finally {
+      w.cleanup();
+    }
+  }
+});
+
 test('the owner script shows every change it would make, and makes none without --apply', () => {
   const w = world();
   try {
     const out = w.owner(['tuannd9288/app', '--id', '1234']);
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /PUT repos\/tuannd9288\/app\/collaborators\/tuan9288-agent \{"permission":"push"\}/);
+    assert.match(out.out, /PUT repos\/tuannd9288\/app\/collaborators\/nami9288 \{"permission":"push"\}/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-branches".*"~DEFAULT_BRANCH".*"non_fast_forward"/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-tags","target":"tag".*"~ALL".*"creation".*"update".*"deletion"/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-bootstrap"/);
-    assert.match(out.out, /PUT repos\/tuannd9288\/app\/environments\/reviewer \{"deployment_branch_policy":\{"protected_branches":false,"custom_branch_policies":true\}\}/);
-    assert.match(out.out, /POST repos\/tuannd9288\/app\/environments\/reviewer\/deployment-branch-policies \{"name":"main","type":"branch"\}/);
     assert.match(out.out, /dry run: nothing changed; rerun with --apply/);
     assert.deepEqual(w.writes(), []);
   } finally {
@@ -207,10 +250,9 @@ test('the owner script applies, reads back what it set, and on a second run chan
     let out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /read back: every setting as planned/);
-    assert.match(out.out, /waiting: tuan9288-agent accepts the invitation/);
+    assert.match(out.out, /waiting: nami9288 accepts the invitation/);
     const s = w.state();
     assert.deepEqual(s.rulesets.map((r) => r.name).sort(), ['factory-bootstrap', 'factory-branches', 'factory-claims', 'factory-tags']);
-    assert.deepEqual(s.environment.policies.map((p) => p.name), ['main']);
     w.set({ collaborator: 'write', invitations: [] });
     w.clear();
     out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
@@ -228,7 +270,7 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
   try {
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
     assert.deepEqual(w.state().actionsPolicies ?? [], [], 'no policy before the kit is on main');
-    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({}) });
     w.clear();
     // The policy allows the one workflow on main that runs on pull_request_target the events its on: block names.
     const policy = { name: 'factory gate: pull_request_target', enforcement: 'active', conditions: { workflow_path: { include: [TRUSTED], exclude: [] } }, rules: [{ type: 'restrict_action_events', parameters: { allowed_events: ['pull_request_target'] } }] };
@@ -256,7 +298,7 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
     assert.deepEqual(w.state().actionsPolicies[0].rules, policy.rules);
     // GitHub's echo may drop the empty exclude and give the lists in another order: the same policy plans no PUT, and a
     // different event still plans one. Two workflows on pull_request_target and two events, so an order can differ.
-    const kit = onMain({ reviewer: 'claude' });
+    const kit = onMain({});
     const two = { ...kit, [GATE]: kit[GATE].replace(/^on:\n {2}pull_request:\n/m, 'on:\n  pull_request_target:\n'), [TRUSTED]: kit[TRUSTED].replace(/^on:\n/m, 'on:\n  workflow_dispatch:\n') };
     assert.ok(two[GATE] !== kit[GATE] && two[TRUSTED] !== kit[TRUSTED]);
     w.set({ files: two });
@@ -284,75 +326,8 @@ test('once the kit is on main, the owner script puts the gate\'s ruleset in, the
   }
 });
 
-test('with GATE_REVIEWER entire in main\'s gate-trusted.yml the gate requires verify, tier and Entire Gates from Entire\'s App, not review or verdict (#155, #335)', async () => {
-  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
-  const app = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
-  const w = world({ kitLanded: true, collaborator: 'write', files: onMain({ reviewer: 'entire' }), apps: app });
-  try {
-    let out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /GATE_REVIEWER is entire/);
-    assert.match(out.out, /read back: every setting as planned/);
-    const gate = w.state().rulesets.find((r) => r.name === 'factory-gate');
-    const checks = gate.rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks;
-    assert.deepEqual(checks, [{ context: 'verify', integration_id: 15368 }, { context: 'tier', integration_id: 15368 }, { context: 'Entire Gates', integration_id: ENTIRE_APP.id }]);
-    // A second run changes nothing; the kit's own ruleset, with review and verdict, comes back once main names another reviewer.
-    w.clear();
-    out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
-    assert.equal(out.code, 0, out.out);
-    assert.deepEqual(w.writes(), []);
-    w.set({ files: onMain({ reviewer: 'claude' }) });
-    out = w.owner(['tuannd9288/app', '--id', '1234']);
-    assert.match(out.out, /PUT repos\/tuannd9288\/app\/rulesets\/\d+ \{"name":"factory-gate".*"context":"review"/);
-  } finally {
-    w.cleanup();
-  }
-});
-
-test('an Entire App that GitHub does not know by that slug and id is refused before anything changes', async () => {
-  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
-  for (const apps of [{}, { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id + 1, slug: ENTIRE_APP.slug } }]) {
-    const w = world({ kitLanded: true, collaborator: 'write', files: onMain({ reviewer: 'entire' }), apps });
-    try {
-      const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
-      assert.equal(out.code, 2, out.out);
-      assert.match(out.out, new RegExp(`Entire's App ${ENTIRE_APP.slug}`));
-      assert.deepEqual(w.writes(), []);
-    } finally {
-      w.cleanup();
-    }
-  }
-});
-
-const SHARED = ['self-hosted', 'macOS'];
-
-test('a main on the kit before #335 has its reviewer from the repository variable; on the kit since, the variable is not read (#335)', async () => {
-  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
-  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
-  const entire = [{ name: 'GATE_REVIEWER', value: 'entire' }];
-  const checksOf = (w) => w.state().rulesets.find((r) => r.name === 'factory-gate').rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
-  let w = world({ kitLanded: true, collaborator: 'write', apps, variables: entire, files: { ...onMain({}), [TRUSTED]: OLD_TRUSTED } });
-  try {
-    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /from the repository variable GATE_REVIEWER, which its gate-trusted.yml reads until its kit update/);
-    assert.ok(checksOf(w).includes(ENTIRE_APP.check), out.out);
-  } finally {
-    w.cleanup();
-  }
-  w = world({ kitLanded: true, collaborator: 'write', apps, variables: entire, files: onMain({ reviewer: 'claude' }) });
-  try {
-    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /the reviewer on main is claude, as its gate-trusted.yml holds it/);
-    assert.ok(checksOf(w).includes('review') && !checksOf(w).includes(ENTIRE_APP.check), JSON.stringify(checksOf(w)));
-  } finally {
-    w.cleanup();
-  }
-});
-
-test('the four options that set repository variables are refused with nothing called; no run writes a variable (#335)', () => {
-  for (const extra of [['--runner', '"ubuntu-latest"'], ['--pr-runner', '["self-hosted","macOS"]'], ['--trusted-runner', '"ubuntu-latest"'], ['--reviewer', 'claude']]) {
+test('the three options that set repository variables are refused with nothing called, and --reviewer is unknown (FAC-100); no run writes a variable (#335)', () => {
+  for (const extra of [['--runner', '"ubuntu-latest"'], ['--pr-runner', '["self-hosted","macOS"]'], ['--trusted-runner', '"ubuntu-latest"']]) {
     const w = world();
     try {
       const out = w.owner(['tuannd9288/app', '--id', '1234', ...extra, '--apply']);
@@ -363,7 +338,7 @@ test('the four options that set repository variables are refused with nothing ca
       w.cleanup();
     }
   }
-  for (const extra of [['--runer', '"ubuntu-latest"'], ['--id']]) {
+  for (const extra of [['--runer', '"ubuntu-latest"'], ['--reviewer', 'claude'], ['--id']]) {
     const w = world();
     try {
       const out = w.owner(['tuannd9288/app', ...(extra[0] === '--id' ? [] : ['--id', '1234']), ...extra]);
@@ -374,26 +349,12 @@ test('the four options that set repository variables are refused with nothing ca
       w.cleanup();
     }
   }
-  const w = world({ kitLanded: true, collaborator: 'write', files: onMain({ reviewer: 'claude' }), variables: [{ name: 'GATE_RUNNER', value: '["self-hosted","zz-held-runner"]' }, { name: 'OTHER', value: 'zz-other-value' }] });
+  const w = world({ kitLanded: true, collaborator: 'write', files: onMain({}), variables: [{ name: 'GATE_RUNNER', value: '["self-hosted","zz-held-runner"]' }, { name: 'OTHER', value: 'zz-other-value' }] });
   try {
     const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 0, out.out);
     assert.deepEqual(w.writes().filter((l) => /actions\/variables/.test(l)), []);
     for (const secret of ['zz-held-runner', 'zz-other-value']) assert.ok(!out.out.includes(secret), `${secret} printed:\n${out.out}`);
-  } finally {
-    w.cleanup();
-  }
-});
-
-test('the #155 exception: under entire, runners main shares say so in one line that names its condition (#210, #335)', async () => {
-  const { ENTIRE_APP } = await import('../bin/lib/owner.mjs');
-  const apps = { [ENTIRE_APP.slug]: { id: ENTIRE_APP.id, slug: ENTIRE_APP.slug } };
-  const w = world({ kitLanded: true, collaborator: 'write', apps, files: onMain({ reviewer: 'entire', runner: SHARED, prRunner: SHARED, trustedRunner: SHARED }) });
-  try {
-    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /#155/);
-    assert.match(out.out, /no reviewer secret in the environment reviewer/);
   } finally {
     w.cleanup();
   }
@@ -440,7 +401,7 @@ test('on the first run GitHub may answer 404 for the permission of an account no
   try {
     const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /done {4}collaborator tuan9288-agent \(write\)/);
+    assert.match(out.out, /done {4}collaborator nami9288 \(write\)/);
   } finally {
     w.cleanup();
   }
@@ -503,7 +464,7 @@ test('the owner script sets factory-claims before the kit lands and keeps it aft
     assert.match(dry.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-claims","target":"branch".*"refs\/heads\/claim\/\*\*".*"deletion"/);
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
     assert.ok(w.state().rulesets.some((r) => r.name === 'factory-claims'));
-    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({}) });
     w.clear();
     assert.equal(w.owner(['tuannd9288/app', '--id', '1234', '--apply']).code, 0);
     assert.ok(w.state().rulesets.some((r) => r.name === 'factory-claims'));
@@ -518,7 +479,7 @@ test('the owner script sets factory-claims before the kit lands and keeps it aft
 
 // #333: the merge switch is the two review parameters of the factory-gate ruleset; only the owner's login moves it.
 const ME = ['tuannd9288/app', '--id', '1234'];
-const inForce = (over = {}) => world({ kitLanded: true, collaborator: 'write', files: onMain({ reviewer: 'claude' }), ...over });
+const inForce = (over = {}) => world({ kitLanded: true, collaborator: 'write', files: onMain({}), ...over });
 const gateOf = (w) => w.state().rulesets.find((r) => r.name === 'factory-gate');
 const reviewOf = (w) => {
   const p = gateOf(w).rules.find((r) => r.type === 'pull_request').parameters;
@@ -572,7 +533,7 @@ test('a gate put in new starts at 1-2, and the run names the position it reads, 
   const before = world();
   try {
     assert.equal(before.owner([...ME, '--apply']).code, 0);
-    before.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
+    before.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({}) });
     const out = before.owner(ME);
     assert.match(out.out, /the merge switch on main is none/);
   } finally {
@@ -587,7 +548,7 @@ test('a changed factory-gate is put back with the review parameters it holds, no
       assert.equal(w.owner([...ME, '--apply']).code, 0);
       setReview(w, count, owner);
       // Another change to the ruleset: a required check taken out.
-      w.set({ rulesets: w.state().rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.map((x) => (x.type === 'required_status_checks' ? { ...x, parameters: { ...x.parameters, required_status_checks: x.parameters.required_status_checks.filter((c) => c.context !== 'verdict') } } : x)) })) });
+      w.set({ rulesets: w.state().rulesets.map((r) => (r.name !== 'factory-gate' ? r : { ...r, rules: r.rules.map((x) => (x.type === 'required_status_checks' ? { ...x, parameters: { ...x.parameters, required_status_checks: x.parameters.required_status_checks.filter((c) => c.context !== 'tier') } } : x)) })) });
       w.clear();
       const out = w.owner([...ME, '--apply']);
       assert.equal(out.code, 0, out.out);
@@ -597,7 +558,7 @@ test('a changed factory-gate is put back with the review parameters it holds, no
       assert.match(writes[0], new RegExp(` -X PUT repos/tuannd9288/app/rulesets/${gateOf(w).id} `));
       assert.deepEqual(reviewOf(w), [count, owner], position);
       const checks = gateOf(w).rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
-      assert.ok(checks.includes('verdict'), 'the rest of the ruleset is the kit\'s again');
+      assert.ok(checks.includes('tier'), 'the rest of the ruleset is the kit\'s again');
     } finally {
       w.cleanup();
     }
@@ -653,15 +614,14 @@ test('--merge on a repository that has drifted from the kit changes the two para
   const w = inForce();
   try {
     assert.equal(w.owner([...ME, '--apply']).code, 0);
-    // Auto-merge off, as zalo-gateway has it, a ruleset gone, and the environment's branch policy gone.
-    w.set({ repo: { ...w.state().repo, allow_auto_merge: false }, rulesets: w.state().rulesets.filter((r) => r.name !== 'factory-claims'), environment: { ...w.state().environment, policies: [] } });
+    // Auto-merge off, as zalo-gateway has it, and a ruleset gone.
+    w.set({ repo: { ...w.state().repo, allow_auto_merge: false }, rulesets: w.state().rulesets.filter((r) => r.name !== 'factory-claims') });
     w.clear();
     const dry = w.owner([...ME, '--merge', 'all']);
     assert.equal(dry.code, 0, dry.out);
     assert.match(dry.out, /change  ruleset factory-gate: PUT/);
     assert.match(dry.out, /not changed  allow auto-merge: .*--merge moves the merge switch only/);
     assert.match(dry.out, /not changed  ruleset factory-claims:/);
-    assert.match(dry.out, /not changed  environment reviewer deploys from main:/);
     assert.deepEqual(w.writes(), []);
     const out = w.owner([...ME, '--merge', 'all', '--apply']);
     assert.equal(out.code, 0, out.out);
@@ -691,7 +651,7 @@ test('--merge writes the live gate ruleset back with the two parameters changed,
             created_at: '2026-11-01T00:00:00Z',
             _links: { self: { href: 'x' } },
             current_user_can_bypass: 'never',
-            rules: r.rules.map((x) => (x.type === 'required_status_checks' ? { ...x, parameters: { ...x.parameters, required_status_checks: [...x.parameters.required_status_checks.filter((c) => c.context !== 'verdict'), { context: 'extra', integration_id: 15368 }] } } : x)),
+            rules: r.rules.map((x) => (x.type === 'required_status_checks' ? { ...x, parameters: { ...x.parameters, required_status_checks: [...x.parameters.required_status_checks.filter((c) => c.context !== 'tier'), { context: 'extra', integration_id: 15368 }] } } : x)),
           },
     );
     w.set({ rulesets: drifted });
@@ -706,7 +666,7 @@ test('--merge writes the live gate ruleset back with the two parameters changed,
     const body = w.state().puts.at(-1);
     assert.deepEqual(Object.keys(body).sort(), ['bypass_actors', 'conditions', 'enforcement', 'name', 'rules', 'target'], 'only what GitHub takes back');
     const checks = body.rules.find((x) => x.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
-    assert.ok(checks.includes('extra') && !checks.includes('verdict'), `the live difference stayed: ${checks}`);
+    assert.ok(checks.includes('extra') && !checks.includes('tier'), `the live difference stayed: ${checks}`);
     // (The fake's read adds required_reviewers: [], as GitHub does; it is not a difference.)
     const mask = (rules) => JSON.stringify(rules.map((x) => (x.type === 'pull_request' ? { ...x, parameters: { ...x.parameters, required_reviewers: undefined, required_approving_review_count: 0, require_code_owner_review: 0 } } : x)));
     assert.equal(mask(body.rules), mask(live.rules), 'only the two parameters changed');
@@ -737,7 +697,7 @@ test('--merge is refused while the gate ruleset is not in force, and the bootstr
   const w = world();
   try {
     assert.equal(w.owner([...ME, '--apply']).code, 0);
-    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({ reviewer: 'claude' }) });
+    w.set({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({}) });
     w.clear();
     const out = w.owner([...ME, '--merge', 'all', '--apply']);
     assert.equal(out.code, 2, out.out);
@@ -769,7 +729,7 @@ test('--merge is refused with a value that is no position, without a value, befo
   } finally {
     w.cleanup();
   }
-  w = inForce({ login: 'tuan9288-agent' });
+  w = inForce({ login: 'nami9288' });
   try {
     const out = w.owner([...ME, '--merge', 'all', '--apply']);
     assert.equal(out.code, 2, out.out);
@@ -780,21 +740,8 @@ test('--merge is refused with a value that is no position, without a value, befo
   }
 });
 
-test('on a main where the kit has landed, a gate-trusted.yml that cannot be read stops the run, rather than reading as no reviewer (#333)', () => {
-  const noReviewer = { ...onMain({ reviewer: 'claude' }), [TRUSTED]: 'name: gate-trusted\njobs: {}\n' };
-  for (const files of [{}, { ...onMain({}), [TRUSTED]: undefined }, noReviewer]) {
-    const w = world({ kitLanded: true, collaborator: 'write', files });
-    try {
-      const out = w.owner([...ME, '--apply']);
-      assert.equal(out.code, 2, out.out);
-      assert.match(out.out, /gate-trusted\.yml on main cannot be read/);
-      assert.deepEqual(w.writes(), []);
-    } finally {
-      w.cleanup();
-    }
-  }
-  // Nor is a guess made at the events an Actions event policy must allow (#337): an on: block not in the kit's form stops it too.
-  const kit = onMain({ reviewer: 'claude' });
+test('on a main where the kit has landed, no guess is made at the events an Actions event policy must allow: an on: block not in the kit\'s form stops the run (#337)', () => {
+  const kit = onMain({});
   const inline = { ...kit, [TRUSTED]: kit[TRUSTED].replace(/^on:\n {2}pull_request_target:\n {4}types: .*$/m, 'on: [pull_request_target]') };
   assert.notEqual(inline[TRUSTED], kit[TRUSTED]);
   const w = world({ kitLanded: true, collaborator: 'write', files: inline });
@@ -803,17 +750,6 @@ test('on a main where the kit has landed, a gate-trusted.yml that cannot be read
     assert.equal(out.code, 2, out.out);
     assert.match(out.out, /gate-trusted\.yml on main has no on: block in the kit's form/);
     assert.deepEqual(w.writes(), []);
-  } finally {
-    w.cleanup();
-  }
-});
-
-test('a gate-trusted.yml with the reviewer empty is a reading, not a failure to read (#333)', () => {
-  const w = world({ kitLanded: true, collaborator: 'write', files: onMain({}) });
-  try {
-    const out = w.owner([...ME, '--apply']);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /the reviewer on main is none/);
   } finally {
     w.cleanup();
   }
@@ -869,8 +805,8 @@ test('onboard opens the kit pull request only as the agents\' account, after the
       });
     let out = onboard({ LOGIN: 'tuannd9288', RULES: '[{"type":"pull_request"}]' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
-    assert.match(out.stdout + out.stderr, /opens the kit pull request as the agents' account \(tuan9288-agent\), not as tuannd9288/);
-    out = onboard({ LOGIN: 'tuan9288-agent', RULES: '[]' });
+    assert.match(out.stdout + out.stderr, /opens the kit pull request as the agents' account \(nami9288\), not as tuannd9288/);
+    out = onboard({ LOGIN: 'nami9288', RULES: '[]' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
     assert.match(out.stdout + out.stderr, /main has no pull request rule: bin\/onboard-owner runs first/);
     assert.ok(!existsSync(join(dir, 'root/app')), 'cloned before refusing');
@@ -918,7 +854,7 @@ test('forcePush defaults to pstack, and off protects all branches', async () => 
 
 for (const merge of [undefined, 'squash', 'merge']) {
   test(`the live ruleset follows main's merge method: ${merge ?? 'default squash'}`, () => {
-    const files = onMain({ reviewer: 'claude' });
+    const files = onMain({});
     if (merge) files['.gate/driver.json'] = JSON.stringify({ merge });
     const w = world({ kitLanded: true, files });
     try {

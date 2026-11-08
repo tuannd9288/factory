@@ -9,23 +9,20 @@ import { kitUpdateTldr, onboardTldr, settingsOf } from '../bin/lib/tldr.mjs';
 // The rows as bin/kit-evidence prints them: a plain value, or the value and `, CHANGED from <value>`, or the value and
 // `, CHANGED: the base held none in the kit's form (…)`.
 const block = (...rows) =>
-  ['kit-evidence: PASS', "settings (the gate's, as the head's workflows hold them; a pull request changes one at tier 3):", ...rows.map((r) => `  ${r}`), "replaced (the repository's own at the base, now the kit's):", '  none'].join('\n');
-const NONE = 'none (review and verdict fail closed)';
+  ['kit-evidence: PASS', "settings (the gate's, as the head's workflows hold them; a pull request changes one at tier 3):", ...rows.map((r) => `  ${r}`)].join('\n');
 const UNSEEN = ", CHANGED: the base held none in the kit's form (a repository variable, before #335)";
-const rowsOf = (reviewer = 'claude', pr = '["ubuntu-latest"]') => [
-  `the reviewer (.github/workflows/gate-trusted.yml): ${reviewer}`,
+const ROWS = [
   "main's runner (.github/workflows/main.yml): [\"self-hosted\",\"macOS\"]",
-  `the candidate's runner (.github/workflows/gate.yml): ${pr}`,
+  'the candidate\'s runner (.github/workflows/gate.yml): ["ubuntu-latest"]',
   'the trusted runner (.github/workflows/gate-trusted.yml): ["ubuntu-latest"]',
 ];
-const STAY = block(...rowsOf());
+const STAY = block(...ROWS);
 const MOVED = block(
-  `the reviewer (.github/workflows/gate-trusted.yml): claude, CHANGED from ${NONE}`,
   "main's runner (.github/workflows/main.yml): [\"ubuntu-latest\"]",
   "the candidate's runner (.github/workflows/gate.yml): [\"self-hosted\",\"macOS\"], CHANGED from [\"ubuntu-latest\"]",
   `the trusted runner (.github/workflows/gate-trusted.yml): ["ubuntu-latest"]${UNSEEN}`,
 );
-const ALL_UNSEEN = block(...rowsOf().map((r) => `${r}${UNSEEN}`));
+const ALL_UNSEEN = block(...ROWS.map((r) => `${r}${UNSEEN}`));
 
 const ORDER = ['Anh quyết', 'Đề xuất', 'Rủi ro'];
 const ORDER_EN = ['You decide', 'Recommendation', 'Risk'];
@@ -37,10 +34,10 @@ const decisions = (text, key = 'Đề xuất') => [...bullet(text, key).matchAll
 const without = (text, key) => text.split('\n').filter((l) => !l.startsWith(`- **${key}:**`)).join('\n');
 const times = (text, pattern) => [...text.matchAll(pattern)].length;
 const COUNTS = { added: 1, updated: 0, removed: 0, kept: 3 };
-// The four settings' names in the summary; the reviewer's is a word of other names too, so it is told apart by its colon.
-const NAMES = [/máy chạy việc của main/g, /máy kiểm từng thay đổi/g, /máy giữ key của reviewer/g, /(?<!của )reviewer:/g];
-// The same four in the English block.
-const NAMES_EN = [/the machine that runs main/g, /the machine that checks each change/g, /the machine that holds the reviewer's key/g, /reviewer:/g];
+// The three settings' names in the summary.
+const NAMES = [/máy chạy việc của main/g, /máy kiểm từng thay đổi/g, /máy chạy bước tier/g];
+// The same three in the English block.
+const NAMES_EN = [/the machine that runs main/g, /the machine that checks each change/g, /the machine that runs the tier check/g];
 const en = (text) => text.split('\n\n')[1];
 const structure = (text) => {
   const blocks = text.split('\n\n');
@@ -56,11 +53,11 @@ const structure = (text) => {
 
 describe('the summary of a kit pull request', () => {
   test('reads the gate\'s settings from the evidence as rows, marking those the pull request changes', () => {
-    assert.deepEqual(settingsOf(STAY).map((r) => r.changed), [false, false, false, false]);
-    assert.deepEqual(settingsOf(MOVED).map((r) => r.changed), [true, false, true, true]);
-    assert.deepEqual(settingsOf(MOVED).map((r) => r.from !== ''), [true, false, true, false]);
+    assert.deepEqual(settingsOf(STAY).map((r) => r.changed), [false, false, false]);
+    assert.deepEqual(settingsOf(MOVED).map((r) => r.changed), [false, true, true]);
+    assert.deepEqual(settingsOf(MOVED).map((r) => r.from !== ''), [false, true, false]);
     assert.deepEqual(settingsOf('kit-evidence: PASS\n'), []);
-    assert.equal(settingsOf(STAY).length, 4);
+    assert.equal(settingsOf(STAY).length, 3);
   });
 
   test('onboard\'s has the two blocks in order and names each setting once, with no file or path', () => {
@@ -73,21 +70,7 @@ describe('the summary of a kit pull request', () => {
     assert.equal(decisions(text), 0);
   });
 
-  test('a fourth line for silence is written only when the caller passes one', () => {
-    const silence = { vi: 'x', en: 'y' };
-    for (const make of [(s) => onboardTldr('app', STAY, s), (s) => kitUpdateTldr('app', COUNTS, STAY, s)]) {
-      assert.equal(bullet(make(), 'Nếu không trả lời'), undefined);
-      assert.equal(bullet(make(), 'If no answer'), undefined);
-      const text = make(silence);
-      assert.deepEqual(heads(text.split('\n\n')[0]), [...ORDER, 'Nếu không trả lời']);
-      assert.deepEqual(heads(text.split('\n\n')[1]), [...ORDER_EN, 'If no answer']);
-    }
-  });
-
-  test('a reviewer, and a GitHub-hosted runner whatever its label, are told apart from the repository\'s own', () => {
-    const said = (reviewer) => bullet(onboardTldr('app', block(`the reviewer (.github/workflows/gate-trusted.yml): ${reviewer}`)), 'Anh quyết');
-    const all = [NONE, 'claude', 'entire', 'stub'].map(said);
-    assert.equal(new Set(all).size, 4);
+  test('a GitHub-hosted runner, whatever its label, is told apart from the repository\'s own', () => {
     const runner = (labels) => bullet(onboardTldr('app', block(`the candidate's runner (.github/workflows/gate.yml): ${labels}`)), 'Anh quyết');
     assert.notEqual(runner('["macos-15"]'), runner('["ubuntu-latest"]'));
     assert.match(runner('["macos-15"]'), /macos-15/);
@@ -116,9 +99,9 @@ describe('the summary of a kit pull request', () => {
     const full = kitUpdateTldr('app', COUNTS, MOVED);
     structure(full);
     const text = vi(full);
-    assert.equal(decisions(text), 3);
+    assert.equal(decisions(text), 2);
     const outside = without(text, 'Đề xuất');
-    // MOVED changes the reviewer, the candidate's runner and the trusted runner, not main's.
+    // MOVED changes the candidate's runner and the trusted runner, not main's.
     for (const [i, name] of NAMES.entries()) {
       assert.equal(times(bullet(text, 'Đề xuất'), name), i === 0 ? 0 : 1, String(name));
       assert.equal(times(outside, name), 0, String(name));
@@ -137,7 +120,7 @@ describe('the summary of a kit pull request', () => {
     const full = kitUpdateTldr('app', COUNTS, ALL_UNSEEN);
     structure(full);
     const text = vi(full);
-    assert.equal(decisions(text), 4);
+    assert.equal(decisions(text), 3);
     const outside = without(text, 'Đề xuất');
     for (const name of NAMES) {
       assert.equal(times(bullet(text, 'Đề xuất'), name), 1, String(name));
@@ -152,32 +135,11 @@ describe('the summary of a kit pull request', () => {
     assert.doesNotMatch(full, /#335|before #|variable|\.yml/);
   });
 
-  test('Rủi ro follows what runs: onboard has no review, and kit-update\'s follows the reviewer', () => {
-    const risk = (reviewer) => bullet(kitUpdateTldr('app', COUNTS, block(...rowsOf(reviewer))), 'Rủi ro');
-    const none = risk(NONE);
-    const claude = risk('claude');
-    const stub = risk('stub');
-    assert.notEqual(none, claude);
-    assert.notEqual(stub, claude);
-    assert.notEqual(stub, none);
-    assert.equal(risk('entire'), claude);
-    assert.notEqual(bullet(onboardTldr('app', STAY), 'Rủi ro'), claude);
-    assert.equal(bullet(onboardTldr('app', STAY), 'Rủi ro'), bullet(onboardTldr('app', block(...rowsOf(NONE))), 'Rủi ro'));
-  });
-
-  test('Rủi ro follows the reviewer of the base, which is the one that runs the review', () => {
-    const risk = (...rows) => bullet(kitUpdateTldr('app', COUNTS, block(...rows)), 'Rủi ro');
-    const plain = (reviewer) => risk(...rowsOf(reviewer));
-    assert.equal(risk(...rowsOf(`${NONE}, CHANGED from claude`)), plain('claude'));
-    assert.equal(risk(...rowsOf(`claude, CHANGED from ${NONE}`)), plain(NONE));
-    const unseen = risk(...rowsOf(`claude${UNSEEN}`));
-    assert.notEqual(unseen, plain('claude'));
-    assert.notEqual(unseen, plain(NONE));
-    assert.equal(unseen, plain('claude').replace(', review AI chạy trên PR này', ''));
-  });
-
   test('Anh quyết counts the changed settings and the unseen ones apart', () => {
-    const mixed = bullet(kitUpdateTldr('app', COUNTS, MOVED), 'Anh quyết');
+    const mixed = bullet(kitUpdateTldr('app', COUNTS, block(
+      "main's runner (.github/workflows/main.yml): [\"self-hosted\",\"macOS\"], CHANGED from [\"ubuntu-latest\"]",
+      ...MOVED.split('\n').filter((l) => /^ {2}the (candidate's|trusted) runner/.test(l)).map((l) => l.trim()),
+    )), 'Anh quyết');
     assert.match(mixed, /\b2 cài đặt của gate đổi\b/);
     assert.match(mixed, /\b1 cài đặt chuyển vào file của gate\b/);
   });

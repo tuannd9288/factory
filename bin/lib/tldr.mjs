@@ -2,8 +2,7 @@
 // Vietnamese with the terms in English, so the Human reads and approves a tier-3 pull request from them, then `**TL;DR**` with
 // the same three in English (You decide, Recommendation, Risk). They are the same layout as kit/.github/pull_request_template.md,
 // and the Vietnamese block is the repository's only Vietnamese (docs/decisions.md, Language); a decision for him is numbered in Đề xuất,
-// each with a recommendation, and each changed setting is named once, there. A fourth line (Nếu không trả lời / If no answer) is
-// written only when a caller passes `silence`, `{ vi, en }`; bin/onboard and bin/kit-update pass none.
+// each with a recommendation, and each changed setting is named once, there.
 //
 //   node bin/lib/tldr.mjs onboard <name> < evidence
 //   node bin/lib/tldr.mjs kit-update <name> <added> <updated> <removed> <kept> < evidence
@@ -16,27 +15,19 @@ import { fileURLToPath } from 'node:url';
 import { isHosted } from './gate-settings.mjs';
 
 const NAMES = {
-  'the reviewer': 'reviewer',
   "main's runner": 'máy chạy việc của main',
   "the candidate's runner": 'máy kiểm từng thay đổi',
-  'the trusted runner': 'máy giữ key của reviewer',
+  'the trusted runner': 'máy chạy bước tier',
 };
 const NAMES_EN = {
-  'the reviewer': 'reviewer',
   "main's runner": 'the machine that runs main',
   "the candidate's runner": 'the machine that checks each change',
-  'the trusted runner': "the machine that holds the reviewer's key",
+  'the trusted runner': 'the machine that runs the tier check',
 };
-const NO_REVIEWER = 'none (review and verdict fail closed)';
-const VALUE = /^(\[[^\]]*\]|none \(review and verdict fail closed\)|[^,\s]+)(?:, (.*))?$/;
-
-const REVIEWS = { claude: 'review của Claude', entire: 'review của Entire (dịch vụ riêng)', stub: 'reviewer giả để test, không phải review thật' };
-const REVIEWS_EN = { claude: 'Claude review', entire: 'Entire review (a separate service)', stub: 'a stub reviewer for tests, not a real review' };
+const VALUE = /^(\[[^\]]*\]|[^,\s]+)(?:, (.*))?$/;
 
 /** A setting's value as the evidence prints it, in words (Vietnamese, or English when `en`). */
 function plain(words, value, en = false) {
-  if (value === NO_REVIEWER) return en ? 'no reviewer yet (nothing merges by itself)' : 'chưa có reviewer (không gì tự merge)';
-  if (words === 'the reviewer') return (en ? REVIEWS_EN : REVIEWS)[value] ?? value;
   try {
     const labels = JSON.parse(value);
     if (labels.length === 1 && labels[0] === 'ubuntu-latest') return en ? "GitHub's machine" : 'máy của GitHub';
@@ -86,20 +77,19 @@ const REVERT = 'muốn bỏ thì revert PR này';
 const REVERT_EN = 'to undo, revert this PR';
 
 const LABELS = {
-  vi: { head: '**Tóm tắt cho anh**', decide: 'Anh quyết', recommend: 'Đề xuất', risk: 'Rủi ro', silence: 'Nếu không trả lời' },
-  en: { head: '**TL;DR**', decide: 'You decide', recommend: 'Recommendation', risk: 'Risk', silence: 'If no answer' },
+  vi: { head: '**Tóm tắt cho anh**', decide: 'Anh quyết', recommend: 'Đề xuất', risk: 'Rủi ro' },
+  en: { head: '**TL;DR**', decide: 'You decide', recommend: 'Recommendation', risk: 'Risk' },
 };
 
-/** One block: the heading and the bullets in the order the Human reads them (what he decides, the answer, the risk), then the
- * line for silence when the caller gave one. */
-const block = (lang, { decide, recommend, risk, silence }) => {
+/** One block: the heading and the bullets in the order the Human reads them (what he decides, the answer, the risk). */
+const block = (lang, { decide, recommend, risk }) => {
   const l = LABELS[lang];
-  const pairs = [[l.decide, decide], [l.recommend, recommend], [l.risk, risk], ...(silence ? [[l.silence, silence]] : [])];
+  const pairs = [[l.decide, decide], [l.recommend, recommend], [l.risk, risk]];
   return [l.head, ...pairs.map(([k, v]) => `- **${k}:** ${v}`)].join('\n');
 };
 
-/** The two blocks, Vietnamese then English, with a blank line between. `silence` is { vi, en } or none. */
-const section = (vi, en, silence) => [block('vi', { ...vi, silence: silence?.vi }), block('en', { ...en, silence: silence?.en })].join('\n\n');
+/** The two blocks, Vietnamese then English, with a blank line between. */
+const section = (vi, en) => [block('vi', vi), block('en', en)].join('\n\n');
 
 /** The decisions for the changed settings, numbered on: those with an old value we can see, then those whose old value the
  * factory cannot see (the base held them in a form the kit does not use, so it cannot say whether they changed). */
@@ -128,18 +118,7 @@ function settingDecisionsEn(changed) {
   return parts.join(' ');
 }
 
-/** The review clause follows the reviewer that runs on this pull request: main's copy of gate-trusted.yml, so the base's value
- * for a changed row (none when the factory cannot see it), else the row's own. */
-function reviewClause(rows, en = false) {
-  const row = rows.find((r) => r.name === NAMES['the reviewer']);
-  const reviewer = row?.changed ? row.fromRaw : row?.raw;
-  if (reviewer === undefined || reviewer === '') return '';
-  if (reviewer === NO_REVIEWER) return en ? ', no AI review runs because there is no reviewer yet' : ', chưa có reviewer nên không có review AI nào chạy';
-  if (reviewer === 'stub') return en ? ', only a stub reviewer for tests runs, not a real review' : ', chỉ reviewer giả để test chạy, không phải review thật';
-  return en ? ', an AI review runs on this PR' : ', review AI chạy trên PR này';
-}
-
-export function onboardTldr(name, evidence, silence) {
+export function onboardTldr(name, evidence) {
   const rows = settingsOf(evidence);
   const settings = rows.map(say).join('; ');
   const settingsEn = rows.map((r) => say(r.en)).join('; ');
@@ -147,18 +126,17 @@ export function onboardTldr(name, evidence, silence) {
     {
       decide: `Duyệt PR đưa ${name} vào factory: thêm gate (bộ kiểm tra tự động), hooks, template PR và luật cho agent${settings ? `, với cài đặt của gate: ${settings}` : ''}.`,
       recommend: `Approve, nếu các cài đặt trên đúng ý anh và session của ${name} đã liệt kê các file sửa trong phần chi tiết.`,
-      risk: `verify đỏ tới khi PR này merge là bình thường và không chặn merge, chưa có review AI nào chạy; ${REVERT}.`,
+      risk: `verify đỏ tới khi PR này merge là bình thường và không chặn merge; ${REVERT}.`,
     },
     {
       decide: `Approve the PR that brings ${name} into the factory: it adds the gate (automatic checks), hooks, a PR template and agent rules${settingsEn ? `, with these gate settings: ${settingsEn}` : ''}.`,
       recommend: `Approve, if the settings above are what you want and ${name}'s session has listed the files it edits in the detail.`,
-      risk: `verify stays red until this PR merges, which is normal and does not block the merge, and no AI review has run yet; ${REVERT_EN}.`,
+      risk: `verify stays red until this PR merges, which is normal and does not block the merge; ${REVERT_EN}.`,
     },
-    silence,
   );
 }
 
-export function kitUpdateTldr(name, { added, updated, removed, kept }, evidence, silence) {
+export function kitUpdateTldr(name, { added, updated, removed, kept }, evidence) {
   const rows = settingsOf(evidence);
   const changed = rows.filter((r) => r.changed);
   const moves = changed.filter((r) => r.from);
@@ -175,14 +153,13 @@ export function kitUpdateTldr(name, { added, updated, removed, kept }, evidence,
     {
       decide: `Duyệt PR đưa kit trong ${name} lên bản factory mới: thêm ${added} file, cập nhật ${updated}, bỏ ${removed}, giữ ${kept} file riêng của repo; ${settings[0]}.`,
       recommend: changed.length ? settingDecisions(changed) : 'Approve.',
-      risk: `${touches ? `Sửa ${touches} file repo đã có` : 'Không sửa file nào repo đã có'}${reviewClause(rows)}; ${REVERT}.`,
+      risk: `${touches ? `Sửa ${touches} file repo đã có` : 'Không sửa file nào repo đã có'}; ${REVERT}.`,
     },
     {
       decide: `Approve the PR that moves the kit in ${name} to a newer factory version: ${added} files added, ${updated} updated, ${removed} removed, ${kept} of the repository's own kept; ${settings[1]}.`,
       recommend: changed.length ? settingDecisionsEn(changed) : 'Approve.',
-      risk: `${touches ? `It edits ${touches} files the repository already has` : 'It edits no file the repository already has'}${reviewClause(rows, true)}; ${REVERT_EN}.`,
+      risk: `${touches ? `It edits ${touches} files the repository already has` : 'It edits no file the repository already has'}; ${REVERT_EN}.`,
     },
-    silence,
   );
 }
 

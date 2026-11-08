@@ -19,9 +19,7 @@
 # A clone anywhere else, its branches and its uncommitted edits change nothing that runs; only a change that lands on main reaches the copy.
 set -euo pipefail
 [ "$#" -eq 0 ] || { echo "usage: bin/install-factory" >&2; exit 2; }
-PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
-export PATH
-command -v node >/dev/null 2>&1 || { echo "install-factory: node is not on PATH ($PATH)" >&2; exit 127; }
+. "$(dirname "${BASH_SOURCE[0]}")/lib/prelude.sh"
 here=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 helper="$here/bin/lib/install-factory.mjs"
 root=$(node "$helper" root)

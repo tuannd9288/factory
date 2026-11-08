@@ -26,8 +26,7 @@
 //       agents' GitHub token in this node's store, sends a local file it is given.
 //     `<bin/seat> *` (the MacBook Lead as the agents' user): bin/seat reads the tokens by design, and it takes any file as the brief, so a
 //       brief outside the work and run folders reaches the model; the probe is a seat started on a synthetic denied file.
-//   Not here: commands (`Bash(...)` rules, bin/lib/seat.mjs); the gate's reviewer on CI, which denies the runner's system folders
-//   (kit/.gate/bin/lib/claude-reviewer.mjs).
+//   Not here: commands (`Bash(...)` rules, bin/lib/seat.mjs).
 export const SCOPES = {
   all: { channels: ['file', 'kit', 'shell', 'codex'], why: 'a credential or a login: no channel reads it' },
   'file-tools': { channels: ['file', 'kit'], why: 'named beside the whole profiles folder (#178), which every sandbox denies whole' },

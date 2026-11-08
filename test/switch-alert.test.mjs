@@ -156,18 +156,20 @@ function world(dir) {
   const home = join(dir, 'home');
   mkdirSync(home);
   mkdirSync(join(dir, 'root'));
-  // The factory's own checkout: origin names github.com/o/factory in a folder that is no remote, so nothing leaves the host.
+  // The factory's own checkout: origin names github.com/o/factory, and the sweep's git may use no transport but a local file
+  // (GIT_ALLOW_PROTOCOL below), so nothing leaves the host.
   const checkout = join(dir, 'checkout');
   mkdirSync(checkout);
   spawnSync('git', ['init', '-q', checkout]);
-  spawnSync('git', ['-C', checkout, 'remote', 'add', 'origin', join(dir, 'github.com/o/factory')]);
+  spawnSync('git', ['-C', checkout, 'remote', 'add', 'origin', 'https://github.com/o/factory']);
   const rules = (position) =>
     writeFileSync(join(dir, 'rules.json'), JSON.stringify([{ type: 'pull_request', parameters: { required_approving_review_count: position === 'none' ? 1 : 0, require_code_owner_review: position !== 'all' } }]));
   const sweep = (extra = {}, repos = ['o/app']) => {
     writeFileSync(join(dir, 'calls'), '');
     const env = {
       ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, Q: dir, HOME: home, FACTORY_STATE: state, FACTORY_RUNS: join(dir, 'runs'),
-      FACTORY_ROOT: join(dir, 'root'), FACTORY_CHECKOUT: '', FACTORY_PLIST_DIR: join(dir, 'no-plists'), AGENT_PROFILES: join(dir, 'profiles'), ...extra,
+      FACTORY_ROOT: join(dir, 'root'), FACTORY_CHECKOUT: '', FACTORY_PLIST_DIR: join(dir, 'no-plists'), AGENT_PROFILES: join(dir, 'profiles'),
+      GIT_ALLOW_PROTOCOL: 'file', ...extra,
     };
     const out = spawnSync(join(factory, 'bin/factory-queue'), ['sweep', ...repos.flatMap((r) => ['--repo', r])], { encoding: 'utf8', env });
     const calls = readFileSync(join(dir, 'calls'), 'utf8').split('\n').filter(Boolean);
@@ -269,6 +271,18 @@ test('a node off the factory host, the MacBook\'s own `factory` user included, r
       assert.ok(!existsSync(positionFile(w.state, 'o/factory')));
       assert.ok(!readLines(w.state).some((e) => e.key.startsWith('switch-moved o/factory ')));
     }
+  }));
+
+// FAC-85: the factory's own repository is named by the one parser, so an origin that names no owner/name names none, and no gh call
+// carries it.
+test('a factory checkout whose origin names no owner/name has no merge switch read for it', () =>
+  withDir((dir) => {
+    const w = world(dir);
+    spawnSync('git', ['-C', w.checkout, 'remote', 'set-url', 'origin', 'https://github.com/o/factory/extra']);
+    w.rules('1-2');
+    const r = w.sweep({ FACTORY_CHECKOUT: w.checkout, ...ON_HOST });
+    assert.equal(r.code, 0, r.out);
+    assert.ok(!r.calls.some((c) => c.includes('o/factory/extra')), r.calls.join('\n'));
   }));
 
 test('rules that give no position write no position file and start no condition, and the sweep goes on', () =>

@@ -9,8 +9,8 @@
 //   { keys, since, until } -> { missing, via }, a read of the Linear events the store holds, for `bin/factory-daemon linear-check` (FAC-38,
 //   bin/lib/linear-listen.mjs). An unknown verb gets an error answer, a bad line too; nothing a client sends ends the daemon.
 //   Reconcile before listening (server/server.go:242-248, core/reconcile.go:11-54): the store is opened, then the seat records not yet taken are
-//   woken once. The authority for "once" is queue-seats.news (bin/lib/news-wake.mjs, wakeOnSeatEnds), the state the sweep always had; the store's
-//   offset into sessions.jsonl is the daemon's own read position. piggery's reconcile marks sessions gone and never respawns; this daemon starts no
+//   woken once. The authority for "once" is queue-seats.news (bin/lib/news-wake.mjs, wakeOnSeatEnds), the state the sweep always had.
+//   piggery's reconcile marks sessions gone and never respawns; this daemon starts no
 //   seat and ends none, so a restart stops nothing.
 //   The pass: bin/lib/queue.mjs's runPass, unchanged, every 60 s (from the start of one to the start of the next, 1 s at least between), under
 //   queue.lock, so a pass run by hand (`bin/factory-queue sweep --once`, `check`) and this one never overlap. It runs in a worker thread of this
@@ -31,7 +31,7 @@
 //   10 MiB, so the next start moves it aside, and on SIGTERM, SIGINT and SIGHUP after the pass in hand (30 s at most). After every pass, whether
 //   it ended well or threw, it also compares the code it loaded with the checkout's HEAD and exits when they differ (a move made by another
 //   process, or whose message the pass lost). It lives on a lease from the job: each `ping` renews it, and with none for 180 s
-//   (FACTORY_DAEMON_LEASE_MS) it stops the way SIGTERM does, so booting the job out ends it within about three minutes, with no plist change.
+//   (LEASE_MS) it stops the way SIGTERM does, so booting the job out ends it within about three minutes, with no plist change.
 //   The peer check (server/peer.go:22-47) is not ported. It lets a caller speak for a harness process, by the pid of the socket's peer and its
 //   process tree, since piggery's verbs carry a participant's authority. Here a post carries none: the daemon acts on what sessions.jsonl holds,
 //   never on the post's fields, which only name the row they settle, and a forged `seat-ended` makes the daemon take records earlier, which is
@@ -99,13 +99,6 @@ export const codeMoved = (loaded, head) => Boolean(loaded && head && loaded !== 
  * team, so such a record waits for it. */
 export function reconcile(d) {
   d.pushRecords?.();
-  const file = join(d.state, 'sessions.jsonl');
-  const size = sizeOf(file);
-  let offset = d.store.offset('sessions.jsonl');
-  if (offset > size) {
-    d.log(`daemon: sessions.jsonl (${size} bytes) is shorter than the offset ${offset}; read from its start`);
-    offset = 0;
-  }
   const taken = wakeOnSeatEnds({
     state: d.state,
     runs: d.runs,
@@ -113,8 +106,7 @@ export function reconcile(d) {
     post: d.post,
     sink: (r, out) => settleWith(d.store, d.store.post({ verb: 'reconcile', run: r.run ?? null, tag: r.tag ?? null, session: r.session ?? null }), out),
   });
-  d.store.setOffset('sessions.jsonl', size);
-  d.log(`daemon: reconciled: ${size - offset} bytes of sessions.jsonl past the offset, ${taken.length} seat ends taken`);
+  d.log(`daemon: reconciled: ${taken.length} seat ends taken`);
   return taken;
 }
 
@@ -127,7 +119,6 @@ function seatEnded(d, req) {
   const after = () => {
     let mine = false;
     try {
-      const size = sizeOf(join(d.state, 'sessions.jsonl'));
       const taken = wakeOnSeatEnds({
         state: d.state,
         runs: d.runs,
@@ -142,7 +133,6 @@ function seatEnded(d, req) {
           settleWith(d.store, d.store.post({ verb: 'found', run: r.run ?? null, tag: r.tag ?? null, session: r.session ?? null }), out);
         },
       });
-      d.store.setOffset('sessions.jsonl', size);
       if (!mine) d.store.settle(id, { why: taken.length ? 'the record it names was not among those taken' : 'no new record: taken already' });
     } catch (error) {
       d.log(`daemon: seat-ended ${req.tag}: ${first(error)}`);
@@ -225,7 +215,7 @@ function serve(d, sock) {
 
 /** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow`, `startSource`, `pushRecords` and `onStart` (told
  * { stop, d } once it listens) are passed in for tests. */
-export async function run({ env = process.env, state = stateDirOf(env), runs = runsOf(env), human = humanOf(env), passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
+export async function run({ env = process.env, state = stateDirOf(env), runs = runsOf(env), human = humanOf(env), passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
   const sock = socketPath(state);
   if (!fits(sock)) throw new Error(`the socket path ${sock} is longer than 103 bytes`);
   mkdirSync(state, { recursive: true });

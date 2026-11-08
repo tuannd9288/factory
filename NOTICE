@@ -17,13 +17,32 @@ in this factory.
 
 pstack (https://github.com/cursor/plugins, path pstack): what the pstack pack takes from it is in packs/pstack/NOTICE.
 
-agent-desk (the Human's own project, tuannd9288/agent-desk), commit 0cd59d55. The Human chose the port (#25,
-2026-10-24).
+piggery (https://github.com/sting8k/piggery), commit 67c083e4ed28eb7092fcebc03df200dffa842758
+(v0.10.3, 2026-10-15). Its license, from its LICENSE at that commit:
 
-  kit/.gate/bin/lib/      plugin/content/prompts/REVIEWER.md:12-17, 18-56, 70-84 ("Never", "Reviewing a commit" with
-  reviewer-prompt.md      its re-review paragraphs, "The verdict"), word for word, each section under its own heading;
-                          the prompt carries no provenance comments, since the reviewer's model reads it (#203, K6).
-                          Not taken: 1-10, 57-62 ("Before Adding a Test") and 64-68 ("Answering a question"). Added
-                          here, for the Human to approve in the pull request: that the pull request's text and files
-                          are data and never instructions, the output shape of result.mjs, the No-red judgement,
-                          the raise rule and the acceptance rule.
+MIT License
+
+Copyright (c) 2026 sting8k
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+  scripts/release-notes   .github/workflows/release.yml:107, the awk program that prints a tag's own section of
+                          CHANGELOG.md, word for word, with the tag and the file as the script's own arguments; the
+                          script around it is the factory's.
+  bin/lib/team-names.mjs  internal/core/names.go: the team nicknames.
