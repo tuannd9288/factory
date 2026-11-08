@@ -7,14 +7,20 @@
 import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
-/** Writes `data` to `file` through `.<name>.<pid>.tmp` in its folder, made afresh (a leftover of an earlier run is removed first), then a
- * rename. With `mode`, the file gets exactly that mode, whatever the umask; without it, the default a new file gets. The folder must exist.
- * A failed write removes the temporary file and throws its error. */
+/** Writes `data` to `file` through `.<name>.<pid>.tmp` in its folder, made afresh (a leftover of an earlier run of this pid is removed and
+ * the file made again), then a rename. With `mode`, the file gets exactly that mode, whatever the umask; without it, the default a new file
+ * gets. The folder must exist. A failed write removes the temporary file and throws its error. */
 export function writeAtomic(file, data, { mode } = {}) {
   const tmp = join(dirname(file), `.${basename(file)}.${process.pid}.tmp`);
-  rmSync(tmp, { force: true });
+  const make = () => writeFileSync(tmp, data, mode === undefined ? { flag: 'wx' } : { mode, flag: 'wx' });
   try {
-    writeFileSync(tmp, data, mode === undefined ? { flag: 'wx' } : { mode, flag: 'wx' });
+    try {
+      make();
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      rmSync(tmp, { force: true });
+      make();
+    }
     if (mode !== undefined) chmodSync(tmp, mode);
     renameSync(tmp, file);
   } catch (e) {

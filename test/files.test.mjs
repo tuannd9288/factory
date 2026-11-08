@@ -19,6 +19,11 @@ test('writeAtomic replaces the file whole with the mode asked, and leaves no tem
     assert.equal(readFileSync(file, 'utf8'), 'new\n');
     assert.equal(statSync(file).mode & 0o777, 0o600);
     assert.deepEqual(readdirSync(dir), ['state.json']);
+    // A temporary file an earlier run of this pid left behind is made afresh, not refused.
+    writeFileSync(join(dir, `.state.json.${process.pid}.tmp`), 'leftover');
+    writeAtomic(file, 'newer\n');
+    assert.equal(readFileSync(file, 'utf8'), 'newer\n');
+    assert.deepEqual(readdirSync(dir), ['state.json']);
     // A rename onto a folder fails: the error is thrown and the temporary file goes with it.
     mkdirSync(join(dir, 'taken'));
     assert.throws(() => writeAtomic(join(dir, 'taken'), 'x'));
