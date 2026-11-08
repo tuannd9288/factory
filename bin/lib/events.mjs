@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { RATE_SOURCE } from './claude-code.mjs';
 import { writeAtomic } from './files.mjs';
 import { claimJob } from './job-claim.mjs';
+import { MACBOOK_SHARE } from './launchd.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountEvent, accountOut } from './seat.mjs';
@@ -211,9 +212,9 @@ const linesOf = (file) =>
 /** The lines of the state folder's events file. */
 export const readLines = (state) => linesOf(join(state, 'events.jsonl'));
 
-/** Where the MacBook's queue job puts the share (FAC-43, bin/lib/queue.mjs job): a folder of its own in /Users/Shared, which every local user
- * can reach. */
-export const MACBOOK_SHARE = '/Users/Shared/factory/events.jsonl';
+// Where the MacBook's queue job puts the share (FAC-43): a folder of its own in /Users/Shared, which every local user can reach. Its one
+// home is the jobs' table (bin/lib/launchd.mjs), and it is exported here too for the readers that import it from here.
+export { MACBOOK_SHARE };
 
 /** Why a share's folder or file (`what`) may not be used, from its lstat, or null: it must be a real folder or file (a link is not), owned by
  * one of `owners` (uids), and writable by no one else. /Users/Shared is writable by every account, so an account could make the folder first,

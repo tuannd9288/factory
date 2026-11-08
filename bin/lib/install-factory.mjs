@@ -20,14 +20,14 @@ import { fileURLToPath } from 'node:url';
 import { quote } from '../../packs/pstack/bin/lead.mjs';
 import { ROOT, followMain } from './checkout.mjs';
 import { contextOf, installedRoot, placeOf } from './factory.mjs';
+import { JOBS, PREFIX } from './launchd.mjs';
 import { isAgentsUser } from './node.mjs';
 import { liveRuns } from './seat.mjs';
 
-/** The MacBook's jobs: each label, the tool that prints and checks it, and the flags its `plist` takes for the LaunchDaemon. */
-export const DAEMONS = [
-  { label: 'io.github.tuannd9288.factory.relay', tool: 'bin/factory-relay', flags: [] },
-  { label: 'io.github.tuannd9288.factory.queue', tool: 'bin/factory-queue', flags: ['--daemon'] },
-];
+/** The MacBook's jobs, in the order they are installed: each label, the tool that prints and checks it, and the flags its `plist` takes for
+ * the LaunchDaemon, from the table (bin/lib/launchd.mjs). */
+const MACBOOK = ['relay', 'queue'];
+export const DAEMONS = MACBOOK.map((name) => ({ label: JOBS[name].label, tool: JOBS[name].tool, flags: JOBS[name].flags }));
 
 /** The line for one `follow`, and its exit code. */
 export function follow(env = process.env, move = followMain) {
@@ -73,7 +73,7 @@ export function sudoLine(jobs) {
 
 /** The jobs his own user ran before #366, LaunchAgents of his: out, with their plists, so they do not run beside the daemons. Run in his own
  * terminal, where $(id -u) and ~ are his; a job that is not loaded is skipped quietly. */
-const OLD_AGENTS = `for j in relay queue; do launchctl bootout gui/$(id -u)/io.github.tuannd9288.factory.$j 2>/dev/null; rm -f ~/Library/LaunchAgents/io.github.tuannd9288.factory.$j.plist; done`;
+const OLD_AGENTS = `for j in ${MACBOOK.join(' ')}; do launchctl bootout gui/$(id -u)/${PREFIX}$j 2>/dev/null; rm -f ~/Library/LaunchAgents/${PREFIX}$j.plist; done`;
 
 /** `daemons`: the lines it says, through `say`, and its exit code. */
 export function daemons(env = process.env, { root = ROOT, plistDir = env.FACTORY_PLIST_DIR ?? '/Library/LaunchDaemons', say = console.log } = {}) {
