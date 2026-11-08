@@ -712,6 +712,37 @@ console.log('{}');
     assert.equal(out.code, 0, out.out);
     assert.match(out.edits, /pr edit 7 --repo o\/app --add-label tier-2/);
   });
+  // FAC-100: no reviewer runs on Actions, so tier waits for no review job; the body's No-red line goes to the Human as tier 3.
+  const noReviewJob = () => write(fake, { 'jobs.json': JSON.stringify({ jobs: [{ id: 502, name: 'tier', run_attempt: 1, status: 'completed', conclusion: 'success' }], total_count: 1 }) });
+  test('tier needs no review: with no review job in its run, or no run id, it passes tier 1 and 2', () => {
+    labels();
+    noReviewJob();
+    let out = job('tier', { 'src/math.js': MUL }, pr);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /^tier 1$/m);
+    out = job('tier', { 'src/auth/t.js': 'export const t = 1;\n' }, { ...pr, GITHUB_RUN_ID: '' });
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.edits, /pr edit 7 --repo o\/app --add-label tier-2/);
+  });
+  test('a No-red line, a protected path and a needs-human label each make tier 3, which waits for the Human\'s approval', () => {
+    noReviewJob();
+    write(r.dir, { 'nored-body.txt': 'Summary\nTeam: team-x\nNo-red: a refactor that moves code and changes no behaviour\n' });
+    const cases = [
+      ['a No-red line', { 'src/math.js': MUL }, [], { GATE_BODY_FILE: join(r.dir, 'nored-body.txt') }],
+      ['a protected path', { 'AGENTS.md': '# app\n' }, [], {}],
+      ['a needs-human label', { 'src/math.js': MUL }, ['needs-human'], {}],
+    ];
+    for (const [what, files, names, env] of cases) {
+      labels(...names);
+      reviews([]);
+      const out = job('tier', files, { ...pr, ...env });
+      assert.equal(out.code, 1, `${what}: ${out.out}`);
+      assert.match(out.out, /^tier 3$/m, what);
+      assert.match(out.out, /tier 3 waits for @tuannd9288 to approve/, what);
+      reviews([review('tuannd9288', 'APPROVED', out.head)]);
+      assert.equal(again('tier', out.head, { ...pr, ...env }).code, 0, `${what}: the approval of the head did not land it`);
+    }
+  });
   test('tier waits for the review of its own run, and fails closed when it does not end or cannot be found', () => {
     labels();
     reviewJob('in_progress');
@@ -2504,6 +2535,9 @@ describe('workflows and ruleset', () => {
   /** Whether a job checks out the pull request's head as a work tree, and so runs the candidate's code. */
   const runsCandidate = (j) => j.steps.some((s) => String(s.uses).startsWith('actions/checkout') && /head\.(sha|ref)|head_ref|refs\/pull/.test(String(s.with?.ref ?? '')));
 
+  test('the kit requires verify and tier, and nothing else (FAC-100)', () => {
+    assert.deepEqual([...required].sort(), ['tier', 'verify']);
+  });
   test('every required check is a pull request job, and one skipped by needs leans only on a required one', () => {
     const jobs = workflows.filter((wf) => events(wf).some((e) => e.startsWith('pull_request'))).flatMap((wf) => Object.entries(wf.jobs).map(([id, j]) => ({ id, wf, j })));
     for (const check of required) assert.ok(jobs.some(({ j }) => j.name === check), `${check} is no pull request job`);

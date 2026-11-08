@@ -183,6 +183,21 @@ test('the owner script refuses a repository other than the one named, a login wi
   }
 });
 
+test('the owner script offers no reviewer: the gate requires verify and tier alone, and no reviewer environment is made (FAC-100)', () => {
+  const w = world({ kitLanded: true, collaborator: 'write', invitations: [], files: onMain({}) });
+  try {
+    const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
+    assert.equal(out.code, 0, out.out);
+    const gate = w.state().rulesets.find((r) => r.name === 'factory-gate');
+    const checks = gate.rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks.map((c) => c.context);
+    assert.deepEqual(checks, ['verify', 'tier']);
+    assert.ok(!w.writes().some((l) => l.includes('environments/reviewer')), w.writes().join('\n'));
+    assert.doesNotMatch(out.out, /reviewer/);
+  } finally {
+    w.cleanup();
+  }
+});
+
 test('the owner script shows every change it would make, and makes none without --apply', () => {
   const w = world();
   try {
