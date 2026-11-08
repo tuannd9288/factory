@@ -35,3 +35,21 @@ test('clonesUnder skips a clone with no readable origin or no owner/name, report
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a clone taken in is a .git and a .gate/ folder, with or without config.sh; a .gate that is a file is none (FAC-85)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ledger-clones-'));
+  try {
+    const bare = (folder, url, gate) => {
+      const dir = join(root, folder);
+      execFileSync('git', ['init', '-q', dir]);
+      execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', url]);
+      if (gate === 'folder') mkdirSync(join(dir, '.gate'));
+      else writeFileSync(join(dir, '.gate'), '');
+    };
+    bare('noconfig', 'https://github.com/o/noconfig.git', 'folder');
+    bare('gatefile', 'https://github.com/o/gatefile.git', 'file');
+    assert.deepEqual([...clonesUnder(root).keys()], ['o/noconfig']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
