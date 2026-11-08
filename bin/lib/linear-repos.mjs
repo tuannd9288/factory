@@ -27,10 +27,10 @@ export function readRegistry(state) {
 }
 
 /** The repository's registry entry ({ key, teamId }), or null when it is on GitHub. Throws as readRegistry does. The registry is keyed
- * by the repository's name, as `onboard` writes it; an `owner/name` is read by its name, as `factory-move` and the ledger pass it. */
-export function onLinear(repo, state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory')) {
+ * by the repository's name, as `onboard` writes it, and every caller passes that name (FAC-85), a caller that holds owner/name its name
+ * part. */
+export function onLinear(name, state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory')) {
   const registry = readRegistry(state);
-  const name = String(repo).slice(String(repo).lastIndexOf('/') + 1);
   const e = Object.hasOwn(registry, name) ? registry[name] : null;
   return e && typeof e.key === 'string' && TEAM_KEY.test(e.key) && typeof e.teamId === 'string' ? e : null;
 }
