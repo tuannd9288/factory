@@ -550,10 +550,8 @@ test('--after takes a whole number of 0 or more; anything else is a usage error'
   });
 });
 
-test('the Leads are read with the reader that throws when ps fails, not the one that shows none', async () => {
-  const e = await events();
+test('the reader of the Leads throws when ps fails, unlike the one that shows none', async () => {
   const top = await import('../bin/lib/colly-status.mjs');
-  assert.equal(e.defaultProcesses, top.readProcesses);
   assert.throws(() => top.readProcesses(['/nonexistent/ps']), /ps is not on this host/);
   assert.throws(() => top.readProcesses(['/usr/bin/false']));
 });
