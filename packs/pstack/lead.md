@@ -88,11 +88,12 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    named as in step 3 (`.gate/bin/verify --tests <files>` and `.gate/bin/red-check --base origin/main`; `--fast`
    checks only staged files, and a committed change has none), or that it runs none, since step 5 ran them, that it
    writes nothing in the worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists
-   what it found. Tell it to fill `raise`, one line naming the kind and the place, only when the change touches what its paths
-   do not show: data that could be lost or exposed, authentication, secrets, payment, or what deploys, even if every rule is
-   met. On a `PASS` that carries a `raise`, add `needs-human` to the pull request as soon as step 7's first `scripts/ship` run
-   has opened it, with `gh issue edit <number> --add-label needs-human` (a pull request's number is its issue's), before the run
-   that would arm it: ship then stops, and the pull request waits for the Human as tier 3. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
+   what it found. Tell it to fill `raise`, one line naming the kind and the place, only when the change touches what its
+   paths do not show: data that could be lost or exposed, authentication, secrets, payment, or what deploys, even if
+   every rule is met. On a `PASS` that carries a `raise`, add `needs-human` to the pull request as soon as step 7's
+   first `scripts/ship` run has opened it, with `gh issue edit <number> --add-label needs-human` (a pull request's
+   number is its issue's), before the run that would arm it: ship then stops, and the pull request waits for the Human
+   as tier 3. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
    a user reaches and leaves that feature's file unchanged. Start it with step 4's command, with `reviewer` in place of
    `worker`, its own brief and
    `--tag review<k>`, and on its wake find its record with `"tag":"review<k>"` the same way; sort its `foundOutside`
