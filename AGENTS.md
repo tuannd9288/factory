@@ -63,6 +63,7 @@ The Human's dated decisions, with their sources and his words, are in `docs/deci
 - **The Factory app's Linear key, 2026-11-04.**
 - **Effectiveness, 2026-11-04.**
 - **The Watcher's freeze, 2026-11-07.**
+- **The factory's own merge switch, 2026-11-08.**
 
 ## Tiers
 
@@ -171,7 +172,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
-  Checked by: `.github/CODEOWNERS:4`.
+  Checked by: `scripts/ship`'s stop on `needs-human` (`packs/pstack/scripts/lib/ship.mjs:162`) and
+  `.github/workflows/approval.yml`, which reads his approval of such a pull request from `.github/CODEOWNERS:4`.
   Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
   factory's unattended sessions; 0d does; (2) the record of a task is in its repository's tracker (1b) and in 0d's
@@ -192,6 +194,16 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
+
+Versions follow Semantic Versioning 2.0.0: a version is a tag `v<major>.<minor>.<patch>` on `main`, cut on his word and never
+moved or deleted (the tag ruleset `factory-versions`, `.github/ruleset-versions.json`, which he sets, refuses a deletion and a
+force push). Its public API is the
+contracts H1–H9; the required check names (3a); the record shapes `events.jsonl` (`bin/lib/events.mjs`) and `sessions.jsonl`
+(`bin/lib/seat.mjs`); the commands `factory`, `bin/seat`,
+`bin/onboard`, `bin/onboard-owner`, `bin/onboard-doctor` and `bin/kit-update`; and what a served repository holds of the kit:
+the Gate block, the `.gate/bin/` commands, the keys of `.gate/config.sh` and `.gate/driver.json` and the line forms of
+`.gate/protected`. Everything else is internal. An incompatible change to the API is MAJOR; a new compatible contract,
+command or key, or a deprecation, is MINOR; a fix is PATCH.
 
 ## This root
 
@@ -223,10 +235,17 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   GitHub token there (#366); its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
-- Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its `**TL;DR**`
-  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386,
-  #411). Its title carries no issue number, which stays in the body.
+- A pull request of this repository lands once the team's Supervisor has accepted it and Colly's review passed, with
+  `verify` green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
+  One that needs the Human, a release, a first design or a change to a design or architecture, carries `needs-human`
+  (`gh issue edit <n> --add-label needs-human`), and Colly takes it to him. This repository runs no `tier`, so only
+  `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:162`). It goes on
+  when he approves its head on GitHub, which `approval` reads, so the Lead sees it with no relay, or on his word, which
+  Colly records on the issue. Then the Lead removes the label (`gh issue edit <n> --remove-label needs-human`) and runs
+  `scripts/ship` again. GitHub asks his review only on a pull request that changes `.github/CODEOWNERS`. Each body
+  opens with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its
+  `**TL;DR**` block, the same lines in English; they are his only section, and the agents' detail is collapsed below
+  them (#386, #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|
@@ -264,6 +283,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
 | `scripts/ship` | Opens, readies and arms this repository's pull requests as a repository that installed the pstack pack does: it runs `packs/pstack/scripts/ship` from its source, with no red-check stamp, since this root has no `.gate/config.sh` and CI runs `scripts/verify` (FAC-14) |
+| `CHANGELOG.md` | Each version's notes, one section `## vX.Y.Z - <date>`, written in its release pull request; `.github/workflows/release.yml` publishes the section (`scripts/release-notes <tag>`) to the version's GitHub Release when its tag is pushed, or by hand for an existing tag; the workflow's header has the steps |
 | `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
 

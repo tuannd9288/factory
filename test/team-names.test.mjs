@@ -22,7 +22,7 @@ test('FNV-1a nickname is stable and scans from the first word, wrapping when tak
 
 test('no team picks a name; one resumes; several refuse; new-team scans all team sources', () => {
   const home = mkdtempSync(join(tmpdir(), 'team-names-'));
-  const options = { home, state: join(home, 'state'), runs: join(home, 'runs'), root: home, processes: () => [] };
+  const options = { home, state: join(home, 'state'), runs: join(home, 'runs'), processes: () => [] };
   try {
     mkdirSync(options.state);
     assert.equal(pickTeam('factory', options), 'thyme');

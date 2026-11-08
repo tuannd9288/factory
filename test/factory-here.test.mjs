@@ -92,7 +92,7 @@ test('the shared fixture adds no account team before a Lead is launched', () => 
     const runs = join(s.home, 'factory-runs');
     mkdirSync(join(runs, 'alpha-lead'), { recursive: true });
     assert.deepEqual(teamsOf('alpha', {
-      home: s.home, state: s.state, runs, root: join(s.home, 'WORKSPACES'), processes: () => [],
+      home: s.home, state: s.state, runs, processes: () => [],
     }), ['lead']);
   } finally { s.done(); }
 });

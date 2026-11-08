@@ -14,7 +14,7 @@ import { pushHook } from '../../../bin/lib/force-push.mjs';
 // and given once, as the first message of a resume.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +26,7 @@ import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 import { readRules } from '../../../bin/lib/deny-read.mjs';
 import { which } from '../../../bin/lib/launchd.mjs';
+import { setJsonKey, writeAtomic } from '../../../bin/lib/files.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
 const USAGE = 'usage: factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]   (--team names the team, use the only existing team, pick a nickname when none exists, refuse when several exist; --new-team picks a free nickname; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
@@ -158,9 +159,7 @@ export function copyHook({ root, runDir }) {
   const to = hookPath({ root, runDir });
   if (!existsSync(to)) {
     mkdirSync(dirname(to), { recursive: true });
-    const tmp = `${to}.${process.pid}.tmp`;
-    writeFileSync(tmp, readFileSync(join(root, 'packs/pstack/bin/transcript-copy.mjs')));
-    renameSync(tmp, to);
+    writeAtomic(to, readFileSync(join(root, 'packs/pstack/bin/transcript-copy.mjs')));
   }
   return to;
 }
@@ -196,33 +195,7 @@ function profileConfig(cwd) {
  * mode kept, through a temporary file and a rename. A trust key is never set: trust stays the Human's. Throws an Error whose message
  * names the file when it does not parse into an object; the file is then unchanged. */
 export function markOnboarded(config) {
-  const file = join(config, '.claude.json');
-  let text = '{}';
-  let mode = 0o600;
-  try {
-    text = readFileSync(file, 'utf8');
-    mode = statSync(file).mode & 0o777;
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw new Error(`could not read ${file}: ${e.code ?? e.message}`);
-  }
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = null;
-  }
-  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error(`${file} does not hold a JSON object; fix or move it`);
-  if (json.hasCompletedOnboarding === true) return;
-  mkdirSync(config, { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, `${JSON.stringify({ ...json, hasCompletedOnboarding: true }, null, 2)}\n`, { mode, flag: 'wx' });
-    chmodSync(tmp, mode);
-    renameSync(tmp, file);
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw new Error(`could not write ${file}: ${e.code ?? e.message}`);
-  }
+  setJsonKey(join(config, '.claude.json'), 'hasCompletedOnboarding', true);
 }
 
 /** Copy pstack's mapped skill defaults into the Lead profile on every start (#436). Model changes are the Human's. */
@@ -230,12 +203,9 @@ export function writeModels(config, root) {
   const file = join(config, 'rules/pstack-models.md');
   const text = readFileSync(join(root, 'packs/pstack/pstack-models.md'));
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
   try {
-    writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });
-    renameSync(tmp, file);
+    writeAtomic(file, text, { mode: 0o600 });
   } catch (e) {
-    rmSync(tmp, { force: true });
     throw new Error(`could not write ${file}: ${e.code ?? e.message}`);
   }
 }
@@ -343,7 +313,7 @@ function main(argv, env) {
   const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
   let linear;
   try {
-    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), root, newTeam: flags.includes('--new-team') });
+    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), newTeam: flags.includes('--new-team') });
     linear = onLinear(repo, stateDir);
   } catch (e) {
     // A registry that does not parse would give every repository the GitHub form without a word: no start instead.

@@ -10,7 +10,7 @@
 // part. On the Mac mini the account of a row is in $FACTORY_STATE/accounts, local to a machine, the one source of it.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,7 @@ import { FACTORY_REPO, repoOk } from './repos.mjs';
 import { teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
+import { writeAtomic } from './files.mjs';
 import { APP_FOLDERS, accountList, accountRefusal, archiveToken, nodeAccountList, readAccounts, readTokenFile, readSecret, retireSeat1File, seat1File, seatAccounts, setAccount, tokenAdded, tokenAccounts, tokenDir, tokenOf, writeAppFile, writeToken } from './token.mjs';
 
 const KINDS = { claude: 'Claude', codex: 'Codex', gh: 'gh' };
@@ -559,9 +560,7 @@ function copyLibHook(dir, name) {
   const to = join(dir, `${name}-${createHash('sha256').update(bytes).digest('hex').slice(0, 7)}.mjs`);
   if (!existsSync(to)) {
     mkdirSync(dirname(to), { recursive: true });
-    const tmp = `${to}.${process.pid}.tmp`;
-    writeFileSync(tmp, bytes);
-    renameSync(tmp, to);
+    writeAtomic(to, bytes);
   }
   return to;
 }
@@ -579,15 +578,7 @@ function markTrusted(config, folder) {
   const entry = projects[folder] && typeof projects[folder] === 'object' ? projects[folder] : {};
   if (entry.hasTrustDialogAccepted === true) return;
   const mode = statSync(file).mode & 0o777;
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, `${JSON.stringify({ ...json, projects: { ...projects, [folder]: { ...entry, hasTrustDialogAccepted: true } } }, null, 2)}\n`, { mode, flag: 'wx' });
-    chmodSync(tmp, mode);
-    renameSync(tmp, file);
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw e;
-  }
+  writeAtomic(file, `${JSON.stringify({ ...json, projects: { ...projects, [folder]: { ...entry, hasTrustDialogAccepted: true } } }, null, 2)}\n`, { mode });
 }
 
 /** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder

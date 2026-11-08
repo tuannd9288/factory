@@ -1,15 +1,17 @@
 // Colly status text and shared session readers (#429).
 // --line and --brief share top-github.json, preserving the existing cache and deadlines.
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
+import { writeAtomic } from './files.mjs';
 import { hookStateOf, parseLog } from './claude-code.mjs';
-import { REQUIRED, clonesUnder } from './ledger.mjs';
+import { REQUIRED } from './ledger.mjs';
 import { readSessions } from './records.mjs';
+import { byName, cloneRepo, clonesUnder } from './repos.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 
@@ -64,12 +66,7 @@ export function roleOf(tag, record) {
 /** owner/name of a work folder's origin, read with git alone; null where git cannot tell. */
 function originIn(cwd) {
   if (!cwd || !existsSync(cwd)) return null;
-  try {
-    const url = execFileSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)?.[1] ?? null;
-  } catch {
-    return null;
-  }
+  return cloneRepo(cwd, 5000);
 }
 
 /** ps's elapsed time ([[dd-]hh:]mm:ss) in milliseconds; null for anything else. */
@@ -257,7 +254,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
       const s = statSync(join(dir, n));
       if (!newest || s.mtimeMs > newest.mtimeMs) newest = { file: join(dir, n), mtimeMs: s.mtimeMs, st: s };
     }
-    const repo = [...clones.keys()].find((r) => r.split('/')[1] === repoName) ?? null;
+    const repo = byName(clones.keys(), repoName);
     const cwd = repo ? clones.get(repo) : null;
     let event = null;
     try {
@@ -283,7 +280,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
   for (const s of out) {
     if (s.repo || !s.folder) continue;
     const m = /^(.+)-\d+$/.exec(s.folder);
-    s.repo = m?.[1] === 'issue' ? (root ? originCached(root) : null) : ([...names].find((r) => r.split('/')[1] === m?.[1]) ?? null);
+    s.repo = m?.[1] === 'issue' ? (root ? originCached(root) : null) : byName(names, m?.[1]);
   }
   if (cache) cache.logs = seenLogs;
   const rank = (s) => ROLE_ORDER.indexOf(s.role) === -1 ? ROLE_ORDER.length : ROLE_ORDER.indexOf(s.role);
@@ -366,10 +363,7 @@ function readSharedGithub(state) {
 function writeSharedGithub(state, data, good) {
   try {
     mkdirSync(state, { recursive: true });
-    const file = join(state, GH_FILE);
-    const tmp = `${file}.tmp-${process.pid}`;
-    writeFileSync(tmp, JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
-    renameSync(tmp, file);
+    writeAtomic(join(state, GH_FILE), JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
   } catch {
     // a view that cannot write the file reads GitHub again next time
   }
