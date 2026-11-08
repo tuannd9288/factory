@@ -63,6 +63,7 @@ The Human's dated decisions, with their sources and his words, are in `docs/deci
 - **The Factory app's Linear key, 2026-11-04.**
 - **Effectiveness, 2026-11-04.**
 - **The Watcher's freeze, 2026-11-07.**
+- **The factory's own merge switch, 2026-11-08.**
 
 ## Tiers
 
@@ -223,10 +224,15 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   GitHub token there (#366); its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
-- Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its `**TL;DR**`
-  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386,
-  #411). Its title carries no issue number, which stays in the body.
+- A pull request of this repository lands once the supervising session has accepted it, Colly's review passed and
+  `verify` is green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
+  One that needs the Human, a release, a first design or a change to a design or architecture, carries `needs-human`
+  (`gh issue edit <n> --add-label needs-human`), and Colly takes it to him. This repository runs no `tier`, so only
+  `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:162`). On his
+  approval, relayed by Colly, the Lead removes the label (`gh issue edit <n> --remove-label needs-human`) and runs
+  `scripts/ship` again. Each body opens with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language,
+  in Decisions), then its `**TL;DR**` block, the same lines in English; they are his only section, and the agents'
+  detail is collapsed below them (#386, #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|

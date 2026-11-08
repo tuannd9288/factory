@@ -1,4 +1,4 @@
 # Every change to the factory changes every repository's gate at its next kit pull request: all of it is tier 3.
-# The ruleset requires one approval after the last push, since GitHub's code-owner rule asks nothing of an author
-# who owns the code: agents open the factory's pull requests from their own account, the Human approves.
+# Since 2026-11-08 the ruleset `factory` is at the merge switch's position all and requires no approval; a pull request
+# that needs the Human's carries needs-human, which scripts/ship stops on (AGENTS.md, "This root").
 * @tuannd9288
