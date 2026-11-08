@@ -20,7 +20,9 @@ import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } f
 
 /** What a session reports back through --json-schema.
  * The cost is not asked of the model: the record takes it from the session's result event. `foundOutside` lists the bugs and
- * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead. */
+ * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead.
+ * `raise`, optional since every seat shares this schema, is the reviewer's: the kind and the place of a high risk, on which the Lead
+ * labels the pull request needs-human (FAC-101, packs/pstack/lead.md step 6). */
 export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -31,6 +33,7 @@ export const SCHEMA = {
     couldNotRead: { type: 'array', items: { type: 'string' } },
     needsLead: { type: 'array', items: { type: 'string' } },
     foundOutside: { type: 'array', items: { type: 'string' } },
+    raise: { type: 'string' },
   },
 };
 

@@ -249,6 +249,14 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   until the Human revisits its scope on evidence. The Watcher stays on by default, as he decided on 2026-11-06. Its
   switch's own notice, `reader-off`, is outside the freeze. Sources: INN-39 for the box, and the supervising session's
   relay for 15:15:36.
+- **The factory's own merge switch, 2026-11-08.** On his word, Colly moved the ruleset `factory` (25631761) of
+  `tuannd9288/factory` to the merge switch's position `all` at 08:31:11 +07: no approval, no code-owner review and
+  no approval of the last push are required, and `verify` stays required. A pull request of this repository lands once
+  the team's Supervisor has accepted it and Colly's review passed, with `verify` green, armed by `scripts/ship`. He
+  still approves a release, a first design, and a change to a design or architecture: such a pull request carries
+  `needs-human`, which `scripts/ship` stops on, and Colly takes it to him. `.github/ruleset.json` holds the same
+  parameters. Source: the Human, in his chat with Colly, 2026-11-08 shortly before 08:31 +07, paraphrased; recorded on
+  INN-42 the same morning.
 - **No reviewer on GitHub Actions, 2026-11-08.** Review runs beside the workers, as eight of the ten reference systems do:
   the team's reviewer decides on the machine, the Lead arms auto-merge only on its PASS, and a high risk gets
   `needs-human`. No job on GitHub Actions calls a model or holds a reviewer's credential: the kit's Claude reviewer and
@@ -263,3 +271,4 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   asks. A repository still on the kit before this keeps its own reviewer jobs until FAC-102 moves it. Sources: his five
   answers on the review-placement page, as FAC-99 on Linear records them, and his answers on FAC-100, recorded there and
   relayed by Colly at 10:36 +07.
+
