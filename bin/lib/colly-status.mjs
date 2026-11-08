@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
 import { hookStateOf, parseLog } from './claude-code.mjs';
-import { REQUIRED, clonesUnder, readSessions } from './ledger.mjs';
+import { REQUIRED, clonesUnder } from './ledger.mjs';
+import { readSessions } from './records.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 
