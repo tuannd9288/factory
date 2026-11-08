@@ -9,6 +9,14 @@ import { Worker } from 'node:worker_threads';
 import { clearFailed, markFailed, markOk, readMarkers, repoMarker } from '../bin/lib/status.mjs';
 
 const folder = () => mkdtempSync(join(tmpdir(), 'status-'));
+/** p, or a failure that names what, once ms have passed: a pass that hangs fails its test instead of holding the file open. */
+function within(p, ms, what) {
+  let timer;
+  const late = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms waiting for ${what}`)), ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
 /** The marker `name` holds after markFailed in a fresh state folder, as lines. */
 const failedLines = (why, opts) => {
   const dir = folder();
@@ -43,11 +51,16 @@ test('a daemon pass that raises leaves queue-run.failed with the time and its fi
     const state = join(dir, 'state');
     // A folder where the sweep's lock keeps its database: opening it raises inside runPass.
     mkdirSync(join(state, 'queue.lock.db'), { recursive: true });
-    await new Promise((resolve, reject) => {
-      const worker = new Worker(new URL('../bin/lib/daemon-pass.mjs', import.meta.url), { workerData: { state, human: 'nobody' }, stdout: true, stderr: true });
+    const worker = new Worker(new URL('../bin/lib/daemon-pass.mjs', import.meta.url), { workerData: { state, human: 'nobody' }, stdout: true, stderr: true });
+    const ended = new Promise((resolve, reject) => {
       worker.on('error', reject);
       worker.on('exit', resolve);
     });
+    try {
+      await within(ended, 10000, 'the daemon pass to end');
+    } finally {
+      await worker.terminate();
+    }
     assert.match(readFileSync(join(state, 'queue-run.failed'), 'utf8'), /^20\d\d-\d\d-\d\dT[\d:.]+Z \S.*\n$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
