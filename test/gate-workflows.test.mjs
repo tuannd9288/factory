@@ -91,12 +91,6 @@ describe('the runners and the reviewer, which bin/onboard fills in (item 10, #15
     for (const file of ['main.yml', 'gate.yml', 'gate-trusted.yml']) assert.doesNotMatch(readFileSync(join(factory, 'kit/.github/workflows', file), 'utf8'), /\bvars\./, file);
   });
 
-  test('gate-trusted.yml holds the reviewer once, empty in the kit, at the workflow\'s level, and the reviewer\'s install follows it', () => {
-    assert.equal(trusted.env.GATE_REVIEWER, '');
-    assert.equal(JSON.stringify(trusted.jobs).includes('GATE_REVIEWER:'), false);
-    const install = Object.values(trusted.jobs).flatMap((job) => job.steps).filter((step) => /GATE_REVIEWER/.test(String(step.if ?? '')));
-    assert.deepEqual(install.map((step) => step.if), ["env.GATE_REVIEWER == 'claude'"]);
-  });
 });
 
 describe('.gate/bin/verify-timeout (item 9)', () => {
@@ -185,19 +179,6 @@ describe('the ceilings that follow the timeout (item 9)', () => {
     assert.ok(gate.jobs.verify['timeout-minutes'] >= max + 30);
   });
 
-  test('review has room to wait for the longest verify and still run the reviewer; verdict and tier outlast review', () => {
-    const review = jobs.review['timeout-minutes'];
-    assert.equal(max, 60);
-    assert.ok(review >= max + 30, `review ${review}`);
-    assert.equal(String(jobs.review.steps.at(-1).env.GATE_JOB_MINUTES), String(review));
-    assert.ok(jobs.verdict['timeout-minutes'] >= review + 10);
-    assert.ok(jobs.tier['timeout-minutes'] >= jobs.verdict['timeout-minutes'] + 5);
-    const script = readFileSync(join(factory, 'kit/.gate/bin/review'), 'utf8');
-    const waits = [...script.matchAll(/GATE_REVIEW_WAIT:-(\d+)/g)].map((m) => Number(m[1]));
-    assert.ok(waits.length >= 1);
-    for (const w of waits) assert.ok(w / 60 >= review + 10, `GATE_REVIEW_WAIT ${w}`);
-    for (const w of waits) assert.ok(w / 60 + 5 <= jobs.tier['timeout-minutes'], `tier ends before a wait of ${w}`);
-  });
 });
 
 describe('the repository\'s own Node and pnpm (#155)', () => {

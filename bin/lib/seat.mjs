@@ -18,7 +18,7 @@ import { readSessions } from './records.mjs';
 import { repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
 
-/** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
+/** What a session reports back through --json-schema.
  * The cost is not asked of the model: the record takes it from the session's result event. `foundOutside` lists the bugs and
  * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead. */
 export const SCHEMA = {
