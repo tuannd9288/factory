@@ -29,6 +29,16 @@ describe('the runners, which bin/onboard fills in (item 10, #154, #335)', () => 
 
 });
 
+// FAC-100: with no reviewer, a label is the only route to tier 3 besides the paths, so tier runs again when one is added.
+describe('gate-trusted.yml\'s triggers (FAC-100)', () => {
+  test('tier runs again when a label is added, and not when one is removed, since a tier never drops', () => {
+    // YAML 1.1, which Ruby's loader reads, takes the key `on` for true.
+    const { types } = trusted.true.pull_request_target;
+    assert.ok(types.includes('labeled'), JSON.stringify(types));
+    assert.ok(!types.includes('unlabeled'), JSON.stringify(types));
+  });
+});
+
 describe('.gate/bin/verify-timeout (item 9)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'verify-timeout-'));
   const kit = (config) => {

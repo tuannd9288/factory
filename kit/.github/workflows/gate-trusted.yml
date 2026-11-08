@@ -9,6 +9,9 @@
 #            or of a commit whose patch the head carries unchanged. After his approval the queue re-runs it. It is red unless
 #            the issue the body's `Issue:` names is open (`issues: read`) and `Claim:` is that issue's claim ref's tip
 #            (.gate/bin/lib/claim.mjs check).
+# It runs again when a label is added, since a needs-human label makes tier 3 on a pull request whose tier was green. The
+# labels tier writes itself use GITHUB_TOKEN, whose events start no workflow run, so it never starts itself. A removed label
+# starts nothing: a tier never drops.
 # The required checks are verify (gate.yml) and tier (.gate/ruleset.json). No required job here has `needs`: a job skipped
 # because a job it needs failed counts as passing. No job counts a pull request's red heads: the three-round rule is the
 # workers' (FAC-100).
@@ -21,7 +24,7 @@ name: gate-trusted
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, labeled]
 
 permissions:
   contents: read
