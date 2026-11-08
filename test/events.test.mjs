@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs, { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
@@ -550,10 +551,22 @@ test('--after takes a whole number of 0 or more; anything else is a usage error'
   });
 });
 
-test('the reader of the Leads throws when ps fails, unlike the one that shows none', async () => {
+test('the reader of the Leads throws when ps fails, unlike the one that shows none, and leadsAtDialog reads with it by default', async (t) => {
   const top = await import('../bin/lib/colly-status.mjs');
   assert.throws(() => top.readProcesses(['/nonexistent/ps']), /ps is not on this host/);
   assert.throws(() => top.readProcesses(['/usr/bin/false']));
+  // The sweep calls observe with no processes (bin/lib/queue.mjs): with no ps on the host its default reader throws, so a failed ps
+  // clears no Lead's open condition, as an empty list would.
+  const { leadsAtDialog } = await events();
+  const exists = fs.existsSync;
+  t.mock.method(fs, 'existsSync', (p) => (p === '/bin/ps' || p === '/usr/bin/ps' ? false : exists(p)));
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => leadsAtDialog({ runs: tmpdir(), now: Date.now() }), /ps is not on this host/);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
 });
 
 test('a process list or accounts that cannot be read leave their conditions as they were; a reading that succeeded ends them', async () => {
