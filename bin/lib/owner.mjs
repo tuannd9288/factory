@@ -1,17 +1,17 @@
 import { forcePushOn } from './force-push.mjs';
 // The admin step of taking a repository in, run by Colly from the factory clone, on the Human's gh login, after his one
 // approval of what it prints: it checks the repository is the one he names, by name and id, shows every change, and
-// with --apply invites the agents' account (write), sets the factory's rulesets, creates the reviewer environment and turns
+// with --apply invites the agents' account (write), sets the factory's rulesets and turns
 // on the repository's "Allow auto-merge" (#139), once the kit is on main sets an Actions event policy that allows the gate's
 // workflows on pull_request_target the events main's own files give them (#337), then reads back what it set. On the factory's
-// own repository it sets that policy alone. The gate's ruleset follows the reviewer as
-// main's gate-trusted.yml holds it (#155: entire has its own). The gate's settings are in the workflows on main, which
+// own repository it sets that policy alone. The gate's ruleset is the kit's, which requires verify and tier: no reviewer runs
+// on Actions, and none is offered (FAC-100). A main still on the kit before FAC-100 whose gate-trusted.yml names the reviewer
+// entire keeps the Entire variant (#155) until its kit update (FAC-102). The gate's settings are in the workflows on main, which
 // bin/onboard fills in and a pull request changes (#335); this command sets none of them, since the Human's approval of
 // that pull request is what changes one. Nor does it set the gate's merge switch (#333), the two review parameters of the
 // gate's pull_request rule, unless --merge all|1-2|none says so: it takes them from the live ruleset when it puts one back,
 // and from the kit's (1-2) when it makes one. With --merge it writes the live gate ruleset back with those two parameters changed and
-// nothing else in it. A main whose gate-trusted.yml cannot be read stops the run when the kit is on
-// it, since the reviewer chooses the ruleset. It calls only gh against GitHub's API, with the factory's own files: never git,
+// nothing else in it. It calls only gh against GitHub's API, with the factory's own files: never git,
 // never the target's .envrc, scripts or hooks, so nothing the target holds runs with his authority. A second run changes
 // nothing. See bin/onboard-owner for the arguments.
 import { execFileSync } from 'node:child_process';
@@ -31,10 +31,8 @@ const FILES = {
   bootstrap: join(here, '../rulesets/bootstrap.json'),
   gate: join(here, '../../kit/.gate/ruleset.json'),
 };
-const ENV = 'reviewer';
 const GATE_NAME = 'factory-gate';
 const CALL_MS = 60_000;
-const BRANCH_POLICY = { protected_branches: false, custom_branch_policies: true };
 /** #337: from 2026-12-02 GitHub blocks pull_request_target in a public repository that has no Actions event policy allowing
  * it, and the gate's trusted jobs run on it. The repository gets one policy, by this name, that allows the gate's workflow files
  * that run on pull_request_target the events they run on. Its endpoints are documented for this API version, sent on each call. */
@@ -53,25 +51,16 @@ export const eventPolicy = ({ include, events }) => ({
  * factory-onboard-scratch's head 485678f. An App's id never changes; main() asks GitHub that the slug still names it. */
 export const ENTIRE_APP = { slug: 'entire', id: 2626939, check: 'Entire Gates' };
 
-/** The kit's gate for a repository whose GATE_REVIEWER is entire: Entire reviews outside Actions, so review and verdict
- * judge nothing and are not required, and Entire's check is, pinned to its App. tier, which passes only on that check's
- * success (GitHub counts its neutral as passing), stays required. */
+/** The gate of a main still on the kit before FAC-100 whose GATE_REVIEWER is entire (#155): Entire reviews outside Actions,
+ * so its check is required, pinned to its App, beside verify and tier, which that kit's tier waits for. FAC-102 moves each
+ * such repository to the kit's gate; then main names no reviewer and this variant is chosen no more. */
 export function entireGate(gate) {
   return {
     ...gate,
     rules: gate.rules.map((r) =>
       r.type !== 'required_status_checks'
         ? r
-        : {
-            ...r,
-            parameters: {
-              ...r.parameters,
-              required_status_checks: [
-                ...r.parameters.required_status_checks.filter((c) => c.context !== 'review' && c.context !== 'verdict'),
-                { context: ENTIRE_APP.check, integration_id: ENTIRE_APP.id },
-              ],
-            },
-          },
+        : { ...r, parameters: { ...r.parameters, required_status_checks: [...r.parameters.required_status_checks, { context: ENTIRE_APP.check, integration_id: ENTIRE_APP.id }] } },
     ),
   };
 }
@@ -89,8 +78,9 @@ const sorted = (r) => ({ ...r, rules: [...(r.rules ?? [])].sort((a, b) => a.type
 /** What the repository should hold: before the kit is on its default branch, a ruleset that refuses a rewrite on main and claims
  * (every branch with forcePush off), one on every tag that refuses creation, update and deletion but for a repository admin, one on the claim refs
  * (claim/<n>) that refuses deletion and rewrite for everyone, and a bootstrap one on main that asks the Human to approve
- * the last push; after, the kit's gate in place of the bootstrap one, in its Entire variant when the reviewer is entire, and the
- * Actions event policy for the workflow files `target` names (#337), read from main by gateState. */
+ * the last push; after, the kit's gate in place of the bootstrap one, in its Entire variant when main is on the kit before
+ * FAC-100 with the reviewer entire, and the Actions event policy for the workflow files `target` names (#337), read from main
+ * by gateState. */
 export function wanted({ kitLanded, branch, reviewer, mergeMethod = 'squash', forcePush, target }) {
   const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
   const gate = () => {
@@ -152,11 +142,12 @@ export function switchNow(slug, branch, read = gh) {
   }
 }
 
-/** The four repository variables that held the gate's settings before #335, as the repository holds them; an unset or
- * empty one is absent. Only a main whose gate-trusted.yml predates #335 reads one, GATE_REVIEWER, until its kit update. */
+/** The repository variables that held the gate's settings before #335, GATE_REVIEWER with them, as the repository holds them;
+ * an unset or empty one is absent. Only a main whose gate-trusted.yml predates #335 reads them, until its kit update. */
 export function variablesOf(slug, read = gh) {
   const list = read(['variable', 'list', '--repo', slug, '--json', 'name,value']) ?? [];
-  return Object.fromEntries(SETTINGS.map(({ variable }) => [variable, list.find((v) => v.name === variable)?.value]).filter(([, value]) => value));
+  const names = [...SETTINGS.map(({ variable }) => variable), 'GATE_REVIEWER'];
+  return Object.fromEntries(names.map((name) => [name, list.find((v) => v.name === name)?.value]).filter(([, value]) => value));
 }
 
 /** The calls that bring the repository from have to want: every addition before any removal, so main never stands bare
@@ -171,10 +162,6 @@ export function plan(slug, agent, have, want) {
     if (!now) calls.push({ what: `ruleset ${r.name}`, method: 'POST', path: `${repo}/rulesets`, body: r });
     else if (!holds(sorted(r), sorted(now))) calls.push({ what: `ruleset ${r.name}`, method: 'PUT', path: `${repo}/rulesets/${now.id}`, body: r });
   }
-  if (!holds(BRANCH_POLICY, have.environment?.deployment_branch_policy))
-    calls.push({ what: `environment ${ENV}`, method: 'PUT', path: `${repo}/environments/${ENV}`, body: { deployment_branch_policy: BRANCH_POLICY } });
-  if (!have.policies.some((p) => p.name === want.branch && (p.type ?? 'branch') === 'branch'))
-    calls.push({ what: `environment ${ENV} deploys from ${want.branch}`, method: 'POST', path: `${repo}/environments/${ENV}/deployment-branch-policies`, body: { name: want.branch, type: 'branch' } });
   if (!have.autoMerge) calls.push({ what: 'allow auto-merge', method: 'PATCH', path: repo, body: { allow_auto_merge: true } });
   calls.push(...policyCalls(slug, have, want));
   for (const name of want.drop) {
@@ -235,7 +222,6 @@ export function current(slug, agent, names, read = gh) {
   const repo = `repos/${slug}`;
   const invitations = read(['api', `${repo}/invitations`]) ?? [];
   const list = read(['api', `${repo}/rulesets?per_page=100`]) ?? [];
-  const environment = maybe(`${repo}/environments/${ENV}`, read);
   return {
     // GitHub may answer 404 for an account that is not a collaborator yet, the case the invitation is for.
     collaborator: maybe(`${repo}/collaborators/${agent}/permission`, read)?.permission ?? 'none',
@@ -243,19 +229,13 @@ export function current(slug, agent, names, read = gh) {
     autoMerge: read(['api', repo])?.allow_auto_merge === true,
     invited: invitations.some((i) => i.invitee?.login?.toLowerCase() === agent.toLowerCase() && i.permissions === 'write'),
     rulesets: list.filter((r) => names.has(r.name)).map((r) => read(['api', `${repo}/rulesets/${r.id}`])),
-    environment,
-    policies: environment ? (read(['api', `${repo}/environments/${ENV}/deployment-branch-policies`])?.branch_policies ?? []) : [],
     actionsPolicy: policyNow(slug, read),
   };
 }
 
-/** What the repository still lacks of `want`: the plan's calls by name, and an environment that also deploys from a
- * branch other than the default. onboard-owner's read-back and the doctor both ask it. */
+/** What the repository still lacks of `want`: the plan's calls by name. onboard-owner's read-back and the doctor both ask it. */
 export function left(slug, agent, have, want) {
-  const calls = plan(slug, agent, have, want).map((c) => c.what);
-  const extra = have.policies.filter((p) => p.name !== want.branch).map((p) => p.name);
-  if (extra.length) calls.push(`environment ${ENV} also deploys from ${extra.join(', ')}: take that out by hand`);
-  return calls;
+  return plan(slug, agent, have, want).map((c) => c.what);
 }
 
 /** What both bin/onboard-owner and bin/onboard-doctor settle before they trust the repository named: not the agents'
@@ -273,10 +253,9 @@ export function identify(who, { slug, id, agent, read = gh }) {
 }
 
 /** Whether the kit is on the branch (its inventory is), and the gate's settings as the branch's workflows hold them (#335),
- * read through the contents API, or with `fileAt(path)` (text, or null) where the caller holds the branch already. The
- * gate's ruleset follows the reviewer, and the jobs read it too, so a later run cannot put back a ruleset that requires
- * review and verdict while they judge nothing. A branch whose gate-trusted.yml still reads the repository variable (`old`,
- * the kit before #335) has its reviewer there until its kit update lands. */
+ * read through the contents API, or with `fileAt(path)` (text, or null) where the caller holds the branch already. A branch
+ * whose gate-trusted.yml still reads the repository variables (`old`, the kit before #335) has its settings there until its
+ * kit update lands. `reviewer` is entire only on a main on the kit before FAC-100 that names it (#155), else undefined. */
 export function gateState(slug, branch, read = gh, fileAt = undefined) {
   const at = (path) => `repos/${slug}/contents/${path}?ref=${encodeURIComponent(branch)}`;
   const kitLanded = maybe(at('.gate/kit-files'), read) !== null;
@@ -300,12 +279,9 @@ export function gateState(slug, branch, read = gh, fileAt = undefined) {
   const settings = valuesIn(files);
   const variables = variablesOf(slug, read);
   const old = typeof files[TRUSTED] === 'string' && readsVariables(files[TRUSTED]);
-  // On a main where the kit has landed, a gate-trusted.yml that is absent, or holds no reviewer line in the kit's form, is not
-  // "no reviewer": the reviewer is unknown, and the ruleset it chooses would be the wrong one (#333, #335's round 2).
-  const unreadable = kitLanded && !old && settings.reviewer === undefined;
   // The Actions event policy's files and events, from the same workflows (#337); { unreadable: path } when one is not in the kit's form.
   const target = targetOf(files);
-  return { forcePush, kitLanded, files, settings, variables, old, unreadable, mergeMethod, target, reviewer: settings.reviewer ?? (old ? (variables.GATE_REVIEWER ?? '') : '') };
+  return { forcePush, kitLanded, files, settings, variables, old, mergeMethod, target, reviewer: settings.reviewer };
 }
 
 /** The arguments of bin/onboard-owner: { slug, id, apply, merge }, or { problem } for a usage error. */
@@ -410,12 +386,8 @@ function main(argv) {
     }
     return policyOnly(slug, branch, apply);
   }
-  // The reviewer as main holds it; a runner that breaks the rule is the evidence's and the doctor's to name.
-  const { kitLanded, settings, old, reviewer, unreadable, mergeMethod, forcePush, target } = gateState(slug, branch);
-  if (unreadable) {
-    console.error(`onboard-owner: ${TRUSTED} on ${branch} cannot be read as the kit's file with its reviewer line, so the reviewer is not known and the gate's ruleset cannot be chosen: nothing changes`);
-    return 2;
-  }
+  // A runner that breaks the rule is the evidence's and the doctor's to name.
+  const { kitLanded, settings, reviewer, mergeMethod, forcePush, target } = gateState(slug, branch);
   if (target.unreadable) {
     console.error(`onboard-owner: ${target.unreadable} on ${branch} has no on: block in the kit's form, so the events its Actions event policy must allow are not known: nothing changes`);
     return 2;
@@ -440,19 +412,18 @@ function main(argv) {
   const want = kitLanded && review ? withReview(kit, review) : kit;
   console.log(`onboard-owner: ${slug} (id ${repo.id}, default branch ${branch}); the kit is ${kitLanded ? '' : 'not '}on ${branch}`);
   if (kitLanded) {
-    console.log(`onboard-owner: the reviewer on ${branch} is ${reviewer || 'none'}${old ? ', from the repository variable GATE_REVIEWER, which its gate-trusted.yml reads until its kit update (#335)' : ', as its gate-trusted.yml holds it (#335)'}`);
     const before = switchNow(slug, branch);
     console.log(`onboard-owner: the merge switch on ${branch} ${before.position ? `is ${before.position}` : `could not be read (${before.problem})`}${merge ? `; --merge sets it to ${merge}` : ', and this run leaves it as it is'}`);
   }
   if (reviewer === 'entire')
-    console.log(`onboard-owner: GATE_REVIEWER is entire: the gate requires verify, tier and ${ENTIRE_APP.check} from App ${ENTIRE_APP.slug} (id ${ENTIRE_APP.id}), not review or verdict`);
+    console.log(`onboard-owner: ${TRUSTED} on ${branch} names the reviewer entire, as the kit did before FAC-100: the gate requires verify, tier and ${ENTIRE_APP.check} from App ${ENTIRE_APP.slug} (id ${ENTIRE_APP.id}) until its kit update (FAC-102)`);
   if (reviewer === 'entire' && sharedRunners(settings).length)
     console.log('onboard-owner: the runners are shared under the Human\'s exception (#155, kit/.gate/enforced-rules.md), which holds ' +
       'only while there is no reviewer secret in the environment reviewer; this command does not read secrets, so that is his to keep');
   const live = now.rulesets.find((r) => r.name === GATE_NAME);
   // --merge writes the live gate ruleset back with its two review parameters changed and nothing else in it: whatever else
   // it holds, drift from the kit included, stays as it is. Every other difference from the kit (auto-merge, a missing
-  // ruleset, the environment) is listed as not changed and left. It moves a switch that exists, so a gate not in force yet
+  // ruleset) is listed as not changed and left. It moves a switch that exists, so a gate not in force yet
   // is a plain run's to put in, and a gate with no pull_request rule has no switch to move.
   let calls = [];
   let leftAlone = [];

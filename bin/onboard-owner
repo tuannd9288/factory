@@ -5,19 +5,17 @@
 #   bin/onboard-owner <owner/name> --id <repository id>            show what it would change, and change nothing
 #   bin/onboard-owner <owner/name> --id <repository id> --apply    invite the agents' account (write), set the
 #        factory's rulesets (forcePush defaults to pstack: no rewrite on main or claims; on main, a bootstrap one until the kit lands, then the kit's
-#        gate, which with GATE_REVIEWER=entire in main's gate-trusted.yml requires verify, tier and Entire's check
-#        Entire Gates instead of review and verdict), create the reviewer environment, allow auto-merge (#139), once the
+#        gate, which requires verify and tier: no reviewer runs on Actions, FAC-100), allow auto-merge (#139), once the
 #        kit is on main set the Actions event policy "factory gate: pull_request_target" (#337: GitHub blocks pull_request_target
 #        in a public repository from 2026-12-02 unless a policy allows it), and read it all back. The policy names the workflow
 #        files on main that run on pull_request_target and allows them every event their on: block names, read from those
 #        files; a file whose on: block is not in the kit's form stops the run. onboard-doctor reports the policy missing.
 #   bin/onboard-owner <his login>/factory --id <id> [--apply]   the factory's own repository: only that policy, for the
 #        workflows on its main that run on pull_request_target; its own ruleset stays, and no kit ruleset goes there
-#   It sets none of the gate's settings (#335): the reviewer and the three runners are in the workflows on main, which
-#   bin/onboard fills in (--reviewer, --runner, --pr-runner, --trusted-runner) and a pull request the Human approves
-#   changes. It reads the reviewer from main's gate-trusted.yml; a main whose gate-trusted.yml still reads the repository
-#   variable, as the kit did before #335, has it from GATE_REVIEWER until its kit update lands. The four old options are
-#   refused, with nothing done.
+#   It sets none of the gate's settings (#335): the three runners are in the workflows on main, which bin/onboard fills in
+#   (--runner, --pr-runner, --trusted-runner) and a pull request the Human approves changes. The old options are refused,
+#   with nothing done. A main still on the kit before FAC-100 whose gate-trusted.yml names the reviewer entire (#155) keeps
+#   the gate that requires verify, tier and Entire's check Entire Gates pinned to its App, until its kit update (FAC-102).
 #   bin/onboard-owner <owner/name> --id <repository id> --merge all|1-2|none [--apply]
 #        moves the repository's merge switch (#333): the two review parameters of the gate ruleset. The run writes the live
 #        ruleset back with those two changed and nothing else in it (whatever else it holds stays as it is), and no other
@@ -36,8 +34,8 @@
 # nami9288) names the agents' account.
 # With --apply it sets factory-branches (main and claims: no rewrite; every branch with forcePush off), factory-tags (every tag: no create, update or delete, but
 # for a repository admin), factory-claims (refs/heads/claim/**: no deletion, no rewrite, no bypass) and factory-bootstrap
-# (main: a pull request, one approval of the last push, merge commits only), creates the reviewer environment for main, turns
-# on "Allow auto-merge", and reads it all back; it calls only gh api and gh variable list. Once the agents' account has
+# (main: a pull request, one approval of the last push, merge commits only), turns on "Allow auto-merge", and reads it all
+# back; it calls only gh api and gh variable list. Once the agents' account has
 # accepted the invitation, the team that claimed the issue runs bin/onboard <repo-url> from this root, logged into gh as that
 # account.
 exec node "$(dirname "$0")/lib/owner.mjs" "$@"

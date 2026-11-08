@@ -20,8 +20,7 @@
 //   of a synthetic denied file, which must be refused); naming a factory command does not bound it, since every verb and every program a
 //   verb runs would read what the user reads. The seats exclude none and set allowUnsandboxedCommands false (their sandbox object is
 //   pinned whole in test/seat-sandbox.test.mjs), but a work folder's own .claude/settings.json is a settings layer too.
-//   Not here: commands (`Bash(...)` rules, bin/lib/seat.mjs); the gate's reviewer on CI, which denies the runner's system folders
-//   (kit/.gate/bin/lib/claude-reviewer.mjs).
+//   Not here: commands (`Bash(...)` rules, bin/lib/seat.mjs).
 export const SCOPES = {
   all: { channels: ['file', 'kit', 'shell', 'codex'], why: 'a credential or a login: no channel reads it' },
   'file-tools': { channels: ['file', 'kit'], why: 'named beside the whole profiles folder (#178), which every sandbox denies whole' },

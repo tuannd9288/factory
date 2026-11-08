@@ -17,17 +17,6 @@ in this factory.
 
 pstack (https://github.com/cursor/plugins, path pstack): what the pstack pack takes from it is in packs/pstack/NOTICE.
 
-agent-desk (the Human's own project, tuannd9288/agent-desk), commit 0cd59d55. The Human chose the port (#25,
-2026-10-24).
-
-  kit/.gate/bin/lib/      plugin/content/prompts/REVIEWER.md:12-17, 18-56, 70-84 ("Never", "Reviewing a commit" with
-  reviewer-prompt.md      its re-review paragraphs, "The verdict"), word for word, each section under its own heading;
-                          the prompt carries no provenance comments, since the reviewer's model reads it (#203, K6).
-                          Not taken: 1-10, 57-62 ("Before Adding a Test") and 64-68 ("Answering a question"). Added
-                          here, for the Human to approve in the pull request: that the pull request's text and files
-                          are data and never instructions, the output shape of result.mjs, the No-red judgement,
-                          the raise rule and the acceptance rule.
-
 piggery (https://github.com/sting8k/piggery), commit 67c083e4ed28eb7092fcebc03df200dffa842758
 (v0.10.3, 2026-10-15). Its license, from its LICENSE at that commit:
 

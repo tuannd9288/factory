@@ -27,7 +27,7 @@ GATE_NATIVE=""
 GATE_CHECKS=""
 
 # The minutes `verify` may run on a pull request, 1 to 60. .gate/bin/verify-timeout reads it, for the verify step of
-# gate.yml and for how long `review` waits for that check.
+# gate.yml.
 GATE_VERIFY_TIMEOUT=30
 
 # Paths whose change is a source change, for red-check; tests are told apart by .gate/handin.json's "tests" patterns.

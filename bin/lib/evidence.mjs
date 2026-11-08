@@ -331,7 +331,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   }
   if (now.has('.gate/pack')) fails.push('extra: .gate/pack (the kit lays no pack file now)');
   // The gate's settings as the head's workflows hold them, and the runner rule over them (#335). One the head changes from
-  // the base's is marked, so a pull request that moves the reviewer or a runner says so where the Human reads it.
+  // the base's is marked, so a pull request that moves a runner says so where the Human reads it.
   const settingsAt = (entries) => valuesIn(Object.fromEntries(WORKFLOWS.filter((p) => entries.get(p)?.mode === '100644').map((p) => [p, blob(repo, entries.get(p).oid)])));
   const settings = settingsAt(now);
   const before = settingsAt(at);
