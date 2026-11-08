@@ -191,7 +191,7 @@ export function createMove({ gh = ghRun, api, state, home = process.env.HOME, ru
     fullTeam = `${name}-${leadTeam}`;
     let entry;
     try {
-      entry = onLinear(repo, state);
+      entry = onLinear(name, state);
     } catch (e) {
       throw new Refused(e.message);
     }
