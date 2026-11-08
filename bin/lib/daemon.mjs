@@ -1,8 +1,8 @@
 // The factory's daemon (#399, slice 1): the one long-running process that hosts the sweep's pass and takes a seat's end at once. The pattern is
 // piggery's (v0.10.3, 67c083e; the part ported is cited at each place), the differences are named below. bin/factory-daemon runs it; only the 60 s
 // job starts it (bin/lib/queue.mjs, ensureDaemon).
-//   One instance: $FACTORY_STATE/daemon.lock records the pid and start time (takeLock of the queue's lock; a lock whose process is gone is taken
-//   over). piggery takes a flock (server/server.go:119-130); a pid and a start time is how the queue's lock tells a dead holder from a reused pid.
+//   One instance: the lock at $FACTORY_STATE/daemon.lock (bin/lib/lock.mjs), which the kernel frees when this process ends, however it ends;
+//   the file itself notes the holder's pid and start for people. piggery takes a flock (server/server.go:119-130); Node has none.
 //   The socket: $FACTORY_STATE/daemon.sock, mode 0600, its path under 104 bytes (bin/lib/daemon-proto.mjs says the wire). Only the lock holder
 //   unlinks a stale socket and makes its own (server/transport_unix.go:16-30). One request, one answer, matched by `id` (proto/proto.go:136-157).
 //   Verbs: `ping` -> { pid, start, startedAt, head, passes, passing }; `seat-ended` { run, tag, session } -> { id }; `linear-check`
@@ -49,8 +49,9 @@ import { Worker } from 'node:worker_threads';
 import { LOADED, ROOT, headOf } from './checkout.mjs';
 import { MAX_LINE, fits, socketPath } from './daemon-proto.mjs';
 // queue.mjs before news-wake.mjs: the modules import each other in a ring, and the queue's constants are built from the comment wake's, so the ring
-// must be entered at the queue, as bin/factory-queue enters it.
-import { holderOf, releaseLock, takeLock } from './queue.mjs';
+// must be entered at the queue, as bin/factory-queue enters it. Nothing else here comes from the queue.
+import './queue.mjs';
+import { holderOf, takeLock } from './lock.mjs';
 import { wakeOnSeatEnds } from './news-wake.mjs';
 import { openStore } from './store.mjs';
 import { linearCheckMain, startLinearSource } from './linear-listen.mjs';
@@ -222,12 +223,6 @@ function serve(d, sock) {
   });
 }
 
-/** Removes queue.lock if this process holds it: a pass whose worker died leaves it, and its pid is alive, so nobody else would take it. */
-function releaseQueueLock(state) {
-  const lock = join(state, 'queue.lock');
-  if (holderOf(lock)?.pid === process.pid) rmSync(lock, { force: true });
-}
-
 /** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow`, `startSource`, `pushRecords` and `onStart` (told
  * { stop, d } once it listens) are passed in for tests. */
 export async function run({ env = process.env, state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'), runs = env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), human = env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
@@ -245,7 +240,7 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
   try {
     store = openStore(join(state, 'factory.db'));
   } catch (error) {
-    releaseLock(lockFile, lock.token);
+    lock.release();
     throw error;
   }
   const d = { state, runs, store, lock, post, log, pushRecords, held: null, lastPing: Date.now(), passes: 0, passing: false, stopping: false, moved: false, worker: null, timer: null, startedAt: new Date().toISOString(), cpu: process.cpuUsage() };
@@ -283,7 +278,7 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
       server?.close();
       rmSync(sock, { force: true });
       store.close();
-      releaseLock(lockFile, lock.token);
+      lock.release();
       log('daemon: stopped');
       stopped(0);
     };
@@ -321,7 +316,6 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
       const cpu = process.cpuUsage(d.cpu);
       d.cpu = process.cpuUsage();
       log(`daemon: pass ${d.passes} took ${Date.now() - began} ms; rss ${mib(mem.rss)} MiB, heapUsed ${mib(mem.heapUsed)} MiB; cpu since the last pass: user ${Math.round(cpu.user / 1000)} ms, system ${Math.round(cpu.system / 1000)} ms`);
-      releaseQueueLock(state);
       if (result?.heldBy) d.held = result.heldBy;
       if (result?.moved) d.moved = true;
       if (d.stopping) return;
@@ -337,7 +331,7 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
     server = await serve(d, sock);
   } catch (error) {
     store.close();
-    releaseLock(lockFile, lock.token);
+    lock.release();
     throw error;
   }
   d.linear = loggedIn ? startSource({ state, store, runs, log }) : null;

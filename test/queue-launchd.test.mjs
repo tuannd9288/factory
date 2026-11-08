@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { factory } from './helpers.mjs';
+import { HOST_ENV, factory } from './helpers.mjs';
 
 // The fake gh of queue-visible.test.mjs: who is logged in, and a repository with no pull request waiting.
 const GH = (login) => `#!/bin/sh\ncase "$*" in\n  "api user"*) echo ${login} ;;\n  *graphql*) echo '{"data":{"repository":{"pullRequests":{"nodes":[]}}}}' ;;\n  *rules/branches*) echo "[]" ;;\n  *) exit 1 ;;\nesac\n`;
@@ -20,7 +20,7 @@ function withMachine(login, body, over = () => ({})) {
     const home = join(dir, 'home');
     mkdirSync(home);
     // The factory host's job, unless `over` says otherwise (#366: off it, the sweep needs the node's own agents token).
-    const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: home, FACTORY_STATE: join(dir, 'state'), FACTORY_HOST_USER: userInfo().username, ...over(dir) };
+    const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, HOME: home, FACTORY_STATE: join(dir, 'state'), ...HOST_ENV, ...over(dir) };
     const queue = (...args) => spawnSync(join(factory, 'bin/factory-queue'), args, { encoding: 'utf8', env });
     body({ dir, home, queue, env });
   } finally {
@@ -154,16 +154,16 @@ test('check is not ready when gh is not logged in, or when the sweep fails', () 
 });
 
 test('check is not ready while another sweep holds the lock, for its own sweep did nothing', async () => {
-  const queueLib = await import('../bin/lib/queue.mjs');
+  const { takeLock } = await import('../bin/lib/lock.mjs');
   withMachine('agent-bot', ({ dir, queue }) => {
     mkdirSync(join(dir, 'state'));
-    const held = queueLib.takeLock(join(dir, 'state/queue.lock'));
+    const held = takeLock(join(dir, 'state/queue.lock'));
     try {
       const r = queue('check', '--repo', 'o/app');
       assert.equal(r.status, 1, r.stdout + r.stderr);
       assert.match(r.stdout, /^check: not ready: another sweep holds the lock, so this one did nothing; run check again once it ends$/m);
     } finally {
-      queueLib.releaseLock(join(dir, 'state/queue.lock'), held.token);
+      held.release();
     }
   });
 });

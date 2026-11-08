@@ -23,7 +23,11 @@
 #   - .gate/kit-commit names the factory commit, which verify-trusted checks against the factory's main; the old .gate/pack goes.
 # Then .gate/kit-files as onboard writes it, the repository's own .gate/bin/setup and .gate/bin/verify, the
 # commit, and bin/kit-evidence, which must pass. Without --no-pr it then creates the labels, pushes the branch and
-# opens the pull request. A failing verify or evidence leaves the branch committed and nothing pushed.
+# opens the pull request as a draft: readying a pull request is what asks GitHub for the code owner's review, which stays
+# even if it turns back into a draft (request 21). The repository's own scripts/ship, run in the clone on the branch, readies it once
+# verify passed on its head with no conflict (FAC-55); in a repository with no scripts/ship, the team that ran the update runs
+# gh pr ready at that point. The queue never readies a draft. A failing verify or evidence leaves the branch committed and
+# nothing pushed.
 # It refuses, doing nothing, when the clone is missing or dirty, origin/main has no .gate/kit-files or lists scripts/verify
 # among them (the old layout, where the kit shipped it: onboard the repository afresh), the factory's kit/
 # or packs/ has changes no commit holds or its HEAD is not on origin/main, or the branch exists here or on origin; and,
@@ -186,7 +190,7 @@ note=""
 grep -qx '.claude/settings.json' "$lists/updated" && note=" The repository's \`.claude/settings.json\` is updated: the kit's new deny lines are inserted as text, every other byte kept."
 grep -qx '.github/CODEOWNERS' "$lists/kept" && note="$note The repository's \`.github/CODEOWNERS\` is its own, so it is kept: the kit's new lines do not reach this file."
 list() { if [ -s "$lists/$1" ]; then sed 's/^/- `/; s/$/`/' "$lists/$1"; else echo "- none"; fi; }
-gh pr create --repo "$slug" --head "$branch" --title "chore(kit): update to factory main $sha7" --body "$(cat <<BODY
+gh pr create --repo "$slug" --draft --head "$branch" --title "chore(kit): update to factory main $sha7" --body "$(cat <<BODY
 $tldr
 
 <details>
@@ -199,6 +203,8 @@ $tldr
 ---
 
 Source: tuannd9288/factory \`$kit_commit\`. Made by \`bin/kit-update\`, not by hand.
+
+Opened as a draft, so no code owner is asked to review it yet. Ready it with this repository's own \`scripts/ship\`, run in its clone on \`$branch\`: it readies the draft once \`verify\` passed on its head with no conflict, then arms it. Where the repository has no \`scripts/ship\`, the team that ran this update runs \`gh pr ready\` on it at that point. The queue never readies a draft.
 
 Added (the repository lacked them):
 $(list added)

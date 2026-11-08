@@ -14,13 +14,10 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, truncateSync, writeFileSync, appendFileSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-
-export function nodeName() {
-  return hostname().split('.')[0].toLowerCase();
-}
+import { RATE_LIMIT_LINE } from './claude-code.mjs';
+import { nodeName } from './node.mjs';
 
 const exec = promisify(execFile);
 // Same private destination as ledger.mjs's DIGEST_REPO; the digest itself is unchanged.
@@ -37,7 +34,7 @@ const sizeOf = (file) => {
 
 const CHUNK = Buffer.alloc(1 << 20);
 const TAIL = 4096;
-const RATE_LIMIT = '"type":"rate_limit_event"'; // seat.accountEvent's selector, verbatim
+const RATE_LIMIT = RATE_LIMIT_LINE; // seat.accountEvent's selector, the one in claude-code.mjs
 
 /** Calls `each` with the bytes of each whole line of `fd` from byte `at` to its last newline before `size`, read 1 MiB at a time into one
  * buffer (larger only for a longer line), so a long log is never in memory whole and only the lines kept are decoded; the bytes are valid

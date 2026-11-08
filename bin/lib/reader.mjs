@@ -7,18 +7,30 @@
 // Piggery watch.go:26-28,79-81,136-177@67c083e supplies incident deduplication (no default);
 // 15 minutes follows captions 11:46-11:57. The finished-turn predicate is review round 1's adaptation.
 // All notifications reuse Colly's existing events monitor; no periodic Supervisor prompt.
+// The model pass sits behind a switch, `"side": "off"` in reader.json, changed by pull request (INN-39): off, the sweep starts no new pass
+// (one already running finishes) and says so once (readerSwitch); the silence watch runs whatever the switch says.
+// The detector's kinds and sides are frozen: docs/decisions.md, "The Watcher's freeze, 2026-11-07".
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appendStart, oneLine, record, readLines } from './events.mjs';
-import { redact } from './redact.mjs';
-import { releaseLock, takeLock } from './queue.mjs';
+import { appendStart, oneLine, readActive, record, readLines } from './events.mjs';
+import { reduceLine, turnEnded } from './claude-code.mjs';
+
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
+export { reduce } from './claude-code.mjs';
+import { redact, redactDeep } from './redact.mjs';
+import { takeLock } from './lock.mjs';
 import { listStreams } from './streams.mjs';
 import { createHash } from 'node:crypto';
 
-export const SETTING_FILE = join(dirname(fileURLToPath(import.meta.url)), 'reader.json');
+/** The setting the repository ships, changed by pull request. */
+export const REPO_SETTING = join(dirname(fileURLToPath(import.meta.url)), 'reader.json');
+
+/** Where the setting is read from, at each call: FACTORY_READER_SETTING when it is set, as FACTORY_STATE and FACTORY_RUNS are, else the
+ * shipped one. The tests set it, so a pull request that turns the shipped switch off changes no sweep test (#518). */
+export const settingPath = (env = process.env) => env.FACTORY_READER_SETTING || REPO_SETTING;
 export const LIMIT = 400_000;
 export const MAX_CALLS = 3;
 export const TIMEOUT_MS = 10 * 60_000;
@@ -69,9 +81,13 @@ const refuse = (why) => {
 };
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** The setting as { side, model, effort } for the side it picks (or `override`, for --try), or a refusal (error.cause 'setting'): a side
- * the reader does not have, a missing model, an effort the side does not take, any other key. The file is checked whole, both sides. */
-export function loadSetting(file = SETTING_FILE, override = undefined) {
+/** The switch's side (INN-39): `"side": "off"` turns the model pass off. It is the side, not an effort, though pi takes an effort `off` too. */
+export const OFF = 'off';
+
+/** The setting as { side, model, effort } for the side it picks (or `override`, for --try), { side: 'off' } when the switch is off and no
+ * side is named, or a refusal (error.cause 'setting'): a side the reader does not have, a missing model, an effort the side does not take,
+ * any other key. The file is checked whole, both sides, so switching back on finds them as they were. */
+export function loadSetting(file = settingPath(), override = undefined) {
   let s;
   try {
     s = JSON.parse(readFileSync(file, 'utf8'));
@@ -86,6 +102,7 @@ export function loadSetting(file = SETTING_FILE, override = undefined) {
     if (!SIDES[name].includes(v.effort)) return refuse(`side ${name} does not take the effort ${JSON.stringify(v.effort)}`);
   }
   const side = override ?? s.side;
+  if (side === OFF && override === undefined) return { side: OFF };
   if (!SIDES[side]) return refuse(`unknown side ${JSON.stringify(side)}`);
   if (!s.sides[side]) return refuse(`side ${side} is not in sides`);
   return { side, model: s.sides[side].model, effort: s.sides[side].effort };
@@ -106,46 +123,6 @@ export function commandOf({ side, model, effort }, { input, inputFile, schemaFil
     stdin: `${PROMPT}\n\n${input}`,
   };
 }
-
-// ---- the reduction --------------------------------------------------------------------------------------------------------
-
-/** A value with every string in it redacted, before it is written as JSON: the escaping (`\"`, `\n`) hides a quoted secret value and a
- * token after a line break from `redact`, which sees only the escaped text if it runs after. */
-const redactDeep = (v) => (typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(redactDeep) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x)])) : v);
-
-/** What one stream line says, reduced: the assistant's text (redacted) and the names of the tools it called, as `[tool <name>]`. The one
- * input kept is that of `StructuredOutput`, which follows its line as compact JSON (redacted): every seat reports through that call, so
- * the report, with its refusals, lapses and work found outside the issue, is in no text item. A line of any other type, a subagent's (a
- * sidechain, or a message with a parent tool use), a thinking item and any other tool's input are left out. */
-function reduceLine(line) {
-  let o;
-  try {
-    o = JSON.parse(line);
-  } catch {
-    return '';
-  }
-  if (o?.type !== 'assistant' || o.isSidechain === true || (o.parent_tool_use_id ?? null) !== null) return '';
-  const content = o.message?.content;
-  const items = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [];
-  return items
-    .flatMap((i) => {
-      if (i?.type === 'text' && typeof i.text === 'string') return [redact(i.text)];
-      if (i?.type !== 'tool_use' || typeof i.name !== 'string') return [];
-      const head = `[tool ${redact(i.name)}]`;
-      if (i.name !== 'StructuredOutput' || i.input === undefined) return [head];
-      try {
-        return [head, redact(typeof i.input === 'string' ? i.input : JSON.stringify(redactDeep(i.input)))];
-      } catch {
-        // An input nested too deep to walk (a RangeError) gives the tool line alone: one line must never crash the pass, whose cursor
-        // would then never move past it.
-        return [head];
-      }
-    })
-    .join('\n');
-}
-
-/** The reduction of a stream's text (either kind). */
-export const reduce = (text) => String(text).split('\n').map(reduceLine).filter(Boolean).join('\n');
 
 // ---- the streams and their cursors ----------------------------------------------------------------------------------------
 
@@ -332,6 +309,30 @@ function writeAtomic(file, text) {
 const flat = (s) => s.replace(/\s+/g, ' ').trim();
 const eventText = (e) => `${flat(e.session)} ${e.kind}: "${flat(e.quote)}" (${flat(e.why)})`;
 
+/** The switch (INN-39), read by the sweep before it starts a pass: 'off' when reader.json's side is `off`, else 'on'. Off, it ends any held
+ * reader-failed condition (no pass will end it), removes reader/cursors.json (so the first pass once it is on again starts each stream at its
+ * end, as the first pass ever does) and holds one `reader-off` condition, of a scope of its own so that a pass cannot end it: it starts once.
+ * On, it ends a held reader-off. A setting that does not load counts as on, so the pass reports it, as before. The silence watch does not
+ * read the switch. */
+export function readerSwitch({ state, settingFile = settingPath(), now = Date.now() }) {
+  let side = null;
+  try {
+    side = loadSetting(settingFile).side;
+  } catch {
+    // the pass reports a setting that does not load
+  }
+  if (side !== OFF) {
+    if (readActive(state).conditions['reader-off']) record({ state, found: [], read: new Set(['reader-switch']), now });
+    return 'on';
+  }
+  rmSync(join(state, 'reader', 'cursors.json'), { force: true });
+  record({
+    state, now, read: new Set(['reader', 'reader-switch']),
+    found: [{ key: 'reader-off', scope: 'reader-switch', top: true, text: "the Watcher's model pass is off (bin/lib/reader.json); the silence watch still runs" }],
+  });
+  return 'off';
+}
+
 // Piggery has no silent_for default: watch.go:26-28 rejects a missing value.
 export const SILENT_FOR_MS = 15 * 60_000;
 
@@ -363,10 +364,8 @@ export function watchSilence({ state, runs, now = Date.now() }) {
     if (!o.complete || !o.last || now - o.since < SILENT_FOR_MS) continue;
     let last;
     try { last = JSON.parse(o.last); } catch { continue; }
-    const finished = last.isSidechain !== true && (last.parent_tool_use_id ?? null) === null && (
-      last.message?.stop_reason === 'end_turn' || last.type === 'result' || last.type === 'turn.completed' ||
-      (last.type === 'system' && last.subtype === 'turn_duration'));
-    if (!finished) continue;
+    // Claude Code's end of a turn (claude-code.mjs), or Codex's `turn.completed`.
+    if (!turnEnded(last) && last.type !== 'turn.completed') continue;
     const key = `watch_fired ${stream.key} ${o.end} ${createHash('sha256').update(o.last).digest('hex')}`;
     if (fired.has(key)) continue;
     const quote = redact(JSON.stringify(redactDeep(last)));
@@ -384,7 +383,7 @@ export function watchSilence({ state, runs, now = Date.now() }) {
 /** One pass. Returns { status: 'ok' | 'running' | 'crashed', calls, events, failed, chars } (`failed`: the causes of reader-failed this pass had;
  * `chars`: the characters sent to the model). Every pass but a 'running' one writes the same fields, with the time, to reader/last.json, and
  * appends them as one line to reader/passes.jsonl, so a day's calls and characters are the sum of its lines (#476). */
-export async function runPass({ state, runs, settingFile = SETTING_FILE, home = process.env.HOME, env = process.env, timeoutMs = TIMEOUT_MS, now = Date.now(), provider = runModel }) {
+export async function runPass({ state, runs, settingFile = settingPath(), home = process.env.HOME, env = process.env, timeoutMs = TIMEOUT_MS, now = Date.now(), provider = runModel }) {
   const dir = join(state, 'reader');
   mkdirSync(dir, { recursive: true });
   const lock = takeLock(join(state, 'reader.lock'));
@@ -401,7 +400,9 @@ export async function runPass({ state, runs, settingFile = SETTING_FILE, home = 
       if (error.cause !== 'setting') throw error;
       causes.set('setting', error.message);
     }
-    if (setting) await readAndSend({ state, dir, runs, setting, home, env, timeoutMs, now, causes, result, provider });
+    // Off (INN-39): a pass run by hand makes no model call; the sweep starts none (readerSwitch).
+    if (setting?.side === OFF) result.status = OFF;
+    else if (setting) await readAndSend({ state, dir, runs, setting, home, env, timeoutMs, now, causes, result, provider });
     // The reader-failed conditions: each cause starts once and is cleared by the next pass where it does not happen.
     record({ state, read: new Set(['reader']), now, found: [...causes].map(([cause, detail]) => ({ key: `reader-failed ${cause}`, scope: 'reader', text: `the stream reader failed (${cause}): ${detail}` })) });
     result.failed = [...causes.keys()];
@@ -424,7 +425,7 @@ export async function runPass({ state, runs, settingFile = SETTING_FILE, home = 
     } catch {
       // this pass is missing from the day's lines
     }
-    releaseLock(join(state, 'reader.lock'), lock.token);
+    lock.release();
   }
   return final;
 }
@@ -509,7 +510,8 @@ async function readAndSend({ state, dir, runs, setting, home, env, timeoutMs, no
 /** `--try <file> [--side pi|codex]`: the file reduced, sent once, the answer printed with the quote check. It reads no cursor and writes no
  * event, lock or file but its temporary input, which is removed. Returns the exit code. */
 async function tryFile(file, side, env = process.env) {
-  const setting = loadSetting(SETTING_FILE, side);
+  const setting = loadSetting(settingPath(env), side);
+  if (setting.side === OFF) throw new Error(`the model pass is off in ${settingPath(env)}; name a side with --side pi|codex`);
   // The header of the one part is `try <first 8 characters of the file's name>`: a file has no run folder or session id to name.
   const header = `try ${basename(file).replace(/\.jsonl$/, '').slice(0, 8)}`;
   const w = wholeLines(file, 0);
@@ -558,6 +560,10 @@ async function main(argv) {
   }
   if (argv.length) throw new Error('usage: factory-reader [--try <file> [--side pi|codex]]');
   const r = await runPass({ state: stateDir, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
+  if (r.status === OFF) {
+    console.log(`reader: off in ${settingPath()}; no model call`);
+    return 0;
+  }
   console.log(`reader: ${r.status}, ${r.calls} call(s), ${r.events} event(s)${r.failed.length ? `, failed: ${r.failed.join(' ')}` : ''}`);
   return r.status === 'crashed' ? 1 : 0;
 }

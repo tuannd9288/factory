@@ -11,6 +11,8 @@ import { factory } from './helpers.mjs';
 
 const FIXTURE = JSON.parse(readFileSync(join(factory, 'test/fixtures/ledger-entry-2.1.308.json'), 'utf8'));
 const ledger = () => import(join(factory, 'bin/lib/ledger.mjs'));
+// The prices live in the one module that reads Claude Code's formats (INN-39 item 3); the ledger finds the files.
+const claudeCode = () => import(join(factory, 'bin/lib/claude-code.mjs'));
 
 /** A profile folder holding one session file made of the fixture entry with some fields changed. */
 function profile(entries) {
@@ -41,7 +43,8 @@ test('the canary reads every field the ledger reads from the fixture of 2.1.308:
 });
 
 test('an entry is charged to the repository whose folder its working directory is under, with its branch', async () => {
-  const { repoCosts, costOf } = await ledger();
+  const { repoCosts } = await ledger();
+  const { costOf } = await claudeCode();
   const one = costOf(FIXTURE.message.model, FIXTURE.message.usage);
   const p = profile([
     { cwd: '/work/app', gitBranch: 'a' },
@@ -63,7 +66,8 @@ test('an entry is charged to the repository whose folder its working directory i
 });
 
 test('an entry with no working directory is charged to no repository by folder, and an entry seen twice once', async () => {
-  const { repoCosts, costOf } = await ledger();
+  const { repoCosts } = await ledger();
+  const { costOf } = await claudeCode();
   const one = costOf(FIXTURE.message.model, FIXTURE.message.usage);
   const { cwd, ...noCwd } = FIXTURE;
   const p = profile([{ ...noCwd, cwd: undefined, id: 'x1', gitBranch: 'a' }, { id: 'y1', cwd: '/work/app', gitBranch: 'a' }, { id: 'y1', cwd: '/work/app', gitBranch: 'a' }]);
@@ -76,7 +80,8 @@ test('an entry with no working directory is charged to no repository by folder, 
 });
 
 test('repoCosts reads no folder but the extra ones: a profile passed as `own` adds nothing (#205)', async () => {
-  const { repoCosts, costOf } = await ledger();
+  const { repoCosts } = await ledger();
+  const { costOf } = await claudeCode();
   const one = costOf(FIXTURE.message.model, FIXTURE.message.usage);
   const own = profile([{ cwd: '/anywhere', gitBranch: 'a' }, { cwd: '/anywhere', gitBranch: 'b' }]);
   const extra = profile([{ id: 'e1', cwd: '/work/app', gitBranch: 'a' }]);
