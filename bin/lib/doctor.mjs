@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { MAX_BYTES, MAX_LINES, carrierProblems, countLines, entryIn, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { SETTINGS, TRUSTED, runnerProblems } from './gate-settings.mjs';
 import { POLICY_VERSION, current, gateState, gh, identify, left, reviewOf, switchNow, wanted, withReview } from './owner.mjs';
+import { agentOf } from './node.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WIDTH = 120;
@@ -250,7 +251,7 @@ function main(argv) {
     console.error(`onboard-doctor: ${problem}; nothing read`);
     return 2;
   }
-  const agent = process.env.FACTORY_AGENT ?? 'tuan9288-agent';
+  const agent = agentOf();
   const who = identify('onboard-doctor', { slug, id, agent, read: get });
   if (who.refusal) {
     console.error(who.refusal);

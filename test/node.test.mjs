@@ -6,10 +6,10 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HOST, installedRoot, nodeGithubToken, placeOf } from '../bin/lib/node.mjs';
+import { HOST, agentOf, installedRoot, nodeGithubToken, placeOf } from '../bin/lib/node.mjs';
 import { HOST_ENV, factory } from './helpers.mjs';
 
-test('the host\'s user on a machine that is not named the host is a node: its installed copy, its own agents token (#366)', () => {
+test('the host\'s user on a machine that is not named the host is a node: its installed copy, its own agents token (#366), the agents\' default account', () => {
   const home = mkdtempSync(join(tmpdir(), 'node-place-'));
   try {
     mkdirSync(join(home, '.agent-profiles/tokens'), { recursive: true });
@@ -23,6 +23,9 @@ test('the host\'s user on a machine that is not named the host is a node: its in
     assert.equal(placeOf(node), 'macbook');
     assert.equal(installedRoot(node), join(home, '.local/share/factory/checkout'));
     assert.equal(nodeGithubToken(node), 'made-up-agents-token');
+    // With no FACTORY_AGENT, or an empty one, the agents' account is the default, as bin/onboard's ${FACTORY_AGENT:-…} reads it (FAC-106).
+    assert.equal(agentOf({ HOME: home }), 'nami9288');
+    assert.equal(agentOf({ HOME: home, FACTORY_AGENT: '' }), 'nami9288');
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

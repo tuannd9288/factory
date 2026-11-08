@@ -2,7 +2,7 @@
 
 This repository (`tuannd9288/factory`) is the root of the Human's software factory. On the Mac mini it is cloned
 in the agents' own macOS account, `factory` (#24), as `~/WORKSPACES`; each repository in the factory is a subfolder
-there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`tuan9288-agent`
+there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`nami9288`
 alone), their profiles and their Herdr; the Human reaches it with `ssh factory@<the Mac mini>`. His own account keeps
 his SSH keys and gh login behind its home, which is `drwx------` on the Mac mini. The clone is outside `~/Desktop`,
 which macOS privacy controls (TCC) close to launchd jobs that were not granted access; not tested here. This file

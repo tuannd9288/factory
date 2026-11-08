@@ -129,7 +129,7 @@ function world(over = {}) {
   chmodSync(join(dir, 'git'), 0o755);
   const state = {
     login: 'tuannd9288',
-    agent: 'tuan9288-agent',
+    agent: 'nami9288',
     repo: { id: 1234, full_name: 'tuannd9288/app', owner: { login: 'tuannd9288' }, default_branch: 'main', permissions: { admin: true }, allow_auto_merge: true },
     kitLanded: false,
     collaborator: null,
@@ -169,7 +169,7 @@ test('the owner script refuses a repository other than the one named, a login wi
     assert.match(out.out, /repository id 1234, not 9999/);
     out = w.owner(['tuannd9288/app', '--apply']);
     assert.equal(out.code, 2, out.out);
-    w.set({ login: 'tuan9288-agent' });
+    w.set({ login: 'nami9288' });
     out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 2, out.out);
     assert.match(out.out, /runs as the Human, the repository's owner, not as the agents' account/);
@@ -188,7 +188,7 @@ test('the owner script shows every change it would make, and makes none without 
   try {
     const out = w.owner(['tuannd9288/app', '--id', '1234']);
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /PUT repos\/tuannd9288\/app\/collaborators\/tuan9288-agent \{"permission":"push"\}/);
+    assert.match(out.out, /PUT repos\/tuannd9288\/app\/collaborators\/nami9288 \{"permission":"push"\}/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-branches".*"~DEFAULT_BRANCH".*"non_fast_forward"/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-tags","target":"tag".*"~ALL".*"creation".*"update".*"deletion"/);
     assert.match(out.out, /POST repos\/tuannd9288\/app\/rulesets \{"name":"factory-bootstrap"/);
@@ -207,7 +207,7 @@ test('the owner script applies, reads back what it set, and on a second run chan
     let out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /read back: every setting as planned/);
-    assert.match(out.out, /waiting: tuan9288-agent accepts the invitation/);
+    assert.match(out.out, /waiting: nami9288 accepts the invitation/);
     const s = w.state();
     assert.deepEqual(s.rulesets.map((r) => r.name).sort(), ['factory-bootstrap', 'factory-branches', 'factory-claims', 'factory-tags']);
     assert.deepEqual(s.environment.policies.map((p) => p.name), ['main']);
@@ -440,7 +440,7 @@ test('on the first run GitHub may answer 404 for the permission of an account no
   try {
     const out = w.owner(['tuannd9288/app', '--id', '1234', '--apply']);
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /done {4}collaborator tuan9288-agent \(write\)/);
+    assert.match(out.out, /done {4}collaborator nami9288 \(write\)/);
   } finally {
     w.cleanup();
   }
@@ -769,7 +769,7 @@ test('--merge is refused with a value that is no position, without a value, befo
   } finally {
     w.cleanup();
   }
-  w = inForce({ login: 'tuan9288-agent' });
+  w = inForce({ login: 'nami9288' });
   try {
     const out = w.owner([...ME, '--merge', 'all', '--apply']);
     assert.equal(out.code, 2, out.out);
@@ -869,8 +869,8 @@ test('onboard opens the kit pull request only as the agents\' account, after the
       });
     let out = onboard({ LOGIN: 'tuannd9288', RULES: '[{"type":"pull_request"}]' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
-    assert.match(out.stdout + out.stderr, /opens the kit pull request as the agents' account \(tuan9288-agent\), not as tuannd9288/);
-    out = onboard({ LOGIN: 'tuan9288-agent', RULES: '[]' });
+    assert.match(out.stdout + out.stderr, /opens the kit pull request as the agents' account \(nami9288\), not as tuannd9288/);
+    out = onboard({ LOGIN: 'nami9288', RULES: '[]' });
     assert.equal(out.status, 2, out.stdout + out.stderr);
     assert.match(out.stdout + out.stderr, /main has no pull request rule: bin\/onboard-owner runs first/);
     assert.ok(!existsSync(join(dir, 'root/app')), 'cloned before refusing');
