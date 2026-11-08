@@ -12,6 +12,15 @@ import { skipPs } from './ps-skip.mjs';
 const lib = () => import('../bin/lib/checkout.mjs');
 const seatLib = () => import('../bin/lib/seat.mjs');
 
+/** p, or a failure that names what, once ms have passed: a child stuck on a pipe fails its test instead of holding the file open. */
+function within(p, ms, what) {
+  let timer;
+  const late = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms waiting for ${what}`)), ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
 /** An origin, a clone of it that is the checkout, and a second clone that makes commits on origin. */
 async function world(body) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-')));
@@ -379,6 +388,9 @@ test('a failed render keeps queue-plist.failed and names the plist and the first
 });
 
 // The start side. A named pipe where bin/seat reads a seat's log holds it inside chooseSeat, right after the claim is written.
+// The test holds the pipe's write end from before the start (O_RDWR, which waits for no reader), so the start's open never waits
+// for a writer and its read ends exactly when the test closes it. A writer that opened and closed before the start's open
+// woke left the start waiting in open with no writer ever coming (on macOS, the reader re-checks for a writer when it wakes).
 test('a start writes its claim while it holds checkout.lock, and releases the lock once the seat is chosen', async () => {
   const { world: seatWorld, until, SEAT_JS } = await import('./seat-world.mjs');
   await seatWorld(async (w) => {
@@ -387,15 +399,18 @@ test('a start writes its claim while it holds checkout.lock, and releases the lo
     const fifo = join(other, 'run-p.jsonl');
     assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
     writeFileSync(join(other, 'run-p.seat'), '2\n');
+    let writer = openSync(fifo, 'r+');
     const child = spawn(process.execPath, [SEAT_JS, ...w.args('worker')], { env: w.env(), cwd: w.root, stdio: 'ignore' });
     const ended = new Promise((resolve) => child.on('close', resolve));
     try {
       await until(() => existsSync(join(w.run, 'run-worker.claim.pid')), 'the claim');
       assert.ok(existsSync(join(w.state, 'checkout.lock')), 'the claim was written without checkout.lock');
-      closeSync(openSync(fifo, 'w'));
-      assert.equal(await ended, 0);
+      closeSync(writer);
+      writer = null;
+      assert.equal(await within(ended, 10000, 'the start to end'), 0);
       assert.ok(!existsSync(join(w.state, 'checkout.lock')), 'the lock was not released');
     } finally {
+      if (writer !== null) closeSync(writer);
       child.kill('SIGKILL');
     }
   });
