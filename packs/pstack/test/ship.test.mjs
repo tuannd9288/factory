@@ -537,6 +537,41 @@ describe('the reviewer\'s PASS', () => {
     assert.ok(!calls.some((c) => c.includes('--auto')), calls.join('\n'));
     assert.match(out.out, /stopped on #7: its reviewer raised it \(secrets: cli\.js reads the token file\): it carries needs-human now; the Human decides/);
   });
+
+  test('a raise the Human decided arms: with the label ship set taken off, that head and a main merge of it arm; a raise on a new patch stops again', () => {
+    const w = opened();
+    const raised = (tag, session) => ({ tag, session, structured: { conclusion: 'PASS', raise: 'secrets: cli.js reads the token file' } });
+    const labels = () => w.calls().filter((c) => c === 'pr edit 7 --add-label needs-human').length;
+    w.review(raised('review1', 's1'));
+    assert.equal(w.ship().code, 1);
+    // His approval is the tier check's to read; his decision reaches ship as the label taken off.
+    w.pr({ labels: [] });
+    let out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(labels(), 1, 'the label is not set again for the raise he decided');
+    assert.deepEqual(arms(w), [`pr merge 7 --auto --squash --match-head-commit ${w.head()}`]);
+    // main is merged in, the change untouched: the decision holds for the head with the same patch.
+    const other = join(w.dir, 'other');
+    git(w.dir, 'clone', '-q', join(w.dir, 'origin.git'), other);
+    commit(other, { 'other.js': 'x\n' }, 'feat(other): add other');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(w.repo, 'fetch', '-q', 'origin');
+    git(w.repo, 'merge', '--no-ff', '--no-edit', 'origin/main');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: w.head(), autoMergeRequest: null });
+    out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(labels(), 1);
+    // A commit that changes the patch, reviewed with a raise again, is stopped again.
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'fix(cli): print three');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: w.head(), autoMergeRequest: null });
+    w.review(raised('review2', 's2'));
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.equal(labels(), 2);
+    assert.match(out.out, /stopped on #7: its reviewer raised it/);
+  });
 });
 
 describe('a tier 3 that the paths make, with no label on the pull request', () => {

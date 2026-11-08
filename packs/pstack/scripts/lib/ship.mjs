@@ -2,7 +2,7 @@
 // pull request, or opens one, and takes the next step; it refuses a wrong step with the reason. See scripts/ship.
 import { execFileSync, spawnSync } from 'node:child_process';
 import console from 'node:console';
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 
@@ -125,6 +125,11 @@ function draftWait(pr) {
   return `its parent ${move.previousRefName} landed, and its head does not hold that landing: the queue's restack, its merge of main into it, is pending`;
 }
 
+/** The state folder, where bin/seat's records are: $FACTORY_STATE, else ~/.local/state/factory. */
+const stateDir = () => process.env.FACTORY_STATE ?? join(process.env.HOME ?? '', '.local/state/factory');
+/** The pull request's repository, owner/name, from its URL. */
+const repoOf = (pr) => /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(pr.url ?? '')?.[1] ?? null;
+
 /** The patch-id of a commit's own change, its diff from its merge base with origin/main, as .gate/bin/lib/approval.mjs reads it for the
  * Human's approval; null when it cannot be read (the commit is not here) or the change is empty. */
 function patchOf(sha) {
@@ -151,13 +156,12 @@ function patchOf(sha) {
  * included: the Lead is trusted to hold its own reviewer, as in those references.
  */
 function reviewOf(pr) {
-  const repo = /github\.com\/([^/]+\/[^/]+)\/pull\//.exec(pr.url ?? '')?.[1] ?? null;
+  const repo = repoOf(pr);
   const team = process.env.FACTORY_TEAM ?? null;
   const short = String(pr.headRefOid).slice(0, 7);
-  const state = process.env.FACTORY_STATE ?? join(process.env.HOME ?? '', '.local/state/factory');
   let text = '';
   try {
-    text = readFileSync(join(state, 'sessions.jsonl'), 'utf8');
+    text = readFileSync(join(stateDir(), 'sessions.jsonl'), 'utf8');
   } catch {
     // No record yet.
   }
@@ -180,6 +184,35 @@ function reviewOf(pr) {
   if (record && conclusion.startsWith('PASS')) return { pass: true, record };
   const named = record ? `the newest, ${record.tag} (session ${record.session}), concluded ${conclusion.split('\n')[0].slice(0, 80) || 'nothing'}` : 'there is none';
   return { pass: false, why: `no reviewer PASS of team ${team ?? '(FACTORY_TEAM is not set)'} covers head ${short} or its patch (${named}); run step 6's reviewer on it` };
+}
+
+/**
+ * The raises ship labelled (FAC-101): one line per label it set, in $FACTORY_STATE/ship-raised.jsonl, naming the repository, the pull request
+ * and the reviewer record (its session and tag) whose raise it was. A raise is read on the record reviewOf picks, the one on the head or on a
+ * head with its patch; so when that record's line is here and the pull request no longer carries needs-human, the label ship set was taken
+ * off, which is the Human's decision on that raise, and ship arms. A new patch needs a new review, whose raise is a new record and is
+ * labelled again. The line is kept on this machine, where the Lead runs ship; a run elsewhere labels again and stops, which lands nothing.
+ */
+const raisedFile = () => join(stateDir(), 'ship-raised.jsonl');
+const sameRaise = (line, pr, record) => line.repo === repoOf(pr) && line.pr === pr.number && line.session === record.session && line.tag === record.tag;
+function labelledBefore(pr, record) {
+  let text = '';
+  try {
+    text = readFileSync(raisedFile(), 'utf8');
+  } catch {
+    return false;
+  }
+  return text.split('\n').some((l) => {
+    try {
+      return sameRaise(JSON.parse(l), pr, record);
+    } catch {
+      return false;
+    }
+  });
+}
+function noteLabelled(pr, record) {
+  mkdirSync(stateDir(), { recursive: true });
+  appendFileSync(raisedFile(), `${JSON.stringify({ repo: repoOf(pr), pr: pr.number, session: record.session, tag: record.tag, head: pr.headRefOid, at: new Date().toISOString() })}\n`);
 }
 
 function step(pr, head, branch, stacks, merge, drafts) {
@@ -236,10 +269,12 @@ function step(pr, head, branch, stacks, merge, drafts) {
   if (review && !review.pass) return say(1, `refused to arm #${n}: ${review.why}`);
   // A high risk the reviewer named (lead.md step 6) goes to the Human: ship labels the pull request needs-human, which makes it tier 3
   // (.gate/bin/tier), and stops without arming it, as step 3 stops on every later run. Armed, a tier 3 merges on its checks alone at the
-  // merge switch's position all (#333), so the raise would land unseen.
+  // merge switch's position all (#333), so the raise would land unseen. Once the label it set is off, the raise is decided and ship arms.
   const raise = String(review?.record.structured?.raise ?? '').trim();
-  if (raise) {
+  const decided = Boolean(raise) && labelledBefore(pr, review.record);
+  if (raise && !decided) {
     gh(['pr', 'edit', String(n), '--add-label', 'needs-human']);
+    noteLabelled(pr, review.record);
     return say(1, `stopped on #${n}: its reviewer raised it (${raise.split('\n')[0].slice(0, 200)}): it carries needs-human now; the Human decides`);
   }
   // A draft is readied and armed at once, as the queue did before FAC-55. A pull request that was ready already is read fresh: CI may have
@@ -254,7 +289,7 @@ function step(pr, head, branch, stacks, merge, drafts) {
     if (!String(error.stderr).includes('Auto merge is not allowed for this repository')) throw error;
     return say(1, `stopped on #${n}: auto-merge is off on this repository; the Human merges it`);
   }
-  say(0, `armed #${n} at HEAD ${short}${review ? `: reviewer PASS ${review.record.tag}, session ${review.record.session}`
+  say(0, `armed #${n} at HEAD ${short}${review ? `: reviewer PASS ${review.record.tag}, session ${review.record.session}${decided ? ', its raise decided (the needs-human ship set is off)' : ''}`
     : '; no reviewer record is required here: Colly and the supervising session review this repository\'s pull requests'}`);
   return wait ? waits() : 0;
 }

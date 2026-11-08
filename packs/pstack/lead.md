@@ -91,10 +91,10 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    what it found. Tell it to fill `raise`, one line naming the kind and the place, only when the change touches what its
    paths do not show: data that could be lost or exposed, authentication, secrets, payment, or what deploys, even if
    every rule is met; or, where the repository's merge switch is at `all`, when it changes a design or an architecture
-   the Human has not decided. On a `PASS` that carries a `raise`, add `needs-human` to the pull request as soon as step
-   7's first `scripts/ship` run has opened it, with `gh issue edit <number> --add-label needs-human` (a pull request's
-   number is its issue's), before the run that would arm it: ship then stops, and the pull request waits for the Human
-   as tier 3. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
+   the Human has not decided. On a `PASS` that carries a `raise`, step 7's `scripts/ship` labels the pull request
+   `needs-human` and stops without arming it, and it waits for the Human as tier 3. Once he has decided, take the label
+   off with `gh issue edit <number> --remove-label needs-human` (a pull request's number is its issue's) and run ship
+   again: it arms that head, or one with the same patch, and a new patch needs its own review. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
    a user reaches and leaves that feature's file unchanged. Start it with step 4's command, with `reviewer` in place of
    `worker`, its own brief and
    `--tag review<k>`, and on its wake find its record with `"tag":"review<k>"` the same way; sort its `foundOutside`
