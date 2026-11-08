@@ -6,19 +6,22 @@
 //         ref of the clone: its refs, its config and its object store are shared by every worktree of the clone, and a seat that can
 //         commit can write them all (git update-ref moves origin/main; a loose object, a pack or a refs/replace ref can say anything, and
 //         git reads them as the object they are named for). So every object read here is hashed and checked against its id, and an object
-//         that is missing or does not match installs nothing. The worktree's first start records the commit it was given beside the
-//         stamp, and every later start reads main there; a later --main that differs is noted in the log and not used. No --main and no
-//         record installs nothing.
-//   When: that commit's .gate/driver.json `prepare`, absent or `first` (the worktree's first start) or `every` (every start).
+//         that is missing or does not match installs nothing. The worktree's first start records the commit it was given, with the
+//         switch read there, and every later start reads them from that record; a later --main that differs is noted in the log and not
+//         used. No --main and no record installs nothing.
+//   When: that commit's .gate/driver.json `prepare`, absent or `first` (before the worktree's first session only) or `every` (every
+//         start).
 //   What: that commit's gate_prepare, run in the worktree with the session's own scrubbed environment, its output in the run folder as
 //         run-<tag>.prepare.log. A main with no .gate/config.sh, or a work folder that is no clone, installs nothing.
-//   First start: only when the worktree's files are that commit's tree, compared file by file here (no git status, index or
-//         fsmonitor, which a seat can set), since what is installed outside the sandbox must be a tree main had. Any other worktree
-//         installs nothing, gets no stamp, says why in that log, and its session starts as before. Once an install passed, a stamp in
-//         $FACTORY_STATE/prepared/, where no seat can write, keyed to the worktree's real path and folder, says the worktree is ready; a
-//         worker that removes anything in its worktree or run folder does not bring the install back. A worktree removed and made again
-//         at the same path is a new folder and installs again.
-// Every git call takes research-git's guard (bin/lib/research-git.mjs BASE) and no replace objects; the hash check is the defence.
+//   First: only before the worktree's first session (bin/seat marks when one begins), and only when the worktree's files are that
+//         commit's tree, compared file by file here (no git status, index or fsmonitor, which a seat can set), since what is installed
+//         outside the sandbox must be a tree main had. Any other start installs nothing, gets no stamp, says why in that log, and its
+//         session starts as before; a start refused by a failed install ran no session and may try again. The stamp, the record and the
+//         session mark live in $FACTORY_STATE/prepared/, where no seat can write, keyed to the worktree's real path and folder, and a
+//         stamped worktree, or one whose first session ran, is decided on before the store is read. A worktree removed and made again at
+//         the same path is a new folder.
+// Every git call takes research-git's guard (bin/lib/research-git.mjs BASE), no transport at all and no lazy fetch, and no replace
+// objects; the hash check is the defence.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -38,14 +41,25 @@ export const COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 // dsh-superagent-prototype gives a workspace's prepare "ten minutes to finish" (docs/003-execution.md:51 at 8c32a9d).
 const TIME_MS = 10 * 60_000;
-// research-git's guard (bin/lib/research-git.mjs): no pager, hooks, fsmonitor, bare repository found by looking, or file transport.
-const BASE = ['--no-pager', '-c', 'safe.bareRepository=explicit', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.file.allow=never'];
+// research-git's guard (bin/lib/research-git.mjs): no pager, hooks, fsmonitor, bare repository found by looking, or file transport; and no
+// transport at all, since reading the store never needs one, and a clone whose config names a promisor remote would otherwise fetch a
+// missing object by itself, running what that config names for the transport (core.sshCommand, ...), which a seat can write.
+const BASE = ['--no-pager', '-c', 'safe.bareRepository=explicit', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'protocol.file.allow=never', '-c', 'protocol.allow=never'];
 
 const lastLine = (text) => text.trim().split('\n').at(-1)?.slice(0, 300) ?? '';
 
 /** The stamp of a worktree's first install: its real path and its folder's inode, so a folder made again at the same path is new. */
 export const stampOf = (state, work) =>
   join(state, 'prepared', createHash('sha256').update(`${realpathSync(work)}\0${statSync(work).ino}`).digest('hex').slice(0, 32));
+
+/** Marks that a session began in the work folder (bin/seat, once the supervisor runs): later starts there install nothing in `first` mode,
+ * since the Human's box A installs only before a worktree's first session. A work folder that is no clone gets no mark. */
+export function markSession(state, work) {
+  if (!existsSync(join(work, '.git'))) return;
+  const mark = `${stampOf(state, work)}.session`;
+  mkdirSync(dirname(mark), { recursive: true });
+  writeFileSync(mark, `${new Date().toISOString()}\n`);
+}
 
 /** The id git gives content of a type: the hash of "<type> <size>\0<content>", SHA-1 or SHA-256 by the id's length. */
 const idOf = (type, content, length) => createHash(length === 64 ? 'sha256' : 'sha1').update(`${type} ${content.length}\0`).update(content).digest('hex');
@@ -56,7 +70,7 @@ function storeOf(work, env) {
   return (wanted) => {
     if (!wanted.length) return [];
     const r = spawnSync('git', ['-C', work, ...BASE, 'cat-file', '--batch'], {
-      env: { ...env, GIT_NO_REPLACE_OBJECTS: '1' }, input: `${wanted.map(([id]) => id).join('\n')}\n`, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 1 << 30, timeout: 60_000,
+      env: { ...env, GIT_NO_REPLACE_OBJECTS: '1', GIT_NO_LAZY_FETCH: '1' }, input: `${wanted.map(([id]) => id).join('\n')}\n`, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 1 << 30, timeout: 60_000,
     });
     if (r.error?.code === 'ENOENT') throw new PrepareError(`git is not on bin/seat's PATH (${env.PATH ?? ''}), so main's gate_prepare could not be read`);
     const out = r.stdout ?? Buffer.alloc(0);
@@ -141,22 +155,27 @@ export function prepareWork({ work, run, tag, state, env, main = null }) {
     return null;
   };
   if (main && !COMMIT.test(main)) throw new PrepareError(`--main ${main} is not a commit id`);
-  // The commit a worktree was made at is the one the Lead gave at its first start: bin/seat records it beside the stamp, where no seat
-  // writes, and every later start (a fix round, the reviewer) reads main there. A later --main that differs is noted and not used.
-  const record = `${stampOf(state, work)}.main`;
-  const recorded = existsSync(record) ? readFileSync(record, 'utf8').trim() : null;
+  // What this worktree's starts know, in $FACTORY_STATE where no seat writes: the stamp of a passed install, the mark of a session that
+  // began, and the record of its first start (the commit it was given and the switch read there). Each is decided on before the store is
+  // read, so a stamped worktree, or one whose first session has run, never touches the store.
+  const stamp = stampOf(state, work);
+  const recordFile = `${stamp}.json`;
+  const record = existsSync(recordFile) ? JSON.parse(readFileSync(recordFile, 'utf8')) : null;
+  const began = existsSync(`${stamp}.session`);
   let head = '';
-  if (recorded && main && main !== recorded) head = `prepare: --main ${main.slice(0, 7)} differs from ${recorded.slice(0, 7)}, the commit this worktree's first start was given; ${recorded.slice(0, 7)} is used\n`;
-  if (!recorded && !main) return skip('bin/seat was given no --main, the commit of main the Lead read from GitHub, and this worktree has none recorded');
-  if (!recorded) {
-    mkdirSync(dirname(record), { recursive: true });
-    writeFileSync(record, `${main}\n`);
-  }
-  main = recorded ?? main;
+  if (record && main && main !== record.main) head = `prepare: --main ${main.slice(0, 7)} differs from ${record.main.slice(0, 7)}, the commit this worktree's first start was given; ${record.main.slice(0, 7)} is used\n`;
   const skipNoted = (why) => {
     writeFileSync(log, `${head}prepare: not run: ${why}\n`);
     return null;
   };
+  // Box A installs only before the worktree's first session; a start refused by a failed install ran none, so it may try again.
+  const sessionRan = 'a session has already run in this worktree, and main\'s install is made only before its first session (the Human, INN-51 box A)';
+  if (record?.when === 'first' && existsSync(stamp)) return null;
+  if (record?.when === 'first' && began) return skipNoted(sessionRan);
+  if (record && record.when === null) return null;
+  if (!record && began) return skipNoted(sessionRan);
+  if (!record && !main) return skip('bin/seat was given no --main, the commit of main the Lead read from GitHub, and this worktree has none recorded');
+  main = record?.main ?? main;
   const read = storeOf(work, env);
   const whole = (id, type) => read([[id, type]])[0];
   const notWhole = `main's commit ${main.slice(0, 7)} is not whole in this clone (git fetch origin, then start again)`;
@@ -165,24 +184,27 @@ export function prepareWork({ work, run, tag, state, env, main = null }) {
   const top = root && whole(root, 'tree');
   if (!top) return skipNoted(notWhole);
   const gateEntry = entriesOf(top, main.length)['.gate'];
-  if (!gateEntry || gateEntry.mode !== '40000') return null;
-  const gate = whole(gateEntry.id, 'tree');
+  const gate = gateEntry?.mode === '40000' ? whole(gateEntry.id, 'tree') : Buffer.alloc(0);
   if (!gate) return skipNoted(notWhole);
   const files = entriesOf(gate, main.length);
-  if (!files['config.sh']) return null;
-  const config = whole(files['config.sh'].id, 'blob');
+  const config = files['config.sh'] ? whole(files['config.sh'].id, 'blob') : null;
   const driverText = files['driver.json'] ? whole(files['driver.json'].id, 'blob') : Buffer.from('{}');
-  if (!config || !driverText) return skipNoted(notWhole);
-  let driver;
-  try {
-    driver = JSON.parse(driverText.toString());
-  } catch {
-    throw new PrepareError("main's .gate/driver.json is not JSON");
+  if ((files['config.sh'] && !config) || !driverText) return skipNoted(notWhole);
+  let when = null;
+  if (config) {
+    try {
+      when = prepareWhen(JSON.parse(driverText.toString()));
+    } catch (e) {
+      throw e instanceof PrepareError ? e : new PrepareError("main's .gate/driver.json is not JSON");
+    }
   }
-  const when = prepareWhen(driver);
-  const stamp = stampOf(state, work);
+  if (!record) {
+    mkdirSync(dirname(recordFile), { recursive: true });
+    writeFileSync(recordFile, `${JSON.stringify({ work, main, when, at: new Date().toISOString() })}\n`);
+  }
+  // A main with no .gate/config.sh starts as before.
+  if (!config) return null;
   if (when === 'first') {
-    if (existsSync(stamp)) return null;
     const differs = firstDifference(work, root, read, main.length);
     if (differs) return skipNoted(`the worktree differs from main's commit ${main.slice(0, 7)} at ${differs}, so its first install would run what main never had; a worktree made at that commit gets it`);
   }

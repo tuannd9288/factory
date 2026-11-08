@@ -130,7 +130,7 @@ test('a first start in a worktree holding a commit main lacks installs nothing, 
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
   assert.equal(prepared(w), '', 'only a tree main had is installed outside the sandbox');
-  assert.deepEqual(readdirSync(join(w.state, 'prepared')).filter((n) => !n.endsWith('.main')), [], 'no stamp');
+  assert.deepEqual(readdirSync(join(w.state, 'prepared')).filter((n) => !n.includes('.')), [], 'no stamp beside the record and the session mark');
   assert.match(readFileSync(join(w.run, 'run-worker.prepare.log'), 'utf8'), /^prepare: not run: the worktree differs from main's commit [0-9a-f]{7} at pnpm-lock\.yaml/);
 }));
 
@@ -214,4 +214,33 @@ test('a repo-local core.fsmonitor does not run during a first start\'s check', (
   git(w.work, 'config', 'core.fsmonitor', join(w.root, 'monitor.sh'));
   prepareAt(w, 't1', main);
   assert.ok(!existsSync(join(w.root, 'MONITOR-RAN')));
+}));
+
+test('a missing object in a clone whose config names a promisor remote is not fetched: its sshCommand does not run', () => world(async (w) => {
+  const main = mainWith(w, prepare('echo main >> "$PREP_OUT"'));
+  const loose = join(w.root, 'loose');
+  git(w.root, 'init', '-q', '-b', 'work', loose);
+  git(loose, 'remote', 'add', 'origin', join(w.root, 'origin.git'));
+  git(loose, 'fetch', '-q', 'origin');
+  git(loose, 'reset', '-q', '--hard', 'origin/main');
+  const blob = git(loose, 'rev-parse', `${main}:.gate/config.sh`);
+  rmSync(join(loose, '.git/objects', blob.slice(0, 2), blob.slice(2)));
+  writeFileSync(join(w.root, 'ssh.sh'), `#!/bin/sh\ntouch '${join(w.root, 'SSH-RAN')}'\nexit 1\n`);
+  chmodSync(join(w.root, 'ssh.sh'), 0o755);
+  for (const [k, v] of [['core.repositoryformatversion', '1'], ['extensions.partialClone', 'origin'], ['remote.origin.url', 'ssh://git@example.invalid/x.git'], ['remote.origin.promisor', 'true'], ['core.sshCommand', join(w.root, 'ssh.sh')]]) git(loose, 'config', k, v);
+  prepareAt(w, 't1', main, loose);
+  assert.ok(!existsSync(join(w.root, 'SSH-RAN')), 'no transport ran');
+  assert.equal(prepared(w), '');
+}));
+
+test('a worktree whose first session ran without an install installs nothing at a later start, even once it matches main', () => world(async (w) => {
+  const main = mainWith(w, prepare('echo run >> "$PREP_OUT"'));
+  commitTo(w.work, { 'extra.txt': 'not fresh\n' });
+  assert.equal(w.start('worker', ['--main', main], withGit(w)).code, 0);
+  await until(() => w.records().length === 1, 'the first record');
+  git(w.work, 'reset', '-q', '--hard', main);
+  assert.equal(w.start('worker', ['--tag', 'review1'], withGit(w)).code, 0);
+  await until(() => w.records().length === 2, 'the second record');
+  assert.equal(prepared(w), '');
+  assert.match(readFileSync(join(w.run, 'run-review1.prepare.log'), 'utf8'), /^prepare: not run: a session has already run in this worktree/);
 }));

@@ -14,7 +14,7 @@ import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
-import { COMMIT, PrepareError, prepareWork } from './prepare.mjs';
+import { COMMIT, PrepareError, markSession, prepareWork } from './prepare.mjs';
 import { readSessions } from './records.mjs';
 import { githubRepo, repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
@@ -554,6 +554,8 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   writeFileSync(join(run, `run-${tag}.seat`), `${seat}\n`);
   writeFileSync(join(run, `run-${tag}.account`), `${account}\n`);
   writeFileSync(pidFile, `${sup.pid}\n`);
+  // A session began in this worktree: later starts there make no first install (FAC-108, the Human's box A on INN-51).
+  markSession(state, work);
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
 
