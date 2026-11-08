@@ -45,7 +45,10 @@ export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta
  * profiles, when given, whole: it holds the tokens, the archive and the seats.
  * Writes are allowed to the work folder, the run folder and the temporary folder (by its real path) that the tests use, and, by
  * Claude Code's defaults, to each --add-dir and to its own session temporary folder. No domain is allowed and no local binding:
- * the strict allowlist is empty, so there is no network. */
+ * the strict allowlist is empty, so there is no network. `factory codex` alone runs outside it (excludedCommands, #182): Codex
+ * reads its login under the denied profiles folder and needs the network, and runs its own commands under a permission profile
+ * that denies bin/lib/deny-read.mjs's paths too (packs/pstack/bin/codex-step.mjs). Claude Code keeps a call sandboxed unless every part matches, and
+ * whatever the entry when it holds a cd, a substitution or a redirect, so the brief goes by --brief-file, not stdin. */
 export function sandboxSettings({ home, run, work, profiles = null }) {
   let tmp = tmpdir();
   try {
@@ -63,10 +66,16 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
       allowWrite: [...new Set([work, run, tmp].filter(Boolean))],
     },
     network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
+    excludedCommands: [CODEX_STEP_COMMAND],
   };
 }
 
 // The paths no seat reads are bin/lib/deny-read.mjs's list (INN-39 item 2): its sandbox paths above, its Read rules below.
+
+/** pstack's other-model-family steps on Codex (#182): every seat is granted the factory's verb, never `codex` itself (denied
+ * below), and the sandboxed seats run it outside their sandbox (sandboxSettings above). */
+const CODEX_STEP_COMMAND = 'factory codex *';
+const CODEX_STEP_GRANT = 'Bash(factory codex:*)';
 // No agent runs `factory account add` or `factory store` (#177): the Human alone puts a token in the store. The leading `*` takes
 // `factory` by name, by a relative or an absolute path and after other words; the two library rules close the `node` grant.
 // `factory account remove` stays the Human's alone. Colly may run `factory use` and `factory lead` on his spoken word
@@ -133,7 +142,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
     '--permission-mode', p.hideKey ? 'default' : 'auto',
     ...(p.sandbox ? ['--settings', JSON.stringify({ sandbox: sandboxSettings({ home, run, work, profiles }) })] : []),
     '--add-dir', run, ...addDirs.flatMap((d) => ['--add-dir', d]),
-    '--allowedTools', ...(p.hideKey ? p.allow(run) : []), ...edits, 'StructuredOutput', ...skills.map((s) => `Skill(${s})`), ...allow,
+    '--allowedTools', ...(p.hideKey ? p.allow(run) : []), ...edits, 'StructuredOutput', CODEX_STEP_GRANT, ...skills.map((s) => `Skill(${s})`), ...allow,
     '--disallowedTools', ...deny,
     '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(SCHEMA),
   ];
