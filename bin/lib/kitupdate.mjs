@@ -36,8 +36,6 @@ import { ATTRIBUTES, BLOCK_FILE, CONFIG, FILLED, INSTRUCTION_FILES, INVENTORY, K
 import { SETTINGS as GATE_SETTINGS, WORKFLOWS, describe, parseOptions, runnerProblems, valuesIn } from './gate-settings.mjs';
 import { addDeny } from './settings.mjs';
 
-const RENDERED = (path) => Boolean(FILLED[path]);
-
 export function plan({ factory, commit, repo, base, name, human, given = {} }) {
   const fac = git(factory, ['rev-parse', '--verify', `${commit}^{commit}`]).trim();
   const baseSha = git(repo, ['rev-parse', '--verify', `${base}^{commit}`]).trim();
@@ -71,7 +69,7 @@ export function plan({ factory, commit, repo, base, name, human, given = {} }) {
       }
       continue;
     }
-    if (RENDERED(path)) {
+    if (FILLED[path]) {
       const to = rendering(path, want);
       if (!had) {
         out.add.push(path);
