@@ -16,6 +16,7 @@ import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { job, plist } from './queue.mjs';
+import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
 
@@ -341,6 +342,124 @@ export function revertCount(rows, { since, until }) {
   return { n: plain.length, k: reverted.length, m: during.filter(([key]) => reverts.has(key)).length, reverted };
 }
 
+/** The commits a merged pull request's body says it repairs (INN-40): each line `Fixes: <12 to 40 hex> ("<title>")`, the Linux
+ * kernel's tag, the hex lowercased. `Fixes FAC-12` and `Fixes #12`, which close an issue, are none. */
+export const fixLines = (body) => [...String(body ?? '').matchAll(/^[ \t]*Fixes:[ \t]+([0-9a-fA-F]{12,40})(?![0-9a-fA-F])/gm)].map((m) => m[1].toLowerCase());
+
+/** The pull request a commit of a clone came from, by git alone, never gh: its subject `Merge pull request #N from …` (a merge commit)
+ * or `… (#N)` (a squash commit) gives N; null when the clone has no such commit or its subject names none. A commit the clone lacks
+ * makes one `git fetch origin main`, the first time only. */
+export function commitPullRequest(dir) {
+  let fetched = false;
+  const subject = (sha) => {
+    try {
+      return execFileSync('git', ['-C', dir, 'log', '-1', '--format=%s', sha, '--'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+      return null;
+    }
+  };
+  return (sha) => {
+    let s = subject(sha);
+    if (s === null && !fetched) {
+      fetched = true;
+      spawnSync('git', ['-C', dir, 'fetch', '--quiet', '--no-tags', 'origin', 'main'], { stdio: 'ignore', timeout: 60_000 });
+      s = subject(sha);
+    }
+    const m = s && (/^Merge pull request #(\d+) /.exec(s) ?? /\(#(\d+)\)$/.exec(s));
+    return m ? Number(m[1]) : null;
+  };
+}
+
+/** Gives every merged entry of the rows its `fixes`: [{ sha, number }] for each `Fixes:` line of its body, the number from
+ * `resolverOf(repo)` (a function of a sha, or null when the repository has no clone), null when it names no pull request. */
+export function resolveFixes(rows, resolverOf) {
+  const resolvers = new Map();
+  for (const r of rows) {
+    if (!resolvers.has(r.repo)) resolvers.set(r.repo, resolverOf(r.repo));
+    const resolve = resolvers.get(r.repo);
+    for (const p of r.merges ?? []) p.fixes ??= fixLines(p.body).map((sha) => ({ sha, number: resolve ? resolve(sha) : null }));
+  }
+  return rows;
+}
+
+const FIX_TITLE = /^fix(\([^)]*\))?!?:/;
+
+/** The change fail rate in [from, to] (ms), DORA's: of the merged pull requests in it that are not reverts (n), the ones a revert
+ * or a fix merged by its end repairs (k); failed names them with what repaired them. earlier: the pull requests merged before it
+ * that a fix merged in it repairs; unresolved: the `Fixes:` lines of fixes merged in it that name no other pull request; unmarked:
+ * the pull requests of n titled fix(…) with no `Fixes:` line. A fix's lines are its entry's `fixes` (resolveFixes), else unresolved. */
+export function failIn(rows, from, to) {
+  const all = new Map();
+  for (const r of rows) for (const p of r.merges ?? []) all.set(`${r.repo}#${p.number}`, { ...p, repo: r.repo });
+  const byRepo = (repo) => [...all.values()].filter((p) => p.repo === repo);
+  const reverts = new Map([...all].map(([key, p]) => [key, revertsOf(p.repo, p, byRepo(p.repo))]).filter(([, t]) => t.length));
+  const inside = (p) => Date.parse(p.merged) >= from && Date.parse(p.merged) <= to;
+  const during = [...all].filter(([, p]) => inside(p));
+  const duringKeys = new Set(during.map(([key]) => key));
+  const plain = during.filter(([key]) => !reverts.has(key));
+  const by = new Map();
+  const add = (key, how) => by.set(key, [...(by.get(key) ?? []), how]);
+  for (const [key, targets] of reverts) if (Date.parse(all.get(key).merged) <= to) for (const t of targets) add(`${all.get(key).repo}#${t}`, `reverted by #${all.get(key).number}`);
+  const earlier = new Map();
+  const unresolved = [];
+  for (const p of all.values()) {
+    if (Date.parse(p.merged) > to) continue;
+    for (const f of p.fixes ?? fixLines(p.body).map((sha) => ({ sha, number: null }))) {
+      if (f.number === null || f.number === p.number) {
+        if (inside(p)) unresolved.push({ repo: p.repo, number: p.number, sha: f.sha });
+        continue;
+      }
+      const target = `${p.repo}#${f.number}`;
+      add(target, `fixed by #${p.number}`);
+      if (inside(p) && !duringKeys.has(target)) earlier.set(target, [...(earlier.get(target) ?? []), p.number]);
+    }
+  }
+  const order = (a, b) => a.repo.localeCompare(b.repo) || a.number - b.number;
+  const failed = plain.filter(([key]) => by.has(key)).map(([key, p]) => ({ repo: p.repo, number: p.number, by: by.get(key) })).sort(order);
+  const unmarked = plain.filter(([, p]) => FIX_TITLE.test(p.title) && !fixLines(p.body).length).map(([, p]) => ({ repo: p.repo, number: p.number })).sort(order);
+  return {
+    n: plain.length, k: failed.length, failed, unmarked, unresolved: unresolved.sort(order),
+    earlier: [...earlier].map(([key, fixes]) => ({ repo: key.slice(0, key.lastIndexOf('#')), number: Number(key.slice(key.lastIndexOf('#') + 1)), by: fixes })).sort(order),
+  };
+}
+
+/** failIn for the period [since 00:00, until 23:59:59] (UTC). */
+export const failCount = (rows, { since, until }) => failIn(rows, Date.parse(`${since}T00:00:00Z`), Date.parse(`${until}T23:59:59Z`));
+
+const SEARCH = `query($q:String!,$after:String){search(query:$q,type:ISSUE,first:100,after:$after){pageInfo{hasNextPage endCursor}
+nodes{... on PullRequest{number title body mergedAt}}}}`;
+
+/** The pull requests of a repository merged in [from, to] (ms), as merged entries ({ number, title, body, merged }), from GitHub's
+ * search, 100 a page (INN-40). `run` is gh. */
+export function mergedIn(repo, from, to, run = gh) {
+  const q = `repo:${repo} is:pr is:merged merged:>=${new Date(from).toISOString().slice(0, 10)}`;
+  const out = [];
+  for (let after = null; ;) {
+    const page = JSON.parse(run(['api', 'graphql', '-f', `query=${SEARCH}`, '-f', `q=${q}`, ...(after ? ['-f', `after=${after}`] : [])])).data.search;
+    for (const p of page.nodes) if (p?.mergedAt && Date.parse(p.mergedAt) >= from && Date.parse(p.mergedAt) <= to) out.push({ number: p.number, title: p.title, body: p.body ?? '', merged: p.mergedAt });
+    if (!page.pageInfo.hasNextPage) return out;
+    after = page.pageInfo.endCursor;
+  }
+}
+
+/** For each repository, its merge switch (switchSince) and the change fail rate over the window since the switch last moved, up to
+ * `to` (ms): { position, since, n, k }, or null when the sweep's file names no position. `merged(repo, from, to)` gives the merged
+ * entries of the window, and `resolverOf` resolves their `Fixes:` lines (resolveFixes). */
+export function switchWindows(repos, { state, to, merged, resolverOf }) {
+  return new Map(repos.map((repo) => {
+    const sw = switchSince(state, repo);
+    if (!sw) return [repo, null];
+    const from = Date.parse(sw.since);
+    try {
+      const c = failIn(resolveFixes([{ repo, merges: merged(repo, from, to) }], resolverOf), from, to);
+      return [repo, { position: sw.position, since: sw.since, n: c.n, k: c.k }];
+    } catch (error) {
+      // A search that fails costs this repository's line, not the digest.
+      return [repo, { position: sw.position, since: sw.since, error: String(error.stderr || error.message).trim().split('\n')[0].slice(0, 200) }];
+    }
+  }));
+}
+
 /** How a row's number reads after its repository: `#12` for a GitHub issue or pull request, ` FAC-12` for a task on Linear (#406). */
 const at = (number) => (typeof number === 'string' ? ` ${number}` : `#${number}`);
 
@@ -390,13 +509,15 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, unread = null, shared = null, codexWaits: waits = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, unread = null, shared = null, codexWaits: waits = null, switches = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
   const costed = rows.filter((r) => r.cost !== null);
   const rounds = rows.filter((r) => r.rounds > 0);
   const reverts = revertCount(rows, { since, until });
+  const fail = failCount(rows, { since, until });
+  const named = (list, how = () => '') => list.map((p) => `${p.repo}#${p.number}${how(p)}`).join(', ');
   const lines = [
     `# ${digestTitle(since, until)}`,
     '',
@@ -417,6 +538,14 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     `- Merged tasks the Human had to touch: ${rate(landed.filter((r) => r.touched).length, landed.length)}`,
     `- PRs reverted: ${rate(reverts.k, reverts.n)}; reverts merged in the period: ${reverts.m}`,
     ...(reverts.n ? [`- Reverted PRs: ${reverts.k ? reverts.reverted.map((p) => `${p.repo}#${p.number}`).join(', ') : 'none'}`] : []),
+    `- Change fail rate (reverted or fixed): ${rate(fail.k, fail.n)}`,
+    ...(fail.n ? [`- Failed PRs: ${fail.k ? named(fail.failed, (p) => ` (${p.by.join(', ')})`) : 'none'}`] : []),
+    `- Fixed this period, merged earlier: ${fail.earlier.length ? `${fail.earlier.length} (${named(fail.earlier, (p) => ` fixed by ${p.by.map((x) => `#${x}`).join(', ')}`)})` : 'none'}`,
+    ...(fail.n ? [`- PRs titled fix(…) with no Fixes: line: ${fail.unmarked.length ? `${fail.unmarked.length} (${named(fail.unmarked)})` : 'none'}`] : []),
+    ...(fail.unresolved.length ? [`- Fixes: lines not resolved: ${named(fail.unresolved, (p) => ` (${p.sha})`)}`] : []),
+    ...(switches?.size ? ['- By repository, since its merge switch last moved:', ...[...switches].map(([repo, w]) => (w
+      ? `  - ${repo}: merge switch ${w.position} since ${w.since.slice(0, 10)}; change fail rate since then ${w.error ? `not read (${w.error})` : rate(w.k, w.n)}`
+      : `  - ${repo}: merge switch not read`))] : []),
     `- Green at the first commit the gate judged: ${rate(judged.filter((r) => r.firstPass).length, judged.length)}`,
     `- Used No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
     `- Reviewer raised to tier 3 (label raised), by repository: ${[...new Set(rows.map((r) => r.repo))].sort().map((repo) => `${repo} ${rows.filter((r) => r.repo === repo && r.raised).length}`).join(', ') || 'no tasks'}`,
@@ -469,6 +598,8 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     'API cost: the cost of the bin/seat sessions that ran on the PR\'s branch, as their records name the repository and branch, plus the tokens of the --profile-dir folders by the same branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
     'Cash: the Claude subscription, paid monthly, not split by task. The ledger sees no other cash.',
     'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N"; only when its body has no "Reverts" line at all, for any repository, is its title Revert "<title of a merged PR>" or revert(scope): <title of a merged PR> (scope optional) read; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
+    'Fixed: a merged PR named by a line "Fixes: <the first 12 or more characters of a commit> ("<title>")" in the body of a PR merged later, the commit being the merge or squash commit main got when the named PR merged, read in the repository\'s clone; "Fixes <KEY>" and "Fixes #N" close an issue and name no PR. Change fail rate (DORA\'s) counts the PRs merged in the period, reverts not included, that a revert or a fix merged by its end repairs; a fix of a PR merged before the period is counted in the week the fix lands, under "merged earlier". Data only: nothing gates on it.',
+    'Merge switch: all, every PR merges by itself, tier 3 included; 1-2, tier 3 waits for the Human; none, every PR waits for an approval. Its window starts at its last move as the sweep saw it, or the sweep\'s first sight of it.',
     'Human touched: the Human reviewed it, the label needs-human, or a merge by the Human\'s own login that was not made by auto-merge (a merge by the agents\' login is a team merge).',
   );
   return `${lines.join('\n')}\n`;
@@ -523,6 +654,17 @@ export async function linearTaskRows({ repo, api, teamKey, allPulls, pullRow, fr
     rows.push(taskRow(repo, { number: t.identifier, title: t.title, url: t.url, createdAt: start, state: end ? 'CLOSED' : 'OPEN', timelineItems: { nodes: [] } }, prs));
   }
   return { rows, keys: new Set(tasks.map((t) => t.identifier)) };
+}
+
+/** The owner/name of the clone at dir, from its github.com origin, or null: the factory's own repository, whose clone is the root. */
+function originRepo(dir) {
+  try {
+    const url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const m = /github\.com[:/](.+)$/.exec(url.replace(/\/$/, '').replace(/\.git$/, ''));
+    return m && /^[\w.-]+\/[\w.-]+$/.test(m[1]) ? m[1] : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The factory's clones under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose
@@ -802,6 +944,17 @@ async function main(argv) {
     }
   }
   rows.sort((a, b) => a.created.localeCompare(b.created));
+  // A `Fixes:` line names a commit; the repository's own clone says which pull request it came from (INN-40), never gh.
+  const own = originRepo(root);
+  const resolvers = new Map();
+  const resolverOf = (repo) => {
+    if (!resolvers.has(repo)) {
+      const dir = clones.get(repo) ?? (repo === own ? root : null);
+      resolvers.set(repo, dir ? commitPullRequest(dir) : null);
+    }
+    return resolvers.get(repo);
+  };
+  resolveFixes(rows, resolverOf);
   if (opts.mode === 'rows') {
     const head = ['repo', 'task', 'prs', 'who', 'tier', 'state', 'rounds', 'first_pass', 'no_red', 'human_touched', 'why', 'cost_usd', 'cost_note', 'hours_to_merge', 'title'];
     console.log(head.join('\t'));
@@ -818,7 +971,9 @@ async function main(argv) {
     }
   }
   const report = inspect(shared ? [] : folders, { latest: opts.latest });
-  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared });
+  // Each repository's change fail rate since its merge switch last moved (INN-40), from GitHub's search for that window.
+  const switches = switchWindows(opts.repos, { state, to, merged: (repo, a, b) => mergedIn(repo, a, b), resolverOf });
+  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared, switches });
   if (!opts.post) {
     process.stdout.write(text);
     return;

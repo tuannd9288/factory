@@ -12,7 +12,7 @@ covers the factory's rules and taking a repository in. Inside a repository, that
 
 His standing rules for building the factory, approved on INN-24 (A, 2026-11-05 13:52:46 +07); they are not copied into the kit or a pack.
 
-- **Snags.** At a snag, a bug or a security finding, a reviewer FAIL included, do what a reference system does about it; if none has it, record it in Triage with the reason and park it (31/10, 01/11, 05/11).
+- **Snags.** The factory is built to trust agents. At a snag, a bug or a security finding, a reviewer FAIL included, do what a reference system does about it, and add a block (a deny, an allowlist, a refusing check, a hook) only where one has it, cited at its pin; if none has it, record it in Triage with the reason and park it (31/10, 01/11, 05/11, 07/11).
 - **Reference systems,** each at its pin, with a local copy under `data_mirror/data/repos/`: piggery `67c083e`, agent-orchestrator `9dc1c14`, pstack `4dd1d05` (`cursor-plugins`, the pin in `packs/pstack/settings.json`), zeroshot `0ad6653`, pi-herdsman `f2064d9`, dsh-superagent-prototype `8c32a9d`, paperclip `01d9a12`, warp-factory-examples `84e7c95`, seatworks `4c35563` (`seatworks-v3`), paseo-slp `a75c4db`, and Demonthorn's SLP articles; a system is added when he names one (05/11).
 - **Default to pstack and SLP.** Where the factory differs, the difference is a switch whose default is pstack's way; it deviates only on his dated word (13/10, 16/10, 05/11).
 - **Where the references agree.** Before proposing a switch, compare the reference systems: where only the factory differs and they all agree, take the common way with no switch, tagging the factory's divergent code and removing it; where only pstack differs, keep the common way; where they split, a switch whose default is pstack's way (05/11). A reference with no rule on the point does not count; where only pstack has a rule and it follows a public standard, take pstack's way (INN-29, 05/11).
@@ -63,6 +63,7 @@ The Human's dated decisions, with their sources and his words, are in `docs/deci
 - **The Factory app's Linear key, 2026-11-04.**
 - **Effectiveness, 2026-11-04.**
 - **The Watcher's freeze, 2026-11-07.**
+- **The factory's own merge switch, 2026-11-08.**
 
 ## Tiers
 
@@ -171,7 +172,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
-  Checked by: `.github/CODEOWNERS:4`.
+  Checked by: `scripts/ship`'s stop on `needs-human` (`packs/pstack/scripts/lib/ship.mjs:162`) and
+  `.github/workflows/approval.yml`, which reads his approval of such a pull request from `.github/CODEOWNERS:4`.
   Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
   factory's unattended sessions; 0d does; (2) the record of a task is in its repository's tracker (1b) and in 0d's
@@ -192,6 +194,16 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
+
+Versions follow Semantic Versioning 2.0.0: a version is a tag `v<major>.<minor>.<patch>` on `main`, cut on his word and never
+moved or deleted (the tag ruleset `factory-versions`, `.github/ruleset-versions.json`, which he sets, refuses a deletion and a
+force push). Its public API is the
+contracts H1–H9; the required check names (3a); the record shapes `events.jsonl` (`bin/lib/events.mjs`) and `sessions.jsonl`
+(`bin/lib/seat.mjs`); the commands `factory`, `bin/seat`,
+`bin/onboard`, `bin/onboard-owner`, `bin/onboard-doctor` and `bin/kit-update`; and what a served repository holds of the kit:
+the Gate block, the `.gate/bin/` commands, the keys of `.gate/config.sh` and `.gate/driver.json` and the line forms of
+`.gate/protected`. Everything else is internal. An incompatible change to the API is MAJOR; a new compatible contract,
+command or key, or a deprecation, is MINOR; a fix is PATCH.
 
 ## This root
 
@@ -223,10 +235,17 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   GitHub token there (#366); its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
-- Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its `**TL;DR**`
-  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386,
-  #411). Its title carries no issue number, which stays in the body.
+- A pull request of this repository lands once the team's Supervisor has accepted it and Colly's review passed, with
+  `verify` green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
+  One that needs the Human, a release, a first design or a change to a design or architecture, carries `needs-human`
+  (`gh issue edit <n> --add-label needs-human`), and Colly takes it to him. This repository runs no `tier`, so only
+  `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:162`). It goes on
+  when he approves its head on GitHub, which `approval` reads, so the Lead sees it with no relay, or on his word, which
+  Colly records on the issue. Then the Lead removes the label (`gh issue edit <n> --remove-label needs-human`) and runs
+  `scripts/ship` again. GitHub asks his review only on a pull request that changes `.github/CODEOWNERS`. Each body
+  opens with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its
+  `**TL;DR**` block, the same lines in English; they are his only section, and the agents' detail is collapsed below
+  them (#386, #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|
@@ -249,7 +268,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH from each machine's installed copy of the factory (#390): `$FACTORY_CHECKOUT`, `~/WORKSPACES` on the Mac mini, `${XDG_DATA_HOME:-~/.local/share}/factory/checkout` on the MacBook (`installedRoot`), outside the folders macOS refuses a launchd job and never set by a dev clone's branch or edits, which change nothing that runs. Run from a clone that is not that copy, it clones the copy (main only, an empty `credential.helper`) or brings it to `origin/main` by `followMain`'s rules, then runs the copy's own `bin/install-factory`, which makes `~/.local/bin/factory` a symlink to the copy's `bin/factory` and replaces only a symlink whose target ends in `/bin/factory`; on the MacBook, run as its `factory` user (any other is refused), it also runs the checks of the relay's and the queue's LaunchDaemons, writes their plists with each one's sha256, user and program, and prints the steps he runs one at a time: his old LaunchAgents out, and a `sudo` command that installs only copies it checked against those sha256 (#366). His one line after a change here is `~/.local/share/factory/checkout/bin/install-factory` when the copy exists, else `bin/install-factory` from any clone; it can be run again |
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves. Its job's command, `sweep` with no repository, starts the daemon when nobody answers; `sweep --once` and `sweep --repo` run one pass in-process (#399) |
-| `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery. It lives on a lease from the job's pings: `launchctl bootout` of the job stops it within about three minutes; to stop it at once, or before re-installing a changed plist, check that the pid in `$FACTORY_STATE/daemon.lock` is the daemon (`ps -p <pid> -o command=` ends in `bin/lib/daemon.mjs`; a stale lock can name a reused pid), then send it SIGTERM |
+| `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery. It lives on a lease from the job's pings: `launchctl bootout` of the job stops it within about three minutes; to stop it at once, or before re-installing a changed plist, check that the pid in `$FACTORY_STATE/daemon.lock` is the daemon (`ps -p <pid> -o command=` ends in `bin/lib/daemon.mjs`; the lock itself goes with the daemon, but a note a crashed daemon left can name a reused pid), then send it SIGTERM |
 | `bin/lib/linear.mjs` | The only code that talks to Linear's API, as the Factory app (#403): one token source in `tokens/linear-app/` (client id and secret, the minted token with its expiry), minted under a lock with one fixed set of scopes and renewed 7 days ahead by the daemon's pass; an authentication failure re-reads, mints once and then raises `linear-auth-failed` (a request sends three times and mints twice at most), and any success clears it; writes pass `createAsUser`; `factory login linear-app client-id\|client-secret` stores the credentials; the header has the rest |
 | `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
