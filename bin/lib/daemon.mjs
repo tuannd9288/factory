@@ -57,7 +57,7 @@ import { openStore } from './store.mjs';
 import { linearCheckMain, startLinearSource } from './linear-listen.mjs';
 import { postSync } from './wake.mjs';
 import { recordsWriter } from './shared-records.mjs';
-import { nodeLogin } from './node.mjs';
+import { humanOf, nodeLogin, runsOf, stateDirOf } from './node.mjs';
 
 export const PASS_MS = 60_000;
 const LOG_MAX = 10 * 1024 * 1024;
@@ -225,7 +225,7 @@ function serve(d, sock) {
 
 /** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow`, `startSource`, `pushRecords` and `onStart` (told
  * { stop, d } once it listens) are passed in for tests. */
-export async function run({ env = process.env, state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'), runs = env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), human = env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
+export async function run({ env = process.env, state = stateDirOf(env), runs = runsOf(env), human = humanOf(env), passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
   const sock = socketPath(state);
   if (!fits(sock)) throw new Error(`the socket path ${sock} is longer than 103 bytes`);
   mkdirSync(state, { recursive: true });
