@@ -24,10 +24,12 @@ test('clonesUnder skips a clone with no readable origin or no owner/name, report
     clone(root, 'odd', 'https://github.com/justone');
     // A look-alike host is not GitHub (FAC-85): left out, as a clone on another host is, and not reported.
     clone(root, 'evil', 'https://evilgithub.com/o/evil.git');
+    // GitHub's ssh over port 443 names no owner/name in the form the factory reads: reported, as it was before FAC-85.
+    clone(root, 'ssh443', 'ssh://git@ssh.github.com:443/o/s.git');
     const skipped = [];
     const found = clonesUnder(root, (folder, why) => skipped.push([folder, why]));
     assert.deepEqual([...found.keys()].sort(), ['o/app', 'o/lib']);
-    assert.deepEqual(skipped.map(([folder]) => folder).sort(), [join(root, 'odd'), join(root, 'stray')]);
+    assert.deepEqual(skipped.map(([folder]) => folder).sort(), [join(root, 'odd'), join(root, 'ssh443'), join(root, 'stray')]);
     assert.ok(skipped.every(([, why]) => typeof why === 'string' && why.length > 0));
   } finally {
     rmSync(root, { recursive: true, force: true });

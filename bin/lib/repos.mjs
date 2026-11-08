@@ -8,14 +8,20 @@ import { ROOT } from './checkout.mjs';
 
 export const FACTORY_REPO = 'factory';
 
-// github.com itself as the host, where a host can be: at the start, after a scheme's // and an optional user@, or after a user@ in the
-// scp-like form. A look-alike host (evilgithub.com), github.com in another host's path (https://evil.com/github.com/o/r) or as its user
-// (https://github.com@evil.com/o/r) is none.
-const ON_GITHUB = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@/]+@)?github\.com[:/]/i;
+// Where git reads `host` as the host of an origin: after a scheme git speaks over a network (http, https, ssh, git, git+ssh, ssh+git), its
+// // and an optional user@ with no / ? # in it; or, in the scp-like form, at the start or after a user@ with no / or : in it, before a :.
+// A look-alike host (evilgithub.com), github.com in another host's path, user, query or fragment, after another host's scp-like colon, or
+// in a local path (github.com/o/r, x@github.com/o/r, file://) is none. The host is matched in lower case, as every reader of an origin
+// matched it before (FAC-85).
+const hostAt = (host) => new RegExp(`^(?:(?:https?|ssh|git|git\\+ssh|ssh\\+git):\\/\\/(?:[^@\\/?#\\s]+@)?${host}[:\\/]|(?:[^@\\/:\\s]+@)?${host}:)`);
+// github.com, and www.github.com, which every reader but bin/seat's took.
+const ON_GITHUB = hostAt('(?:www\\.)?github\\.com');
+// GitHub's hosts, with ssh.github.com (its ssh over port 443), for clonesUnder's line about a GitHub origin that names no owner/name.
+const GITHUB_HOST = hostAt('(?:www\\.|ssh\\.)?github\\.com');
 
-/** The GitHub owner/name an origin URL names, or null: https://github.com/o/r, ssh://git@github.com/o/r or git@github.com:o/r, with
- * any scheme or user before the host, with or without a trailing .git and /, and a path that is exactly an owner and a name in
- * GitHub's characters. The one parser of an origin (FAC-85). */
+/** The GitHub owner/name an origin URL names, or null: https://github.com/o/r, ssh://git@github.com/o/r or git@github.com:o/r, with a
+ * user before the host or not, with or without a trailing .git and /, and a path that is exactly an owner and a name in GitHub's
+ * characters. The one parser of an origin (FAC-85). */
 export function githubRepo(url) {
   const text = String(url ?? '').trim();
   const at = ON_GITHUB.exec(text);
@@ -52,7 +58,7 @@ export function clonesUnder(root, skip = () => {}) {
       skip(dir, `origin cannot be read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
       continue;
     }
-    if (!ON_GITHUB.test(url)) continue;
+    if (!GITHUB_HOST.test(url)) continue;
     const repo = githubRepo(url);
     if (repo) out.set(repo, dir);
     else skip(dir, `origin ${url} does not name owner/name`);
