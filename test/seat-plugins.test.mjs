@@ -1,11 +1,13 @@
 // bin/seat (#185): before each session it installs the work folder's enabled plugins into the seat's own root, and gives the
-// session that root as its plugin cache, whatever the caller had set. And (FAC-108) it runs origin/main's gate_prepare in the
-// worktree, outside the sandbox, at the worktree's first start unless origin/main's .gate/driver.json says every start.
+// session that root as its plugin cache, whatever the caller had set. And (FAC-108) it runs main's gate_prepare, at the commit the
+// Lead names with --main, in the worktree, outside the sandbox, at the worktree's first start unless main's .gate/driver.json says every.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { deflateSync } from 'node:zlib';
+import { prepareWork } from '../bin/lib/prepare.mjs';
 import { PSTACK_SETTINGS, until, world } from './seat-world.mjs';
 
 const ID = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' };
@@ -22,19 +24,21 @@ const commitTo = (dir, files) => {
   git(dir, 'add', '-A');
   git(dir, 'commit', '-q', '-m', 'main moves');
 };
-/** A local origin whose main holds files, cloned into the world's work folder, as a Lead's worktree from origin/main. */
+/** A local origin whose main holds files, cloned into the world's work folder, as a Lead's worktree made at main's commit; that commit. */
 const mainWith = (w, files) => {
   git(w.root, 'init', '-q', '--bare', '-b', 'main', join(w.root, 'origin.git'));
   git(w.root, 'clone', '-q', join(w.root, 'origin.git'), join(w.root, 'seed'));
   commitTo(join(w.root, 'seed'), files);
   git(join(w.root, 'seed'), 'push', '-q', 'origin', 'HEAD:main');
   git(w.root, 'clone', '-q', join(w.root, 'origin.git'), w.work);
+  return git(join(w.root, 'seed'), 'rev-parse', 'HEAD');
 };
-/** main moves on origin, and the worktree fetches it: origin/main is ahead of the worktree's HEAD. */
+/** main moves on origin, and the worktree fetches it; main's new commit. */
 const advance = (w, files) => {
   commitTo(join(w.root, 'seed'), files);
   git(join(w.root, 'seed'), 'push', '-q', 'origin', 'HEAD:main');
   git(w.work, 'fetch', '-q', 'origin');
+  return git(join(w.root, 'seed'), 'rev-parse', 'HEAD');
 };
 const prepare = (body) => ({ '.gate/config.sh': `gate_prepare() {\n  ${body}\n}\n` });
 const prepared = (w) => (existsSync(join(w.root, 'prep.out')) ? readFileSync(join(w.root, 'prep.out'), 'utf8') : '');
@@ -73,11 +77,13 @@ test('a failed install refuses the start, with the reason, and leaves no run beh
 
 // The launcher's PATH, with git on it: the world's own has the fake claude and node only.
 const withGit = (w, extra = {}) => ({ PATH: `${w.env().PATH}:/usr/bin:/bin`, PREP_OUT: join(w.root, 'prep.out'), ...extra });
+/** prepareWork as bin/seat calls it, for what a seat does between two starts (Colly's probe of #550). */
+const prepareAt = (w, tag, main, work = w.work) => prepareWork({ work, run: w.run, tag, state: w.state, env: { ...withGit(w), HOME: w.home }, main });
 
-test('origin/main\'s gate_prepare, not the worktree\'s copy, runs in the worktree before the session, with no credential in its environment', () => world(async (w) => {
-  mainWith(w, prepare('echo old >> "$PREP_OUT"'));
-  advance(w, prepare('echo "main $1 ${GH_TOKEN:-none} ${ANTHROPIC_BASE_URL:-none} ${FACTORY_SANDBOX:-none}" >> "$PREP_OUT"'));
-  const r = w.start('worker', [], withGit(w, { GH_TOKEN: 'gh-not-a-token', ANTHROPIC_BASE_URL: 'https://example.invalid' }));
+test('main\'s gate_prepare at the commit --main names, not the worktree\'s copy, runs in the worktree before the session, with no credential in its environment', () => world(async (w) => {
+  const main = mainWith(w, { ...prepare('echo "main $1 ${GH_TOKEN:-none} ${ANTHROPIC_BASE_URL:-none} ${FACTORY_SANDBOX:-none}" >> "$PREP_OUT"'), '.gate/driver.json': '{"prepare":"every"}' });
+  writeFileSync(join(w.work, '.gate/config.sh'), 'gate_prepare() {\n  echo worktree >> "$PREP_OUT"\n}\n');
+  const r = w.start('worker', ['--main', main], withGit(w, { GH_TOKEN: 'gh-not-a-token', ANTHROPIC_BASE_URL: 'https://example.invalid' }));
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
   const line = `main ${w.work} none none none\n`;
@@ -87,58 +93,125 @@ test('origin/main\'s gate_prepare, not the worktree\'s copy, runs in the worktre
 }));
 
 test('a failed gate_prepare refuses the start before any session: its output is in the run folder, and no pid, claim or seat file is left', () => world(async (w) => {
-  mainWith(w, prepare('echo boom >&2; return 3'));
-  const r = w.start('worker', [], withGit(w));
+  const main = mainWith(w, prepare('echo boom >&2; return 3'));
+  const r = w.start('worker', ['--main', main], withGit(w));
   assert.equal(r.code, 2, r.out + r.err);
-  assert.match(r.err, /bin\/seat: prepare: origin\/main's gate_prepare failed \(exit 3\): boom/);
+  assert.match(r.err, /bin\/seat: prepare: main's gate_prepare failed \(exit 3\): boom/);
   assert.match(readFileSync(join(w.run, 'run-worker.prepare.log'), 'utf8'), /boom/);
   assert.deepEqual(readdirSync(w.run).filter((n) => /\.(pid|seat|account|name|claim)/.test(n)), []);
   assert.ok(!existsSync(w.out()), 'no session started');
   assert.deepEqual(w.records(), []);
 }));
 
-test('the install runs at the worktree\'s first start only, whatever the seat removes; prepare every in origin/main\'s driver.json runs it at each start', () => world(async (w) => {
-  mainWith(w, prepare('echo run >> "$PREP_OUT"'));
-  assert.equal(w.start('worker', [], withGit(w)).code, 0);
+test('the install runs at the worktree\'s first start only, whatever the seat removes; prepare every in main\'s driver.json runs it at each start', () => world(async (w) => {
+  const main = mainWith(w, prepare('echo run >> "$PREP_OUT"'));
+  assert.equal(w.start('worker', ['--main', main], withGit(w)).code, 0);
   await until(() => w.records().length === 1, 'the first record');
   // A seat writes its worktree and its run folder; the stamp is in neither, so removing what it left there brings no install back.
   rmSync(join(w.run, 'run-worker.prepare.log'));
   assert.equal(w.start('worker', ['--tag', 'fix1'], withGit(w)).code, 0);
   await until(() => w.records().length === 2, 'the fix round\'s record');
   assert.equal(prepared(w), 'run\n');
-  advance(w, { '.gate/driver.json': JSON.stringify({ prepare: 'every' }) });
-  assert.equal(w.start('worker', ['--tag', 'fix2'], withGit(w)).code, 0);
-  await until(() => w.records().length === 3, 'the second fix round\'s record');
-  assert.equal(prepared(w), 'run\nrun\n');
+  // A new worktree made at main's next commit, which says every: each of its starts installs.
+  const next = advance(w, { '.gate/driver.json': JSON.stringify({ prepare: 'every' }) });
+  rmSync(w.work, { recursive: true, force: true });
+  git(w.root, 'clone', '-q', join(w.root, 'origin.git'), w.work);
+  for (const [n, tag] of [[3, 'fix2'], [4, 'fix3']]) {
+    assert.equal(w.start('worker', ['--tag', tag, '--main', next], withGit(w)).code, 0);
+    await until(() => w.records().length === n, `${tag}'s record`);
+  }
+  assert.equal(prepared(w), 'run\nrun\nrun\n');
 }));
 
 test('a first start in a worktree holding a commit main lacks installs nothing, writes no stamp, says why in its log and starts as before', () => world(async (w) => {
-  mainWith(w, prepare('echo run >> "$PREP_OUT"'));
+  const main = mainWith(w, prepare('echo run >> "$PREP_OUT"'));
   commitTo(w.work, { 'pnpm-lock.yaml': 'a lockfile the branch changed\n' });
-  const r = w.start('worker', [], withGit(w));
+  const r = w.start('worker', ['--main', main], withGit(w));
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
   assert.equal(prepared(w), '', 'only a tree main had is installed outside the sandbox');
-  assert.ok(!existsSync(join(w.state, 'prepared')), 'no stamp');
-  assert.match(readFileSync(join(w.run, 'run-worker.prepare.log'), 'utf8'), /^prepare: not run: the worktree .* holds 1 commit\(s\) main lacks/);
+  assert.deepEqual(readdirSync(join(w.state, 'prepared')).filter((n) => !n.endsWith('.main')), [], 'no stamp');
+  assert.match(readFileSync(join(w.run, 'run-worker.prepare.log'), 'utf8'), /^prepare: not run: the worktree differs from main's commit [0-9a-f]{7} at pnpm-lock\.yaml/);
 }));
 
-test('a main with no .gate/config.sh starts as before, even when the worktree has one of its own', () => world(async (w) => {
-  mainWith(w, { 'README.md': 'x\n' });
+test('a main with no .gate/config.sh starts as before, even when the worktree has one of its own; so does a start with no --main', () => world(async (w) => {
+  const main = mainWith(w, { 'README.md': 'x\n' });
   mkdirSync(join(w.work, '.gate'));
   writeFileSync(join(w.work, '.gate/config.sh'), 'gate_prepare() {\n  echo worktree >> "$PREP_OUT"\n}\n');
-  const r = w.start('worker', [], withGit(w));
+  const r = w.start('worker', ['--main', main], withGit(w));
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
   assert.equal(prepared(w), '');
   assert.ok(!existsSync(join(w.run, 'run-worker.prepare.log')));
+  // A worktree started with no --main, as by a Lead from before this: nothing installs, the log says why, and the session starts.
+  const other = join(w.root, 'other');
+  git(w.root, 'clone', '-q', join(w.root, 'origin.git'), other);
+  const r2 = w.seat(['worker', join(w.run, 'BRIEF.md'), '--run', w.run, '--work', other, '--tag', 'other'], withGit(w));
+  assert.equal(r2.code, 0, r2.out + r2.err);
+  await until(() => w.records().length === 2, 'the second record');
+  assert.match(readFileSync(join(w.run, 'run-other.prepare.log'), 'utf8'), /^prepare: not run: bin\/seat was given no --main/);
 }));
 
 test('a command gate_prepare runs that is not on bin/seat\'s PATH refuses the start, naming the PATH', () => world(async (w) => {
-  mainWith(w, prepare('pnpm-not-on-this-path install --frozen-lockfile'));
+  const main = mainWith(w, prepare('pnpm-not-on-this-path install --frozen-lockfile'));
   const env = withGit(w);
-  const r = w.start('worker', [], env);
+  const r = w.start('worker', ['--main', main], env);
   assert.equal(r.code, 2, r.out + r.err);
   assert.ok(r.err.includes(`not on bin/seat's PATH (${env.PATH})`), r.err);
   assert.ok(!existsSync(w.out()));
+}));
+
+// What a seat can write is the clone's shared git dir (refs, config, objects, the index): none of it decides what runs (Colly, #550).
+test('a seat that commits its own gate_prepare and driver.json and moves origin/main has neither run at the next start', () => world(async (w) => {
+  const main = mainWith(w, prepare('echo main >> "$PREP_OUT"'));
+  prepareAt(w, 't1', main);
+  commitTo(w.work, { ...prepare('echo seat >> "$PREP_OUT"'), '.gate/driver.json': '{"prepare":"every"}' });
+  git(w.work, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+  prepareAt(w, 't2', main);
+  assert.equal(prepared(w), 'main\n');
+}));
+
+test('a replace ref on main\'s config.sh blob does not change what runs', () => world(async (w) => {
+  const main = mainWith(w, prepare('echo main >> "$PREP_OUT"'));
+  writeFileSync(join(w.root, 'seat.sh'), 'gate_prepare() {\n  echo seat >> "$PREP_OUT"\n}\n');
+  git(w.work, 'replace', git(w.work, 'rev-parse', `${main}:.gate/config.sh`), git(w.work, 'hash-object', '-w', join(w.root, 'seat.sh')));
+  prepareAt(w, 't1', main);
+  assert.equal(prepared(w), 'main\n');
+}));
+
+test('a forged loose object of main\'s config.sh is not read as main\'s: the first start installs nothing', () => world(async (w) => {
+  const main = mainWith(w, prepare('echo main >> "$PREP_OUT"'));
+  // A clone whose objects are loose: a fetch of fewer objects than fetch.unpackLimit (100) keeps no pack.
+  const loose = join(w.root, 'loose');
+  git(w.root, 'init', '-q', '-b', 'work', loose);
+  git(loose, 'remote', 'add', 'origin', join(w.root, 'origin.git'));
+  git(loose, 'fetch', '-q', 'origin');
+  git(loose, 'reset', '-q', '--hard', 'origin/main');
+  const blob = git(loose, 'rev-parse', `${main}:.gate/config.sh`);
+  const file = join(loose, '.git/objects', blob.slice(0, 2), blob.slice(2));
+  const forged = Buffer.from('gate_prepare() {\n  echo seat >> "$PREP_OUT"\n}\n');
+  chmodSync(file, 0o644);
+  writeFileSync(file, deflateSync(Buffer.concat([Buffer.from(`blob ${forged.length}\0`), forged])));
+  prepareAt(w, 't1', main, loose);
+  assert.equal(prepared(w), '');
+  assert.match(readFileSync(join(w.run, 'run-t1.prepare.log'), 'utf8'), /not whole in this clone/);
+}));
+
+test('a changed package.json hidden with assume-unchanged is not taken for main\'s: the first start installs nothing', () => world(async (w) => {
+  const main = mainWith(w, { ...prepare('echo main >> "$PREP_OUT"'), 'package.json': '{}\n' });
+  writeFileSync(join(w.work, 'package.json'), '{"scripts":{"preinstall":"echo seat"}}\n');
+  git(w.work, 'update-index', '--assume-unchanged', 'package.json');
+  prepareAt(w, 't1', main);
+  assert.equal(prepared(w), '');
+  assert.match(readFileSync(join(w.run, 'run-t1.prepare.log'), 'utf8'), /differs from main's commit [0-9a-f]{7} at package\.json/);
+}));
+
+test('a repo-local core.fsmonitor does not run during a first start\'s check', () => world(async (w) => {
+  const main = mainWith(w, prepare('echo main >> "$PREP_OUT"'));
+  commitTo(w.work, { 'extra.txt': 'not fresh\n' });
+  writeFileSync(join(w.root, 'monitor.sh'), `#!/bin/sh\ntouch '${join(w.root, 'MONITOR-RAN')}'\n`);
+  chmodSync(join(w.root, 'monitor.sh'), 0o755);
+  git(w.work, 'config', 'core.fsmonitor', join(w.root, 'monitor.sh'));
+  prepareAt(w, 't1', main);
+  assert.ok(!existsSync(join(w.root, 'MONITOR-RAN')));
 }));
