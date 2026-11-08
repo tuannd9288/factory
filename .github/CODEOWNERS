@@ -1,4 +1,4 @@
 # Every change to the factory changes every repository's gate at its next kit pull request: all of it is tier 3.
-# Since 2026-11-08 the ruleset `factory` is at the merge switch's position all and requires no approval; a pull request
-# that needs the Human's carries needs-human, which scripts/ship stops on (AGENTS.md, "This root").
-* @tuannd9288
+# Since 2026-11-08 the ruleset `factory` is at all; a pull request that needs the Human carries needs-human, and approval.yml
+# reads his approval from the owner named below. The line names this file alone, so GitHub asks his review on no other PR.
+/.github/CODEOWNERS @tuannd9288
