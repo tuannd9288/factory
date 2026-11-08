@@ -88,7 +88,12 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    named as in step 3 (`.gate/bin/verify --tests <files>` and `.gate/bin/red-check --base origin/main`; `--fast`
    checks only staged files, and a committed change has none), or that it runs none, since step 5 ran them, that it
    writes nothing in the worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists
-   what it found. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
+   what it found. Tell it to fill `raise`, one line naming the kind and the place, only when the change touches what its
+   paths do not show: data that could be lost or exposed, authentication, secrets, payment, or what deploys, even if
+   every rule is met. On a `PASS` that carries a `raise`, add `needs-human` to the pull request as soon as step 7's
+   first `scripts/ship` run has opened it, with `gh issue edit <number> --add-label needs-human` (a pull request's
+   number is its issue's), before the run that would arm it: ship then stops, and the pull request waits for the Human
+   as tier 3. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
    a user reaches and leaves that feature's file unchanged. Start it with step 4's command, with `reviewer` in place of
    `worker`, its own brief and
    `--tag review<k>`, and on its wake find its record with `"tag":"review<k>"` the same way; sort its `foundOutside`
@@ -108,12 +113,29 @@ stdin with `--body-file -`, from a heredoc, never into a file). Below, `<n>` is 
    turn with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was
    opened (the reviewer's raise, a `needs-human` label). The body also carries <!--github-->`Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`,<!--/github--><!--linear-->`Fixes <KEY>`, so Linear closes the issue on merge, `Issue: <KEY>`
-   and `Team: {{TEAM}}` (and `Claim: <sha>`, once `.gate/bin/claim` takes a key),<!--/linear--> outside that block. The title uses Conventional Commits `type(scope): subject`, no trailing period, at most 72 characters; type is `feat`, `fix`, `docs`, `refactor`, `test`, `chore` or `perf`; scope is the area; subject is short, imperative and names a real symbol when one carries the change. It carries no issue number (`ship`
+   and `Team: {{TEAM}}` (and `Claim: <sha>`, once `.gate/bin/claim` takes a key),<!--/linear--> outside that block. When the
+   pull request repairs a fault that a merged pull request of this repository brought in, the body also carries, for each, one
+   line `Fixes: <sha> ("<title>")`: the first 12 characters of the commit `main` got when that pull request merged, and its
+   title, from `printf 'Fixes: %s ("%s")\n' "$(git log -1 --format=%h --abbrev=12 <commit>)" "$(git log -1 --format=%b <commit> | head -n 1)"`
+   for a merge commit, or `--format=%s` in place of the second `%b` for a squash commit. It feeds the digest's change fail
+   rate and is never a check. The title uses Conventional Commits `type(scope): subject`, no trailing period, at most 72 characters; type is `feat`, `fix`, `docs`, `refactor`, `test`, `chore` or `perf`; scope is the area; subject is short, imperative and names a real symbol when one carries the change. It carries no issue number (`ship`
    drops the commit subject's `(#<n>)`); the issue stays in the body. On a stop, put the reason and your recommended answer in
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a
    check is red, read `.claude/skills/gate-red/SKILL.md` first.
-9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes the worktree.
+9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes that issue's worktree.
+   Where the repository has a Feature Map and `~/factory-runs/<repo>-map-pass/date` does not hold today's date (one file
+   for the repository, whichever team), write today's date there, run `git fetch origin`; if
+   `~/factory-runs/<repo>-map-pass/w` is still there, run `git worktree remove --force` on it first; then run
+   `git worktree add --detach ~/factory-runs/<repo>-map-pass/w origin/main`, and start one reviewer seat on it as step 6
+   does, with `--run ~/factory-runs/<repo>-map-pass` and `--tag mappass-<YYYY-MM-DD>`. Its brief's first line is
+   `/pstack:maintain-verification-skill` (where a seat's log shows that line did not start the skill, the brief tells it
+   to read `skills/maintain-verification-skill/SKILL.md` from its plugin root and follow it instead); it names
+   `feature-map/` as step 0's target and no edit scope, orders steps 0 to 3 from the source with step 1's index fixes
+   reported as drift, step 4 not run (no session can run the app until #264) and step 5's sorting of each finding, and
+   asks for the outcome, `blocked`, with each finding, its kind, its feature file and its source path. On its
+   `seat-ended` wake, run `git worktree remove ~/factory-runs/<repo>-map-pass/w` (nothing removes it otherwise), then
+   file the doc drift as one issue of this repository and each product gap as its own, as step 4 files a finding.
 
 ## What you ask the Human
 Only a tier-3 approval, a merge that ship hands him, a change that failed three reviews, a product answer, a login, a

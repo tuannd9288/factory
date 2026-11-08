@@ -63,6 +63,17 @@ test('account add defaults locally and sends only the selected node its token', 
   } finally { s.done(); }
 });
 
+test('account add --node macbook from the Mac mini stores through the MacBook\'s own factory, the link into its installed copy (#366)', () => {
+  const s = sandbox();
+  try {
+    s.onHost();
+    const r = s.facIn('made-up-macbook-secret', 'account', 'add', 'fixture', '--node', 'macbook', '--no-setup');
+    assert.equal(r.code, 0, r.out);
+    assert.match(s.calls(), /factory@macbook zsh -lc '~\/\.local\/bin\/factory store fixture'/);
+    assert.equal(readFileSync(join(s.fake, 'far/.agent-profiles/tokens/fixture'), 'utf8'), 'made-up-macbook-secret\n');
+  } finally { s.done(); }
+});
+
 
 test('an older token has an unknown added date until replaced; metadata never becomes an account', () => {
   const s = sandbox();

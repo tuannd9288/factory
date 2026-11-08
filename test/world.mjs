@@ -20,7 +20,7 @@ if (a[0] === 'ruleset' && a[1] === 'check') {
 if (a[0] === 'repo' && a[1] === 'view' && a.includes('nameWithOwner')) said('tuannd9288/app');
 if (a[0] === 'repo' && a[1] === 'view' && a.includes('id')) said('R_kgDOtest');
 if (a[0] === 'label') process.exit(0);
-if (a[0] === 'pr' && a[1] === 'create') { fs.writeFileSync(process.env.PR_BODY, a[a.indexOf('--body') + 1]); fs.writeFileSync(process.env.PR_TITLE, a[a.indexOf('--title') + 1]); said('https://github.com/tuannd9288/app/pull/1'); }
+if (a[0] === 'pr' && a[1] === 'create') { fs.writeFileSync(process.env.PR_BODY, a[a.indexOf('--body') + 1]); fs.writeFileSync(process.env.PR_TITLE, a[a.indexOf('--title') + 1]); fs.writeFileSync(process.env.PR_ARGS, JSON.stringify(a)); said('https://github.com/tuannd9288/app/pull/1'); }
 process.stderr.write('fake gh: ' + a.join(' ') + '\n');
 process.exit(1);
 `;
@@ -56,12 +56,14 @@ export function world({ kit = {}, executable = [], onboardArgs = [], seedFiles =
   writeFileSync(ghLog, '');
   const body = join(dir, 'body.md');
   const title = join(dir, 'title.txt');
+  const prArgs = join(dir, 'pr-args.json');
   const env = {
     ...quiet,
     PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
     GH_LOG: ghLog,
     PR_BODY: body,
     PR_TITLE: title,
+    PR_ARGS: prArgs,
     FACTORY_ROOT: join(dir, 'root'),
     AGENT_PROFILES: join(dir, 'profiles'),
     XDG_DATA_HOME: join(dir, 'xdg'),
@@ -90,11 +92,13 @@ export function world({ kit = {}, executable = [], onboardArgs = [], seedFiles =
   const sha7 = () => git(fac, 'rev-parse', 'HEAD').slice(0, 7);
   const update = (args = ['app'], more = {}) => run(dir, join(fac, 'bin/kit-update'), args, { ...env, ...more });
   const calls = () => readFileSync(ghLog, 'utf8').split('\n').filter(Boolean);
+  // The arguments of the one `gh pr create`, whole: a log line ends at the body's first newline.
+  const created = () => JSON.parse(readFileSync(prArgs, 'utf8'));
   const state = () => ({
     branches: git(repo, 'branch', '--list'),
     head: git(repo, 'rev-parse', 'HEAD'),
     remote: git(dir, '--git-dir', url, 'for-each-ref', '--format=%(refname) %(objectname)'),
   });
   const show = (rev, path) => git(repo, 'show', `${rev}:${path}`);
-  return { dir, fac, repo, url, env, onboard, body, title, update, repoCommit, facCommit, sha7, calls, state, show, cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 5 }) };
+  return { dir, fac, repo, url, env, onboard, body, title, update, repoCommit, facCommit, sha7, calls, created, state, show, cleanup: () => rmSync(dir, { recursive: true, force: true, maxRetries: 5 }) };
 }

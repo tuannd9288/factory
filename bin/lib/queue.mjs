@@ -37,9 +37,8 @@
 // the last pass began and none runs, and never waits for it; that costs the sweep no gh call.
 // See bin/factory-queue for the arguments.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { accessSync, closeSync, constants, linkSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { hostname, userInfo } from 'node:os';
+import { accessSync, closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkPlists, checkoutRoot, followMain } from './checkout.mjs';
@@ -52,11 +51,12 @@ import { clonesUnder } from './ledger.mjs';
 import { MERGED_FIELDS, wakeOnNews, wakeOnSeats, wakeStarted } from './news-wake.mjs';
 import { liveRuns, runFiles } from './seat.mjs';
 import { listStreams } from './streams.mjs';
-import { watchSilence } from './reader.mjs';
+import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
 import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
 import { installedRoot, nodeLogin, placeOf } from './node.mjs';
+import { holderOf, isHeld, takeLock } from './lock.mjs';
 
 const CALL_MS = 60_000;
 
@@ -428,97 +428,6 @@ function sweepNews(repo, folder, state, runs, rulesRead, root) {
   return holders(comments.claims?.nodes);
 }
 
-/** A process's start time as ps prints it, or null: with the pid it names one process, so a reused pid differs. */
-const startOf = (pid) => {
-  try {
-    return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
-  } catch {
-    return null;
-  }
-};
-
-/** The holder a lock file records, or null when it is not one (a legacy directory lock, a torn or foreign file). */
-export function holderOf(path) {
-  try {
-    const h = JSON.parse(readFileSync(path, 'utf8'));
-    return typeof h?.pid === 'number' && h.token ? h : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Whether a holder is gone. The state folder is single-machine (AGENTS.md), so the recorded host decides nothing:
- * hostname() is not stable. ESRCH is gone. EPERM means a process of another user has the pid, which may be a reused
- * one, so the start time decides, as for a live pid. Any other error is alive. A pid with another start time is a
- * reused pid. When ps cannot say, the holder counts as alive: a held lock is the safe mistake. */
-function gone(h) {
-  try {
-    process.kill(h.pid, 0);
-  } catch (error) {
-    if (error.code === 'ESRCH') return true;
-    if (error.code !== 'EPERM') return false;
-  }
-  const now = startOf(h.pid);
-  return Boolean(h.start) && now !== null && now !== h.start;
-}
-/** Takes the lock at path and returns what it recorded ({pid, start, host, token}), or null while another sweep holds
- * it. The record is written to a file of its own and link()ed into place: link fails with EEXIST like O_EXCL, and the
- * content is there from the first instant. A holder that is gone is displaced by renaming its lock to a name of ours:
- * of several sweeps that found it dead, one rename succeeds. We then read what we moved; if it is not the lock we
- * judged dead, a third sweep took over meanwhile, and we link it back and give up. An unreadable lock (the old
- * directory, a torn file) is a dead sweep's after ten minutes. afterRead is for tests: it runs between the read and
- * the rename. */
-export function takeLock(path, { afterRead } = {}) {
-  mkdirSync(dirname(path), { recursive: true });
-  const mine = { pid: process.pid, start: startOf(process.pid), host: hostname(), token: randomBytes(8).toString('hex') };
-  const tmp = `${path}.${mine.token}.tmp`;
-  writeFileSync(tmp, JSON.stringify(mine));
-  try {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      try {
-        linkSync(tmp, path);
-        return mine;
-      } catch (error) {
-        if (error.code !== 'EEXIST') throw error;
-      }
-      const held = holderOf(path);
-      afterRead?.(held);
-      let dead;
-      try {
-        dead = held ? gone(held) : Date.now() - statSync(path).mtimeMs >= 10 * 60_000;
-      } catch {
-        continue;
-      }
-      if (!dead) return null;
-      const aside = `${path}.dead.${mine.token}`;
-      try {
-        renameSync(path, aside);
-      } catch (error) {
-        if (error.code === 'ENOENT') continue;
-        throw error;
-      }
-      const moved = holderOf(aside);
-      if ((moved?.token ?? null) !== (held?.token ?? null)) {
-        try {
-          linkSync(aside, path);
-        } catch {}
-        rmSync(aside, { recursive: true, force: true });
-        return null;
-      }
-      rmSync(aside, { recursive: true, force: true });
-    }
-    return null;
-  } finally {
-    rmSync(tmp, { force: true });
-  }
-}
-
-/** Removes the lock only if it is the one we made. Between the read and the unlink another sweep can only take it
- * if it judged us gone, and we are running. */
-export function releaseLock(path, token) {
-  if (holderOf(path)?.token === token) rmSync(path, { force: true });
-}
-
 /** The checks before the repository loop. Their failure leaves $state/queue-run.failed (a name no repository's
  * `queue-<owner>-<name>.failed` can take) with the time and the cause, so the digest shows it; a run that gets past
  * them removes it. Returns the exit code on failure, null to go on; `who.login` is the sweep's own login once it is read. */
@@ -634,14 +543,15 @@ function recordEvents(state, reads, switches) {
 export const READER_EVERY_MS = 15 * 60_000;
 
 /** Starts one pass of the stream reader (#339) and returns true, when 15 minutes have passed since the last pass began (`reader/started`, in
- * ms; the pass and this both write it), no pass holds `reader.lock` (a lock whose pid is gone is none), and some stream exists to read. The pass
+ * ms; the pass and this both write it), no pass holds `reader.lock` (bin/lib/lock.mjs), and some stream exists to read. The pass
  * is a node process of its own, detached (a new process group, so launchd does not end it with the sweep), with this process's environment
  * unchanged, and nothing here waits for it. It runs bin/lib/reader.mjs with process.execPath, which is what bin/factory-reader (a bash
  * wrapper that finds node) execs, since a bash script cannot be started with a node path. With no stream there is nothing to read, so no
- * pass starts; the first pass then puts the first streams at their end, as it would have. */
-export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, env = process.env }) {
-  const holder = holderOf(join(state, 'reader.lock'));
-  if (holder && !gone(holder)) return false;
+ * pass starts; the first pass then puts the first streams at their end, as it would have. With reader.json's switch off (INN-39) no pass
+ * starts and readerSwitch tells it once; it runs on every sweep, so a cursor a running pass saves after the switch went off goes at the next. */
+export function startReader({ state, runs, now = Date.now(), spawnFn = spawn, env = process.env, settingFile = settingPath(env) }) {
+  if (readerSwitch({ state, settingFile, now }) === 'off') return false;
+  if (isHeld(join(state, 'reader.lock'))) return false;
   let last = 0;
   try {
     last = Number(readFileSync(join(state, 'reader/started'), 'utf8').trim()) || 0;
@@ -875,7 +785,7 @@ export function runPass({ repos = [], human, state }) {
     recordEvents(state, reads, switches);
     checkSilence(state);
     startReaderPass(state);
-    releaseLock(held, mine.token);
+    mine.release();
   }
 }
 
@@ -901,14 +811,14 @@ export async function ensureDaemon(state, { ping = ask, spawnFn = spawn, home = 
     return 1;
   };
   const lock = join(state, 'daemon.lock');
-  const holder = holderOf(lock);
-  if (holder && !gone(holder)) {
+  if (isHeld(lock)) {
     // It may be starting or busy for a moment.
     for (let i = 0; i < 6; i += 1) {
       await pause(waitMs / 10);
       if (await answers(500)) return 0;
     }
-    return fail(`the daemon (pid ${holder.pid}, started ${holder.start}) holds ${lock} and does not answer on ${sock}`);
+    const holder = holderOf(lock);
+    return fail(`the daemon${holder ? ` (pid ${holder.pid}, started ${holder.start})` : ''} holds ${lock} and does not answer on ${sock}`);
   }
   // Only the job starts the daemon: it hands the pass its environment, and launchd names the job's label in XPC_SERVICE_NAME. A person or a Lead
   // who runs a bare `sweep` would give the daemon theirs (tokens among them).

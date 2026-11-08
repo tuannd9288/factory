@@ -12,7 +12,7 @@ covers the factory's rules and taking a repository in. Inside a repository, that
 
 His standing rules for building the factory, approved on INN-24 (A, 2026-11-05 13:52:46 +07); they are not copied into the kit or a pack.
 
-- **Snags.** At a snag, a bug or a security finding, a reviewer FAIL included, do what a reference system does about it; if none has it, record it in Triage with the reason and park it (31/10, 01/11, 05/11).
+- **Snags.** The factory is built to trust agents. At a snag, a bug or a security finding, a reviewer FAIL included, do what a reference system does about it, and add a block (a deny, an allowlist, a refusing check, a hook) only where one has it, cited at its pin; if none has it, record it in Triage with the reason and park it (31/10, 01/11, 05/11, 07/11).
 - **Reference systems,** each at its pin, with a local copy under `data_mirror/data/repos/`: piggery `67c083e`, agent-orchestrator `9dc1c14`, pstack `4dd1d05` (`cursor-plugins`, the pin in `packs/pstack/settings.json`), zeroshot `0ad6653`, pi-herdsman `f2064d9`, dsh-superagent-prototype `8c32a9d`, paperclip `01d9a12`, warp-factory-examples `84e7c95`, seatworks `4c35563` (`seatworks-v3`), paseo-slp `a75c4db`, and Demonthorn's SLP articles; a system is added when he names one (05/11).
 - **Default to pstack and SLP.** Where the factory differs, the difference is a switch whose default is pstack's way; it deviates only on his dated word (13/10, 16/10, 05/11).
 - **Where the references agree.** Before proposing a switch, compare the reference systems: where only the factory differs and they all agree, take the common way with no switch, tagging the factory's divergent code and removing it; where only pstack differs, keep the common way; where they split, a switch whose default is pstack's way (05/11). A reference with no rule on the point does not count; where only pstack has a rule and it follows a public standard, take pstack's way (INN-29, 05/11).
@@ -62,6 +62,8 @@ The Human's dated decisions, with their sources and his words, are in `docs/deci
 - **Linear, 2026-11-04.**
 - **The Factory app's Linear key, 2026-11-04.**
 - **Effectiveness, 2026-11-04.**
+- **The Watcher's freeze, 2026-11-07.**
+- **The factory's own merge switch, 2026-11-08.**
 
 ## Tiers
 
@@ -164,12 +166,14 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Prior art [SH]: "A profile is data: a system prompt, a set of skills, a set of extensions, a sandbox policy, model defaults."
 - **H6**: Tools are commands; permissions live outside the instructions.
   Checked by: the deny rules `bin/seat` and `packs/pstack/bin/lead` give each session (`denyOf` in `bin/lib/seat.mjs`
-  and in `packs/pstack/bin/lead.mjs`), and their tests; the kit's `kit/.claude/settings.json` binds Claude Code only (#134).
+  and in `packs/pstack/bin/lead.mjs`), whose paths come from the one list in `bin/lib/deny-read.mjs`, and their tests; the kit's
+  `kit/.claude/settings.json`, that list's rendering, binds Claude Code only (#134).
   Prior art [A5]: "Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
-  Checked by: `.github/CODEOWNERS:4`.
+  Checked by: `scripts/ship`'s stop on `needs-human` (`packs/pstack/scripts/lib/ship.mjs:162`) and
+  `.github/workflows/approval.yml`, which reads his approval of such a pull request from `.github/CODEOWNERS:4`.
   Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
   factory's unattended sessions; 0d does; (2) the record of a task is in its repository's tracker (1b) and in 0d's
@@ -194,8 +198,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 Versions follow Semantic Versioning 2.0.0: a version is a tag `v<major>.<minor>.<patch>` on `main`, cut on his word and never
 moved or deleted (the tag ruleset `factory-versions`, `.github/ruleset-versions.json`, which he sets, refuses a deletion and a
 force push). Its public API is the
-contracts H1–H9; the required check names (3a); the record shapes `events.jsonl` (`bin/lib/events.mjs`), `sessions.jsonl`
-(`bin/lib/seat.mjs`) and the reviewer result (`kit/.gate/bin/lib/result.mjs`); the commands `factory`, `bin/seat`,
+contracts H1–H9; the required check names (3a); the record shapes `events.jsonl` (`bin/lib/events.mjs`) and `sessions.jsonl`
+(`bin/lib/seat.mjs`); the commands `factory`, `bin/seat`,
 `bin/onboard`, `bin/onboard-owner`, `bin/onboard-doctor` and `bin/kit-update`; and what a served repository holds of the kit:
 the Gate block, the `.gate/bin/` commands, the keys of `.gate/config.sh` and `.gate/driver.json` and the line forms of
 `.gate/protected`. Everything else is internal. An incompatible change to the API is MAJOR; a new compatible contract,
@@ -231,10 +235,17 @@ command or key, or a deprecation, is MINOR; a fix is PATCH.
   GitHub token there (#366); its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
-- Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its `**TL;DR**`
-  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386,
-  #411). Its title carries no issue number, which stays in the body.
+- A pull request of this repository lands once the team's Supervisor has accepted it and Colly's review passed, with
+  `verify` green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
+  One that needs the Human, a release, a first design or a change to a design or architecture, carries `needs-human`
+  (`gh issue edit <n> --add-label needs-human`), and Colly takes it to him. This repository runs no `tier`, so only
+  `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:162`). It goes on
+  when he approves its head on GitHub, which `approval` reads, so the Lead sees it with no relay, or on his word, which
+  Colly records on the issue. Then the Lead removes the label (`gh issue edit <n> --remove-label needs-human`) and runs
+  `scripts/ship` again. GitHub asks his review only on a pull request that changes `.github/CODEOWNERS`. Each body
+  opens with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its
+  `**TL;DR**` block, the same lines in English; they are his only section, and the agents' detail is collapsed below
+  them (#386, #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|
@@ -253,19 +264,20 @@ command or key, or a deprecation, is MINOR; a fix is PATCH.
 | `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest. `factory lead <repo> [--team <name>] --here [-- <claude arguments>]` (#349) is the MacBook's own Lead, with no `gh` login and no git credential of the Human's; with no agents' GitHub token on the MacBook a push to GitHub fails and git over ssh is off, and with one stored by his `factory store` the push runs on the MacBook itself (#366) |
 | `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` under the agents' login, on the Mac mini by ssh, or on the MacBook itself once his `factory store` has put the agents' GitHub token there (#366); on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
 | `bin/factory linear` | `factory linear <verb>` (#404): a Lead's steps on a repository on Linear, as the Factory app: `take`, `release`, `accept`, `decline`, `duplicate`, `read`, `list`, `comment`, `ask`, `answered`, `create` and `onboard`, one JSON object out; it runs on any node whose own token store holds the Factory app's client id and secret, else on the Mac mini by ssh, a body on stdin, and Colly's verbs (`decision-create`, `decision-close`) always run on the Mac mini (FAC-38); `onboard` makes the repository's team (copied from FAC) and its Needs Human status, or with `--key` alone registers a team that exists, and records it in the node's own `$FACTORY_STATE/linear/repos.json`, which `bin/lib/linear-repos.mjs` reads and which picks the Linear form of `packs/pstack/lead.md`; the header of `bin/lib/linear-cli.mjs` has the rest |
-| `bin/factory codex` | `factory codex --role <role> [--effort <e>] [--write <folder>]` (#182): what runs where in pstack: a step that asks for another model family (the second seat of arena, architect and interrogate, arena's cross-judge, show-me-your-work's trail review, Orchestrate's verifier) runs on Codex, on the verifier's Codex profile, never on Claude, under Codex's own permission profile, which denies reading what the seats' sandbox denies (`DENY_READ` in `bin/lib/seat.mjs`) and every `.env*` file; a `grok` role runs on the session model, and every other role on Claude; when Codex cannot run (logged out, out of quota, failed) the step waits, exits 3 and logs the cause in the factory user's `~/.local/state/factory/codex-waits.jsonl`; every path the step uses comes from that user's home by getpwuid, never the caller's environment; the Lead is granted this verb, never `codex`, and a seat is not granted it yet; the header of `packs/pstack/bin/codex-step.mjs` has the rest |
-| `bin/install-factory` | The Human's step that puts `factory` on the PATH from each machine's installed copy of the factory (#390): `$FACTORY_CHECKOUT`, `~/WORKSPACES` on the Mac mini, `${XDG_DATA_HOME:-~/.local/share}/factory/checkout` on the MacBook (`installedRoot`), outside the folders macOS refuses a launchd job and never set by a dev clone's branch or edits, which change nothing that runs. Run from a clone that is not that copy, it clones the copy (main only, an empty `credential.helper`) or brings it to `origin/main` by `followMain`'s rules, then runs the copy's own `bin/install-factory`, which makes `~/.local/bin/factory` a symlink to the copy's `bin/factory` and replaces only a symlink whose target ends in `/bin/factory`; on the MacBook it also writes the relay's LaunchAgent, loads it anew and runs `bin/factory-relay check`. His one line after a change here is `~/.local/share/factory/checkout/bin/install-factory` when the copy exists, else `bin/install-factory` from any clone; it can be run again |
+| `bin/factory codex` | `factory codex --role <role> [--effort <e>] [--write <folder>]` (#182): what runs where in pstack: a step that asks for another model family (the second seat of arena, architect and interrogate, arena's cross-judge, show-me-your-work's trail review, Orchestrate's verifier) runs on Codex, on the verifier's Codex profile, never on Claude, under Codex's own permission profile, which denies reading the paths no agent reads (`bin/lib/deny-read.mjs`), every `.env*` file among them; a `grok` role runs on the session model, and every other role on Claude; when Codex cannot run (logged out, out of quota, failed) the step waits, exits 3 and logs the cause in the factory user's `~/.local/state/factory/codex-waits.jsonl`; every path the step uses comes from that user's home by getpwuid, never the caller's environment; the Lead is granted this verb, never `codex`, and a seat is not granted it yet; the header of `packs/pstack/bin/codex-step.mjs` has the rest |
+| `bin/install-factory` | The Human's step that puts `factory` on the PATH from each machine's installed copy of the factory (#390): `$FACTORY_CHECKOUT`, `~/WORKSPACES` on the Mac mini, `${XDG_DATA_HOME:-~/.local/share}/factory/checkout` on the MacBook (`installedRoot`), outside the folders macOS refuses a launchd job and never set by a dev clone's branch or edits, which change nothing that runs. Run from a clone that is not that copy, it clones the copy (main only, an empty `credential.helper`) or brings it to `origin/main` by `followMain`'s rules, then runs the copy's own `bin/install-factory`, which makes `~/.local/bin/factory` a symlink to the copy's `bin/factory` and replaces only a symlink whose target ends in `/bin/factory`; on the MacBook, run as its `factory` user (any other is refused), it also runs the checks of the relay's and the queue's LaunchDaemons, writes their plists with each one's sha256, user and program, and prints the steps he runs one at a time: his old LaunchAgents out, and a `sudo` command that installs only copies it checked against those sha256 (#366). His one line after a change here is `~/.local/share/factory/checkout/bin/install-factory` when the copy exists, else `bin/install-factory` from any clone; it can be run again |
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves. Its job's command, `sweep` with no repository, starts the daemon when nobody answers; `sweep --once` and `sweep --repo` run one pass in-process (#399) |
-| `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery. It lives on a lease from the job's pings: `launchctl bootout` of the job stops it within about three minutes; to stop it at once, or before re-installing a changed plist, check that the pid in `$FACTORY_STATE/daemon.lock` is the daemon (`ps -p <pid> -o command=` ends in `bin/lib/daemon.mjs`; a stale lock can name a reused pid), then send it SIGTERM |
+| `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery. It lives on a lease from the job's pings: `launchctl bootout` of the job stops it within about three minutes; to stop it at once, or before re-installing a changed plist, check that the pid in `$FACTORY_STATE/daemon.lock` is the daemon (`ps -p <pid> -o command=` ends in `bin/lib/daemon.mjs`; the lock itself goes with the daemon, but a note a crashed daemon left can name a reused pid), then send it SIGTERM |
 | `bin/lib/linear.mjs` | The only code that talks to Linear's API, as the Factory app (#403): one token source in `tokens/linear-app/` (client id and secret, the minted token with its expiry), minted under a lock with one fixed set of scopes and renewed 7 days ahead by the daemon's pass; an authentication failure re-reads, mints once and then raises `linear-auth-failed` (a request sends three times and mints twice at most), and any success clears it; writes pass `createAsUser`; `factory login linear-app client-id\|client-secret` stores the credentials; the header has the rest |
 | `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
 | `bin/factory-events` | What the sweep tells Colly (#309): the `start` lines of `$FACTORY_STATE/events.jsonl` after its cursor; `--follow` moves the cursor and follows the file; the header has the ssh command |
-| `bin/factory-relay` | The MacBook's relay of a Lead's news (#370): `run` is one pass that reads the Mac mini's news lines by ssh and posts those it could not deliver into the socket file of the Lead that runs there; `plist` prints its LaunchAgent (his own user, every 60 s), which runs from the installed copy, since macOS refuses a launchd job `~/Desktop`, `~/Documents` and `~/Downloads`; each `run` pass first brings that copy to `origin/main`, as the Mac mini's sweep does for `~/WORKSPACES`; `check` fails when a path of the job or of the installed plist sits under those folders or the loaded job's last exit code is not 0, says, in the job's environment, whether ssh and the read of the news work, sets the first cursor and relays nothing; the header of `bin/lib/relay.mjs` has the rest |
+| `bin/factory-relay` | The MacBook's relay of a Lead's news (#370): `run` is one pass that reads the Mac mini's news lines by ssh and posts those it could not deliver into the socket file of the Lead that runs there; `plist` prints its LaunchDaemon (the MacBook's `factory` user, every 60 s, with nobody logged in), which runs from the installed copy, since macOS refuses a launchd job `~/Desktop`, `~/Documents` and `~/Downloads`; each `run` pass first brings that copy to `origin/main`, as the Mac mini's sweep does for `~/WORKSPACES`; `check` fails when a path of the job or of the installed plist sits under those folders or the loaded job's last exit code is not 0, says, in the job's environment, whether ssh and the read of the news work, sets the first cursor and relays nothing; the header of `bin/lib/relay.mjs` has the rest |
 | `bin/factory-reader` | The stream reader's pass (#339): `bin/factory-reader` reads what the Leads and the seats wrote since the last pass and tells Colly, through the events file, what code cannot see (a seat's `StructuredOutput` report included); `--try <file> [--side pi\|codex]` sends one stream file once and prints the answer and the quote check, writing nothing; the sweep starts a pass every 15 minutes |
-| `bin/lib/reader.mjs` | The reader's code: the reduction to the assistant's text, the tool names and a seat's `StructuredOutput` report, the two commands, the cursors, the quote check; the header has the rest |
-| `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, or `codex`) and, for each side, its model and effort |
+| `bin/lib/reader.mjs` | The reader's code: the two commands, the cursors, the quote check; the header has the rest |
+| `bin/lib/claude-code.mjs` | The one file that reads Claude Code's formats (INN-39): a seat's stream, transcripts and their prices, rate limits, the status line, a Lead's hook events, the reader's reduction, `claude auth status`; the rest of the factory reads the shapes it gives, and its header says what it reads and what stays out |
+| `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, `codex`, or `off`, under which no new model pass starts while the silence watch runs; the reader's header has the rest) and, for each side, its model and effort |
 | `bin/lib/streams.mjs` | Finds the two kinds of stream the reader reads, a seat's `run-<tag>.jsonl` and a Lead's `transcripts/<session>.jsonl` |
 | `bin/lib/redact.mjs` | The one redaction: the events' patterns (#309) and seatwork's, used by `bin/lib/events.mjs` and the reader |
 | `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
@@ -321,9 +333,7 @@ every open pull request, since with the ruleset off each would land unjudged. Th
 behind, except a stack's child moved onto `main`, which the queue brings up to `main` (FAC-13). GitHub kept the Human's
 approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
 
-Claude Code updates itself on the stable channel; nothing in the factory pins the version its sessions run (the canary,
-#24, is at the tag `before-271`). The gate's reviewer on CI pins its own, 2.1.308
-(`kit/.gate/bin/reviewer/package.json`, `kit/.gate/bin/lib/reviewer.json`). The digest's job is in `bin/factory-ledger`'s header.
+Sessions take Claude Code's own updates (#290); only the gate's reviewer runs a pinned version (`kit/.gate/bin/lib/reviewer.json`).
 
 The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of eight conditions begins (a required check
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, an account Claude Code warns is
@@ -337,7 +347,7 @@ Lead's news (#370, `bin/lib/news-wake.mjs`): `seat-ended`, `seat-no-result`, `ch
 waking the Lead of its seat or pull request on this host (Colly's Monitor leaves them out; `bin/factory-events --news` prints only them),
 and a `check-not-started` start wakes that pull request's Lead as well. The sweep reads every repository that has a team row for these
 wakes alone, the factory's own too (its Lead is `factory-<team>`, found by the pull request's `Team:` line). A news line carries its Lead and
-the delivery as data (`lead`, `woke`, `why`); the MacBook's relay (`bin/factory-relay`, a LaunchAgent under his own user, run from the MacBook's
+the delivery as data (`lead`, `woke`, `why`); the MacBook's relay (`bin/factory-relay`, a LaunchDaemon of its `factory` user, run from the MacBook's
 installed copy, which each of its passes first brings to `origin/main`; #390) reads them by ssh and delivers the news to the Leads that run there,
 those the Mac mini could not wake for want of a live Lead.
 
@@ -349,27 +359,12 @@ never the token. The sweep does the same for a new comment, by a login other tha
 
 The live verifier's Codex profile and its login are in `packs/pstack/INSTALL.md`, "The live verifier's login". What unattended runs
 need, and how `bin/seat` picks the team, the account and the seat, sets the permission mode and the grants, and handles the
-researcher and its known limits, are in the header of `bin/seat`. The worker's and the reviewer's Bash runs in Claude Code's
-sandbox, which denies reading the credential folders, allows no network and allows writes to the work folder, the run folder,
-the temporary folder, each `--add-dir` and Claude Code's own session temporary folder (#183).
+researcher and its known limits, are in the header of `bin/seat`. The worker's and the reviewer's commands run in a sandbox
+with no network and no read of the credential folders (#183).
 
-What a session may read under a profile is nothing: the deny list holds `Read(~/.agent-profiles/**)` whole (#185). Claude
-Code caches a plugin under the profile's `CLAUDE_CONFIG_DIR`, so the cache is moved out: each profile has its own plugin
-root, `~/.local/share/factory/plugins/<path of the profile's config dir under ~/.agent-profiles>`, mode 700, which
-`bin/seat` and `packs/pstack/bin/lead` set as `CLAUDE_CODE_PLUGIN_CACHE_DIR`. Both install the work folder's enabled
-plugins into it before the session (`bin/lib/plugins.mjs`), through a throwaway config folder of their own under
-`~/.local/share/factory/plugin-install/`, so no profile's folder is touched. The marketplace comes only from the
-factory's own pin, `packs/pstack/settings.json` of the checkout that runs, never from the work folder, which may be a
-candidate branch and would otherwise re-point the root every later session on the profile shares. The work folder decides
-only whether to install: its `.claude/settings.json` must enable the pin's `pstack@<name>` and no other plugin, and declare
-no marketplace but the pin, with the pin's own source; anything else (an older pin included: take the kit update), a
-name that is not plain letters, digits, dot, dash and underscore, stops the start before any folder is made or any `claude`
-call is run, and so does a failed install. A session reads its own earlier transcripts from copies outside every profile: a
-seat's `run-<tag>.jsonl` in its run folder, and a Lead's `~/factory-runs/<repo>-<team>/transcripts/`, which a Stop and
-SessionEnd hook of the launcher (`packs/pstack/bin/transcript-copy.mjs`) fills with the one transcript its input names.
-The hook runs it with the `node` that `PATH` names when `lead` starts (`/opt/homebrew/bin/node`, a link `brew upgrade`
-keeps, not its Cellar path), and `lead` refuses to start with none. Only the Lead reads those copies: every seat role is
-denied `Read(~/factory-runs/*/transcripts/**)` (only a Lead's folder has a `transcripts/`).
+No session reads a profile's folder (#185). A session finds pstack's files in a plugin folder outside the profiles, installed
+only from the factory's own pin, and reads its own earlier transcripts from copies outside them; no seat reads a Lead's
+copies. `bin/lib/plugins.mjs` and `packs/pstack/bin/transcript-copy.mjs` have the rest.
 
 A pack is a folder a team copies; the kit lays none (#132). What `packs/pstack/` holds and how it is copied are at the opening of
 `packs/pstack/INSTALL.md`. The pstack Lead's start (`factory lead <repo>`), its resume and `--dry-run`, its login and the Herdr notes

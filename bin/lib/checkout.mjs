@@ -208,8 +208,10 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
   }
 }
 
-export const PLISTS = ['io.github.tuannd9288.factory.queue', 'io.github.tuannd9288.factory.digest'];
-const TOOLS = { queue: 'bin/factory-queue', digest: 'bin/factory-ledger' };
+// The relay's is installed on the MacBook alone (#366), and is skipped where it is not, as every one is.
+export const PLISTS = ['io.github.tuannd9288.factory.queue', 'io.github.tuannd9288.factory.digest', 'io.github.tuannd9288.factory.relay'];
+// Each tool, with the flags its `plist` takes for the LaunchDaemon.
+const TOOLS = { queue: ['bin/factory-queue', '--daemon'], digest: ['bin/factory-ledger', '--daemon'], relay: ['bin/factory-relay'] };
 
 /** The repositories an installed plist names (its --repo arguments), in order. */
 export function reposOf(text) {
@@ -217,10 +219,10 @@ export function reposOf(text) {
 }
 
 /** What this checkout's code renders for the plist of `label`, with the repositories the installed one names: the tools'
- * own `plist --daemon`, run in this process's environment, which for a daemon is the plist's. */
+ * own `plist` for the LaunchDaemon, run in this process's environment, which for a daemon is the plist's. */
 export function renderPlist(root, label, installed, env = process.env) {
-  const tool = TOOLS[label.split('.').slice(4).join('.')];
-  const r = spawnSync(join(root, tool), ['plist', '--daemon', ...reposOf(installed).flatMap((repo) => ['--repo', repo])], { encoding: 'utf8', env, timeout: 30_000 });
+  const [tool, ...flags] = TOOLS[label.split('.').slice(4).join('.')];
+  const r = spawnSync(join(root, tool), ['plist', ...flags, ...reposOf(installed).flatMap((repo) => ['--repo', repo])], { encoding: 'utf8', env, timeout: 30_000 });
   if (r.status !== 0) throw new Error(first(r.stderr) || `exit ${r.status}`);
   return r.stdout;
 }

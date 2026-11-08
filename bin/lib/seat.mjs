@@ -8,7 +8,9 @@ import { tmpdir, userInfo } from 'node:os';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
+import { RATE_LIMIT_LINE, keptEvent, rateReadingOf, resultOf } from './claude-code.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
+import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
@@ -16,9 +18,11 @@ import { readSessions } from './records.mjs';
 import { repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
 
-/** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
+/** What a session reports back through --json-schema.
  * The cost is not asked of the model: the record takes it from the session's result event. `foundOutside` lists the bugs and
- * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead. */
+ * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead.
+ * `raise`, optional since every seat shares this schema, is the reviewer's: the kind and the place of a high risk, on which the Lead
+ * labels the pull request needs-human (FAC-101, packs/pstack/lead.md step 6). */
 export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -29,6 +33,7 @@ export const SCHEMA = {
     couldNotRead: { type: 'array', items: { type: 'string' } },
     needsLead: { type: 'array', items: { type: 'string' } },
     foundOutside: { type: 'array', items: { type: 'string' } },
+    raise: { type: 'string' },
   },
 };
 
@@ -38,8 +43,9 @@ export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta
 /** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get. It covers Bash
  * only: the Read tool, the hooks and the MCP servers run outside it, so the Read denies stay permission rules. Paths are absolute
  * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
- * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. Only ~/.config/gh is denied of ~/.config, so
- * git keeps the settings it finds there. profiles, when given, is denied whole: it holds the tokens, the archive and the seats.
+ * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. What it denies is bin/lib/deny-read.mjs's sandbox
+ * paths (of ~/.config only the named stores, ~/.config/gh and ~/.config/claude-credit, so git keeps the settings it finds there), and
+ * profiles, when given, whole: it holds the tokens, the archive and the seats.
  * Writes are allowed to the work folder, the run folder and the temporary folder (by its real path) that the tests use, and, by
  * Claude Code's defaults, to each --add-dir and to its own session temporary folder. No domain is allowed and no local binding:
  * the strict allowlist is empty, so there is no network. */
@@ -56,21 +62,14 @@ export function sandboxSettings({ home, run, work, profiles = null }) {
     autoAllowBashIfSandboxed: false,
     allowUnsandboxedCommands: false,
     filesystem: {
-      denyRead: [...new Set([...DENY_READ.map((d) => `${home}/${d}`), ...(profiles ? [profiles] : [])])],
+      denyRead: sandboxPaths(home, profiles),
       allowWrite: [...new Set([work, run, tmp].filter(Boolean))],
     },
     network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
   };
 }
 
-/** The folders under home that no sandboxed command reads: the agent profiles and their tokens, Claude Code's and Codex's own, gh's
- * and ssh's. The seats' sandbox above denies them (#183), and so does `factory codex`'s Codex profile (packs/pstack/bin/codex-step.mjs,
- * #182). An entry with * is a glob. */
-export const DENY_READ = ['.agent-profiles', '.claude', '.claude*', '.codex', '.codex*', '.config/gh', '.ssh', '.local/share/claude'];
-
-// The deny list every launcher shared, with env and printenv for every role and seat (#181). WebFetch and WebSearch are
-// denied for every role but the researcher.
-export const secretsRead = ['Read(~/.config/**)', 'Read(~/.claude/**)', 'Read(~/.codex/**)', 'Read(~/.agent-profiles/**)', 'Read(~/.ssh/**)', 'Read(~/.local/share/claude/**)'];
+// The paths no seat reads are bin/lib/deny-read.mjs's list (INN-39 item 2): its sandbox paths above, its Read rules below.
 // No agent runs `factory account add` or `factory store` (#177): the Human alone puts a token in the store. The leading `*` takes
 // `factory` by name, by a relative or an absolute path and after other words; the two library rules close the `node` grant.
 // `factory account remove` stays the Human's alone. Colly may run `factory use` and `factory lead` on his spoken word
@@ -79,12 +78,12 @@ export const tokenStoreDeny = [
   'Bash(*factory account add*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs store*)',
   'Bash(*factory use*)', 'Bash(*factory account remove*)', 'Bash(*lib/factory.mjs use*)', 'Bash(*lib/factory.mjs account remove*)',
 ];
-// The copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185): only the Lead reads its own, so every seat role is
-// denied them. The Lead's own deny list takes secretsRead alone.
-export const leadTranscripts = 'Read(~/factory-runs/*/transcripts/**)';
-const denyOf = (home, web) => [
+// The deny list of every role, with env and printenv for every role and seat (#181). WebFetch and WebSearch are denied for every role but
+// the researcher. The read rules are a seat's: among them the copies of a Lead's transcripts (packs/pstack/bin/transcript-copy.mjs, #185),
+// which only the Lead reads, and the profiles folder whole, by its absolute path too when it is given.
+const denyOf = (home, web, profiles) => [
   ...tokenStoreDeny, 'Bash(gh:*)', 'Bash(git push:*)', 'Bash(git config:*)', 'Bash(claude:*)', 'Bash(codex:*)', 'Bash(npm:*)', 'Bash(npx:*)', 'Bash(curl:*)',
-  'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...secretsRead, leadTranscripts,
+  'Bash(herdr:*)', `Bash(${home}/.local/bin/herdr:*)`, 'Bash(env:*)', 'Bash(printenv:*)', ...(web ? [] : ['WebFetch', 'WebSearch']), ...readRules({ profiles, role: 'seat' }),
   // The keychain of the user the seat runs as, which on the MacBook can hold logins the factory never put there (#366).
   'Bash(security:*)', 'Bash(/usr/bin/security:*)',
 ];
@@ -121,9 +120,8 @@ export const PRESETS = {
 export const ROLES = Object.keys(PRESETS);
 
 /** The arguments of `claude`, for a role. run is the run folder (the session may add it to its directories); skills become
- * Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, adds three deny
- * rules for every seat (#178): the tokens folder, the archive folder and seat 1's old token file; deny is a run's own extra deny
- * rules (#92), which come after the role's and before those three. The mode is auto and the only grants are StructuredOutput,
+ * Skill(<name>) grants and allow is a run's own extra grants; profiles, the profiles folder, is denied whole by its absolute path for
+ * every seat (#178), beside ~/.agent-profiles; deny is a run's own extra deny rules (#92), which come after the role's. The mode is auto and the only grants are StructuredOutput,
  * the skills and the run's own allow, the deny rules staying whole (#307). With hideKey the mode is default (the scrub forces it,
  * Claude Code 2.1.308, #188), with the role's allow list and one Edit rule for each of the session's own folders (run, work and
  * each --add-dir): Write, Edit and redirects reach those only. */
@@ -131,7 +129,7 @@ export function buildArgs({ role, run, work = null, home, resume = null, skills 
   const p = PRESETS[role];
   if (!Object.hasOwn(PRESETS, role)) throw new Error(`unknown role ${role}; the roles are ${ROLES.join(', ')}`);
   const edits = p.hideKey ? [...new Set([run, work, ...addDirs].filter(Boolean))].map((d) => `Edit(/${d}/**)`) : [];
-  const deny = [...denyOf(home, p.web), ...(p.deny ?? []), ...extraDeny, ...(profiles ? [`Read(/${profiles}/tokens/**)`, `Read(/${profiles}/archive/**)`, `Read(/${profiles}/seats/1/oauth-token)`] : [])];
+  const deny = [...denyOf(home, p.web, profiles), ...(p.deny ?? []), ...extraDeny];
   return [
     '-p', ...(resume ? ['--resume', resume] : []),
     '--model', p.model, '--effort', p.effort, '--max-turns', String(maxTurns ?? (resume ? p.resumeTurns : p.turns)),
@@ -283,21 +281,16 @@ const accountOf = (file, seatRows) => {
   return seat === null ? null : (seatRows[seat] ?? null);
 };
 
-/** The rate_limit_info that the newest log of the account reporting a seven-day use gives (its last rate_limit_event), with the
- * log's time, or null. The one reader of an account's quota: accountOut, the ledger's table, `factory` all use it. */
+/** The quota that the newest log of the account reporting a seven-day use gives (its last rate-limit line, read by claude-code.mjs), as
+ * { windows, resetsAt, asOf } with the log's time, or null. The one reader of an account's quota: accountOut, the ledger's table, the events
+ * and `factory` all use it. */
 export function accountEvent(runs, account, seatRows = {}) {
   const logs = runFiles(runs, '.jsonl').filter((f) => accountOf(f, seatRows) === account).map((f) => ({ f, t: statSync(f).mtimeMs })).sort((a, b) => b.t - a.t);
   for (const { f, t } of logs) {
-    const line = readFileSync(f, 'utf8').split('\n').filter((l) => l.includes('"type":"rate_limit_event"')).pop();
+    const line = readFileSync(f, 'utf8').split('\n').filter((l) => l.includes(RATE_LIMIT_LINE)).pop();
     if (!line) continue;
-    let info;
-    try {
-      info = JSON.parse(line).rate_limit_info;
-    } catch {
-      continue;
-    }
-    const u = info?.unifiedWindows?.seven_day?.utilization;
-    if (u !== undefined && u !== null && u !== '') return { info, asOf: t };
+    const reading = rateReadingOf(line);
+    if (reading) return { ...reading, asOf: t };
   }
   return null;
 }
@@ -311,10 +304,10 @@ const WINDOW = { five_hour: 'five-hour', seven_day: 'seven-day' };
  * passed. This is the only signal of a limit hit (#194): the two recorded cut-offs, factory-runs/issue-149 and issue-167, each
  * carry this event before their result ("You've hit your session limit · resets …", api_error_status 429). */
 export function accountOut(runs, account, seatRows = {}, now = Date.now()) {
-  const info = accountEvent(runs, account, seatRows)?.info;
-  if (info?.status !== 'rejected' || info.resetsAt == null || resetPassed(info.resetsAt, now)) return null;
-  const until = new Date(info.resetsAt * 1000).toISOString().slice(0, 16).replace('T', ' ');
-  return `rejected by Claude Code (${WINDOW[info.rateLimitType] ?? info.rateLimitType} window) until ${until} UTC`;
+  const e = accountEvent(runs, account, seatRows);
+  if (e?.windows.status !== 'rejected' || e.resetsAt == null || resetPassed(e.resetsAt, now)) return null;
+  const until = new Date(e.resetsAt * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  return `rejected by Claude Code (${WINDOW[e.windows.type] ?? e.windows.type} window) until ${until} UTC`;
 }
 
 /** The seat a session runs on (#311): a seat is a slot. It is resumeSeat for a resume, else the first of the role's seats, whatever its
@@ -575,22 +568,17 @@ function placeOf(dir) {
 
 /** The record of a session that has ended: spec is what launch decided, text the session's log, end how it ended. */
 export function recordOf(spec, events, { code, signal, error = null, end = new Date() }) {
-  const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
-  // A run can hold several results (a background task that ends starts another query): turns and duration add up; the cost
-  // is cumulative, so the last result's is the whole; the report is the last one that has it.
-  const results = events.filter((e) => e.type === 'result');
-  const result = results.at(-1) ?? null;
-  if (result?.is_error) error = result.result || result.errors?.join('; ') || result.terminal_reason || '';
-  const sum = (key) => (results.some((r) => typeof r[key] === 'number') ? results.reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0) : null);
-  const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
+  // What the session's events say is read by claude-code.mjs; this composes the record, the factory's own shape in sessions.jsonl.
+  const r = resultOf(events);
+  if (r.error !== null) error = r.error;
   return {
-    session: result?.session_id ?? init?.session_id ?? spec.resume ?? null,
+    session: r.session ?? spec.resume ?? null,
     role: spec.role, seat: spec.seat, ...(spec.team ? { team: spec.team, account: spec.account } : {}), tag: spec.tag, ...(spec.name ? { name: spec.name } : {}), run: spec.run, ...placeOf(spec.cwd),
-    model: models.length ? models.join(',') : (init?.model ?? spec.model),
+    model: r.model ?? spec.model,
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
-    turns: sum('num_turns'), duration_ms: sum('duration_ms'), total_cost_usd: result?.total_cost_usd ?? null,
-    structured: results.findLast((r) => r.structured_output !== undefined && r.structured_output !== null)?.structured_output ?? null,
-    ended: result?.is_error ? 'error' : result ? (result.subtype ?? 'result') : 'no-result',
+    turns: r.turns, duration_ms: r.duration_ms, total_cost_usd: r.total_cost_usd,
+    structured: r.structured,
+    ended: r.ended,
     exitCode: code ?? null, signal: signal ?? null, ...(error ? { error } : {}),
   };
 }
@@ -609,7 +597,7 @@ function supervise() {
   const take = (line) => {
     try {
       const e = JSON.parse(line);
-      if (e?.type === 'result' || (e?.type === 'system' && e.subtype === 'init')) events.push(e);
+      if (keptEvent(e)) events.push(e);
     } catch {
       // Not an event.
     }

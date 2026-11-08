@@ -9,11 +9,13 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { factory } from './helpers.mjs';
+import { READER_ON, factory } from './helpers.mjs';
 
 process.env.TZ = 'UTC';
 
 const reader = () => import('../bin/lib/reader.mjs');
+// The reduction reads Claude Code's stream, so it lives in the one module that does (INN-39 item 3).
+const claudeCode = () => import('../bin/lib/claude-code.mjs');
 const fixture = (name) => readFileSync(join(factory, 'test/fixtures/reader', name), 'utf8');
 const LEAD_ID = '0a1b2c3d-1111-2222-3333-444455556666';
 const T0 = Date.parse('2026-11-02T10:00:00Z');
@@ -99,7 +101,7 @@ const user = (text) => `${JSON.stringify({ type: 'user', message: { role: 'user'
 // ---- the reduction --------------------------------------------------------------------------------------------------------
 
 test('the reduction of a seat stream keeps the assistant\'s text and the tool names, with tokens redacted, and nothing else', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const out = reduce(fixture('seat-stream.jsonl'));
   for (const kept of ['I will read the config first.', 'going in circles on the same flaky test', 'I made a mistake: I edited the wrong file', 'Read', 'Bash']) assert.ok(out.includes(kept), kept);
   for (const gone of ['THINKING-MARKER', 'TOOL-INPUT-MARKER', 'TOOL-OUTPUT-MARKER', 'TOOL-RESULT-MARKER', 'USER-TURN-MARKER', 'RESULT-MARKER', 'SUBAGENT-MARKER', 'HOOK-NAME-MARKER', 'npm test'])
@@ -109,7 +111,7 @@ test('the reduction of a seat stream keeps the assistant\'s text and the tool na
 });
 
 test('the reduction keeps the input of a StructuredOutput call, redacted, and no other tool\'s input or result', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const out = reduce(fixture('seat-report.jsonl'));
   for (const kept of ['[tool Read]', '[tool StructuredOutput]', 'I skipped the migration step because the fixture database was missing.', 'I ran the full suite once although the brief said not to.', 'The build script also ignores the retry flag.'])
     assert.ok(out.includes(kept), kept);
@@ -128,7 +130,7 @@ test('the reduction keeps the input of a StructuredOutput call, redacted, and no
 });
 
 test('a secret in a report string reaches the reduction redacted even when JSON escaping would hide it', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const out = reduce(fixture('seat-report.jsonl'));
   assert.ok(!out.includes('Ab12cd34'), 'a quoted value after a secret name');
   assert.ok(!out.includes('AKIAABCDEFGHIJKLMNOP'), 'a token after a line break');
@@ -137,7 +139,7 @@ test('a secret in a report string reaches the reduction redacted even when JSON 
 });
 
 test('a report nested too deep to walk reduces to its tool line, and the other lines reduce as before', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const depth = 5_000;
   const nested = `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput","input":${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}}]},"parent_tool_use_id":null}`;
   assert.equal(reduce(`${nested}\n`), '[tool StructuredOutput]');
@@ -145,7 +147,7 @@ test('a report nested too deep to walk reduces to its tool line, and the other l
 });
 
 test('the reduction of a Lead copy drops the lines that are not the assistant\'s own, a subagent\'s included', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const out = reduce(fixture('lead-copy.jsonl'));
   for (const kept of ['I am now also refactoring the build script', 'Edit', 'trying the same fix a third time']) assert.ok(out.includes(kept), kept);
   for (const gone of ['LAST-PROMPT-MARKER', 'TITLE-MARKER', 'BLOB-MARKER', 'USER-MARKER', 'LEAD-THINKING-MARKER', 'LEAD-INPUT-MARKER', 'LEAD-OUTPUT-MARKER', 'SIDECHAIN-MARKER', 'ATTACHMENT-MARKER'])
@@ -153,7 +155,7 @@ test('the reduction of a Lead copy drops the lines that are not the assistant\'s
 });
 
 test('a line that is not JSON reduces to nothing, and a secret of the forms seatwork knows is hidden', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   assert.equal(reduce('not json\n{"type":"assistant"\n').trim(), '');
   const secrets = ['sk-ant-api03-abcdefghijklmnop1234', 'AKIAABCDEFGHIJKLMNOP', 'Authorization: Bearer abcdefghijklmnop12345', 'API_KEY=hunter2hunter2', 'postgres://user:pa55word@db.example/x'];
   const out = reduce(secrets.map((s) => say(`note ${s} end`)).join(''));
@@ -174,10 +176,11 @@ test('the redaction is one function: events.mjs uses it and keeps every pattern 
 // ---- the setting ----------------------------------------------------------------------------------------------------------
 
 test('the setting file defaults to the existing pi Flash path', async () => {
-  const { loadSetting, SETTING_FILE } = await reader();
-  assert.equal(SETTING_FILE, join(factory, 'bin/lib/reader.json'));
-  assert.deepEqual(JSON.parse(readFileSync(SETTING_FILE, 'utf8')), DEFAULT);
-  assert.deepEqual(loadSetting(SETTING_FILE), { side: 'pi', model: 'antigravity/gemini-3.8-flash', effort: 'high' });
+  const { loadSetting, REPO_SETTING, settingPath } = await reader();
+  assert.equal(REPO_SETTING, join(factory, 'bin/lib/reader.json'));
+  assert.equal(settingPath({}), REPO_SETTING, 'with no FACTORY_READER_SETTING the shipped file is read');
+  assert.deepEqual(JSON.parse(readFileSync(REPO_SETTING, 'utf8')), DEFAULT);
+  assert.deepEqual(loadSetting(REPO_SETTING), { side: 'pi', model: 'antigravity/gemini-3.8-flash', effort: 'high' });
 });
 
 test('each side\'s command is built from the setting alone, exactly', async () => {
@@ -230,6 +233,11 @@ test('a setting naming no known side, a missing model, an effort the side does n
       assert.throws(() => load(s), (e) => e.cause === 'setting' || /setting/i.test(e.message), why);
     for (const effort of ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']) assert.equal(load(piWith({ effort })).effort, effort);
     for (const effort of ['minimal', 'low', 'medium', 'high', 'xhigh']) assert.equal(load(codexWith({ effort })).effort, effort);
+    // INN-39: the switch. Off loads as off; --try, which names its side, still gets that side's model; the sides are still checked whole.
+    assert.deepEqual(load(side({ side: 'off' })), { side: 'off' });
+    assert.deepEqual(loadSetting(file, 'pi'), { side: 'pi', ...DEFAULT.sides.pi });
+    assert.throws(() => loadSetting(file, 'off'), (e) => e.cause === 'setting', 'off is no side for --try');
+    assert.throws(() => load({ side: 'off', sides: { ...DEFAULT.sides, pi: { ...DEFAULT.sides.pi, effort: 'ultra' } } }), (e) => e.cause === 'setting', 'off still checks the sides');
   });
 });
 
@@ -282,7 +290,8 @@ test('the quote check keeps a quote that is verbatim in its session\'s part, and
 });
 
 test('the quote check keeps a quote across a `"` or a line break of a report, in plain or escaped form, and drops a made-up one', async () => {
-  const { judge, reduce } = await reader();
+  const { judge } = await reader();
+  const { reduce } = await claudeCode();
   const parts = new Map([['issue-333 fix9', reduce(fixture('seat-report.jsonl'))]]);
   const ev = (quote) => ({ kind: 'admits-mistake', session: 'issue-333 fix9', quote, why: 'w' });
   const plainQuote = 'refused: "Permission denied (publickey)" twice\nthen I tried it';
@@ -298,20 +307,23 @@ test('the quote check keeps a quote across a `"` or a line break of a report, in
   assert.deepEqual(r.dropped.map((e) => e.quote), [quotes.madeUpPlain, quotes.madeUpEscaped]);
 });
 
-test('a malformed answer writes reader-failed answer and no event, and moves no cursor', async () => {
-  await withDir(async (dir) => {
-    const w = world(dir);
-    w.put(w.seatFile(), say('first line'));
-    await w.pass({ now: T0 });
-    const before = w.cursors();
-    appendFileSync(w.seatFile(), say('I keep going in circles on this test'));
-    w.answer('this is not json');
-    const r = await w.pass({ now: T0 + 15 * MIN });
-    assert.equal(w.calls().length, 1);
-    assert.deepEqual(w.shape(), ['start reader-failed answer']);
-    assert.deepEqual(w.cursors(), before);
-    assert.deepEqual(r.failed, ['answer']);
-  });
+test('a malformed answer, or one whose event kind is outside KINDS, writes reader-failed answer and no event, and moves no cursor', async () => {
+  // The second answer's quote is verbatim, so only the refusal of its kind keeps it out (the frozen set, docs/decisions.md).
+  for (const bad of ['this is not json', { events: [{ kind: 'unknown-kind', session: 'issue-333 fix9', quote: 'going in circles on this test', why: 'w' }] }]) {
+    await withDir(async (dir) => {
+      const w = world(dir);
+      w.put(w.seatFile(), say('first line'));
+      await w.pass({ now: T0 });
+      const before = w.cursors();
+      appendFileSync(w.seatFile(), say('I keep going in circles on this test'));
+      w.answer(bad);
+      const r = await w.pass({ now: T0 + 15 * MIN });
+      assert.equal(w.calls().length, 1);
+      assert.deepEqual(w.shape(), ['start reader-failed answer'], JSON.stringify(bad));
+      assert.deepEqual(w.cursors(), before);
+      assert.deepEqual(r.failed, ['answer']);
+    });
+  }
 });
 
 test('a quote that is not in the input, in another session\'s part or too short writes reader-failed answer, never the event', async () => {
@@ -674,13 +686,13 @@ test('a pass writes reader/last.json with its counts and appends them to reader/
     assert.deepEqual(last(), { at: new Date(T0 + 15 * MIN).toISOString(), status: 'ok', calls: 1, events: 1, failed: ['answer'], chars: sent });
     const second = last();
     assert.deepEqual(passes(), [first, second], 'one line a pass, in order');
-    const { takeLock } = await import('../bin/lib/queue.mjs');
+    const { takeLock } = await import('../bin/lib/lock.mjs');
     const mine = takeLock(join(w.state, 'reader.lock'));
     assert.ok(mine);
     assert.equal((await w.pass({ now: T0 + 30 * MIN })).status, 'running');
     assert.equal(last().at, new Date(T0 + 15 * MIN).toISOString(), 'a pass that found the lock taken wrote nothing');
     assert.equal(passes().length, 2, 'nor appended a line');
-    rmSync(join(w.state, 'reader.lock'));
+    mine.release();
     rmSync(join(w.state, 'reader/cursors.json'));
     mkdirSync(join(w.state, 'reader/cursors.json'));
     const r = await w.pass({ now: T0 + 45 * MIN });
@@ -696,13 +708,13 @@ test('a pass holds reader.lock: a live holder stops another pass, and a lock who
     w.put(w.seatFile(), '');
     await w.pass({ now: T0 });
     appendFileSync(w.seatFile(), say('some words'));
-    const { takeLock } = await import('../bin/lib/queue.mjs');
+    const { takeLock } = await import('../bin/lib/lock.mjs');
     const mine = takeLock(join(w.state, 'reader.lock'));
     assert.ok(mine);
     const r = await w.pass({ now: T0 + 15 * MIN });
     assert.equal(r.status, 'running');
     assert.deepEqual(w.calls(), []);
-    rmSync(join(w.state, 'reader.lock'));
+    mine.release();
     const dead = spawn(process.execPath, ['-e', '0']);
     await new Promise((res) => dead.once('exit', res));
     writeFileSync(join(w.state, 'reader.lock'), JSON.stringify({ pid: dead.pid, start: 'x', host: 'h', token: 'deadbeef' }));
@@ -795,7 +807,7 @@ test('the sweep starts a pass when 15 minutes have passed since the last began a
       started.push({ cmd, args, opts });
       return { unref() {}, on() {} };
     };
-    const env = { HOME: '/h', PATH: '/opt/homebrew/bin:/usr/bin' };
+    const env = { HOME: '/h', PATH: '/opt/homebrew/bin:/usr/bin', FACTORY_READER_SETTING: READER_ON };
     const go = (now) => startReader({ state, runs, now, spawnFn, env });
     assert.equal(go(T0), false, 'no stream exists to read');
     writeFileSync(join(runs, 'issue-333/run-fix9.jsonl'), '');
@@ -809,16 +821,57 @@ test('the sweep starts a pass when 15 minutes have passed since the last began a
     assert.equal(go(T0 + 14 * MIN + 59_000), false);
     assert.equal(go(T0 + 15 * MIN), true);
     assert.equal(started.length, 2);
-    const { takeLock } = await import('../bin/lib/queue.mjs');
+    const { takeLock } = await import('../bin/lib/lock.mjs');
     const lock = takeLock(join(state, 'reader.lock'));
     assert.ok(lock);
     assert.equal(go(T0 + 40 * MIN), false, 'a pass is running');
-    rmSync(join(state, 'reader.lock'));
+    lock.release();
     const dead = spawn(process.execPath, ['-e', '0']);
     await new Promise((res) => dead.once('exit', res));
     writeFileSync(join(state, 'reader.lock'), JSON.stringify({ pid: dead.pid, start: 'x', host: 'h', token: 'deadbeef' }));
     assert.equal(go(T0 + 40 * MIN), true, 'a lock whose pid is gone is stale');
     assert.equal(started.length, 3);
+  });
+});
+
+// INN-39: the model pass sits behind reader.json's switch; the silence watch does not.
+test('with the switch off no pass starts, no model call is made, no cursor is kept, the notice starts once, and a silent Lead still fires', async () => {
+  const { startReader } = await import('../bin/lib/queue.mjs');
+  const { watchSilence } = await reader();
+  await withDir(async (dir) => {
+    const w = world(dir);
+    // While it was on: cursors kept, and a reader-failed held.
+    w.put(w.seatFile(), '');
+    await w.pass({ now: T0 });
+    w.flag('fail');
+    appendFileSync(w.seatFile(), say('seat words'));
+    await w.pass({ now: T0 + 15 * MIN });
+    w.unflag('fail');
+    assert.deepEqual(w.shape(), ['start reader-failed command']);
+    assert.ok(existsSync(join(w.state, 'reader/cursors.json')));
+    const calls = w.calls().length;
+    w.setting({ ...DEFAULT, side: 'off' });
+    const spawned = [];
+    const sweep = (now) => startReader({ state: w.state, runs: w.runs, now, settingFile: w.settingFile, env: w.env, spawnFn: (...a) => (spawned.push(a), { unref() {}, on() {} }) });
+    assert.equal(sweep(T0 + 60 * MIN), false);
+    assert.equal(sweep(T0 + 61 * MIN), false);
+    assert.deepEqual(spawned, [], 'no pass starts');
+    assert.ok(!existsSync(join(w.state, 'reader/cursors.json')), 'no cursor is kept');
+    assert.deepEqual(w.shape().slice(1).sort(), ['clear reader-failed command', 'start reader-off'], 'a held reader-failed ends and the notice starts once');
+    assert.equal((await w.pass({ now: T0 + 62 * MIN })).status, 'off', 'a pass run by hand says it is off');
+    assert.equal(w.calls().length, calls, 'no model call is made');
+    // The silence watch runs whatever the switch says.
+    w.put(w.leadFile(), `${JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done for now.' }], stop_reason: 'end_turn' }, parent_tool_use_id: null })}\n`);
+    utimesSync(w.leadFile(), (T0 + 40 * MIN) / 1000, (T0 + 40 * MIN) / 1000);
+    assert.equal(watchSilence({ state: w.state, runs: w.runs, now: T0 + 70 * MIN }), 1);
+    assert.ok(w.events().some((e) => e.kind === 'watch_fired'));
+    // On again: the notice ends, and the first pass starts each stream at its end, with no model call.
+    w.setting(DEFAULT);
+    assert.equal(sweep(T0 + 80 * MIN), true);
+    assert.equal(w.shape().filter((l) => l === 'clear reader-off').length, 1);
+    await w.pass({ now: T0 + 80 * MIN });
+    assert.equal(w.calls().length, calls, 'what was written while it was off is not read');
+    assert.ok(existsSync(join(w.state, 'reader/cursors.json')));
   });
 });
 

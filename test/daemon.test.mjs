@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,7 @@ import { ask, socketPath } from '../bin/lib/daemon-proto.mjs';
 import { run } from '../bin/lib/daemon.mjs';
 import { readLines } from '../bin/lib/events.mjs';
 import { openStore } from '../bin/lib/store.mjs';
+import { HOST_ENV } from './helpers.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '..');
 const wait = async (ok, ms = 5000) => {
@@ -48,7 +49,7 @@ async function world(body, { pass = FAKE_PASS } = {}) {
     let up;
     const ready = new Promise((done) => (up = done));
     // The factory host's daemon, unless a test gives another environment (#366).
-    const env = { ...process.env, FACTORY_HOST_USER: userInfo().username };
+    const env = { ...process.env, ...HOST_ENV };
     const finished = run({ env, state, runs, human: 'nobody', passFile: new URL(`file://${join(dir, 'pass.mjs')}`), post, log: () => {}, signals: false, startSource: () => null, pushRecords: () => {}, onStart: up, ...extra });
     const api = await Promise.race([ready, finished.then(() => null)]);
     daemons.push({ api, finished });
@@ -106,7 +107,7 @@ test('off the factory host a pass runs as the agents with the node\'s own token,
 
 test('on the factory host the pass runs with the environment the job gave it, unchanged (#366)', () =>
   world(async ({ state, start }) => {
-    await start({ env: { ...process.env, FACTORY_HOST_USER: userInfo().username, GH_TOKEN: 'made-up-host-token' }, passMs: 50 });
+    await start({ env: { ...process.env, ...HOST_ENV, GH_TOKEN: 'made-up-host-token' }, passMs: 50 });
     assert.ok(await wait(() => existsSync(join(state, 'pass-env'))));
     const seen = JSON.parse(readFileSync(join(state, 'pass-env'), 'utf8'));
     assert.equal(seen.GH_TOKEN, 'made-up-host-token');

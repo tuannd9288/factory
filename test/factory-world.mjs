@@ -3,9 +3,9 @@
 // ($FAKE/far, $FAKE/far/state), so each node has its own accounts file and token store.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { factory } from './helpers.mjs';
+import { HOST_ENV, factory } from './helpers.mjs';
 
 export const EMAIL = 'ann.example@secret-corp.example';
 export const ORG = 'org-00000000-1111-2222-3333-444444444444';
@@ -72,8 +72,8 @@ if [ -f "$FAKE/ssh-$user.error" ]; then cat "$FAKE/ssh-$user.error" >&2; exit 25
 cmd=$(printf '%s' "$last" | sed -n "s/^zsh -lc '\\(.*\\)'$/\\1/p")
 case "$cmd" in
   *"factory store "*|*"factory use"*|*"factory account remove "*)
-    rest=\${cmd#\\~/WORKSPACES/bin/factory}
-    FACTORY_HOST_USER="$FAR_USER" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" FACTORY_STATE="$FAKE/far/state" exec "$NODE_BIN" -- "$FACTORY_BIN" $rest;;
+    rest=\${cmd#\\~/WORKSPACES/bin/factory}; rest=\${rest#\\~/.local/bin/factory}
+    FACTORY_HOST_USER="$FAR_USER" FACTORY_HOST_NAME="$FAR_NAME" HOME="$FAKE/far" AGENT_PROFILES="$FAKE/far/.agent-profiles" FACTORY_STATE="$FAKE/far/state" exec "$NODE_BIN" -- "$FACTORY_BIN" $rest;;
 esac
 if [ -f "$FAKE/ssh-factory.stderr" ]; then cat "$FAKE/ssh-factory.stderr" >&2; fi
 if [ "$user" = factory ]; then cat "$FAKE/ssh-factory.json"; exit 0; fi
@@ -103,9 +103,10 @@ export function sandbox() {
     FACTORY_ROOT: join(home, 'WORKSPACES'),
     FACTORY_RUNS: join(home, 'factory-runs'),
     // The factory host is where the caller's user is FACTORY_HOST_USER: the MacBook here, the Mac mini after onHost() and in the
-    // fake ssh's far side (FAR_USER).
+    // fake ssh's far side (FAR_USER, on the machine FAR_NAME).
     FACTORY_HOST_USER: 'nobody-here',
-    FAR_USER: userInfo().username,
+    FAR_USER: HOST_ENV.FACTORY_HOST_USER,
+    FAR_NAME: HOST_ENV.FACTORY_HOST_NAME,
     USER_PLACE: 'macbook',
   };
   const w = (name, text) => writeFileSync(join(fake, name), text);
@@ -117,7 +118,7 @@ export function sandbox() {
   const calls = () => (existsSync(join(fake, 'calls.log')) ? readFileSync(join(fake, 'calls.log'), 'utf8') : '');
   const onHost = () => {
     env.USER_PLACE = 'factory';
-    env.FACTORY_HOST_USER = userInfo().username;
+    Object.assign(env, HOST_ENV);
   };
   // The files under the sandbox that hold these bytes, relative to it.
   const holders = (bytes) => {

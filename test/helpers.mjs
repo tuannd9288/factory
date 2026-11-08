@@ -1,11 +1,21 @@
 // A throwaway repository with the kit installed by bin/onboard, and helpers to change it and run its scripts.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nodeName } from '../bin/lib/node.mjs';
 
 export const factory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// The reader's setting every test runs with (#518): the model pass on, on its pi side, so a pull request that turns the shipped switch
+// (bin/lib/reader.json) off changes no sweep test. A child a test starts with this process's environment gets it too. The one test of the
+// shipped file reads it by its own path (REPO_SETTING).
+export const READER_ON = join(factory, 'test/fixtures/reader/setting-on.json');
+process.env.FACTORY_READER_SETTING ??= READER_ON;
+
+// The settings that make this machine and user the factory host (placeOf, bin/lib/node.mjs): its user and its name.
+export const HOST_ENV = { FACTORY_HOST_USER: userInfo().username, FACTORY_HOST_NAME: nodeName() };
 
 // Commits made by the tests name a throwaway author and run no hooks unless a test asks for them. They also start no
 // background gc or maintenance: git's own default starts one detached after a commit, and it can write into a test's
