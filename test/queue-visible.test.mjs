@@ -47,6 +47,11 @@ test('a queue run that fails before its repository loop leaves queue-run.failed 
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.ok(!existsSync(report), 'a run that got to its loop clears it');
     assert.match(readFileSync(join(state, 'queue-o-app.ok'), 'utf8'), /^20\d\d-\d\d-\d\dT/);
+    // A repository's sweep that gh fails leaves its marker with gh's stderr redacted (FAC-85, fix 12).
+    writeFileSync(join(dir, 'gh'), `#!/bin/sh\ncase "$*" in\n  "api user"*) echo agent-bot ;;\n  *) echo "HTTP 401: Bad credentials (${token})" >&2; exit 1 ;;\nesac\n`);
+    out = sweep();
+    assert.equal(out.status, 1, out.stdout + out.stderr);
+    assert.match(readFileSync(join(state, 'queue-o-app.failed'), 'utf8'), /^20\d\d-.* o\/app: HTTP 401: Bad credentials \(\[redacted\]\)\n$/);
   });
 });
 
