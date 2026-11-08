@@ -44,7 +44,7 @@ import { redact } from './redact.mjs';
 import { accountEvent, accountOut } from './seat.mjs';
 import { quotaRows, alertLines } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
-import { AGENTS_USER, rootOf, stateOf } from './node.mjs';
+import { AGENTS_USER, rootOf, stateDirOf } from './node.mjs';
 import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
 
 /** How long a required check may sit unstarted before it is told: half as much again as the slowest normal wait seen on 2026-11-02
@@ -53,7 +53,7 @@ export const NOT_STARTED_MS = 30 * 60_000;
 
 const STARTED = new Set(['IN_PROGRESS', 'COMPLETED']);
 const HUMAN = new Set(['tier-3', 'needs-human']);
-const stateDir = () => stateOf();
+const stateDir = () => stateDirOf();
 
 export { redact };
 

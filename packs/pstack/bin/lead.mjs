@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { onLinear } from '../../../bin/lib/linear-repos.mjs';
 import { TEAM, firstFree } from '../../../bin/lib/names.mjs';
-import { profilesOf, runsOf, stateOf } from '../../../bin/lib/node.mjs';
+import { profilesOf, runsOf, stateDirOf } from '../../../bin/lib/node.mjs';
 import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
@@ -356,7 +356,7 @@ function main(argv, env) {
     return 2;
   }
   const rolePath = join(root, 'packs/pstack/lead.md');
-  const stateDir = resolve(stateOf(env));
+  const stateDir = resolve(stateDirOf(env));
   let linear;
   try {
     team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), root, newTeam: flags.includes('--new-team') });

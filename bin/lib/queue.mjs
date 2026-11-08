@@ -55,7 +55,7 @@ import { readerSwitch, settingPath, watchSilence } from './reader.mjs';
 import { watchSwitch } from './switch-watch.mjs';
 import { FACTORY_REPO, teamRows } from './teams.mjs';
 import { sweepWorktrees } from './worktrees.mjs';
-import { humanOf, installedRoot, nodeLogin, placeOf, profilesOf, rootOf, runsOf, stateOf as stateFolder } from './node.mjs';
+import { humanOf, installedRoot, nodeLogin, placeOf, profilesOf, rootOf, runsOf, stateDirOf } from './node.mjs';
 import { holderOf, isHeld, takeLock } from './lock.mjs';
 
 const CALL_MS = 60_000;
@@ -683,7 +683,7 @@ async function check(repos, human) {
   const j = job(repos);
   const say = (line) => console.log(`check: ${line}`);
   // #366: off the factory host the job's sweep runs as the agents, with the node's own token, as the daemon does (bin/lib/node.mjs).
-  const agents = nodeLogin(process.env, stateFolder());
+  const agents = nodeLogin(process.env, stateDirOf());
   if (agents.refusal) {
     say(`not ready: ${agents.refusal}`);
     return 1;
@@ -694,14 +694,14 @@ async function check(repos, human) {
   const login = who.status === 0 ? who.stdout.trim() : '';
   say(`gh login ${login || `none: ${String(who.stderr || who.error?.message || '').trim()}`}`);
   say(`node ${spawnSync('node', ['--version'], { env, encoding: 'utf8' }).stdout?.trim() || 'not found'}`);
-  say(`state folder ${stateFolder(env)}`);
+  say(`state folder ${stateDirOf(env)}`);
   say(`log ${j.log}`);
   // One pass in this process, under the lock (--once): the job's own command would hand it to the daemon (#399).
   const run = spawnSync(j.program[0], [...j.program.slice(1), '--once'], { cwd: j.cwd, env, encoding: 'utf8', timeout: 10 * CALL_MS });
   const out = `${run.stdout ?? ''}${run.stderr ?? ''}`;
   for (const line of out.trim().split('\n').filter(Boolean).slice(-10)) say(`  ${line}`);
   say(`one sweep exited ${run.status}`);
-  const up = await ask(socketPath(stateFolder(env)), { verb: 'ping' }, { timeoutMs: 1000 });
+  const up = await ask(socketPath(stateDirOf(env)), { verb: 'ping' }, { timeoutMs: 1000 });
   say(up.ok ? `the daemon answers (pid ${up.result?.pid})` : `the daemon does not answer (${up.why}); the job starts it`);
   const why = !login
     ? 'gh is not logged in'
@@ -877,7 +877,7 @@ async function main(argv) {
   const human = humanOf();
   if (command === 'plist') return void process.stdout.write(plist(job(repos, process.env, daemon)));
   if (command === 'check') return check(repos, human);
-  const state = stateFolder();
+  const state = stateDirOf();
   // The job's command, with no repository named, hosts the pass in the daemon (#399); one named, or --once, runs one pass here.
   if (!repos.length && !once) return ensureDaemon(state);
   return runPass({ repos, human, state }).code;
@@ -895,7 +895,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     // check are the Human's, run by hand, and keep no queue state.
     if (!['plist', 'check'].includes(process.argv[2])) {
       try {
-        const state = stateFolder();
+        const state = stateDirOf();
         mkdirSync(state, { recursive: true });
         writeFileSync(join(state, 'queue-run.failed'), `${new Date().toISOString()} ${why}\n`);
       } catch {}

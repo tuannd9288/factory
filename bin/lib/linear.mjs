@@ -28,7 +28,7 @@ import { lstatSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readActive, record } from './events.mjs';
 import { parseTeam } from './names.mjs';
-import { profilesOf, stateOf } from './node.mjs';
+import { profilesOf, stateDirOf } from './node.mjs';
 import { redact } from './redact.mjs';
 import { APP_FOLDERS, appDir, readTokenFile, tokenDir, writeAppFile } from './token.mjs';
 
@@ -70,7 +70,7 @@ export function isAuthFailure(status, body) {
 
 export function createLinear({
   agentProfiles = profilesOf(),
-  state = stateOf(),
+  state = stateDirOf(),
   fetchFn = globalThis.fetch,
   now = Date.now,
   sleep = defaultSleep,

@@ -19,7 +19,7 @@ import { job, plist } from './queue.mjs';
 import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
-import { humanOf, rootOf, runsOf, stateOf } from './node.mjs';
+import { humanOf, rootOf, runsOf, stateDirOf } from './node.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import them from here.
 export { READS, costOf } from './claude-code.mjs';
@@ -852,7 +852,7 @@ async function main(argv) {
   const quotaNow = () => {
     const runs = runsOf();
     try {
-      const state = stateOf();
+      const state = stateDirOf();
       return { rows: quotaRows({ runs, state, root: process.env.FACTORY_ROOT, statusFiles: opts.statusFiles }), now: Date.now() };
     } catch (error) {
       return { error: `The runs folder or a log in it could not be read (${error.code ?? 'error'}), so there is no quota table.` };
@@ -876,7 +876,7 @@ async function main(argv) {
     const visibility = JSON.parse(gh(['repo', 'view', opts.post, '--json', 'visibility'])).visibility;
     if (visibility !== 'PRIVATE') throw new Error(`${opts.post} is ${visibility ?? 'of unknown visibility'}, not PRIVATE; the digest lists private tasks, so nothing posted`);
   }
-  const state = stateOf();
+  const state = stateDirOf();
   if (opts.post && !claimJob(root, state, 'digest', `${opts.since}_${opts.until}`)) return;
   const shared = opts.post || opts.lastWeek ? sharedRecords(state, opts.since, opts.until) : null;
   const sessions = shared?.sessions ?? readSessions(state);
@@ -1008,7 +1008,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const args = process.argv.slice(2);
     if (args[0] !== 'plist' && args.includes('--post')) {
       try {
-        const state = stateOf();
+        const state = stateDirOf();
         mkdirSync(state, { recursive: true });
         writeFileSync(join(state, 'digest.failed'), `${new Date().toISOString()} ${why.split('\n')[0]}\n`);
       } catch {}

@@ -11,7 +11,7 @@ import { post as postAsync, wakeLine } from './wake.mjs';
 import { record, appendStart, innAnswer } from './events.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
 import { linearKey } from './store.mjs';
-import { runsOf, stateOf } from './node.mjs';
+import { runsOf, stateDirOf } from './node.mjs';
 
 const COMMENT = 'id createdAt user { id } botActor { type } issue { identifier team { key } }';
 // Issue has no update actor in the schema. Do not mistake its creator for its editor.
@@ -396,7 +396,7 @@ export async function linearCheckMain(argv, { env = process.env, now = Date.now,
   const since = flags['--since'];
   const until = flags['--until'] ?? now() - 60_000;
   if (!Number.isFinite(since) || !Number.isFinite(until) || since > until) return print(USAGE), 2;
-  const state = stateOf(env);
+  const state = stateDirOf(env);
   fetchCatchUp ??= (query, variables) => createLinear({ state }).request(query, variables);
   askFn ??= (request) => ask(socketPath(state), request, { timeoutMs: 5000 });
   let r;

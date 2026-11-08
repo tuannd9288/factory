@@ -23,7 +23,7 @@ export { reduce } from './claude-code.mjs';
 import { redact, redactDeep } from './redact.mjs';
 import { takeLock } from './lock.mjs';
 import { listStreams } from './streams.mjs';
-import { runsOf, stateOf } from './node.mjs';
+import { runsOf, stateDirOf } from './node.mjs';
 import { createHash } from 'node:crypto';
 
 /** The setting the repository ships, changed by pull request. */
@@ -553,7 +553,7 @@ async function tryFile(file, side, env = process.env) {
 }
 
 async function main(argv) {
-  const stateDir = stateOf();
+  const stateDir = stateDirOf();
   if (argv[0] === '--try') {
     const side = argv[2] === '--side' ? argv[3] : undefined;
     if (!argv[1] || argv.length !== (side === undefined ? 2 : 4) || (side !== undefined && !SIDES[side])) throw new Error('usage: factory-reader --try <file> [--side pi|codex]');

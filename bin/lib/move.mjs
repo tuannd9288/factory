@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { createLinear } from './linear.mjs';
 import { announceTakeOn, commentsOfIssue, isHolderLine } from './linear-cli.mjs';
 import { TEAM_KEY, onLinear } from './linear-repos.mjs';
-import { runsOf, stateOf } from './node.mjs';
+import { runsOf, stateDirOf } from './node.mjs';
 import { redact } from './redact.mjs';
 
 import { pickTeam } from './team-names.mjs';
@@ -388,7 +388,7 @@ export async function main(argv, env = process.env, { api, gh } = {}) {
     console.error('usage: factory-move <owner>/<repo> --team-key <KEY> --board <owner>/<number> [--apply] [--rewrites <dir>] [--only <n>,...] [--limit N] [--project <name> --in-project <n>,...] (see bin/lib/move.mjs)');
     return 2;
   }
-  const state = stateOf(env);
+  const state = stateDirOf(env);
   try {
     const out = await createMove({ gh, api: api ?? createLinear({ state }), state, home: env.HOME, runs: runsOf(env) }).run(opts, (line) => console.log(line));
     if (!out.applied) for (const l of out.lines) console.log(l);

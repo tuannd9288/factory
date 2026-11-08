@@ -1,6 +1,6 @@
 // This node (#366): the one place that resolves its facts from its environment (FAC-85, fix 7): its folders (home, state, runs, profiles,
-// data, the factory root), which place it is and where its installed copy of the factory is, the factory host's name, its two macOS users
-// and the agents' checkout there, and the agents' and the Human's GitHub logins. agent-orchestrator resolves its own once, in config.Load
+// data, the factory root), which place it is and where its installed copy of the factory is, the factory host's name and the agents' macOS
+// user there, and the agents' and the Human's GitHub logins. agent-orchestrator resolves its own once, in config.Load
 // (backend/internal/config/config.go:273 at 9dc1c14), as piggery does in internal/driver/local/layout.go (67c083e). It imports nothing but
 // checkout.mjs and token.mjs, so the daemon and the queue can use it without entering the module ring that bin/lib/factory.mjs is part of
 // (factory.mjs -> colly-status.mjs -> ledger.mjs -> queue.mjs). bin/lib/factory.mjs re-exports placeOf and installedRoot.
@@ -13,20 +13,14 @@ import { readTokenFile, tokenDir } from './token.mjs';
 
 /** The factory host's name, which ssh reaches as factory@HOST. */
 export const HOST = 'tuans-mac-mini';
-/** The host's two macOS users: the agents' (FACTORY_HOST_USER where a test names another) and the Human's own. */
+/** The agents' macOS user (FACTORY_HOST_USER where a test names another). */
 export const AGENTS_USER = 'factory';
-export const HUMAN_USER = 'tuannguyen';
-/** The agents' checkout of the factory on the factory host, as ssh reaches it there. */
-export const HOST_CHECKOUT = `/Users/${AGENTS_USER}/WORKSPACES`;
-/** A node's own `factory` command, as ssh to its agents' user runs it in a login shell: on the factory host its main checkout's, on any
- * other node the link bin/install-factory makes into its installed copy. */
-export const factoryCommand = (node = HOST) => (node === HOST ? '~/WORKSPACES/bin/factory' : '~/.local/bin/factory');
 /** The agents' and the Human's GitHub logins, when the environment names none. */
 export const AGENT = 'tuan9288-agent';
 export const HUMAN = 'tuannd9288';
 
 /** The state folder: FACTORY_STATE, else ~/.local/state/factory. */
-export const stateOf = (env = process.env) => env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
+export const stateDirOf = (env = process.env) => env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
 /** The runs folder, where the seats' and the Leads' run folders are: FACTORY_RUNS, else ~/factory-runs, made absolute. */
 export const runsOf = (env = process.env) => resolve(env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'));
 /** The profiles folder: AGENT_PROFILES, else ~/.agent-profiles. */
@@ -45,7 +39,7 @@ export function contextOf(env = process.env) {
     env,
     home: env.HOME,
     root: rootOf(env),
-    state: stateOf(env),
+    state: stateDirOf(env),
     agentProfiles: profilesOf(env),
     runs: runsOf(env),
     timeout: Number(env.FACTORY_TIMEOUT_MS) || 15000,
