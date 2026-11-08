@@ -1,4 +1,4 @@
-# Every change to the factory changes every repository's gate at its next kit pull request: all of it is tier 3.
-# The ruleset requires one approval after the last push, since GitHub's code-owner rule asks nothing of an author
-# who owns the code: agents open the factory's pull requests from their own account, the Human approves.
-* @tuannd9288
+# The owner whose approval .github/workflows/approval.yml reads (kit/.gate/bin/lib/approval.mjs) in this repository.
+# Since 2026-11-08 the ruleset `factory` is at all: his approval is asked only of a pull request labelled needs-human.
+# The line names this file alone, so GitHub asks his review on no other pull request.
+/.github/CODEOWNERS @tuannd9288
