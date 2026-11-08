@@ -32,20 +32,6 @@ export const dataOf = (env = process.env) => join(env.XDG_DATA_HOME || join(env.
 /** The Human's GitHub login: FACTORY_HUMAN, else HUMAN; an empty FACTORY_HUMAN means the default. */
 export const humanOf = (env = process.env) => env.FACTORY_HUMAN || HUMAN;
 
-/** This node's folders and settings, from its environment: { env, home, root, state, agentProfiles, runs, timeout }, `timeout` being a
- * vendor command's time limit in ms (FACTORY_TIMEOUT_MS, else 15 s). It takes the place of bin/lib/factory.mjs's contextOf (FAC-85). */
-export function contextOf(env = process.env) {
-  return {
-    env,
-    home: env.HOME,
-    root: rootOf(env),
-    state: stateDirOf(env),
-    agentProfiles: profilesOf(env),
-    runs: runsOf(env),
-    timeout: Number(env.FACTORY_TIMEOUT_MS) || 15000,
-  };
-}
-
 // The function itself, taken now: a test that mocks child_process.spawnSync later does not get this read.
 const run = spawnSync;
 let name;
