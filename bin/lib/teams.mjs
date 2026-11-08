@@ -4,7 +4,7 @@
 // row is no team at all.
 import { ROOT } from './checkout.mjs';
 import { parseTeam } from './names.mjs';
-import { FACTORY_REPO, repoOk } from './repos.mjs';
+import { repoOk } from './repos.mjs';
 import { readAccounts } from './token.mjs';
 
 /** The teams the file names, sorted by name: { name, row, repo, team, account }. */
