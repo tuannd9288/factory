@@ -32,14 +32,19 @@ export function cloneRepo(dir, timeout = undefined) {
   }
 }
 
-/** The repositories taken in under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose origin names a
- * GitHub owner/name. The ledger and the merge queue find them by this rule (#211). A kit clone whose origin cannot be read, or whose
- * GitHub origin names no owner/name, is left out and `skip(folder, why)` is called for it; a clone on another host is left out. */
+/** The one rule for a repository taken in (FAC-85): a folder that holds a `.git` of its own and the kit's `.gate/`, which bin/onboard
+ * lays. clonesUnder finds the repositories by it, and refusal adds what a team needs on top. Each entry says why a folder without it
+ * is none. */
+const TAKEN_IN = [['.git', 'has no .git of its own, so it is not a clone'], ['.gate', 'has no .gate/, so it is not an onboarded clone']];
+
+/** The repositories taken in under root, by owner/name: a folder that TAKEN_IN holds for, whose origin names a GitHub owner/name. The
+ * ledger and the merge queue find them by this rule (#211). A kit clone whose origin cannot be read, or whose GitHub origin names no
+ * owner/name, is left out and `skip(folder, why)` is called for it; a clone on another host is left out. */
 export function clonesUnder(root, skip = () => {}) {
   const out = new Map();
   for (const name of existsSync(root) ? readdirSync(root) : []) {
     const dir = join(root, name);
-    if (!existsSync(join(dir, '.gate/config.sh')) || !existsSync(join(dir, '.git'))) continue;
+    if (TAKEN_IN.some(([file]) => !existsSync(join(dir, file)))) continue;
     let url;
     try {
       url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -62,7 +67,8 @@ export function byName(names, short) {
   return hits.length === 1 ? hits[0] : null;
 }
 
-/** The reason to refuse a repository, or null: repo is a plain folder name and root/repo is a real folder with .git, .gate/ and .envrc. */
+/** The reason to refuse a repository, or null: repo is a plain folder name and root/repo is a real folder that TAKEN_IN holds for, with
+ * a profile (.envrc). */
 export function refusal(repo, root) {
   // GitHub's own name characters only: the name goes into the deny rules' paths, where a glob character would bend them.
   if (typeof repo !== 'string' || !/^[A-Za-z0-9._-]+$/.test(repo) || repo === '.' || repo.startsWith('-') || repo.includes('..')) {
@@ -76,8 +82,7 @@ export function refusal(repo, root) {
     // a missing folder is refused below
   }
   if (!st || st.isSymbolicLink() || !st.isDirectory()) return `bin/lead: ${dir} is not a folder of its own (missing, a symlink or a file)`;
-  if (!existsSync(join(dir, '.git'))) return `bin/lead: ${dir} has no .git of its own, so it is not a clone`;
-  if (!existsSync(join(dir, '.gate'))) return `bin/lead: ${dir} has no .gate/, so it is not an onboarded clone`;
+  for (const [file, why] of TAKEN_IN) if (!existsSync(join(dir, file))) return `bin/lead: ${dir} ${why}`;
   if (!existsSync(join(dir, '.envrc'))) return `bin/lead: ${dir} has no .envrc, so it has no profile`;
   return null;
 }

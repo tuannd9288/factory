@@ -14,7 +14,7 @@
 // before its repository loop leaves queue-run.failed until a run gets that far. A clean sweep writes
 // queue-<owner>-<name>.ok, the time the digest shows as that repository's last good sweep.
 // With no --repo it sweeps the repositories taken in (#211), found by repos.mjs's clonesUnder, as the ledger finds them: a folder
-// of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/config.sh, named by its
+// of the factory's root ($FACTORY_ROOT, else this clone) that holds a .git and the kit's .gate/, named by its
 // origin on github.com. None found is a logged sweep of nothing, not an error. --repo gives an explicit list instead.
 // The last step, under the lock, writes the events of #309 (bin/lib/events.mjs): one line to $FACTORY_STATE/events.jsonl when a condition
 // begins and one when it ends, from what the sweep read and from the Leads and accounts on this host; it adds no gh call. A sixth (#333) tells each move of a
