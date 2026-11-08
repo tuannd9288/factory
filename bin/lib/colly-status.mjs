@@ -7,6 +7,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
+import { readMarkers } from './status.mjs';
 import { writeAtomic } from './files.mjs';
 import { hookStateOf, parseLog } from './claude-code.mjs';
 import { REQUIRED } from './ledger.mjs';
@@ -300,13 +301,9 @@ export function eventsOf(state) {
 
 /** The queue's and the alerts' state: the time in the newest `queue-*.ok`, the `queue-*.failed` files, every `*.failed` file. */
 export function queueOf(dir) {
-  let names = [];
-  try {
-    names = readdirSync(dir).sort();
-  } catch {}
-  const first = (f) => readText(join(dir, f)).split('\n')[0].trim();
-  const oks = names.filter((f) => /^queue-.*\.ok$/.test(f)).map(first).filter(Boolean).sort();
-  const failed = names.filter((f) => f.endsWith('.failed')).map((f) => ({ file: f, text: first(f) }));
+  const markers = readMarkers(dir) ?? [];
+  const oks = markers.filter((m) => m.kind === 'ok' && m.name.startsWith('queue-')).map((m) => m.line).filter(Boolean).sort();
+  const failed = markers.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line }));
   return { lastSweep: oks.at(-1) ?? null, queueFailed: failed.filter((f) => f.file.startsWith('queue-')).length, failed };
 }
 
@@ -509,11 +506,14 @@ function groupOf(repo, number, gh, sessions) {
   const merged = Boolean(pr?.mergedAt);
   const closed = issue?.state === 'CLOSED';
   const step = merged ? 'merged' : closed ? 'closed' : pr ? 'PR open' : held ? 'claimed' : gh?.claimsOk === false ? '?' : 'unclaimed';
+  // The kit runs no review job since FAC-100; a repository still on the kit before it runs its own until FAC-102 moves it, and that job
+  // is not among the kit's required checks, so it is read from the rollup.
+  const oldReview = (pr?.statusCheckRollup ?? []).filter((c) => c.name === 'review').at(-1);
   let waiting = '–';
   if (pr && !merged) {
     if (labels.some((l) => l === 'tier-3' || l === 'needs-human') && checks.tier && checks.tier.status === 'COMPLETED' && checks.tier.conclusion !== 'SUCCESS') waiting = 'the Human';
     else if (pr.reviewDecision === 'REVIEW_REQUIRED' && gh.required.every((n) => MARK(checks[n]) === '✓')) waiting = 'the Human';
-    else if (checks.review && checks.review.status !== 'COMPLETED') waiting = 'the reviewer';
+    else if (oldReview && oldReview.status !== 'COMPLETED') waiting = 'the reviewer';
   }
   if (waiting === '–' && sessions.some((s) => s.live)) waiting = 'the team';
   return {

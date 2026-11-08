@@ -41,8 +41,9 @@ export function installedRoot(env = process.env) {
   return join(env.XDG_DATA_HOME || join(env.HOME, '.local/share'), 'factory/checkout');
 }
 
-/** The agents' GitHub account, as bin/onboard names it. */
-export const agentOf = (env = process.env) => env.FACTORY_AGENT ?? 'tuan9288-agent';
+/** The agents' GitHub account, as bin/onboard names it: FACTORY_AGENT, else nami9288; an empty FACTORY_AGENT means the default, as
+ * bin/onboard's ${FACTORY_AGENT:-…} has it. */
+export const agentOf = (env = process.env) => env.FACTORY_AGENT || 'nami9288';
 
 /** The agents' GitHub token in this node's own token store (#366), under the agents' account; undefined on the factory host, whose gh has its
  * own login, and on a node that holds none. */

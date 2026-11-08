@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JOBS, nameOf } from './launchd.mjs';
 import { writeAtomic } from './files.mjs';
+import { clearFailed, markFailed } from './status.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const STALE_MS = 120_000;
@@ -133,19 +134,18 @@ function archive(state, folder, root, path) {
  * tip it fetched, and nothing else. */
 export function followMain({ root, state, live, now = Date.now(), env = process.env }) {
   mkdirSync(state, { recursive: true });
-  const report = join(state, 'queue-checkout.failed');
   const since = join(state, 'queue-checkout.since');
   // GIT_LITERAL_PATHSPECS: a path from the scan is a path, whatever characters it holds.
   const git = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 60_000, env: { ...env, GIT_TERMINAL_PROMPT: '0', GIT_LITERAL_PATHSPECS: '1' } });
   const out = (r) => `${r.stdout ?? ''}`.trim();
   const why = (r) => first(r.stderr) || first(r.stdout) || (r.error ? r.error.message : `exit ${r.status}`);
   const refuse = (text) => {
-    writeFileSync(report, `${new Date(now).toISOString()} ${text}\n`);
+    markFailed(state, 'queue-checkout', text, { now });
     rmSync(since, { force: true });
     return { status: 'refused', why: text };
   };
   const clear = () => {
-    rmSync(report, { force: true });
+    clearFailed(state, 'queue-checkout');
     rmSync(since, { force: true });
   };
   // The checkout must be on main with no change of its own.
@@ -183,7 +183,7 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
       const began = Date.parse((readOr(since) ?? '').trim());
       if (Number.isNaN(began)) writeFileSync(since, `${new Date(now).toISOString()}\n`);
       else if (now - began >= LONG_MS) {
-        writeFileSync(report, `${new Date(now).toISOString()} ${behind} commits behind for ${Math.floor((now - began) / 3600_000)} h: runs are live\n`);
+        markFailed(state, 'queue-checkout', `${behind} commits behind for ${Math.floor((now - began) / 3600_000)} h: runs are live`, { now });
       }
       return { status: 'deferred', behind };
     }
@@ -236,7 +236,6 @@ export function checkPlists({ root, state, plistDir, render = (label, installed)
   const differ = [];
   const unrendered = [];
   const wantedDir = join(state, 'plist-wanted');
-  const report = join(state, 'queue-plist.failed');
   for (const label of PLISTS) {
     const installed = readOr(join(plistDir, `${label}.plist`));
     if (installed === null) continue;
@@ -262,11 +261,17 @@ export function checkPlists({ root, state, plistDir, render = (label, installed)
     }
     writeAtomic(file, wanted);
   }
-  const parts = [
-    ...(differ.length ? [`${differ.join(' ')}: the installed plist differs from what the code renders; the wanted one is in ${wantedDir}; the Human reinstalls it with sudo: bootout the job, check that the pid in daemon.lock is the daemon (ps -p <pid> -o command= ends in bin/lib/daemon.mjs) and SIGTERM it, install, bootstrap`] : []),
+  // One fact a line, each at most 200 characters (bin/lib/status.mjs): what differs first, which Colly's status line and the digest show,
+  // then where the wanted plist is and the Human's steps, then each render that failed.
+  const lines = [
+    ...(differ.length ? [
+      `${differ.join(' ')}: the installed plist differs from what the code renders`,
+      `the wanted one is in ${wantedDir}`,
+      'the Human reinstalls it with sudo: bootout the job, check that the pid in daemon.lock is the daemon (ps -p <pid> -o command= ends in bin/lib/daemon.mjs) and SIGTERM it, install, bootstrap',
+    ] : []),
     ...unrendered,
   ];
-  if (parts.length) writeFileSync(report, `${new Date(now).toISOString()} ${parts.join('; ')}\n`);
-  else rmSync(report, { force: true });
+  if (lines.length) markFailed(state, 'queue-plist', lines[0], { now, more: lines.slice(1) });
+  else clearFailed(state, 'queue-plist');
   return { differ, unrendered };
 }

@@ -173,6 +173,17 @@ test('the sessions: states follow the log, the pid and the limit; a stopped sess
   assert.equal(by.aardvark.state, 'idle');
 });
 
+// FAC-100: the kit runs no review job, but a repository still on the kit before it runs its own until FAC-102 moves it.
+test('a pull request whose review job still runs waits on the reviewer, on a repository still on the kit before FAC-100', async () => {
+  const w = world();
+  const prs = JSON.parse(readFileSync(join(w.fx, 'prs.json'), 'utf8'));
+  const check = (name, conclusion, status = 'COMPLETED') => ({ name, status, conclusion });
+  prs.push({ number: 270, title: 'old kit', state: 'OPEN', headRefName: 'issue-170-x', body: 'Issue: #170', labels: [], mergedAt: null, statusCheckRollup: [check('verify', 'SUCCESS'), check('review', null, 'IN_PROGRESS'), check('tier', null, 'IN_PROGRESS')] });
+  writeFileSync(join(w.fx, 'prs.json'), JSON.stringify(prs));
+  const { snap } = await readSnapshot(w);
+  assert.equal(snap.repos.find((r) => r.repo === 'tuannd9288/factory').groups.find((g) => g.number === 170).waiting, 'the reviewer');
+});
+
 test('a run shows the name in its run-<tag>.name, a Lead the name in its folder\'s name file; a run with none keeps <issue>-<tag>', async () => {
   const w = world();
   const { snap } = await readSnapshot(w);

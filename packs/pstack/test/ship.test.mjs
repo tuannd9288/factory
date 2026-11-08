@@ -2,7 +2,7 @@
 // against a fake gh, in a copy of the kit and the pstack pack with a real bare origin.
 import { afterEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commit, factory, git, run, quiet } from '../../../test/helpers.mjs';
@@ -27,8 +27,11 @@ if (a[0] === 'pr' && a[1] === 'list' && a.includes('merged'))
   out(fs.existsSync(sh + '/parent.json') ? fs.readFileSync(sh + '/parent.json', 'utf8') : '[]');
 if (a[0] === 'pr' && a[1] === 'edit') {
   const pr = read();
-  pr.baseRefName = a[a.indexOf('--base') + 1];
-  pr.baseRefOid = fs.readFileSync(sh + '/base', 'utf8').trim();
+  if (a.includes('--add-label')) pr.labels = [...pr.labels, { name: a[a.indexOf('--add-label') + 1] }];
+  if (a.includes('--base')) {
+    pr.baseRefName = a[a.indexOf('--base') + 1];
+    pr.baseRefOid = fs.readFileSync(sh + '/base', 'utf8').trim();
+  }
   fs.writeFileSync(sh + '/pr.json', JSON.stringify(pr));
   out('ok\n');
 }
@@ -64,8 +67,9 @@ afterEach(() => {
   for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. */
-function world({ driver = true, stacks, merge, drafts = 'pstack' } = {}) {
+/** A copy of the kit on branch `work` (one commit past `main`, which origin holds), with stamps and fakes on request. Each run of ship
+ * finds a reviewer's PASS on the head it runs at (FAC-101), unless `reviewed` is false; `review` appends a reviewer seat's record. */
+function world({ driver = true, stacks, merge, drafts = 'pstack', reviewed = true } = {}) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ship-')));
   directories.push(dir);
   const repo = join(dir, 'app');
@@ -102,10 +106,16 @@ function world({ driver = true, stacks, merge, drafts = 'pstack' } = {}) {
     passed: (base = git(repo, 'rev-parse', 'origin/main')) => {
       w.stamp(`red-check-${w.head()}-${base}`);
     },
+    review: (over = {}) => {
+      mkdirSync(join(dir, 'state'), { recursive: true });
+      const record = { role: 'reviewer', team: 'app-pig', repo: 'o/app', tag: 'review1', session: 's1', head: w.head(), structured: { conclusion: 'PASS' }, ...over };
+      appendFileSync(join(dir, 'state', 'sessions.jsonl'), `${JSON.stringify(record)}\n`);
+    },
     ship: (args = ['--body-file', join(dir, 'body.md')]) => {
       writeFileSync(join(sh, 'head'), w.head());
       writeFileSync(join(sh, 'base'), git(repo, 'rev-parse', 'origin/main'));
-      return run(repo, join(repo, 'scripts/ship'), args, { ...quiet, SH: sh, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-a-token' });
+      if (reviewed) w.review();
+      return run(repo, join(repo, 'scripts/ship'), args, { ...quiet, SH: sh, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-a-token', FACTORY_STATE: join(dir, 'state'), FACTORY_TEAM: 'app-pig' });
     },
     pr: (over) => writeFileSync(join(sh, 'pr.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(sh, 'pr.json'), 'utf8')), ...over })),
     read: (name) => (existsSync(join(sh, name)) ? readFileSync(join(sh, name), 'utf8') : ''),
@@ -235,7 +245,8 @@ describe('opening the pull request', () => {
     writeFileSync(join(dir, 'body.md'), body);
     writeFileSync(join(sh, 'head'), git(repo, 'rev-parse', 'HEAD'));
     writeFileSync(join(sh, 'base'), git(repo, 'rev-parse', 'origin/main'));
-    const ship = () => run(repo, join(repo, 'scripts/ship'), ['--body-file', join(dir, 'body.md')], { ...quiet, SH: sh, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-a-token' });
+    // An empty state folder: here no reviewer record is required (FAC-101), since Colly and the supervising session review.
+    const ship = () => run(repo, join(repo, 'scripts/ship'), ['--body-file', join(dir, 'body.md')], { ...quiet, SH: sh, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GH_TOKEN: 'not-a-token', FACTORY_STATE: join(dir, 'state'), FACTORY_TEAM: 'factory-pig' });
     const out = ship();
     assert.equal(out.code, 0, out.out);
     const calls = () => readFileSync(join(sh, 'gh-calls'), 'utf8').split('\n').filter(Boolean);
@@ -243,14 +254,15 @@ describe('opening the pull request', () => {
     assert.match(create, /--base main --head fac-14-ship-here --title feat\(factory\): add x /);
     assert.ok(create.includes('--draft'));
     assert.equal(readFileSync(join(sh, 'created-body'), 'utf8'), body);
-    // Once verify passed, ship readies it and arms it with this repository's own method, merge commits: every pull request here waits
-    // for the Human, so it stops there.
+    // Once verify passed, ship readies it and arms it with this repository's own method, merge commits, and says it waits for its required
+    // checks: whether they hold it for the Human is the merge switch's (#333), which ship does not read.
     writeFileSync(join(sh, 'methods.json'), JSON.stringify({ squashMergeAllowed: false, mergeCommitAllowed: true }));
     const pr = JSON.parse(readFileSync(join(sh, 'pr.json'), 'utf8'));
     writeFileSync(join(sh, 'pr.json'), JSON.stringify({ ...pr, statusCheckRollup: [{ name: 'verify', status: 'COMPLETED', conclusion: 'SUCCESS' }] }));
     const armed = ship();
-    assert.equal(armed.code, 1, armed.out);
-    assert.match(armed.out, /waits for the Human's approval/);
+    assert.equal(armed.code, 0, armed.out);
+    assert.match(armed.out, /waits for its required checks/);
+    assert.doesNotMatch(armed.out, /stopped/);
     assert.deepEqual(calls().filter((c) => c.startsWith('pr ready') || c.startsWith('pr merge')), ['pr ready 7', `pr merge 7 --auto --merge --match-head-commit ${pr.headRefOid}`]);
   });
 
@@ -353,7 +365,7 @@ describe('the steps after it opened', () => {
     const w = opened();
     let out = w.ship();
     assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /^ship: armed #7 at HEAD [0-9a-f]{7}$/m);
+    assert.match(out.out, /^ship: armed #7 at HEAD [0-9a-f]{7}\b/m);
     assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`), w.calls().join('\n'));
     out = w.ship();
     assert.equal(out.code, 0, out.out);
@@ -412,13 +424,14 @@ describe('the steps after it opened', () => {
     assert.ok(!w.calls().some((c) => c.startsWith('pr merge')));
   });
 
-  test('arms a tier-3 pull request, then stops while its tier check waits, and is done once it is green', () => {
+  test('arms a tier-3 pull request and says it waits for its required checks while its tier check runs, and is done once it is green', () => {
     const w = opened();
     w.pr({ labels: [{ name: 'tier-3' }], statusCheckRollup: [{ name: 'tier', status: 'IN_PROGRESS', conclusion: '' }] });
     let out = w.ship();
-    assert.equal(out.code, 1, out.out);
+    assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.match(out.out, /waits for its required checks/);
+    assert.doesNotMatch(out.out, /stopped/);
     assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`));
     w.pr({ statusCheckRollup: [{ name: 'tier', status: 'COMPLETED', conclusion: 'SUCCESS' }] });
     out = w.ship();
@@ -445,6 +458,122 @@ fs.appendFileSync(sh + '/tier-calls', process.argv.slice(2).join(' ') + '\n');
 console.log('tier ' + fs.readFileSync(sh + '/tier', 'utf8').trim());
 `;
 
+// FAC-101: ship arms only a head its team's reviewer passed, read from the reviewer seat's record in sessions.jsonl.
+describe('the reviewer\'s PASS', () => {
+  const opened = () => {
+    const w = world({ reviewed: false });
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    return w;
+  };
+  const arms = (w) => w.calls().filter((c) => c.includes('--auto'));
+
+  test('with no PASS on the head ship refuses to arm and says so; another team\'s, another repository\'s or a worker\'s do not count; a PASS on that head arms it', () => {
+    const w = opened();
+    let out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /refused to arm #7: no reviewer PASS/);
+    w.review({ team: 'app-other' });
+    w.review({ repo: 'o/other' });
+    w.review({ role: 'worker' });
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.deepEqual(arms(w), []);
+    w.review({ tag: 'review2', session: 'sess-2' });
+    out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /armed #7 at HEAD [0-9a-f]{7}: .*review2.*sess-2/);
+    assert.deepEqual(arms(w), [`pr merge 7 --auto --squash --match-head-commit ${w.head()}`]);
+  });
+
+  test('a pushed commit that changes the patch disarms and needs its own PASS; a merge of main that leaves the patch as it was keeps it', () => {
+    const w = opened();
+    w.review();
+    assert.equal(w.ship().code, 0);
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'fix(cli): print three');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: w.head() });
+    let out = w.ship();
+    assert.match(out.out, /disarmed #7: no reviewer PASS/);
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /refused to arm #7: no reviewer PASS/);
+    w.review({ tag: 'review2', session: 's2' });
+    assert.equal(w.ship().code, 0);
+    // main moves and is merged in, the change untouched: the armed pull request stays armed, and once disarmed it arms again on review2.
+    const other = join(w.dir, 'other');
+    git(w.dir, 'clone', '-q', join(w.dir, 'origin.git'), other);
+    commit(other, { 'other.js': 'x\n' }, 'feat(other): add other');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(w.repo, 'fetch', '-q', 'origin');
+    git(w.repo, 'merge', '--no-ff', '--no-edit', 'origin/main');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: w.head() });
+    out = w.ship();
+    assert.match(out.out, /#7 is armed; nothing to do/);
+    w.pr({ autoMergeRequest: null });
+    out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /armed #7 at HEAD [0-9a-f]{7}: .*review2/);
+  });
+
+  test('the newest record on the patch decides: a FAIL after a PASS refuses, and names the FAIL', () => {
+    const w = opened();
+    w.review({ tag: 'review1', session: 's1' });
+    w.review({ tag: 'review2', session: 's2', structured: { conclusion: 'FAIL: cli.js prints the wrong number' } });
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.match(out.out, /review2 \(session s2\), concluded FAIL/);
+    assert.deepEqual(arms(w), []);
+  });
+
+  test('a PASS with a raise labels the pull request needs-human and stops without arming it: at switch all an armed tier 3 would land unseen', () => {
+    const w = opened();
+    w.review({ structured: { conclusion: 'PASS', raise: 'secrets: cli.js reads the token file' } });
+    const out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    const calls = w.calls();
+    assert.ok(calls.includes('pr edit 7 --add-label needs-human'), calls.join('\n'));
+    assert.ok(!calls.some((c) => c.includes('--auto')), calls.join('\n'));
+    assert.match(out.out, /stopped on #7: its reviewer raised it \(secrets: cli\.js reads the token file\): it carries needs-human now; the Human decides/);
+  });
+
+  test('a raise the Human decided arms: with the label ship set taken off, that head and a main merge of it arm; a raise on a new patch stops again', () => {
+    const w = opened();
+    const raised = (tag, session) => ({ tag, session, structured: { conclusion: 'PASS', raise: 'secrets: cli.js reads the token file' } });
+    const labels = () => w.calls().filter((c) => c === 'pr edit 7 --add-label needs-human').length;
+    w.review(raised('review1', 's1'));
+    assert.equal(w.ship().code, 1);
+    // His approval is the tier check's to read; his decision reaches ship as the label taken off.
+    w.pr({ labels: [] });
+    let out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(labels(), 1, 'the label is not set again for the raise he decided');
+    assert.deepEqual(arms(w), [`pr merge 7 --auto --squash --match-head-commit ${w.head()}`]);
+    // main is merged in, the change untouched: the decision holds for the head with the same patch.
+    const other = join(w.dir, 'other');
+    git(w.dir, 'clone', '-q', join(w.dir, 'origin.git'), other);
+    commit(other, { 'other.js': 'x\n' }, 'feat(other): add other');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(w.repo, 'fetch', '-q', 'origin');
+    git(w.repo, 'merge', '--no-ff', '--no-edit', 'origin/main');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: w.head(), autoMergeRequest: null });
+    out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.equal(labels(), 1);
+    // A commit that changes the patch, reviewed with a raise again, is stopped again.
+    commit(w.repo, { 'cli.js': 'console.log(3);\n' }, 'fix(cli): print three');
+    git(w.repo, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: w.head(), autoMergeRequest: null });
+    w.review(raised('review2', 's2'));
+    out = w.ship();
+    assert.equal(out.code, 1, out.out);
+    assert.equal(labels(), 2);
+    assert.match(out.out, /stopped on #7: its reviewer raised it/);
+  });
+});
+
 describe('a tier 3 that the paths make, with no label on the pull request', () => {
   const opened = (tier) => {
     const w = world();
@@ -464,17 +593,17 @@ describe('a tier 3 that the paths make, with no label on the pull request', () =
     assert.equal(w.read('tier-calls'), '--base origin/main --head HEAD --labels task,tier-2\n');
   });
 
-  test('arms it, then stops with the line, and a later run stops again', () => {
+  test('arms it and says it waits for its required checks, and a later run says so again and arms nothing more', () => {
     const w = opened(3);
     w.pr({ statusCheckRollup: waiting });
     let out = w.ship();
-    assert.equal(out.code, 1, out.out);
+    assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.match(out.out, /waits for its required checks/);
     assert.ok(w.calls().includes(`pr merge 7 --auto --squash --match-head-commit ${w.head()}`));
     out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /waits for its required checks/);
     assert.equal(w.calls().filter((c) => c.startsWith('pr merge')).length, 1);
   });
 
@@ -523,23 +652,23 @@ describe('a tier 3 whose tier check is red, which is how the kit shows the wait 
     return w;
   };
 
-  test('by the label: armed, then stopped, and stopped again on the next run', () => {
+  test('by the label: armed, waiting for its required checks, and still waiting on the next run', () => {
     const w = opened(3, ['tier-3']);
     let out = w.ship();
-    assert.equal(out.code, 1, out.out);
+    assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^ship: armed #7/m);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.match(out.out, /waits for its required checks/);
     out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /waits for its required checks/);
     assert.doesNotMatch(out.out, /nothing to do/);
   });
 
   test('by .gate/bin/tier on the paths: the same', () => {
     const w = opened(3);
     const out = w.ship();
-    assert.equal(out.code, 1, out.out);
-    assert.match(out.out, /^ship: stopped on #7: tier 3 waits for the Human's approval \(unless the merge switch is at all\)$/m);
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /waits for its required checks/);
   });
 
   test('below tier 3 a red tier check is no wait of the Human\'s', () => {
@@ -829,4 +958,28 @@ test('squash refuses malformed titles before opening or arming a pull request', 
   w.pr({ title: 'Update the queue' });
   assert.match(w.ship().out, /refused title/);
   assert.ok(!w.calls().some((c) => c.includes('--auto')));
+});
+
+// The queue's update-branch (bin/lib/queue.mjs:352) merges main into an armed pull request on GitHub, and the Lead's clone has not fetched
+// that head when it runs ship again (Colly's review of #548).
+describe('an armed pull request the queue brought up to main', () => {
+  test('a merge of main pushed on GitHub, not fetched here, keeps the PASS of the same patch', () => {
+    const w = world({ reviewed: false });
+    w.passed();
+    assert.equal(w.ship().code, 0);
+    w.review();
+    let out = w.ship();
+    assert.equal(out.code, 0, out.out);
+    assert.match(out.out, /armed #7/);
+    const other = join(w.dir, 'other');
+    git(w.dir, 'clone', '-q', join(w.dir, 'origin.git'), other);
+    commit(other, { 'other.js': 'x\n' }, 'feat(other): add other');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(other, 'switch', '-q', '-c', 'work', 'origin/work');
+    git(other, 'merge', '--no-ff', '--no-edit', 'main');
+    git(other, 'push', '-q', 'origin', 'work');
+    w.pr({ headRefOid: git(other, 'rev-parse', 'HEAD') });
+    out = w.ship();
+    assert.doesNotMatch(out.out, /disarmed/, out.out);
+  });
 });

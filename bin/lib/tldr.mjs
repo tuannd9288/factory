@@ -15,27 +15,19 @@ import { fileURLToPath } from 'node:url';
 import { isHosted } from './gate-settings.mjs';
 
 const NAMES = {
-  'the reviewer': 'reviewer',
   "main's runner": 'máy chạy việc của main',
   "the candidate's runner": 'máy kiểm từng thay đổi',
-  'the trusted runner': 'máy giữ key của reviewer',
+  'the trusted runner': 'máy chạy bước tier',
 };
 const NAMES_EN = {
-  'the reviewer': 'reviewer',
   "main's runner": 'the machine that runs main',
   "the candidate's runner": 'the machine that checks each change',
-  'the trusted runner': "the machine that holds the reviewer's key",
+  'the trusted runner': 'the machine that runs the tier check',
 };
-const NO_REVIEWER = 'none (review and verdict fail closed)';
-const VALUE = /^(\[[^\]]*\]|none \(review and verdict fail closed\)|[^,\s]+)(?:, (.*))?$/;
-
-const REVIEWS = { claude: 'review của Claude', entire: 'review của Entire (dịch vụ riêng)', stub: 'reviewer giả để test, không phải review thật' };
-const REVIEWS_EN = { claude: 'Claude review', entire: 'Entire review (a separate service)', stub: 'a stub reviewer for tests, not a real review' };
+const VALUE = /^(\[[^\]]*\]|[^,\s]+)(?:, (.*))?$/;
 
 /** A setting's value as the evidence prints it, in words (Vietnamese, or English when `en`). */
 function plain(words, value, en = false) {
-  if (value === NO_REVIEWER) return en ? 'no reviewer yet (nothing merges by itself)' : 'chưa có reviewer (không gì tự merge)';
-  if (words === 'the reviewer') return (en ? REVIEWS_EN : REVIEWS)[value] ?? value;
   try {
     const labels = JSON.parse(value);
     if (labels.length === 1 && labels[0] === 'ubuntu-latest') return en ? "GitHub's machine" : 'máy của GitHub';
@@ -126,17 +118,6 @@ function settingDecisionsEn(changed) {
   return parts.join(' ');
 }
 
-/** The review clause follows the reviewer that runs on this pull request: main's copy of gate-trusted.yml, so the base's value
- * for a changed row (none when the factory cannot see it), else the row's own. */
-function reviewClause(rows, en = false) {
-  const row = rows.find((r) => r.name === NAMES['the reviewer']);
-  const reviewer = row?.changed ? row.fromRaw : row?.raw;
-  if (reviewer === undefined || reviewer === '') return '';
-  if (reviewer === NO_REVIEWER) return en ? ', no AI review runs because there is no reviewer yet' : ', chưa có reviewer nên không có review AI nào chạy';
-  if (reviewer === 'stub') return en ? ', only a stub reviewer for tests runs, not a real review' : ', chỉ reviewer giả để test chạy, không phải review thật';
-  return en ? ', an AI review runs on this PR' : ', review AI chạy trên PR này';
-}
-
 export function onboardTldr(name, evidence) {
   const rows = settingsOf(evidence);
   const settings = rows.map(say).join('; ');
@@ -145,12 +126,12 @@ export function onboardTldr(name, evidence) {
     {
       decide: `Duyệt PR đưa ${name} vào factory: thêm gate (bộ kiểm tra tự động), hooks, template PR và luật cho agent${settings ? `, với cài đặt của gate: ${settings}` : ''}.`,
       recommend: `Approve, nếu các cài đặt trên đúng ý anh và session của ${name} đã liệt kê các file sửa trong phần chi tiết.`,
-      risk: `verify đỏ tới khi PR này merge là bình thường và không chặn merge, chưa có review AI nào chạy; ${REVERT}.`,
+      risk: `verify đỏ tới khi PR này merge là bình thường và không chặn merge; ${REVERT}.`,
     },
     {
       decide: `Approve the PR that brings ${name} into the factory: it adds the gate (automatic checks), hooks, a PR template and agent rules${settingsEn ? `, with these gate settings: ${settingsEn}` : ''}.`,
       recommend: `Approve, if the settings above are what you want and ${name}'s session has listed the files it edits in the detail.`,
-      risk: `verify stays red until this PR merges, which is normal and does not block the merge, and no AI review has run yet; ${REVERT_EN}.`,
+      risk: `verify stays red until this PR merges, which is normal and does not block the merge; ${REVERT_EN}.`,
     },
   );
 }
@@ -172,12 +153,12 @@ export function kitUpdateTldr(name, { added, updated, removed, kept }, evidence)
     {
       decide: `Duyệt PR đưa kit trong ${name} lên bản factory mới: thêm ${added} file, cập nhật ${updated}, bỏ ${removed}, giữ ${kept} file riêng của repo; ${settings[0]}.`,
       recommend: changed.length ? settingDecisions(changed) : 'Approve.',
-      risk: `${touches ? `Sửa ${touches} file repo đã có` : 'Không sửa file nào repo đã có'}${reviewClause(rows)}; ${REVERT}.`,
+      risk: `${touches ? `Sửa ${touches} file repo đã có` : 'Không sửa file nào repo đã có'}; ${REVERT}.`,
     },
     {
       decide: `Approve the PR that moves the kit in ${name} to a newer factory version: ${added} files added, ${updated} updated, ${removed} removed, ${kept} of the repository's own kept; ${settings[1]}.`,
       recommend: changed.length ? settingDecisionsEn(changed) : 'Approve.',
-      risk: `${touches ? `It edits ${touches} files the repository already has` : 'It edits no file the repository already has'}${reviewClause(rows, true)}; ${REVERT_EN}.`,
+      risk: `${touches ? `It edits ${touches} files the repository already has` : 'It edits no file the repository already has'}; ${REVERT_EN}.`,
     },
   );
 }

@@ -6,10 +6,8 @@
 //     `gh pr list` and `gh pr checks`, and any -X, --method, -f, -F, --field, --raw-field or --input; a query is in the path;
 //   - it runs only from a commit on the first-parent line of origin/main, with no uncommitted, untracked or ignored
 //     file under bin/ or kit/, as bin/onboard asks of its clone;
-//   - it prints no token, secret or variable value. The gate's settings are read from main's workflows (#335), the reviewer
-//     to choose the gate's ruleset as onboard-owner does. The repository variables that held them before #335 are listed
-//     to name each one still set, and on a main whose gate-trusted.yml predates #335 GATE_REVIEWER's value chooses the
-//     ruleset; a variable's value is used and never shown;
+//   - it prints no token, secret or variable value. The gate's settings are read from main's workflows (#335). The repository
+//     variables that held them before #335 are listed to name each one still set; a variable's value is never shown;
 //   - the merge switch (#333) is named from the rules in force on the default branch, and is red only when they cannot be read
 //     as a position; the gate ruleset's two review parameters are whatever the Human set, never a difference from the kit's;
 //   - each line names what it read, and the end lists every gh call that ran.
@@ -24,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { MAX_BYTES, MAX_LINES, carrierProblems, countLines, entryIn, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { SETTINGS, TRUSTED, runnerProblems } from './gate-settings.mjs';
 import { POLICY_VERSION, current, gateState, gh, identify, left, reviewOf, switchNow, wanted, withReview } from './owner.mjs';
+import { agentOf } from './node.mjs';
 
 const factory = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WIDTH = 120;
@@ -109,24 +108,22 @@ function format(ok, label, result, reads) {
   return [head + first + tail, ...lines.slice(1).map((l) => ' '.repeat(head.length) + l)].join('\n');
 }
 
-/** What the doctor says of the gate's settings on main (#335): each in the kit's form in its workflow, a reviewer named, the
- * runner rule, and no repository variable left from before #335, which nothing reads and which changes without a pull
- * request. */
+/** What the doctor says of the gate's settings on main (#335): each in the kit's form in its workflow, the runner rule, and no
+ * repository variable left from before #335, which nothing reads and which changes without a pull request. */
 function settingProblems({ slug, files, settings, old, variables }) {
-  if (old) return [`${TRUSTED} on main reads the repository variables, as the kit did before #335, and those change without a pull request; bin/kit-update with the four settings brings them into the workflows`];
+  if (old) return [`${TRUSTED} on main reads the repository variables, as the kit did before #335, and those change without a pull request; bin/kit-update with the three settings brings them into the workflows`];
   const problems = [];
   for (const s of SETTINGS) {
     if (files[s.file] === undefined) problems.push(`${s.file} is not on main as a regular file`);
     else if (settings[s.key] === undefined) problems.push(`${s.words} is not in ${s.file} in the kit's form`);
   }
-  if (settings.reviewer === '') problems.push(`no reviewer: GATE_REVIEWER is empty in ${TRUSTED}, so review and verdict fail closed`);
   problems.push(...runnerProblems(settings));
   for (const name of Object.keys(variables)) problems.push(`the repository variable ${name} is still set, and nothing reads it since #335: gh variable delete ${name} --repo ${slug}`);
   return [...new Set(problems)];
 }
 
 function checkSettings(ctx) {
-  const reads = 'repo rulesets env collab invites kit vars workflows policies';
+  const reads = 'repo rulesets collab invites kit vars workflows policies';
   const { slug, agent, branch, kitLanded, reviewer, mergeMethod, forcePush, target } = ctx;
   const kit = wanted({ kitLanded: true, branch, reviewer, mergeMethod, forcePush, target });
   const names = new Set([...kit.rulesets.map((r) => r.name), ...kit.drop]);
@@ -250,7 +247,7 @@ function main(argv) {
     console.error(`onboard-doctor: ${problem}; nothing read`);
     return 2;
   }
-  const agent = process.env.FACTORY_AGENT ?? 'tuan9288-agent';
+  const agent = agentOf();
   const who = identify('onboard-doctor', { slug, id, agent, read: get });
   if (who.refusal) {
     console.error(who.refusal);

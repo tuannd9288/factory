@@ -22,6 +22,7 @@ import { cloneRepo, clonesUnder } from './repos.mjs';
 import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
+import { clearFailed, markFailed, readMarkers, repoMarker } from './status.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import them from here.
 export { READS, costOf } from './claude-code.mjs';
@@ -270,16 +271,15 @@ export function taskRow(repo, issue, prRows) {
  * sweep in every `queue-*.ok` file, with a null for each of the ledger's repositories that has no such record (an
  * empty file is none). `missing` is true when the folder itself is not there, so nothing could be checked. */
 export function queueState(dir, repos) {
-  const missing = !existsSync(dir);
-  const names = missing ? [] : readdirSync(dir).sort();
-  const first = (file) => readFileSync(join(dir, file), 'utf8').split('\n')[0].trim();
-  const ok = names.filter((f) => /^queue-.*\.ok$/.test(f)).map((f) => ({ label: f, at: first(f) })).filter((x) => x.at);
+  const markers = readMarkers(dir);
+  const queue = (markers ?? []).filter((m) => m.name.startsWith('queue-'));
+  const ok = queue.filter((m) => m.kind === 'ok' && m.line).map((m) => ({ label: m.file, at: m.line }));
   const known = new Set(ok.map((x) => x.label));
   return {
     dir,
-    missing,
-    failed: names.filter((f) => /^queue-.*\.failed$/.test(f)).map((f) => ({ file: f, text: first(f) })),
-    ok: [...ok, ...repos.filter((repo) => !known.has(`queue-${repo.replace('/', '-')}.ok`)).map((repo) => ({ label: repo, at: null }))],
+    missing: markers === null,
+    failed: queue.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line })),
+    ok: [...ok, ...repos.filter((repo) => !known.has(`${repoMarker(repo)}.ok`)).map((repo) => ({ label: repo, at: null }))],
   };
 }
 
@@ -941,7 +941,7 @@ async function main(argv) {
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
   if (shared) writeFileSync(join(state, 'digest-records.json'), `${JSON.stringify(shared.cursor)}\n`);
-  rmSync(join(state, 'digest.failed'), { force: true });
+  clearFailed(state, 'digest');
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
@@ -955,13 +955,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     // leaves queue-run.failed (#209);
     // a run that prints to stdout, and plist, keep no state.
     const args = process.argv.slice(2);
-    if (args[0] !== 'plist' && args.includes('--post')) {
-      try {
-        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-        mkdirSync(state, { recursive: true });
-        writeFileSync(join(state, 'digest.failed'), `${new Date().toISOString()} ${why.split('\n')[0]}\n`);
-      } catch {}
-    }
+    if (args[0] !== 'plist' && args.includes('--post')) markFailed(process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), 'digest', why);
     process.exit(1);
   }
 }

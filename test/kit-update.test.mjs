@@ -21,12 +21,12 @@ describe('bin/kit-update', () => {
       // The repository's own changes at the base: a file it fills in, a dropped kit file it edited, and a kit file it lacks.
       w.repoCommit({ '.gate/config.sh': `${readFileSync(join(w.repo, '.gate/config.sh'), 'utf8')}# ours\n`, '.gate/old-b.txt': 'ours b\n', '.github/pull_request_template.md': null });
       const base = git(w.repo, 'rev-parse', 'HEAD');
-      const promptWas = blob(w.repo, base, '.gate/bin/lib/reviewer-prompt.md');
+      const skillWas = blob(w.repo, base, '.claude/skills/gate-red/SKILL.md');
       const codeownersWas = blob(w.repo, base, '.github/CODEOWNERS');
       // The factory moves on: a changed file, a changed rendered file, a changed AGENTS.md, a new file, two dropped.
       const kitFile = (p) => readFileSync(join(w.fac, p), 'utf8');
       w.facCommit({
-        'kit/.gate/bin/lib/reviewer-prompt.md': `${kitFile('kit/.gate/bin/lib/reviewer-prompt.md')}\nA new line.\n`,
+        'kit/.claude/skills/gate-red/SKILL.md': `${kitFile('kit/.claude/skills/gate-red/SKILL.md')}\nA new line.\n`,
         'kit/.github/CODEOWNERS': `/docs/ @OWNER\n${kitFile('kit/.github/CODEOWNERS')}`,
         'kit/.gate/gate-section.md': kitFile('kit/.gate/gate-section.md').replace('gate-section-v1', 'gate-section-v2'),
         'kit/.gate/new-c.txt': 'new c\n',
@@ -42,7 +42,7 @@ describe('bin/kit-update', () => {
       const rev = branch;
       assert.match(git(w.dir, '--git-dir', w.url, 'for-each-ref', '--format=%(refname)', 'refs/heads/'), new RegExp(`refs/heads/${branch}`));
       // Stale: replaced by the kit's. Missing: added. Dropped and stale: removed; dropped and the repository's own: kept.
-      assert.equal(w.show(rev, '.gate/bin/lib/reviewer-prompt.md'), kitFile('kit/.gate/bin/lib/reviewer-prompt.md').trim());
+      assert.equal(w.show(rev, '.claude/skills/gate-red/SKILL.md'), kitFile('kit/.claude/skills/gate-red/SKILL.md').trim());
       assert.equal(w.show(rev, '.github/pull_request_template.md'), kitFile('kit/.github/pull_request_template.md').trim());
       assert.equal(w.show(rev, '.gate/new-c.txt'), 'new c');
       assert.throws(() => w.show(rev, '.gate/old-a.txt'));
@@ -59,7 +59,7 @@ describe('bin/kit-update', () => {
       const text = readFileSync(w.body, 'utf8');
       for (const seen of [out.out, text]) {
         assert.match(seen, /^kit-evidence: PASS$/m);
-        assert.match(seen, new RegExp(`^ {2}.gate/bin/lib/reviewer-prompt\\.md \\(was ${promptWas}, kit at factory ${sha7}\\)$`, 'm'));
+        assert.match(seen, new RegExp(`^ {2}.claude/skills/gate-red/SKILL\\.md \\(was ${skillWas}, kit at factory ${sha7}\\)$`, 'm'));
         assert.match(seen, new RegExp(`^ {2}\\.github/CODEOWNERS \\(was ${codeownersWas}, kit at factory ${sha7}\\)$`, 'm'));
         assert.match(seen, /^kept \(the repository's own, unchanged\):\n(?: {2}.*\n)* {2}\.gate\/config\.sh$/m);
         assert.match(seen, /^removed \(.*\):\n {2}\.gate\/old-a\.txt \(was [0-9a-f]{12}, no longer in the kit at factory /m);
@@ -197,8 +197,8 @@ describe('bin/kit-update', () => {
     const w = world();
     try {
       w.repoCommit({ 'src/math.js': 'export function add(a, b) {\n  return a - b;\n}\n' });
-      const kitFile = join(w.fac, 'kit/.gate/bin/lib/reviewer-prompt.md');
-      w.facCommit({ 'kit/.gate/bin/lib/reviewer-prompt.md': `${readFileSync(kitFile, 'utf8')}\nA new line.\n` });
+      const kitFile = join(w.fac, 'kit/.claude/skills/gate-red/SKILL.md');
+      w.facCommit({ 'kit/.claude/skills/gate-red/SKILL.md': `${readFileSync(kitFile, 'utf8')}\nA new line.\n` });
       const before = w.state();
       const out = w.update(['app']);
       assert.equal(out.code, 1, out.out);
@@ -217,8 +217,8 @@ describe('bin/kit-update', () => {
 // Review of 1a13447 (#53).
 describe('bin/kit-update, after review', () => {
   const touch = (w) => {
-    const file = join(w.fac, 'kit/.gate/bin/lib/reviewer-prompt.md');
-    w.facCommit({ 'kit/.gate/bin/lib/reviewer-prompt.md': `${readFileSync(file, 'utf8')}\nA new line.\n` });
+    const file = join(w.fac, 'kit/.claude/skills/gate-red/SKILL.md');
+    w.facCommit({ 'kit/.claude/skills/gate-red/SKILL.md': `${readFileSync(file, 'utf8')}\nA new line.\n` });
   };
 
   test('goes back to a detached HEAD, and leaves no branch, when there is nothing to do', () => {
