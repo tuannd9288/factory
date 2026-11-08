@@ -471,47 +471,26 @@ describe('tier on a pull request', () => {
     write(fake, {
       'bin/gh': [
         '#!/bin/sh',
-        // A runs listing is asked for a head: any other head lists nothing, as GitHub would for a head that is not the run's.
-        // A remove of the label raised fails while noremove exists.
-        'case "$*" in *"--remove-label raised"*) if [ -e "$FAKE/noremove" ]; then echo boom >&2; exit 1; fi ;; esac',
-        'case "$*" in *head_sha=*) h=${2#*head_sha=}; h=${h%%&*}; if [ "$h" != "$(cat "$FAKE/head")" ]; then echo \'{"total_count":0,"workflow_runs":[]}\'; exit 0; fi ;; esac',
         // The label query is answered only when it asks who added each label: the approval time follows the bot's own event.
         'case "$*" in *itemTypes:*LABELED_EVENT*) case "$*" in *"actor{login}"*) ;; *) echo "fake gh: the label query does not ask for actor{login}" >&2; exit 1 ;; esac ;; esac',
         'case "$*" in',
-        // The review job is found through the run (99) and its annotations through the job's id (501), never by name.
-        // The body and closing issues, as gh prints them (2026-10-26): porcelain commands only, read by acceptance.mjs and by tier's
-        // claim check (#133). prview.json is a test's own answer; else closing.json; else no closing issue and `Issue: none`.
-        '  "pr view 7 --repo o/app --json closingIssuesReferences,body") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; if [ -e "$FAKE/prview.json" ]; then cat "$FAKE/prview.json"; else cat "$FAKE/closing.json" 2>/dev/null || printf \'%s\\n\' \'{"body":"Issue: none\\n","closingIssuesReferences":[]}\'; fi ;;',
-        '  "issue view "*" --repo o/app --json number,title,labels,body") echo "issue view $3" >>"$FAKE/ghlog"; cat "$FAKE/issue-$3.json" ;;',
+        // The body and closing issues, as gh prints them (2026-10-26): porcelain commands only, read by tier's claim check (#133). prview.json is a test's own answer; else no closing issue and `Issue: none`.
+        '  "pr view 7 --repo o/app --json closingIssuesReferences,body") echo "pr view" >>"$FAKE/ghlog"; [ -e "$FAKE/ghfails" ] && { echo "HTTP 502" >&2; exit 1; }; if [ -e "$FAKE/prview.json" ]; then cat "$FAKE/prview.json"; else printf \'%s\\n\' \'{"body":"Issue: none\\n","closingIssuesReferences":[]}\'; fi ;;',
         // tier's claim check reads the named issue's state (#133): open unless the test leaves state-<n>.json.
         '  "issue view "*" --repo o/app --json state") cat "$FAKE/state-$3.json" 2>/dev/null || echo \'{"state":"OPEN"}\' ;;',
-        // A test that moves something while a job waits leaves $FAKE/mover.sh, which runs once at the first listing.
-        '  *actions/runs/99/jobs?filter=all*) echo jobs >>"$FAKE/calls"; echo jobs >>"$FAKE/order"; [ -x "$FAKE/mover.sh" ] && { "$FAKE/mover.sh"; rm -f "$FAKE/mover.sh"; }; cat "$FAKE/jobs.json" ;;',
-        '  *check-runs/501/annotations*) echo annotations >>"$FAKE/calls"; echo annotations >>"$FAKE/order"; cat "$FAKE/annotations.json" ;;',
-        '  *check-runs/601/annotations*) cat "$FAKE/ann601.json" ;;',
-        '  *check-runs/777/annotations*) cat "$FAKE/ann777.json" 2>/dev/null || echo "[]" ;;',
-        '  *actions/runs/98/jobs?filter=all*) cat "$FAKE/jobs98.json" ;;',
-        '  *actions/workflows/gate-trusted.yml/runs?head_sha=*) echo runs >>"$FAKE/calls"; cat "$FAKE/runs.json" ;;',
-        // #155: the rules in force on main and the "Entire Gates" check runs, for GATE_REVIEWER=entire; the app_id is asked for.
-        // #333: the merge switch asks for every page, and a call that does not fails. Entire's own read of the rules (#155) is
-        // not the switch's, and is let through while a test sets $FAKE/entire-rules.
-        '  *rules/branches/main) echo rules >>"$FAKE/rules-calls"; echo rules >>"$FAKE/order"; case "$*" in *"--paginate --slurp"*) ;; *) [ -e "$FAKE/entire-rules" ] || { echo "fake gh: the rules are asked without --paginate --slurp" >&2; exit 1; } ;; esac; cat "$FAKE/rules.json" ;;',
-        '  *"check-runs?check_name=Entire%20Gates&app_id="*) echo entire >>"$FAKE/calls"; cat "$FAKE/entire.json" ;;',
-        '  *check-runs*) cat "$FAKE/verify.json" ;;',
+        // #333: the merge switch asks for every page, and a call that does not fails.
+        '  *rules/branches/main) echo rules >>"$FAKE/rules-calls"; echo rules >>"$FAKE/order"; case "$*" in *"--paginate --slurp"*) ;; *) echo "fake gh: the rules are asked without --paginate --slurp" >&2; exit 1 ;; esac; cat "$FAKE/rules.json" ;;',
         // The pagination is matched literally: a query that asks for the wrong end or no pageInfo falls to exit 1.
         // From the second read on, labels2.json answers when it exists: the labels as they are after the wait.
         '  *"first:100,itemTypes:[LABELED_EVENT]){pageInfo{hasNextPage} nodes"*) n=$(cat "$FAKE/labels.n" 2>/dev/null || echo 0); echo $((n + 1)) >"$FAKE/labels.n"; if [ "$n" -ge 1 ] && [ -e "$FAKE/labels2.json" ]; then cat "$FAKE/labels2.json"; else cat "$FAKE/labels.json"; fi ;;',
         // FAC-41: the pull request's last base change (history.mjs moved): it never changed.
         '  *BASE_REF_CHANGED_EVENT*) echo \'{"data":{"repository":{"pullRequest":{"timelineItems":{"nodes":[]}}}}}\' ;;',
-        '  *HEAD_REF_FORCE_PUSHED_EVENT*) cat "$FAKE/forced.json" 2>/dev/null || echo \'{"data":{"repository":{"pullRequest":{"baseRefOid":"base","timelineItems":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}\' ;;',
-        '  *compare/base...old*) cat "$FAKE/overwritten.json" ;;',
         // #379: the pull request's comments, kept in $FAKE/comments.json by comments.mjs; a write fails while nowrite exists.
         '  *issues/7/comments*|*issues/comments/*) node "$FAKE/comments.mjs" "$@" ;;',
         // #374: each review request is logged; the one for the login in norequest, when that exists, fails.
         '  "pr view 7 --repo o/app --json isDraft --jq .isDraft") cat "$FAKE/draft" 2>/dev/null || echo false ;;',
         '  *requested_reviewers*) echo "$*" >>"$FAKE/requests"; if [ -e "$FAKE/norequest" ]; then case "$*" in *"=$(cat "$FAKE/norequest")") echo boom >&2; exit 1 ;; esac; fi; echo "{}" ;;',
         '  *reviews*) cat "$FAKE/reviews.json" ;;',
-        '  "pr edit"*raised*) [ -e "$FAKE/nolabel" ] && { echo "Could not resolve to a Label with the name raised" >&2; exit 1; }; echo "$*" >>"$FAKE/edits" ;;',
         '  "pr edit"*) echo "$*" >>"$FAKE/edits" ;;',
         '  *) echo "fake gh: $*" >&2; exit 1 ;;',
         'esac',
@@ -548,29 +527,10 @@ console.log('{}');
 `,
     });
     run(fake, 'chmod', ['+x', 'bin/gh']);
-    verify('success');
-    reviewJob('success');
-    annotations();
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }) });
   });
   after(() => r.cleanup());
-  /** The verify check run gate.yml reports on every head: success, failure, or in_progress. */
-  const verify = (state) =>
-    write(fake, { 'verify.json': JSON.stringify({ check_runs: [{ name: 'verify', app: { slug: 'github-actions' }, started_at: '2026-10-21T10:00:00Z', status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state }] }) });
   const labels = (...names) =>
     write(fake, { 'labels2.json': null, 'labels.n': null, 'labels.json': JSON.stringify({ data: { repository: { pullRequest: { timelineItems: { pageInfo: { hasNextPage: false }, nodes: names.map((name) => ({ label: { name }, createdAt: '2026-10-21T09:00:00Z' })) } } } } }) });
-  /** The jobs of run 99, as `filter=all` lists them: the review job (check run 501) and the tier jobs, per attempt. */
-  const reviewJob = (state, ...more) =>
-    write(fake, {
-      'jobs.json': JSON.stringify({
-        jobs: [{ id: 501, name: 'review', run_attempt: 1, check_run_url: CHECK_RUN(501), status: state === 'in_progress' ? state : 'completed', conclusion: state === 'in_progress' ? null : state }, ...more],
-        total_count: 1 + more.length,
-      }),
-    });
-  const CHECK_RUN = (id) => `https://api.github.com/repos/o/app/check-runs/${id}`;
-  /** The annotations of check run 501: the result of a review that reached it is `none`, or `raise: <why>` for a reason. */
-  const result = (message, extra = {}) => ({ title: 'review-result', message, annotation_level: 'notice', ...extra });
-  const annotations = (...messages) => write(fake, { 'annotations.json': JSON.stringify(messages.length ? messages.map((message) => result(`raise: ${message}`)) : [result('none')]) });
   const reviews = (list) => write(fake, { 'reviews.json': JSON.stringify([list]) });
   /** Runs one job in the trusted checkout on a head already fetched there, as a re-run does. */
   const again = (kind, head, env = {}) => {
@@ -602,17 +562,12 @@ console.log('{}');
     return again(kind, head, env);
   };
   const pr = { GATE_PR: '7', GATE_PR_AUTHOR: 'agent-bot', GITHUB_RUN_ID: '99' };
-  const beforeNoRemove = () => write(fake, { noremove: null });
-  beforeEach(beforeNoRemove);
   // Every test starts from the same fake GitHub: a test that fails before its last line restores nothing.
   beforeEach(() => {
-    verify('success');
-    reviewJob('success');
-    annotations();
     labels();
     reviews([]);
     // The rules in force on main are the kit's gate: the merge switch at 1-2 (#333).
-    write(fake, { 'runs.json': JSON.stringify({ total_count: 1, workflow_runs: [{ id: 99 }] }), 'jobs98.json': null, 'ann601.json': null, 'ann777.json': null, nolabel: null, 'closing.json': null, ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), 'entire.json': null, 'entire-rules': null, norequest: null, draft: null, 'comments.json': null, 'comment-writes': null, noread: null, nowrite: null });
+    write(fake, { ghfails: null, 'rules.json': JSON.stringify(switchRules(0, true)), norequest: null, draft: null, 'comments.json': null, 'comment-writes': null, noread: null, nowrite: null });
   });
   const review = (login, state, commit_id, at = '2026-10-21T10:00:00Z') => ({ user: { login }, state, commit_id, submitted_at: at });
   /** The rules in force on main with one pull_request rule: the merge switch's two parameters (#333). */
@@ -657,11 +612,9 @@ console.log('{}');
     assert.equal(out.code, 0, out.out);
     assert.match(out.edits, /pr edit 7 --repo o\/app --add-label tier-2/);
   });
-  // FAC-100: no reviewer runs on Actions, so tier waits for no review job; the body's No-red line goes to the Human as tier 3.
-  const noReviewJob = () => write(fake, { 'jobs.json': JSON.stringify({ jobs: [{ id: 502, name: 'tier', run_attempt: 1, status: 'completed', conclusion: 'success' }], total_count: 1 }) });
+  // FAC-100: no reviewer runs on Actions, so tier waits for no review job: the fake GitHub answers for none.
   test('tier needs no review: with no review job in its run, or no run id, it passes tier 1 and 2', () => {
     labels();
-    noReviewJob();
     let out = job('tier', { 'src/math.js': MUL }, pr);
     assert.equal(out.code, 0, out.out);
     assert.match(out.out, /^tier 1$/m);
@@ -670,7 +623,6 @@ console.log('{}');
     assert.match(out.edits, /pr edit 7 --repo o\/app --add-label tier-2/);
   });
   test('a protected path and a needs-human label each make tier 3, which waits for the Human\'s approval', () => {
-    noReviewJob();
     const cases = [
       ['a protected path', { 'AGENTS.md': '# app\n' }, [], {}],
       ['a needs-human label', { 'src/math.js': MUL }, ['needs-human'], {}],
@@ -698,7 +650,7 @@ console.log('{}');
   const closes = (number, [owner, name] = ['o', 'app']) => ({ number, repository: { name, owner: { login: owner } } });
   const tierRun = (files = { 'src/math.js': MUL }) => job('tier', files, pr);
   beforeEach(() => {
-    write(fake, { 'prview.json': null, 'mover.sh': null, 'state-7.json': null });
+    write(fake, { 'prview.json': null, 'state-7.json': null });
     dropClaim();
   });
 
@@ -806,22 +758,6 @@ console.log('{}');
     assert.match(out.out, /Team: team-x/);
   });
 
-  test('at tier 3 by paths, a reviewer\'s raise sets nothing: the Human\'s approval given before the re-run counts, and the re-run passes', () => {
-    labels();
-    reviews([]);
-    rulesAre(switchRules(0, true));
-    annotations('deletes a sign-in var in wrangler.jsonc');
-    const first = job('tier', { 'AGENTS.md': '# app\n' }, pr);
-    assert.equal(first.code, 1, first.out);
-    assert.match(first.out, /tier 3 waits for @tuannd9288 to approve/);
-    assert.doesNotMatch(first.out, /raised by the reviewer/);
-    reviews([review('tuannd9288', 'APPROVED', first.head, '2026-10-21T10:00:00Z')]);
-    const out = again('tier', first.head, pr);
-    assert.equal(out.code, 0, out.out);
-    assert.match(out.out, /tuannd9288 approved/);
-    assert.doesNotMatch(out.edits, /raised/, 'the raise labels nothing at tier 3');
-    assert.doesNotMatch(out.out, /raised by the reviewer/);
-  });
   // #333: the merge switch is the two review parameters of the rules in force on main. At all, the Human's approval of a
   // tier 3 change is not asked; the other checks, and the claim, still are.
   test('on tier 3, tier passes with no approval at all, and says the switch is at all', () => {
@@ -1269,66 +1205,6 @@ console.log('{}');
       assert.equal(out.code, 0, out.out);
     });
   }
-
-  // The Claude Code reviewer through .gate/bin/review, and verdict reading review's result: one reviewer call per pull request.
-  const FAKE_CLAUDE = (f) => `#!/usr/bin/env node
-const fs = require('fs');
-const conf = JSON.parse(fs.readFileSync(${JSON.stringify(join(f, 'claude.json'))}, 'utf8'));
-if (process.argv[2] === '--version') { console.log('2.1.308 (Claude Code)'); process.exit(0); }
-fs.writeFileSync(${JSON.stringify(join(f, 'brief'))}, fs.readFileSync(0, 'utf8'));
-fs.appendFileSync(${JSON.stringify(join(f, 'claude-calls'))}, 'call\\n');
-const e = (x) => console.log(JSON.stringify(x));
-e({ type: 'system', subtype: 'init', tools: ['Read', 'Grep', 'Glob', 'StructuredOutput'], mcp_servers: [], plugins: [], skills: [], slash_commands: [] });
-if (conf.mode === 'crash') process.exit(7);
-if (conf.mode === 'quota') { e({ type: 'result', is_error: true, api_error_status: 429, result: 'Claude AI usage limit reached|1761300000' }); process.exit(1); }
-e({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify(conf.output), structured_output: conf.output });
-`;
-  const claude = (conf) => {
-    write(fake, { 'bin/claude': FAKE_CLAUDE(fake), 'claude.json': JSON.stringify(conf), 'claude-calls': '' });
-    run(fake, 'chmod', ['+x', 'bin/claude']);
-  };
-  const reviewEnv = { GATE_REVIEWER: 'claude', CLAUDE_CODE_OAUTH_TOKEN: 'tok', ...pr };
-  const NOTE = (title, message) => ({ title, message, annotation_level: 'notice' });
-  /** Commits a tier 2 candidate (a load-bearing path) and fetches it; returns its head and the base the jobs get. */
-  const candidate = (files = { 'src/auth/t.js': 'export const t = 1;\n' }) => {
-    git(r.repo, 'switch', '-q', '-C', 'rv', 'origin/main');
-    const head = commit(r.repo, files, 'rv');
-    git(trusted, 'fetch', '-q', r.repo, 'rv');
-    return { head, base: git(trusted, 'rev-parse', 'origin/main') };
-  };
-
-  // #96: the issues the pull request closes, read by .gate/bin/review with gh porcelain before the reviewer runs.
-  const REF = (number, owner = 'o', name = 'app') => ({ id: `I_${number}`, number, repository: { id: 'R_x', name, owner: { id: 'U_x', login: owner } }, url: `https://github.com/${owner}/${name}/issues/${number}` });
-  const ISSUE = (number, extra = {}) => ({ body: '## Acceptance\n\n- Refuse an empty name.\n', labels: [{ id: 'LA_1', name: 'task', description: '', color: 'ffffff' }], number, title: 'Initials', ...extra });
-  const closing = (...refs) => write(fake, { 'closing.json': JSON.stringify({ closingIssuesReferences: refs, body: 'Issue: none\n' }), ghlog: '' });
-  const briefSeen = () => readFileSync(join(fake, 'brief'), 'utf8');
-  const ghLog = () => readFileSync(join(fake, 'ghlog'), 'utf8').split('\n').filter(Boolean);
-  const claudeCalls = () => readFileSync(join(fake, 'claude-calls'), 'utf8').split('\n').filter(Boolean).length;
-  const accOf = (text) => /::notice title=review-verdict::head=\S+ base=\S+ nored=\S+ acc=(\S+) reviewer=/.exec(text)?.[1];
-
-  // #155: Entire (entire.com) reviews outside Actions. Its check "Entire Gates" concluded neutral while a gate blocked
-  // (factory-onboard-scratch#23, 2026-10-29), and GitHub counts neutral and skipped as passing.
-  const ENTIRE_APP = 4242;
-  /** The rules in force on main, pinning "Entire Gates" to the Apps named (null: no integration_id), and the
-   * "Entire Gates" check runs on the head, each [conclusion, in_progress or queued, App id, started_at, id]; the id is
-   * the run's place in the list unless given. */
-  const entire = (runs, pinned = [ENTIRE_APP]) =>
-    write(fake, {
-      'entire-rules': '',
-      'rules.json': JSON.stringify([
-        ...switchRules(0, true),
-        ...pinned.map((id) => ({ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'verify', integration_id: 15368 }, { context: 'tier', integration_id: 15368 }, { context: 'Entire Gates', ...(id === null ? {} : { integration_id: id }) }] } })),
-      ]),
-      'entire.json': JSON.stringify({
-        total_count: runs.length,
-        check_runs: runs.map(([state, app = ENTIRE_APP, started = '2026-10-29T10:00:00Z', id], i) => {
-          const open = state === 'in_progress' || state === 'queued';
-          return { id: id === undefined ? i + 1 : id, name: 'Entire Gates', app: { id: app, slug: 'entire' }, started_at: started, status: open ? state : 'completed', conclusion: open ? null : state };
-        }),
-      }),
-    });
-  const onEntire = { ...pr, GATE_REVIEWER: 'entire', GATE_BASE_REF: 'main' };
-
 });
 
 describe('gate-trusted.yml permissions', () => {
