@@ -6,25 +6,35 @@
 // to run alone (bin/lib/socket-hook.mjs, bin/lib/statusline-hook.mjs, packs/pstack/bin/transcript-copy.mjs) keep their own few lines.
 import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { threadId } from 'node:worker_threads';
 
-/** Writes `data` to `file` through `.<name>.<pid>.tmp` in its folder, made afresh (a leftover of an earlier run of this pid is removed and
- * the file made again), then a rename. With `mode`, the file gets exactly that mode, whatever the umask; without it, the default a new file
- * gets. The folder must exist. A failed write removes the temporary file and throws its error. */
+/** Writes `data` to `file` through `.<name>.<pid>.<thread>.tmp` in its folder, so no two writers share one, threads of a process included
+ * (the daemon runs each pass in a worker thread). It is made afresh with an exclusive create, so a symlink there is never followed: a
+ * leftover of an earlier run of this pid and thread is removed and the file made again. Then a rename. With `mode`, the file gets exactly
+ * that mode, whatever the umask; without it, the default a new file gets. The folder must exist. A failed write removes the temporary file
+ * and throws its own error, even when something there cannot be removed (a folder, say). */
 export function writeAtomic(file, data, { mode } = {}) {
-  const tmp = join(dirname(file), `.${basename(file)}.${process.pid}.tmp`);
+  const tmp = join(dirname(file), `.${basename(file)}.${process.pid}.${threadId}.tmp`);
   const make = () => writeFileSync(tmp, data, mode === undefined ? { flag: 'wx' } : { mode, flag: 'wx' });
+  const remove = () => {
+    try {
+      rmSync(tmp, { force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  };
   try {
     try {
       make();
     } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-      rmSync(tmp, { force: true });
+      if (e.code !== 'EEXIST' || !remove()) throw e;
       make();
     }
     if (mode !== undefined) chmodSync(tmp, mode);
     renameSync(tmp, file);
   } catch (e) {
-    rmSync(tmp, { force: true });
+    remove();
     throw e;
   }
 }
