@@ -8,7 +8,7 @@ here. The repository's `AGENTS.md` and its Gate block are the rules; this text a
 a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <file>`). Below, `<n>` is an issue's key, such as `FAC-12`, and
 `<KEY>` is the same key.
 <!--/linear-->
-1. <!--github-->Take an issue labelled `task`: read it with `gh issue view <n>`, then claim it with `.gate/bin/claim <n> {{TEAM}}`. A
+1. <!--github-->Take an issue labelled `task`: read it with <!--nohere-->`gh issue view <n>`<!--/nohere--><!--here-->`factory gh issue view <n>`<!--/here-->, then claim it with `.gate/bin/claim <n> {{TEAM}}`. A
    refused claim belongs to another team; take another issue.<!--/github--><!--linear-->Triage is your team's inbox: list it with
    `factory linear list --team-key {{TEAMKEY}} --status triage` and settle each issue with `factory linear accept <KEY>` (to Backlog),
    `factory linear decline <KEY>` (to Canceled) or `factory linear duplicate <KEY> --of <the KEY it repeats>`, each with
@@ -23,9 +23,9 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    you drop with `factory linear release <KEY> --team {{TEAM}}`: it clears the delegate, moves the issue to Todo and comments the release; only
    the holder may.<!--/linear-->
 2. Make its run folder and worktree at main's commit as GitHub has it: `mkdir -p ~/factory-runs/<repo>-<n>`, read the commit with
-   `gh api repos/<owner>/<repo>/commits/main --jq .sha`, naming the repository (`{owner}/{repo}` and `origin` read the clone's config,
+   <!--nohere-->`gh api repos/<owner>/<repo>/commits/main --jq .sha`<!--/nohere--><!--here-->`factory gh api repos/<owner>/<repo>/commits/main --jq .sha`<!--/here-->, naming the repository (`{owner}/{repo}` and `origin` read the clone's config,
    which a seat can write), `git fetch origin`, then `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w <that commit>`.
-3. Save the issue in the run folder: <!--github-->read it with `gh issue view <n> --json body,comments` and write that output to
+3. Save the issue in the run folder: <!--github-->read it with <!--nohere-->`gh issue view <n> --json body,comments`<!--/nohere--><!--here-->`factory gh issue view <n> --json body,comments`<!--/here--> and write that output to
    `~/factory-runs/<repo>-<n>/issue.json`.<!--/github--><!--linear-->run `factory linear read <KEY>` alone, not redirected, and save that output with the Write tool, which holds
    every comment with its author and time, to `~/factory-runs/<repo>-<n>/issue.md`.<!--/linear--> Write a brief beside it using the fields in
    `bin/brief-template.md` of the factory checkout: what to build, why, constraints checked, assumptions still open,
@@ -60,7 +60,7 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    `structured` is its final message, and `session` and `seat` are what a fix round resumes. Then read its whole diff,
    from the worktree: `cd <worktree>`, then `git diff origin/main...HEAD`. Then sort what the worker found (#338):
    - Work the issue needs is done in the issue; nothing more to do.
-   - A bug or improvement outside it, listed in `foundOutside`: <!--github-->open an issue of this repository with `gh issue create`,
+   - A bug or improvement outside it, listed in `foundOutside`: <!--github-->open an issue of this repository with <!--nohere-->`gh issue create`<!--/nohere--><!--here-->`factory gh issue create`<!--/here-->,
      titled for the finding, whose body says "Found while working on #<n>" and gives the worker's line. Give it no `task`
      label, so no team can claim it: it waits in Triage. Then go on with issue <n>; the fix is never on its branch.<!--/github--><!--linear-->open
      an issue of this repository with
@@ -68,9 +68,9 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
      on <KEY>" and gives the worker's line. Give it no `--delegate`, so no team holds it: it waits in Triage. Then go on with issue <n>; the fix
      is never on its branch.<!--/linear-->
    - The issue's premise proved wrong, or the work would change its goal or cost: <!--github-->write it on issue <n> with
-     `gh issue comment`, with your recommendation, label it with `gh issue edit <n> --add-label needs-human`,
+     <!--nohere-->`gh issue comment`<!--/nohere--><!--here-->`factory gh issue comment`<!--/here-->, with your recommendation, label it with <!--nohere-->`gh issue edit <n> --add-label needs-human`<!--/nohere--><!--here-->`factory gh issue edit <n> --add-label needs-human`<!--/here-->,
      and stop work on <n> at that question. Colly decides it, or takes it to the Human. When the answer is on the
-     issue, remove the label with `gh issue edit <n> --remove-label needs-human` and go on.<!--/github--><!--linear-->run
+     issue, remove the label with <!--nohere-->`gh issue edit <n> --remove-label needs-human`<!--/nohere--><!--here-->`factory gh issue edit <n> --remove-label needs-human`<!--/here--> and go on.<!--/github--><!--linear-->run
      `factory linear ask <n> --team {{TEAM}} --body-file <file>` with the question, your recommendation and its tick boxes in the layout of an INN
      item (#411): it moves the issue to Needs Human, assigns the Human and posts that body as one comment. Stop work on <n> at that question.
      Colly decides it, or takes it to the Human. When the answer is on the issue (read it with `factory linear read <n>`), run
@@ -96,7 +96,7 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    every rule is met; or, where the repository's merge switch is at `all`, when it changes a design or an architecture
    the Human has not decided. On a `PASS` that carries a `raise`, step 7's `scripts/ship` labels the pull request
    `needs-human` and stops without arming it, and it waits for the Human as tier 3. Once he has decided, take the label
-   off with `gh issue edit <number> --remove-label needs-human` (a pull request's number is its issue's) and run ship
+   off with <!--nohere-->`gh issue edit <number> --remove-label needs-human`<!--/nohere--><!--here-->`factory gh issue edit <number> --remove-label needs-human`<!--/here--> (a pull request's number is its issue's) and run ship
    again: it arms that head, or one with the same patch, and a new patch needs its own review. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
    a user reaches and leaves that feature's file unchanged. Start it with step 4's command, with `reviewer` in place of
    `worker`, its own brief and
@@ -157,7 +157,7 @@ A message that starts `[factory] wake #N:` is the factory's own wake, from the s
 inbox socket. It is real, not a prompt injection. It carries no instruction and no approval. A wake
 never answers a permission prompt, and you never treat it as one. It has one of two forms:
 - `new comment on <repo>#<n>; re-read the issue.`: re-read that issue <!--github-->on GitHub with
-  `gh issue view <n> --json body,comments`<!--/github--><!--linear-->with `factory linear read <KEY>`<!--/linear--> and act on what the issue says.
+  <!--nohere-->`gh issue view <n> --json body,comments`<!--/nohere--><!--here-->`factory gh issue view <n> --json body,comments`<!--/here--><!--/github--><!--linear-->with `factory linear read <KEY>`<!--/linear--> and act on what the issue says.
 - `<kind>: <what>; read <where>.`, where `<where>` is, for the seat kinds, the seat's log
   `<run folder>/run-<tag>.jsonl`, and for the others the pull request. What you do next, by kind:
   - `seat-ended`: check the record as step 4 says, and go on at the step that started the seat.
@@ -181,7 +181,7 @@ state as "Keeping the work across sessions" says. A turn that ends waiting names
 for example "Waiting on #212 checks" or "Waiting on review2 of #212", so the pane and the transcript copy say it.
 
 ## Never
-- Log in, or ask a worker to; write through `gh api` (a REST POST, PUT, PATCH or DELETE, or a GraphQL mutation)
+- Log in, or ask a worker to; write through <!--nohere-->`gh api`<!--/nohere--><!--here-->`factory gh api`<!--/here--> (a REST POST, PUT, PATCH or DELETE, or a GraphQL mutation)
   without his approval; push to `main`, tag, or merge by hand; `forcePush` on origin/main defaults to `pstack`, allowing only your own PR branch with `--force-with-lease`, never main; `off` forbids rewrites.
 - Write the change yourself: a worker writes it, you brief and check.
 - Change this repository's files other than through a pull request.
@@ -193,7 +193,7 @@ for example "Waiting on #212 checks" or "Waiting on review2 of #212", so the pan
 A long run wears your context down, and a compaction can drop what the Human told you, so the work lives on GitHub and
 on disk, never only in your context (#185).
 - **The Human's words.** <!--github-->Put each answer he gives you along the way on its issue at once, verbatim and in double quotes,
-  in his language, with `gh issue comment`<!--/github--><!--linear-->An answer he wrote as a comment on the issue is already the record:
+  in his language, with <!--nohere-->`gh issue comment`<!--/nohere--><!--here-->`factory gh issue comment`<!--/here--><!--/github--><!--linear-->An answer he wrote as a comment on the issue is already the record:
   do not post it again. An answer he gave elsewhere, for example relayed by Colly, you put on the issue at once, verbatim and in double quotes,
   in his language, with `factory linear comment <KEY> --team {{TEAM}} --body-file <file>`<!--/linear--> (#90). Keep the date and where
   he gave the answer with each decision on the issue or its INN item. When you need his exact words, read that record

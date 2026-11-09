@@ -788,11 +788,12 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...readRules({ profiles: agentProfiles, role: 'lead-here' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
     // Its shell runs in Claude Code's sandbox (FAC-79 (b)), as seatworks-v3 runs its Lead and the factory its seats. It writes the runs
     // folder too, where the pack Lead's --add-dir lets it write: its issues' run folders and worktrees, its seats' run folders and its own
-    // transcripts. It reaches github.com and api.github.com. `factory` reaches the Mac mini by ssh, which the sandbox refuses, and runs the
-    // pack's ship and pr-body for the factory (`factory ship`, `factory pr-body`, FAC-79); a Lead that starts seats runs bin/seat, which
-    // reads the tokens by design: both run outside it.
+    // transcripts. It reaches github.com alone, for git. gh, a Go program, fails TLS verification in a macOS sandbox
+    // (code.claude.com/docs/en/sandboxing), so every gh the Lead runs goes through `factory` (`factory gh`, `factory ship`, `factory pr-body`,
+    // FAC-79), as does its ssh to the Mac mini, which the sandbox refuses; a Lead that starts seats runs bin/seat, which reads the tokens by
+    // design: both run outside it.
     sandbox: hereSandbox({
-      home: env.HOME, cwd, profiles: agentProfiles, writes: contextOf(env).runs, hosts: ['github.com', 'api.github.com'],
+      home: env.HOME, cwd, profiles: agentProfiles, writes: contextOf(env).runs, hosts: ['github.com'],
       excluded: ['factory *', ...(seat ? [`${seat} *`] : [])],
     }),
   };

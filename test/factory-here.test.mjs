@@ -134,11 +134,11 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       w.done();
     }
     // Its shell runs in Claude Code's sandbox (FAC-79 (b)): it reads none of the list's shell paths, writes here, in the runs folder and
-    // the temporary folder, reaches only GitHub's two hosts, and, as a user that starts no seat, runs only `factory` outside it.
+    // the temporary folder, reaches only github.com, and, as a user that starts no seat, runs only `factory` outside it.
     assert.deepEqual(settingsOf(args).sandbox, {
       enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
       filesystem: { denyRead: sandboxPaths(s.home, join(s.dir, 'profiles')), allowWrite: [realpathSync(factory), join(s.home, 'factory-runs'), realpathSync(tmpdir())] },
-      network: { strictAllowlist: true, allowedDomains: ['github.com', 'api.github.com'], allowLocalBinding: false },
+      network: { strictAllowlist: true, allowedDomains: ['github.com'], allowLocalBinding: false },
       excludedCommands: ['factory *'],
     });
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
