@@ -7,7 +7,7 @@
 //     that merged before then (a stack's parent), or none (approval.mjs --moved-at, --parent-head)
 // Exit 2 when GitHub cannot be read or the history does not fit one page: a history half read decides nothing. One page
 // is decided by pageInfo, not totalCount: totalCount ignores the itemTypes filter (factory-pack-scratch#3, 2026-10-23).
-import { execFileSync } from 'node:child_process';
+import { gh } from './gh.mjs';
 
 // Not documented: whether pageInfo.hasNextPage counts the itemTypes-filtered list or all timeline items. If all, a pull
 // request with more than 100 timeline items of any kind fails closed here: a liveness risk only, never a wrong pass.
@@ -29,10 +29,7 @@ const opt = (name) => {
 const [owner, name] = opt('--repo').split('/');
 
 function pull(query) {
-  const out = execFileSync('gh', ['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `pr=${opt('--pr')}`], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const out = gh(['api', 'graphql', '-f', `query=${query}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `pr=${opt('--pr')}`]);
   const pr = JSON.parse(out).data?.repository?.pullRequest;
   if (!pr) throw new Error(`no pull request #${opt('--pr')} in ${opt('--repo')}`);
   return pr;
@@ -49,10 +46,7 @@ try {
     if (change) {
       const { createdAt: at, previousRefName: from, currentRefName: to } = change;
       if (![at, from, to].every((v) => typeof v === 'string' && v)) throw new Error('the last base change has no time or bases');
-      const out = execFileSync('gh', ['api', 'graphql', '-f', `query=${PARENT}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-f', `head=${from}`, '-f', `base=${to}`], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      const out = gh(['api', 'graphql', '-f', `query=${PARENT}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-f', `head=${from}`, '-f', `base=${to}`]);
       const nodes = JSON.parse(out).data?.repository?.pullRequests?.nodes;
       if (!Array.isArray(nodes)) throw new Error('the merged pull requests of the old base are unreadable');
       const parent = nodes
