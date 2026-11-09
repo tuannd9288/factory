@@ -12,12 +12,12 @@
 //     as a position; the gate ruleset's two review parameters are whatever the Human set, never a difference from the kit's;
 //   - each line names what it read, and the end lists every gh call that ran.
 // The repository's files come from git objects of a bare clone in the system's temporary folder, removed at the end:
-// nothing the repository holds runs. DOCTOR_CLONE_URL (an absolute local folder, for tests) replaces the clone's URL.
+// nothing the repository holds runs.
 // See bin/onboard-doctor for the arguments. Exit 0 when every line is green, 1 when any is red, 2 on a refusal.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_BYTES, MAX_LINES, carrierProblems, countLines, entryIn, sizeProblems, splitGate } from '../../kit/.gate/bin/lib/instructions.mjs';
 import { SETTINGS, TRUSTED, runnerProblems } from './gate-settings.mjs';
@@ -71,20 +71,9 @@ function listCalls(login, what) {
 }
 let asLogin;
 
-/** Where the repository is cloned from: its URL on GitHub, through gh's own credential helper, unless DOCTOR_CLONE_URL
- * names a local folder as an absolute path. Anything else that variable holds is a refusal and not a fallback. */
-function cloneSource(slug) {
-  const given = process.env.DOCTOR_CLONE_URL;
-  if (given === undefined || given === '') return { url: `https://github.com/${slug}.git`, options: ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'] };
-  let folder = false;
-  try {
-    folder = isAbsolute(given) && statSync(given).isDirectory();
-  } catch {
-    folder = false;
-  }
-  if (!folder) throw new Refusal(`DOCTOR_CLONE_URL must be an absolute path to a local folder, and is only for tests; it is ${JSON.stringify(given)}`);
-  return { url: given, options: [] };
-}
+/** Where the repository is cloned from: its URL on GitHub, through gh's own credential helper. A test points it at a local folder
+ * with git's own url.<folder>.insteadOf. */
+const cloneSource = (slug) => ({ url: `https://github.com/${slug}.git`, options: ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'] });
 
 const regular = (entry) => Boolean(entry) && REGULAR.includes(entry.mode);
 const reasons = (list) => list.join('; ');
@@ -261,7 +250,7 @@ function main(argv) {
   const folder = mkdtempSync(join(tmpdir(), 'doctor-'));
   try {
     const clone = join(folder, 'repo.git');
-    if (!process.env.DOCTOR_CLONE_URL) calls.add(`git clone ${source.url}, read with ${login}'s credentials, through gh auth git-credential`);
+    calls.add(`git clone ${source.url}, read with ${login}'s credentials, through gh auth git-credential`);
     const cloned = git([...source.options, 'clone', '--quiet', '--bare', '--no-tags', source.url, clone]);
     if (cloned.status !== 0) throw new Refusal(`could not clone ${slug}: ${cloned.stderr.trim().split('\n')[0]}`);
     const rev = `refs/heads/${branch}`;

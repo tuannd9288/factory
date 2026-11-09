@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { OWN_PROCESS } from './helpers.mjs';
 import { skipPs } from './ps-skip.mjs';
 import { SEAT_JS, until, world } from './seat-world.mjs';
 
@@ -40,7 +41,7 @@ const listings = (...lists) => {
   return () => lists[Math.min(i++, lists.length - 1)];
 };
 
-test('a count that lists the folder just before a start hands off its claim to its run counts that run', { skip: skipPs }, async () => {
+test('a count that lists the folder just before a start hands off its claim to its run counts that run', async () => {
   const { liveRuns } = await import('../bin/lib/seat.mjs');
   await world(async (w) => {
     const run = join(w.root, 'handoff');
@@ -49,14 +50,14 @@ test('a count that lists the folder just before a start hands off its claim to i
     writeFileSync(join(run, 'run-a.seat'), '2\n');
     // The first listing has a's claim, whose files are gone by the time they are read; the second has a's run.
     const claim = join(run, 'run-a.claim.pid');
-    assert.equal(liveRuns(w.runs, listings([claim], [join(run, 'run-a.pid')])), 1);
+    assert.equal(liveRuns(w.runs, { list: listings([claim], [join(run, 'run-a.pid')]), ps: OWN_PROCESS }), 1);
   });
 });
 
 test('a count whose listing changes every time it is taken is Infinity, not a number', async () => {
   const { liveRuns } = await import('../bin/lib/seat.mjs');
   let n = 0;
-  assert.equal(liveRuns('/nowhere', () => [`/nowhere/run-${n++}.pid`]), Infinity);
+  assert.equal(liveRuns('/nowhere', { list: () => [`/nowhere/run-${n++}.pid`] }), Infinity);
 });
 
 // An ended run: a dead pid, its seat, and a log whose last rate_limit_event has status (its windows reset in an hour, the

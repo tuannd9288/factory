@@ -506,7 +506,7 @@ function sweepLanded(state) {
   try {
     const runs = runsOf();
     // A worktree is held when a live run's folder is its parent: the run files of that folder alone are listed.
-    const live = (path) => liveRuns(runs, (dir, ext) => runFiles(dir, ext).filter((f) => path.startsWith(`${dirname(f)}/`)));
+    const live = (path) => liveRuns(runs, { list: (dir, ext) => runFiles(dir, ext).filter((f) => path.startsWith(`${dirname(f)}/`)) });
     const own = ownRepo(root);
     const clones = [...(own ? [{ repo: own, dir: root }] : []), ...[...clonesUnder(root)].map(([repo, dir]) => ({ repo, dir }))];
     const r = sweepWorktrees({ clones, state, live, merged });

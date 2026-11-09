@@ -314,16 +314,16 @@ function main(argv, env) {
   }
   const rolePath = join(root, 'packs/pstack/lead.md');
   const stateDir = resolve(stateDirOf(env));
+  const runs = runsOf(env);
   let linear;
   try {
-    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), newTeam: flags.includes('--new-team') });
+    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs, newTeam: flags.includes('--new-team') });
     linear = onLinear(repo, stateDir);
   } catch (e) {
     // A registry that does not parse would give every repository the GitHub form without a word: no start instead.
     process.stderr.write(`bin/lead: ${e.message}\n`);
     return 2;
   }
-  const runs = runsOf(env);
   const roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat: join(root, 'bin/seat'), runs }) : '';
   if (!roleText.trim()) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);

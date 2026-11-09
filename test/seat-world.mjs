@@ -44,7 +44,7 @@ process.stdin.on('end', () => {
     parentHasToken: parent.includes('CLAUDE_CODE_OAUTH_TOKEN'), parentSeen: parent.includes('PATH='),
     env: { gh: e.GH_CONFIG_DIR, config: e.CLAUDE_CONFIG_DIR, token: e.CLAUDE_CODE_OAUTH_TOKEN ?? null, spec: e.FACTORY_SEAT_SUPERVISE ?? null,
       GH_TOKEN: 'GH_TOKEN' in e, GITHUB_TOKEN: 'GITHUB_TOKEN' in e, ANTHROPIC_API_KEY: 'ANTHROPIC_API_KEY' in e, ANTHROPIC_AUTH_TOKEN: 'ANTHROPIC_AUTH_TOKEN' in e,
-      pluginCache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null, sandbox: e.FACTORY_SANDBOX ?? null, clones: e.FACTORY_RESEARCH_CLONES ?? null,
+      pluginCache: e.CLAUDE_CODE_PLUGIN_CACHE_DIR ?? null, scrub: e.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null, clones: e.FACTORY_RESEARCH_CLONES ?? null,
       author: [e.GIT_AUTHOR_NAME, e.GIT_AUTHOR_EMAIL, e.GIT_COMMITTER_NAME, e.GIT_COMMITTER_EMAIL],
       // What a test's gate_prepare wrote to PREP_OUT before this session started (FAC-108).
       prepOut: e.PREP_OUT && fs.existsSync(e.PREP_OUT) ? fs.readFileSync(e.PREP_OUT, 'utf8') : null } }));

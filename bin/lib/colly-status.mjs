@@ -13,6 +13,7 @@ import { hookStateOf, parseLog } from './claude-code.mjs';
 import { REQUIRED } from './ledger.mjs';
 import { readSessions } from './records.mjs';
 import { byName, cloneRepo, clonesUnder } from './repos.mjs';
+import { PS } from './ps.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 
@@ -78,17 +79,13 @@ export function etimeMs(text) {
 
 /** The processes as { pid, ageMs, command }, from ps; throws when ps is not here or cannot run (the events step needs to tell that
  * from no process). */
-export function readProcesses(paths = ['/bin/ps', '/usr/bin/ps']) {
-  for (const ps of paths) {
-    if (!existsSync(ps)) continue;
-    return execFileSync(ps, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
-      .split('\n')
-      .flatMap((l) => {
-        const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
-        return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
-      });
-  }
-  throw new Error('ps is not on this host');
+export function readProcesses() {
+  return execFileSync(PS, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
+    .split('\n')
+    .flatMap((l) => {
+      const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
+      return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
+    });
 }
 
 /** The same, with [] when ps cannot run: what the view shows. */
@@ -314,11 +311,13 @@ const firstLine = (e) => String(e.stderr || e.message || e).trim().split('\n')[0
 const NET = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 
 /** The claims on a repository as `claim --list` reads them: the tip of each refs/heads/claim/<n>, by its subject. The URL is
- * built from the repository's name alone (`url` is for tests), never asked of a clone, whose config a worker can write. Every
- * git call runs in a bare repository of the view's own, `<state>/top/<owner>-<name>.git`, made on first use, so that only its
- * config applies and nothing is written into a clone or the folder the view runs from; `--` ends the options before the URL. */
-export async function readClaims(repo, state, { url = `https://github.com/${repo}.git` } = {}) {
+ * built from the repository's name alone, never asked of a clone, whose config a worker can write; a test points it at a local
+ * folder with git's own url.<folder>.insteadOf. Every git call runs in a bare repository of the view's own,
+ * `<state>/top/<owner>-<name>.git`, made on first use, so that only its config applies and nothing is written into a clone or the
+ * folder the view runs from; `--` ends the options before the URL. */
+export async function readClaims(repo, state) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error(`not owner/name: ${JSON.stringify(repo)}`);
+  const url = `https://github.com/${repo}.git`;
   const git = async (cwd, ...a) => (await run('git', ['-C', cwd, ...a], { encoding: 'utf8', timeout: CALL_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })).stdout.trim();
   const top = join(state, 'top');
   const cache = join(top, `${repo.replace('/', '-')}.git`);
