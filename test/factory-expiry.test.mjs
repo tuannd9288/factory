@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { accountsText } from '../bin/lib/factory.mjs';
+import { tokenState } from '../bin/lib/factory.mjs';
 
 test('account list derives expiry from the added date and warns at seven days and after expiry', () => {
   const agentProfiles = mkdtempSync(join(tmpdir(), 'factory-expiry-'));
@@ -18,7 +18,7 @@ test('account list derives expiry from the added date and warns at seven days an
       const sidecar = join(tokens, '.fixture.added');
       if (added === null) rmSync(sidecar, { force: true });
       else writeFileSync(sidecar, `${added}\n`);
-      const text = accountsText([], [{ name: 'fixture', letter: 'a' }], { agentProfiles, now: Date.parse(now) }).join('\n');
+      const text = tokenState(agentProfiles, 'fixture', Date.parse(now)).note;
       assert.ok(!text.includes(secret));
       return text;
     };

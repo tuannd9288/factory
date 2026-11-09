@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The one command for the Human's agent accounts (#177; its list is #173's).
-#   factory account list [--all] [--json]       every agent profile's login, account and plan in a table, each account's quota in a second one; on the Mac mini
-#                                  the rows are the teams, numbered and the accounts lettered, with 5h, 7d, reset and the rows that share each (#178)
+#   factory account list [--all] [--json]  one block for each machine, this one first: its rows, numbered on that machine, each with its account by
+#                                  name, how it stands (works, out until a reset, no token, token ends, not logged in) and its 5h and 7d use; the accounts it
+#                                  holds; then WHAT TO RUN, the lines to type on this machine, each saying whether it needs a browser login (#178, FAC-117)
 #   factory account add <account> [--node <node>] [--no-setup]   runs `claude setup-token`, takes the token from a hidden prompt, stores it
 #   factory store <account>        on this node: reads one token from stdin and stores it (what account add runs over ssh)
 #   factory use [--node <node>] [<row|repo-team> [<letter>]]  the row's account in the accounts file of the node the team runs on becomes the
@@ -22,10 +23,11 @@
 #                                  and exit code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
 #                                  --body-file, --notes-file, --env-file, --input, --field or -F (pass it on stdin: --body-file -, -F name=@-,
 #                                  --input -); on the Mac mini it runs gh itself (#349); with the agents' GitHub token in this node's own
-#                                  token store, gh runs here with it, refusing only the gh auth commands above (#366)
+#                                  token store, gh runs here with it, refusing only the gh auth commands above (#366); by ssh,
+#                                  --body-file <file> is read here and sent on stdin (FAC-79)
 #   factory linear <verb> ...      a Lead's steps on a repository on Linear (#404; bin/lib/linear-cli.mjs has the verbs): take, release, read, list, comment, ask,
 #                                  answered, create and onboard, as the Factory app; one JSON object on stdout, exit 0, 1 (Linear refused) or 2 (usage); a
-#                                  body comes on stdin (--body-file -); it runs on a node whose own token store holds the Factory app's credentials,
+#                                  body comes on stdin (--body-file -) or as a file, read here and sent on stdin (FAC-79); it runs on a node whose own token store holds the Factory app's credentials,
 #                                  else on the Mac mini by ssh, stdin kept; Colly's decision-create and decision-close always run on the Mac mini
 #   factory codex --role <role> [--effort <e>] [--write <folder>]  a pstack step that asks for another model family, on Codex on the verifier's
 #                                  profile, never on Claude (#182; packs/pstack/bin/codex-step.mjs has the roles and the rest): the brief on stdin,
@@ -35,12 +37,23 @@
 #                                  the issue (the message itself is a comment there) and types nothing into its pane; on the Mac mini it posts to the socket
 #                                  its hook recorded in ~/factory-runs/<repo>-<team>/socket; on the MacBook to the socket `lead --here` recorded when that
 #                                  team's Lead runs there, else the same command runs on the Mac mini by ssh; exit 0 posted, 1 not posted (with the reason), 2 usage
+#   factory events --follow [--local] [--after <seq>]  Colly's Monitor on the events (FAC-79): from the MacBook, bin/factory-events --follow on the Mac
+#                                  mini by ssh; with --local, on this MacBook's share; only these words, each once, and --after a whole number
+#   factory ship [<ship's arguments>] | factory pr-body <n> <file>  the --here Lead's ship and pr-body (FAC-79): the pack's scripts/ship or
+#                                  scripts/pr-body beside this command, run in the working folder outside the Lead's sandbox with this node's
+#                                  agents login; only in a clone of tuannd9288/factory, read from the folder's origin with the caller's GIT_*
+#                                  and GH_* variables dropped, and gh held to that repository; git with no hooks, no fsmonitor, no lazy fetch
+#                                  and https alone; exit 2 refused, else the script's code; no pacing of its own (FAC-109)
 #   factory account remove <account>       on this node: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
 # it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes each account's quota from the run logs of its sessions. On the
 # MacBook a plain run is --all (still accepted; refused on the host), and its spare Claude rows are the ~/.claude-acc<N> folders that exist. --all
 # adds the factory rows and the piggery rows over ssh to the Mac mini. --json prints the rows as one JSON line.
-# A row that is not logged in shows its login command; the Human runs it. The profiles are committed in lib/factory.mjs, with no
+# A row that does not work has its lines in WHAT TO RUN, as typed on the machine the list runs on: `--node` where a line acts on the other
+# machine (from the MacBook a row number goes to the Mac mini, and account add stores where it runs), and an ssh line before a login that
+# runs on the Mac mini; the Human runs them. Times are this machine's local time with its offset (timeText in lib/factory.mjs). An account
+# is one quota on every machine: each row of it shows its newest reading, and Claude Code's refusal as the Mac mini's runs recorded it;
+# a MacBook Lead's status line carries no refusal. The profiles are committed in lib/factory.mjs, with no
 # account name; the account of a profile is in $FACTORY_STATE/accounts (default ~/.local/state/factory/accounts), one
 # "<profile>=<name>" a line, local to the machine, mode 600: on the Mac mini the one source of a row's account. Only `use` changes it,
 # run by the Human or Colly on his spoken word (INN-30, 2026-11-05).
@@ -48,10 +61,11 @@
 # Tokens are stored at ~/.agent-profiles/tokens/<account> (mode 600, in a folder of mode 700); only the Human runs account add (bin/install-factory
 # puts this command on his PATH, as a symlink into the machine's installed copy of the factory, which follows main and is followed here, #390).
 # On the Mac mini the table is the numbered rows (one for each team $FACTORY_STATE/accounts names, factory/<repo>-<team> of an
-# onboarded repository or of `factory`, sorted; no seat row; the verifier) and the lettered accounts (every account the file
-# names and every file of ~/.agent-profiles/tokens/, read by name and by mode and date only), each with its 5h, 7d, reset, the
-# rows that share it, and `?` where no run of the account reported; a row whose account has no token file is red with the line to
-# run. $FACTORY_STATE/accounts (<profile>=<account> a line, mode 600, written through a temporary file and a rename) is the one
+# onboarded repository or of `factory`, sorted; no seat row; the verifier) and its accounts by name (every account the file
+# names and every file of ~/.agent-profiles/tokens/, read by name and by mode and date only), each with how it stands, its 5h, 7d,
+# reset, the rows on it, and `?` where no run of the account reported; a row that does not work is red, with its lines in WHAT TO
+# RUN. An account's letter, which `use` takes, shows only inside a `factory use` line, beside its name (FAC-117).
+# $FACTORY_STATE/accounts (<profile>=<account> a line, mode 600, written through a temporary file and a rename) is the one
 # source of a row's account (#178). `factory use <row> <letter>` rewrites it (from the MacBook, `use` runs on the Mac
 # mini over ssh, its arguments checked first, `ssh -t` when `use` lacks one, unless the row is a <repo>-<team> of the MacBook's own
 # accounts file or --node macbook is given: then it writes the MacBook's file, its letters are the MacBook's own token files, and
@@ -80,8 +94,8 @@
 # It warns within seven days of expiry and when expired; tokens without an added date show "expiry unknown".
 # Dates are UTC; a February 29 anniversary becomes February 28. Replacing a token updates its added date; remove archives both.
 # Only the Human runs account add, account remove and store; Colly may run use and lead (INN-30) and account list, which prints no token
-# (#365). Seats and Leads deny add, remove, store and use. On the MacBook account list also shows its own teams, each account's letter
-# (a spare's too) and the quota each MacBook Lead's status line last showed (#365 B5).
+# (#365). Seats and Leads deny add, remove, store and use. On the MacBook account list also shows its own teams, its accounts (a spare's
+# too, and the agents' GitHub token named as one) and the quota each MacBook Lead's status line last showed (#365 B5).
 # The old login/logout verbs refuse in one line naming account add/remove; the old table invocation names account list.
 # `factory lead`: the team is a letter then at most 31 lowercase letters and digits, chosen from the existing teams or the nickname list, and is the team of its
 # claims and pull requests; on the Mac mini it runs packs/pstack/bin/lead, on the MacBook it runs that by ssh (the start is

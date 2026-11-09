@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { APP, commit, factory, git, quiet, run, write } from './helpers.mjs';
+import { APP, commit, factory, git, insteadOf, quiet, run, write } from './helpers.mjs';
 import { wanted } from '../bin/lib/owner.mjs';
 import { TRUSTED } from '../bin/lib/gate-settings.mjs';
 
@@ -167,7 +167,7 @@ function doctor({ held, url = target, bin = fac, args = ['tuannd9288/app', '--id
   const r = spawnSync(join(bin, 'bin/onboard-doctor'), args, {
     encoding: 'utf8',
     timeout: 240_000,
-    env: { ...process.env, ...quiet, PATH: `${fake}:${process.env.PATH}`, GH_STATE: join(work, 'state.json'), GH_CALLS: join(work, 'calls'), GH_TOKEN: FAKE_TOKEN, DOCTOR_CLONE_URL: url, TMPDIR: tmp, ...env },
+    env: { ...process.env, ...insteadOf(url, `https://github.com/${args[0]}.git`), PATH: `${fake}:${process.env.PATH}`, GH_STATE: join(work, 'state.json'), GH_CALLS: join(work, 'calls'), GH_TOKEN: FAKE_TOKEN, TMPDIR: tmp, ...env },
   });
   const out = `${r.stdout}${r.stderr}`;
   const lines = Object.fromEntries(LABELS.map((label) => [label, out.split('\n').find((l) => new RegExp(`^\\S+\\s+${label}\\s`).test(l))]));
@@ -391,13 +391,6 @@ test('it refuses what onboard-owner refuses: the agents\' login, another id, a r
   assert.equal(refused({ repo: { ...held.repo, full_name: 'tuannd9288/renamed' } }).code, 2);
   assert.equal(refused({ repo: { ...held.repo, permissions: { admin: false } } }).code, 2);
   assert.equal(refused({}).code, 0);
-});
-
-test('DOCTOR_CLONE_URL takes only an absolute local folder', () => {
-  for (const url of ['relative/app.git', 'https://example.invalid/app.git', join(dir, 'missing.git')]) {
-    const r = doctor({ held: state(kitMerge), url });
-    assert.equal(r.code, 2, `${url}: ${r.out}`);
-  }
 });
 
 test('settings: a line red with many calls left prints every call whole, over more lines, none cut', () => {

@@ -8,7 +8,8 @@ There is no `.gate/pack` and no `--pack`. Run from the repository's root, with t
 checkout at `$FACTORY`, in a branch, and open the pull request: `scripts/`, `.gate/` and `.claude/` are tier 3.
 
 1. `mkdir -p scripts/lib && cp -p $FACTORY/packs/pstack/scripts/ship $FACTORY/packs/pstack/scripts/pr-body scripts/ && cp -p
-   $FACTORY/packs/pstack/scripts/lib/ship.mjs scripts/lib/`. A `scripts/` the repository already has keeps its other files.
+   $FACTORY/packs/pstack/scripts/lib/ship.mjs $FACTORY/packs/pstack/scripts/lib/ship-review.mjs scripts/lib/`. A `scripts/` the
+   repository already has keeps its other files.
 2. Append the row of `enforced-rules.rows.md` to `.gate/enforced-rules.md`.
 3. Add what `section.md` says to the repository's own `AGENTS.md`, after the Gate block, within 150 lines and 32 KiB.
    A repository already near the limit shortens its own rules first, through the Human's rule audit; the pack is not

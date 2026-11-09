@@ -61,8 +61,8 @@
 # worker's and the reviewer's Bash runs in Claude Code's sandbox (#183), set in the one --settings value they get: it
 # denies reading the paths no agent reads that a sandbox takes (bin/lib/deny-read.mjs) and the profiles folder, allows
 # writes to the work folder, the run folder, the temporary folder, each `--add-dir` and Claude Code's own session temporary
-# folder (its defaults), and allows no network, and a sandbox that cannot start ends the session. bin/seat sets FACTORY_SANDBOX=1
-# in such a session, which the tests read to skip those that need `ps`, which the sandbox refuses. The `Read` tool, the hooks and
+# folder (its defaults), and allows no network, and a sandbox that cannot start ends the session. The sandbox refuses `ps`, so
+# the tests that need it skip there, but never where CI is set (test/ps-skip.mjs). The `Read` tool, the hooks and
 # the MCP servers run outside it, so every seat and role also keeps the list's Read rules, the tokens folder, the archive folder and
 # seat 1's old file among them. The researcher is not in the sandbox.
 # The researcher reads untrusted pages and can send them out, and since #178 its seat 2 holds a token too; while
@@ -71,7 +71,7 @@
 # deny rules refuse on the tokens, the archive and the whole `~/.agent-profiles/`, and `research-git` reads only its own clones;
 # the token is in claude's environment alone, which the scrub keeps from every command. It has no `node`, `cp`, `sed` or `git`.
 # Before the session (FAC-108, the Human on INN-51), after the plugins, bin/seat runs main's `gate_prepare` in the work folder,
-# outside the sandbox and with the network, with the session's environment less every ANTHROPIC_* and FACTORY_SANDBOX, for ten
+# outside the sandbox and with the network, with the session's environment less every ANTHROPIC_*, for ten
 # minutes at most; its output is `run-<tag>.prepare.log` in the run folder. Main is the commit the Lead names with `--main`, read
 # from GitHub with the repository named (packs/pstack/lead.md step 2), never a ref of the clone, whose refs, config, objects and
 # index a seat can write; each object is read with its hash checked against its id, with no transport and no lazy fetch. The

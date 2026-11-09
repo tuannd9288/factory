@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { onLinear } from '../../../bin/lib/linear-repos.mjs';
 import { TEAM, firstFree } from '../../../bin/lib/names.mjs';
+import { profilesOf, runsOf, stateDirOf } from '../../../bin/lib/node.mjs';
 import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
@@ -37,8 +38,10 @@ const RUNS_TOKEN = '{{RUNS}}'; // in lead.md: the absolute runs folder, whose pa
 
 /** lead.md for one Lead: the form of its repository, its team, its Linear team key, the bin/seat its grant names and its runs folder.
  * With no `seat` (a MacBook Lead that does not run as the agents' user, #366) it takes the <!--noseat--> form, which starts no seat, and
- * names no bin/seat. Each value goes in as written (a function replacement, so no `$` in a path is read as a pattern). */
-export const roleFor = (text, { linear, team, seat = null, runs }) => formOf(roleOf(text, Boolean(linear)), seat ? 'seat' : 'noseat', seat ? 'noseat' : 'seat')
+ * names no bin/seat. With `here` (a `factory lead --here` Lead, whose shell runs in a sandbox, FAC-79) it takes the <!--here--> form, else the
+ * <!--nohere--> one. Each value goes in as written (a function replacement, so no `$` in a path is read as a pattern). */
+export const roleFor = (text, { linear, team, seat = null, runs, here = false }) => formOf(formOf(roleOf(text, Boolean(linear)), seat ? 'seat' : 'noseat', seat ? 'noseat' : 'seat'),
+  here ? 'here' : 'nohere', here ? 'nohere' : 'here')
   .replaceAll(TEAM_TOKEN, () => team).replaceAll(TEAM_KEY_TOKEN, () => linear?.key ?? '').replaceAll(SEAT_TOKEN, () => seat ?? '').replaceAll(RUNS_TOKEN, () => runs);
 
 /** The text with each span of `drop` taken out, markers included (a span that starts a line takes its line break with it), and the markers
@@ -93,7 +96,7 @@ function newestSession(dir) {
 const allowOf = (root) => [
   'Read', 'Glob', 'Grep', 'Write', 'Edit',
   'Bash(git fetch:*)', 'Bash(git worktree:*)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)',
-  'Bash(git rev-parse:*)', 'Bash(git branch:*)', 'Bash(git push -u origin HEAD)',
+  'Bash(git rev-parse:*)', 'Bash(git branch:*)', 'Bash(git push origin HEAD)',
   'Bash(cd:*)', 'Bash(ls:*)', 'Bash(mkdir:*)',
   'Bash(.gate/bin/claim:*)', 'Bash(.gate/bin/tier:*)', 'Bash(.gate/bin/verify:*)', 'Bash(.gate/bin/red-check:*)',
   'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
@@ -119,12 +122,12 @@ export const findNode = (PATH) => which('node', PATH);
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop', 'SessionEnd'];
 
 /** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
- * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-<team>/
- * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
- * exec bit. */
-export function leadArgs({ repo, team, home, root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
+ * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to
+ * <runs>/<repo>-<team>/transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script
+ * needs no exec bit. runs is the runs folder (runsOf, bin/lib/node.mjs), ~/factory-runs unless FACTORY_RUNS names another. */
+export function leadArgs({ repo, team, home, runs = join(home, 'factory-runs'), root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
   const cwd = join(root, repo);
-  const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
+  const hook = [node, hookScript, join(runs, `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
   return {
     cwd,
@@ -134,7 +137,7 @@ export function leadArgs({ repo, team, home, root, roleText, node, resume = null
       '--model', 'opus', '--effort', 'high',
       '--append-system-prompt', roleText,
       '--permission-mode', 'auto',
-      '--add-dir', join(home, 'factory-runs'),
+      '--add-dir', runs,
       '--name', `${repo}-${team}`,
       '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: { ...Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])), PreToolUse: pushHook(false, node) } }),
       // The prompt argument goes right after the id: --allowedTools and --disallowedTools take every word up to the next option.
@@ -310,23 +313,24 @@ function main(argv, env) {
     return 2;
   }
   const rolePath = join(root, 'packs/pstack/lead.md');
-  const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  const stateDir = resolve(stateDirOf(env));
+  const runs = runsOf(env);
   let linear;
   try {
-    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), newTeam: flags.includes('--new-team') });
+    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs, newTeam: flags.includes('--new-team') });
     linear = onLinear(repo, stateDir);
   } catch (e) {
     // A registry that does not parse would give every repository the GitHub form without a word: no start instead.
     process.stderr.write(`bin/lead: ${e.message}\n`);
     return 2;
   }
-  const roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat: join(root, 'bin/seat'), runs: resolve(env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs')) }) : '';
+  const roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat: join(root, 'bin/seat'), runs }) : '';
   if (!roleText.trim()) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;
   }
   // No row, no start: the Lead runs on a row's token, never on a login (the Human, 2026-11-01).
-  const state = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  const state = stateDir;
   const row = `factory/${repo}-${team}`;
   const account = readAccounts(state)[row] ?? null;
   if (!account) {
@@ -337,7 +341,7 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: the account of ${row} is not a plain account name\n`);
     return 2;
   }
-  const runDir = join(env.HOME, 'factory-runs', `${repo}-${team}`);
+  const runDir = join(runs, `${repo}-${team}`);
   const transcripts = join(runDir, 'transcripts');
   const earlier = flags.includes('--new') ? null : newestSession(transcripts);
   const resume = earlier?.id ?? null;
@@ -361,10 +365,10 @@ function main(argv, env) {
     return 2;
   }
   const hookScript = hookPath({ root, runDir });
-  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, root, roleText, node, resume, message, sessionId, hookScript });
+  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, runs, root, roleText, node, resume, message, sessionId, hookScript });
   const wanted = enabledPlugins(readSettings(cwd));
   // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
-  const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
+  const profiles = resolve(profilesOf(env));
   let config;
   let pluginRoot;
   try {
@@ -377,7 +381,7 @@ function main(argv, env) {
   }
 
   if (flags.includes('--dry-run')) {
-    const shown = leadArgs({ repo, team, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', sessionId: sessionId && '<new session id>', hookScript }).argv;
+    const shown = leadArgs({ repo, team, home: env.HOME, runs, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', sessionId: sessionId && '<new session id>', hookScript }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
     process.stdout.write(`plugin root: ${pluginRoot}\n`);

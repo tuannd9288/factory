@@ -46,6 +46,7 @@ import { redact } from './redact.mjs';
 import { accountEvent, accountOut } from './seat.mjs';
 import { quotaRows, alertLines } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
+import { AGENTS_USER, rootOf, stateDirOf } from './node.mjs';
 import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
 import { clearFailed, markFailed } from './status.mjs';
 
@@ -55,7 +56,7 @@ export const NOT_STARTED_MS = 30 * 60_000;
 
 const STARTED = new Set(['IN_PROGRESS', 'COMPLETED']);
 const HUMAN = new Set(['tier-3', 'needs-human']);
-const stateDir = () => process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+const stateDir = () => stateDirOf();
 
 /** The first non-empty line of a text, redacted, with its control characters gone, at most 200 characters. */
 export const oneLine =(text) => redact(String(text).split('\n').find((l) => l.trim()) ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
@@ -230,7 +231,7 @@ export function shareRefusal(st, what, owners) {
 /** The uids a reader of a share accepts as its owner: this user's, and the agents' user's (FACTORY_HOST_USER, else `factory`) where this machine
  * has that user. */
 export function ownersOf(env = process.env) {
-  const r = spawnSync('id', ['-u', env.FACTORY_HOST_USER || 'factory'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const r = spawnSync('id', ['-u', env.FACTORY_HOST_USER || AGENTS_USER], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   const agents = r.status === 0 ? Number(r.stdout.trim()) : NaN;
   return [process.getuid(), ...(Number.isInteger(agents) ? [agents] : [])];
 }
@@ -425,8 +426,9 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
 /** `factory-events [--follow] [--after <seq>]`: the start lines after the cursor (or after <seq>, which the reader says it got as far
  * as, in place of the cursor), one JSON line each. Without --follow it prints them and leaves the cursor; with it, a line moves the
  * cursor only once its write succeeded, lines go out one at a time, and the file is followed. It never prints a clear line. A cursor
- * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. */
-function main(argv) {
+ * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. A claim that failed
+ * is tried again after retryMs, which only a test passes (the command takes none). */
+export function main(argv, { retryMs = 60_000 } = {}) {
   let follow = false;
   let news = false;
   let newest = false;
@@ -485,7 +487,6 @@ function main(argv) {
   let offset = 0;
   let partial = '';
   const pending = [];
-  const retryMs = Number(process.env.FACTORY_EVENTS_RETRY_MS) || 60_000;
   let writing = false;
   // One line at a time; the cursor moves in the write's callback, and only when the write succeeded.
   const pump = () => {
@@ -497,7 +498,7 @@ function main(argv) {
     let holder;
     try {
       holder = event.kind !== 'inn-answer' || claimJob(
-        process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '../..'),
+        rootOf(),
         state, 'inn-answer', Buffer.from(event.key.slice('inn-answer '.length)).toString('hex'), console.error,
       );
     } catch {

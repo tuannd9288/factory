@@ -12,9 +12,11 @@ import { RATE_LIMIT_LINE, keptEvent, rateReadingOf, resultOf } from './claude-co
 import { ask, socketPath } from './daemon-proto.mjs';
 import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
+import { which } from './launchd.mjs';
 import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
 import { COMMIT, PrepareError, markSession, prepareWork } from './prepare.mjs';
+import { PROCESSES } from './ps.mjs';
 import { readSessions } from './records.mjs';
 import { githubRepo, repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
@@ -41,7 +43,8 @@ export const SCHEMA = {
 // The researcher's only git (#181).
 export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta.url));
 
-/** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get. It covers Bash
+/** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get; bin/lib/factory.mjs builds the MacBook
+ * Lead's and Colly's on it, with their own writes, hosts and excluded commands (FAC-79 (b)). It covers Bash
  * only: the Read tool, the hooks and the MCP servers run outside it, so the Read denies stay permission rules. Paths are absolute
  * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
  * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. What it denies is bin/lib/deny-read.mjs's sandbox
@@ -174,42 +177,26 @@ const seatOf = (file) => {
   }
 };
 
-// The uid and start time of a process, from ps (the kernel's own record, which no launcher can change; argv it can). lstart has
-// one-second precision. ps is by absolute path, since a test's PATH holds no /bin. A failed ps, or no process, is null.
-function processInfo(pid) {
-  for (const ps of ['/bin/ps', '/usr/bin/ps']) {
-    if (!existsSync(ps)) continue;
-    try {
-      const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(execFileSync(ps, ['-o', 'uid=,lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' },stdio: ['ignore', 'pipe', 'ignore'] }));
-      const started = m ? Date.parse(m[2]) : NaN;
-      return Number.isNaN(started) ? null : { uid: Number(m[1]), started };
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
 /** Whether pid is a live session that wrote a file at fileMs: a process of this user (never pid 1, nor another user's), that
  * started no later than the file was written, give or take a second; a later start is a pid the system gave again. A pid no process
- * has (kill 0 says ESRCH) is not live and costs no ps; any other answer, EPERM included, goes on to ps. info and kill are the seams
- * a test counts the calls through. */
-export const alive = (pid, fileMs, info = processInfo, kill = (p, s) => process.kill(p, s)) => {
+ * has (signal 0 says ESRCH) is not live and costs no ps; any other answer, EPERM included, goes on to ps. ps is the process lister
+ * (bin/lib/ps.mjs). */
+export const alive = (pid, fileMs, ps = PROCESSES) => {
   try {
-    kill(pid, 0);
+    ps.signal(pid);
   } catch (e) {
     if (e.code === 'ESRCH') return false;
   }
-  const p = info(pid);
+  const p = ps.info(pid);
   return p !== null && p.uid === process.getuid() && p.started <= fileMs + 1000;
 };
 
 // An empty or non-numeric pid file is no live session (process.kill(0, 0) would succeed for it).
 // A file that goes away meanwhile (a start backing off removes its claim) is no live session either.
-function filePidAlive(file) {
+function filePidAlive(file, ps) {
   try {
     const text = readFileSync(file, 'utf8').trim();
-    return /^[1-9][0-9]*$/.test(text) && alive(Number(text), statSync(file).mtimeMs);
+    return /^[1-9][0-9]*$/.test(text) && alive(Number(text), statSync(file).mtimeMs, ps);
   } catch {
     return false;
   }
@@ -217,7 +204,7 @@ function filePidAlive(file) {
 
 /** Whether a run is live: its pid file's process (the supervisor, or the claude of an old launcher) or the session the
  * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
-export const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
+export const runLive = (pidFile, ps = PROCESSES) => filePidAlive(pidFile, ps) || filePidAlive(pidFile.replace(/\.pid$/, '.child'), ps);
 
 /** The names in use (#286): those of the runs that are live, a start's claim included, and every Lead's, which it holds for as long as
  * its file ~/factory-runs/<repo>-<team>/name exists (#196). With the state folder, also the names of the sessions.jsonl records that ended on
@@ -244,21 +231,22 @@ export const nameOfSession = (state, session) => readSessions(state).findLast((r
  * the folders never held still. The count is taken between two listings of the .pid files, claims included, and is made again when
  * they differ. A start's hand-off removes run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the
  * listing, so none can finish between two equal listings; one seen half done counts that start twice at worst. list is the
- * listing, passed in so a test can force the interleaving. */
-export function liveRuns(runs, list = runFiles) {
-  return countLive(runs, () => true, list);
+ * listing: the queue's sweep passes one of a single folder's run files, and a test one that forces the interleaving. ps is the
+ * process lister (bin/lib/ps.mjs). */
+export function liveRuns(runs, { list = runFiles, ps = PROCESSES } = {}) {
+  return countLive(runs, () => true, list, ps);
 }
 
 /** How many runs of an account have a live process (#311), counted as liveRuns does. A run with no .account file counts under the
  * account its seat's old row names (seatRows, { seat: account }) while that row is in the file, as accountEvent reads it. */
-export function liveOfAccount(runs, account, seatRows = {}, list = runFiles) {
-  return countLive(runs, (p) => accountOf(p, seatRows) === account, list);
+export function liveOfAccount(runs, account, seatRows = {}, ps = PROCESSES) {
+  return countLive(runs, (p) => accountOf(p, seatRows) === account, runFiles, ps);
 }
 
-function countLive(runs, keep, list) {
+function countLive(runs, keep, list, ps) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const before = list(runs, '.pid').sort();
-    const n = before.filter((p) => keep(p) && runLive(p)).length;
+    const n = before.filter((p) => keep(p) && runLive(p, ps)).length;
     if (before.join('\n') === list(runs, '.pid').sort().join('\n')) return n;
   }
   return Infinity;
@@ -384,8 +372,6 @@ function readToken(path, seat, account) {
   if (r.error) throw new Refused(`seat ${seat}: the token file ${path} is empty or not printable ASCII`);
   return r.token;
 }
-
-const onPath = (name, PATH) => (PATH ?? '').split(':').some((d) => d && existsSync(join(d, name)));
 
 /** Starts a session in the background and returns what to print. The session runs under a detached supervisor of this
  * file, which waits for it and appends its record; the supervisor's pid is the one in run-<tag>.pid. */
@@ -515,9 +501,6 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const child = { ...env, GH_CONFIG_DIR: join(run, '.gh-empty'), CLAUDE_CONFIG_DIR: join(profiles, 'seats', String(seat), 'claude') };
   if (PRESETS[o.role].hideKey) child.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   else delete child.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB;
-  // The marker the tests read to know their Bash runs in the sandbox (#183): set for a sandboxed preset, and only then.
-  if (PRESETS[o.role].sandbox) child.FACTORY_SANDBOX = '1';
-  else delete child.FACTORY_SANDBOX;
   for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete child[name];
   // The researcher's git clones under its run folder, and only there (bin/research-git).
   if (o.role === 'researcher') child.FACTORY_RESEARCH_CLONES = join(run, 'clones');
@@ -530,9 +513,9 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
     throw e;
   }
   // main's gate_prepare, at the commit the Lead names with --main, makes the worktree ready to test before the session, outside the
-  // sandbox and with the network (FAC-108, bin/lib/prepare.mjs), with the session's environment less every ANTHROPIC_* and the sandbox
-  // marker. A failed install starts nothing.
-  const install = Object.fromEntries(Object.entries(child).filter(([k]) => !k.startsWith('ANTHROPIC_') && k !== 'FACTORY_SANDBOX'));
+  // sandbox and with the network (FAC-108, bin/lib/prepare.mjs), with the session's environment less every ANTHROPIC_*. A failed
+  // install starts nothing.
+  const install = Object.fromEntries(Object.entries(child).filter(([k]) => !k.startsWith('ANTHROPIC_')));
   try {
     prepareWork({ work, run, tag, state, env: install, main: o.main ?? null });
   } catch (e) {
@@ -541,7 +524,7 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   }
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
-    cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
+    cmd: [...(which('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
     childFile: join(run, `run-${tag}.child`), tokenPath, account, team, role: o.role, seat, tag, name, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
     head: placeOf(work).head,
   };

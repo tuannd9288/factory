@@ -60,8 +60,8 @@ export function headOf(root) {
   return null;
 }
 
-/** The commit this process loaded its code at: read as this module loads, which is as the start's own code loads. A test names one. */
-export const LOADED = process.env.FACTORY_LOADED_HEAD || headOf(ROOT);
+/** The commit this process loaded its code at: read as this module loads, which is as the start's own code loads. */
+export const LOADED = headOf(ROOT);
 
 /** A lock folder (mkdir is atomic), as bin/seat claims a tag. Returns its release, or null after `wait` ms. One older than STALE_MS
  * is a crashed holder's: the update holds it for seconds, a start for milliseconds. */
@@ -94,7 +94,7 @@ function takeDir(lock, wait, label) {
  * holder (`label`), which a refused start names. Returns {value}, or {moved: true, head} without running fn when the checkout is at another commit
  * than the one this start loaded its code at: the caller starts again (reexec) so one commit's code starts the run. Throws, naming
  * the update, when the lock stays taken for `wait` ms. */
-export function withStartLock(state, root, fn, { wait = Number(process.env.FACTORY_CHECKOUT_LOCK_WAIT_MS) || 10_000, loaded = LOADED, label = 'a start' } = {}) {
+export function withStartLock(state, root, fn, { wait = 10_000, loaded = LOADED, label = 'a start' } = {}) {
   mkdirSync(state, { recursive: true });
   const lock = join(state, 'checkout.lock');
   const release = takeDir(lock, wait, label);
