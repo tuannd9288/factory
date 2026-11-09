@@ -32,6 +32,10 @@ const KIT_RUNS_ON = runsOn(HOSTED_DEFAULT);
 const LABEL = /^[\w.-]+$/;
 /** GitHub-hosted: one label, an OS name and then `latest` or a version (ubuntu-24.04-arm, macos-15-xlarge); macos-mini is not. */
 const HOSTED = /^(ubuntu|macos|windows)-(latest|\d[\w.]*)(-[\w.]+)?$/i;
+/** InstaBox's size labels, as its page lists them (https://instabox.sh/docs/use-cases/ci.md): one is a job's whole runs-on,
+ * and the job gets a fresh machine, deleted when it ends, which the Human counts as GitHub's (2026-11-09, FAC-125). A
+ * snapshot label (instabox-medium-snapshot-…) is not one of them. */
+const INSTABOX = /^instabox-(small|medium|large|xlarge|2xlarge)$/i;
 /** Labels every self-hosted runner of one kind carries: sharing them is no sharing of a runner. */
 const GENERIC = new Set(['self-hosted', 'linux', 'macos', 'windows', 'x86', 'x64', 'arm', 'arm64']);
 
@@ -137,7 +141,9 @@ export const readsVariables = (text) => /\bvars\.GATE_/.test(text);
 
 /** Whether a runner's labels name one GitHub-hosted machine. */
 export const isHosted = (labels) => labels.length === 1 && HOSTED.test(labels[0]);
-const selfHosted = (labels) => !isHosted(labels);
+/** Whether a runner's labels name one machine that is fresh for each job: GitHub-hosted, or an InstaBox size label. */
+const freshPerJob = (labels) => isHosted(labels) || (labels.length === 1 && INSTABOX.test(labels[0]));
+const selfHosted = (labels) => !freshPerJob(labels);
 
 /** Whether a job on runner `a` can land on a machine that serves runner `b`, or the reverse: GitHub gives a job to any
  * runner that carries every label of its runs-on, so one label set inside the other reaches the same machine; so does a
@@ -149,8 +155,8 @@ function reaches(a, b) {
 }
 
 /** The runner rule of kit/.gate/enforced-rules.md as far as the factory can know it, without the #155 exception: of the
- * trusted runner, the candidate's and main's, no two self-hosted ones reach the same machine. GitHub-hosted runners are
- * fresh for each job, so the same one for all three is fine. A deploy's runner is not known here. */
+ * trusted runner, the candidate's and main's, no two self-hosted ones reach the same machine. GitHub-hosted runners and
+ * InstaBox's size labels are fresh for each job, so the same one for all three is fine. A deploy's runner is not known here. */
 export function sharedRunners(values) {
   const v = { ...DEFAULTS, ...values };
   const words = (key) => SETTINGS.find((s) => s.key === key).words;

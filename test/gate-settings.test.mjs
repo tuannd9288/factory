@@ -75,6 +75,8 @@ test('a self-hosted runner that is, holds, is held by or shares a label with ano
     [['--runner', '["self-hosted","macOS"]', '--pr-runner', '["self-hosted","macOS","pr"]'], /the candidate's runner/],
     [['--runner', '["self-hosted","macOS","main"]', '--pr-runner', '["self-hosted","macOS"]'], /the candidate's runner/],
     [['--runner', '["self-hosted","macOS","ci-box","a"]', '--pr-runner', '["self-hosted","linux","ci-box","b"]'], /the candidate's runner/],
+    // An InstaBox snapshot label is not one of its size labels, so it stays self-hosted (FAC-125).
+    [['--runner', '"instabox-medium-snapshot-acme-warm"', '--pr-runner', '"instabox-medium-snapshot-acme-warm"'], /the candidate's runner .* main's runner/],
   ];
   for (const [argv, words] of refused) {
     const problems = runnerProblems(opts(argv));
@@ -83,10 +85,11 @@ test('a self-hosted runner that is, holds, is held by or shares a label with ano
   }
 });
 
-test('GitHub-hosted runners may be the same for all three, a self-hosted one may share only the OS and architecture, and an old kit\'s entire lifts the rule (#210, #155)', () => {
+test('GitHub-hosted and InstaBox size runners may be the same for all three, a self-hosted one may share only the OS and architecture, and an old kit\'s entire lifts the rule (#210, #155, FAC-125)', () => {
   const allowed = [
     [],
     ['--runner', '"ubuntu-latest"', '--pr-runner', '"ubuntu-latest"', '--trusted-runner', '"ubuntu-latest"'],
+    ['--runner', '"instabox-medium"', '--pr-runner', '"instabox-medium"', '--trusted-runner', '"instabox-medium"'],
     ['--runner', '["self-hosted","macOS","ARM64","a"]', '--pr-runner', '["self-hosted","macOS","ARM64","b"]', '--trusted-runner', '["self-hosted","macOS","ARM64","t"]'],
     ['--runner', '["self-hosted","macOS","a"]', '--trusted-runner', '"ubuntu-latest"'],
   ];
