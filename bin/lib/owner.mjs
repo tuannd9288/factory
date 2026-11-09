@@ -14,7 +14,7 @@ import { forcePushOn } from './force-push.mjs';
 // nothing else in it. It calls only gh against GitHub's API, with the factory's own files: never git,
 // never the target's .envrc, scripts or hooks, so nothing the target holds runs with his authority. A second run changes
 // nothing. See bin/onboard-owner for the arguments.
-import { execFileSync } from 'node:child_process';
+import { gh as runGh } from '../../kit/.gate/bin/lib/gh.mjs';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -201,8 +201,9 @@ export function policyNow(slug, read = gh) {
   return found ? maybe(`repos/${slug}/actions/policies/${found.id}`, read, POLICY_VERSION) : null;
 }
 
+/** gh's answer as JSON, or null when it printed nothing, through the kit's one gh runner (FAC-85), whose ceiling is above Node's 1 MiB. */
 export function gh(args, input) {
-  const out = execFileSync('gh', args, { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: CALL_MS });
+  const out = runGh(args, { input, timeout: CALL_MS });
   return out.trim() ? JSON.parse(out) : null;
 }
 

@@ -42,6 +42,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkPlists, checkoutRoot, followMain } from './checkout.mjs';
 import { POSITIONS, pagesOf, positionOf } from '../../kit/.gate/bin/lib/switch.mjs';
+import { gh as runGh } from '../../kit/.gate/bin/lib/gh.mjs';
 import { RED, failedCheck, pickReruns } from './checks.mjs';
 import { FIELDS, holders, readCursor, wakeOnComments } from './comment-wake.mjs';
 import { noteGh, observe, resetNotes } from './events.mjs';
@@ -98,11 +99,11 @@ commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{... on 
  * request, a hundred times the cost of the rest. */
 const recordsQuery = (ids) => `query{nodes(ids:${JSON.stringify(ids)}){... on CheckRun{id databaseId annotations(first:10){nodes{title message}}}}}`;
 
-// A failed call is noted for the events (#309: gh-refused) and thrown as before.
+// The kit's one gh runner (FAC-85), whose ceiling holds the query's answer: the body of up to 110 pull requests (#370). A failed call
+// is noted for the events (#309: gh-refused) and thrown as before.
 const gh = (args) => {
   try {
-    // The query's answer carries the body of up to 110 pull requests (#370), which can pass execFileSync's 1 MiB default.
-    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS, maxBuffer: 64 * 1024 * 1024 });
+    return runGh(args, { timeout: CALL_MS });
   } catch (error) {
     noteGh(args, error);
     throw error;

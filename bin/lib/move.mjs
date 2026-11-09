@@ -26,7 +26,7 @@
 // repeats no write. When the file is lost, an issue is looked for in the team by its provenance line (first, or first non-blank after `+++ Agent notes`) before one is created, and
 // adopted; a map file that exists and does not parse refuses the run.
 // Exit 0 done, 1 refused or failed (the reason is the first line of the message, never a token), 2 usage.
-import { execFileSync } from 'node:child_process';
+import { gh as runGh } from '../../kit/.gate/bin/lib/gh.mjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -58,9 +58,8 @@ const COMMENTS = `query($owner:String!,$name:String!,$n:Int!,$after:String){repo
 title body comments(first:100,after:$after){nodes{author{login} createdAt body} pageInfo{hasNextPage endCursor}}}}}`;
 const STATES = 'states(first: 100) { nodes { id name type position } }';
 
-function ghRun(args) {
-  return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CALL_MS, maxBuffer: 256 << 20 });
-}
+// The kit's one gh runner (FAC-85), with the move's longer timeout for its paginated reads.
+const ghRun = (args) => runGh(args, { timeout: CALL_MS });
 
 const firstLine = (error) => redact(String(error?.stderr || error?.message || error).trim().split('\n')[0]).slice(0, 200);
 
