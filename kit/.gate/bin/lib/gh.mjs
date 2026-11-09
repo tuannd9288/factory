@@ -1,4 +1,4 @@
-// The one way the gate, the pack's scripts/ship and the factory's own code run gh (FAC-85): one output ceiling and one default
+// The one way the gate's Node code, the pack's scripts/ship and the factory's own code run gh (FAC-85): one output ceiling and one default
 // timeout, so no caller stops at Node's 1 MiB of output or waits forever on a gh that never answers. A caller whose call takes
 // longer passes its own timeout.
 import { execFileSync } from 'node:child_process';
