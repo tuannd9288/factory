@@ -106,7 +106,7 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    `FAIL` rounds, ask the Human. `scripts/ship` arms only a head whose newest reviewer record, on that head or one with
    the same patch, concludes `PASS`, so a commit that changes the change needs its own review.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier, which you need before you write the body. Push from the
-   worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>`. It takes one
+   worktree (`cd <worktree>`, then `git push origin HEAD`), then run `scripts/ship --body-file <file>`. It takes one
    step a run: run it again at once, run after run, until it says `armed`, stops, or that the draft stays one, and only
    then end the turn, naming what it waits on. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386, #411) and
    its three lines, Anh quyết, Đề xuất and Rủi ro, in Vietnamese plain words with the terms in English (PR, main,
