@@ -37,6 +37,16 @@ export const quiet = {
   GIT_CONFIG_VALUE_2: '/dev/null',
 };
 
+/** quiet, with git fetching `url` from the local `folder` instead, by its own url.<folder>.insteadOf. */
+export const insteadOf = (folder, url) => ({ ...quiet, GIT_CONFIG_COUNT: '7', GIT_CONFIG_KEY_6: `url.${folder}.insteadOf`, GIT_CONFIG_VALUE_6: url });
+
+/** A process lister (bin/lib/ps.mjs) that knows this test's own process alone, started at performance.timeOrigin, and asks no ps, which
+ * a seat's sandbox refuses: a liveness test that passes it runs there too. Any other pid has no process it can read. */
+export const OWN_PROCESS = {
+  signal: (pid) => process.kill(pid, 0),
+  info: (pid) => (pid === process.pid ? { uid: process.getuid(), started: Math.floor(performance.timeOrigin) } : null),
+};
+
 export function run(cwd, command, args = [], env = {}, timeout = undefined) {
   const { NODE_TEST_CONTEXT, ...outer } = process.env;
   const r = spawnSync(command, args, { cwd, encoding: 'utf8', env: { ...outer, ...env }, timeout });

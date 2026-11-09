@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { insteadOf } from './helpers.mjs';
 
 // Local times are shown in the machine's zone; the fixtures are in UTC, so a local time reads as the fixture's.
 process.env.TZ = 'UTC';
@@ -335,7 +336,19 @@ test('the claim reader writes nothing into the clone: it fetches into a bare cac
   const before = git(clone, 'for-each-ref');
   const state = join(root, 'state');
   git(clone, 'config', 'remote.origin.url', `--upload-pack=touch ${join(root, 'PWNED')} #`);
-  const claims = await readClaims('o/n', state, { url: origin });
+  // https://github.com/o/n.git is the local origin, by git's own insteadOf, for this one read.
+  const redirect = insteadOf(origin, 'https://github.com/o/n.git');
+  const saved = Object.fromEntries(Object.keys(redirect).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, redirect);
+  let claims;
+  try {
+    claims = await readClaims('o/n', state);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
   assert.deepEqual(claims.get(5), { state: 'claimed', team: 'alpha' });
   assert.ok(existsSync(join(state, 'top/o-n.git')));
   assert.ok(!existsSync(join(clone, '.git/FETCH_HEAD')));
@@ -344,19 +357,14 @@ test('the claim reader writes nothing into the clone: it fetches into a bare cac
   assert.ok(!existsSync(join(root, 'PWNED')), 'the clone\'s url is never read, so its hostile value runs nothing');
 });
 
-test('the claim reader runs git in its own cache: no option in a url, no config of the folder the view runs from', async () => {
+test('the claim reader runs git in its own cache: no config of the folder the view runs from', async () => {
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { readClaims } = await top();
   const root = mkdtempSync(join(tmpdir(), 'top-hostile-'));
   const state = join(root, 'state');
   const g = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' });
-  // A url that starts with a dash would be an option without `--`.
-  const flag = join(root, 'PWNED-OPTION');
   const gitFailure = (e) => !(e instanceof TypeError);
-  await assert.rejects(readClaims('o/n', state, { url: `--upload-pack=touch ${flag} #` }), gitFailure);
-  assert.ok(!existsSync(flag));
-  assert.ok(existsSync(join(state, 'top/o-n.git')), 'git ran, in the cache');
   // The folder the view runs from rewrites https://github.com/ to ssh and sets an ssh command.
   const here = join(root, 'cwd');
   mkdirSync(here);

@@ -81,24 +81,24 @@ const withGit = (w, extra = {}) => ({ PATH: `${w.env().PATH}:/usr/bin:/bin`, PRE
 const prepareAt = (w, tag, main, work = w.work) => prepareWork({ work, run: w.run, tag, state: w.state, env: { ...withGit(w), HOME: w.home }, main });
 
 test('main\'s gate_prepare at the commit --main names, not the worktree\'s copy, runs in the worktree before the session, with no credential in its environment', () => world(async (w) => {
-  const main = mainWith(w, { ...prepare('echo "main $1 ${GH_TOKEN:-none} ${ANTHROPIC_BASE_URL:-none} ${FACTORY_SANDBOX:-none}" >> "$PREP_OUT"'), '.gate/driver.json': '{"prepare":"every"}' });
+  const main = mainWith(w, { ...prepare('echo "main $1 ${GH_TOKEN:-none} ${ANTHROPIC_BASE_URL:-none}" >> "$PREP_OUT"'), '.gate/driver.json': '{"prepare":"every"}' });
   writeFileSync(join(w.work, '.gate/config.sh'), 'gate_prepare() {\n  echo worktree >> "$PREP_OUT"\n}\n');
   const r = w.start('worker', ['--main', main], withGit(w, { GH_TOKEN: 'gh-not-a-token', ANTHROPIC_BASE_URL: 'https://example.invalid' }));
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');
-  const line = `main ${w.work} none none none\n`;
+  const line = `main ${w.work} none none\n`;
   assert.equal(prepared(w), line);
   assert.equal(w.saw().env.prepOut, line, 'the install had run when the session started');
   assert.equal(readFileSync(join(w.run, 'run-worker.prepare.log'), 'utf8'), '');
 }));
 
-test('a failed gate_prepare refuses the start before any session: its output is in the run folder, and no pid, claim or seat file is left', () => world(async (w) => {
+test('a failed gate_prepare refuses the start before any session: its output is in the run folder, and no pid, claim, seat or tag lock is left', () => world(async (w) => {
   const main = mainWith(w, prepare('echo boom >&2; return 3'));
   const r = w.start('worker', ['--main', main], withGit(w));
   assert.equal(r.code, 2, r.out + r.err);
   assert.match(r.err, /bin\/seat: prepare: main's gate_prepare failed \(exit 3\): boom/);
   assert.match(readFileSync(join(w.run, 'run-worker.prepare.log'), 'utf8'), /boom/);
-  assert.deepEqual(readdirSync(w.run).filter((n) => /\.(pid|seat|account|name|claim)/.test(n)), []);
+  assert.deepEqual(readdirSync(w.run).filter((n) => /\.(pid|seat|account|name|claim|lock)/.test(n)), []);
   assert.ok(!existsSync(w.out()), 'no session started');
   assert.deepEqual(w.records(), []);
 }));

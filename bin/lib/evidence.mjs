@@ -29,6 +29,7 @@ import { HOOK, NATIVE, adapterBlock } from './adapter.mjs';
 import { ATTRIBUTES, BLOCK_FILE, insertBlock, splitBlock } from './attributes.mjs';
 import { DEFAULTS, FILLED, SETTINGS as GATE_SETTINGS, WORKFLOWS, describe, render, runnerProblems, shown, valuesIn, valuesOf } from './gate-settings.mjs';
 import { addDeny } from './settings.mjs';
+import { humanOf } from './node.mjs';
 
 export const INVENTORY = '.gate/kit-files';
 export const SETTINGS = '.claude/settings.json';
@@ -378,7 +379,7 @@ function main(argv) {
     console.error('usage: bin/kit-evidence --factory <dir> --commit <rev> --repo <dir> --base <rev> --head <rev> --slug <owner/name> --id <repository id> [--human <login>] [--own]');
     return 2;
   }
-  const { pass, text } = evidence({ ...opt, human: opt.human ?? process.env.FACTORY_HUMAN ?? 'tuannd9288' });
+  const { pass, text } = evidence({ ...opt, human: opt.human ?? humanOf() });
   console.log(text);
   return pass ? 0 : 1;
 }

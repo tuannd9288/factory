@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { skipPs } from './ps-skip.mjs';
+import { OWN_PROCESS } from './helpers.mjs';
 
 const lib = () => import('../bin/lib/seat.mjs');
 
@@ -39,23 +39,23 @@ test('a pid no process has is not live and ps is not asked; any other answer of 
   const err = (code) => () => {
     throw Object.assign(new Error(code), { code });
   };
-  assert.equal(alive(4242, Date.now(), info, err('ESRCH')), false);
+  assert.equal(alive(4242, Date.now(), { info, signal: err('ESRCH') }), false);
   assert.equal(asked, 0, 'ESRCH: no ps');
-  assert.equal(alive(4242, Date.now(), info, err('EPERM')), true);
-  assert.equal(alive(4242, Date.now(), info, () => true), true);
+  assert.equal(alive(4242, Date.now(), { info, signal: err('EPERM') }), true);
+  assert.equal(alive(4242, Date.now(), { info, signal: () => true }), true);
   assert.equal(asked, 2, 'EPERM and success: ps');
-  assert.equal(alive(4242, -5000, info, () => true), false, 'started after the file was written');
+  assert.equal(alive(4242, -5000, { info, signal: () => true }), false, 'started after the file was written');
 });
 
-test('a pid file written before its process started is a reused pid, not a live session; one written after counts', { skip: skipPs }, async () => {
+test('a pid file written before its process started is a reused pid, not a live session; one written after counts', async () => {
   const { liveRuns } = await lib();
   runs((root, put) => {
     const file = join(root, 'issue-1', 'run-old.pid');
     put('old', process.pid, 'pid');
     put('old', 2, 'seat');
-    assert.equal(liveRuns(root), 1, 'written after this process started');
+    assert.equal(liveRuns(root, { ps: OWN_PROCESS }), 1, 'written after this process started');
     const past = new Date(Date.now() - 3600 * 1000);
     utimesSync(file, past, past);
-    assert.equal(liveRuns(root), 0, 'written an hour ago, before this process started');
+    assert.equal(liveRuns(root, { ps: OWN_PROCESS }), 0, 'written an hour ago, before this process started');
   });
 });

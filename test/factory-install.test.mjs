@@ -30,6 +30,8 @@ function world(f) {
     const fake = join(dir, 'fake');
     mkdirSync(home);
     mkdirSync(fake);
+    // The factory on GitHub is this origin, by git's own insteadOf in the HOME every run and step of this world has, so no fetch leaves.
+    writeFileSync(join(home, '.gitconfig'), `[url "${origin}"]\n\tinsteadOf = https://github.com/tuannd9288/factory.git\n`);
     writeFileSync(join(fake, 'launchctl'), ['#!/bin/sh', 'echo "$*" >>"$HOME/launchctl.log"',
       // Each job is loaded or not by its domain and label: $HOME/loaded-<domain>_<label>, with each / of print's and bootout's target as _.
       'case "$1" in', 'print) [ -f "$HOME/loaded-$(echo "$2" | tr / _)" ] || exit 113 ;;',
@@ -55,7 +57,7 @@ function world(f) {
       install: (args = [], env = {}, from = join(factory, 'bin/install-factory')) =>
         run(factory, 'bash', [from, ...args], {
           HOME: home, PATH: `${fake}:${process.env.PATH}`, FACTORY_STATE: join(dir, 'state'), FACTORY_RUNS: join(dir, 'runs'),
-          FACTORY_INSTALL_ORIGIN: origin, ...HOST_ENV, FACTORY_HOST_NAME: 'another-machine', FACTORY_CHECKOUT: '', XDG_DATA_HOME: '',
+          ...HOST_ENV, FACTORY_HOST_NAME: 'another-machine', FACTORY_CHECKOUT: '', XDG_DATA_HOME: '',
           AGENT_PROFILES: join(dir, 'profiles'), FACTORY_AGENT: 'fake-agent', FACTORY_PLIST_DIR: join(dir, 'LaunchDaemons'), ...env,
         }),
       // The numbered steps the run printed for the Human's own terminal, run one at a time as he would, with the fakes, until one fails;

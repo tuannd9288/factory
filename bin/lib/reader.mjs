@@ -25,6 +25,7 @@ export { reduce } from './claude-code.mjs';
 import { redact, redactDeep } from './redact.mjs';
 import { takeLock } from './lock.mjs';
 import { listStreams } from './streams.mjs';
+import { runsOf, stateDirOf } from './node.mjs';
 import { createHash } from 'node:crypto';
 
 /** The setting the repository ships, changed by pull request. */
@@ -548,14 +549,14 @@ async function tryFile(file, side, env = process.env) {
 }
 
 async function main(argv) {
-  const stateDir = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+  const stateDir = stateDirOf();
   if (argv[0] === '--try') {
     const side = argv[2] === '--side' ? argv[3] : undefined;
     if (!argv[1] || argv.length !== (side === undefined ? 2 : 4) || (side !== undefined && !SIDES[side])) throw new Error('usage: factory-reader --try <file> [--side pi|codex]');
     return tryFile(argv[1], side);
   }
   if (argv.length) throw new Error('usage: factory-reader [--try <file> [--side pi|codex]]');
-  const r = await runPass({ state: stateDir, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
+  const r = await runPass({ state: stateDir, runs: runsOf() });
   if (r.status === OFF) {
     console.log(`reader: off in ${settingPath()}; no model call`);
     return 0;

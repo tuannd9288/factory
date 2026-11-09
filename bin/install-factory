@@ -2,7 +2,7 @@
 # Puts `factory` on the PATH (#177) from the machine's installed copy of the factory (#390), which follows main by itself. The Human runs it,
 # once per machine, on the MacBook and as the factory user on the Mac mini; it can be run again.
 #   From any clone that is not the installed copy: it makes the installed copy when there is none (git clone --branch main --single-branch of
-#   $FACTORY_INSTALL_ORIGIN, default https://github.com/tuannd9288/factory.git, then an empty credential.helper in that clone, so its fetch is
+#   https://github.com/tuannd9288/factory.git, then an empty credential.helper in that clone, so its fetch is
 #   anonymous and never reaches the Keychain), else brings it to origin/main by followMain's rules (bin/lib/checkout.mjs); then it runs the
 #   installed copy's own bin/install-factory, so the code that does the work is main's. The installed copy is $FACTORY_CHECKOUT, ~/WORKSPACES
 #   on the Mac mini, and ${XDG_DATA_HOME:-~/.local/share}/factory/checkout on the MacBook (installedRoot, bin/lib/factory.mjs).
@@ -32,7 +32,7 @@ if [ "$(cd -P "$root" 2>/dev/null && pwd || true)" != "$here" ]; then
     echo "install-factory: $root exists and is not a clone; left as it is" >&2
     exit 1
   else
-    origin=${FACTORY_INSTALL_ORIGIN:-https://github.com/tuannd9288/factory.git}
+    origin=https://github.com/tuannd9288/factory.git
     mkdir -p "$(dirname "$root")"
     # The empty helper and no prompt: the first clone is anonymous too, and never reaches the Keychain or asks for a login.
     GIT_TERMINAL_PROMPT=0 git -c credential.helper= clone -q --branch main --single-branch "$origin" "$root"
