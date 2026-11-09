@@ -118,7 +118,9 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    turn with <!--nohere-->`scripts/pr-body <n> <file>`<!--/nohere--><!--here-->`factory pr-body <n> <file>`<!--/here-->; do the same to add it when a pull request becomes tier 3 after it was
    opened (the reviewer's raise, a `needs-human` label). The body also carries <!--github-->`Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`,<!--/github--><!--linear-->`Fixes <KEY>`, so Linear closes the issue on merge, `Issue: <KEY>`
-   and `Team: {{TEAM}}` (and `Claim: <sha>`, once `.gate/bin/claim` takes a key),<!--/linear--> outside that block. When the
+   and `Team: {{TEAM}}` (and `Claim: <sha>`, once `.gate/bin/claim` takes a key),<!--/linear--> outside that block; where the repository's own
+   rules forbid closing keywords, leave <!--github-->`Closes #<n>`<!--/github--><!--linear-->`Fixes <KEY>`<!--/linear--> out: then `Issue:` alone
+   links the issue, and it is closed by hand. When the
    pull request repairs a fault that a merged pull request of this repository brought in, the body also carries, for each, one
    line `Fixes: <sha> ("<title>")`: the first 12 characters of the commit `main` got when that pull request merged, and its
    title, from `printf 'Fixes: %s ("%s")\n' "$(git log -1 --format=%h --abbrev=12 <commit>)" "$(git log -1 --format=%b <commit> | head -n 1)"`
@@ -128,7 +130,8 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    the pull request.
 8. On tier 3, tell the Human the pull request and its head commit, and that its summary says what he approves. When a
    check is red, read `.claude/skills/gate-red/SKILL.md` first.
-9. A `merged` wake says it has landed: check that the issue closed. The queue's sweep removes that issue's worktree.
+9. A `merged` wake says it has landed: check that the issue closed, or, where the repository's own rules forbid closing keywords,
+   leave it open for the Human to close. The queue's sweep removes that issue's worktree.
    Where the repository has a Feature Map and `~/factory-runs/<repo>-map-pass/date` does not hold today's date (one file
    for the repository, whichever team), write today's date there, run `git fetch origin`; if
    `~/factory-runs/<repo>-map-pass/w` is still there, run `git worktree remove --force` on it first; then run

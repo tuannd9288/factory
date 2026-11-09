@@ -20,7 +20,7 @@
 
 </details>
 
-<!-- Closes #<n> closes a GitHub issue on merge. On a repository whose issues are in Linear, write `Fixes <KEY>` in its place and `Issue: <KEY>`, the key being such as FAC-12; Linear then closes the issue on merge. -->
+<!-- Closes #<n> closes a GitHub issue on merge. On a repository whose issues are in Linear, write `Fixes <KEY>` in its place and `Issue: <KEY>`, the key being such as FAC-12; Linear then closes the issue on merge. Where this repository's own rules forbid closing keywords, leave the Closes (or Fixes) line out: then Issue: alone links the issue, and it is closed by hand. -->
 Closes #<issue labelled task>
 Issue: #<issue labelled task>
 Claim: <sha printed by .gate/bin/claim>
