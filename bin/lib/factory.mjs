@@ -18,10 +18,10 @@ import { readClaude } from './claude-code.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
 export { readClaude };
-import { HOST, TOKEN_GIT, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
+import { HOST, TOKEN_GIT, agentOf, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
-import { liveOfAccount, tokenStoreDeny } from './seat.mjs';
+import { accountEvent, accountOut, liveOfAccount, resetPassed, tokenStoreDeny } from './seat.mjs';
 import { readRules } from './deny-read.mjs';
 import { markOnboarded, quote, roleFor, copyHook } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
@@ -67,7 +67,8 @@ export function profilesOf(place, { home, agentProfiles, state, root, runs }) {
       // Colly's own factory profile (INN-31 3A, #365); Colly writes to GitHub only through factory gh, so it has no gh row.
       claude('macbook/claude', 'Colly', { CLAUDE_CONFIG_DIR: collyProfile(state) }, 'factory colly, then /login'),
       ...spareFolders(home).map((n) => claude(`macbook/claude-acc${n}`, 'spare Claude', { CLAUDE_CONFIG_DIR: join(home, `.claude-acc${n}`) }, `claude-use login ${n}`)),
-      { profile: 'macbook/codex', role: 'Colly Codex', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: {} }, login: 'codex-use login <N>' },
+      // Its own command, as the verifier's is (FAC-117): the check runs with no CODEX_HOME, so the login goes to codex's own folder.
+      { profile: 'macbook/codex', role: 'Colly Codex', kind: 'codex', check: { cmd: 'codex', args: ['login', 'status'], env: {} }, login: 'codex login --device-auth' },
     ];
   }
   if (place === 'factory') {
@@ -108,18 +109,20 @@ const readGh = (text) => {
 /** codex login status exits 0 when logged in and 1 when not; any other exit (127 for a missing command, a failed shell) says nothing. */
 const readCodex = (code) => ({ loggedIn: code === 0 ? true : code === 1 ? false : null, account: null, plan: null });
 
-/** An account's token stat and date-only sidecar: { ok, note }; the token content is never read. */
+/** An account's token stat and date-only sidecar: { ok, note, expiry }, expiry the date the token ends (YYYY-MM-DD) or null when its added
+ * date is unknown; the token content is never read. */
 function tokenState(agentProfiles, account, now = Date.now()) {
   let s;
   try {
     s = statSync(join(tokenDir(agentProfiles), account));
   } catch {
-    return { ok: false, note: 'no token file' };
+    return { ok: false, note: 'no token file', expiry: null };
   }
   const mode = (s.mode & 0o777).toString(8);
   const added = tokenAdded(agentProfiles, account);
   const expiry = new Date(`${added}T00:00:00Z`);
   let expiryNote = 'expiry unknown';
+  let ends = null;
   if (Number.isFinite(expiry.getTime()) && expiry.toISOString().slice(0, 10) === added) {
     // Anthropic authentication page, captured 2026-11-06, line 295: setup-token makes a one-year OAuth token.
     const month = expiry.getUTCMonth();
@@ -127,9 +130,10 @@ function tokenState(agentProfiles, account, now = Date.now()) {
     if (expiry.getUTCMonth() !== month) expiry.setUTCDate(0); // February 29 -> February 28.
     const remaining = expiry.getTime() - now;
     const warning = remaining <= 0 ? 'WARNING: expired' : remaining <= 7 * 86400000 ? 'WARNING: expires within 7 days' : '';
-    expiryNote = `expiry ${expiry.toISOString().slice(0, 10)}${warning ? `; ${warning}` : ''}`;
+    ends = expiry.toISOString().slice(0, 10);
+    expiryNote = `expiry ${ends}${warning ? `; ${warning}` : ''}`;
   }
-  return { ok: true, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, added ${added}; ${expiryNote}` };
+  return { ok: true, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, added ${added}; ${expiryNote}`, expiry: ends };
 }
 
 /** The profile's login state by its own vendor command: { loggedIn: true|false|null, account, plan, note }. A row of the accounts
@@ -139,7 +143,7 @@ function check(p, ctx) {
     const account = ctx.accounts[p.key ?? p.profile] ?? null;
     if (!account) return { loggedIn: false, account: null, plan: null, note: 'no row in the accounts file' };
     const t = tokenState(ctx.agentProfiles, account);
-    return { loggedIn: t.ok, account, plan: null, note: t.note };
+    return { loggedIn: t.ok, account, plan: null, note: t.note, expiry: t.expiry };
   }
   const r = call(p.check.cmd, p.check.args, { extra: p.check.env, env: ctx.env, timeout: ctx.timeout });
   if (r.error) return { loggedIn: null, account: null, plan: null, note: r.error };
@@ -170,8 +174,22 @@ export { installedRoot, placeOf };
 
 const win = (w) => (w ? { use: w.use, resetsAt: w.resetsAt } : null);
 
+/** What Claude Code itself said of an account in its newest run (FAC-117): outUntil, the reset (seconds) until which it refused the
+ * account (accountOut, the one signal that stops a seat), and warned, its own warning that a window is near its limit (allowed_warning,
+ * as the sweep's quota-warning reads it) while that window has not reset. No threshold of the factory's own (#194). q is the account's
+ * quota reading, when there is one. Only a machine with the account's runs knows either: a Lead's status line carries neither. */
+function limitOf(ctx, account, seatRows, q, now) {
+  if (!account) return { outUntil: null, warned: false };
+  const out = accountOut(ctx.runs, account, seatRows, now);
+  if (out) return { outUntil: q?.resetsAt ?? accountEvent(ctx.runs, account, seatRows)?.resetsAt ?? null, warned: false };
+  const w = q?.windows;
+  const at = w?.status === 'allowed_warning' ? (w[w.type]?.resetsAt ?? q.resetsAt ?? null) : null;
+  return { outUntil: null, warned: at != null && !resetPassed(at, now) };
+}
+
 /** The rows of one place: the profile list read through the vendors' commands. A team's row carries the quota of its account. */
 export function readPlace(place, ctx) {
+  const now = Date.now();
   let quota = [];
   if (place === 'factory') {
     try {
@@ -199,18 +217,20 @@ export function readPlace(place, ctx) {
         live = null;
       }
     }
-    // A row of the file that is not logged in shows both ways out: log its account in, or move the row to another account.
-    const login = p.byFile && c.loggedIn === false ? [...(c.account ? [`factory account add ${c.account}`] : []), `factory use ${n} <letter>`].join('\n') : p.login;
+    // A team row's commands are built by finish, which knows the machine the list is typed on (FAC-117); another row keeps its login.
     return {
       place, profile: p.profile, role: p.role, kind: KINDS[p.kind], loggedIn: c.loggedIn, account: c.account, accountFrom: c.account ? 'read' : null, plan: c.plan,
-      five_hour: win(q?.windows?.five_hour), seven_day: win(q?.windows?.seven_day), asOf: q?.asOf ?? null, live, shared: [], login, note: c.note,
+      five_hour: win(q?.windows?.five_hour), seven_day: win(q?.windows?.seven_day), asOf: q?.asOf ?? null, live, shared: [], login: p.byFile ? null : p.login, note: c.note,
       n, letter: (c.account && letters.get(c.account)) || null,
+      team: Boolean(p.byFile), expiry: c.expiry ?? null, ...(p.byFile ? limitOf(ctx, c.account, seatRows, q, now) : { outUntil: null, warned: false }),
     };
   });
   for (const account of tokenAccounts(ctx.agentProfiles)) {
-    const note = tokenState(ctx.agentProfiles, account).note;
-    rows.push({ ...blank(place, { profile: `${place}/tokens/${account}`, role: 'node token', kind: 'claude' },
-      { loggedIn: true, account, plan: null }, note), n: null, letter: letters.get(account) ?? null });
+    const t = tokenState(ctx.agentProfiles, account);
+    const q = quota.find((x) => x.account === account) ?? null;
+    rows.push({ ...blank(place, { profile: `${place}/tokens/${account}`, role: 'node token', kind: 'claude' }, { loggedIn: true, account, plan: null }, t.note),
+      five_hour: win(q?.windows?.five_hour), seven_day: win(q?.windows?.seven_day), asOf: q?.asOf ?? null,
+      n: null, letter: letters.get(account) ?? null, team: false, expiry: t.expiry, ...limitOf(ctx, account, seatRows, q, now) });
   }
   return rows;
 }
@@ -254,6 +274,8 @@ export function readFactory(ctx) {
       place: 'factory', profile: s(x.profile) ?? '?', role: s(x.role) ?? '', kind: s(x.kind) ?? '', loggedIn: typeof x.loggedIn === 'boolean' ? x.loggedIn : null,
       account: s(x.account) && x.accountFrom === 'read' ? x.account : null, accountFrom: x.accountFrom === 'read' ? 'read' : null, plan: s(x.plan),
       five_hour: w(x.five_hour), seven_day: w(x.seven_day), asOf: n(x.asOf), live: n(x.live), shared: [], login: s(x.login), note: s(x.note) ?? '', n: n(x.n), letter: s(x.letter),
+      // FAC-117: what the MacBook needs to say how the row stands and what to type for it there.
+      team: x.team === true, expiry: s(x.expiry), outUntil: n(x.outUntil), warned: x.warned === true,
       ...(x.accountFrom === 'expected' && s(x.account) ? { expectedRemote: x.account } : {}),
     }));
   } catch {
@@ -261,8 +283,54 @@ export function readFactory(ctx) {
   }
 }
 
-/** Fills each account (read, else expected, else unknown) and "shared with": every other row of the same kind on that account. */
-export function finish(rows, expected) {
+const NODE = { macbook: 'macbook', factory: HOST };
+const MACHINE = { macbook: 'the MacBook', factory: 'the Mac mini', piggery: 'the Mac mini' };
+const SHORT = { macbook: 'MacBook', factory: 'Mac mini', piggery: 'piggery' };
+const BROWSER = 'browser login';
+
+/** How a row stands (FAC-117), one word: works, ending (its token ends within 7 days), warned (Claude Code warns a window is near its limit),
+ * out (Claude Code refuses the account until a reset), expired, no-token, not-logged-in, or unknown (the check gave no answer). A team
+ * row and a token stand by the token file and what Claude Code said of the account; any other row by its vendor's own check. */
+function standing(r, now) {
+  if (r.loggedIn === null) return 'unknown';
+  if (!r.team && r.role !== 'node token') return r.loggedIn ? 'works' : 'not-logged-in';
+  if (!r.loggedIn) return 'no-token';
+  const left = r.expiry ? Date.parse(`${r.expiry}T00:00:00Z`) - now : null;
+  if (left !== null && left <= 0) return 'expired';
+  if (r.outUntil != null) return 'out';
+  if (left !== null && left <= 7 * 86400000) return 'ending';
+  return r.warned ? 'warned' : 'works';
+}
+
+/** The lines to type for a row that does not work, on the machine `here` the list is read on, each with what it needs ({ cmd, needs, why }).
+ * A team row: `factory account add` (a browser login that makes a token, then a paste) and `factory use` to an account that works on the
+ * row's own machine, each naming that machine when it is not this one, since from the MacBook a row number goes to the Mac mini and
+ * `account add` stores on the machine it runs on. Another row: its own login, after an ssh line when it runs on the Mac mini. */
+function fixesOf(r, here, rows, agent) {
+  if (r.role === 'node token' || ['works', 'warned', 'unknown'].includes(r.state)) return [];
+  if (!r.team) {
+    if (!r.login) return [];
+    const far = r.place === 'factory' && here !== 'factory';
+    return [...(far ? [`ssh -t factory@${HOST}`] : []), ...r.login.split('\n')]
+      .map((cmd) => (cmd.startsWith('ssh ') ? { cmd, needs: 'no login', why: `a shell on ${MACHINE[r.place]}, where the next line runs` } : { cmd, needs: BROWSER, why: '' }));
+  }
+  const where = MACHINE[r.place];
+  const fixes = [];
+  if (r.account && r.state !== 'out') {
+    fixes.push({ cmd: `factory account add ${r.account}${r.place === here ? '' : ` --node ${NODE[r.place]}`}`, needs: `${BROWSER} that makes a token, then you paste it`, why: `a new token for ${r.account} on ${where}` });
+  }
+  if (r.state !== 'ending') {
+    const other = rows.find((o) => o.place === r.place && o.role === 'node token' && o.letter && o.account !== r.account && o.account !== agent && ['works', 'warned', 'ending'].includes(o.state));
+    if (other) fixes.push({ cmd: `factory use${r.place === 'factory' && here === 'factory' ? '' : ` --node ${NODE[r.place]}`} ${r.n} ${other.letter}`, needs: 'no login', why: `moves the row to ${other.account}, which works on ${where}` });
+  }
+  return fixes;
+}
+
+/** Fills each account (read, else expected, else unknown) and "shared with": every other row of the same kind on that account. With here,
+ * the machine the list is read on (FAC-117), it also gives every row its state and the lines to type there. One account is one quota,
+ * whichever machine read it, so every row and token of an account takes the account's newest reading, and Claude Code's refusal or warning
+ * wherever one was read. */
+export function finish(rows, expected, { here = null, now = Date.now(), agent = agentOf() } = {}) {
   for (const r of rows) {
     if (r.unreachable) continue;
     if (r.account) r.accountFrom = 'read';
@@ -276,21 +344,49 @@ export function finish(rows, expected) {
     delete r.expectedRemote;
   }
   for (const r of rows) r.shared = r.account && r.account !== 'unknown' && !r.unreachable ? rows.filter((o) => o !== r && o.role !== 'node token' && o.kind === r.kind && o.account === r.account).map((o) => o.profile) : [];
+  if (!here) return rows;
+  const held = rows.filter((r) => !r.unreachable && (r.team || r.role === 'node token') && r.account && r.account !== 'unknown');
+  for (const account of new Set(held.map((r) => r.account))) {
+    const mine = held.filter((r) => r.account === account);
+    const newest = mine.filter((r) => r.asOf).sort((a, b) => b.asOf - a.asOf)[0];
+    const until = Math.max(0, ...mine.map((r) => (r.outUntil != null && !resetPassed(r.outUntil, now) ? r.outUntil : 0))) || null;
+    for (const r of mine) {
+      if (newest) Object.assign(r, { five_hour: newest.five_hour, seven_day: newest.seven_day, asOf: newest.asOf });
+      Object.assign(r, { outUntil: until, warned: !until && mine.some((o) => o.warned) });
+    }
+  }
+  for (const r of rows) if (!r.unreachable) r.state = standing(r, now);
+  for (const r of rows) {
+    if (r.unreachable) continue;
+    r.fixes = fixesOf(r, here, rows, agent);
+    if (r.fixes.length || r.team) r.login = r.fixes.map((f) => f.cmd).join('\n') || null;
+  }
   return rows;
 }
 
 const pad = (s, n) => String(s).padEnd(n);
 const pct = (u) => `${Math.round(u * 1000) / 10}%`;
-const utc = (ms) => new Date(ms).toISOString().slice(5, 16).replace('T', ' ');
-const windowCell = (w, now) => (w ? `${pct(w.use)} ${w.resetsAt != null && w.resetsAt * 1000 <= now ? '(reset since)' : w.resetsAt != null ? `@${utc(w.resetsAt * 1000)}` : ''}`.trim() : '–');
+const two = (n) => String(n).padStart(2, '0');
 
-/** "Shared with" in the table: the names while they fit in 24 columns, else the first and a count; --json has the whole list. */
-const sharedCell = (names) => (names.join(', ').length <= 24 ? names.join(', ') || '–' : `${names[0]} +${names.length - 1}`);
+/** This machine's offset from UTC, as +07 or +05:30. */
+const zoneOf = (d) => {
+  const off = -d.getTimezoneOffset();
+  return `${off < 0 ? '-' : '+'}${two(Math.floor(Math.abs(off) / 60))}${Math.abs(off) % 60 ? `:${two(Math.abs(off) % 60)}` : ''}`;
+};
+
+/** Every time the list prints, in one form (FAC-117): this machine's local time with its offset, "11-09 14:21 +07". Colly's default until
+ * he chooses another; this function is the one place to change it. */
+const timeText = (ms) => {
+  const d = new Date(ms);
+  return `${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())} ${zoneOf(d)}`;
+};
+
+const windowCell = (w, now) => (w ? `${pct(w.use)} ${w.resetsAt != null && w.resetsAt * 1000 <= now ? '(reset since)' : w.resetsAt != null ? `to ${timeText(w.resetsAt * 1000)}` : ''}`.trim() : '–');
 
 const red = (text) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[31m${text}\x1b[0m` : text);
 
-/** The lines of the lettered accounts (Mac mini): for each, its 5h and 7d use with the reset, the token file, and the numbers of the
- * rows that name it. The quota is the newest a run of that account reported; "?" where none did. */
+/** The lines of the lettered accounts, for `factory use` on the MacBook (hereListing): for each, its 5h and 7d use with the reset, the token
+ * file, and the numbers of the rows that name it. The quota is the newest a run of that account reported; "?" where none did. */
 export function accountsText(rows, accounts, { now = Date.now(), agentProfiles, title = 'ACCOUNTS' }) {
   const win = (w) => (w ? windowCell(w, now) : '?');
   const heads = accounts.map(({ name, letter }) => {
@@ -310,38 +406,108 @@ export function accountsText(rows, accounts, { now = Date.now(), agentProfiles, 
   return lines;
 }
 
-/** The text of the table: the profiles, then the accounts block where there is one, then the quota of the rows that have one, then
- * what to do and what to know. A row of the Mac mini has its number first and its account's letter after the name; one that is not
- * logged in is red on a terminal. */
-export function tableText(rows, { now = Date.now(), accounts = null } = {}) {
-  const normal = rows.filter((r) => !r.unreachable && r.role !== 'node token');
-  const numbered = normal.some((r) => r.n);
-  const heads = [...(numbered ? ['#'] : []), 'PROFILE', 'ROLE', 'KIND', 'IN', 'ACCOUNT', 'PLAN', 'LIVE', 'SHARED WITH / WHY NOT READ'];
-  const cells = normal.map((r) => [...(numbered ? [r.n ?? '–'] : []), r.profile, r.role, r.kind, r.loggedIn === null ? '?' : r.loggedIn ? 'yes' : 'NO', `${r.accountFrom === 'expected' ? `${r.account}*` : r.account}${r.letter ? ` (${r.letter})` : ''}`, r.plan ?? '–', r.live ?? '–', r.loggedIn === null ? r.note : sharedCell(r.shared)]);
-  const widths = heads.slice(0, -1).map((h, i) => Math.max(h.length, ...cells.map((c) => String(c[i]).length)));
-  const line = (c) => [...c.slice(0, -1).map((x, i) => pad(x, widths[i])), c.at(-1)].join('  ').trimEnd();
-  const out = [line(heads), ...cells.map((c, i) => (numbered && normal[i].loggedIn === false && normal[i].n ? red(line(c)) : line(c)))];
-  for (const r of rows.filter((x) => x.unreachable)) out.push(`${r.profile}  ${r.note}`);
-  if (accounts?.length) out.push('', ...accounts);
-  const tokens = rows.filter((r) => r.role === 'node token');
-  // Each account's letter, a spare's too, so `factory use <row> <letter>` finds it here (#365 B5).
-  if (tokens.length) out.push('', 'TOKENS BY NODE', ...tokens.map((r) => `  ${r.place === 'factory' ? HOST : r.place}  ${r.account}${r.letter ? ` (${r.letter})` : ''}  ${r.note}`));
-  // One row for each account, not for each team: teams on one account share it.
-  const quota = normal.filter((r) => (r.five_hour || r.seven_day || r.asOf) && r.account && r.account !== 'unknown').filter((r, i, all) => all.findIndex((o) => o.account === r.account) === i);
-  if (quota.length) {
-    const names = quota.map((r) => `account ${r.account}`);
-    const qw = Math.max(7, ...names.map((n) => n.length));
-    out.push('', `${pad('QUOTA', qw)}  ${pad('5H USE @RESET (UTC)', 21)}  ${pad('7D USE @RESET (UTC)', 21)}  AS OF (UTC)`);
-    for (const [i, r] of quota.entries()) out.push(`${pad(names[i], qw)}  ${pad(windowCell(r.five_hour, now), 21)}  ${pad(windowCell(r.seven_day, now), 21)}  ${r.asOf ? utc(r.asOf) : '–'}`);
+/** What a row's state says, in his words. */
+function stateText(r) {
+  switch (r.state) {
+    case 'works': return r.team || r.role === 'node token' ? 'works' : `works (logged in${r.plan ? `, ${r.plan}` : ''})`;
+    case 'ending': return `works, token ends ${r.expiry}`;
+    case 'warned': return 'works, near its limit';
+    case 'out': return r.outUntil ? `OUT until ${timeText(r.outUntil * 1000)}` : 'OUT';
+    case 'expired': return `TOKEN ENDED ${r.expiry}`;
+    case 'no-token': return 'NO TOKEN';
+    case 'not-logged-in': return 'not logged in';
+    default: return `can't tell: ${r.note || 'no answer'}`;
   }
-  out.push('', 'Quota is reported for each account that has run a session: from the run logs, and on the MacBook from its team\'s Lead\'s status line; every other row: not reported.', '* = the expected account (a local file), not one read.');
-  const out_ = normal.filter((r) => r.loggedIn !== true);
-  if (out_.length) {
-    out.push('', 'Not logged in or not readable:');
-    for (const r of out_) out.push(`  ${r.profile}${r.note ? ` (${r.note})` : ''}`, ...(r.login ?? '').split('\n').map((l) => `    ${l}`));
+}
+
+/** Why a row needs a line to run, as the head of its entry in WHAT TO RUN. */
+function problemText(r) {
+  switch (r.state) {
+    case 'no-token': return r.account ? `no token for ${r.account} on ${MACHINE[r.place]}` : 'no account in the accounts file';
+    case 'expired': return `${r.account}'s token ended ${r.expiry}`;
+    case 'ending': return `${r.account}'s token ends ${r.expiry}`;
+    case 'out': return `Claude Code refuses ${r.account}${r.outUntil ? ` until ${timeText(r.outUntil * 1000)}` : ''}; wait, or`;
+    default: return 'not logged in';
   }
-  const notes = normal.filter((r) => r.loggedIn === true && r.note);
-  if (notes.length) out.push('', 'Notes:', ...notes.map((r) => `  ${r.profile}: ${r.note}`));
+}
+
+const PROBLEM = ['no-token', 'expired', 'out', 'not-logged-in'];
+
+/** The title of a machine's block: which machine, and whether it is the one the list runs on. */
+const titleOf = (place, here) => (place === 'macbook' ? `MacBook${here === 'macbook' ? ' (this machine)' : ''}`
+  : place === 'factory' ? `Mac mini (${HOST}, ${here === 'factory' ? 'this machine' : 'read by ssh'})` : 'piggery (on the Mac mini as tuannguyen, read by ssh)');
+
+/** One line for each account a machine holds, a token or a row's (FAC-117): its name only, how it stands, its use, the rows on it, its token
+ * file. The agents' GitHub token, which shares a node's store, is said to be one. */
+function accountLines(place, rows, { now, agent }) {
+  const mine = rows.filter((r) => r.place === place && !r.unreachable && (r.role === 'node token' || r.team) && r.account && r.account !== 'unknown');
+  const names = [...new Set(mine.map((r) => r.account))].sort();
+  if (!names.length) return [];
+  const win = (w) => (w ? windowCell(w, now) : '?');
+  const heads = names.map((name) => {
+    const of = mine.filter((r) => r.account === name);
+    const token = of.find((r) => r.role === 'node token');
+    const any = token ?? of[0];
+    const state = name === agent && token ? "the agents' GitHub token, not for a Lead" : token ? stateText(token) : 'NO TOKEN';
+    const team = of.filter((r) => r.team).map((r) => r.n);
+    return { name, state, any, rows: team.length ? `rows ${team.join(', ')}` : 'no row', note: token ? token.note : 'no token file', bad: !token || PROBLEM.includes(token.state) };
+  });
+  const w = (f) => Math.max(...heads.map((h) => String(f(h)).length));
+  const nameW = w((h) => h.name);
+  const stateW = w((h) => h.state);
+  const rowsW = w((h) => h.rows);
+  const lines = [`  Accounts on ${MACHINE[place]}:`];
+  for (const h of heads) {
+    const use = h.name === agent ? ' '.repeat(56) : `5H ${pad(win(h.any.five_hour), 23)}  7D ${pad(win(h.any.seven_day), 23)}  `;
+    const text = `    ${pad(h.name, nameW)}  ${pad(h.state, stateW)}  ${use}${pad(h.rows, rowsW)}  ${h.note}`.trimEnd();
+    lines.push(h.bad ? red(text) : text);
+  }
+  return lines;
+}
+
+/** The list (FAC-117): one block for each machine, the one it runs on first, each with its rows and the accounts it holds; then WHAT TO RUN,
+ * the lines to type on this machine for every row that does not work, each saying whether it needs a browser login; then what the words
+ * mean. Accounts are named, never lettered: a letter shows only inside a `factory use` line, with the account's name beside it. */
+export function listText(rows, { here, now = Date.now(), agent = agentOf() }) {
+  const places = [here, 'factory', 'piggery'].filter((p, i, all) => all.indexOf(p) === i && rows.some((r) => r.place === p));
+  const out = [];
+  for (const place of places) {
+    const down = rows.find((r) => r.place === place && r.unreachable);
+    if (down) {
+      out.push(`${titleOf(place, here)}: not reached (${down.note})`, '');
+      continue;
+    }
+    const mine = rows.filter((r) => r.place === place && r.role !== 'node token');
+    const heads = ['#', 'NAME', 'WHAT', 'ACCOUNT', 'STATE', 'USE 5H / 7D', 'LIVE'];
+    const cells = mine.map((r) => [
+      r.n ?? '–',
+      r.profile.slice(r.profile.indexOf('/') + 1),
+      r.team ? (place === 'factory' ? 'Lead and seats' : 'Lead') : r.kind && !r.role.toLowerCase().includes(r.kind.toLowerCase()) ? `${r.role} (${r.kind})` : r.role,
+      r.account && r.account !== 'unknown' ? `${r.account}${r.accountFrom === 'expected' ? '*' : ''}` : '–',
+      stateText(r),
+      r.team ? `${r.five_hour ? pct(r.five_hour.use) : '?'} / ${r.seven_day ? pct(r.seven_day.use) : '?'}` : '–',
+      r.live ?? '–',
+    ]);
+    const widths = heads.map((h, i) => Math.max(h.length, ...cells.map((c) => String(c[i]).length)));
+    const line = (c) => c.map((x, i) => pad(x, widths[i])).join('  ').trimEnd();
+    out.push(titleOf(place, here), `  ${line(heads)}`, ...cells.map((c, i) => (PROBLEM.includes(mine[i].state) ? red(`  ${line(c)}`) : `  ${line(c)}`)));
+    const accounts = place === 'piggery' ? [] : accountLines(place, rows, { now, agent });
+    out.push(...(accounts.length ? ['', ...accounts] : []), '');
+  }
+  const todo = places.flatMap((p) => rows.filter((r) => r.place === p && !r.unreachable && r.fixes?.length));
+  if (todo.length) {
+    out.push(`WHAT TO RUN (type each line on this ${here === 'factory' ? 'Mac mini' : 'MacBook'})`);
+    for (const r of todo) {
+      out.push(`  ${SHORT[r.place]}${r.n ? ` ${r.n}` : ''}, ${r.profile.slice(r.profile.indexOf('/') + 1)}: ${problemText(r)}`);
+      const w = Math.max(...r.fixes.map((f) => f.cmd.length));
+      for (const f of r.fixes) out.push(`    ${pad(f.cmd, w)}   ${f.needs}${f.why ? `; ${f.why}` : ''}`);
+    }
+    out.push('');
+  }
+  out.push('"works": a token is there, it has not ended, and Claude Code has not refused the account for quota. No request tests a token, so a revoked one shows only when a session fails.');
+  if (places.includes('macbook')) out.push('A MacBook Lead\'s status line carries its use but no refusal: the MacBook sees an account refused only when the Mac mini\'s runs use it too.');
+  out.push(`USE is each account's newest reading, a Mac mini run or a MacBook Lead's status line; "?" where none has run. Times are this machine's (UTC${zoneOf(new Date(now))}).`);
+  if (rows.some((r) => r.accountFrom === 'expected')) out.push('* = the expected account (a local file), not one read.');
   return out.join('\n');
 }
 
@@ -1159,12 +1325,16 @@ function remote(cmd, args, env) {
   return r.status ?? 1;
 }
 
-/** The Mac mini's list as text: the numbered rows and the lettered accounts, and the line about seat 1's old file while it is there. */
-function listing(ctx, env) {
+/** The Mac mini's list as text: the numbered rows and the accounts, and the line about seat 1's old file while it is there. For `use` with
+ * an argument missing (forUse), also the `factory use` line of each account, its letter there beside its name (FAC-117). */
+function listing(ctx, env, { forUse = false } = {}) {
   const rows = readPlace('factory', ctx);
-  finish(rows, readAccounts(ctx.state));
-  const text = tableText(rows, { accounts: accountsText(rows, accountList(ctx), ctx) });
-  return { rows, text: existsSync(seat1File(ctx.agentProfiles)) ? `${text}\n\nseats/1/oauth-token (seat 1's old token file) is still there; it moves aside, never deleted, at the next factory account add or factory use once seat 1's account has a token.` : text };
+  const agent = agentOf(env);
+  finish(rows, readAccounts(ctx.state), { here: 'factory', agent });
+  const lines = [listText(rows, { here: 'factory', agent })];
+  if (forUse) lines.push('', 'The accounts factory use takes here:', ...accountList(ctx).map((a) => `  factory use <row> ${a.letter}   ${a.name}`));
+  if (existsSync(seat1File(ctx.agentProfiles))) lines.push('', "seats/1/oauth-token (seat 1's old token file) is still there; it moves aside, never deleted, at the next factory account add or factory use once seat 1's account has a token.");
+  return { rows, text: lines.join('\n') };
 }
 
 const defaultAsk = async (question) => {
@@ -1356,7 +1526,7 @@ async function useOnHost(args, env, io) {
     return 2;
   }
   const ctx = contextOf(env);
-  const { rows, text } = listing(ctx, env);
+  const { rows, text } = listing(ctx, env, { forUse: true });
   let [row, letter] = args;
   if (row === undefined || letter === undefined) {
     console.log(text);
@@ -1470,12 +1640,10 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
     return 0;
   }
   const rows = readPlace(place, ctx);
-  // The MacBook's own lettered accounts, with the quota its teams' Leads reported, before the other places' rows join (#365 B5).
-  const lettered = nodeAccountList(ctx.agentProfiles);
-  const accounts = lettered.length ? accountsText(rows.filter((r) => r.place === 'macbook'), lettered, { ...ctx, title: 'ACCOUNTS ON macbook' }) : null;
   if (all) rows.push(...readFactory(ctx), ...readPiggery(ctx));
-  finish(rows, readAccounts(ctx.state));
-  console.log(argv.includes('--json') ? JSON.stringify(rows) : tableText(rows, { accounts }));
+  const agent = agentOf(env);
+  finish(rows, readAccounts(ctx.state), { here: place, agent });
+  console.log(argv.includes('--json') ? JSON.stringify(rows) : listText(rows, { here: place, agent }));
   return 0;
 }
 
