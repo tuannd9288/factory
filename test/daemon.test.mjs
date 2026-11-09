@@ -68,13 +68,15 @@ async function world(body, { pass = FAKE_PASS } = {}) {
   }
 }
 
-// A pass that records the gh and git environment it ran with, in <state>/pass-env.
+// A pass that records the gh and git environment it ran with, in <state>/pass-env. It writes a temporary file and renames it, so a test
+// never reads pass-env half-written: writeFileSync empties a file before it writes, and a pass runs again every passMs.
 const ENV_PASS = `
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parentPort, workerData } from 'node:worker_threads';
 const seen = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(GH_|GITHUB_TOKEN$|GIT_)/.test(k)));
-writeFileSync(join(workerData.state, 'pass-env'), JSON.stringify(seen));
+writeFileSync(join(workerData.state, 'pass-env.tmp'), JSON.stringify(seen));
+renameSync(join(workerData.state, 'pass-env.tmp'), join(workerData.state, 'pass-env'));
 parentPort.postMessage({ type: 'pass', code: 0, heldBy: null, moved: false });
 `;
 
