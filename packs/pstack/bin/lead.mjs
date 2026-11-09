@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { onLinear } from '../../../bin/lib/linear-repos.mjs';
 import { TEAM, firstFree } from '../../../bin/lib/names.mjs';
+import { profilesOf, runsOf, stateDirOf } from '../../../bin/lib/node.mjs';
 import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
@@ -121,12 +122,12 @@ export const findNode = (PATH) => which('node', PATH);
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop', 'SessionEnd'];
 
 /** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
- * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-<team>/
- * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
- * exec bit. */
-export function leadArgs({ repo, team, home, root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
+ * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to
+ * <runs>/<repo>-<team>/transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script
+ * needs no exec bit. runs is the runs folder (runsOf, bin/lib/node.mjs), ~/factory-runs unless FACTORY_RUNS names another. */
+export function leadArgs({ repo, team, home, runs = join(home, 'factory-runs'), root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
   const cwd = join(root, repo);
-  const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
+  const hook = [node, hookScript, join(runs, `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
   return {
     cwd,
@@ -136,7 +137,7 @@ export function leadArgs({ repo, team, home, root, roleText, node, resume = null
       '--model', 'opus', '--effort', 'high',
       '--append-system-prompt', roleText,
       '--permission-mode', 'auto',
-      '--add-dir', join(home, 'factory-runs'),
+      '--add-dir', runs,
       '--name', `${repo}-${team}`,
       '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: { ...Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])), PreToolUse: pushHook(false, node) } }),
       // The prompt argument goes right after the id: --allowedTools and --disallowedTools take every word up to the next option.
@@ -312,7 +313,7 @@ function main(argv, env) {
     return 2;
   }
   const rolePath = join(root, 'packs/pstack/lead.md');
-  const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  const stateDir = resolve(stateDirOf(env));
   let linear;
   try {
     team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), newTeam: flags.includes('--new-team') });
@@ -322,13 +323,14 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: ${e.message}\n`);
     return 2;
   }
-  const roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat: join(root, 'bin/seat'), runs: resolve(env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs')) }) : '';
+  const runs = runsOf(env);
+  const roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat: join(root, 'bin/seat'), runs }) : '';
   if (!roleText.trim()) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;
   }
   // No row, no start: the Lead runs on a row's token, never on a login (the Human, 2026-11-01).
-  const state = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  const state = stateDir;
   const row = `factory/${repo}-${team}`;
   const account = readAccounts(state)[row] ?? null;
   if (!account) {
@@ -339,7 +341,7 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: the account of ${row} is not a plain account name\n`);
     return 2;
   }
-  const runDir = join(env.HOME, 'factory-runs', `${repo}-${team}`);
+  const runDir = join(runs, `${repo}-${team}`);
   const transcripts = join(runDir, 'transcripts');
   const earlier = flags.includes('--new') ? null : newestSession(transcripts);
   const resume = earlier?.id ?? null;
@@ -363,10 +365,10 @@ function main(argv, env) {
     return 2;
   }
   const hookScript = hookPath({ root, runDir });
-  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, root, roleText, node, resume, message, sessionId, hookScript });
+  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, runs, root, roleText, node, resume, message, sessionId, hookScript });
   const wanted = enabledPlugins(readSettings(cwd));
   // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
-  const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
+  const profiles = resolve(profilesOf(env));
   let config;
   let pluginRoot;
   try {
@@ -379,7 +381,7 @@ function main(argv, env) {
   }
 
   if (flags.includes('--dry-run')) {
-    const shown = leadArgs({ repo, team, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', sessionId: sessionId && '<new session id>', hookScript }).argv;
+    const shown = leadArgs({ repo, team, home: env.HOME, runs, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', sessionId: sessionId && '<new session id>', hookScript }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
     process.stdout.write(`plugin root: ${pluginRoot}\n`);
