@@ -12,13 +12,17 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
 import { STALE_RUN, assistantEntryOf, canaryOf } from './claude-code.mjs';
-import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { seatAccounts } from './token.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
-import { job, plist } from './queue.mjs';
+import { DIGEST_REPO, job, plist } from './launchd.mjs';
+import { installedRoot, placeOf } from './node.mjs';
+import { cloneRepo, clonesUnder } from './repos.mjs';
 import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
+import { clearFailed, markFailed, readMarkers, repoMarker } from './status.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import them from here.
 export { READS, costOf } from './claude-code.mjs';
@@ -90,14 +94,6 @@ export function charge(byBranch, seen, entry) {
   else row.dollars += entry.dollars;
   row.models.add(entry.model);
   byBranch.set(entry.branch, row);
-}
-
-/** Cost per git branch from a Claude Code profile's session files: dollars, models, and unpriced models. */
-export function branchCosts(profileDir) {
-  const byBranch = new Map();
-  const seen = new Set();
-  for (const entry of assistantEntries(profileDir)) charge(byBranch, seen, entry);
-  return byBranch;
 }
 
 const real = (p) => {
@@ -173,7 +169,7 @@ export function inWindow(start, end, from, to) {
 }
 
 /** One pull request's row, as the GraphQL query below returns it; a task of its own when it closes no task. */
-export function rowOf(repo, pr, { human, costs, profile }) {
+export function rowOf(repo, pr, { human, costs }) {
   const labels = pr.labels.nodes.map((l) => l.name);
   const tiers = labels.map((l) => /^tier-([123])$/.exec(l)?.[1]).filter(Boolean).map(Number);
   const events = pr.timelineItems.nodes;
@@ -209,8 +205,7 @@ export function rowOf(repo, pr, { human, costs, profile }) {
   const branch = costs?.get(pr.headRefName);
   let cost = null;
   let costNote;
-  if (!profile) costNote = 'no profile';
-  else if (!branch) costNote = 'no session on the branch';
+  if (!branch) costNote = 'no session on the branch';
   else {
     cost = branch.dollars;
     costNote = branch.unpriced.size ? `unpriced: ${[...branch.unpriced].join(', ')}` : '';
@@ -276,16 +271,15 @@ export function taskRow(repo, issue, prRows) {
  * sweep in every `queue-*.ok` file, with a null for each of the ledger's repositories that has no such record (an
  * empty file is none). `missing` is true when the folder itself is not there, so nothing could be checked. */
 export function queueState(dir, repos) {
-  const missing = !existsSync(dir);
-  const names = missing ? [] : readdirSync(dir).sort();
-  const first = (file) => readFileSync(join(dir, file), 'utf8').split('\n')[0].trim();
-  const ok = names.filter((f) => /^queue-.*\.ok$/.test(f)).map((f) => ({ label: f, at: first(f) })).filter((x) => x.at);
+  const markers = readMarkers(dir);
+  const queue = (markers ?? []).filter((m) => m.name.startsWith('queue-'));
+  const ok = queue.filter((m) => m.kind === 'ok' && m.line).map((m) => ({ label: m.file, at: m.line }));
   const known = new Set(ok.map((x) => x.label));
   return {
     dir,
-    missing,
-    failed: names.filter((f) => /^queue-.*\.failed$/.test(f)).map((f) => ({ file: f, text: first(f) })),
-    ok: [...ok, ...repos.filter((repo) => !known.has(`queue-${repo.replace('/', '-')}.ok`)).map((repo) => ({ label: repo, at: null }))],
+    missing: markers === null,
+    failed: queue.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line })),
+    ok: [...ok, ...repos.filter((repo) => !known.has(`${repoMarker(repo)}.ok`)).map((repo) => ({ label: repo, at: null }))],
   };
 }
 
@@ -465,8 +459,6 @@ const at = (number) => (typeof number === 'string' ? ` ${number}` : `#${number}`
 
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
-
-export { lastRecords, readSessions };
 
 /** The sessions that ran in the period, one record each: a resumed session's total_cost_usd covers the whole session, so a
  * session counts once, by its last record; the records of one session are never added (#89). */
@@ -656,40 +648,8 @@ export async function linearTaskRows({ repo, api, teamKey, allPulls, pullRow, fr
   return { rows, keys: new Set(tasks.map((t) => t.identifier)) };
 }
 
-/** The owner/name of the clone at dir, from its github.com origin, or null: the factory's own repository, whose clone is the root. */
-function originRepo(dir) {
-  try {
-    const url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    const m = /github\.com[:/](.+)$/.exec(url.replace(/\/$/, '').replace(/\.git$/, ''));
-    return m && /^[\w.-]+\/[\w.-]+$/.test(m[1]) ? m[1] : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The factory's clones under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose
- * `origin` is on github.com. The merge queue (bin/lib/queue.mjs) finds the repositories taken in by the same rule.
- * The name is the origin less one trailing `/` and a trailing `.git`, as bin/onboard takes it. A kit clone whose origin
- * cannot be read, or whose name is not owner/name, is left out and `skip(folder, why)` is called for it. */
-export function clonesUnder(root, skip = () => {}) {
-  const out = new Map();
-  for (const name of existsSync(root) ? readdirSync(root) : []) {
-    const dir = join(root, name);
-    if (!existsSync(join(dir, '.gate/config.sh')) || !existsSync(join(dir, '.git'))) continue;
-    let url;
-    try {
-      url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-    } catch (error) {
-      skip(dir, `origin cannot be read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
-      continue;
-    }
-    const m = /github\.com[:/](.+)$/.exec(url.replace(/\/$/, '').replace(/\.git$/, ''));
-    if (!m) continue;
-    if (/^[\w.-]+\/[\w.-]+$/.test(m[1])) out.set(m[1], dir);
-    else skip(dir, `origin ${url} does not name owner/name`);
-  }
-  return out;
-}
+// Moved to repos.mjs (FAC-85), which owns a repository's identity, and exported here too while callers still import it from here.
+export { clonesUnder };
 
 /** `--check`: the canary, printed. Exit 1 when a field the ledger reads is missing or stale, or there is nothing to read. */
 function check(dirs, latest, extra) {
@@ -719,8 +679,8 @@ export function lastWeek(now = new Date()) {
   return { since: day(7), until: day(1) };
 }
 
-/** The digest's own launchd job (#209), `plist [--daemon] --repo owner/name...`: Monday 09:00 in the machine's local
- * time, posting last week's digest to the private repository where the Human reads it. */
+/** The digest's own launchd job (#209), `plist [--daemon] --repo owner/name...`, as the table has it (bin/lib/launchd.mjs): Monday 09:00
+ * in the machine's local time, posting last week's digest to the private repository where the Human reads it. */
 function digestJob(argv) {
   const repos = [];
   let daemon = false;
@@ -729,19 +689,9 @@ function digestJob(argv) {
     else if (argv[i] === '--repo' && /^[\w.-]+\/[\w.-]+$/.test(argv[i + 1] ?? '')) repos.push(argv[++i]);
     else throw new Error(`plist takes --daemon and --repo owner/name, not ${JSON.stringify(argv[i] === '--repo' ? argv[i + 1] ?? '' : argv[i])}`);
   }
-  const as = {
-    label: 'io.github.tuannd9288.factory.digest',
-    tool: 'bin/factory-ledger',
-    verb: null,
-    args: ['--post', DIGEST_REPO, '--last-week'],
-    log: 'digest.log',
-    calendar: { Weekday: 1, Hour: 9, Minute: 0 },
-    keep: ['FACTORY_ROOT', 'AGENT_PROFILES', 'FACTORY_RUNS', 'FACTORY_PROFILE_DIRS', 'FACTORY_STATUSLINE'],
-  };
-  process.stdout.write(plist(job(repos, process.env, daemon, as)));
+  const env = process.env;
+  process.stdout.write(plist(job('digest', { repos, env, daemon, place: placeOf(env), installed: installedRoot(env) })));
 }
-
-const DIGEST_REPO = 'tuannd9288/better-factory';
 
 /** #366: the issue's shared-records contract (no multi-node reader in the references).
  * Fetch into a disposable bare repository so a failed fetch can never use yesterday's local files.
@@ -908,7 +858,7 @@ async function main(argv) {
     const pull = (n) => {
       if (!pulls.has(n)) {
         const node = graphql(QUERY, n).pullRequest;
-        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: true }) });
+        pulls.set(n, { node, row: rowOf(repo, node, { human, costs }) });
       }
       return pulls.get(n);
     };
@@ -916,7 +866,7 @@ async function main(argv) {
     // A registry or a Linear read that fails leaves this repository's tasks out and says so; the rest of the digest is written.
     let team = null;
     try {
-      team = onLinear(repo, state);
+      team = onLinear(repo.slice(repo.indexOf('/') + 1), state);
     } catch (error) {
       unreadBecause(repo, error);
     }
@@ -945,7 +895,7 @@ async function main(argv) {
   }
   rows.sort((a, b) => a.created.localeCompare(b.created));
   // A `Fixes:` line names a commit; the repository's own clone says which pull request it came from (INN-40), never gh.
-  const own = originRepo(root);
+  const own = cloneRepo(root);
   const resolvers = new Map();
   const resolverOf = (repo) => {
     if (!resolvers.has(repo)) {
@@ -973,7 +923,7 @@ async function main(argv) {
   const report = inspect(shared ? [] : folders, { latest: opts.latest });
   // Each repository's change fail rate since its merge switch last moved (INN-40), from GitHub's search for that window.
   const switches = switchWindows(opts.repos, { state, to, merged: (repo, a, b) => mergedIn(repo, a, b), resolverOf });
-  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared, switches });
+  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : seatAccounts(state), shared, switches });
   if (!opts.post) {
     process.stdout.write(text);
     return;
@@ -991,7 +941,7 @@ async function main(argv) {
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
   if (shared) writeFileSync(join(state, 'digest-records.json'), `${JSON.stringify(shared.cursor)}\n`);
-  rmSync(join(state, 'digest.failed'), { force: true });
+  clearFailed(state, 'digest');
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
@@ -1005,13 +955,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     // leaves queue-run.failed (#209);
     // a run that prints to stdout, and plist, keep no state.
     const args = process.argv.slice(2);
-    if (args[0] !== 'plist' && args.includes('--post')) {
-      try {
-        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-        mkdirSync(state, { recursive: true });
-        writeFileSync(join(state, 'digest.failed'), `${new Date().toISOString()} ${why.split('\n')[0]}\n`);
-      } catch {}
-    }
+    if (args[0] !== 'plist' && args.includes('--post')) markFailed(process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), 'digest', why);
     process.exit(1);
   }
 }

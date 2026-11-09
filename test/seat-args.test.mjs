@@ -54,9 +54,9 @@ test('a real absolute --run, --work and --add-dir are accepted (#192)', () => wo
 }));
 
 test('a pid file that is empty or not a number is not a live session: it does not count, and its tag is free', () => world(async (w) => {
-  const { liveCount } = await import('../bin/lib/seat.mjs');
+  const { liveRuns } = await import('../bin/lib/seat.mjs');
   for (const [i, text] of ['', '\n', 'abc', '0', '-1'].entries()) writeFileSync(join(w.run, `run-bad${i}.pid`), text);
-  assert.equal(liveCount(w.runs, 2), 0);
+  assert.equal(liveRuns(w.runs), 0);
   const r = w.start('worker', ['--tag', 'bad0']);
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the record');

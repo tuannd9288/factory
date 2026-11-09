@@ -208,7 +208,7 @@ test('on the factory account: a team row is its account\'s token file\'s mode an
     writeFileSync(join(s.state, 'accounts'), 'factory/alpha-lead=seat.one\nfactory/factory-lead=seat.two\nfactory/beta-lead=seat.one\nfactory/lead-x=seat.one\nfactory/seat-1=seat.one\nfactory/seat-2=seat.two\n');
     s.w('gh-factory', 'agentgh');
     s.onHost();
-    for (const [repo, files] of [['alpha', ['.gate', '.envrc', '.git/x']], ['beta', ['.gate']], ['gamma', ['.envrc']], ['delta', ['.gate', '.envrc', '.git/x']]]) {
+    for (const [repo, files] of [['alpha', ['.gate/config.sh', '.envrc', '.git/x']], ['beta', ['.gate/config.sh']], ['gamma', ['.envrc']], ['delta', ['.gate/config.sh', '.envrc', '.git/x']]]) {
       mkdirSync(join(s.env.FACTORY_ROOT, repo), { recursive: true });
       for (const f of files) {
         mkdirSync(join(s.env.FACTORY_ROOT, repo, f, '..'), { recursive: true });

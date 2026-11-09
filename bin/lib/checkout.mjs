@@ -9,6 +9,9 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { JOBS, nameOf } from './launchd.mjs';
+import { writeAtomic } from './files.mjs';
+import { clearFailed, markFailed } from './status.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const STALE_MS = 120_000;
@@ -131,19 +134,18 @@ function archive(state, folder, root, path) {
  * tip it fetched, and nothing else. */
 export function followMain({ root, state, live, now = Date.now(), env = process.env }) {
   mkdirSync(state, { recursive: true });
-  const report = join(state, 'queue-checkout.failed');
   const since = join(state, 'queue-checkout.since');
   // GIT_LITERAL_PATHSPECS: a path from the scan is a path, whatever characters it holds.
   const git = (...args) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 60_000, env: { ...env, GIT_TERMINAL_PROMPT: '0', GIT_LITERAL_PATHSPECS: '1' } });
   const out = (r) => `${r.stdout ?? ''}`.trim();
   const why = (r) => first(r.stderr) || first(r.stdout) || (r.error ? r.error.message : `exit ${r.status}`);
   const refuse = (text) => {
-    writeFileSync(report, `${new Date(now).toISOString()} ${text}\n`);
+    markFailed(state, 'queue-checkout', text, { now });
     rmSync(since, { force: true });
     return { status: 'refused', why: text };
   };
   const clear = () => {
-    rmSync(report, { force: true });
+    clearFailed(state, 'queue-checkout');
     rmSync(since, { force: true });
   };
   // The checkout must be on main with no change of its own.
@@ -181,7 +183,7 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
       const began = Date.parse((readOr(since) ?? '').trim());
       if (Number.isNaN(began)) writeFileSync(since, `${new Date(now).toISOString()}\n`);
       else if (now - began >= LONG_MS) {
-        writeFileSync(report, `${new Date(now).toISOString()} ${behind} commits behind for ${Math.floor((now - began) / 3600_000)} h: runs are live\n`);
+        markFailed(state, 'queue-checkout', `${behind} commits behind for ${Math.floor((now - began) / 3600_000)} h: runs are live`, { now });
       }
       return { status: 'deferred', behind };
     }
@@ -208,20 +210,19 @@ export function followMain({ root, state, live, now = Date.now(), env = process.
   }
 }
 
-// The relay's is installed on the MacBook alone (#366), and is skipped where it is not, as every one is.
-export const PLISTS = ['io.github.tuannd9288.factory.queue', 'io.github.tuannd9288.factory.digest', 'io.github.tuannd9288.factory.relay'];
-// Each tool, with the flags its `plist` takes for the LaunchDaemon.
-const TOOLS = { queue: ['bin/factory-queue', '--daemon'], digest: ['bin/factory-ledger', '--daemon'], relay: ['bin/factory-relay'] };
+// The factory's jobs (bin/lib/launchd.mjs). The relay's is installed on the MacBook alone (#366), and is skipped where it is not, as every
+// one is.
+export const PLISTS = Object.values(JOBS).map((j) => j.label);
 
 /** The repositories an installed plist names (its --repo arguments), in order. */
 export function reposOf(text) {
   return [...text.matchAll(/<string>--repo<\/string>\s*<string>([^<]+)<\/string>/g)].map((m) => m[1]);
 }
 
-/** What this checkout's code renders for the plist of `label`, with the repositories the installed one names: the tools'
- * own `plist` for the LaunchDaemon, run in this process's environment, which for a daemon is the plist's. */
+/** What this checkout's code renders for the plist of `label`, with the repositories the installed one names: the job's tool's
+ * own `plist` with the flags for the LaunchDaemon, run in this process's environment, which for a daemon is the plist's. */
 export function renderPlist(root, label, installed, env = process.env) {
-  const [tool, ...flags] = TOOLS[label.split('.').slice(4).join('.')];
+  const { tool, flags } = JOBS[nameOf(label)];
   const r = spawnSync(join(root, tool), ['plist', ...flags, ...reposOf(installed).flatMap((repo) => ['--repo', repo])], { encoding: 'utf8', env, timeout: 30_000 });
   if (r.status !== 0) throw new Error(first(r.stderr) || `exit ${r.status}`);
   return r.stdout;
@@ -235,7 +236,6 @@ export function checkPlists({ root, state, plistDir, render = (label, installed)
   const differ = [];
   const unrendered = [];
   const wantedDir = join(state, 'plist-wanted');
-  const report = join(state, 'queue-plist.failed');
   for (const label of PLISTS) {
     const installed = readOr(join(plistDir, `${label}.plist`));
     if (installed === null) continue;
@@ -259,15 +259,19 @@ export function checkPlists({ root, state, plistDir, render = (label, installed)
       mkdirSync(dirname(to), { recursive: true });
       copyFileSync(file, to);
     }
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, wanted);
-    renameSync(tmp, file);
+    writeAtomic(file, wanted);
   }
-  const parts = [
-    ...(differ.length ? [`${differ.join(' ')}: the installed plist differs from what the code renders; the wanted one is in ${wantedDir}; the Human reinstalls it with sudo: bootout the job, check that the pid in daemon.lock is the daemon (ps -p <pid> -o command= ends in bin/lib/daemon.mjs) and SIGTERM it, install, bootstrap`] : []),
+  // One fact a line, each at most 200 characters (bin/lib/status.mjs): what differs first, which Colly's status line and the digest show,
+  // then where the wanted plist is and the Human's steps, then each render that failed.
+  const lines = [
+    ...(differ.length ? [
+      `${differ.join(' ')}: the installed plist differs from what the code renders`,
+      `the wanted one is in ${wantedDir}`,
+      'the Human reinstalls it with sudo: bootout the job, check that the pid in daemon.lock is the daemon (ps -p <pid> -o command= ends in bin/lib/daemon.mjs) and SIGTERM it, install, bootstrap',
+    ] : []),
     ...unrendered,
   ];
-  if (parts.length) writeFileSync(report, `${new Date(now).toISOString()} ${parts.join('; ')}\n`);
-  else rmSync(report, { force: true });
+  if (lines.length) markFailed(state, 'queue-plist', lines[0], { now, more: lines.slice(1) });
+  else clearFailed(state, 'queue-plist');
   return { differ, unrendered };
 }

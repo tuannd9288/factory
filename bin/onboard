@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Takes a repository into the factory: clones it under the factory root and opens the kit pull request
 # in it once the full verify passes.
-#   bin/onboard <repo-url> [--no-pr] [--own <file>] [--reviewer <name>] [--runner <json>]
+#   bin/onboard <repo-url> [--no-pr] [--own <file>] [--runner <json>]
 #     [--pr-runner <json>] [--trusted-runner <json>]
 # The team that claimed the issue runs it; a repository that already has the kit is brought up to date with
 # bin/kit-update. bin/onboard-owner runs first; without --no-pr, onboard refuses until
@@ -24,12 +24,11 @@
 # it has gets the kit's deny lines it lacks inserted as text (bin/lib/settings.mjs), every other byte kept; a shape that
 # cannot take them is refused before anything is written and the clone removed. With none, the kit's own file is laid as it
 # is: deny lines only, and no way of working's pin (a team brings that in its own pull request).
-# --reviewer (stub, claude or entire), --runner, --pr-runner and --trusted-runner (JSON: "ubuntu-latest" or
-# ["self-hosted","macOS"]) are the gate's settings (#335, bin/lib/gate-settings.mjs): which reviewer the gate runs, and the
-# runners of main's jobs, the candidate's verify and the trusted jobs. They are filled into the three workflows as
-# CODEOWNERS gets its owner, so they are on main once the kit lands, and a pull request changes them at tier 3. One left out
-# is the kit's: GitHub-hosted Ubuntu, and no reviewer, so review and verdict fail closed. Runners that break the runner rule
-# (kit/.gate/enforced-rules.md) are refused before anything is cloned, unless the reviewer is entire (#155).
+# --runner, --pr-runner and --trusted-runner (JSON: "ubuntu-latest" or ["self-hosted","macOS"]) are the gate's settings
+# (#335, bin/lib/gate-settings.mjs): the runners of main's jobs, the candidate's verify and the trusted tier job. They are
+# filled into the three workflows as CODEOWNERS gets its owner, so they are on main once the kit lands, and a pull request
+# changes them at tier 3. One left out is the kit's: GitHub-hosted Ubuntu. Runners that break the runner rule
+# (kit/.gate/enforced-rules.md) are refused before anything is cloned. No reviewer runs on Actions (FAC-100).
 # In order, it:
 #   1. clones the repository into <root>/<repo>;
 #      Excludes .claude/worktrees/ from git so git add -A never stages one under the tier-3 .claude/.
@@ -52,13 +51,13 @@
 #      base and head. Onboard opens it only from a factory commit on origin/main whose kit/ has no uncommitted, untracked or
 #      ignored file, since it lays the kit from the working tree.
 # FACTORY_ROOT (default: this clone) is where repositories live; FACTORY_HUMAN
-# (default: tuannd9288) is the code owner of tier 3; FACTORY_AGENT (default: tuan9288-agent) the agents' account.
+# (default: tuannd9288) is the code owner of tier 3; FACTORY_AGENT (default: nami9288) the agents' account.
 set -euo pipefail
 factory=$(cd "$(dirname "$0")/.." && pwd)
 root=${FACTORY_ROOT:-$factory}
 human=${FACTORY_HUMAN:-tuannd9288}
-agent=${FACTORY_AGENT:-tuan9288-agent}
-url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>] [--reviewer <name>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]}
+agent=${FACTORY_AGENT:-nami9288}
+url=${1:?usage: bin/onboard <repo-url> [--no-pr] [--own <file>] [--runner <json>] [--pr-runner <json>] [--trusted-runner <json>]}
 shift
 open_pr=1
 own=""
@@ -67,7 +66,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --no-pr) open_pr=0; shift ;;
     --own) own=${2:?onboard: --own needs a file}; shift 2 ;;
-    --reviewer | --runner | --pr-runner | --trusted-runner)
+    --runner | --pr-runner | --trusted-runner)
       [ "$#" -ge 2 ] || { echo "onboard: $1 needs a value; nothing done"; exit 2; }
       settings+=("$1" "$2"); shift 2 ;;
     *) echo "onboard: unknown argument $1; nothing done"; exit 2 ;;
@@ -180,7 +179,6 @@ lists=$(mktemp -d)
 trap 'rm -rf "$lists"; rm -f "$composed" "$attrs"' EXIT
 (cd "$factory/kit" && find . -type f ! -name .DS_Store | sed 's#^\./##' | LC_ALL=C sort) >"$lists/kit"
 : >"$lists/kept"
-: >"$lists/replaced"
 : >"$lists/merged"
 had_config=0
 [ -e .gate/config.sh ] && had_config=1
@@ -209,20 +207,15 @@ while IFS= read -r path; do
 done <"$lists/kit"
 # The instruction files: AGENTS.md is the composed text (the repository's own, or --own, with the block in it) written over
 # the file in place, so its mode stays; CLAUDE.md is the repository's own, or the one-line import where it had none.
-[ ! -e AGENTS.md ] || echo AGENTS.md >>"$lists/merged"
 cat "$composed" >AGENTS.md
 [ -e CLAUDE.md ] || [ -L CLAUDE.md ] || printf '@AGENTS.md\n' >CLAUDE.md
 # .gitattributes: the composed text, written in place so its mode stays. A repository whose .gitignore ignores it (a root
 # allowlist) and does not track it still gets it: it is the one path added with git add -f, below.
-[ ! -e .gitattributes ] || echo .gitattributes >>"$lists/merged"
 git check-ignore -q .gitattributes && attrs_ignored=1 || attrs_ignored=0
 cat "$attrs" >.gitattributes
 # A repository with its own scripts/verify gets the adapter lines (bin/lib/adapter.mjs), but only in a .gate/config.sh the
 # kit has just laid: one the repository had is its own.
 [ "$had_config" -eq 1 ] || node "$factory/bin/lib/adapter.mjs" "$dest" >>.gate/config.sh
-# A file the repository had exactly as the kit's was not replaced: git sees no change in it.
-while IFS= read -r path; do git diff --quiet HEAD -- "$path" || echo "$path"; done <"$lists/replaced" >"$lists/changed"
-mv "$lists/changed" "$lists/replaced"
 # .gate/kit-commit (the factory commit the kit came from) and .gate/kit-files (the inventory) are generated here, not files
 # of the kit. Removed first: a link the repository holds there would take the write outside the clone. The inventory lists
 # neither AGENTS.md nor CLAUDE.md: they are the repository's own.
@@ -241,7 +234,7 @@ if ! GATE_BASE=HEAD .gate/bin/verify; then
 fi
 n_kept=$(wc -l <"$lists/kept" | tr -d ' ')
 git commit --quiet -m "Join the factory: gate, hooks, hand-in rules and templates" \
-  -m "From tuannd9288/factory $(git -C "$factory" rev-parse --short HEAD 2>/dev/null || echo '(uncommitted)'). Kept as the repository had them: $n_kept. Its AGENTS.md has the kit's Gate block at the start; the rest of it, and its CLAUDE.md, are its own."
+  -m "From tuannd9288/factory $(git -C "$factory" rev-parse --short HEAD). Kept as the repository had them: $n_kept. Its AGENTS.md has the kit's Gate block at the start; the rest of it, and its CLAUDE.md, are its own."
 echo "onboard: kit committed on factory/kit ($(wc -l <"$lists/kit" | tr -d ' ') files, $n_kept kept as they were; AGENTS.md has the Gate block, the rest of it is the repository's)"
 
 [ "$open_pr" -eq 1 ] || { echo "onboard: --no-pr; push factory/kit and open the pull request yourself"; exit 0; }
@@ -260,7 +253,6 @@ tldr=$(node "$factory/bin/lib/tldr.mjs" onboard "$name" <<<"$evidence") || tldr=
 for label in tier-1 tier-2 tier-3 needs-human raised task; do gh label create "$label" --repo "$slug" --force >/dev/null; done
 git push --quiet -u origin factory/kit
 kept=$(sed 's/^/  - `/; s/$/`/' "$lists/kept")
-moved=""
 moved='The repository'"'"'s own `AGENTS.md` has the kit'"'"'s marked `## Gate` block inserted at its start, after the title line; every other byte of it is the repository'"'"'s, and so is its `CLAUDE.md` (the import is written only where there was none).'
 moved="$moved"' Its `.gitattributes` has the kit'"'"'s marked review-categories block at the start (a file of the block alone where there was none), so the repository'"'"'s own lines come after it and win; every other byte is the repository'"'"'s.'
 [ "$attrs_ignored" -eq 0 ] || moved="$moved"' The repository'"'"'s `.gitignore` ignores `.gitattributes`; the file is added with `git add -f`, that one path only.'
@@ -268,13 +260,13 @@ moved="$moved"' Its `.gitattributes` has the kit'"'"'s marked review-categories 
 # The repository's own scripts/ and hooks, which the kit does not ship and leaves byte for byte (the evidence checks it).
 untouched=$(git ls-tree -r --name-only "$base" -- scripts .githooks | grep -vxFf "$lists/kit" || true)
 untouched_list=$(printf '%s' "$untouched" | sed '/^$/d; s/^/  - `/; s/$/`/')
-grep -qx '.claude/settings.json' "$lists/merged" && moved="${moved:+$moved }The repository's own \`.claude/settings.json\` has the kit's deny lines inserted as text; every other byte is the repository's, and the evidence below names it as merged."
+grep -qx '.claude/settings.json' "$lists/merged" && moved="$moved The repository's own \`.claude/settings.json\` has the kit's deny lines inserted as text; every other byte is the repository's, and the evidence below names it as merged."
 if [ "$had_config" -eq 0 ] && [ -f scripts/verify ]; then
   adapter_note="\`.gate/config.sh\` ends with the adapter lines: \`GATE_NATIVE=scripts/verify\` runs the repository's own verify as the \`native\` check"
   grep -q '^gate_fast() { \.githooks/pre-commit; }$' .gate/config.sh && adapter_note="$adapter_note, and \`gate_fast\` in \`.gate/config.sh\` calls \`.githooks/pre-commit\`"
-  moved="${moved:+$moved }$adapter_note."
+  moved="$moved $adapter_note."
 fi
-[ -z "$untouched" ] || moved="${moved:+$moved }The repository's own hooks stay in \`.githooks/\` and run only in a clone that ran the repository's own setup; the kit's \`.gate/hooks/\` serve a repository with none."
+[ -z "$untouched" ] || moved="$moved The repository's own hooks stay in \`.githooks/\` and run only in a clone that ran the repository's own setup; the kit's \`.gate/hooks/\` serve a repository with none."
 gh pr create --repo "$slug" --head factory/kit --title "chore(kit): add the factory gate, hooks and templates" --body "$(cat <<EOF
 $tldr
 
@@ -305,19 +297,14 @@ Note: the \`verify\` check of this PR is red (\`.gate/bin/verify-trusted: No suc
 
 ## After the merge
 1. Colly runs \`bin/onboard-owner $slug --id $id --apply\` again, on the Human's login; his approval of this pull
-   request covers it. It replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\`, for the reviewer
-   \`main\`'s \`gate-trusted.yml\` now holds, and reads back what it set.
-2. Where the repository uses the kit's Claude reviewer, the Human pastes the reviewer's secret into the environment
-   \`reviewer\` (branch \`main\` only; set no repository-level secret: the \`pull_request\` jobs of every branch can
-   read it). Entire needs none (#155).
+   request covers it. It replaces the temporary ruleset of \`main\` with the kit's \`factory-gate\`, which requires
+   \`verify\` and \`tier\`, and reads back what it set.
 
 The gate's settings are filled into the workflows by this pull request; the evidence's \`settings\` lines name them, and
 its \`rendered\` lines show each filled line (#335). No repository variable holds them, and changing one later is a pull
 request at tier 3.
-- The reviewer, \`GATE_REVIEWER\` in \`gate-trusted.yml\`: while it is empty, \`review\` and \`verdict\` are red and
-  nothing merges itself.
 - The \`runs-on:\` of \`main.yml\` (\`main\`'s jobs), \`gate.yml\` (the candidate's \`verify\`) and \`gate-trusted.yml\`
-  (the jobs that hold the reviewer's credential, never on a runner that a candidate's, \`main\`'s or a deploy's job uses).
+  (the \`tier\` job, which holds a token that writes labels: never on a runner that a candidate's, \`main\`'s or a deploy's job uses).
 
 </details>
 

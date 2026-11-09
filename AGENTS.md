@@ -2,7 +2,7 @@
 
 This repository (`tuannd9288/factory`) is the root of the Human's software factory. On the Mac mini it is cloned
 in the agents' own macOS account, `factory` (#24), as `~/WORKSPACES`; each repository in the factory is a subfolder
-there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`tuan9288-agent`
+there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`nami9288`
 alone), their profiles and their Herdr; the Human reaches it with `ssh factory@<the Mac mini>`. His own account keeps
 his SSH keys and gh login behind its home, which is `drwx------` on the Mac mini. The clone is outside `~/Desktop`,
 which macOS privacy controls (TCC) close to launchd jobs that were not granted access; not tested here. This file
@@ -64,6 +64,7 @@ The Human's dated decisions, with their sources and his words, are in `docs/deci
 - **Effectiveness, 2026-11-04.**
 - **The Watcher's freeze, 2026-11-07.**
 - **The factory's own merge switch, 2026-11-08.**
+- **No reviewer on GitHub Actions, 2026-11-08.**
 
 ## Tiers
 
@@ -71,15 +72,12 @@ The change sets the tier, by the paths it touches (`.gate/bin/tier`), never the 
 
 | Tier | Trigger | Must be true to merge | The Human |
 |---|---|---|---|
-| 1 | no tier-2 or tier-3 path | `verify`, `review`, `verdict`, `tier` green on the head commit; `verdict` passes at once | none |
-| 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
-| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the Vietnamese summary |
+| 1 | no tier-2 or tier-3 path | `verify` and `tier` green on the head commit | none |
+| 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same as tier 1 | reads it in the weekly digest and on the deploy page |
+| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), or the label `needs-human` | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the Vietnamese summary |
 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
 removed.
-
-Where a repository picks Entire as its reviewer (`GATE_REVIEWER: 'entire'` in `gate-trusted.yml`, #155), the required
-checks are `verify`, `tier` and `Entire Gates`, set by `bin/onboard-owner`; `review` and `verdict` are not among them.
 
 Agents open pull requests under their own GitHub account, never the Human's. GitHub refuses an author's approval of
 his own pull request, and its code-owner rule asks nothing of an author who owns the code: on the scratch repository
@@ -92,9 +90,8 @@ that approval it requests the code owners' review on GitHub, so the pull request
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy. Where a repository's merge
   switch is at `all` (#333), a tier-3 pull request needs no approval of his (a `needs-human` one too, as the code does:
   his choice on #354, 2026-11-02 20:16:33 +07, review 5737110797); a deploy is still his.
-- His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
-  `reviewer` environment, "Allow auto-merge", the Actions event policy for `pull_request_target`), which Colly then
-  applies on his login; and the reviewer's secret, where a repository uses the kit's Claude reviewer.
+- His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, "Allow
+  auto-merge", the Actions event policy for `pull_request_target`), which Colly then applies on his login.
 - Logging into the verifier's Codex profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.
@@ -134,8 +131,7 @@ Names are standard terms, never coined ones (25/10).
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository.
 - **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify --fast`, the tests of the part changed, `red-check`; the full suite runs on CI (#281).
-- **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit; where Entire
-  reviews, `verify`, `tier` and `Entire Gates` (#155).
+- **3a Required status checks** [GH3]: `verify` and `tier`, green on the head commit.
 - **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
 - **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
 - **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
@@ -152,11 +148,11 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   which makes it read Linear, reopens when one moves.
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
-  Checked by: `tier` and `verify-trusted`, which read the body's `Issue:`, `Claim:` and `Team:` lines, and `review`,
-  which reads the body; `kit/.github/pull_request_template.md` asks for the rest.
+  Checked by: `tier` and `verify-trusted`, which read the body's `Issue:`, `Claim:` and `Team:` lines;
+  `kit/.github/pull_request_template.md` asks for the rest.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
-  Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:31` (one reviewer call per head).
+  Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review` (`tier` judges only the pull request's head).
   Prior art [A8]: "An approval covers one specific commit."
 - **H4**: Knowledge is files in the repository, changed by pull request.
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
@@ -228,8 +224,7 @@ command or key, or a deprecation, is MINOR; a fix is PATCH.
 - The Human (2026-10-29, #171), to every reviewer: "Rate each bug from 1 to 10 on how often it would happen and how bad it
   would be. If the two scores multiplied are below 5, just file it as an issue and leave the code alone." To every writer:
   "Do not design for rare or future cases nobody asked about." Claude Code reads this file in a project with no
-  `CLAUDE.md`, as every factory worktree is. The kit's Gate block holds both; its reviewer reports such a bug in
-  `forIssue`, which never blocks, and the Lead files the issue.
+  `CLAUDE.md`, as every factory worktree is. The kit's Gate block holds both.
 - The factory's own Lead on the MacBook starts with `factory lead factory --here`, reads and writes GitHub with `factory gh`
   under the agents' login and pushes, on the Mac mini, or on the MacBook itself once his `factory store` has put the agents'
   GitHub token there (#366); its commits carry the agents' name. The
@@ -251,7 +246,7 @@ command or key, or a deprecation, is MINOR; a fix is PATCH.
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
 | `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
-| `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment, Actions event policy), which Colly runs on the Human's login after his one approval; on the factory's own repository it sets the Actions event policy alone (#337) |
+| `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, Actions event policy), which Colly runs on the Human's login after his one approval; on the factory's own repository it sets the Actions event policy alone (#337) |
 | `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
 | `bin/onboard-doctor` | Reads one repository taken in and prints one line per check, green or red, and changes nothing; Colly runs it on the Human's login, from a commit on `main`; the "Take <repo> in" issue closes on its output |
 | `bin/kit-update` | The onboarded repository's counterpart of onboard: brings its clone up to a factory commit, with evidence, in a pull request from `factory/kit-<sha7>` |
@@ -282,7 +277,8 @@ command or key, or a deprecation, is MINOR; a fix is PATCH.
 | `bin/lib/redact.mjs` | The one redaction: the events' patterns (#309) and seatwork's, used by `bin/lib/events.mjs` and the reader |
 | `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
-| `scripts/ship` | Opens, readies and arms this repository's pull requests as a repository that installed the pstack pack does: it runs `packs/pstack/scripts/ship` from its source, with no red-check stamp, since this root has no `.gate/config.sh` and CI runs `scripts/verify` (FAC-14) |
+| `scripts/ship` | Opens, readies and arms this repository's pull requests as a repository that installed the pstack pack does: it runs `packs/pstack/scripts/ship` from its source, with no red-check stamp, since this root has no `.gate/config.sh` and CI runs `scripts/verify` (FAC-14), and with no reviewer record, since Colly and the supervising session review its pull requests (FAC-101) |
+| `CHANGELOG.md` | Each version's notes, one section `## vX.Y.Z - <date>`, written in its release pull request; `.github/workflows/release.yml` publishes the section (`scripts/release-notes <tag>`) to the version's GitHub Release when its tag is pushed, or by hand for an existing tag; the workflow's header has the steps |
 | `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
 
@@ -295,12 +291,12 @@ Six steps, run by Colly and a team:
 2. Colly runs `bin/onboard-owner` without `--apply`, from the factory's clone on the MacBook, on the Human's `gh`
    login, and sends him the changes it prints. He approves once; Colly runs it with `--apply`. For a private
    repository, Colly also takes the runner's registration token (the Human's standing exception, 2026-10-29), never
-   printed. The agents' account accepts the invitation itself. The gate's settings (the reviewer and three runners)
+   printed. The agents' account accepts the invitation itself. The gate's settings (three runners)
    are no repository variables, which change without a pull request: `bin/onboard` fills them into the kit's
    workflows in step 3, from the options the issue names, and a later change is a pull request (#335).
-3. A team claims the issue and runs `bin/onboard <repo-url>` with the settings the issue names (`--reviewer`, and
-   `--runner`, `--pr-runner`, `--trusted-runner` off GitHub-hosted Ubuntu). The kit pull request carries its evidence
-   (`bin/kit-evidence`), whose `settings` lines name all four. Until `main` holds the kit, its `verify` is red (code
+3. A team claims the issue and runs `bin/onboard <repo-url>` with the settings the issue names (`--runner`,
+   `--pr-runner`, `--trusted-runner` off GitHub-hosted Ubuntu). The kit pull request carries its evidence
+   (`bin/kit-evidence`), whose `settings` lines name all three. Until `main` holds the kit, its `verify` is red (code
    127), and the bootstrap rule requires no check (`bin/onboard`'s own note in the kit pull request body). He
    approves it as tier 3 from its "Tóm tắt cho anh" (`kit/.github/pull_request_template.md`).
 4. When it merges, Colly runs `--apply` the second time (`factory-gate` in, `factory-bootstrap` out). The Human's
@@ -313,8 +309,7 @@ Six steps, run by Colly and a team:
    request per area through the gate, and one that seeds the Feature Map with `/pstack:create-verification-skill`.
 6. When `bin/onboard-doctor` prints every line green, Colly closes the issue.
 
-His part is the two approvals, typing `/repo-refresh` in audit mode in the Lead's session, and pasting the reviewer's
-secret where the repository uses the kit's Claude reviewer; Entire needs none (#155).
+His part is the two approvals and typing `/repo-refresh` in audit mode in the Lead's session.
 
 What step 2 sets and reads back is in the header of `bin/onboard-owner`; what step 3 does, file by file, is in the header of
 `bin/onboard`. Use `bin/onboard` once, for a repository that has no kit yet, and `bin/kit-update` for every later move of an
@@ -332,7 +327,7 @@ every open pull request, since with the ruleset off each would land unjudged. Th
 behind, except a stack's child moved onto `main`, which the queue brings up to `main` (FAC-13). GitHub kept the Human's
 approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
 
-Sessions take Claude Code's own updates (#290); only the gate's reviewer runs a pinned version (`kit/.gate/bin/lib/reviewer.json`).
+Sessions take Claude Code's own updates (#290); nothing in the factory pins the version they run.
 
 The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of eight conditions begins (a required check
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, an account Claude Code warns is

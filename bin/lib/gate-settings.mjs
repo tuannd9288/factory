@@ -1,16 +1,14 @@
-// The gate's four settings (#335): which reviewer `review` runs, and the runners of main's jobs, of the candidate's verify
-// and of the trusted jobs that hold the reviewer's credential. They live in the kit's workflow files on the repository's
-// main, filled in for each repository the way .github/CODEOWNERS gets its owner: a runner as the `runs-on:` of every job in
-// its file, the reviewer as the workflow-level env GATE_REVIEWER of gate-trusted.yml, whose copy on main is the one
-// pull_request_target runs. Changing one is a pull request under /.github: tier 3, the Human's approval. Until #335 they
-// were repository variables, which change without a pull request.
+// The gate's three settings (#335): the runners of main's jobs, of the candidate's verify and of the trusted tier job. They
+// live in the kit's workflow files on the repository's main, filled in for each repository the way .github/CODEOWNERS gets
+// its owner: a runner as the `runs-on:` of every job in its file. Changing one is a pull request under /.github: tier 3, the
+// Human's approval. Until #335 they were repository variables, which change without a pull request. The reviewer was a
+// fourth until FAC-100, when the kit stopped running one on Actions.
 //   bin/onboard fills them in, bin/kit-update carries them from the base, bin/kit-evidence names them and checks the runner
 //   rule, and bin/onboard-owner and bin/onboard-doctor read them back from main. From the same files, eventsOf and targetOf read
 //   the events each workflow runs on, for the Actions event policy bin/onboard-owner sets (#337).
 //   node bin/lib/gate-settings.mjs check [options]                  the options' problems, exit 2 on any
 //   node bin/lib/gate-settings.mjs render <path> --human <login> [options]   fills in the kit file at <path>, in place
-// The options: --reviewer stub|claude|entire ('' for none), and --runner, --pr-runner, --trusted-runner <json>
-// ("ubuntu-latest" or ["self-hosted","macOS"]).
+// The options: --runner, --pr-runner, --trusted-runner <json> ("ubuntu-latest" or ["self-hosted","macOS"]).
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -21,20 +19,15 @@ export const WORKFLOWS = [MAIN, GATE, TRUSTED];
 /** The settings: each with its option, the repository variable that held it before #335, the file that holds it now, and
  * the words that name it in a message. */
 export const SETTINGS = [
-  { key: 'reviewer', option: '--reviewer', variable: 'GATE_REVIEWER', file: TRUSTED, words: 'the reviewer' },
   { key: 'runner', option: '--runner', variable: 'GATE_RUNNER', file: MAIN, words: "main's runner" },
   { key: 'prRunner', option: '--pr-runner', variable: 'GATE_PR_RUNNER', file: GATE, words: "the candidate's runner" },
   { key: 'trustedRunner', option: '--trusted-runner', variable: 'GATE_TRUSTED_RUNNER', file: TRUSTED, words: 'the trusted runner' },
 ];
-export const REVIEWERS = ['stub', 'claude', 'entire'];
 const HOSTED_DEFAULT = ['ubuntu-latest'];
-/** The kit's own lines, which are also what a repository that sets nothing holds: GitHub-hosted Ubuntu, and no reviewer,
- * so `review` and `verdict` fail closed. */
-export const DEFAULTS = { reviewer: '', runner: HOSTED_DEFAULT, prRunner: HOSTED_DEFAULT, trustedRunner: HOSTED_DEFAULT };
+/** The kit's own lines, which are also what a repository that sets nothing holds: GitHub-hosted Ubuntu. */
+export const DEFAULTS = { runner: HOSTED_DEFAULT, prRunner: HOSTED_DEFAULT, trustedRunner: HOSTED_DEFAULT };
 const runsOn = (labels) => `runs-on: ${JSON.stringify(labels)}`;
-const reviewerLine = (name) => `GATE_REVIEWER: '${name}'`;
 const KIT_RUNS_ON = runsOn(HOSTED_DEFAULT);
-const KIT_REVIEWER = reviewerLine('');
 
 const LABEL = /^[\w.-]+$/;
 /** GitHub-hosted: one label, an OS name and then `latest` or a version (ubuntu-24.04-arm, macos-15-xlarge); macos-mini is not. */
@@ -48,14 +41,11 @@ export const FILLED = {
   '.github/CODEOWNERS': (v) => [['@OWNER', `@${v.human}`]],
   [MAIN]: (v) => [[KIT_RUNS_ON, runsOn(v.runner ?? DEFAULTS.runner)]],
   [GATE]: (v) => [[KIT_RUNS_ON, runsOn(v.prRunner ?? DEFAULTS.prRunner)]],
-  [TRUSTED]: (v) => [
-    [KIT_RUNS_ON, runsOn(v.trustedRunner ?? DEFAULTS.trustedRunner)],
-    [KIT_REVIEWER, reviewerLine(v.reviewer ?? DEFAULTS.reviewer)],
-  ],
+  [TRUSTED]: (v) => [[KIT_RUNS_ON, runsOn(v.trustedRunner ?? DEFAULTS.trustedRunner)]],
 };
 
-/** A kit file as bin/onboard fills it in, or null for a file the kit does not fill in. values: { human, reviewer, runner,
- * prRunner, trustedRunner }; a setting left out is the kit's default. */
+/** A kit file as bin/onboard fills it in, or null for a file the kit does not fill in. values: { human, runner, prRunner,
+ * trustedRunner }; a setting left out is the kit's default. */
 export function render(path, text, values) {
   if (!FILLED[path]) return null;
   const pairs = FILLED[path](values);
@@ -88,15 +78,17 @@ export function valuesOf(path, text) {
     const method = /"allowed_merge_methods": \["(merge|squash)"\]/.exec(text)?.[1];
     if (method) found.mergeMethod = method;
   }
-  const runner = SETTINGS.find((s) => s.file === path && s.key !== 'reviewer');
+  const runner = SETTINGS.find((s) => s.file === path);
   if (runner) {
     const seen = [...new Set(text.split('\n').map((l) => /^\s*runs-on: (.*)$/.exec(l)?.[1]).filter((v) => v !== undefined))];
     const parsed = seen.length === 1 ? parseRunner(seen[0]) : null;
     if (parsed && Array.isArray(JSON.parse(seen[0]))) found[runner.key] = parsed.labels;
   }
+  // #155: a main still on the kit before FAC-100 names its reviewer here; `entire` keeps the Human's exception to the runner
+  // rule (runnerProblems) until that repository moves (FAC-102). No setting reads it.
   if (path === TRUSTED) {
     const names = text.split('\n').map((l) => /^\s*GATE_REVIEWER: '([a-z]*)'$/.exec(l)?.[1]).filter((v) => v !== undefined);
-    if (names.length === 1 && ['', ...REVIEWERS].includes(names[0])) found.reviewer = names[0];
+    if (names.length === 1 && names[0] === 'entire') found.reviewer = 'entire';
   }
   return found;
 }
@@ -171,7 +163,8 @@ export function sharedRunners(values) {
 
 /** The runner rule with the Human's exception (#155): with the reviewer entire and no reviewer secret in the environment
  * `reviewer`, the jobs hold no reviewer credential and may share self-hosted runners. The factory reads no secret, so the
- * condition is the Human's to keep. */
+ * condition is the Human's to keep. Only a main on the kit before FAC-100 can name entire. The exception ends (the Human's X1,
+ * 2026-11-08): at FAC-102 its owner moves zalo-gateway's tier onto GitHub-hosted runners. */
 export const runnerProblems = (values) => (values.reviewer === 'entire' ? [] : sharedRunners(values));
 
 /** The settings the options give: { values } with each option given in the form the files hold, or { problem }. */
@@ -182,20 +175,15 @@ export function parseOptions(argv) {
     if (!setting) return { problem: `unknown argument ${argv[k]}` };
     const value = argv[k + 1];
     if (value === undefined) return { problem: `${argv[k]} needs a value` };
-    if (setting.key === 'reviewer') {
-      if (value !== '' && !REVIEWERS.includes(value)) return { problem: `--reviewer is ${REVIEWERS.join(', ')}, or '' for none` };
-      values.reviewer = value;
-    } else {
-      const runner = parseRunner(value);
-      if (!runner) return { problem: `${argv[k]} is a JSON runs-on value: a label as "ubuntu-latest", or a list as ["self-hosted","macOS"]` };
-      values[setting.key] = runner.labels;
-    }
+    const runner = parseRunner(value);
+    if (!runner) return { problem: `${argv[k]} is a JSON runs-on value: a label as "ubuntu-latest", or a list as ["self-hosted","macOS"]` };
+    values[setting.key] = runner.labels;
   }
   return { values };
 }
 
-/** A setting's value in words: a reviewer's name, or a runner's labels as JSON. */
-export const shown = (key, v) => (key === 'reviewer' ? (v === '' ? 'none (review and verdict fail closed)' : v) : JSON.stringify(v));
+/** A setting's value in words: a runner's labels as JSON. */
+export const shown = (key, v) => JSON.stringify(v);
 
 /** One line for each setting as values give it, and where it came from: `from` maps a key to its source's words. */
 export const describe = (values, from = {}) =>

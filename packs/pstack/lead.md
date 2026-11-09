@@ -22,8 +22,9 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    a restart find your issues by those comments (`factory linear read <KEY>` shows them), never by the delegate. An issue you will not finish
    you drop with `factory linear release <KEY> --team {{TEAM}}`: it clears the delegate, moves the issue to Todo and comments the release; only
    the holder may.<!--/linear-->
-2. Make its run folder and worktree from `main`: `mkdir -p ~/factory-runs/<repo>-<n>`, `git fetch origin`, then
-   `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w origin/main`.
+2. Make its run folder and worktree at main's commit as GitHub has it: `mkdir -p ~/factory-runs/<repo>-<n>`, read the commit with
+   `gh api repos/<owner>/<repo>/commits/main --jq .sha`, naming the repository (`{owner}/{repo}` and `origin` read the clone's config,
+   which a seat can write), `git fetch origin`, then `git worktree add -b issue-<n>-<slug> ~/factory-runs/<repo>-<n>/w <that commit>`.
 3. Save the issue in the run folder: <!--github-->read it with `gh issue view <n> --json body,comments` and write that output to
    `~/factory-runs/<repo>-<n>/issue.json`.<!--/github--><!--linear-->run `factory linear read <KEY>` alone, not redirected, and save that output with the Write tool, which holds
    every comment with its author and time, to `~/factory-runs/<repo>-<n>/issue.md`.<!--/linear--> Write a brief beside it using the fields in
@@ -47,7 +48,9 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    the top three to five user-facing features, with no `SKILL.md` and no run of the app; an existing feature doc moves
    into the map, and its old file is deleted, in the same pull request.
 4. Start the worker <!--seat-->by `bin/seat`'s absolute path, the one your grant names:
-   `{{SEAT}} worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree>`. It runs in
+   `{{SEAT}} worker <brief> --run ~/factory-runs/<repo>-<n> --work <worktree> --main <step 2's commit>`; before the worktree's first
+   session it runs main's `gate_prepare` at that commit, once for each worktree path (a fresh install needs a new path), and keeps the
+   commit, so later starts there may leave `--main` out. It runs in
    the background: end the turn.<!--/seat--><!--noseat-->only as this MacBook's `factory` user, the agents' own: you run as another
    user, so you have no grant to start a seat and start none (#366). Tell the Human that the issue's work waits for a Lead that runs
    as `factory`, and stop there.<!--/noseat--> A `seat-ended` wake says it ended; only then check, with Grep, once,
@@ -90,16 +93,18 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    writes nothing in the worktree and commits nothing, and that its `conclusion` starts with `PASS` or `FAIL` and lists
    what it found. Tell it to fill `raise`, one line naming the kind and the place, only when the change touches what its
    paths do not show: data that could be lost or exposed, authentication, secrets, payment, or what deploys, even if
-   every rule is met. On a `PASS` that carries a `raise`, add `needs-human` to the pull request as soon as step 7's
-   first `scripts/ship` run has opened it, with `gh issue edit <number> --add-label needs-human` (a pull request's
-   number is its issue's), before the run that would arm it: ship then stops, and the pull request waits for the Human
-   as tier 3. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
+   every rule is met; or, where the repository's merge switch is at `all`, when it changes a design or an architecture
+   the Human has not decided. On a `PASS` that carries a `raise`, step 7's `scripts/ship` labels the pull request
+   `needs-human` and stops without arming it, and it waits for the Human as tier 3. Once he has decided, take the label
+   off with `gh issue edit <number> --remove-label needs-human` (a pull request's number is its issue's) and run ship
+   again: it arms that head, or one with the same patch, and a new patch needs its own review. Where the repository has a Feature Map, tell it to return `FAIL` for a change that alters a feature
    a user reaches and leaves that feature's file unchanged. Start it with step 4's command, with `reviewer` in place of
    `worker`, its own brief and
    `--tag review<k>`, and on its wake find its record with `"tag":"review<k>"` the same way; sort its `foundOutside`
    as in step 4. On `FAIL`, brief a fix round as in step 5, run step 5's checks again, then review again. A `fix<k>`
    or `review<k>` tag is used once in a run: `<k>` counts on and never restarts. Push only after a `PASS`; after three
-   `FAIL` rounds, ask the Human.
+   `FAIL` rounds, ask the Human. `scripts/ship` arms only a head whose newest reviewer record, on that head or one with
+   the same patch, concludes `PASS`, so a commit that changes the change needs its own review.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier, which you need before you write the body. Push from the
    worktree (`cd <worktree>`, then `git push -u origin HEAD`), then run `scripts/ship --body-file <file>`. It takes one
    step a run: run it again at once, run after run, until it says `armed`, stops, or that the draft stays one, and only

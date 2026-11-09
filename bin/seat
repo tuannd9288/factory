@@ -70,4 +70,19 @@
 # `bin/research-git` and `ls`, `wc`, `mkdir`, `date`, `cd`, so the only tool that returns a file's content is `Read`, which the
 # deny rules refuse on the tokens, the archive and the whole `~/.agent-profiles/`, and `research-git` reads only its own clones;
 # the token is in claude's environment alone, which the scrub keeps from every command. It has no `node`, `cp`, `sed` or `git`.
+# Before the session (FAC-108, the Human on INN-51), after the plugins, bin/seat runs main's `gate_prepare` in the work folder,
+# outside the sandbox and with the network, with the session's environment less every ANTHROPIC_* and FACTORY_SANDBOX, for ten
+# minutes at most; its output is `run-<tag>.prepare.log` in the run folder. Main is the commit the Lead names with `--main`, read
+# from GitHub with the repository named (packs/pstack/lead.md step 2), never a ref of the clone, whose refs, config, objects and
+# index a seat can write; each object is read with its hash checked against its id, with no transport and no lazy fetch. The
+# worktree's first start records that commit in $FACTORY_STATE/prepared/, where no seat writes, and later starts read main there. By
+# default it runs only before the worktree's first session (bin/seat marks there when one begins), and only when the worktree's
+# files are that commit's tree, compared file by file, so what is installed outside the sandbox is a tree main had; a stamp beside
+# the record marks the worktree done. The three are keyed by the worktree's path alone, so a worktree made again at the same path,
+# by the Lead or by a seat, gets no install: a fresh install needs a new path. Any other start, a commit not whole in the clone, or a
+# start with no `--main` and no record installs nothing, says why in that log, and starts as before. That commit's
+# `.gate/driver.json` `prepare: every` runs it at every start. A failed install, a command it runs that is not on bin/seat's PATH,
+# or a `prepare` it cannot read refuses the start before any session, leaving no pid, claim or seat file. A work folder that is no
+# clone, or a main with no `.gate/config.sh`, starts as before. Known limit: past its ten minutes the install's shell is killed,
+# not what it started.
 exec node "$(dirname "$0")/lib/seat.mjs" "$@"

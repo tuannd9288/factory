@@ -54,7 +54,7 @@ describe('bin/onboard writes the review-categories block into .gitattributes', (
     const cases = [
       KIT.replace(/^# factory:review-categories:end.*\n/m, ''),
       `${KIT}\n${KIT}`,
-      `${KIT.replace('review-generated', 'review-assets')}\n*.png binary\n`,
+      `${KIT.replace('review-documentation', 'review-assets')}\n*.png binary\n`,
       '*.png binary\r\n*.jpg binary\r\n',
       `*.png binary\n${begin}\n`,
     ];

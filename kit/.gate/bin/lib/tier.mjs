@@ -71,7 +71,8 @@ for (const path of paths) {
   if (bearing) raise(2, `${path} (load-bearing: ${bearing.glob})`);
   else if (DEPENDENCIES.test(path)) raise(2, `${path} (dependency manifest)`);
 }
-// A dropped test is the reviewer's to judge: whether the test kept in its place covers what the dropped one did.
+// A dropped test, or a proof for one, makes tier 2: information for the digest, asking no more than tier 1 to merge. Whether the
+// test kept in its place covers what the dropped one did is for the reviewer beside the workers.
 for (const path of deleted) if (tests.some((t) => t.test(path))) raise(2, `${path} (test deleted)`);
 let file = '';
 for (const line of diff.split('\n')) {

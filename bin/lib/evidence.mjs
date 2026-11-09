@@ -175,7 +175,6 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   const rendered = [];
   const filled = new Set();
   const kept = [];
-  const replaced = [];
   const updated = [];
   const removed = [];
   const merged = [];
@@ -233,14 +232,12 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
       } else {
         exact++;
         if (isOwn && older) updated.push(was(path, had.oid, 'kit'));
-        else if (isOwn) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
       }
     } else if (!FILLED[path]) {
       if (have.oid !== want.oid) fails.push(`differs: ${path} (content)`);
       else {
         exact++;
         if (isOwn && older) updated.push(was(path, had.oid, 'kit'));
-        else if (isOwn) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
       }
     } else {
       const from = blob(factory, want.oid);
@@ -255,7 +252,6 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
       else {
         filled.add(path);
         if (isOwn && older) updated.push(was(path, had.oid, 'kit'));
-        else if (isOwn) replaced.push(`${path} (was ${had.oid.slice(0, 12)})`);
         const before = from.split('\n');
         to.split('\n').forEach((line, i) => line !== before[i] && rendered.push(`${path}:${i + 1}: \`${before[i]}\` → \`${line}\``));
       }
@@ -335,7 +331,7 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   }
   if (now.has('.gate/pack')) fails.push('extra: .gate/pack (the kit lays no pack file now)');
   // The gate's settings as the head's workflows hold them, and the runner rule over them (#335). One the head changes from
-  // the base's is marked, so a pull request that moves the reviewer or a runner says so where the Human reads it.
+  // the base's is marked, so a pull request that moves a runner says so where the Human reads it.
   const settingsAt = (entries) => valuesIn(Object.fromEntries(WORKFLOWS.filter((p) => entries.get(p)?.mode === '100644').map((p) => [p, blob(repo, entries.get(p).oid)])));
   const settings = settingsAt(now);
   const before = settingsAt(at);
@@ -364,7 +360,6 @@ export function evidence({ factory, commit, repo, base, head, slug, id, human, o
   if (merged.length) lines.push("merged (the repository's own file with the kit's deny lines inserted as text; every other byte is the base's):", ...merged.map((p) => `  ${p}`));
   if (adapted.length) lines.push("adapter (the kit's text with the lines bin/lib/adapter.mjs writes for the repository's own files):", ...adapted.map((p) => `  ${p}`));
   if (untouched.length) lines.push("untouched (the repository's own scripts/ and hooks, which the kit does not ship; unchanged):", ...untouched.map((p) => `  ${p}`));
-  lines.push("replaced (the repository's own at the base, now the kit's):", ...(replaced.length ? replaced.map((p) => `  ${p}`) : ['  none']));
   lines.push("kept (the repository's own, unchanged):", ...(kept.length ? kept.map((p) => `  ${p}`) : ['  none']));
   // Only bin/kit-update's pull requests make these two; a first onboarding's evidence has neither.
   if (updated.length) lines.push("updated (the base held an older kit file, or an older rendering, now the kit's):", ...updated.map((p) => `  ${p}`));

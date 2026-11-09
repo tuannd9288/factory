@@ -14,15 +14,16 @@ import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
 import { isAgentsUser } from './node.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
+import { COMMIT, PrepareError, markSession, prepareWork } from './prepare.mjs';
 import { readSessions } from './records.mjs';
-import { repoOk } from './repos.mjs';
+import { githubRepo, repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
 
 /** What a session reports back through --json-schema.
  * The cost is not asked of the model: the record takes it from the session's result event. `foundOutside` lists the bugs and
  * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead.
- * `raise`, optional since every seat shares this schema, is the reviewer's: the kind and the place of a high risk, on which the Lead
- * labels the pull request needs-human (FAC-101, packs/pstack/lead.md step 6). */
+ * `raise`, optional since every seat shares this schema, is the reviewer's: the kind and the place of a high risk (FAC-101,
+ * packs/pstack/lead.md step 6), on which scripts/ship labels the pull request needs-human. */
 export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -164,12 +165,12 @@ export function runFiles(runs, ext) {
   return out;
 }
 
-/** The seat a run's file belongs to: its .seat file, else fallback (a session from before there were seats ran on seat 2). */
-const seatOf = (file, fallback = null) => {
+/** The seat a run's file belongs to: its .seat file, else null (a run from before there were seats). */
+const seatOf = (file) => {
   try {
     return readFileSync(file.replace(/\.[^./]*$/, '.seat'), 'utf8').trim();
   } catch (e) {
-    if (e.code === 'ENOENT') return fallback; // never there, or a start backing off removed its claim meanwhile
+    if (e.code === 'ENOENT') return null; // never there, or a start backing off removed its claim meanwhile
     throw e;
   }
 };
@@ -240,22 +241,16 @@ export function heldNames(runs, state = null) {
 /** The name a resumed session had in its earlier record, or null. */
 export const nameOfSession = (state, session) => readSessions(state).findLast((r) => r.session === session)?.name ?? null;
 
-/** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
- * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off removes
- * run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the listing, so none can finish between two
- * equal listings; one seen half done counts that start twice at worst. list is the listing, passed in so a test can force the
- * interleaving. */
-export function liveCount(runs, seat, list = runFiles) {
-  return countLive(runs, (p) => seatOf(p, '2') === String(seat), list);
-}
-
-/** How many runs are live whatever their seat, claims included (#257): the update of the checkout waits
- * for none. Infinity when the folders never held still. */
+/** How many runs are live whatever their seat, claims included (#257): the update of the checkout waits for none. Infinity when
+ * the folders never held still. The count is taken between two listings of the .pid files, claims included, and is made again when
+ * they differ. A start's hand-off removes run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the
+ * listing, so none can finish between two equal listings; one seen half done counts that start twice at worst. list is the
+ * listing, passed in so a test can force the interleaving. */
 export function liveRuns(runs, list = runFiles) {
   return countLive(runs, () => true, list);
 }
 
-/** How many runs of an account have a live process (#311), counted as liveCount does. A run with no .account file counts under the
+/** How many runs of an account have a live process (#311), counted as liveRuns does. A run with no .account file counts under the
  * account its seat's old row names (seatRows, { seat: account }) while that row is in the file, as accountEvent reads it. */
 export function liveOfAccount(runs, account, seatRows = {}, list = runFiles) {
   return countLive(runs, (p) => accountOf(p, seatRows) === account, list);
@@ -334,8 +329,8 @@ class Moved extends Error {
   }
 }
 
-const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--deny <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
-const VALUE = { '--run': 'run', '--work': 'work', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
+const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--main <commit>] [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--deny <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
+const VALUE = { '--run': 'run', '--work': 'work', '--main': 'main', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
 const LIST = { '--skill': 'skills', '--allow': 'allow', '--deny': 'deny', '--add-dir': 'addDirs' };
 
 const realOf = (path) => {
@@ -377,6 +372,7 @@ export function parseArgs(argv) {
   if (o.maxTurns !== undefined && !/^[1-9][0-9]*$/.test(o.maxTurns)) throw new Refused('--max-turns needs a whole number of at least 1');
   if (o.resume && o.seat === undefined) throw new Refused('a resume stays on its seat; give --seat <n>, the seat the session ran on');
   if (o.tag !== undefined && !/^[A-Za-z0-9._-]+$/.test(o.tag)) throw new Refused('--tag takes letters, digits, dot, dash and underscore');
+  if (o.main !== undefined && !COMMIT.test(o.main)) throw new Refused('--main takes a commit id, 40 or 64 hex digits: main\'s commit as GitHub has it');
   return o;
 }
 
@@ -534,10 +530,21 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
     if (e instanceof PluginError) throw new Refused(`plugins: ${e.message}`);
     throw e;
   }
+  // main's gate_prepare, at the commit the Lead names with --main, makes the worktree ready to test before the session, outside the
+  // sandbox and with the network (FAC-108, bin/lib/prepare.mjs), with the session's environment less every ANTHROPIC_* and the sandbox
+  // marker. A failed install starts nothing.
+  const install = Object.fromEntries(Object.entries(child).filter(([k]) => !k.startsWith('ANTHROPIC_') && k !== 'FACTORY_SANDBOX'));
+  try {
+    prepareWork({ work, run, tag, state, env: install, main: o.main ?? null });
+  } catch (e) {
+    if (e instanceof PrepareError) throw new Refused(`prepare: ${e.message}`);
+    throw e;
+  }
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
     cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
     childFile: join(run, `run-${tag}.child`), tokenPath, account, team, role: o.role, seat, tag, name, run, state, model: PRESETS[o.role].model, resume: o.resume ?? null, start: new Date().toISOString(),
+    head: placeOf(work).head,
   };
   for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
@@ -548,12 +555,15 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   writeFileSync(join(run, `run-${tag}.seat`), `${seat}\n`);
   writeFileSync(join(run, `run-${tag}.account`), `${account}\n`);
   writeFileSync(pidFile, `${sup.pid}\n`);
+  // A session began in this worktree: later starts there make no first install (FAC-108, the Human's box A on INN-51).
+  markSession(state, work);
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
 
-/** The repository (`owner/name`, from a GitHub https or ssh URL of origin) and the branch of a work folder, null where git
- * cannot tell: a folder that is not a clone, another host, a detached HEAD. Read when the session ends, since a worker may
- * make its branch during the session (#205). */
+/** The repository (`owner/name`, from a GitHub https or ssh URL of origin), the branch and the head commit of a work folder, null
+ * where git cannot tell: a folder that is not a clone, another host, a detached HEAD (for the branch). The repository and branch
+ * are read when the session ends, since a worker may make its branch during the session (#205); the head when it starts, the
+ * commit a reviewer is briefed to read, which scripts/ship's reviewer check keys on (FAC-101). */
 function placeOf(dir) {
   const git = (...args) => {
     try {
@@ -562,9 +572,9 @@ function placeOf(dir) {
       return null;
     }
   };
-  const repo = /^(?:https:\/\/|git@|ssh:\/\/git@)github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(git('remote', 'get-url', 'origin') ?? '')?.[1] ?? null;
+  const repo = githubRepo(git('remote', 'get-url', 'origin'));
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
-  return { repo, branch: branch && branch !== 'HEAD' ? branch : null };
+  return { repo, branch: branch && branch !== 'HEAD' ? branch : null, head: git('rev-parse', 'HEAD') };
 }
 
 /** The record of a session that has ended: spec is what launch decided, text the session's log, end how it ended. */
@@ -575,6 +585,7 @@ export function recordOf(spec, events, { code, signal, error = null, end = new D
   return {
     session: r.session ?? spec.resume ?? null,
     role: spec.role, seat: spec.seat, ...(spec.team ? { team: spec.team, account: spec.account } : {}), tag: spec.tag, ...(spec.name ? { name: spec.name } : {}), run: spec.run, ...placeOf(spec.cwd),
+    head: spec.head ?? null,
     model: r.model ?? spec.model,
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
     turns: r.turns, duration_ms: r.duration_ms, total_cost_usd: r.total_cost_usd,

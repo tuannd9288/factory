@@ -67,7 +67,7 @@ test('no sessions option: no block; an empty list: the block says None', async (
 });
 
 test('readSessions reads the lines of sessions.jsonl, skips a damaged one, and gives none when the file is absent', async () => {
-  const { readSessions } = await ledger();
+  const { readSessions } = await import('../bin/lib/records.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'seat-digest-'));
   try {
     assert.deepEqual(readSessions(dir), []);

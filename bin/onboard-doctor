@@ -5,6 +5,6 @@
 # verify on the default branch's head, CLAUDE.md, the size of AGENTS.md, and the kit pull request's evidence. Run it logged
 # into gh as the repository's owner, as bin/onboard-owner, from a commit on main: it refuses any other, and refuses what
 # onboard-owner refuses. Every gh call is a read, each line names what it read, and no token or variable value is printed.
-# Exit 0 when every line is green, 1 when any is red, 2 on a refusal. FACTORY_AGENT (default: tuan9288-agent) names the
+# Exit 0 when every line is green, 1 when any is red, 2 on a refusal. FACTORY_AGENT (default: nami9288) names the
 # agents' account.
 exec node "$(dirname "$0")/lib/doctor.mjs" "$@"
