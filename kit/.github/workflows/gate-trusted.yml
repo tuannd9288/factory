@@ -19,8 +19,7 @@
 # The job's runs-on is the repository's own setting, which bin/onboard fills in and a pull request changes, at tier 3 (#335):
 # no repository variable holds it, since one changes without a pull request. The runner is GitHub-hosted Ubuntu in the kit,
 # and never a runner a candidate's, main's or a deploy's job uses, nor one another workflow can reach, for the tier job
-# holds a token that writes labels, and it alone asks for the Human's approval and checks the claim (.gate/enforced-rules.md,
-# which names the Human's one exception).
+# holds a token that writes labels, and it alone asks for the Human's approval and checks the claim (.gate/enforced-rules.md).
 name: gate-trusted
 
 on:
