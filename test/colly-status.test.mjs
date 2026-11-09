@@ -4,11 +4,14 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { insteadOf } from './helpers.mjs';
 
 // Local times are shown in the machine's zone; the fixtures are in UTC, so a local time reads as the fixture's.
 process.env.TZ = 'UTC';
 
 const top = () => import('../bin/lib/colly-status.mjs');
+// parseLog reads Claude Code's stream, so it lives in the one module that does (INN-39 item 3).
+const claudeCode = () => import('../bin/lib/claude-code.mjs');
 
 const NOW = Date.parse('2026-10-31T12:00:00Z');
 const line = (o) => `${JSON.stringify(o)}\n`;
@@ -106,13 +109,13 @@ const readSnapshot = async (w) => {
 };
 
 test('a Lead runs while a claude process names it with --name <repo>-lead, the rule the sessions use (#179)', async () => {
-  const { leadRunning } = await top();
+  const { leadTeams } = await top();
   const ps = (...commands) => () => commands.map((command, i) => ({ pid: i + 1, command }));
-  assert.equal(leadRunning('factory', ps('claude --model opus --name factory-lead --continue')), true);
-  assert.equal(leadRunning('factory', ps('claude --name factory-lead')), true);
-  assert.equal(leadRunning('factory', ps('claude --name other-lead', 'vim --name factory-lead x')), false);
-  assert.equal(leadRunning('factory', ps('claude --name factory-lead-two')), false);
-  assert.equal(leadRunning('factory', ps()), false);
+  assert.deepEqual(leadTeams('factory', ps('claude --model opus --name factory-lead --continue')), ['lead']);
+  assert.deepEqual(leadTeams('factory', ps('claude --name factory-lead')), ['lead']);
+  assert.deepEqual(leadTeams('factory', ps('claude --name other-lead', 'vim --name factory-lead x')), []);
+  assert.deepEqual(leadTeams('factory', ps('claude --name factory-lead-two')), []);
+  assert.deepEqual(leadTeams('factory', ps()), []);
 });
 
 test('leadOf reads { repo, team } from --name <repo>-<team>, splitting at the last dash, and needs a claude command and a valid team (#196)', async () => {
@@ -128,16 +131,16 @@ test('leadOf reads { repo, team } from --name <repo>-<team>, splitting at the la
   assert.equal(leadOf('vim --name factory-lead x'), null);
 });
 
-test('leadRunning is true when some process is a Lead of the repository, whichever its team (#196)', async () => {
-  const { leadRunning } = await top();
+test('leadTeams names every team of the repository whose Lead runs, and no other repository\'s (#196)', async () => {
+  const { leadTeams } = await top();
   const ps = (...commands) => () => commands.map((command, i) => ({ pid: i + 1, command }));
-  assert.equal(leadRunning('factory-probe', ps('claude --name factory-probe-b')), true);
-  assert.equal(leadRunning('factory', ps('claude --name factory-probe-b')), false);
-  assert.equal(leadRunning('factory-probe', ps('claude --name factory-probe-b', 'claude --name factory-probe-lead')), true);
+  assert.deepEqual(leadTeams('factory-probe', ps('claude --name factory-probe-b')), ['b']);
+  assert.deepEqual(leadTeams('factory', ps('claude --name factory-probe-b')), []);
+  assert.deepEqual(leadTeams('factory-probe', ps('claude --name factory-probe-b', 'claude --name factory-probe-lead')), ['b', 'lead']);
 });
 
 test('parseLog reads model, turns, tokens, context and the last result cost; a resumed log takes the last total', async () => {
-  const { parseLog } = await top();
+  const { parseLog } = await claudeCode();
   const u = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1000, cache_creation_input_tokens: 100 };
   const p = parseLog(init('/x') + assistant('m1', u) + assistant('m1', u) + assistant('m2', { ...u, output_tokens: 7 }) + result({ total_cost_usd: 0.4 }) + result({ total_cost_usd: 0.9, num_turns: 2 }));
   assert.equal(p.model, 'claude-sonnet-5-5');
@@ -149,7 +152,7 @@ test('parseLog reads model, turns, tokens, context and the last result cost; a r
 });
 
 test('parseLog gives null, never a guess, for what the log does not hold', async () => {
-  const { parseLog } = await top();
+  const { parseLog } = await claudeCode();
   const p = parseLog(init('/x'));
   assert.equal(p.cost, null);
   assert.equal(p.ctx, null);
@@ -169,6 +172,17 @@ test('the sessions: states follow the log, the pid and the limit; a stopped sess
   assert.equal(by['169-worker'].state, 'gone');
   assert.equal(by.aardvark.role, 'lead');
   assert.equal(by.aardvark.state, 'idle');
+});
+
+// FAC-100: the kit runs no review job, but a repository still on the kit before it runs its own until FAC-102 moves it.
+test('a pull request whose review job still runs waits on the reviewer, on a repository still on the kit before FAC-100', async () => {
+  const w = world();
+  const prs = JSON.parse(readFileSync(join(w.fx, 'prs.json'), 'utf8'));
+  const check = (name, conclusion, status = 'COMPLETED') => ({ name, status, conclusion });
+  prs.push({ number: 270, title: 'old kit', state: 'OPEN', headRefName: 'issue-170-x', body: 'Issue: #170', labels: [], mergedAt: null, statusCheckRollup: [check('verify', 'SUCCESS'), check('review', null, 'IN_PROGRESS'), check('tier', null, 'IN_PROGRESS')] });
+  writeFileSync(join(w.fx, 'prs.json'), JSON.stringify(prs));
+  const { snap } = await readSnapshot(w);
+  assert.equal(snap.repos.find((r) => r.repo === 'tuannd9288/factory').groups.find((g) => g.number === 170).waiting, 'the reviewer');
 });
 
 test('a run shows the name in its run-<tag>.name, a Lead the name in its folder\'s name file; a run with none keeps <issue>-<tag>', async () => {
@@ -295,6 +309,14 @@ test('an ended run with no record takes its repository from its work folder\'s o
   assert.equal(asked.filter((x) => x === a).length, 1);
 });
 
+test('a Lead whose short name two owners share is given no repository, rather than the first of them (FAC-85)', async () => {
+  const w = world();
+  const { snapshot } = await top();
+  const clones = new Map([...w.opts.clones, ['other/factory', join(w.root, 'WORKSPACES/other-factory')]]);
+  const snap = await withPath(w.bin, () => snapshot({ ...w.opts, clones }));
+  assert.equal(snap.sessions.find((s) => s.role === 'lead').repo, null);
+});
+
 test('the claim reader writes nothing into the clone: it fetches into a bare cache of its own under the state folder', async () => {
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
@@ -314,7 +336,19 @@ test('the claim reader writes nothing into the clone: it fetches into a bare cac
   const before = git(clone, 'for-each-ref');
   const state = join(root, 'state');
   git(clone, 'config', 'remote.origin.url', `--upload-pack=touch ${join(root, 'PWNED')} #`);
-  const claims = await readClaims('o/n', state, { url: origin });
+  // https://github.com/o/n.git is the local origin, by git's own insteadOf, for this one read.
+  const redirect = insteadOf(origin, 'https://github.com/o/n.git');
+  const saved = Object.fromEntries(Object.keys(redirect).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, redirect);
+  let claims;
+  try {
+    claims = await readClaims('o/n', state);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
   assert.deepEqual(claims.get(5), { state: 'claimed', team: 'alpha' });
   assert.ok(existsSync(join(state, 'top/o-n.git')));
   assert.ok(!existsSync(join(clone, '.git/FETCH_HEAD')));
@@ -323,19 +357,14 @@ test('the claim reader writes nothing into the clone: it fetches into a bare cac
   assert.ok(!existsSync(join(root, 'PWNED')), 'the clone\'s url is never read, so its hostile value runs nothing');
 });
 
-test('the claim reader runs git in its own cache: no option in a url, no config of the folder the view runs from', async () => {
+test('the claim reader runs git in its own cache: no config of the folder the view runs from', async () => {
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { readClaims } = await top();
   const root = mkdtempSync(join(tmpdir(), 'top-hostile-'));
   const state = join(root, 'state');
   const g = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' });
-  // A url that starts with a dash would be an option without `--`.
-  const flag = join(root, 'PWNED-OPTION');
   const gitFailure = (e) => !(e instanceof TypeError);
-  await assert.rejects(readClaims('o/n', state, { url: `--upload-pack=touch ${flag} #` }), gitFailure);
-  assert.ok(!existsSync(flag));
-  assert.ok(existsSync(join(state, 'top/o-n.git')), 'git ran, in the cache');
   // The folder the view runs from rewrites https://github.com/ to ssh and sets an ssh command.
   const here = join(root, 'cwd');
   mkdirSync(here);

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { OWN_PROCESS } from './helpers.mjs';
 import { skipPs } from './ps-skip.mjs';
 import { SEAT_JS, until, world } from './seat-world.mjs';
 
@@ -34,14 +35,14 @@ test('three concurrent starts with one tag give one session; the others exit 2; 
   await until(() => w.records().length === 2, 'the second record');
 }));
 
-// A listing that is passed to liveCount: each call gives the next list, the last one for every call after.
+// A listing that is passed to liveRuns: each call gives the next list, the last one for every call after.
 const listings = (...lists) => {
   let i = 0;
   return () => lists[Math.min(i++, lists.length - 1)];
 };
 
-test('a count that lists the folder just before a start hands off its claim to its run counts that run', { skip: skipPs }, async () => {
-  const { liveCount } = await import('../bin/lib/seat.mjs');
+test('a count that lists the folder just before a start hands off its claim to its run counts that run', async () => {
+  const { liveRuns } = await import('../bin/lib/seat.mjs');
   await world(async (w) => {
     const run = join(w.root, 'handoff');
     mkdirSync(run);
@@ -49,14 +50,14 @@ test('a count that lists the folder just before a start hands off its claim to i
     writeFileSync(join(run, 'run-a.seat'), '2\n');
     // The first listing has a's claim, whose files are gone by the time they are read; the second has a's run.
     const claim = join(run, 'run-a.claim.pid');
-    assert.equal(liveCount(w.runs, 2, listings([claim], [join(run, 'run-a.pid')])), 1);
+    assert.equal(liveRuns(w.runs, { list: listings([claim], [join(run, 'run-a.pid')]), ps: OWN_PROCESS }), 1);
   });
 });
 
 test('a count whose listing changes every time it is taken is Infinity, not a number', async () => {
-  const { liveCount } = await import('../bin/lib/seat.mjs');
+  const { liveRuns } = await import('../bin/lib/seat.mjs');
   let n = 0;
-  assert.equal(liveCount('/nowhere', 2, () => [`/nowhere/run-${n++}.pid`]), Infinity);
+  assert.equal(liveRuns('/nowhere', { list: () => [`/nowhere/run-${n++}.pid`] }), Infinity);
 });
 
 // An ended run: a dead pid, its seat, and a log whose last rate_limit_event has status (its windows reset in an hour, the
@@ -95,7 +96,7 @@ test('a start that fails after it chose a seat leaves no claim behind', () => wo
 }));
 
 test('a supervisor killed with SIGKILL leaves a claude that is still counted live and keeps its tag until it ends', { skip: skipPs }, () => world(async (w) => {
-  const { liveCount } = await import('../bin/lib/seat.mjs');
+  const { liveRuns } = await import('../bin/lib/seat.mjs');
   const hold = { FAKE_MODE: 'hang', FAKE_RELEASE: join(w.fake, 'release'), FAKE_SID: 'orphan', FAKE_COST: '9.99', FAKE_TURNS: '99' };
   assert.equal(w.start('worker', ['--tag', 'same'], hold).code, 0);
   await until(() => existsSync(w.out()), 'the session');
@@ -103,13 +104,13 @@ test('a supervisor killed with SIGKILL leaves a claude that is still counted liv
   process.kill(w.pidOf('same'), 'SIGKILL');
   await until(() => !alive(w.pidOf('same')), 'the supervisor to die');
   assert.ok(alive(claude), 'claude outlives its supervisor');
-  assert.equal(liveCount(w.runs, 2), 1, 'its run is still counted');
+  assert.equal(liveRuns(w.runs), 1, 'its run is still counted');
   const refused = w.start('worker', ['--tag', 'same']);
   assert.equal(refused.code, 2, refused.out + refused.err);
 
   writeFileSync(hold.FAKE_RELEASE, '');
   await until(() => !alive(claude), 'the orphan to end');
-  assert.equal(liveCount(w.runs, 2), 0);
+  assert.equal(liveRuns(w.runs), 0);
   const r = w.start('worker', ['--tag', 'same'], { FAKE_SID: 'second', FAKE_OUT: w.out('b') });
   assert.equal(r.code, 0, r.out + r.err);
   await until(() => w.records().length === 1, 'the second run\'s record');

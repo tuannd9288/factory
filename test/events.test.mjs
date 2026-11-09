@@ -3,11 +3,13 @@
 // fixture folders; every tool started gets a state folder of its own, and nothing is written outside it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import childProcess, { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
+import { PS } from '../bin/lib/ps.mjs';
 
 process.env.TZ = 'UTC';
 
@@ -550,12 +552,24 @@ test('--after takes a whole number of 0 or more; anything else is a usage error'
   });
 });
 
-test('the Leads are read with the reader that throws when ps fails, not the one that shows none', async () => {
-  const e = await events();
+test('the reader of the Leads throws when ps fails, unlike the one that shows none, and leadsAtDialog reads with it by default', async (t) => {
   const top = await import('../bin/lib/colly-status.mjs');
-  assert.equal(e.defaultProcesses, top.readProcesses);
-  assert.throws(() => top.readProcesses(['/nonexistent/ps']), /ps is not on this host/);
-  assert.throws(() => top.readProcesses(['/usr/bin/false']));
+  // The sweep calls observe with no processes (bin/lib/queue.mjs): when ps fails its default reader throws, so a failed ps clears no
+  // Lead's open condition, as an empty list would.
+  const { leadsAtDialog } = await events();
+  const run = childProcess.execFileSync;
+  t.mock.method(childProcess, 'execFileSync', (file, ...rest) => {
+    if (file === PS) throw new Error('ps failed');
+    return run(file, ...rest);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => top.readProcesses(), /ps failed/);
+    assert.throws(() => leadsAtDialog({ runs: tmpdir(), now: Date.now() }), /ps failed/);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
 });
 
 test('a process list or accounts that cannot be read leave their conditions as they were; a reading that succeeded ends them', async () => {
@@ -725,7 +739,7 @@ test('factory-events --file leaves an INN answer to the Mac mini: no git call, a
     writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(join(dir, 'git-calls'))}\nexit 1\n`);
     chmodSync(join(bin, 'git'), 0o755);
     const colly = join(dir, 'colly-state');
-    const r = spawnSync(join(factory, 'bin/factory-events'), ['--file', file], { encoding: 'utf8', timeout: 5000, env: { ...eventsEnv(colly), PATH: `${bin}:${process.env.PATH}`, FACTORY_EVENTS_RETRY_MS: '200' } });
+    const r = spawnSync(join(factory, 'bin/factory-events'), ['--file', file], { encoding: 'utf8', timeout: 5000, env: { ...eventsEnv(colly), PATH: `${bin}:${process.env.PATH}` } });
     assert.equal(r.status, 0, `${r.error?.code ?? ''} ${r.stderr}`);
     assert.deepEqual(r.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l).key), ['watch_fired a']);
     assert.ok(!existsSync(join(dir, 'git-calls')), 'no git call');

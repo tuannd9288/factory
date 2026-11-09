@@ -5,6 +5,8 @@ import console from 'node:console';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { URL } from 'node:url';
+import { labelledBefore, noteLabelled, reviewOf } from './ship-review.mjs';
 
 // Installed, this file is a repository's scripts/lib/ship.mjs, beside the kit's .gate/. In the factory it runs from the pack's own source,
 // packs/pstack/scripts/lib/, and the kit is under kit/ (FAC-14): the same subject rules scripts/verify applies, and no red-check, since the
@@ -125,7 +127,7 @@ function draftWait(pr) {
   return `its parent ${move.previousRefName} landed, and its head does not hold that landing: the queue's restack, its merge of main into it, is pending`;
 }
 
-function step(pr, head, branch, stacks, merge, drafts) {
+function step(pr, head, branch, stacks, merge) {
   const n = pr.number;
   const short = head.slice(0, 7);
   const armed = Boolean(pr.autoMergeRequest);
@@ -158,18 +160,35 @@ function step(pr, head, branch, stacks, merge, drafts) {
     return say(0, `disarmed #${n}: ${why}`);
   };
   if (armed && ahead) return disarm(`HEAD ${short} is past what was verified; push it, then run ship again`);
+  // Only a head its reviewer passed is armed (FAC-101), and a push that changes the patch of an armed one disarms it. The factory's own
+  // pull requests are reviewed by Colly and the supervising session, so here no reviewer record is required.
+  const review = FACTORY ? null : reviewOf(pr);
+  if (armed && review && !review.pass) return disarm(review.why);
 
   if (pr.labels.some((l) => l.name === 'needs-human')) return say(1, `stopped on #${n}: it carries needs-human; the Human decides`);
   const wait = tierWait(pr);
   if (typeof wait === 'string') return say(2, `could not judge the tier (${wait})`);
-  const stop = () => (wait ? say(1, `stopped on #${n}: tier 3 waits for the Human's approval (unless the merge switch is at all)`) : 0);
-  if (armed) return stop() || say(0, `#${n} is armed; nothing to do`);
+  // ship reads no merge switch, so it does not say whether a tier 3 waits for the Human: the tier check says it, and at `all` it merges on
+  // its required checks alone (#333).
+  const waits = () => say(0, `#${n} is armed; it waits for its required checks`);
+  if (armed) return wait ? waits() : say(0, `#${n} is armed; nothing to do`);
   if (ahead) return say(1, `refused: HEAD ${short} has commits #${n} lacks; git push first`);
 
   const gap = behind(branch, head);
   if (gap) return say(1, `refused: ${gap}`);
 
   if (pr.baseRefName !== 'main') return say(1, `refused to arm #${n}: its base is ${pr.baseRefName}, not main`);
+  if (review && !review.pass) return say(1, `refused to arm #${n}: ${review.why}`);
+  // A high risk the reviewer named (lead.md step 6) goes to the Human: ship labels the pull request needs-human, which makes it tier 3
+  // (.gate/bin/tier), and stops without arming it, as step 3 stops on every later run. Armed, a tier 3 merges on its checks alone at the
+  // merge switch's position all (#333), so the raise would land unseen. Once the label it set is off, the raise is decided and ship arms.
+  const raise = String(review?.record.structured?.raise ?? '').trim();
+  const decided = Boolean(raise) && labelledBefore(pr, review.record);
+  if (raise && !decided) {
+    gh(['pr', 'edit', String(n), '--add-label', 'needs-human']);
+    noteLabelled(pr, review.record);
+    return say(1, `stopped on #${n}: its reviewer raised it (${raise.split('\n')[0].slice(0, 200)}): it carries needs-human now; the Human decides`);
+  }
   // A draft is readied and armed at once, as the queue did before FAC-55. A pull request that was ready already is read fresh: CI may have
   // ended, and arming a ready pull request would merge it.
   if (pr.isDraft) gh(['pr', 'ready', String(n)]);
@@ -182,8 +201,9 @@ function step(pr, head, branch, stacks, merge, drafts) {
     if (!String(error.stderr).includes('Auto merge is not allowed for this repository')) throw error;
     return say(1, `stopped on #${n}: auto-merge is off on this repository; the Human merges it`);
   }
-  say(0, `armed #${n} at HEAD ${short}`);
-  return stop();
+  say(0, `armed #${n} at HEAD ${short}${review ? `: reviewer PASS ${review.record.tag}, session ${review.record.session}${decided ? ', its raise decided (the needs-human ship set is off)' : ''}`
+    : '; no reviewer record is required here: Colly and the supervising session review this repository\'s pull requests'}`);
+  return wait ? waits() : 0;
 }
 
 function parse(argv) {
@@ -217,7 +237,7 @@ function main(argv) {
     : pr && ((m) => !m.squashMergeAllowed && m.mergeCommitAllowed)(methods()) ? 'merge' : 'squash';
   if (!pr && !stacks && args.base && args.base !== 'main')
     return say(1, `refused to open: its base is ${args.base}, not main`);
-  return pr ? step(pr, head, branch, stacks, merge, policy.drafts) : open(branch, head, args, policy.drafts);
+  return pr ? step(pr, head, branch, stacks, merge) : open(branch, head, args, policy.drafts);
 }
 
 try {

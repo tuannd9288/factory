@@ -63,14 +63,9 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
 - **Feature flags, 2026-10-24.** Not needed for now; revisit when real customers use a product daily. #16 and #21 are
   moved to Triage, "Để sau", as #10 c3 records. Source:
   https://github.com/tuannd9288/factory/issues/10#issuecomment-6372273891 (the Human, through Colly).
-- **The gate's reviewer, 2026-10-24.** The reviewer is the sealed Opus 5.5 reviewer (option A), run as Claude Code
-  headless and paid with a subscription token, not an API key. In #25 c2's words, "One reviewer call per pull
-  request": `verdict` reads `review`'s result for the same head and base, and makes no second call. The gate and
-  pstack's live verifier both stay for now; dropping one is decided only on the probe's numbers. Source:
+- **The gate's reviewer, 2026-10-24.** Replaced on 2026-11-08 by "No reviewer on GitHub Actions", below. Source:
   https://github.com/tuannd9288/factory/issues/25#issuecomment-6372755422 (reviewer and payment) and
   https://github.com/tuannd9288/factory/issues/25#issuecomment-6373226939 (one call; both layers stay).
-  Note (the Lead, 2026-11-01, #203): in the code that is one call per head commit, as H3 says; a push makes a new
-  head, and each head gets its own call (`kit/.gate/bin/review`).
 - **Colly's scope, 2026-10-24.** Colly handles only the factory. The piggery teams of Kizuna and kizuna-labs report to
   the Human directly. Source: chat, as the map page records it in Vietnamese; this line is an English rendering, not
   his words.
@@ -254,4 +249,26 @@ https://claude.ai/artifact/XAUqXMKx1vXJT5bKDGAY1x, which he settled on 2026-10-2
   until the Human revisits its scope on evidence. The Watcher stays on by default, as he decided on 2026-11-06. Its
   switch's own notice, `reader-off`, is outside the freeze. Sources: INN-39 for the box, and the supervising session's
   relay for 15:15:36.
+- **The factory's own merge switch, 2026-11-08.** On his word, Colly moved the ruleset `factory` (25631761) of
+  `tuannd9288/factory` to the merge switch's position `all` at 08:31:11 +07: no approval, no code-owner review and
+  no approval of the last push are required, and `verify` stays required. A pull request of this repository lands once
+  the team's Supervisor has accepted it and Colly's review passed, with `verify` green, armed by `scripts/ship`. He
+  still approves a release, a first design, and a change to a design or architecture: such a pull request carries
+  `needs-human`, which `scripts/ship` stops on, and Colly takes it to him. `.github/ruleset.json` holds the same
+  parameters. Source: the Human, in his chat with Colly, 2026-11-08 shortly before 08:31 +07, paraphrased; recorded on
+  INN-42 the same morning.
+- **No reviewer on GitHub Actions, 2026-11-08.** Review runs beside the workers, as eight of the ten reference systems do:
+  the team's reviewer decides on the machine, the Lead arms auto-merge only on its PASS, and a high risk gets
+  `needs-human`. No job on GitHub Actions calls a model or holds a reviewer's credential: the kit's Claude reviewer and
+  its stub leave the kit, and so does Entire's path (#155), with zalo-gateway moving to review beside its workers. The
+  kit's gate requires `verify` and `tier` alone, and pstack's live verifier stays. This settles what "The gate's
+  reviewer" left to the probe's numbers. Until its kit moves, factory-probe's reviewer is the stub, which he sets
+  himself; grading by /merge-risk is parked in Triage. On FAC-100 he then took pstack's way on three points: a
+  `No-red:` line of 20 characters or more passes on its own, nobody judges it, it raises no tier, and nothing new is
+  built for it; tier 2 gets no new rule and stays a label and a column of the digest, asking what tier 1 asks to merge;
+  and his #155 exception to the runner rule ends (X1): zalo-gateway's `tier` will run on GitHub-hosted runners, a
+  workflow change its owner makes at FAC-102, and meanwhile the rule's reason is the label token and what only `tier`
+  asks. A repository still on the kit before this keeps its own reviewer jobs until FAC-102 moves it. Sources: his five
+  answers on the review-placement page, as FAC-99 on Linear records them, and his answers on FAC-100, recorded there and
+  relayed by Colly at 10:36 +07.
 

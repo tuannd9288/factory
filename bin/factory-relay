@@ -15,7 +15,5 @@
 # bin/lib/relay.mjs has the rules. It calls no gh and reads no token; it refuses to run as the factory host's user, where the sweep delivers.
 # bin/install-factory writes the plist, runs `check` and prints the sudo line that installs and loads it; the Human stops the job with
 # `sudo launchctl bootout system/io.github.tuannd9288.factory.relay`.
-PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
-export PATH
-command -v node >/dev/null 2>&1 || { echo "factory-relay: node is not on PATH ($PATH)" >&2; exit 127; }
+. "$(dirname "$0")/lib/prelude.sh"
 exec node "$(dirname "$0")/lib/relay.mjs" "$@"

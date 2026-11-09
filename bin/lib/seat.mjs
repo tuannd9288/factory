@@ -8,19 +8,25 @@ import { tmpdir, userInfo } from 'node:os';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT, reexec, withStartLock } from './checkout.mjs';
+import { RATE_LIMIT_LINE, keptEvent, rateReadingOf, resultOf } from './claude-code.mjs';
 import { ask, socketPath } from './daemon-proto.mjs';
 import { readRules, sandboxPaths } from './deny-read.mjs';
 import { firstFree, parseTeam } from './names.mjs';
+import { which } from './launchd.mjs';
 import { isAgentsUser } from './node.mjs';
 import { MODELS, claudeModelArgs, entryOf } from './models.mjs';
 import { PluginError, installPlugins } from './plugins.mjs';
+import { COMMIT, PrepareError, markSession, prepareWork } from './prepare.mjs';
+import { PROCESSES } from './ps.mjs';
 import { readSessions } from './records.mjs';
-import { repoOk } from './repos.mjs';
+import { githubRepo, repoOk } from './repos.mjs';
 import { accountRefusal, readAccounts, readTokenFile, seatAccounts, tokenDir } from './token.mjs';
 
-/** What a session reports back through --json-schema (as the gate's reviewer does, kit/.gate/bin/lib/claude-reviewer.mjs).
+/** What a session reports back through --json-schema.
  * The cost is not asked of the model: the record takes it from the session's result event. `foundOutside` lists the bugs and
- * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead. */
+ * improvements it found outside its task, one line each, for the Lead to file (#338). `needsLead` returns questions to the Lead.
+ * `raise`, optional since every seat shares this schema, is the reviewer's: the kind and the place of a high risk (FAC-101,
+ * packs/pstack/lead.md step 6), on which scripts/ship labels the pull request needs-human. */
 export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -31,13 +37,15 @@ export const SCHEMA = {
     couldNotRead: { type: 'array', items: { type: 'string' } },
     needsLead: { type: 'array', items: { type: 'string' } },
     foundOutside: { type: 'array', items: { type: 'string' } },
+    raise: { type: 'string' },
   },
 };
 
 // The researcher's only git (#181).
 export const RESEARCH_GIT = fileURLToPath(new URL('../research-git', import.meta.url));
 
-/** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get. It covers Bash
+/** The sandbox of the worker's and the reviewer's Bash (#183), the one --settings value they get; bin/lib/factory.mjs builds the MacBook
+ * Lead's and Colly's on it, with their own writes, hosts and excluded commands (FAC-79 (b)). It covers Bash
  * only: the Read tool, the hooks and the MCP servers run outside it, so the Read denies stay permission rules. Paths are absolute
  * from home, not `~`, so they mean one thing whatever the settings layer. failIfUnavailable ends the session rather than run Bash
  * unsandboxed; autoAllowBashIfSandboxed is off so the grants decide, sandbox or not. What it denies is bin/lib/deny-read.mjs's sandbox
@@ -162,52 +170,36 @@ export function runFiles(runs, ext) {
   return out;
 }
 
-/** The seat a run's file belongs to: its .seat file, else fallback (a session from before there were seats ran on seat 2). */
-const seatOf = (file, fallback = null) => {
+/** The seat a run's file belongs to: its .seat file, else null (a run from before there were seats). */
+const seatOf = (file) => {
   try {
     return readFileSync(file.replace(/\.[^./]*$/, '.seat'), 'utf8').trim();
   } catch (e) {
-    if (e.code === 'ENOENT') return fallback; // never there, or a start backing off removed its claim meanwhile
+    if (e.code === 'ENOENT') return null; // never there, or a start backing off removed its claim meanwhile
     throw e;
   }
 };
 
-// The uid and start time of a process, from ps (the kernel's own record, which no launcher can change; argv it can). lstart has
-// one-second precision. ps is by absolute path, since a test's PATH holds no /bin. A failed ps, or no process, is null.
-function processInfo(pid) {
-  for (const ps of ['/bin/ps', '/usr/bin/ps']) {
-    if (!existsSync(ps)) continue;
-    try {
-      const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(execFileSync(ps, ['-o', 'uid=,lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' },stdio: ['ignore', 'pipe', 'ignore'] }));
-      const started = m ? Date.parse(m[2]) : NaN;
-      return Number.isNaN(started) ? null : { uid: Number(m[1]), started };
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
 /** Whether pid is a live session that wrote a file at fileMs: a process of this user (never pid 1, nor another user's), that
  * started no later than the file was written, give or take a second; a later start is a pid the system gave again. A pid no process
- * has (kill 0 says ESRCH) is not live and costs no ps; any other answer, EPERM included, goes on to ps. info and kill are the seams
- * a test counts the calls through. */
-export const alive = (pid, fileMs, info = processInfo, kill = (p, s) => process.kill(p, s)) => {
+ * has (signal 0 says ESRCH) is not live and costs no ps; any other answer, EPERM included, goes on to ps. ps is the process lister
+ * (bin/lib/ps.mjs). */
+export const alive = (pid, fileMs, ps = PROCESSES) => {
   try {
-    kill(pid, 0);
+    ps.signal(pid);
   } catch (e) {
     if (e.code === 'ESRCH') return false;
   }
-  const p = info(pid);
+  const p = ps.info(pid);
   return p !== null && p.uid === process.getuid() && p.started <= fileMs + 1000;
 };
 
 // An empty or non-numeric pid file is no live session (process.kill(0, 0) would succeed for it).
 // A file that goes away meanwhile (a start backing off removes its claim) is no live session either.
-function filePidAlive(file) {
+function filePidAlive(file, ps) {
   try {
     const text = readFileSync(file, 'utf8').trim();
-    return /^[1-9][0-9]*$/.test(text) && alive(Number(text), statSync(file).mtimeMs);
+    return /^[1-9][0-9]*$/.test(text) && alive(Number(text), statSync(file).mtimeMs, ps);
   } catch {
     return false;
   }
@@ -215,7 +207,7 @@ function filePidAlive(file) {
 
 /** Whether a run is live: its pid file's process (the supervisor, or the claude of an old launcher) or the session the
  * supervisor recorded in run-<tag>.child, which outlives a supervisor that was killed with SIGKILL. */
-export const runLive = (pidFile) => filePidAlive(pidFile) || filePidAlive(pidFile.replace(/\.pid$/, '.child'));
+export const runLive = (pidFile, ps = PROCESSES) => filePidAlive(pidFile, ps) || filePidAlive(pidFile.replace(/\.pid$/, '.child'), ps);
 
 /** The names in use (#286): those of the runs that are live, a start's claim included, and every Lead's, which it holds for as long as
  * its file ~/factory-runs/<repo>-<team>/name exists (#196). With the state folder, also the names of the sessions.jsonl records that ended on
@@ -238,31 +230,26 @@ export function heldNames(runs, state = null) {
 /** The name a resumed session had in its earlier record, or null. */
 export const nameOfSession = (state, session) => readSessions(state).findLast((r) => r.session === session)?.name ?? null;
 
-/** How many sessions of a seat have a live process: Infinity when the folders never held still. The count is taken between two
- * listings of the .pid files, claims included, and is made again when they differ. A start's hand-off removes
- * run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the listing, so none can finish between two
- * equal listings; one seen half done counts that start twice at worst. list is the listing, passed in so a test can force the
- * interleaving. */
-export function liveCount(runs, seat, list = runFiles) {
-  return countLive(runs, (p) => seatOf(p, '2') === String(seat), list);
+/** How many runs are live whatever their seat, claims included (#257): the update of the checkout waits for none. Infinity when
+ * the folders never held still. The count is taken between two listings of the .pid files, claims included, and is made again when
+ * they differ. A start's hand-off removes run-<tag>.claim.pid only after it wrote run-<tag>.pid, and that removal changes the
+ * listing, so none can finish between two equal listings; one seen half done counts that start twice at worst. list is the
+ * listing: the queue's sweep passes one of a single folder's run files, and a test one that forces the interleaving. ps is the
+ * process lister (bin/lib/ps.mjs). */
+export function liveRuns(runs, { list = runFiles, ps = PROCESSES } = {}) {
+  return countLive(runs, () => true, list, ps);
 }
 
-/** How many runs are live whatever their seat, claims included (#257): the update of the checkout waits
- * for none. Infinity when the folders never held still. */
-export function liveRuns(runs, list = runFiles) {
-  return countLive(runs, () => true, list);
-}
-
-/** How many runs of an account have a live process (#311), counted as liveCount does. A run with no .account file counts under the
+/** How many runs of an account have a live process (#311), counted as liveRuns does. A run with no .account file counts under the
  * account its seat's old row names (seatRows, { seat: account }) while that row is in the file, as accountEvent reads it. */
-export function liveOfAccount(runs, account, seatRows = {}, list = runFiles) {
-  return countLive(runs, (p) => accountOf(p, seatRows) === account, list);
+export function liveOfAccount(runs, account, seatRows = {}, ps = PROCESSES) {
+  return countLive(runs, (p) => accountOf(p, seatRows) === account, runFiles, ps);
 }
 
-function countLive(runs, keep, list) {
+function countLive(runs, keep, list, ps) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const before = list(runs, '.pid').sort();
-    const n = before.filter((p) => keep(p) && runLive(p)).length;
+    const n = before.filter((p) => keep(p) && runLive(p, ps)).length;
     if (before.join('\n') === list(runs, '.pid').sort().join('\n')) return n;
   }
   return Infinity;
@@ -280,21 +267,16 @@ const accountOf = (file, seatRows) => {
   return seat === null ? null : (seatRows[seat] ?? null);
 };
 
-/** The rate_limit_info that the newest log of the account reporting a seven-day use gives (its last rate_limit_event), with the
- * log's time, or null. The one reader of an account's quota: accountOut, the ledger's table, `factory` all use it. */
+/** The quota that the newest log of the account reporting a seven-day use gives (its last rate-limit line, read by claude-code.mjs), as
+ * { windows, resetsAt, asOf } with the log's time, or null. The one reader of an account's quota: accountOut, the ledger's table, the events
+ * and `factory` all use it. */
 export function accountEvent(runs, account, seatRows = {}) {
   const logs = runFiles(runs, '.jsonl').filter((f) => accountOf(f, seatRows) === account).map((f) => ({ f, t: statSync(f).mtimeMs })).sort((a, b) => b.t - a.t);
   for (const { f, t } of logs) {
-    const line = readFileSync(f, 'utf8').split('\n').filter((l) => l.includes('"type":"rate_limit_event"')).pop();
+    const line = readFileSync(f, 'utf8').split('\n').filter((l) => l.includes(RATE_LIMIT_LINE)).pop();
     if (!line) continue;
-    let info;
-    try {
-      info = JSON.parse(line).rate_limit_info;
-    } catch {
-      continue;
-    }
-    const u = info?.unifiedWindows?.seven_day?.utilization;
-    if (u !== undefined && u !== null && u !== '') return { info, asOf: t };
+    const reading = rateReadingOf(line);
+    if (reading) return { ...reading, asOf: t };
   }
   return null;
 }
@@ -308,10 +290,10 @@ const WINDOW = { five_hour: 'five-hour', seven_day: 'seven-day' };
  * passed. This is the only signal of a limit hit (#194): the two recorded cut-offs, factory-runs/issue-149 and issue-167, each
  * carry this event before their result ("You've hit your session limit · resets …", api_error_status 429). */
 export function accountOut(runs, account, seatRows = {}, now = Date.now()) {
-  const info = accountEvent(runs, account, seatRows)?.info;
-  if (info?.status !== 'rejected' || info.resetsAt == null || resetPassed(info.resetsAt, now)) return null;
-  const until = new Date(info.resetsAt * 1000).toISOString().slice(0, 16).replace('T', ' ');
-  return `rejected by Claude Code (${WINDOW[info.rateLimitType] ?? info.rateLimitType} window) until ${until} UTC`;
+  const e = accountEvent(runs, account, seatRows);
+  if (e?.windows.status !== 'rejected' || e.resetsAt == null || resetPassed(e.resetsAt, now)) return null;
+  const until = new Date(e.resetsAt * 1000).toISOString().slice(0, 16).replace('T', ' ');
+  return `rejected by Claude Code (${WINDOW[e.windows.type] ?? e.windows.type} window) until ${until} UTC`;
 }
 
 /** The seat a session runs on (#311): a seat is a slot. It is resumeSeat for a resume, else the first of the role's seats, whatever its
@@ -337,8 +319,8 @@ class Moved extends Error {
   }
 }
 
-const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--deny <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
-const VALUE = { '--run': 'run', '--work': 'work', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
+const USAGE = 'usage: bin/seat <role> <brief file> --run <run folder> --work <work folder> [--main <commit>] [--tag <name>] [--resume <session id> --seat <n>] [--skill <name>]... [--allow <rule>]... [--deny <rule>]... [--add-dir <folder>]... [--max-turns <n>]';
+const VALUE = { '--run': 'run', '--work': 'work', '--main': 'main', '--tag': 'tag', '--resume': 'resume', '--seat': 'seat', '--max-turns': 'maxTurns' };
 const LIST = { '--skill': 'skills', '--allow': 'allow', '--deny': 'deny', '--add-dir': 'addDirs' };
 
 const realOf = (path) => {
@@ -380,6 +362,7 @@ export function parseArgs(argv) {
   if (o.maxTurns !== undefined && !/^[1-9][0-9]*$/.test(o.maxTurns)) throw new Refused('--max-turns needs a whole number of at least 1');
   if (o.resume && o.seat === undefined) throw new Refused('a resume stays on its seat; give --seat <n>, the seat the session ran on');
   if (o.tag !== undefined && !/^[A-Za-z0-9._-]+$/.test(o.tag)) throw new Refused('--tag takes letters, digits, dot, dash and underscore');
+  if (o.main !== undefined && !COMMIT.test(o.main)) throw new Refused('--main takes a commit id, 40 or 64 hex digits: main\'s commit as GitHub has it');
   return o;
 }
 
@@ -392,8 +375,6 @@ function readToken(path, seat, account) {
   if (r.error) throw new Refused(`seat ${seat}: the token file ${path} is empty or not printable ASCII`);
   return r.token;
 }
-
-const onPath = (name, PATH) => (PATH ?? '').split(':').some((d) => d && existsSync(join(d, name)));
 
 /** Starts a session in the background and returns what to print. The session runs under a detached supervisor of this
  * file, which waits for it and appends its record; the supervisor's pid is the one in run-<tag>.pid. */
@@ -526,9 +507,6 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   const child = { ...env, GH_CONFIG_DIR: join(run, '.gh-empty'), CLAUDE_CONFIG_DIR: join(profiles, 'seats', String(seat), 'claude') };
   if (PRESETS[o.role].hideKey) child.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
   else delete child.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB;
-  // The marker the tests read to know their Bash runs in the sandbox (#183): set for a sandboxed preset, and only then.
-  if (PRESETS[o.role].sandbox) child.FACTORY_SANDBOX = '1';
-  else delete child.FACTORY_SANDBOX;
   for (const name of ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete child[name];
   // The researcher's git clones under its run folder, and only there (bin/research-git).
   if (o.role === 'researcher') child.FACTORY_RESEARCH_CLONES = join(run, 'clones');
@@ -540,10 +518,21 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
     if (e instanceof PluginError) throw new Refused(`plugins: ${e.message}`);
     throw e;
   }
+  // main's gate_prepare, at the commit the Lead names with --main, makes the worktree ready to test before the session, outside the
+  // sandbox and with the network (FAC-108, bin/lib/prepare.mjs), with the session's environment less every ANTHROPIC_*. A failed
+  // install starts nothing.
+  const install = Object.fromEntries(Object.entries(child).filter(([k]) => !k.startsWith('ANTHROPIC_')));
+  try {
+    prepareWork({ work, run, tag, state, env: install, main: o.main ?? null });
+  } catch (e) {
+    if (e instanceof PrepareError) throw new Refused(`prepare: ${e.message}`);
+    throw e;
+  }
   const args = buildArgs({ role: o.role, run, work, home, resume: o.resume ?? null, skills: o.skills, allow: o.allow, deny: o.deny, addDirs: o.addDirs, maxTurns: o.maxTurns ? Number(o.maxTurns) : null, profiles });
   const spec = {
-    cmd: [...(onPath('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
+    cmd: [...(which('caffeinate', env.PATH) ? ['caffeinate', '-i'] : []), 'claude', ...args], cwd: work, brief, jsonl: join(run, `run-${tag}.jsonl`), err: join(run, `run-${tag}.err`),
     childFile: join(run, `run-${tag}.child`), tokenPath, account, team, role: o.role, seat, tag, name, run, state, model, resume: o.resume ?? null, start: new Date().toISOString(),
+    head: placeOf(work).head,
   };
   for (const f of [spec.jsonl, spec.err]) writeFileSync(f, '');
   const sup = spawn(process.execPath, [fileURLToPath(import.meta.url), '--supervise'], { cwd: work, detached: true, stdio: 'ignore', env: { ...child, FACTORY_SEAT_SUPERVISE: JSON.stringify(spec) } });
@@ -554,12 +543,15 @@ function spawnSupervisor({ o, env, home, profiles, state, run, work, brief, tag,
   writeFileSync(join(run, `run-${tag}.seat`), `${seat}\n`);
   writeFileSync(join(run, `run-${tag}.account`), `${account}\n`);
   writeFileSync(pidFile, `${sup.pid}\n`);
+  // A session began in this worktree: later starts there make no first install (FAC-108, the Human's box A on INN-51).
+  markSession(state, work);
   return `bin/seat: ${tag} started ${sup.pid} on seat ${seat}\n`;
 }
 
-/** The repository (`owner/name`, from a GitHub https or ssh URL of origin) and the branch of a work folder, null where git
- * cannot tell: a folder that is not a clone, another host, a detached HEAD. Read when the session ends, since a worker may
- * make its branch during the session (#205). */
+/** The repository (`owner/name`, from a GitHub https or ssh URL of origin), the branch and the head commit of a work folder, null
+ * where git cannot tell: a folder that is not a clone, another host, a detached HEAD (for the branch). The repository and branch
+ * are read when the session ends, since a worker may make its branch during the session (#205); the head when it starts, the
+ * commit a reviewer is briefed to read, which scripts/ship's reviewer check keys on (FAC-101). */
 function placeOf(dir) {
   const git = (...args) => {
     try {
@@ -568,29 +560,25 @@ function placeOf(dir) {
       return null;
     }
   };
-  const repo = /^(?:https:\/\/|git@|ssh:\/\/git@)github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(git('remote', 'get-url', 'origin') ?? '')?.[1] ?? null;
+  const repo = githubRepo(git('remote', 'get-url', 'origin'));
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
-  return { repo, branch: branch && branch !== 'HEAD' ? branch : null };
+  return { repo, branch: branch && branch !== 'HEAD' ? branch : null, head: git('rev-parse', 'HEAD') };
 }
 
 /** The record of a session that has ended: spec is what launch decided, text the session's log, end how it ended. */
 export function recordOf(spec, events, { code, signal, error = null, end = new Date() }) {
-  const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
-  // A run can hold several results (a background task that ends starts another query): turns and duration add up; the cost
-  // is cumulative, so the last result's is the whole; the report is the last one that has it.
-  const results = events.filter((e) => e.type === 'result');
-  const result = results.at(-1) ?? null;
-  if (result?.is_error) error = result.result || result.errors?.join('; ') || result.terminal_reason || '';
-  const sum = (key) => (results.some((r) => typeof r[key] === 'number') ? results.reduce((s, r) => s + (typeof r[key] === 'number' ? r[key] : 0), 0) : null);
-  const models = result?.modelUsage ? Object.keys(result.modelUsage) : [];
+  // What the session's events say is read by claude-code.mjs; this composes the record, the factory's own shape in sessions.jsonl.
+  const r = resultOf(events);
+  if (r.error !== null) error = r.error;
   return {
-    session: result?.session_id ?? init?.session_id ?? spec.resume ?? null,
+    session: r.session ?? spec.resume ?? null,
     role: spec.role, seat: spec.seat, ...(spec.team ? { team: spec.team, account: spec.account } : {}), tag: spec.tag, ...(spec.name ? { name: spec.name } : {}), run: spec.run, ...placeOf(spec.cwd),
-    model: models.length ? models.join(',') : (init?.model ?? spec.model),
+    head: spec.head ?? null,
+    model: r.model ?? spec.model,
     start: spec.start, end: end.toISOString(), minutes: Math.round((end - Date.parse(spec.start)) / 600) / 100,
-    turns: sum('num_turns'), duration_ms: sum('duration_ms'), total_cost_usd: result?.total_cost_usd ?? null,
-    structured: results.findLast((r) => r.structured_output !== undefined && r.structured_output !== null)?.structured_output ?? null,
-    ended: result?.is_error ? 'error' : result ? (result.subtype ?? 'result') : 'no-result',
+    turns: r.turns, duration_ms: r.duration_ms, total_cost_usd: r.total_cost_usd,
+    structured: r.structured,
+    ended: r.ended,
     exitCode: code ?? null, signal: signal ?? null, ...(error ? { error } : {}),
   };
 }
@@ -609,7 +597,7 @@ function supervise() {
   const take = (line) => {
     try {
       const e = JSON.parse(line);
-      if (e?.type === 'result' || (e?.type === 'system' && e.subtype === 'init')) events.push(e);
+      if (keptEvent(e)) events.push(e);
     } catch {
       // Not an event.
     }

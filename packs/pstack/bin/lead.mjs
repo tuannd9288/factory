@@ -14,18 +14,21 @@ import { pushHook } from '../../../bin/lib/force-push.mjs';
 // and given once, as the first message of a resume.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PluginError, installPlugins, pluginPaths } from '../../../bin/lib/plugins.mjs';
 import { onLinear } from '../../../bin/lib/linear-repos.mjs';
 import { TEAM, firstFree } from '../../../bin/lib/names.mjs';
+import { profilesOf, runsOf, stateDirOf } from '../../../bin/lib/node.mjs';
 import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 import { readRules } from '../../../bin/lib/deny-read.mjs';
 import { MODELS, claudeModelArgs, entryOf, pstackModels } from '../../../bin/lib/models.mjs';
+import { which } from '../../../bin/lib/launchd.mjs';
+import { setJsonKey, writeAtomic } from '../../../bin/lib/files.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
 
 const USAGE = 'usage: factory lead <repo> [--team <name> | --new-team] [--new] [--dry-run]   (--team names the team, use the only existing team, pick a nickname when none exists, refuse when several exist; --new-team picks a free nickname; --new starts a fresh session, otherwise the newest earlier one of the team is resumed)';
@@ -36,8 +39,10 @@ const RUNS_TOKEN = '{{RUNS}}'; // in lead.md: the absolute runs folder, whose pa
 
 /** lead.md for one Lead: the form of its repository, its team, its Linear team key, the bin/seat its grant names and its runs folder.
  * With no `seat` (a MacBook Lead that does not run as the agents' user, #366) it takes the <!--noseat--> form, which starts no seat, and
- * names no bin/seat. Each value goes in as written (a function replacement, so no `$` in a path is read as a pattern). */
-export const roleFor = (text, { linear, team, seat = null, runs }) => formOf(roleOf(text, Boolean(linear)), seat ? 'seat' : 'noseat', seat ? 'noseat' : 'seat')
+ * names no bin/seat. With `here` (a `factory lead --here` Lead, whose shell runs in a sandbox, FAC-79) it takes the <!--here--> form, else the
+ * <!--nohere--> one. Each value goes in as written (a function replacement, so no `$` in a path is read as a pattern). */
+export const roleFor = (text, { linear, team, seat = null, runs, here = false }) => formOf(formOf(roleOf(text, Boolean(linear)), seat ? 'seat' : 'noseat', seat ? 'noseat' : 'seat'),
+  here ? 'here' : 'nohere', here ? 'nohere' : 'here')
   .replaceAll(TEAM_TOKEN, () => team).replaceAll(TEAM_KEY_TOKEN, () => linear?.key ?? '').replaceAll(SEAT_TOKEN, () => seat ?? '').replaceAll(RUNS_TOKEN, () => runs);
 
 /** The text with each span of `drop` taken out, markers included (a span that starts a line takes its line break with it), and the markers
@@ -59,7 +64,7 @@ const SESSION_COPY = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 /** The Lead's earlier session, from the copies transcript-copy.mjs keeps in dir (~/factory-runs/<repo>-<team>/transcripts), never from
  * a profile: { id, count } for the newest regular file by mtime whose name is a plain session id plus .jsonl, or null. */
-export function newestSession(dir) {
+function newestSession(dir) {
   let names;
   try {
     names = readdirSync(dir);
@@ -92,7 +97,7 @@ export function newestSession(dir) {
 const allowOf = (root) => [
   'Read', 'Glob', 'Grep', 'Write', 'Edit',
   'Bash(git fetch:*)', 'Bash(git worktree:*)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)',
-  'Bash(git rev-parse:*)', 'Bash(git branch:*)', 'Bash(git push -u origin HEAD)',
+  'Bash(git rev-parse:*)', 'Bash(git branch:*)', 'Bash(git push origin HEAD)',
   'Bash(cd:*)', 'Bash(ls:*)', 'Bash(mkdir:*)',
   'Bash(.gate/bin/claim:*)', 'Bash(.gate/bin/tier:*)', 'Bash(.gate/bin/verify:*)', 'Bash(.gate/bin/red-check:*)',
   'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
@@ -109,38 +114,23 @@ const denyOf = (cwd) => [
   ...readRules({ role: 'lead' }),
 ];
 
-// The reason to refuse a start, or null, lives in bin/lib/repos.mjs (#311), which bin/seat and the teams use too.
-export { refusal };
-
 export const quote = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 
-/** The first `node` that PATH names, as PATH names it (a link stays a link: brew upgrade keeps /opt/homebrew/bin/node and removes
- * the Cellar path behind it), or null. Only absolute folders count. */
-export function findNode(PATH) {
-  for (const dir of (PATH ?? '').split(':')) {
-    if (!isAbsolute(dir)) continue;
-    const path = join(dir, 'node');
-    try {
-      accessSync(path, constants.X_OK);
-      if (statSync(path).isFile()) return path;
-    } catch {
-      // not here
-    }
-  }
-  return null;
-}
+/** The first `node` that PATH names, as PATH names it, or null: the one `which` of the factory's launchd jobs (bin/lib/launchd.mjs). */
+export const findNode = (PATH) => which('node', PATH);
 
 // The hooks that run transcript-copy.mjs: it copies the transcript on Stop and SessionEnd, and on all five tells `top` the Lead's state (#286).
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop', 'SessionEnd'];
 
 /** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
- * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to ~/factory-runs/<repo>-<team>/
- * transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script needs no
- * exec bit. Its model and effort are the lead.remote entry of models, the factory's one table (INN-39). */
-export function leadArgs({ repo, team, home, root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs'), models = MODELS }) {
+ * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to
+ * <runs>/<repo>-<team>/transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script
+ * needs no exec bit. runs is the runs folder (runsOf, bin/lib/node.mjs), ~/factory-runs unless FACTORY_RUNS names another. Its model and
+ * effort are the lead.remote entry of models, the factory's one table (INN-39). */
+export function leadArgs({ repo, team, home, runs = join(home, 'factory-runs'), root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs'), models = MODELS }) {
   const model = claudeModelArgs(entryOf(models, 'lead', 'remote'));
   const cwd = join(root, repo);
-  const hook = [node, hookScript, join(home, 'factory-runs', `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
+  const hook = [node, hookScript, join(runs, `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
   return {
     cwd,
@@ -150,7 +140,7 @@ export function leadArgs({ repo, team, home, root, roleText, node, resume = null
       ...model,
       '--append-system-prompt', roleText,
       '--permission-mode', 'auto',
-      '--add-dir', join(home, 'factory-runs'),
+      '--add-dir', runs,
       '--name', `${repo}-${team}`,
       '--settings', JSON.stringify({ autoMemoryEnabled: false, hooks: { ...Object.fromEntries(HOOK_EVENTS.map((e) => [e, hooks])), PreToolUse: pushHook(false, node) } }),
       // The prompt argument goes right after the id: --allowedTools and --disallowedTools take every word up to the next option.
@@ -164,7 +154,7 @@ export function leadArgs({ repo, team, home, root, roleText, node, resume = null
 /** Where the hooks' script is copied to (#257): <run folder>/hooks/transcript-copy-<sha7 of its bytes>.mjs. A Lead pane stays open
  * for days, and its Stop hook would otherwise run whatever the checkout holds by then; the script imports only node: modules, so the
  * copy runs alone. */
-export function hookPath({ root, runDir }) {
+function hookPath({ root, runDir }) {
   const sha = createHash('sha256').update(readFileSync(join(root, 'packs/pstack/bin/transcript-copy.mjs'))).digest('hex').slice(0, 7);
   return join(runDir, 'hooks', `transcript-copy-${sha}.mjs`);
 }
@@ -175,9 +165,7 @@ export function copyHook({ root, runDir }) {
   const to = hookPath({ root, runDir });
   if (!existsSync(to)) {
     mkdirSync(dirname(to), { recursive: true });
-    const tmp = `${to}.${process.pid}.tmp`;
-    writeFileSync(tmp, readFileSync(join(root, 'packs/pstack/bin/transcript-copy.mjs')));
-    renameSync(tmp, to);
+    writeAtomic(to, readFileSync(join(root, 'packs/pstack/bin/transcript-copy.mjs')));
   }
   return to;
 }
@@ -213,33 +201,7 @@ function profileConfig(cwd) {
  * mode kept, through a temporary file and a rename. A trust key is never set: trust stays the Human's. Throws an Error whose message
  * names the file when it does not parse into an object; the file is then unchanged. */
 export function markOnboarded(config) {
-  const file = join(config, '.claude.json');
-  let text = '{}';
-  let mode = 0o600;
-  try {
-    text = readFileSync(file, 'utf8');
-    mode = statSync(file).mode & 0o777;
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw new Error(`could not read ${file}: ${e.code ?? e.message}`);
-  }
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = null;
-  }
-  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error(`${file} does not hold a JSON object; fix or move it`);
-  if (json.hasCompletedOnboarding === true) return;
-  mkdirSync(config, { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, `${JSON.stringify({ ...json, hasCompletedOnboarding: true }, null, 2)}\n`, { mode, flag: 'wx' });
-    chmodSync(tmp, mode);
-    renameSync(tmp, file);
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw new Error(`could not write ${file}: ${e.code ?? e.message}`);
-  }
+  setJsonKey(join(config, '.claude.json'), 'hasCompletedOnboarding', true);
 }
 
 /** Write pstack's mapped skill defaults into the Lead profile on every start (#436), rendered from the factory's one table of models,
@@ -248,24 +210,21 @@ export function writeModels(config, models = MODELS) {
   const file = join(config, 'rules/pstack-models.md');
   const text = pstackModels(models.pstack);
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
   try {
-    writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });
-    renameSync(tmp, file);
+    writeAtomic(file, text, { mode: 0o600 });
   } catch (e) {
-    rmSync(tmp, { force: true });
     throw new Error(`could not write ${file}: ${e.code ?? e.message}`);
   }
 }
 
 /** The role text's hash (#316): SHA-256 hex of the exact string that goes to --append-system-prompt. */
-export const roleHash = (roleText) => createHash('sha256').update(roleText).digest('hex');
+const roleHash = (roleText) => createHash('sha256').update(roleText).digest('hex');
 
 const ROLE_RECORD = /^([0-9a-f]{64}) ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\n$/;
 
 /** What <runDir>/role.sha holds: { raw, hash, session }. raw is the file's text, or null when it is missing or unreadable; hash and
  * session are null unless it is one line, 64 lowercase hex characters, a space, a session id and a newline (an older one-field file is none). */
-export function readRole(runDir) {
+function readRole(runDir) {
   let raw = null;
   try {
     raw = readFileSync(join(runDir, 'role.sha'), 'utf8');
@@ -277,7 +236,7 @@ export function readRole(runDir) {
 }
 
 /** Writes <runDir>/role.sha through a temporary file in the same folder (exclusive create) and a rename. */
-export function writeRole(runDir, text) {
+function writeRole(runDir, text) {
   const file = join(runDir, 'role.sha');
   const tmp = `${file}.${process.pid}.tmp`;
   mkdirSync(runDir, { recursive: true });
@@ -291,14 +250,14 @@ export function writeRole(runDir, text) {
 }
 
 /** Puts role.sha back as readRole saw it: its raw text, or no file. */
-export function restoreRole(runDir, raw) {
+function restoreRole(runDir, raw) {
   if (raw === null) rmSync(join(runDir, 'role.sha'), { force: true });
   else writeRole(runDir, raw);
 }
 
 /** The Lead's name (#286): the file <runDir>/name when it is there, else the first animal no live run and no Lead holds, written
  * to it. Every Lead's name is held for as long as its file exists, so the name stays across restarts. */
-export function leadName(runDir, state) {
+function leadName(runDir, state) {
   const file = join(runDir, 'name');
   try {
     return readFileSync(file, 'utf8').trim();
@@ -358,23 +317,24 @@ function main(argv, env) {
     return 2;
   }
   const rolePath = join(root, 'packs/pstack/lead.md');
-  const stateDir = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  const stateDir = resolve(stateDirOf(env));
+  const runs = runsOf(env);
   let linear;
   try {
-    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs: env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), root, newTeam: flags.includes('--new-team') });
+    team ??= pickTeam(repo, { home: env.HOME, state: stateDir, runs, newTeam: flags.includes('--new-team') });
     linear = onLinear(repo, stateDir);
   } catch (e) {
     // A registry that does not parse would give every repository the GitHub form without a word: no start instead.
     process.stderr.write(`bin/lead: ${e.message}\n`);
     return 2;
   }
-  const roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat: join(root, 'bin/seat'), runs: resolve(env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs')) }) : '';
+  const roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat: join(root, 'bin/seat'), runs }) : '';
   if (!roleText.trim()) {
     process.stderr.write(`bin/lead: ${rolePath} is missing or empty\n`);
     return 2;
   }
   // No row, no start: the Lead runs on a row's token, never on a login (the Human, 2026-11-01).
-  const state = resolve(env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'));
+  const state = stateDir;
   const row = `factory/${repo}-${team}`;
   const account = readAccounts(state)[row] ?? null;
   if (!account) {
@@ -385,7 +345,7 @@ function main(argv, env) {
     process.stderr.write(`bin/lead: the account of ${row} is not a plain account name\n`);
     return 2;
   }
-  const runDir = join(env.HOME, 'factory-runs', `${repo}-${team}`);
+  const runDir = join(runs, `${repo}-${team}`);
   const transcripts = join(runDir, 'transcripts');
   const earlier = flags.includes('--new') ? null : newestSession(transcripts);
   const resume = earlier?.id ?? null;
@@ -409,10 +369,10 @@ function main(argv, env) {
     return 2;
   }
   const hookScript = hookPath({ root, runDir });
-  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, root, roleText, node, resume, message, sessionId, hookScript });
+  const { cwd, argv: command, hook } = leadArgs({ repo, team, home: env.HOME, runs, root, roleText, node, resume, message, sessionId, hookScript });
   const wanted = enabledPlugins(readSettings(cwd));
   // The plugins are cached in a root of this profile outside ~/.agent-profiles, which the deny list hides (#185).
-  const profiles = resolve(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
+  const profiles = resolve(profilesOf(env));
   let config;
   let pluginRoot;
   try {
@@ -425,7 +385,7 @@ function main(argv, env) {
   }
 
   if (flags.includes('--dry-run')) {
-    const shown = leadArgs({ repo, team, home: env.HOME, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', sessionId: sessionId && '<new session id>', hookScript }).argv;
+    const shown = leadArgs({ repo, team, home: env.HOME, runs, root, roleText: '<packs/pstack/lead.md>', node, resume, message: message && '<first message: packs/pstack/lead.md>', sessionId: sessionId && '<new session id>', hookScript }).argv;
     process.stdout.write(`${cwd}\n`);
     process.stdout.write(`${wanted.length ? `plugins to ensure: ${wanted.join(' ')}` : 'plugins to ensure: none'}\n`);
     process.stdout.write(`plugin root: ${pluginRoot}\n`);

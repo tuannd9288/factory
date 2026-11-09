@@ -34,16 +34,21 @@
 // reading the state folder. Every local user can read the share's lines (redacted, as above), and nothing else of the state folder.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { RATE_SOURCE } from './claude-code.mjs';
+import { writeAtomic } from './files.mjs';
 import { claimJob } from './job-claim.mjs';
+import { MACBOOK_SHARE } from './launchd.mjs';
 import { NEWS_KINDS } from './news-wake.mjs';
 import { redact } from './redact.mjs';
 import { accountEvent, accountOut } from './seat.mjs';
-import { quotaRows, alertLines, windowsOf } from './quota.mjs';
+import { quotaRows, alertLines } from './quota.mjs';
 import { accountList, seatAccounts } from './token.mjs';
+import { AGENTS_USER, rootOf, stateDirOf } from './node.mjs';
 import { leadOf, leadStateOf, readProcesses } from './colly-status.mjs';
+import { clearFailed, markFailed } from './status.mjs';
 
 /** How long a required check may sit unstarted before it is told: half as much again as the slowest normal wait seen on 2026-11-02
  * (1,208 s on a busy self-hosted runner, from the run's creation), so only a real stall passes it. */
@@ -51,9 +56,7 @@ export const NOT_STARTED_MS = 30 * 60_000;
 
 const STARTED = new Set(['IN_PROGRESS', 'COMPLETED']);
 const HUMAN = new Set(['tier-3', 'needs-human']);
-const stateDir = () => process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-
-export { redact };
+const stateDir = () => stateDirOf();
 
 /** The first non-empty line of a text, redacted, with its control characters gone, at most 200 characters. */
 export const oneLine =(text) => redact(String(text).split('\n').find((l) => l.trim()) ?? '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 200);
@@ -119,8 +122,7 @@ const readText = (file) => {
 /** Condition 3: the Leads running now whose newest hook event is a permission prompt or an elicitation dialog (the `waiting` state of
  * top's LEAD_STATES, read by top's own rule). The guess of a Lead at a login or a folder trust is not a dialog and is left out. A process
  * list that cannot be read throws (readProcesses), unlike top's, which shows none. */
-export const defaultProcesses = readProcesses;
-export function leadsAtDialog({ runs, now, processes = defaultProcesses }) {
+export function leadsAtDialog({ runs, now, processes = readProcesses }) {
   const out = [];
   for (const proc of processes()) {
     const lead = leadOf(proc.command);
@@ -152,9 +154,9 @@ export function accountsOut({ runs, state, agentProfiles, now }) {
   return accounts.flatMap(({ name, letter }) => {
     const why = accountOut(runs, name, seatRows, now);
     if (why) return [{ key: `out-of-quota ${letter}`, scope: 'quota', text: `account ${letter} is ${why}` }];
-    const info = accountEvent(runs, name, seatRows)?.info;
-    if (info?.status !== 'allowed_warning') return [];
-    const [warned] = alertLines([{ profile: `account ${letter}`, source: 'rate_limit_event', windows: windowsOf(info), resetsAt: info.resetsAt ?? null }], { now });
+    const e = accountEvent(runs, name, seatRows);
+    if (e?.windows.status !== 'allowed_warning') return [];
+    const [warned] = alertLines([{ profile: `account ${letter}`, source: RATE_SOURCE, windows: e.windows, resetsAt: e.resetsAt }], { now });
     return warned ? [{ key: `quota-warning ${letter}`, scope: 'quota', text: warned }] : [];
   });
 }
@@ -211,9 +213,9 @@ const linesOf = (file) =>
 /** The lines of the state folder's events file. */
 export const readLines = (state) => linesOf(join(state, 'events.jsonl'));
 
-/** Where the MacBook's queue job puts the share (FAC-43, bin/lib/queue.mjs job): a folder of its own in /Users/Shared, which every local user
- * can reach. */
-export const MACBOOK_SHARE = '/Users/Shared/factory/events.jsonl';
+// Where the MacBook's queue job puts the share (FAC-43): a folder of its own in /Users/Shared, which every local user can reach. Its one
+// home is the jobs' table (bin/lib/launchd.mjs), and it is exported here too for the readers that import it from here.
+export { MACBOOK_SHARE };
 
 /** Why a share's folder or file (`what`) may not be used, from its lstat, or null: it must be a real folder or file (a link is not), owned by
  * one of `owners` (uids), and writable by no one else. /Users/Shared is writable by every account, so an account could make the folder first,
@@ -229,7 +231,7 @@ export function shareRefusal(st, what, owners) {
 /** The uids a reader of a share accepts as its owner: this user's, and the agents' user's (FACTORY_HOST_USER, else `factory`) where this machine
  * has that user. */
 export function ownersOf(env = process.env) {
-  const r = spawnSync('id', ['-u', env.FACTORY_HOST_USER || 'factory'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const r = spawnSync('id', ['-u', env.FACTORY_HOST_USER || AGENTS_USER], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   const agents = r.status === 0 ? Number(r.stdout.trim()) : NaN;
   return [process.getuid(), ...(Number.isInteger(agents) ? [agents] : [])];
 }
@@ -239,7 +241,6 @@ export function ownersOf(env = process.env) {
  * $state/events-share.failed says why, in one line. A failed share never stops the write to events.jsonl. */
 function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
   if (!file) return;
-  const failed = join(state, 'events-share.failed');
   try {
     const dir = dirname(file);
     try {
@@ -262,20 +263,10 @@ function share(state, text, file = process.env.FACTORY_EVENTS_SHARE) {
     } finally {
       closeSync(fd);
     }
-    rmSync(failed, { force: true });
+    clearFailed(state, 'events-share');
   } catch (error) {
-    try {
-      writeFileSync(failed, `${new Date().toISOString()} the events share ${file} was not written: ${error.code === 'ELOOP' ? 'file is a link' : error.message}\n`);
-    } catch {
-      // the state folder could not be written either: the events write below it has already failed or will say so
-    }
+    markFailed(state, 'events-share', `the events share ${file} was not written: ${error.code === 'ELOOP' ? 'file is a link' : error.message}`);
   }
-}
-
-export function writeAtomic(file, text) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, file);
 }
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -435,8 +426,9 @@ export function observe({ state, reads, runs, agentProfiles, now = Date.now(), p
 /** `factory-events [--follow] [--after <seq>]`: the start lines after the cursor (or after <seq>, which the reader says it got as far
  * as, in place of the cursor), one JSON line each. Without --follow it prints them and leaves the cursor; with it, a line moves the
  * cursor only once its write succeeded, lines go out one at a time, and the file is followed. It never prints a clear line. A cursor
- * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. */
-function main(argv) {
+ * or <seq> above the file's highest seq (the file was made anew) starts from its first line, and says so on stderr. A claim that failed
+ * is tried again after retryMs, which only a test passes (the command takes none). */
+export function main(argv, { retryMs = 60_000 } = {}) {
   let follow = false;
   let news = false;
   let newest = false;
@@ -495,7 +487,6 @@ function main(argv) {
   let offset = 0;
   let partial = '';
   const pending = [];
-  const retryMs = Number(process.env.FACTORY_EVENTS_RETRY_MS) || 60_000;
   let writing = false;
   // One line at a time; the cursor moves in the write's callback, and only when the write succeeded.
   const pump = () => {
@@ -507,7 +498,7 @@ function main(argv) {
     let holder;
     try {
       holder = event.kind !== 'inn-answer' || claimJob(
-        process.env.FACTORY_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '../..'),
+        rootOf(),
         state, 'inn-answer', Buffer.from(event.key.slice('inn-answer '.length)).toString('hex'), console.error,
       );
     } catch {

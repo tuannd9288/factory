@@ -11,16 +11,59 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requiredChecks } from '../../kit/.gate/bin/lib/policy.mjs';
-import { accountsOf, quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { STALE_RUN, assistantEntryOf, canaryOf } from './claude-code.mjs';
+import { quotaRows, quotaSection, roleMapLines } from './quota.mjs';
+import { seatAccounts } from './token.mjs';
 import { createLinear } from './linear.mjs';
 import { onLinear } from './linear-repos.mjs';
-import { job, plist } from './queue.mjs';
+import { DIGEST_REPO, job, plist } from './launchd.mjs';
+import { installedRoot, placeOf } from './node.mjs';
+import { cloneRepo, clonesUnder } from './repos.mjs';
+import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
+import { humanOf, rootOf, runsOf, stateDirOf } from './node.mjs';
+import { clearFailed, markFailed, readMarkers, repoMarker } from './status.mjs';
+
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import them from here.
+export { READS, costOf } from './claude-code.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const PRICES = JSON.parse(readFileSync(join(here, 'prices.json'), 'utf8')).models;
 export const REQUIRED = requiredChecks(join(here, '../../kit'));
+
+/** The session files under a folder, at any depth. */
+function jsonlFiles(dir) {
+  const out = [];
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      const p = join(d, name);
+      const s = statSync(p);
+      if (s.isDirectory()) walk(p);
+      else if (name.endsWith('.jsonl')) out.push(p);
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return out;
+}
+
+/** Every assistant entry with usage in a profile folder's session files, in file order, as claude-code.mjs's entryOf gives it. */
+function* assistantEntries(profileDir) {
+  for (const file of jsonlFiles(join(profileDir, 'projects'))) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const entry = assistantEntryOf(line);
+      if (entry) yield entry;
+    }
+  }
+}
+
+/** The canary (claude-code.mjs's canaryOf) over the session files of the profile folders, oldest first by modification time. */
+export function inspect(profileDirs, { latest = 50 } = {}) {
+  const dated = [];
+  for (const dir of profileDirs)
+    for (const file of jsonlFiles(join(dir, 'projects'))) dated.push({ file, time: statSync(file).mtimeMs });
+  dated.sort((a, b) => a.time - b.time);
+  return canaryOf(dated.map(({ file }) => ({ file, text: readFileSync(file, 'utf8') })), { latest });
+}
 
 /** The 95% Wilson interval of k successes in n, as fractions; null when n is 0. */
 export function wilson(k, n, z = 1.96) {
@@ -41,73 +84,17 @@ export function rate(k, n) {
   return `${k}/${n} (${pct(k / n)}; 95% CI: ${pct(a)}–${pct(b)})`;
 }
 
-/** Dollars of one assistant message's usage at API prices; null for a model the table does not price. */
-export function costOf(model, usage) {
-  const price = PRICES[model];
-  if (!price || !usage) return null;
-  const w1h = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
-  const w5m = usage.cache_creation?.ephemeral_5m_input_tokens ?? Math.max(0, (usage.cache_creation_input_tokens ?? 0) - w1h);
-  return (
-    ((usage.input_tokens ?? 0) * price.input +
-      (usage.output_tokens ?? 0) * price.output +
-      w5m * price.write5m +
-      w1h * price.write1h +
-      (usage.cache_read_input_tokens ?? 0) * price.read) /
-    1e6
-  );
-}
-
-function jsonlFiles(dir) {
-  const out = [];
-  const walk = (d) => {
-    for (const name of readdirSync(d)) {
-      const p = join(d, name);
-      const s = statSync(p);
-      if (s.isDirectory()) walk(p);
-      else if (name.endsWith('.jsonl')) out.push(p);
-    }
-  };
-  if (existsSync(dir)) walk(dir);
-  return out;
-}
-
-/** Every assistant entry with usage in a profile folder's session files, in file order, parsed. */
-function* assistantEntries(profileDir) {
-  for (const file of jsonlFiles(join(profileDir, 'projects'))) {
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
-      let entry;
-      try {
-        entry = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (entry.type === 'assistant' && entry.message?.usage) yield entry;
-    }
-  }
-}
-
-/** Adds an assistant entry's cost to its git branch's row; an entry without a branch, or seen before, adds nothing. */
+/** Adds an assistant entry's cost to its git branch's row; an entry without a branch, or seen before, adds nothing. The entry is in the
+ * factory's shape (entryOf in claude-code.mjs): { key, session, branch, cwd, model, dollars }. */
 export function charge(byBranch, seen, entry) {
-  const message = entry.message;
-  if (!entry.gitBranch) return;
-  const key = message.id ?? entry.requestId ?? entry.uuid;
-  if (seen.has(key)) return;
-  seen.add(key);
-  const row = byBranch.get(entry.gitBranch) ?? { dollars: 0, models: new Set(), unpriced: new Set() };
-  const dollars = costOf(message.model, message.usage);
-  if (dollars === null) row.unpriced.add(message.model);
-  else row.dollars += dollars;
-  row.models.add(message.model);
-  byBranch.set(entry.gitBranch, row);
-}
-
-/** Cost per git branch from a Claude Code profile's session files: dollars, models, and unpriced models. */
-export function branchCosts(profileDir) {
-  const byBranch = new Map();
-  const seen = new Set();
-  for (const entry of assistantEntries(profileDir)) charge(byBranch, seen, entry);
-  return byBranch;
+  if (!entry.branch) return;
+  if (seen.has(entry.key)) return;
+  seen.add(entry.key);
+  const row = byBranch.get(entry.branch) ?? { dollars: 0, models: new Set(), unpriced: new Set() };
+  if (entry.dollars === null) row.unpriced.add(entry.model);
+  else row.dollars += entry.dollars;
+  row.models.add(entry.model);
+  byBranch.set(entry.branch, row);
 }
 
 const real = (p) => {
@@ -139,7 +126,7 @@ export function repoCosts({ extra = [], root, name, seat = null, recorded = new 
   for (const folder of extra) {
     if (!existsSync(folder)) continue;
     any = true;
-    for (const entry of assistantEntries(folder)) if (!recorded.has(entry.sessionId) && within(entry.cwd, dir)) charge(byBranch, seen, entry);
+    for (const entry of assistantEntries(folder)) if (!recorded.has(entry.session) && within(entry.cwd, dir)) charge(byBranch, seen, entry);
   }
   for (const [branch, s] of seat ?? []) {
     any = true;
@@ -159,94 +146,15 @@ export function unplaced(folders) {
   for (const folder of folders) {
     for (const entry of existsSync(folder) ? assistantEntries(folder) : []) {
       if (typeof entry.cwd === 'string' && entry.cwd) continue;
-      const key = entry.message.id ?? entry.requestId ?? entry.uuid;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(entry.key)) continue;
+      seen.add(entry.key);
       total.entries += 1;
-      total.dollars += costOf(entry.message.model, entry.message.usage) ?? 0;
+      total.dollars += entry.dollars ?? 0;
     }
   }
   return total;
 }
 
-/** The fields of an assistant entry the ledger reads: a path, or paths of which one is enough. */
-export const READS = [
-  'type',
-  'gitBranch',
-  'cwd',
-  'message.model',
-  'message.usage.input_tokens',
-  'message.usage.output_tokens',
-  'message.usage.cache_read_input_tokens',
-  'message.usage.cache_creation_input_tokens',
-  'message.usage.cache_creation.ephemeral_1h_input_tokens',
-  'message.usage.cache_creation.ephemeral_5m_input_tokens',
-  'message.id|requestId|uuid',
-];
-// The canary opens only these objects: message, message.usage and the objects inside usage. Any other object is
-// printed as `object` and never opened, so a key it holds (a map keyed by an id, a tool name) cannot reach the output.
-const OPENED = (path) => path === 'message' || path === 'message.usage' || path.startsWith('message.usage.');
-
-const valueAt = (entry, path) => path.split('.').reduce((v, k) => (v && typeof v === 'object' ? v[k] : undefined), entry);
-const kind = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
-const has = (e, r) => r.split('|').some((p) => valueAt(e, p) !== undefined && valueAt(e, p) !== null);
-const STALE_RUN = 10;
-
-/** The canary: over the latest `latest` distinct assistant entries of the profile folders (newest files first by
- * modification time), which fields the ledger reads are present in none of them (`missing`), absent from every entry of
- * the newest session file or from the newest 10 entries (`stale`: the format changed lately), absent from some
- * (`partly`), and every key path with its types and counts. It reads values only to learn their type and reports none. */
-export function inspect(profileDirs, { latest = 50 } = {}) {
-  const dated = [];
-  for (const dir of profileDirs)
-    for (const file of jsonlFiles(join(dir, 'projects'))) dated.push({ file, time: statSync(file).mtimeMs });
-  dated.sort((a, b) => a.time - b.time);
-  const entries = [];
-  for (const { file } of dated) {
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
-      try {
-        const e = JSON.parse(line);
-        if (e.type === 'assistant' && e.message?.usage) entries.push({ e, file });
-      } catch {}
-    }
-  }
-  const seen = new Set();
-  const distinct = entries.filter(({ e }) => {
-    const key = e.message.id ?? e.requestId ?? e.uuid;
-    return key === undefined || !seen.has(key) ? (seen.add(key), true) : false;
-  });
-  const sampleItems = distinct.slice(-latest);
-  const sample = sampleItems.map((x) => x.e);
-  const newestFile = dated.length ? dated[dated.length - 1].file : null;
-  const inNewest = distinct.filter((x) => x.file === newestFile).map((x) => x.e);
-  const paths = new Map();
-  const walk = (value, path, seenHere) => {
-    for (const [k, v] of Object.entries(value)) {
-      const p = path ? `${path}.${k}` : k;
-      const row = paths.get(p) ?? { types: new Set(), count: 0 };
-      row.types.add(kind(v));
-      if (!seenHere.has(p)) row.count += 1;
-      seenHere.add(p);
-      paths.set(p, row);
-      if (v && typeof v === 'object' && !Array.isArray(v) && OPENED(p)) walk(v, p, seenHere);
-    }
-  };
-  for (const e of sample) walk(e, '', new Set());
-  const missing = READS.filter((r) => !sample.some((e) => has(e, r)));
-  const newest = sample.slice(-STALE_RUN);
-  const stale = READS.filter(
-    (r) => !missing.includes(r) && ((inNewest.length && inNewest.every((e) => !has(e, r))) || (newest.length && newest.every((e) => !has(e, r)))),
-  );
-  const partly = READS.filter((r) => !missing.includes(r) && !stale.includes(r) && sample.some((e) => !has(e, r))).map((r) => `${r} (${sample.filter((e) => has(e, r)).length}/${sample.length})`);
-  return {
-    entries: sample.length,
-    missing,
-    stale,
-    partly,
-    paths: [...paths].map(([path, r]) => ({ path, types: [...r.types].sort(), count: r.count })).sort((a, b) => a.path.localeCompare(b.path)),
-  };
-}
 
 /** One line for the digest when the canary could not read what the ledger needs; null when it can, or has nothing. */
 export function canaryLine(report) {
@@ -262,7 +170,7 @@ export function inWindow(start, end, from, to) {
 }
 
 /** One pull request's row, as the GraphQL query below returns it; a task of its own when it closes no task. */
-export function rowOf(repo, pr, { human, costs, profile }) {
+export function rowOf(repo, pr, { human, costs }) {
   const labels = pr.labels.nodes.map((l) => l.name);
   const tiers = labels.map((l) => /^tier-([123])$/.exec(l)?.[1]).filter(Boolean).map(Number);
   const events = pr.timelineItems.nodes;
@@ -298,8 +206,7 @@ export function rowOf(repo, pr, { human, costs, profile }) {
   const branch = costs?.get(pr.headRefName);
   let cost = null;
   let costNote;
-  if (!profile) costNote = 'no profile';
-  else if (!branch) costNote = 'no session on the branch';
+  if (!branch) costNote = 'no session on the branch';
   else {
     cost = branch.dollars;
     costNote = branch.unpriced.size ? `unpriced: ${[...branch.unpriced].join(', ')}` : '';
@@ -365,16 +272,15 @@ export function taskRow(repo, issue, prRows) {
  * sweep in every `queue-*.ok` file, with a null for each of the ledger's repositories that has no such record (an
  * empty file is none). `missing` is true when the folder itself is not there, so nothing could be checked. */
 export function queueState(dir, repos) {
-  const missing = !existsSync(dir);
-  const names = missing ? [] : readdirSync(dir).sort();
-  const first = (file) => readFileSync(join(dir, file), 'utf8').split('\n')[0].trim();
-  const ok = names.filter((f) => /^queue-.*\.ok$/.test(f)).map((f) => ({ label: f, at: first(f) })).filter((x) => x.at);
+  const markers = readMarkers(dir);
+  const queue = (markers ?? []).filter((m) => m.name.startsWith('queue-'));
+  const ok = queue.filter((m) => m.kind === 'ok' && m.line).map((m) => ({ label: m.file, at: m.line }));
   const known = new Set(ok.map((x) => x.label));
   return {
     dir,
-    missing,
-    failed: names.filter((f) => /^queue-.*\.failed$/.test(f)).map((f) => ({ file: f, text: first(f) })),
-    ok: [...ok, ...repos.filter((repo) => !known.has(`queue-${repo.replace('/', '-')}.ok`)).map((repo) => ({ label: repo, at: null }))],
+    missing: markers === null,
+    failed: queue.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line })),
+    ok: [...ok, ...repos.filter((repo) => !known.has(`${repoMarker(repo)}.ok`)).map((repo) => ({ label: repo, at: null }))],
   };
 }
 
@@ -431,13 +337,129 @@ export function revertCount(rows, { since, until }) {
   return { n: plain.length, k: reverted.length, m: during.filter(([key]) => reverts.has(key)).length, reverted };
 }
 
+/** The commits a merged pull request's body says it repairs (INN-40): each line `Fixes: <12 to 40 hex> ("<title>")`, the Linux
+ * kernel's tag, the hex lowercased. `Fixes FAC-12` and `Fixes #12`, which close an issue, are none. */
+export const fixLines = (body) => [...String(body ?? '').matchAll(/^[ \t]*Fixes:[ \t]+([0-9a-fA-F]{12,40})(?![0-9a-fA-F])/gm)].map((m) => m[1].toLowerCase());
+
+/** The pull request a commit of a clone came from, by git alone, never gh: its subject `Merge pull request #N from …` (a merge commit)
+ * or `… (#N)` (a squash commit) gives N; null when the clone has no such commit or its subject names none. A commit the clone lacks
+ * makes one `git fetch origin main`, the first time only. */
+export function commitPullRequest(dir) {
+  let fetched = false;
+  const subject = (sha) => {
+    try {
+      return execFileSync('git', ['-C', dir, 'log', '-1', '--format=%s', sha, '--'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+      return null;
+    }
+  };
+  return (sha) => {
+    let s = subject(sha);
+    if (s === null && !fetched) {
+      fetched = true;
+      spawnSync('git', ['-C', dir, 'fetch', '--quiet', '--no-tags', 'origin', 'main'], { stdio: 'ignore', timeout: 60_000 });
+      s = subject(sha);
+    }
+    const m = s && (/^Merge pull request #(\d+) /.exec(s) ?? /\(#(\d+)\)$/.exec(s));
+    return m ? Number(m[1]) : null;
+  };
+}
+
+/** Gives every merged entry of the rows its `fixes`: [{ sha, number }] for each `Fixes:` line of its body, the number from
+ * `resolverOf(repo)` (a function of a sha, or null when the repository has no clone), null when it names no pull request. */
+export function resolveFixes(rows, resolverOf) {
+  const resolvers = new Map();
+  for (const r of rows) {
+    if (!resolvers.has(r.repo)) resolvers.set(r.repo, resolverOf(r.repo));
+    const resolve = resolvers.get(r.repo);
+    for (const p of r.merges ?? []) p.fixes ??= fixLines(p.body).map((sha) => ({ sha, number: resolve ? resolve(sha) : null }));
+  }
+  return rows;
+}
+
+const FIX_TITLE = /^fix(\([^)]*\))?!?:/;
+
+/** The change fail rate in [from, to] (ms), DORA's: of the merged pull requests in it that are not reverts (n), the ones a revert
+ * or a fix merged by its end repairs (k); failed names them with what repaired them. earlier: the pull requests merged before it
+ * that a fix merged in it repairs; unresolved: the `Fixes:` lines of fixes merged in it that name no other pull request; unmarked:
+ * the pull requests of n titled fix(…) with no `Fixes:` line. A fix's lines are its entry's `fixes` (resolveFixes), else unresolved. */
+export function failIn(rows, from, to) {
+  const all = new Map();
+  for (const r of rows) for (const p of r.merges ?? []) all.set(`${r.repo}#${p.number}`, { ...p, repo: r.repo });
+  const byRepo = (repo) => [...all.values()].filter((p) => p.repo === repo);
+  const reverts = new Map([...all].map(([key, p]) => [key, revertsOf(p.repo, p, byRepo(p.repo))]).filter(([, t]) => t.length));
+  const inside = (p) => Date.parse(p.merged) >= from && Date.parse(p.merged) <= to;
+  const during = [...all].filter(([, p]) => inside(p));
+  const duringKeys = new Set(during.map(([key]) => key));
+  const plain = during.filter(([key]) => !reverts.has(key));
+  const by = new Map();
+  const add = (key, how) => by.set(key, [...(by.get(key) ?? []), how]);
+  for (const [key, targets] of reverts) if (Date.parse(all.get(key).merged) <= to) for (const t of targets) add(`${all.get(key).repo}#${t}`, `reverted by #${all.get(key).number}`);
+  const earlier = new Map();
+  const unresolved = [];
+  for (const p of all.values()) {
+    if (Date.parse(p.merged) > to) continue;
+    for (const f of p.fixes ?? fixLines(p.body).map((sha) => ({ sha, number: null }))) {
+      if (f.number === null || f.number === p.number) {
+        if (inside(p)) unresolved.push({ repo: p.repo, number: p.number, sha: f.sha });
+        continue;
+      }
+      const target = `${p.repo}#${f.number}`;
+      add(target, `fixed by #${p.number}`);
+      if (inside(p) && !duringKeys.has(target)) earlier.set(target, [...(earlier.get(target) ?? []), p.number]);
+    }
+  }
+  const order = (a, b) => a.repo.localeCompare(b.repo) || a.number - b.number;
+  const failed = plain.filter(([key]) => by.has(key)).map(([key, p]) => ({ repo: p.repo, number: p.number, by: by.get(key) })).sort(order);
+  const unmarked = plain.filter(([, p]) => FIX_TITLE.test(p.title) && !fixLines(p.body).length).map(([, p]) => ({ repo: p.repo, number: p.number })).sort(order);
+  return {
+    n: plain.length, k: failed.length, failed, unmarked, unresolved: unresolved.sort(order),
+    earlier: [...earlier].map(([key, fixes]) => ({ repo: key.slice(0, key.lastIndexOf('#')), number: Number(key.slice(key.lastIndexOf('#') + 1)), by: fixes })).sort(order),
+  };
+}
+
+/** failIn for the period [since 00:00, until 23:59:59] (UTC). */
+export const failCount = (rows, { since, until }) => failIn(rows, Date.parse(`${since}T00:00:00Z`), Date.parse(`${until}T23:59:59Z`));
+
+const SEARCH = `query($q:String!,$after:String){search(query:$q,type:ISSUE,first:100,after:$after){pageInfo{hasNextPage endCursor}
+nodes{... on PullRequest{number title body mergedAt}}}}`;
+
+/** The pull requests of a repository merged in [from, to] (ms), as merged entries ({ number, title, body, merged }), from GitHub's
+ * search, 100 a page (INN-40). `run` is gh. */
+export function mergedIn(repo, from, to, run = gh) {
+  const q = `repo:${repo} is:pr is:merged merged:>=${new Date(from).toISOString().slice(0, 10)}`;
+  const out = [];
+  for (let after = null; ;) {
+    const page = JSON.parse(run(['api', 'graphql', '-f', `query=${SEARCH}`, '-f', `q=${q}`, ...(after ? ['-f', `after=${after}`] : [])])).data.search;
+    for (const p of page.nodes) if (p?.mergedAt && Date.parse(p.mergedAt) >= from && Date.parse(p.mergedAt) <= to) out.push({ number: p.number, title: p.title, body: p.body ?? '', merged: p.mergedAt });
+    if (!page.pageInfo.hasNextPage) return out;
+    after = page.pageInfo.endCursor;
+  }
+}
+
+/** For each repository, its merge switch (switchSince) and the change fail rate over the window since the switch last moved, up to
+ * `to` (ms): { position, since, n, k }, or null when the sweep's file names no position. `merged(repo, from, to)` gives the merged
+ * entries of the window, and `resolverOf` resolves their `Fixes:` lines (resolveFixes). */
+export function switchWindows(repos, { state, to, merged, resolverOf }) {
+  return new Map(repos.map((repo) => {
+    const sw = switchSince(state, repo);
+    if (!sw) return [repo, null];
+    const from = Date.parse(sw.since);
+    try {
+      const c = failIn(resolveFixes([{ repo, merges: merged(repo, from, to) }], resolverOf), from, to);
+      return [repo, { position: sw.position, since: sw.since, n: c.n, k: c.k }];
+    } catch (error) {
+      // A search that fails costs this repository's line, not the digest.
+      return [repo, { position: sw.position, since: sw.since, error: String(error.stderr || error.message).trim().split('\n')[0].slice(0, 200) }];
+    }
+  }));
+}
+
 /** How a row's number reads after its repository: `#12` for a GitHub issue or pull request, ` FAC-12` for a task on Linear (#406). */
 const at = (number) => (typeof number === 'string' ? ` ${number}` : `#${number}`);
 
 /** The title of the digest issue for a period. */
 export const digestTitle = (since, until) => `Weekly digest ${since} → ${until}`;
-
-export { lastRecords, readSessions };
 
 /** The sessions that ran in the period, one record each: a resumed session's total_cost_usd covers the whole session, so a
  * session counts once, by its last record; the records of one session are never added (#89). */
@@ -480,13 +502,15 @@ export function sessionLines(records, since, until) {
 }
 
 /** The weekly digest, in markdown. */
-export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, unread = null, shared = null, codexWaits: waits = null }) {
+export function digest(rows, { since, until, secrets = new Map(), canary = null, unplaced: lost = null, queue = null, sessions = null, quota = null, accounts = {}, unread = null, shared = null, codexWaits: waits = null, switches = null }) {
   const n = rows.length;
   const landed = rows.filter((r) => r.state === 'landed');
   const judged = rows.filter((r) => r.firstPass !== null);
   const costed = rows.filter((r) => r.cost !== null);
   const rounds = rows.filter((r) => r.rounds > 0);
   const reverts = revertCount(rows, { since, until });
+  const fail = failCount(rows, { since, until });
+  const named = (list, how = () => '') => list.map((p) => `${p.repo}#${p.number}${how(p)}`).join(', ');
   const lines = [
     `# ${digestTitle(since, until)}`,
     '',
@@ -507,6 +531,14 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     `- Merged tasks the Human had to touch: ${rate(landed.filter((r) => r.touched).length, landed.length)}`,
     `- PRs reverted: ${rate(reverts.k, reverts.n)}; reverts merged in the period: ${reverts.m}`,
     ...(reverts.n ? [`- Reverted PRs: ${reverts.k ? reverts.reverted.map((p) => `${p.repo}#${p.number}`).join(', ') : 'none'}`] : []),
+    `- Change fail rate (reverted or fixed): ${rate(fail.k, fail.n)}`,
+    ...(fail.n ? [`- Failed PRs: ${fail.k ? named(fail.failed, (p) => ` (${p.by.join(', ')})`) : 'none'}`] : []),
+    `- Fixed this period, merged earlier: ${fail.earlier.length ? `${fail.earlier.length} (${named(fail.earlier, (p) => ` fixed by ${p.by.map((x) => `#${x}`).join(', ')}`)})` : 'none'}`,
+    ...(fail.n ? [`- PRs titled fix(…) with no Fixes: line: ${fail.unmarked.length ? `${fail.unmarked.length} (${named(fail.unmarked)})` : 'none'}`] : []),
+    ...(fail.unresolved.length ? [`- Fixes: lines not resolved: ${named(fail.unresolved, (p) => ` (${p.sha})`)}`] : []),
+    ...(switches?.size ? ['- By repository, since its merge switch last moved:', ...[...switches].map(([repo, w]) => (w
+      ? `  - ${repo}: merge switch ${w.position} since ${w.since.slice(0, 10)}; change fail rate since then ${w.error ? `not read (${w.error})` : rate(w.k, w.n)}`
+      : `  - ${repo}: merge switch not read`))] : []),
     `- Green at the first commit the gate judged: ${rate(judged.filter((r) => r.firstPass).length, judged.length)}`,
     `- Used No-red: ${rate(rows.filter((r) => r.noRed).length, n)}`,
     `- Reviewer raised to tier 3 (label raised), by repository: ${[...new Set(rows.map((r) => r.repo))].sort().map((repo) => `${repo} ${rows.filter((r) => r.repo === repo && r.raised).length}`).join(', ') || 'no tasks'}`,
@@ -559,6 +591,8 @@ export function digest(rows, { since, until, secrets = new Map(), canary = null,
     'API cost: the cost of the bin/seat sessions that ran on the PR\'s branch, as their records name the repository and branch, plus the tokens of the --profile-dir folders by the same branch, at API prices (bin/lib/prices.json). That is usage, not money paid; it does not include the reviewer that runs on GitHub.',
     'Cash: the Claude subscription, paid monthly, not split by task. The ledger sees no other cash.',
     'Revert: a merged PR whose body has a line "Reverts #N" or "Reverts <this repository>#N"; only when its body has no "Reverts" line at all, for any repository, is its title Revert "<title of a merged PR>" or revert(scope): <title of a merged PR> (scope optional) read; PRs reverted counts the PRs merged in the period, reverts not included, that a revert merged by its end undoes.',
+    'Fixed: a merged PR named by a line "Fixes: <the first 12 or more characters of a commit> ("<title>")" in the body of a PR merged later, the commit being the merge or squash commit main got when the named PR merged, read in the repository\'s clone; "Fixes <KEY>" and "Fixes #N" close an issue and name no PR. Change fail rate (DORA\'s) counts the PRs merged in the period, reverts not included, that a revert or a fix merged by its end repairs; a fix of a PR merged before the period is counted in the week the fix lands, under "merged earlier". Data only: nothing gates on it.',
+    'Merge switch: all, every PR merges by itself, tier 3 included; 1-2, tier 3 waits for the Human; none, every PR waits for an approval. Its window starts at its last move as the sweep saw it, or the sweep\'s first sight of it.',
     'Human touched: the Human reviewed it, the label needs-human, or a merge by the Human\'s own login that was not made by auto-merge (a merge by the agents\' login is a team merge).',
   );
   return `${lines.join('\n')}\n`;
@@ -615,29 +649,8 @@ export async function linearTaskRows({ repo, api, teamKey, allPulls, pullRow, fr
   return { rows, keys: new Set(tasks.map((t) => t.identifier)) };
 }
 
-/** The factory's clones under root, by owner/name: a folder with a `.git` and the kit's `.gate/config.sh`, whose
- * `origin` is on github.com. The merge queue (bin/lib/queue.mjs) finds the repositories taken in by the same rule.
- * The name is the origin less one trailing `/` and a trailing `.git`, as bin/onboard takes it. A kit clone whose origin
- * cannot be read, or whose name is not owner/name, is left out and `skip(folder, why)` is called for it. */
-export function clonesUnder(root, skip = () => {}) {
-  const out = new Map();
-  for (const name of existsSync(root) ? readdirSync(root) : []) {
-    const dir = join(root, name);
-    if (!existsSync(join(dir, '.gate/config.sh')) || !existsSync(join(dir, '.git'))) continue;
-    let url;
-    try {
-      url = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-    } catch (error) {
-      skip(dir, `origin cannot be read: ${String(error.stderr || error.message).trim().split('\n')[0]}`);
-      continue;
-    }
-    const m = /github\.com[:/](.+)$/.exec(url.replace(/\/$/, '').replace(/\.git$/, ''));
-    if (!m) continue;
-    if (/^[\w.-]+\/[\w.-]+$/.test(m[1])) out.set(m[1], dir);
-    else skip(dir, `origin ${url} does not name owner/name`);
-  }
-  return out;
-}
+// Moved to repos.mjs (FAC-85), which owns a repository's identity, and exported here too while callers still import it from here.
+export { clonesUnder };
 
 /** `--check`: the canary, printed. Exit 1 when a field the ledger reads is missing or stale, or there is nothing to read. */
 function check(dirs, latest, extra) {
@@ -667,8 +680,8 @@ export function lastWeek(now = new Date()) {
   return { since: day(7), until: day(1) };
 }
 
-/** The digest's own launchd job (#209), `plist [--daemon] --repo owner/name...`: Monday 09:00 in the machine's local
- * time, posting last week's digest to the private repository where the Human reads it. */
+/** The digest's own launchd job (#209), `plist [--daemon] --repo owner/name...`, as the table has it (bin/lib/launchd.mjs): Monday 09:00
+ * in the machine's local time, posting last week's digest to the private repository where the Human reads it. */
 function digestJob(argv) {
   const repos = [];
   let daemon = false;
@@ -677,19 +690,9 @@ function digestJob(argv) {
     else if (argv[i] === '--repo' && /^[\w.-]+\/[\w.-]+$/.test(argv[i + 1] ?? '')) repos.push(argv[++i]);
     else throw new Error(`plist takes --daemon and --repo owner/name, not ${JSON.stringify(argv[i] === '--repo' ? argv[i + 1] ?? '' : argv[i])}`);
   }
-  const as = {
-    label: 'io.github.tuannd9288.factory.digest',
-    tool: 'bin/factory-ledger',
-    verb: null,
-    args: ['--post', DIGEST_REPO, '--last-week'],
-    log: 'digest.log',
-    calendar: { Weekday: 1, Hour: 9, Minute: 0 },
-    keep: ['FACTORY_ROOT', 'AGENT_PROFILES', 'FACTORY_RUNS', 'FACTORY_PROFILE_DIRS', 'FACTORY_STATUSLINE'],
-  };
-  process.stdout.write(plist(job(repos, process.env, daemon, as)));
+  const env = process.env;
+  process.stdout.write(plist(job('digest', { repos, env, daemon, place: placeOf(env), installed: installedRoot(env) })));
 }
-
-const DIGEST_REPO = 'tuannd9288/better-factory';
 
 /** #366: the issue's shared-records contract (no multi-node reader in the references).
  * Fetch into a disposable bare repository so a failed fetch can never use yesterday's local files.
@@ -797,9 +800,9 @@ async function main(argv) {
   }
   // The quota is read only by --quota and the digest; a run log that cannot be read gives one line, not a failed ledger.
   const quotaNow = () => {
-    const runs = resolve(process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'));
+    const runs = runsOf();
     try {
-      const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+      const state = stateDirOf();
       return { rows: quotaRows({ runs, state, root: process.env.FACTORY_ROOT, statusFiles: opts.statusFiles }), now: Date.now() };
     } catch (error) {
       return { error: `The runs folder or a log in it could not be read (${error.code ?? 'error'}), so there is no quota table.` };
@@ -817,13 +820,13 @@ async function main(argv) {
   const day = (d) => d.toISOString().slice(0, 10);
   opts.until ??= day(new Date());
   opts.since ??= day(new Date(Date.parse(opts.until) - 7 * 864e5));
-  const root = process.env.FACTORY_ROOT ?? join(here, '..', '..');
+  const root = rootOf();
   // Nothing of the digest reaches a public repository (#209): the target is read before anything is built or posted.
   if (opts.post) {
     const visibility = JSON.parse(gh(['repo', 'view', opts.post, '--json', 'visibility'])).visibility;
     if (visibility !== 'PRIVATE') throw new Error(`${opts.post} is ${visibility ?? 'of unknown visibility'}, not PRIVATE; the digest lists private tasks, so nothing posted`);
   }
-  const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+  const state = stateDirOf();
   if (opts.post && !claimJob(root, state, 'digest', `${opts.since}_${opts.until}`)) return;
   const shared = opts.post || opts.lastWeek ? sharedRecords(state, opts.since, opts.until) : null;
   const sessions = shared?.sessions ?? readSessions(state);
@@ -831,7 +834,7 @@ async function main(argv) {
   opts.codexWaits = codexWaits(state, opts.since, opts.until);
   const seat = seatCosts(sessions);
   const recorded = new Set(sessions.map((r) => r.session).filter(Boolean));
-  const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
+  const human = humanOf();
   let linear = null;
   const linearApi = () => (linear ??= createLinear({ state }));
   const unread = new Map();
@@ -856,7 +859,7 @@ async function main(argv) {
     const pull = (n) => {
       if (!pulls.has(n)) {
         const node = graphql(QUERY, n).pullRequest;
-        pulls.set(n, { node, row: rowOf(repo, node, { human, costs, profile: true }) });
+        pulls.set(n, { node, row: rowOf(repo, node, { human, costs }) });
       }
       return pulls.get(n);
     };
@@ -864,7 +867,7 @@ async function main(argv) {
     // A registry or a Linear read that fails leaves this repository's tasks out and says so; the rest of the digest is written.
     let team = null;
     try {
-      team = onLinear(repo, state);
+      team = onLinear(repo.slice(repo.indexOf('/') + 1), state);
     } catch (error) {
       unreadBecause(repo, error);
     }
@@ -892,6 +895,17 @@ async function main(argv) {
     }
   }
   rows.sort((a, b) => a.created.localeCompare(b.created));
+  // A `Fixes:` line names a commit; the repository's own clone says which pull request it came from (INN-40), never gh.
+  const own = cloneRepo(root);
+  const resolvers = new Map();
+  const resolverOf = (repo) => {
+    if (!resolvers.has(repo)) {
+      const dir = clones.get(repo) ?? (repo === own ? root : null);
+      resolvers.set(repo, dir ? commitPullRequest(dir) : null);
+    }
+    return resolvers.get(repo);
+  };
+  resolveFixes(rows, resolverOf);
   if (opts.mode === 'rows') {
     const head = ['repo', 'task', 'prs', 'who', 'tier', 'state', 'rounds', 'first_pass', 'no_red', 'human_touched', 'why', 'cost_usd', 'cost_note', 'hours_to_merge', 'title'];
     console.log(head.join('\t'));
@@ -908,7 +922,9 @@ async function main(argv) {
     }
   }
   const report = inspect(shared ? [] : folders, { latest: opts.latest });
-  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : accountsOf(state), shared });
+  // Each repository's change fail rate since its merge switch last moved (INN-40), from GitHub's search for that window.
+  const switches = switchWindows(opts.repos, { state, to, merged: (repo, a, b) => mergedIn(repo, a, b), resolverOf });
+  const text = digest(rows, { ...opts, secrets, unread, canary: canaryLine(report), queue: queueState(state, opts.repos), unplaced: shared ? null : unplaced(opts.profileDirs), sessions, quota: shared?.quota ?? quotaNow(), accounts: shared ? {} : seatAccounts(state), shared, switches });
   if (!opts.post) {
     process.stdout.write(text);
     return;
@@ -926,7 +942,7 @@ async function main(argv) {
   if (found.length) console.log(gh(['issue', 'edit', String(found[0].number), '--repo', opts.post, '--add-label', 'digest', '--body-file', file]).trim());
   else console.log(gh(['issue', 'create', '--repo', opts.post, '--title', title, '--label', 'digest', '--body-file', file]).trim());
   if (shared) writeFileSync(join(state, 'digest-records.json'), `${JSON.stringify(shared.cursor)}\n`);
-  rmSync(join(state, 'digest.failed'), { force: true });
+  clearFailed(state, 'digest');
 }
 
 // Node loads the main module by its real path: started through a symlinked directory, argv[1] still names this file.
@@ -940,13 +956,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     // leaves queue-run.failed (#209);
     // a run that prints to stdout, and plist, keep no state.
     const args = process.argv.slice(2);
-    if (args[0] !== 'plist' && args.includes('--post')) {
-      try {
-        const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
-        mkdirSync(state, { recursive: true });
-        writeFileSync(join(state, 'digest.failed'), `${new Date().toISOString()} ${why.split('\n')[0]}\n`);
-      } catch {}
-    }
+    if (args[0] !== 'plist' && args.includes('--post')) markFailed(stateDirOf(), 'digest', why);
     process.exit(1);
   }
 }

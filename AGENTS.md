@@ -2,7 +2,7 @@
 
 This repository (`tuannd9288/factory`) is the root of the Human's software factory. On the Mac mini it is cloned
 in the agents' own macOS account, `factory` (#24), as `~/WORKSPACES`; each repository in the factory is a subfolder
-there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`tuan9288-agent`
+there, cloned from GitHub and ignored by this root's git. That account holds the agents' gh login (`nami9288`
 alone), their profiles and their Herdr; the Human reaches it with `ssh factory@<the Mac mini>`. His own account keeps
 his SSH keys and gh login behind its home, which is `drwx------` on the Mac mini. The clone is outside `~/Desktop`,
 which macOS privacy controls (TCC) close to launchd jobs that were not granted access; not tested here. This file
@@ -12,7 +12,7 @@ covers the factory's rules and taking a repository in. Inside a repository, that
 
 His standing rules for building the factory, approved on INN-24 (A, 2026-11-05 13:52:46 +07); they are not copied into the kit or a pack.
 
-- **Snags.** At a snag, a bug or a security finding, a reviewer FAIL included, do what a reference system does about it; if none has it, record it in Triage with the reason and park it (31/10, 01/11, 05/11).
+- **Snags.** The factory is built to trust agents. At a snag, a bug or a security finding, a reviewer FAIL included, do what a reference system does about it, and add a block (a deny, an allowlist, a refusing check, a hook) only where one has it, cited at its pin; if none has it, record it in Triage with the reason and park it (31/10, 01/11, 05/11, 07/11).
 - **Reference systems,** each at its pin, with a local copy under `data_mirror/data/repos/`: piggery `67c083e`, agent-orchestrator `9dc1c14`, pstack `4dd1d05` (`cursor-plugins`, the pin in `packs/pstack/settings.json`), zeroshot `0ad6653`, pi-herdsman `f2064d9`, dsh-superagent-prototype `8c32a9d`, paperclip `01d9a12`, warp-factory-examples `84e7c95`, seatworks `4c35563` (`seatworks-v3`), paseo-slp `a75c4db`, and Demonthorn's SLP articles; a system is added when he names one (05/11).
 - **Default to pstack and SLP.** Where the factory differs, the difference is a switch whose default is pstack's way; it deviates only on his dated word (13/10, 16/10, 05/11).
 - **Where the references agree.** Before proposing a switch, compare the reference systems: where only the factory differs and they all agree, take the common way with no switch, tagging the factory's divergent code and removing it; where only pstack differs, keep the common way; where they split, a switch whose default is pstack's way (05/11). A reference with no rule on the point does not count; where only pstack has a rule and it follows a public standard, take pstack's way (INN-29, 05/11).
@@ -63,6 +63,8 @@ The Human's dated decisions, with their sources and his words, are in `docs/deci
 - **The Factory app's Linear key, 2026-11-04.**
 - **Effectiveness, 2026-11-04.**
 - **The Watcher's freeze, 2026-11-07.**
+- **The factory's own merge switch, 2026-11-08.**
+- **No reviewer on GitHub Actions, 2026-11-08.**
 
 ## Tiers
 
@@ -70,15 +72,12 @@ The change sets the tier, by the paths it touches (`.gate/bin/tier`), never the 
 
 | Tier | Trigger | Must be true to merge | The Human |
 |---|---|---|---|
-| 1 | no tier-2 or tier-3 path | `verify`, `review`, `verdict`, `tier` green on the head commit; `verdict` passes at once | none |
-| 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same, with `verdict` judged by the reviewer | reads it in the weekly digest and on the deploy page |
-| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), the label `needs-human`, the reviewer's raise (C3), or, where Entire reviews, a `No-red:` line | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the Vietnamese summary |
+| 1 | no tier-2 or tier-3 path | `verify` and `tier` green on the head commit | none |
+| 2 | a `.gate/load-bearing` path, a dependency manifest, a deleted test file, or an added proof for a dropped test (`gate-allow test-deleted:` or `gate-allow assertions-removed:`) | the same as tier 1 | reads it in the weekly digest and on the deploy page |
+| 3 | a path or `key` line in `.gate/protected` (the gate, `AGENTS.md`, `.claude/`, test and lint configuration), or the label `needs-human` | tier 2 and his approval of the head commit, or of one whose patch the head carries unchanged, which `tier` checks; unless the repository's merge switch is at `all` (#333) | approves from the Vietnamese summary |
 
 A tier never drops within a pull request: every label `tier-N` or `needs-human` it ever had raises it, even once
 removed.
-
-Where a repository picks Entire as its reviewer (`GATE_REVIEWER: 'entire'` in `gate-trusted.yml`, #155), the required
-checks are `verify`, `tier` and `Entire Gates`, set by `bin/onboard-owner`; `review` and `verdict` are not among them.
 
 Agents open pull requests under their own GitHub account, never the Human's. GitHub refuses an author's approval of
 his own pull request, and its code-owner rule asks nothing of an author who owns the code: on the scratch repository
@@ -91,9 +90,8 @@ that approval it requests the code owners' review on GitHub, so the pull request
 - Tier 3 approvals, `needs-human` pull requests (stuck after three rounds), and every deploy. Where a repository's merge
   switch is at `all` (#333), a tier-3 pull request needs no approval of his (a `needs-human` one too, as the code does:
   his choice on #354, 2026-11-02 20:16:33 +07, review 5737110797); a deploy is still his.
-- His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, the
-  `reviewer` environment, "Allow auto-merge", the Actions event policy for `pull_request_target`), which Colly then
-  applies on his login; and the reviewer's secret, where a repository uses the kit's Claude reviewer.
+- His one approval, per repository, of what `bin/onboard-owner` would change (the agents' account, rulesets, "Allow
+  auto-merge", the Actions event policy for `pull_request_target`), which Colly then applies on his login.
 - Logging into the verifier's Codex profile. An agent never logs in or switches accounts.
 
 Everything else that can be undone, agents decide and report after.
@@ -133,8 +131,7 @@ Names are standard terms, never coined ones (25/10).
 - **2a Context** [SP2, OA1]: what a session reads: the repository's `AGENTS.md`, at most 150 lines and 32 KiB composed.
 - **2b Skills & plugins** [A5]: the pack and its plugin (pstack), pinned for each repository.
 - **2c Verification** [SP3]: what a worker runs before the pull request: `.gate/bin/verify --fast`, the tests of the part changed, `red-check`; the full suite runs on CI (#281).
-- **3a Required status checks** [GH3]: `verify`, `review`, `verdict` and `tier`, green on the head commit; where Entire
-  reviews, `verify`, `tier` and `Entire Gates` (#155).
+- **3a Required status checks** [GH3]: `verify` and `tier`, green on the head commit.
 - **3b Risk tiers** [A8]: tier 1, 2 or 3, set by the paths a change touches.
 - **3c Merge & rollback** [A8]: a merge commit through auto-merge, the merge queue, a revert pull request.
 - **4a Observability & cost** [SH, U1]: the ledger's cost for each task and the weekly digest.
@@ -151,11 +148,11 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   which makes it read Linear, reopens when one moves.
   Prior art [GH2]: "You can start work from the agents panel, a conversation, or an issue or pull request on GitHub.com."
 - **H2**: Work leaves through one pull request that carries its evidence.
-  Checked by: `tier` and `verify-trusted`, which read the body's `Issue:`, `Claim:` and `Team:` lines, and `review`,
-  which reads the body; `kit/.github/pull_request_template.md` asks for the rest.
+  Checked by: `tier` and `verify-trusted`, which read the body's `Issue:`, `Claim:` and `Team:` lines;
+  `kit/.github/pull_request_template.md` asks for the rest.
   Prior art [A8]: "Require CI, and add "Testing", "Risk" and "How to revert" to your PR template."
 - **H3**: A verdict binds exactly one commit.
-  Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review:31` (one reviewer call per head).
+  Checked by: `kit/.gate/bin/lib/approval.mjs:1-10`, the row "Tier 3 lands only with the Human's approval of the head commit…" in `kit/.gate/enforced-rules.md`, `kit/.gate/bin/review` (`tier` judges only the pull request's head).
   Prior art [A8]: "An approval covers one specific commit."
 - **H4**: Knowledge is files in the repository, changed by pull request.
   Checked by: `kit/.gate/protected:14` (`AGENTS.md` is tier 3), `kit/.gate/bin/lib/instructions.mjs` (150 lines and 32 KiB, run by `verify` and, on the candidate's git objects, by `verify-trusted`).
@@ -174,7 +171,8 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   kit's `kit/.gate/bin/lib/reviewer.json` (`test/claude-reviewer.test.mjs`).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
-  Checked by: `.github/CODEOWNERS:4`.
+  Checked by: `scripts/ship`'s stop on `needs-human` (`packs/pstack/scripts/lib/ship.mjs:168@86f5e7a`) and
+  `.github/workflows/approval.yml`, which reads his approval of such a pull request from `.github/CODEOWNERS:4`.
   Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
   factory's unattended sessions; 0d does; (2) the record of a task is in its repository's tracker (1b) and in 0d's
@@ -195,6 +193,16 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
   Checked by: none yet. The check will be a test that stops every surface process and shows that a
   `bin/factory-queue` sweep (the merge queue) and a `bin/seat` run on a fake `claude` still pass.
   Prior art [OA2]: "The App Server's JSON-RPC surface is designed to be backward compatible, so older clients can talk to newer servers safely."
+
+Versions follow Semantic Versioning 2.0.0: a version is a tag `v<major>.<minor>.<patch>` on `main`, cut on his word and never
+moved or deleted (the tag ruleset `factory-versions`, `.github/ruleset-versions.json`, which he sets, refuses a deletion and a
+force push). Its public API is the
+contracts H1–H9; the required check names (3a); the record shapes `events.jsonl` (`bin/lib/events.mjs`) and `sessions.jsonl`
+(`bin/lib/seat.mjs`); the commands `factory`, `bin/seat`,
+`bin/onboard`, `bin/onboard-owner`, `bin/onboard-doctor` and `bin/kit-update`; and what a served repository holds of the kit:
+the Gate block, the `.gate/bin/` commands, the keys of `.gate/config.sh` and `.gate/driver.json` and the line forms of
+`.gate/protected`. Everything else is internal. An incompatible change to the API is MAJOR; a new compatible contract,
+command or key, or a deprecation, is MINOR; a fix is PATCH.
 
 ## This root
 
@@ -219,23 +227,29 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - The Human (2026-10-29, #171), to every reviewer: "Rate each bug from 1 to 10 on how often it would happen and how bad it
   would be. If the two scores multiplied are below 5, just file it as an issue and leave the code alone." To every writer:
   "Do not design for rare or future cases nobody asked about." Claude Code reads this file in a project with no
-  `CLAUDE.md`, as every factory worktree is. The kit's Gate block holds both; its reviewer reports such a bug in
-  `forIssue`, which never blocks, and the Lead files the issue.
+  `CLAUDE.md`, as every factory worktree is. The kit's Gate block holds both.
 - The factory's own Lead on the MacBook starts with `factory lead factory --here`, reads and writes GitHub with `factory gh`
   under the agents' login and pushes, on the Mac mini, or on the MacBook itself once his `factory store` has put the agents'
   GitHub token there (#366); its commits carry the agents' name. The
   Human's own `gh` login there is not touched: the factory-repo session uses it to approve for him (#349; the Human,
   2026-11-02 19:38:59, relayed by the factory-repo session: "1,2,4 theo đề xuất"). The pack's Lead on the Mac mini is not changed.
-- Every pull request of this repository waits on the Human, through `CODEOWNERS` `* @tuannd9288`, so each opens its body
-  with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its `**TL;DR**`
-  block, the same lines in English; they are his only section, and the agents' detail is collapsed below them (#386,
-  #411). Its title carries no issue number, which stays in the body.
+- A pull request of this repository lands once the team's Supervisor has accepted it and Colly's review passed, with
+  `verify` green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
+  One that needs the Human, a release, a first design or a change to a design or architecture, carries `needs-human`
+  (`gh issue edit <n> --add-label needs-human`), and Colly takes it to him. This repository runs no `tier`, so only
+  `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:168@86f5e7a`). It goes on
+  when he approves its head on GitHub, which `approval` reads, so the Lead sees it with no relay, or on his word, which
+  Colly records on the issue. Then the Lead removes the label (`gh issue edit <n> --remove-label needs-human`) and runs
+  `scripts/ship` again. GitHub asks his review only on a pull request that changes `.github/CODEOWNERS`. Each body
+  opens with the kit template's `**Tóm tắt cho anh**` block, in Vietnamese (Language, in Decisions), then its
+  `**TL;DR**` block, the same lines in English; they are his only section, and the agents' detail is collapsed below
+  them (#386, #411). Its title carries no issue number, which stays in the body.
 
 | Path | What it is |
 |---|---|
 | `kit/` | The core every repository receives through one pull request when it joins: gate, hooks, templates, deny rules, and the Gate block (`kit/.gate/gate-section.md`) that `bin/onboard` puts into the repository's own `AGENTS.md` |
 | `packs/` | A way of working, one folder each (`packs/pstack/`), that a team copies into its repository: scripts, the pin, the prose for its `AGENTS.md` (`section.md`, its sources in `yields.md`), rows for `.gate/enforced-rules.md`, `INSTALL.md`, NOTICE, tests, the Human's `skills/repo-refresh/`; nothing composes it; `packs/pstack/bin/` and `lead.md` stay in the factory and are not copied |
-| `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, `reviewer` environment, Actions event policy), which Colly runs on the Human's login after his one approval; on the factory's own repository it sets the Actions event policy alone (#337) |
+| `bin/onboard-owner` | The admin step of taking a repository in (account, rulesets, Actions event policy), which Colly runs on the Human's login after his one approval; on the factory's own repository it sets the Actions event policy alone (#337) |
 | `bin/onboard` | Clone, profile, kit, verify, the kit pull request |
 | `bin/onboard-doctor` | Reads one repository taken in and prints one line per check, green or red, and changes nothing; Colly runs it on the Human's login, from a commit on `main`; the "Take <repo> in" issue closes on its output |
 | `bin/kit-update` | The onboarded repository's counterpart of onboard: brings its clone up to a factory commit, with evidence, in a pull request from `factory/kit-<sha7>` |
@@ -247,26 +261,29 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 | `bin/factory top` | The read-only view of every session and repository (#174, #286); the header of `bin/lib/top.mjs` has the rest |
 | `bin/factory lead` | `factory lead <repo> [--team <name>] [--new] [--dry-run]` (#166, #196): starts the pstack Lead of one team of a repository, resuming that team's newest earlier session; the headers of `bin/factory` and `packs/pstack/bin/lead` have the rest. `factory lead <repo> [--team <name>] --here [-- <claude arguments>]` (#349) is the MacBook's own Lead, with no `gh` login and no git credential of the Human's; with no agents' GitHub token on the MacBook a push to GitHub fails and git over ssh is off, and with one stored by his `factory store` the push runs on the MacBook itself (#366) |
 | `bin/factory gh` | `factory gh <gh arguments>` (#349): on the MacBook, `gh` under the agents' login, on the Mac mini by ssh, or on the MacBook itself once his `factory store` has put the agents' GitHub token there (#366); on the Mac mini, `gh` itself; the header of `bin/factory` says what it refuses |
+| `bin/factory ship`, `bin/factory pr-body` | `factory ship [<ship's arguments>]` and `factory pr-body <n> <file>` (FAC-79): the `--here` Lead's ship and pr-body, the pack's scripts run outside its sandbox with the node's agents login, in a clone of `tuannd9288/factory` alone; the header of `bin/factory` has the rest |
 | `bin/factory linear` | `factory linear <verb>` (#404): a Lead's steps on a repository on Linear, as the Factory app: `take`, `release`, `accept`, `decline`, `duplicate`, `read`, `list`, `comment`, `ask`, `answered`, `create` and `onboard`, one JSON object out; it runs on any node whose own token store holds the Factory app's client id and secret, else on the Mac mini by ssh, a body on stdin, and Colly's verbs (`decision-create`, `decision-close`) always run on the Mac mini (FAC-38); `onboard` makes the repository's team (copied from FAC) and its Needs Human status, or with `--key` alone registers a team that exists, and records it in the node's own `$FACTORY_STATE/linear/repos.json`, which `bin/lib/linear-repos.mjs` reads and which picks the Linear form of `packs/pstack/lead.md`; the header of `bin/lib/linear-cli.mjs` has the rest |
 | `bin/factory codex` | `factory codex --role <role> [--effort <e>] [--write <folder>]` (#182): what runs where in pstack: a step that asks for another model family (the second seat of arena, architect and interrogate, arena's cross-judge, show-me-your-work's trail review, Orchestrate's verifier) runs on Codex, on the verifier's Codex profile, never on Claude, under Codex's own permission profile, which denies reading the paths no agent reads (`bin/lib/deny-read.mjs`), every `.env*` file among them; a `grok` role runs on the session model, and every other role on Claude; when Codex cannot run (logged out, out of quota, failed) the step waits, exits 3 and logs the cause in the factory user's `~/.local/state/factory/codex-waits.jsonl`; every path the step uses comes from that user's home by getpwuid, never the caller's environment; the Lead is granted this verb, never `codex`, and a seat is not granted it yet; the header of `packs/pstack/bin/codex-step.mjs` has the rest |
 | `bin/install-factory` | The Human's step that puts `factory` on the PATH from each machine's installed copy of the factory (#390): `$FACTORY_CHECKOUT`, `~/WORKSPACES` on the Mac mini, `${XDG_DATA_HOME:-~/.local/share}/factory/checkout` on the MacBook (`installedRoot`), outside the folders macOS refuses a launchd job and never set by a dev clone's branch or edits, which change nothing that runs. Run from a clone that is not that copy, it clones the copy (main only, an empty `credential.helper`) or brings it to `origin/main` by `followMain`'s rules, then runs the copy's own `bin/install-factory`, which makes `~/.local/bin/factory` a symlink to the copy's `bin/factory` and replaces only a symlink whose target ends in `/bin/factory`; on the MacBook, run as its `factory` user (any other is refused), it also runs the checks of the relay's and the queue's LaunchDaemons, writes their plists with each one's sha256, user and program, and prints the steps he runs one at a time: his old LaunchAgents out, and a `sudo` command that installs only copies it checked against those sha256 (#366). His one line after a change here is `~/.local/share/factory/checkout/bin/install-factory` when the copy exists, else `bin/install-factory` from any clone; it can be run again |
 | `bin/factory-view` | The read-only data of `factory top`'s state as JSON, the view model alone (#369); a page will read it, and the page and its hosting wait for the Human's choice; the header says what it holds |
 | `bin/factory-queue` | The merge queue: updates one auto-merge PR at a time when `main` moves, and re-runs the tier check after the Human approves. Its job's command, `sweep` with no repository, starts the daemon when nobody answers; `sweep --once` and `sweep --repo` run one pass in-process (#399) |
-| `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery. It lives on a lease from the job's pings: `launchctl bootout` of the job stops it within about three minutes; to stop it at once, or before re-installing a changed plist, check that the pid in `$FACTORY_STATE/daemon.lock` is the daemon (`ps -p <pid> -o command=` ends in `bin/lib/daemon.mjs`; a stale lock can name a reused pid), then send it SIGTERM |
+| `bin/factory-daemon` | The daemon (#399): runs the queue's pass every 60 s in a worker thread and takes a seat's end from `bin/seat` at once, on `$FACTORY_STATE/daemon.sock`, with its store at `factory.db` (`bin/lib/store.mjs`); only the 60 s job starts it, and the header of `bin/lib/daemon.mjs` has the design and the difference from piggery. It lives on a lease from the job's pings: `launchctl bootout` of the job stops it within about three minutes; to stop it at once, or before re-installing a changed plist, check that the pid in `$FACTORY_STATE/daemon.lock` is the daemon (`ps -p <pid> -o command=` ends in `bin/lib/daemon.mjs`; the lock itself goes with the daemon, but a note a crashed daemon left can name a reused pid), then send it SIGTERM |
 | `bin/lib/linear.mjs` | The only code that talks to Linear's API, as the Factory app (#403): one token source in `tokens/linear-app/` (client id and secret, the minted token with its expiry), minted under a lock with one fixed set of scopes and renewed 7 days ahead by the daemon's pass; an authentication failure re-reads, mints once and then raises `linear-auth-failed` (a request sends three times and mints twice at most), and any success clears it; writes pass `createAsUser`; `factory login linear-app client-id\|client-secret` stores the credentials; the header has the rest |
 | `bin/lib/wake.mjs` | The wake line and its post to a Lead's inbox socket (#351); `factory wake` and the sweep use it |
 | `bin/lib/comment-wake.mjs` | The sweep's wake on new comments (#351): the added fields of the queue's query, the cursor, the `comment` event |
 | `bin/factory-events` | What the sweep tells Colly (#309): the `start` lines of `$FACTORY_STATE/events.jsonl` after its cursor; `--follow` moves the cursor and follows the file; the header has the ssh command |
 | `bin/factory-relay` | The MacBook's relay of a Lead's news (#370): `run` is one pass that reads the Mac mini's news lines by ssh and posts those it could not deliver into the socket file of the Lead that runs there; `plist` prints its LaunchDaemon (the MacBook's `factory` user, every 60 s, with nobody logged in), which runs from the installed copy, since macOS refuses a launchd job `~/Desktop`, `~/Documents` and `~/Downloads`; each `run` pass first brings that copy to `origin/main`, as the Mac mini's sweep does for `~/WORKSPACES`; `check` fails when a path of the job or of the installed plist sits under those folders or the loaded job's last exit code is not 0, says, in the job's environment, whether ssh and the read of the news work, sets the first cursor and relays nothing; the header of `bin/lib/relay.mjs` has the rest |
 | `bin/factory-reader` | The stream reader's pass (#339): `bin/factory-reader` reads what the Leads and the seats wrote since the last pass and tells Colly, through the events file, what code cannot see (a seat's `StructuredOutput` report included); `--try <file> [--side pi\|codex]` sends one stream file once and prints the answer and the quote check, writing nothing; the sweep starts a pass every 15 minutes |
-| `bin/lib/reader.mjs` | The reader's code: the reduction to the assistant's text, the tool names and a seat's `StructuredOutput` report, the two commands, the cursors, the quote check; the header has the rest |
+| `bin/lib/reader.mjs` | The reader's code: the two commands, the cursors, the quote check; the header has the rest |
+| `bin/lib/claude-code.mjs` | The one file that reads Claude Code's formats (INN-39): a seat's stream, transcripts and their prices, rate limits, the status line, a Lead's hook events, the reader's reduction, `claude auth status`; the rest of the factory reads the shapes it gives, and its header says what it reads and what stays out |
 | `bin/lib/reader.json` | The reader's setting, changed by pull request: the side (`pi` with Antigravity, `codex`, or `off`, under which no new model pass starts while the silence watch runs; the reader's header has the rest) and, for each side, its model and effort |
 | `bin/lib/models.json` | The factory's one table of models and efforts (INN-39, H7), changed by pull request and read by `bin/lib/models.mjs`: the seats, the pack Lead (`lead.remote`), the MacBook Lead (`lead.here`), Colly, `factory codex`, and the pstack role lines a Lead's profile gets as `rules/pstack-models.md`; `inherit` passes none, so the harness's default applies; the Watcher keeps its own frozen file, `bin/lib/reader.json` (`docs/decisions.md`, "The Watcher's freeze, 2026-11-07"), and the gate's reviewer its own pin, `kit/.gate/bin/lib/reviewer.json` |
 | `bin/lib/streams.mjs` | Finds the two kinds of stream the reader reads, a seat's `run-<tag>.jsonl` and a Lead's `transcripts/<session>.jsonl` |
 | `bin/lib/redact.mjs` | The one redaction: the events' patterns (#309) and seatwork's, used by `bin/lib/events.mjs` and the reader |
 | `bin/brief-template.md` | A brief's six fields: what to build, why, the constraints checked, the assumptions open, what was decided, and what the receiver may challenge |
 | `scripts/verify` | This repository's own checks: the kit's tests in `test/*.test.mjs`, each pack's in `packs/*/test/`, and the budget of the kit's Gate block (26 lines, 3072 bytes), which leaves every repository room under the 150 lines and 32 KiB of its composed `AGENTS.md` |
-| `scripts/ship` | Opens, readies and arms this repository's pull requests as a repository that installed the pstack pack does: it runs `packs/pstack/scripts/ship` from its source, with no red-check stamp, since this root has no `.gate/config.sh` and CI runs `scripts/verify` (FAC-14) |
+| `scripts/ship` | Opens, readies and arms this repository's pull requests as a repository that installed the pstack pack does: it runs `packs/pstack/scripts/ship` from its source, with no red-check stamp, since this root has no `.gate/config.sh` and CI runs `scripts/verify` (FAC-14), and with no reviewer record, since Colly and the supervising session review its pull requests (FAC-101) |
+| `CHANGELOG.md` | Each version's notes, one section `## vX.Y.Z - <date>`, written in its release pull request; `.github/workflows/release.yml` publishes the section (`scripts/release-notes <tag>`) to the version's GitHub Release when its tag is pushed, or by hand for an existing tag; the workflow's header has the steps |
 | `test/` | The kit's tests; each check is shown failing on a bad input. The parked probe programme and `factory-sublayers` are at the tag `before-271` (#153, #271) |
 | `NOTICE` | What was taken from other projects, with the commit |
 
@@ -279,12 +296,12 @@ Six steps, run by Colly and a team:
 2. Colly runs `bin/onboard-owner` without `--apply`, from the factory's clone on the MacBook, on the Human's `gh`
    login, and sends him the changes it prints. He approves once; Colly runs it with `--apply`. For a private
    repository, Colly also takes the runner's registration token (the Human's standing exception, 2026-10-29), never
-   printed. The agents' account accepts the invitation itself. The gate's settings (the reviewer and three runners)
+   printed. The agents' account accepts the invitation itself. The gate's settings (three runners)
    are no repository variables, which change without a pull request: `bin/onboard` fills them into the kit's
    workflows in step 3, from the options the issue names, and a later change is a pull request (#335).
-3. A team claims the issue and runs `bin/onboard <repo-url>` with the settings the issue names (`--reviewer`, and
-   `--runner`, `--pr-runner`, `--trusted-runner` off GitHub-hosted Ubuntu). The kit pull request carries its evidence
-   (`bin/kit-evidence`), whose `settings` lines name all four. Until `main` holds the kit, its `verify` is red (code
+3. A team claims the issue and runs `bin/onboard <repo-url>` with the settings the issue names (`--runner`,
+   `--pr-runner`, `--trusted-runner` off GitHub-hosted Ubuntu). The kit pull request carries its evidence
+   (`bin/kit-evidence`), whose `settings` lines name all three. Until `main` holds the kit, its `verify` is red (code
    127), and the bootstrap rule requires no check (`bin/onboard`'s own note in the kit pull request body). He
    approves it as tier 3 from its "Tóm tắt cho anh" (`kit/.github/pull_request_template.md`).
 4. When it merges, Colly runs `--apply` the second time (`factory-gate` in, `factory-bootstrap` out). The Human's
@@ -297,8 +314,7 @@ Six steps, run by Colly and a team:
    request per area through the gate, and one that seeds the Feature Map with `/pstack:create-verification-skill`.
 6. When `bin/onboard-doctor` prints every line green, Colly closes the issue.
 
-His part is the two approvals, typing `/repo-refresh` in audit mode in the Lead's session, and pasting the reviewer's
-secret where the repository uses the kit's Claude reviewer; Entire needs none (#155).
+His part is the two approvals and typing `/repo-refresh` in audit mode in the Lead's session.
 
 What step 2 sets and reads back is in the header of `bin/onboard-owner`; what step 3 does, file by file, is in the header of
 `bin/onboard`. Use `bin/onboard` once, for a repository that has no kit yet, and `bin/kit-update` for every later move of an
@@ -316,7 +332,7 @@ every open pull request, since with the ruleset off each would land unjudged. Th
 behind, except a stack's child moved onto `main`, which the queue brings up to `main` (FAC-13). GitHub kept the Human's
 approval of #323 through such a merge, whose patch was unchanged (2026-11-02, head `7d7c78f`).
 
-Sessions take Claude Code's own updates (#290); only the gate's reviewer runs a pinned version (`kit/.gate/bin/lib/reviewer.json`).
+Sessions take Claude Code's own updates (#290); nothing in the factory pins the version they run.
 
 The queue's sweep also writes `$FACTORY_STATE/events.jsonl` (#309): one line when one of eight conditions begins (a required check
 that never started, something that waits on the Human, a Lead at a dialog, an account out of quota, an account Claude Code warns is
@@ -343,7 +359,8 @@ never the token. The sweep does the same for a new comment, by a login other tha
 The live verifier's Codex profile and its login are in `packs/pstack/INSTALL.md`, "The live verifier's login". What unattended runs
 need, and how `bin/seat` picks the team, the account and the seat, sets the permission mode and the grants, and handles the
 researcher and its known limits, are in the header of `bin/seat`. The worker's and the reviewer's commands run in a sandbox
-with no network and no read of the credential folders (#183).
+with no network and no read of the credential folders (#183). So do the MacBook Lead's, which reaches GitHub alone, and Colly's,
+with `factory` (and that Lead's `bin/seat`) let out: open gaps, named in the header of `bin/lib/deny-read.mjs` (FAC-79).
 
 No session reads a profile's folder (#185). A session finds pstack's files in a plugin folder outside the profiles, installed
 only from the factory's own pin, and reads its own earlier transcripts from copies outside them; no seat reads a Lead's

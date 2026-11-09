@@ -2,15 +2,19 @@
 // table of protected categories and of reads the work needs, each with the channels that must refuse it. A probe makes synthetic files in a
 // temporary home and work folder (never a credential) and asks, for each channel, whether its rendered rules refuse each file. The matchers
 // follow each harness's matching rules as the factory reads them; Claude Code's own matching and a live `codex sandbox` run are not shown here.
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+const run = spawnSync; // taken when this module loads, before a test mocks child_process
+
 /** Every channel a probe can ask: Claude Code's file tools of a seat, the pack Lead, the MacBook Lead, Colly and a served repository (kit),
- * the seats' shell sandbox, and Codex. */
-export const CHANNELS = ['seat file', 'lead file', 'here file', 'colly file', 'kit file', 'seat shell', 'codex'];
+ * the seats' shell sandbox, the MacBook Lead's and Colly's shell sandbox, into which Claude Code merges their Read rules, and Codex. */
+export const CHANNELS = ['seat file', 'lead file', 'here file', 'colly file', 'kit file', 'seat shell', 'here shell', 'colly shell', 'codex'];
 const ALL = CHANNELS;
-const FACTORY_FILE_TOOLS = ['seat file', 'lead file', 'here file', 'colly file'];
+// The factory's own file tools, and the MacBook Lead's and Colly's shell, into whose sandbox Claude Code merges those Read rules.
+const ALL_OF_CONFIG = ['seat file', 'lead file', 'here file', 'colly file', 'here shell', 'colly shell'];
 
 /** [what, path under home (or `./` under the work folder), the channels that refuse it]. */
 export const ROWS = [
@@ -27,9 +31,10 @@ export const ROWS = [
   ["Claude Code's data", '.local/share/claude/versions/2.1.319', ALL],
   ["Cursor's login", '.cursor/cli-config.json', ALL],
   ["a repository's .env file, which its tests may load in a seat's shell", './.env', ALL.filter((c) => c !== 'seat shell')],
-  // All of ~/.config is denied to the factory's own file tools; the shells, Codex and the kit name its stores (INN-39, question 1).
-  ["another tool's login under ~/.config", '.config/some-tool/token', FACTORY_FILE_TOOLS],
-  ["git's own settings, which git reads in a shell", '.config/git/config', FACTORY_FILE_TOOLS],
+  // All of ~/.config is denied to the factory's own file tools, and so to the MacBook Lead's and Colly's shell, whose git reads nothing
+  // there (FAC-79); the seats' shell, Codex and the kit name its stores (INN-39, question 1).
+  ["another tool's login under ~/.config", '.config/some-tool/token', ALL_OF_CONFIG],
+  ["git's own settings under ~/.config", '.config/git/config', ALL_OF_CONFIG],
   ["git's settings in home", '.gitconfig', []],
   ["a file of the repository", './README.md', []],
   ['a plugin of the cache outside the profiles', '.local/share/factory/plugins/p/skills/s/SKILL.md', []],
@@ -49,6 +54,24 @@ export function probeWorld() {
     writeFileSync(at(rel), 'SYNTHETIC: not a credential\n');
   }
   return { home, work, at, done: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+/** Which of git's own three files under <home>/.config/git (its config, ignore and attributes files, each planted here with a marker) git
+ * reads when run with a session's `env`, in a new repository under `dir`: [] when it reads none. A sandbox that denies ~/.config makes git
+ * stop on that config file and warn on the other two (FAC-79). */
+export function gitReadsUnderConfig(env, home, dir) {
+  mkdirSync(join(home, '.config/git'), { recursive: true });
+  writeFileSync(join(home, '.config/git/config'), '[probe]\n\tmarker = xdg\n');
+  writeFileSync(join(home, '.config/git/ignore'), '*.probe\n');
+  writeFileSync(join(home, '.config/git/attributes'), '*.probe probe\n');
+  const repo = mkdtempSync(join(dir, 'git-probe-'));
+  const git = (...args) => run('git', args, { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: home, ...env } });
+  git('init', '-q');
+  return [
+    git('config', 'probe.marker').stdout.trim() === 'xdg' && 'config',
+    git('check-ignore', '-q', 'x.probe').status === 0 && 'ignore',
+    /: probe: set$/m.test(git('check-attr', 'probe', 'x.probe').stdout) && 'attributes',
+  ].filter(Boolean);
 }
 
 const glob = (text) => text.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*');

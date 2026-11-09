@@ -13,9 +13,11 @@
 // and the head's rows are read once.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, truncateSync, writeFileSync, appendFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, truncateSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { RATE_LIMIT_LINE } from './claude-code.mjs';
+import { writeAtomic } from './files.mjs';
 import { nodeName } from './node.mjs';
 
 const exec = promisify(execFile);
@@ -33,7 +35,7 @@ const sizeOf = (file) => {
 
 const CHUNK = Buffer.alloc(1 << 20);
 const TAIL = 4096;
-const RATE_LIMIT = '"type":"rate_limit_event"'; // seat.accountEvent's selector, verbatim
+const RATE_LIMIT = RATE_LIMIT_LINE; // seat.accountEvent's selector, the one in claude-code.mjs
 
 /** Calls `each` with the bytes of each whole line of `fd` from byte `at` to its last newline before `size`, read 1 MiB at a time into one
  * buffer (larger only for a longer line), so a long log is never in memory whole and only the lines kept are decoded; the bytes are valid
@@ -171,10 +173,7 @@ export function recordsWriter({ state, runs, remote = REMOTE, node = nodeName(),
   };
   const rowsFile = join(state, 'shared-records.rows');
   const cursorsFile = join(state, 'shared-records.cursors.json');
-  const writeRows = (rows) => {
-    writeFileSync(`${rowsFile}.tmp`, `${rows.join('\n')}\n`);
-    renameSync(`${rowsFile}.tmp`, rowsFile);
-  };
+  const writeRows = (rows) => writeAtomic(rowsFile, `${rows.join('\n')}\n`);
   /** Commits shared-records.rows as rows.jsonl on `parent` and moves `ref` to it. */
   const commitFile = async (parent, ref) => {
     const blob = await git('hash-object', '-w', rowsFile);
@@ -198,10 +197,7 @@ export function recordsWriter({ state, runs, remote = REMOTE, node = nodeName(),
       return null;
     }
   };
-  const saveCursors = (head, files) => {
-    writeFileSync(`${cursorsFile}.tmp`, `${JSON.stringify({ head, rowsBytes: sizeOf(rowsFile), files })}\n`);
-    renameSync(`${cursorsFile}.tmp`, cursorsFile);
-  };
+  const saveCursors = (head, files) => writeAtomic(cursorsFile, `${JSON.stringify({ head, rowsBytes: sizeOf(rowsFile), files })}\n`);
   let configured = null;
   const push = async () => {
     if (!existsSync(clone)) {

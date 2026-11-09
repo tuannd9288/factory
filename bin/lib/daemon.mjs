@@ -1,16 +1,16 @@
 // The factory's daemon (#399, slice 1): the one long-running process that hosts the sweep's pass and takes a seat's end at once. The pattern is
 // piggery's (v0.10.3, 67c083e; the part ported is cited at each place), the differences are named below. bin/factory-daemon runs it; only the 60 s
 // job starts it (bin/lib/queue.mjs, ensureDaemon).
-//   One instance: $FACTORY_STATE/daemon.lock records the pid and start time (takeLock of the queue's lock; a lock whose process is gone is taken
-//   over). piggery takes a flock (server/server.go:119-130); a pid and a start time is how the queue's lock tells a dead holder from a reused pid.
+//   One instance: the lock at $FACTORY_STATE/daemon.lock (bin/lib/lock.mjs), which the kernel frees when this process ends, however it ends;
+//   the file itself notes the holder's pid and start for people. piggery takes a flock (server/server.go:119-130); Node has none.
 //   The socket: $FACTORY_STATE/daemon.sock, mode 0600, its path under 104 bytes (bin/lib/daemon-proto.mjs says the wire). Only the lock holder
 //   unlinks a stale socket and makes its own (server/transport_unix.go:16-30). One request, one answer, matched by `id` (proto/proto.go:136-157).
 //   Verbs: `ping` -> { pid, start, startedAt, head, passes, passing }; `seat-ended` { run, tag, session } -> { id }; `linear-check`
 //   { keys, since, until } -> { missing, via }, a read of the Linear events the store holds, for `bin/factory-daemon linear-check` (FAC-38,
 //   bin/lib/linear-listen.mjs). An unknown verb gets an error answer, a bad line too; nothing a client sends ends the daemon.
 //   Reconcile before listening (server/server.go:242-248, core/reconcile.go:11-54): the store is opened, then the seat records not yet taken are
-//   woken once. The authority for "once" is queue-seats.news (bin/lib/news-wake.mjs, wakeOnSeatEnds), the state the sweep always had; the store's
-//   offset into sessions.jsonl is the daemon's own read position. piggery's reconcile marks sessions gone and never respawns; this daemon starts no
+//   woken once. The authority for "once" is queue-seats.news (bin/lib/news-wake.mjs, wakeOnSeatEnds), the state the sweep always had.
+//   piggery's reconcile marks sessions gone and never respawns; this daemon starts no
 //   seat and ends none, so a restart stops nothing.
 //   The pass: bin/lib/queue.mjs's runPass, unchanged, every 60 s (from the start of one to the start of the next, 1 s at least between), under
 //   queue.lock, so a pass run by hand (`bin/factory-queue sweep --once`, `check`) and this one never overlap. It runs in a worker thread of this
@@ -31,7 +31,7 @@
 //   10 MiB, so the next start moves it aside, and on SIGTERM, SIGINT and SIGHUP after the pass in hand (30 s at most). After every pass, whether
 //   it ended well or threw, it also compares the code it loaded with the checkout's HEAD and exits when they differ (a move made by another
 //   process, or whose message the pass lost). It lives on a lease from the job: each `ping` renews it, and with none for 180 s
-//   (FACTORY_DAEMON_LEASE_MS) it stops the way SIGTERM does, so booting the job out ends it within about three minutes, with no plist change.
+//   (LEASE_MS) it stops the way SIGTERM does, so booting the job out ends it within about three minutes, with no plist change.
 //   The peer check (server/peer.go:22-47) is not ported. It lets a caller speak for a harness process, by the pid of the socket's peer and its
 //   process tree, since piggery's verbs carry a participant's authority. Here a post carries none: the daemon acts on what sessions.jsonl holds,
 //   never on the post's fields, which only name the row they settle, and a forged `seat-ended` makes the daemon take records earlier, which is
@@ -49,14 +49,15 @@ import { Worker } from 'node:worker_threads';
 import { LOADED, ROOT, headOf } from './checkout.mjs';
 import { MAX_LINE, fits, socketPath } from './daemon-proto.mjs';
 // queue.mjs before news-wake.mjs: the modules import each other in a ring, and the queue's constants are built from the comment wake's, so the ring
-// must be entered at the queue, as bin/factory-queue enters it.
-import { holderOf, releaseLock, takeLock } from './queue.mjs';
+// must be entered at the queue, as bin/factory-queue enters it. Nothing else here comes from the queue.
+import './queue.mjs';
+import { holderOf, takeLock } from './lock.mjs';
 import { wakeOnSeatEnds } from './news-wake.mjs';
 import { openStore } from './store.mjs';
 import { linearCheckMain, startLinearSource } from './linear-listen.mjs';
 import { postSync } from './wake.mjs';
 import { recordsWriter } from './shared-records.mjs';
-import { nodeLogin } from './node.mjs';
+import { humanOf, nodeLogin, runsOf, stateDirOf } from './node.mjs';
 
 export const PASS_MS = 60_000;
 const LOG_MAX = 10 * 1024 * 1024;
@@ -98,13 +99,6 @@ export const codeMoved = (loaded, head) => Boolean(loaded && head && loaded !== 
  * team, so such a record waits for it. */
 export function reconcile(d) {
   d.pushRecords?.();
-  const file = join(d.state, 'sessions.jsonl');
-  const size = sizeOf(file);
-  let offset = d.store.offset('sessions.jsonl');
-  if (offset > size) {
-    d.log(`daemon: sessions.jsonl (${size} bytes) is shorter than the offset ${offset}; read from its start`);
-    offset = 0;
-  }
   const taken = wakeOnSeatEnds({
     state: d.state,
     runs: d.runs,
@@ -112,8 +106,7 @@ export function reconcile(d) {
     post: d.post,
     sink: (r, out) => settleWith(d.store, d.store.post({ verb: 'reconcile', run: r.run ?? null, tag: r.tag ?? null, session: r.session ?? null }), out),
   });
-  d.store.setOffset('sessions.jsonl', size);
-  d.log(`daemon: reconciled: ${size - offset} bytes of sessions.jsonl past the offset, ${taken.length} seat ends taken`);
+  d.log(`daemon: reconciled: ${taken.length} seat ends taken`);
   return taken;
 }
 
@@ -126,7 +119,6 @@ function seatEnded(d, req) {
   const after = () => {
     let mine = false;
     try {
-      const size = sizeOf(join(d.state, 'sessions.jsonl'));
       const taken = wakeOnSeatEnds({
         state: d.state,
         runs: d.runs,
@@ -141,7 +133,6 @@ function seatEnded(d, req) {
           settleWith(d.store, d.store.post({ verb: 'found', run: r.run ?? null, tag: r.tag ?? null, session: r.session ?? null }), out);
         },
       });
-      d.store.setOffset('sessions.jsonl', size);
       if (!mine) d.store.settle(id, { why: taken.length ? 'the record it names was not among those taken' : 'no new record: taken already' });
     } catch (error) {
       d.log(`daemon: seat-ended ${req.tag}: ${first(error)}`);
@@ -222,15 +213,9 @@ function serve(d, sock) {
   });
 }
 
-/** Removes queue.lock if this process holds it: a pass whose worker died leaves it, and its pid is alive, so nobody else would take it. */
-function releaseQueueLock(state) {
-  const lock = join(state, 'queue.lock');
-  if (holderOf(lock)?.pid === process.pid) rmSync(lock, { force: true });
-}
-
 /** Runs the daemon until it stops; resolves with the exit code. `passFile`, `passMs`, `post`, `signals`, `leaseMs`, `headNow`, `startSource`, `pushRecords` and `onStart` (told
  * { stop, d } once it listens) are passed in for tests. */
-export async function run({ env = process.env, state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory'), runs = env.FACTORY_RUNS ?? join(env.HOME, 'factory-runs'), human = env.FACTORY_HUMAN ?? 'tuannd9288', passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = Number(env.FACTORY_DAEMON_LEASE_MS) || LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
+export async function run({ env = process.env, state = stateDirOf(env), runs = runsOf(env), human = humanOf(env), passFile = PASS_FILE, passMs = PASS_MS, post = postSync, log = (line) => console.log(line), logFile = env.FACTORY_DAEMON_LOG ?? null, signals = true, leaseMs = LEASE_MS, headNow = () => headOf(ROOT), startSource = startLinearSource, pushRecords = recordsWriter({ state, runs, log }), onStart } = {}) {
   const sock = socketPath(state);
   if (!fits(sock)) throw new Error(`the socket path ${sock} is longer than 103 bytes`);
   mkdirSync(state, { recursive: true });
@@ -245,7 +230,7 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
   try {
     store = openStore(join(state, 'factory.db'));
   } catch (error) {
-    releaseLock(lockFile, lock.token);
+    lock.release();
     throw error;
   }
   const d = { state, runs, store, lock, post, log, pushRecords, held: null, lastPing: Date.now(), passes: 0, passing: false, stopping: false, moved: false, worker: null, timer: null, startedAt: new Date().toISOString(), cpu: process.cpuUsage() };
@@ -283,7 +268,7 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
       server?.close();
       rmSync(sock, { force: true });
       store.close();
-      releaseLock(lockFile, lock.token);
+      lock.release();
       log('daemon: stopped');
       stopped(0);
     };
@@ -321,7 +306,6 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
       const cpu = process.cpuUsage(d.cpu);
       d.cpu = process.cpuUsage();
       log(`daemon: pass ${d.passes} took ${Date.now() - began} ms; rss ${mib(mem.rss)} MiB, heapUsed ${mib(mem.heapUsed)} MiB; cpu since the last pass: user ${Math.round(cpu.user / 1000)} ms, system ${Math.round(cpu.system / 1000)} ms`);
-      releaseQueueLock(state);
       if (result?.heldBy) d.held = result.heldBy;
       if (result?.moved) d.moved = true;
       if (d.stopping) return;
@@ -337,7 +321,7 @@ export async function run({ env = process.env, state = env.FACTORY_STATE ?? join
     server = await serve(d, sock);
   } catch (error) {
     store.close();
-    releaseLock(lockFile, lock.token);
+    lock.release();
     throw error;
   }
   d.linear = loggedIn ? startSource({ state, store, runs, log }) : null;

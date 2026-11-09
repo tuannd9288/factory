@@ -94,23 +94,25 @@ test('a read runs git on the clone\'s own .git and work tree, every switch off, 
   }
 }));
 
-test('clone takes one https URL and a new plain name, and only depth, branch, filter, single-branch, no-checkout and quiet', () => world((w) => {
+test('clone takes one https URL and a new plain name, and only depth, branch, single-branch, no-checkout and quiet', () => world((w) => {
   for (const args of [['clone'], ['clone', 'https://h/r'], ['clone', 'file:///tmp/r', 'a'], ['clone', 'http://h/r', 'a'], ['clone', '/tmp/r', 'a'], ['clone', 'ext::sh -c touch% /tmp/x', 'a'],
     ['clone', 'git@github.com:a/b.git', 'a'], ['clone', '--upload-pack=touch /tmp/x', 'https://h/r', 'a'], ['clone', '-u', 'touch /tmp/x', 'https://h/r', 'a'],
     ['clone', '--template=/tmp/t', 'https://h/r', 'a'], ['clone', '-c', 'core.fsmonitor=x', 'https://h/r', 'a'], ['clone', '--config', 'a=b', 'https://h/r', 'a'],
     ['clone', '--recurse-submodules', 'https://h/r', 'a'], ['clone', '--reference', '/r', 'https://h/r', 'a'], ['clone', 'https://h/r', 'a', 'extra'],
     ['clone', 'https://h/r', 'src/a'], ['clone', 'https://h/r', '../a'], ['clone', 'https://h/r', '/tmp/a'], ['clone', 'https://h/r', '.git'],
-    ['clone', 'https://h/r', '.Git'], ['clone', 'https://h/r', 'clone'], ['clone', 'https://h/r', 'r'], ['clone', '--depth'], ['-C', '/tmp', 'clone', 'https://h/r', 'a']]) {
+    ['clone', 'https://h/r', '.Git'], ['clone', 'https://h/r', 'clone'], ['clone', 'https://h/r', 'r'], ['clone', '--depth'], ['-C', '/tmp', 'clone', 'https://h/r', 'a'],
+    // A partial clone could not read its missing objects: every read turns the lazy fetch off (FAC-115).
+    ['clone', '--filter=blob:none', 'https://h/r', 'a'], ['clone', '--filter', 'blob:none', 'https://h/r', 'a']]) {
     refused(w, args);
   }
   assert.equal(existsSync(join(w.clones, 'a')), false, 'a refused clone makes no folder');
 }));
 
 test('clone makes the clone\'s folder itself, as a new real folder, and hands git that path with templates and submodules off', () => world((w) => {
-  const r = w.rg(['clone', '--depth', '1', '--branch', 'main', '--filter=blob:none', '--single-branch', '-q', 'https://example.com/r.git', 'src']);
+  const r = w.rg(['clone', '--depth', '1', '--branch', 'main', '--single-branch', '-q', 'https://example.com/r.git', 'src']);
   assert.equal(r.code, 0, r.out);
   const dir = join(w.clones, 'src');
-  assert.deepEqual(w.called().argv, [...BASE, 'clone', '--template=', '--no-recurse-submodules', '--depth', '1', '--branch', 'main', '--filter=blob:none',
+  assert.deepEqual(w.called().argv, [...BASE, 'clone', '--template=', '--no-recurse-submodules', '--depth', '1', '--branch', 'main',
     '--single-branch', '-q', '--', 'https://example.com/r.git', dir]);
   assert.ok(lstatSync(dir).isDirectory(), 'the folder exists before git runs, and is not a symlink');
 }));
@@ -130,8 +132,11 @@ test('a name that is taken, by a folder, a file or a symlink, is refused for a c
 test('git gets none of the caller\'s environment but PATH and HOME, and global, system and caller-set configuration are off', () => world((w) => {
   w.rg(['r', 'rev-parse', 'HEAD'], { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.pager', GIT_CONFIG_VALUE_0: 'x', GIT_DIR: '/x', GIT_EXTERNAL_DIFF: 'x', CALLER_MARK: '1' });
   const { env } = w.called();
-  assert.deepEqual(Object.keys(env).filter((k) => k.startsWith('GIT_')).sort(), ['GIT_ALLOW_PROTOCOL', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_TERMINAL_PROMPT']);
-  assert.deepEqual([env.GIT_ALLOW_PROTOCOL, env.GIT_CONFIG_GLOBAL, env.GIT_CONFIG_NOSYSTEM, env.GIT_TERMINAL_PROMPT], ['https', '/dev/null', '1', '0']);
+  assert.deepEqual(Object.keys(env).filter((k) => k.startsWith('GIT_')).sort(), ['GIT_ALLOW_PROTOCOL', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_NO_LAZY_FETCH', 'GIT_TERMINAL_PROMPT']);
+  // A read allows no transport and no lazy fetch (FAC-115); clone keeps https.
+  assert.deepEqual([env.GIT_ALLOW_PROTOCOL, env.GIT_CONFIG_GLOBAL, env.GIT_CONFIG_NOSYSTEM, env.GIT_NO_LAZY_FETCH, env.GIT_TERMINAL_PROMPT], ['', '/dev/null', '1', '1', '0']);
+  w.rg(['clone', 'https://example.com/r.git', 'fresh']);
+  assert.equal(w.called().env.GIT_ALLOW_PROTOCOL, 'https');
   assert.equal('CALLER_MARK' in env, false);
   assert.equal('FACTORY_RESEARCH_CLONES' in env, false);
 }));
@@ -224,6 +229,22 @@ test('with the real git, a folder made to look like a clone runs nothing: a bare
   assert.equal(r.code, 128, r.out);
   assert.match(r.out, /not a git repository/);
   assert.equal(existsSync(marker), false, 'the textconv ran');
+}));
+
+// A clone's config can name a promisor remote; git then fetches a missing object by itself, over whatever transport that config names
+// (FAC-115, from #550's review). The proxy is a closed local port, so an attempt shows as a failed connection to it, and nothing leaves.
+test('with the real git, a read of a missing object in a clone whose config names an https promisor remote makes no fetch', () => realClone(({ dir, rg }) => {
+  const blob = git(dir, 'rev-parse', 'HEAD~1:f.txt');
+  rmSync(join(dir, '.git/objects', blob.slice(0, 2), blob.slice(2)));
+  for (const [k, v] of [['core.repositoryformatversion', '1'], ['extensions.partialClone', 'origin'], ['remote.origin.url', 'https://example.invalid/x.git'],
+    ['remote.origin.promisor', 'true'], ['http.proxy', 'http://127.0.0.1:9']]) git(dir, 'config', k, v);
+  const plain = run(dir, 'git', ['show', blob], { GIT_ALLOW_PROTOCOL: 'https' });
+  assert.match(plain.out, /unable to access|127\.0\.0\.1/, 'plain git tries the promisor remote');
+  const empty = run(dir, 'git', ['show', blob], { GIT_ALLOW_PROTOCOL: '' });
+  assert.doesNotMatch(empty.out, /unable to access|127\.0\.0\.1/, 'the empty list alone stops it');
+  const r = rg(['c', 'show', blob]);
+  assert.notEqual(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /unable to access|127\.0\.0\.1|example\.invalid/);
 }));
 
 // git runs gpg, which the factory machine has, to check a signature: on --show-signature, and on a format that holds %G.

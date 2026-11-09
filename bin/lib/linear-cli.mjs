@@ -34,11 +34,11 @@
 // not. `--team` is a team name of the factory's grammar (bin/lib/names.mjs). A corrupt registry file refuses every verb that reads it.
 // The Human is found, never stored: the one workspace owner who is not an app; any other count refuses.
 // The registry, $FACTORY_STATE/linear/repos.json { "<repo>": { key, teamId } }, is written only by `onboard`, atomically; a repository
-// not in it is on GitHub. `onLinear(repo)` reads it.
+// not in it is on GitHub. `onLinear(<repo>, state)` in linear-repos.mjs, with the repository's name, reads it.
 import { join } from 'node:path';
-import { nodeName } from './node.mjs';
+import { nodeName, profilesOf, stateDirOf } from './node.mjs';
 import { createLinear } from './linear.mjs';
-import { TEAM_KEY, onLinear, readRegistry, registryFile, updateRegistry } from './linear-repos.mjs';
+import { TEAM_KEY, readRegistry, updateRegistry } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 
 export const NEEDS_HUMAN = 'Needs Human';
@@ -47,8 +47,6 @@ const COLOR = '#f2994a';
 const KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,8}$/;
 const WORD = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_BODY = 60_000;
-
-export { onLinear, readRegistry, registryFile };
 
 class Usage extends Error {}
 class Refused extends Error {}
@@ -182,11 +180,11 @@ export function createCli({ api, collyApi, state, readStdin }) {
     return repo;
   };
 
-  /** The issue with its team; with `scoped`, refused unless its team is a repository's. */
-  async function issueTeam(key, { scoped = true } = {}) {
+  /** The issue with its team, refused unless its team is a repository's. */
+  async function issueTeam(key) {
     const issue = (await q(`query($id: String!) { issue(id: $id) { id identifier state { name type } delegate { id } team { id key defaultIssueState { id name type } ${STATES} } } }`, { id: key }))?.issue;
     if (!issue) throw new Refused(`Linear has no issue ${key}`);
-    if (scoped) inScope(issue.team.key);
+    inScope(issue.team.key);
     return issue;
   }
   const stateNamed = (issue, name) => {
@@ -472,8 +470,8 @@ async function stdinText() {
 
 /** The command on the factory host: prints the JSON, returns the exit code. A tty on stdin gives an empty body, which a verb that needs one refuses. */
 export async function main(argv, env = process.env, { api, readStdin = () => (process.stdin.isTTY ? Promise.resolve('') : stdinText()) } = {}) {
-  const state = env.FACTORY_STATE ?? join(env.HOME, '.local/state/factory');
-  const agentProfiles = env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles');
+  const state = stateDirOf(env);
+  const agentProfiles = profilesOf(env);
   const run = createCli({ api: api ?? createLinear({ state, agentProfiles }), collyApi: createLinear({ state, agentProfiles, colly: true }), state, readStdin });
   const { code, out } = await run(argv);
   console.log(JSON.stringify(out));

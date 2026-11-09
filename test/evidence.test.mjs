@@ -147,7 +147,7 @@ const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, a.join(' ') + '\n');
 const said = (s) => { process.stdout.write(s + '\n'); process.exit(0); };
-if (a[0] === 'api' && a[1] === 'user') said('tuan9288-agent');
+if (a[0] === 'api' && a[1] === 'user') said('nami9288');
 if (a[0] === 'api' && a[1] === 'repos/tuannd9288/app/rules/branches/main') said('[{"type":"pull_request"}]');
 if (a[0] === 'api' && a[1] === 'repos/tuannd9288/app') said('1234');
 if (a[0] === 'repo' && a[1] === 'view') said('tuannd9288/app');
@@ -332,7 +332,6 @@ describe('a base that already holds the kit\'s rendering', () => {
       assert.match(out.out, /^kit-evidence: PASS$/m);
       assert.match(out.out, /^managed files: 8: 3 as in the kit, 2 rendered, 1 kept, 2 generated$/m);
       assert.match(out.out, /^ {2}\.github\/CODEOWNERS:2: `\/\.gate\/ @OWNER` → `\/\.gate\/ @tuannd9288`$/m);
-      assert.match(out.out, /^replaced \(the repository's own at the base, now the kit's\):\n {2}none$/m);
       assert.match(out.out, /^kept \(the repository's own, unchanged\):\n {2}\.github\/pull_request_template\.md$/m);
     } finally {
       w.cleanup();

@@ -1,12 +1,14 @@
-// #27: the queue's lock records its holder, is taken over only from a dead one, and is removed only by its maker.
+// #27, FAC-83: the queue's lock is held by one sweep at a time, goes with a holder that dies, and notes its holder in a file that only the
+// holder that wrote it removes.
 import { test as nodeTest } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as queue from '../bin/lib/queue.mjs';
+import * as lock from '../bin/lib/lock.mjs';
 import { skipPs } from './ps-skip.mjs';
 
 // Every test here reads a process's start time from the real ps, which the factory's sandbox refuses (#183).
@@ -76,7 +78,7 @@ const until = async (ok, what) => {
   assert.fail(`timed out waiting for ${what}`);
 };
 
-test('the lock records its holder: pid, start, host and a token', async () => {
+test('the lock notes its holder: pid, start and a token', async () => {
   const w = world();
   try {
     writeFileSync(join(w.dir, 'block'), '');
@@ -84,8 +86,8 @@ test('the lock records its holder: pid, start, host and a token', async () => {
     await until(() => existsSync(join(w.dir, 'in')), 'the sweep to reach gh');
     const rec = JSON.parse(readFileSync(w.lockFile, 'utf8'));
     assert.equal(rec.pid, s.child.pid);
-    assert.equal(rec.start, startOf(s.child.pid));
-    assert.equal(rec.host, hostname());
+    assert.ok(!Number.isNaN(Date.parse(rec.start)), rec.start);
+    assert.equal(rec.host, undefined);
     assert.ok(rec.token);
     writeFileSync(join(w.dir, 'go'), '');
     assert.equal(await s.done, 0);
@@ -97,81 +99,37 @@ test('the lock records its holder: pid, start, host and a token', async () => {
 
 test('a lock whose holder is alive is not taken, however old', async () => {
   const w = world();
+  const held = lock.takeLock(w.lockFile);
   try {
-    writeFileSync(w.lockFile, JSON.stringify(holder()));
     const old = new Date(Date.now() - 20 * 60_000);
     utimesSync(w.lockFile, old, old);
     const out = w.sweep();
     assert.equal(out.status, 0, out.stdout + out.stderr);
-    assert.match(out.stdout, /another sweep is running/);
+    assert.match(out.stdout, new RegExp(`another sweep is running \\(pid ${process.pid}, `));
     assert.equal(w.calls(), '');
-    assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).token, 'other');
+    assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).token, held.token);
   } finally {
+    held.release();
     await w.cleanup();
   }
 });
 
-test('a lock whose holder is gone is taken, though it is fresh', async () => {
+test('a lock whose holder is killed is taken at once, its note though fresh', async () => {
   const w = world();
   try {
-    const gone = spawnSync('true').pid;
-    writeFileSync(w.lockFile, JSON.stringify(holder({ pid: gone, start: 'Mon Jan  1 00:00:00 2001' })));
+    const lockLib = join(factory, 'bin/lib/lock.mjs');
+    const code = `const { takeLock } = await import(${JSON.stringify(lockLib)}); takeLock(${JSON.stringify(w.lockFile)}); console.log('held'); setInterval(() => {}, 1000);`;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'inherit'] });
+    await new Promise((r) => child.stdout.once('data', r));
+    assert.match(w.sweep().stdout, /another sweep is running/);
+    child.kill('SIGKILL');
+    await new Promise((r) => child.once('exit', r));
+    assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).pid, child.pid, 'the killed holder\'s note is left');
     const out = w.sweep();
     assert.equal(out.status, 0, out.stdout + out.stderr);
     assert.doesNotMatch(out.stdout, /another sweep is running/);
     assert.match(w.calls(), /api user/);
     assert.ok(!existsSync(w.lockFile));
-  } finally {
-    await w.cleanup();
-  }
-});
-
-test('a pid reused by another process (a different start) is a dead holder', async () => {
-  const w = world();
-  try {
-    writeFileSync(w.lockFile, JSON.stringify(holder({ start: 'Mon Jan  1 00:00:00 2001' })));
-    const out = w.sweep();
-    assert.equal(out.status, 0, out.stdout + out.stderr);
-    assert.match(w.calls(), /api user/);
-  } finally {
-    await w.cleanup();
-  }
-});
-
-test('a dead holder is taken whatever host it recorded, or none', async () => {
-  const w = world();
-  try {
-    writeFileSync(w.lockFile, JSON.stringify(holder({ host: 'elsewhere.example', pid: spawnSync('true').pid })));
-    assert.equal(w.sweep().status, 0);
-    assert.match(w.calls(), /api user/);
-    const { host, ...noHost } = holder({ pid: spawnSync('true').pid });
-    writeFileSync(w.lockFile, JSON.stringify(noHost));
-    writeFileSync(join(w.dir, 'calls'), '');
-    assert.equal(w.sweep().status, 0);
-    assert.match(w.calls(), /api user/);
-  } finally {
-    await w.cleanup();
-  }
-});
-
-test('a holder whose pid is another user\'s process with another start is taken (EPERM falls through to start)', async () => {
-  const w = world();
-  try {
-    writeFileSync(w.lockFile, JSON.stringify(holder({ pid: 1, start: 'Mon Jan  1 00:00:00 2001' })));
-    assert.equal(w.sweep().status, 0);
-    assert.match(w.calls(), /api user/);
-  } finally {
-    await w.cleanup();
-  }
-});
-
-test('a sweep in another time zone does not take a lock the live test process holds', async () => {
-  const w = world();
-  try {
-    writeFileSync(w.lockFile, JSON.stringify(holder()));
-    const out = w.sweep({ TZ: 'Asia/Ho_Chi_Minh' });
-    assert.match(out.stdout, /another sweep is running/);
-    assert.equal(w.calls(), '');
   } finally {
     await w.cleanup();
   }
@@ -194,22 +152,40 @@ test('a sweep removes the lock only if it made it', async () => {
   }
 });
 
-test('a sweep that judged a holder dead, then finds another sweep took the lock first, gives the lock back', async () => {
+// FAC-83, report B's finding B2: A reads a dead holder; B takes over in that gap; A's rename moves B's live lock aside; C takes the empty path.
+// The schedule runs only where the lock reads a holder and renames; the assertions hold for any lock.
+test('three sweeps on a dead lock: exactly one holds it, and no other takes it until it lets go', async () => {
   const w = world();
+  const realRename = fs.renameSync;
+  const take = () => lock.takeLock(w.lockFile);
   try {
-    const gone = spawnSync('true').pid;
-    writeFileSync(w.lockFile, JSON.stringify(holder({ pid: gone, token: 'dead' })));
-    let a = null;
-    // Sweep B has read the dead holder; sweep A takes over before B renames.
-    const b = queue.takeLock(w.lockFile, {
+    writeFileSync(w.lockFile, JSON.stringify(holder({ pid: spawnSync('true').pid, token: 'dead' })));
+    let b;
+    let c;
+    fs.renameSync = (from, to) => {
+      realRename(from, to);
+      if (from === w.lockFile && b !== undefined && c === undefined) c = take();
+    };
+    syncBuiltinESMExports();
+    const a = lock.takeLock(w.lockFile, {
       afterRead: () => {
-        a = queue.takeLock(w.lockFile);
+        if (b === undefined) b = take();
       },
     });
-    assert.ok(a, 'the first sweep did not take the dead lock');
-    assert.equal(b, null, 'both sweeps took over');
-    assert.equal(JSON.parse(readFileSync(w.lockFile, 'utf8')).token, a.token, 'the live lock was not put back');
+    fs.renameSync = realRename;
+    syncBuiltinESMExports();
+    if (b === undefined) b = take();
+    if (c === undefined) c = take();
+    const holders = [a, b, c].filter(Boolean);
+    assert.equal(holders.length, 1, `${holders.length} sweeps hold the lock at once`);
+    assert.equal(take(), null, 'a fourth sweep took the held lock');
+    holders[0].release();
+    const next = take();
+    assert.ok(next, 'nobody could take the lock once it was let go');
+    next.release();
   } finally {
+    fs.renameSync = realRename;
+    syncBuiltinESMExports();
     await w.cleanup();
   }
 });

@@ -453,6 +453,17 @@ describe('lead --team (#196)', () => {
     assert.ok(!existsSync(join(w.home, 'factory-runs')));
   }));
 
+  test('with FACTORY_RUNS set, the Lead\'s run folder, pane, transcript hook and --add-dir are under it, where its readers look (FAC-85)', () => world((w) => {
+    const runs = join(w.root, 'runs');
+    assert.equal(w.lead([], { FACTORY_RUNS: runs, HERDR_PANE_ID: 'p-9' }).code, 0);
+    assert.equal(readFileSync(join(runs, 'zalo-lead/pane'), 'utf8').trim(), 'p-9');
+    assert.ok(readdirSync(join(runs, 'zalo-lead/hooks')).some((f) => /^transcript-copy-[0-9a-f]{7}\.mjs$/.test(f)));
+    const { argv } = w.log().at(-1);
+    assert.equal(argv[argv.indexOf('--add-dir') + 1], runs);
+    assert.ok(argv.join(' ').includes(`${runs}/zalo-lead/transcripts`), 'the hook copies the transcript into the run folder under FACTORY_RUNS');
+    assert.ok(!existsSync(join(w.home, 'factory-runs')), 'nothing goes under ~/factory-runs');
+  }));
+
   test('--team b names the session zalo-b, keeps its folder, pane and name there, and hooks its transcripts there (#196)', () => world((w) => {
     const dry = w.lead(['--team', 'b', '--dry-run']);
     assert.equal(dry.code, 0, dry.err);

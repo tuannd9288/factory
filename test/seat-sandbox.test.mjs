@@ -1,11 +1,10 @@
 // bin/seat (#183): the worker's and the reviewer's Bash runs in Claude Code's sandbox, set in the one --settings value buildArgs
-// passes; the researcher gets no --settings. The marker FACTORY_SANDBOX tells the tests they are inside it.
+// passes; the researcher gets no --settings.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as seat from '../bin/lib/seat.mjs';
-import { until, world } from './seat-world.mjs';
 
 const RUN = '/r/issue-1';
 const WORK = '/r/w';
@@ -64,15 +63,3 @@ test('of the roles, only the worker and the reviewer get a sandbox', () => {
   for (const role of seat.ROLES) assert.equal(Object.hasOwn(settingsOf(build(role)), 'sandbox'), role === 'worker' || role === 'reviewer', role);
 });
 
-test('the session of the worker and the reviewer gets FACTORY_SANDBOX=1, the researcher\'s none, whatever the caller had', async () => {
-  const seen = {};
-  for (const role of ['worker', 'reviewer', 'researcher']) {
-    await world(async (w) => {
-      const r = w.start(role, [], { FACTORY_SANDBOX: '1' });
-      assert.equal(r.code, 0, r.out + r.err);
-      await until(() => existsSync(w.out()) && w.records().length === 1, 'the session');
-      seen[role] = w.saw().env.sandbox;
-    });
-  }
-  assert.deepEqual(seen, { worker: '1', reviewer: '1', researcher: null });
-});

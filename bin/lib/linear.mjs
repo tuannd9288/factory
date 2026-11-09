@@ -22,12 +22,13 @@
 //   (token() may mint, then the first send, the send with a token another caller stored, the retry's mint and the send with its token).
 //   A symlinked tokens/linear-app is refused: nothing is read from it or written to it.
 //   Nothing printed, thrown or written holds the secret or a token: messages are built from a status and a code, and scrubbed of the values in play.
-//   Writes show their team: every comment and issue passes createAsUser (the team's full name) and, once an icon is hosted (ICON_URL), displayIconUrl,
-//   so Linear shows "<repo>-<team> (via Factory)". `delegateToApp` sets the app as an issue's delegate (`delegateId`, the app's own user id).
+//   Writes show their team: every comment and issue passes createAsUser (the team's full name), so Linear shows "<repo>-<team> (via Factory)"
+//   with the app's own icon.
 import { lstatSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readActive, record } from './events.mjs';
 import { parseTeam } from './names.mjs';
+import { profilesOf, stateDirOf } from './node.mjs';
 import { redact } from './redact.mjs';
 import { APP_FOLDERS, appDir, readTokenFile, tokenDir, writeAppFile } from './token.mjs';
 
@@ -39,8 +40,6 @@ export const SCOPES = ['read', 'write', 'issues:create', 'comments:create', 'app
 export const RENEW_AHEAD_MS = 7 * 24 * 60 * 60_000;
 /** A token with less than this left is not used for a request. */
 export const GRACE_MS = 60_000;
-/** Hosted image for displayIconUrl. None exists yet, so writes carry none (Linear then shows the app's own icon). */
-export const ICON_URL = null;
 export const CONDITION = 'linear-auth-failed';
 /** No request waits longer, so a hung connection cannot stall the daemon's pass. */
 const REQUEST_MS = 20_000;
@@ -68,13 +67,12 @@ export function isAuthFailure(status, body) {
 }
 
 export function createLinear({
-  agentProfiles = process.env.AGENT_PROFILES ?? join(process.env.HOME, '.agent-profiles'),
-  state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'),
+  agentProfiles = profilesOf(),
+  state = stateDirOf(),
   fetchFn = globalThis.fetch,
   now = Date.now,
   sleep = defaultSleep,
   team = process.env.FACTORY_TEAM,
-  iconUrl = ICON_URL,
   raise = null,
   colly = false,
 } = {}) {
@@ -269,7 +267,7 @@ export function createLinear({
     if (!parseTeam(name) && !/^[^\s]+ \(via GitHub\)$/.test(name ?? '')) throw fail('a write needs the full team name <repo>-<team> (FACTORY_TEAM, or the team argument)');
     return name;
   };
-  const asTeam = (given) => colly ? {} : ({ createAsUser: teamOf(given), ...(iconUrl ? { displayIconUrl: iconUrl } : {}) });
+  const asTeam = (given) => colly ? {} : ({ createAsUser: teamOf(given) });
 
   /** The app's own user id (the delegate), read once for each token. */
   async function appUserId() {
@@ -290,10 +288,5 @@ export function createLinear({
     return request('mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }', { input });
   }
 
-  /** The app is the delegate of an issue a Lead holds. */
-  async function delegateToApp(issueId) {
-    return request('mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }', { id: issueId, input: { delegateId: await appUserId() } });
-  }
-
-  return { token, mint, renew, request, commentCreate, issueCreate, delegateToApp, appUserId };
+  return { token, mint, renew, request, commentCreate, issueCreate, appUserId };
 }

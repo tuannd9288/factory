@@ -14,6 +14,8 @@ import { READER_ON, factory } from './helpers.mjs';
 process.env.TZ = 'UTC';
 
 const reader = () => import('../bin/lib/reader.mjs');
+// The reduction reads Claude Code's stream, so it lives in the one module that does (INN-39 item 3).
+const claudeCode = () => import('../bin/lib/claude-code.mjs');
 const fixture = (name) => readFileSync(join(factory, 'test/fixtures/reader', name), 'utf8');
 const LEAD_ID = '0a1b2c3d-1111-2222-3333-444455556666';
 const T0 = Date.parse('2026-11-02T10:00:00Z');
@@ -99,7 +101,7 @@ const user = (text) => `${JSON.stringify({ type: 'user', message: { role: 'user'
 // ---- the reduction --------------------------------------------------------------------------------------------------------
 
 test('the reduction of a seat stream keeps the assistant\'s text and the tool names, with tokens redacted, and nothing else', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const out = reduce(fixture('seat-stream.jsonl'));
   for (const kept of ['I will read the config first.', 'going in circles on the same flaky test', 'I made a mistake: I edited the wrong file', 'Read', 'Bash']) assert.ok(out.includes(kept), kept);
   for (const gone of ['THINKING-MARKER', 'TOOL-INPUT-MARKER', 'TOOL-OUTPUT-MARKER', 'TOOL-RESULT-MARKER', 'USER-TURN-MARKER', 'RESULT-MARKER', 'SUBAGENT-MARKER', 'HOOK-NAME-MARKER', 'npm test'])
@@ -109,7 +111,7 @@ test('the reduction of a seat stream keeps the assistant\'s text and the tool na
 });
 
 test('the reduction keeps the input of a StructuredOutput call, redacted, and no other tool\'s input or result', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const out = reduce(fixture('seat-report.jsonl'));
   for (const kept of ['[tool Read]', '[tool StructuredOutput]', 'I skipped the migration step because the fixture database was missing.', 'I ran the full suite once although the brief said not to.', 'The build script also ignores the retry flag.'])
     assert.ok(out.includes(kept), kept);
@@ -128,7 +130,7 @@ test('the reduction keeps the input of a StructuredOutput call, redacted, and no
 });
 
 test('a secret in a report string reaches the reduction redacted even when JSON escaping would hide it', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const out = reduce(fixture('seat-report.jsonl'));
   assert.ok(!out.includes('Ab12cd34'), 'a quoted value after a secret name');
   assert.ok(!out.includes('AKIAABCDEFGHIJKLMNOP'), 'a token after a line break');
@@ -137,7 +139,7 @@ test('a secret in a report string reaches the reduction redacted even when JSON 
 });
 
 test('a report nested too deep to walk reduces to its tool line, and the other lines reduce as before', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const depth = 5_000;
   const nested = `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput","input":${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}}]},"parent_tool_use_id":null}`;
   assert.equal(reduce(`${nested}\n`), '[tool StructuredOutput]');
@@ -145,7 +147,7 @@ test('a report nested too deep to walk reduces to its tool line, and the other l
 });
 
 test('the reduction of a Lead copy drops the lines that are not the assistant\'s own, a subagent\'s included', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   const out = reduce(fixture('lead-copy.jsonl'));
   for (const kept of ['I am now also refactoring the build script', 'Edit', 'trying the same fix a third time']) assert.ok(out.includes(kept), kept);
   for (const gone of ['LAST-PROMPT-MARKER', 'TITLE-MARKER', 'BLOB-MARKER', 'USER-MARKER', 'LEAD-THINKING-MARKER', 'LEAD-INPUT-MARKER', 'LEAD-OUTPUT-MARKER', 'SIDECHAIN-MARKER', 'ATTACHMENT-MARKER'])
@@ -153,17 +155,15 @@ test('the reduction of a Lead copy drops the lines that are not the assistant\'s
 });
 
 test('a line that is not JSON reduces to nothing, and a secret of the forms seatwork knows is hidden', async () => {
-  const { reduce } = await reader();
+  const { reduce } = await claudeCode();
   assert.equal(reduce('not json\n{"type":"assistant"\n').trim(), '');
   const secrets = ['sk-ant-api03-abcdefghijklmnop1234', 'AKIAABCDEFGHIJKLMNOP', 'Authorization: Bearer abcdefghijklmnop12345', 'API_KEY=hunter2hunter2', 'postgres://user:pa55word@db.example/x'];
   const out = reduce(secrets.map((s) => say(`note ${s} end`)).join(''));
   for (const s of ['sk-ant-api03-abcdefghijklmnop1234', 'AKIAABCDEFGHIJKLMNOP', 'abcdefghijklmnop12345', 'hunter2hunter2', 'pa55word']) assert.ok(!out.includes(s), s);
 });
 
-test('the redaction is one function: events.mjs uses it and keeps every pattern it had', async () => {
-  const events = await import('../bin/lib/events.mjs');
+test('the redaction keeps every pattern events.mjs had', async () => {
   const { redact } = await import('../bin/lib/redact.mjs');
-  assert.equal(events.redact, redact);
   assert.equal(redact('mail someone.private@example.com'), 'mail [account]');
   assert.equal(redact('ghp_abcdefghijklmnopqrstuvwxyz0123456789 and github_pat_11ABCDEFG0abcdefghij_klmnopqrstuvwxyz'), '[redacted] and [redacted]');
   assert.equal(redact('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123456789'), '[redacted]');
@@ -288,7 +288,8 @@ test('the quote check keeps a quote that is verbatim in its session\'s part, and
 });
 
 test('the quote check keeps a quote across a `"` or a line break of a report, in plain or escaped form, and drops a made-up one', async () => {
-  const { judge, reduce } = await reader();
+  const { judge } = await reader();
+  const { reduce } = await claudeCode();
   const parts = new Map([['issue-333 fix9', reduce(fixture('seat-report.jsonl'))]]);
   const ev = (quote) => ({ kind: 'admits-mistake', session: 'issue-333 fix9', quote, why: 'w' });
   const plainQuote = 'refused: "Permission denied (publickey)" twice\nthen I tried it';
@@ -683,13 +684,13 @@ test('a pass writes reader/last.json with its counts and appends them to reader/
     assert.deepEqual(last(), { at: new Date(T0 + 15 * MIN).toISOString(), status: 'ok', calls: 1, events: 1, failed: ['answer'], chars: sent });
     const second = last();
     assert.deepEqual(passes(), [first, second], 'one line a pass, in order');
-    const { takeLock } = await import('../bin/lib/queue.mjs');
+    const { takeLock } = await import('../bin/lib/lock.mjs');
     const mine = takeLock(join(w.state, 'reader.lock'));
     assert.ok(mine);
     assert.equal((await w.pass({ now: T0 + 30 * MIN })).status, 'running');
     assert.equal(last().at, new Date(T0 + 15 * MIN).toISOString(), 'a pass that found the lock taken wrote nothing');
     assert.equal(passes().length, 2, 'nor appended a line');
-    rmSync(join(w.state, 'reader.lock'));
+    mine.release();
     rmSync(join(w.state, 'reader/cursors.json'));
     mkdirSync(join(w.state, 'reader/cursors.json'));
     const r = await w.pass({ now: T0 + 45 * MIN });
@@ -705,13 +706,13 @@ test('a pass holds reader.lock: a live holder stops another pass, and a lock who
     w.put(w.seatFile(), '');
     await w.pass({ now: T0 });
     appendFileSync(w.seatFile(), say('some words'));
-    const { takeLock } = await import('../bin/lib/queue.mjs');
+    const { takeLock } = await import('../bin/lib/lock.mjs');
     const mine = takeLock(join(w.state, 'reader.lock'));
     assert.ok(mine);
     const r = await w.pass({ now: T0 + 15 * MIN });
     assert.equal(r.status, 'running');
     assert.deepEqual(w.calls(), []);
-    rmSync(join(w.state, 'reader.lock'));
+    mine.release();
     const dead = spawn(process.execPath, ['-e', '0']);
     await new Promise((res) => dead.once('exit', res));
     writeFileSync(join(w.state, 'reader.lock'), JSON.stringify({ pid: dead.pid, start: 'x', host: 'h', token: 'deadbeef' }));
@@ -818,11 +819,11 @@ test('the sweep starts a pass when 15 minutes have passed since the last began a
     assert.equal(go(T0 + 14 * MIN + 59_000), false);
     assert.equal(go(T0 + 15 * MIN), true);
     assert.equal(started.length, 2);
-    const { takeLock } = await import('../bin/lib/queue.mjs');
+    const { takeLock } = await import('../bin/lib/lock.mjs');
     const lock = takeLock(join(state, 'reader.lock'));
     assert.ok(lock);
     assert.equal(go(T0 + 40 * MIN), false, 'a pass is running');
-    rmSync(join(state, 'reader.lock'));
+    lock.release();
     const dead = spawn(process.execPath, ['-e', '0']);
     await new Promise((res) => dead.once('exit', res));
     writeFileSync(join(state, 'reader.lock'), JSON.stringify({ pid: dead.pid, start: 'x', host: 'h', token: 'deadbeef' }));

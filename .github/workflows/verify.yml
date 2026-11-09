@@ -1,4 +1,4 @@
-# The factory's own gate: its checks on every pull request and on main. A change here is tier 3 (CODEOWNERS).
+# The factory's own gate: its checks on every pull request and on main; the ruleset `factory` requires it.
 name: verify
 
 on:

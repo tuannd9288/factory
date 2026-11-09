@@ -11,14 +11,21 @@
 // (one already running finishes) and says so once (readerSwitch); the silence watch runs whatever the switch says.
 // The detector's kinds and sides are frozen: docs/decisions.md, "The Watcher's freeze, 2026-11-07".
 import { spawn } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendStart, oneLine, readActive, record, readLines } from './events.mjs';
-import { redact } from './redact.mjs';
-import { releaseLock, takeLock } from './queue.mjs';
+import { writeAtomic } from './files.mjs';
+import { clearFailed, markFailed } from './status.mjs';
+import { reduceLine, turnEnded } from './claude-code.mjs';
+
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
+export { reduce } from './claude-code.mjs';
+import { redact, redactDeep } from './redact.mjs';
+import { takeLock } from './lock.mjs';
 import { listStreams } from './streams.mjs';
+import { runsOf, stateDirOf } from './node.mjs';
 import { createHash } from 'node:crypto';
 
 /** The setting the repository ships, changed by pull request. */
@@ -119,46 +126,6 @@ export function commandOf({ side, model, effort }, { input, inputFile, schemaFil
     stdin: `${PROMPT}\n\n${input}`,
   };
 }
-
-// ---- the reduction --------------------------------------------------------------------------------------------------------
-
-/** A value with every string in it redacted, before it is written as JSON: the escaping (`\"`, `\n`) hides a quoted secret value and a
- * token after a line break from `redact`, which sees only the escaped text if it runs after. */
-const redactDeep = (v) => (typeof v === 'string' ? redact(v) : Array.isArray(v) ? v.map(redactDeep) : isObject(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, redactDeep(x)])) : v);
-
-/** What one stream line says, reduced: the assistant's text (redacted) and the names of the tools it called, as `[tool <name>]`. The one
- * input kept is that of `StructuredOutput`, which follows its line as compact JSON (redacted): every seat reports through that call, so
- * the report, with its refusals, lapses and work found outside the issue, is in no text item. A line of any other type, a subagent's (a
- * sidechain, or a message with a parent tool use), a thinking item and any other tool's input are left out. */
-function reduceLine(line) {
-  let o;
-  try {
-    o = JSON.parse(line);
-  } catch {
-    return '';
-  }
-  if (o?.type !== 'assistant' || o.isSidechain === true || (o.parent_tool_use_id ?? null) !== null) return '';
-  const content = o.message?.content;
-  const items = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [];
-  return items
-    .flatMap((i) => {
-      if (i?.type === 'text' && typeof i.text === 'string') return [redact(i.text)];
-      if (i?.type !== 'tool_use' || typeof i.name !== 'string') return [];
-      const head = `[tool ${redact(i.name)}]`;
-      if (i.name !== 'StructuredOutput' || i.input === undefined) return [head];
-      try {
-        return [head, redact(typeof i.input === 'string' ? i.input : JSON.stringify(redactDeep(i.input)))];
-      } catch {
-        // An input nested too deep to walk (a RangeError) gives the tool line alone: one line must never crash the pass, whose cursor
-        // would then never move past it.
-        return [head];
-      }
-    })
-    .join('\n');
-}
-
-/** The reduction of a stream's text (either kind). */
-export const reduce = (text) => String(text).split('\n').map(reduceLine).filter(Boolean).join('\n');
 
 // ---- the streams and their cursors ----------------------------------------------------------------------------------------
 
@@ -335,12 +302,6 @@ function runModel({ command, args, stdin, cwd, env, timeoutMs }) {
 
 const isEmpty = (dir) => readdirSync(dir).length === 0;
 
-function writeAtomic(file, text) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, text);
-  renameSync(tmp, file);
-}
-
 /** The text of one finding, on one line: `<session> <kind>: "<quote>" (<why>)`. The model's words are data; oneLine redacts them. */
 const flat = (s) => s.replace(/\s+/g, ' ').trim();
 const eventText = (e) => `${flat(e.session)} ${e.kind}: "${flat(e.quote)}" (${flat(e.why)})`;
@@ -400,10 +361,8 @@ export function watchSilence({ state, runs, now = Date.now() }) {
     if (!o.complete || !o.last || now - o.since < SILENT_FOR_MS) continue;
     let last;
     try { last = JSON.parse(o.last); } catch { continue; }
-    const finished = last.isSidechain !== true && (last.parent_tool_use_id ?? null) === null && (
-      last.message?.stop_reason === 'end_turn' || last.type === 'result' || last.type === 'turn.completed' ||
-      (last.type === 'system' && last.subtype === 'turn_duration'));
-    if (!finished) continue;
+    // Claude Code's end of a turn (claude-code.mjs), or Codex's `turn.completed`.
+    if (!turnEnded(last) && last.type !== 'turn.completed') continue;
     const key = `watch_fired ${stream.key} ${o.end} ${createHash('sha256').update(o.last).digest('hex')}`;
     if (fired.has(key)) continue;
     const quote = redact(JSON.stringify(redactDeep(last)));
@@ -444,9 +403,9 @@ export async function runPass({ state, runs, settingFile = settingPath(), home =
     // The reader-failed conditions: each cause starts once and is cleared by the next pass where it does not happen.
     record({ state, read: new Set(['reader']), now, found: [...causes].map(([cause, detail]) => ({ key: `reader-failed ${cause}`, scope: 'reader', text: `the stream reader failed (${cause}): ${detail}` })) });
     result.failed = [...causes.keys()];
-    rmSync(join(state, 'reader.failed'), { force: true });
+    clearFailed(state, 'reader');
   } catch (error) {
-    writeFileSync(join(state, 'reader.failed'), `${new Date().toISOString()} the pass raised ${error.name}: ${firstLine(error.message).slice(0, 200)}\n`);
+    markFailed(state, 'reader', `the pass raised ${error.name}: ${error.message}`);
     final = { ...result, status: 'crashed', failed: [...causes.keys()], error: error.message };
   } finally {
     // The record of this pass, crashed or not; a pass that found the lock taken wrote nothing. Its own failure must not hide the pass's.
@@ -463,7 +422,7 @@ export async function runPass({ state, runs, settingFile = settingPath(), home =
     } catch {
       // this pass is missing from the day's lines
     }
-    releaseLock(join(state, 'reader.lock'), lock.token);
+    lock.release();
   }
   return final;
 }
@@ -590,14 +549,14 @@ async function tryFile(file, side, env = process.env) {
 }
 
 async function main(argv) {
-  const stateDir = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+  const stateDir = stateDirOf();
   if (argv[0] === '--try') {
     const side = argv[2] === '--side' ? argv[3] : undefined;
     if (!argv[1] || argv.length !== (side === undefined ? 2 : 4) || (side !== undefined && !SIDES[side])) throw new Error('usage: factory-reader --try <file> [--side pi|codex]');
     return tryFile(argv[1], side);
   }
   if (argv.length) throw new Error('usage: factory-reader [--try <file> [--side pi|codex]]');
-  const r = await runPass({ state: stateDir, runs: process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs') });
+  const r = await runPass({ state: stateDir, runs: runsOf() });
   if (r.status === OFF) {
     console.log(`reader: off in ${settingPath()}; no model call`);
     return 0;

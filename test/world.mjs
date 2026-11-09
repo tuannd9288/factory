@@ -12,7 +12,7 @@ const fs = require('fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, a.join(' ') + '\n');
 const said = (s) => { process.stdout.write(s + '\n'); process.exit(0); };
-if (a[0] === 'auth' && a[1] === 'status') said(process.env.GH_LOGIN || 'tuan9288-agent');
+if (a[0] === 'auth' && a[1] === 'status') said(process.env.GH_LOGIN || 'nami9288');
 if (a[0] === 'ruleset' && a[1] === 'check') {
   const rule = process.env.NO_RULE ? '' : '\n- pull_request: [required_approving_review_count: 0]\n  (configured in ruleset 1 from repository tuannd9288/app)\n';
   said('2 rules apply to branch main in repo tuannd9288/app\n\n- deletion\n  (configured in ruleset 1 from repository tuannd9288/app)\n' + rule);

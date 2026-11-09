@@ -8,6 +8,7 @@ import test from 'node:test';
 import { codeMoved, handleLine, leaseExpired, reconcile } from '../bin/lib/daemon.mjs';
 import { readLines } from '../bin/lib/events.mjs';
 import { wakeOnSeatEnds, wakeOnSeats } from '../bin/lib/news-wake.mjs';
+import { takeLock } from '../bin/lib/lock.mjs';
 import { ensureDaemon } from '../bin/lib/queue.mjs';
 import { openStore } from '../bin/lib/store.mjs';
 
@@ -68,15 +69,14 @@ test('a seat end posted to the daemon wakes its Lead once, and neither the next 
     assert.equal(store.posts().find((r) => r.id !== row.id && r.verb === 'seat-ended').why, 'no new record: taken already');
   }));
 
-test('a seat that ended while the daemon was down is woken once when it starts, and its offset is kept', () =>
-  world(({ state, posts, d, store, seats, baseline }) => {
+test('a seat that ended while the daemon was down is woken once when it starts', () =>
+  world(({ posts, d, store, seats, baseline }) => {
     baseline();
     seats(record('w1'), record('w2', { structured: null }));
     reconcile(d);
     assert.equal(posts.length, 2);
     assert.match(posts[1].line, /seat-no-result: worker w2 ended with no structured result/);
     assert.deepEqual(store.posts().map((r) => r.verb), ['reconcile', 'reconcile']);
-    assert.equal(store.offset('sessions.jsonl'), readFileSync(join(state, 'sessions.jsonl')).length);
     reconcile(d);
     assert.equal(posts.length, 2, 'a second start woke them again');
   }));
@@ -163,11 +163,12 @@ test('the job starts the daemon when nobody answers, and does nothing when it an
     assert.equal(await ensureDaemon(state, { ping: async () => ({ ok: true, result: { pid: 1 } }), spawnFn, home: dir, waitMs: 100 }), 0);
     assert.equal(spawned.length, 0);
     // A daemon that holds the lock and does not answer: told, nothing started.
-    writeFileSync(join(state, 'daemon.lock'), JSON.stringify({ pid: process.pid, start: null, token: 'x' }));
+    const held = takeLock(join(state, 'daemon.lock'));
     const mute = async () => ({ ok: false, why: 'timed out' });
     assert.equal(await ensureDaemon(state, { ping: mute, spawnFn, home: dir, waitMs: 100 }), 1);
     assert.equal(spawned.length, 0);
     assert.match(readFileSync(join(state, 'queue-run.failed'), 'utf8'), /holds .*daemon\.lock and does not answer/);
+    held.release();
     // A lock whose process is gone: the daemon is started detached, with the job's environment and a log of its own.
     writeFileSync(join(state, 'daemon.lock'), JSON.stringify({ pid: 2 ** 22 + 12345, start: null, token: 'y' }));
     let answered = false;

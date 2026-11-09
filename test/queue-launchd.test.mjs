@@ -154,16 +154,16 @@ test('check is not ready when gh is not logged in, or when the sweep fails', () 
 });
 
 test('check is not ready while another sweep holds the lock, for its own sweep did nothing', async () => {
-  const queueLib = await import('../bin/lib/queue.mjs');
+  const { takeLock } = await import('../bin/lib/lock.mjs');
   withMachine('agent-bot', ({ dir, queue }) => {
     mkdirSync(join(dir, 'state'));
-    const held = queueLib.takeLock(join(dir, 'state/queue.lock'));
+    const held = takeLock(join(dir, 'state/queue.lock'));
     try {
       const r = queue('check', '--repo', 'o/app');
       assert.equal(r.status, 1, r.stdout + r.stderr);
       assert.match(r.stdout, /^check: not ready: another sweep holds the lock, so this one did nothing; run check again once it ends$/m);
     } finally {
-      queueLib.releaseLock(join(dir, 'state/queue.lock'), held.token);
+      held.release();
     }
   });
 });

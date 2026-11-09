@@ -13,7 +13,7 @@ const { MODELS, claudeModelArgs } = await import('../bin/lib/models.mjs');
 const RUN = '/r/issue-1';
 const WORK = '/r/w';
 const HOME = '/h';
-const SCHEMA = '{"type":"object","additionalProperties":false,"required":["conclusion","evidence","couldNotRead","needsLead","foundOutside"],"properties":{"conclusion":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"couldNotRead":{"type":"array","items":{"type":"string"}},"needsLead":{"type":"array","items":{"type":"string"}},"foundOutside":{"type":"array","items":{"type":"string"}}}}';
+const SCHEMA = '{"type":"object","additionalProperties":false,"required":["conclusion","evidence","couldNotRead","needsLead","foundOutside"],"properties":{"conclusion":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},"couldNotRead":{"type":"array","items":{"type":"string"}},"needsLead":{"type":"array","items":{"type":"string"}},"foundOutside":{"type":"array","items":{"type":"string"}},"raise":{"type":"string"}}}';
 
 const DENY = [
   'Bash(*factory account add*)', 'Bash(*factory store*)', 'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs store*)',

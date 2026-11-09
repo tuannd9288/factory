@@ -1,17 +1,25 @@
 // Colly status text and shared session readers (#429).
 // --line and --brief share top-github.json, preserving the existing cache and deadlines.
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { stateOf as claimStateOf } from '../../kit/.gate/bin/lib/claim.mjs';
-import { REQUIRED, clonesUnder, costOf, readSessions } from './ledger.mjs';
-import { windowsOf } from './quota.mjs';
+import { readMarkers } from './status.mjs';
+import { writeAtomic } from './files.mjs';
+import { hookStateOf, parseLog } from './claude-code.mjs';
+import { REQUIRED } from './ledger.mjs';
+import { readSessions } from './records.mjs';
+import { byName, cloneRepo, clonesUnder } from './repos.mjs';
+import { PS } from './ps.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
 import { INHERIT, MODELS, entryOf } from './models.mjs';
+
+// Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
+export { parseLog };
 
 const run = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -22,50 +30,21 @@ const GONE_MS = 24 * 3600_000;
 const LOGIN_MS = 60_000;
 const ROLE_ORDER = ['lead', 'worker', 'reviewer', 'researcher'];
 
-const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-
-/** What one stream-json log (or a Lead's transcript copy) says, from its events alone; null where it says nothing. Tokens
- * add each assistant message once (by id): `tokensIn` is input, cache-creation and cache-read tokens, `tokensOut` output;
- * `ctx` is the last message's input side. A resumed log holds several results: turns add up, the cost is the last total. */
-export function parseLog(text) {
-  const messages = new Map();
-  const results = [];
-  let init = null;
-  let rate = null;
-  for (const l of text.split('\n')) {
-    if (!l.trim()) continue;
-    let e;
-    try {
-      e = JSON.parse(l);
-    } catch {
-      continue;
-    }
-    if (e?.type === 'system' && e.subtype === 'init') init = e;
-    else if (e?.type === 'assistant' && e.message?.usage) messages.set(e.message.id ?? e.uuid ?? messages.size, e.message);
-    else if (e?.type === 'result') results.push(e);
-    else if (e?.type === 'rate_limit_event' && e.rate_limit_info) rate = e.rate_limit_info;
+/** The Lead's state from state.json's event and its process: { state, stateAt, waitNote? }, or null to leave it to the log. An event
+ * older than the process belongs to an earlier session. A process that carries the new SessionStart hook, is over a minute old and
+ * has run none of its hooks waits at the login or the folder trust. That is an inference: whether SessionStart fires only after the
+ * trust dialog has not been seen yet; it is seen at zalo-gateway's first Lead start. A Lead started before the hook existed never
+ * gets this line. */
+export function leadStateOf({ event, command, ageMs, now }) {
+  const at = event ? Date.parse(event.at) : NaN;
+  if (Number.isFinite(at) && (ageMs == null || at >= now - ageMs)) {
+    const state = hookStateOf(event);
+    return state ? { state, stateAt: at } : null;
   }
-  const usages = [...messages.values()];
-  const side = (u) => (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-  const last = results.at(-1) ?? null;
-  // A <synthetic> message (Claude Code's own, with no usage) says nothing of the model, the context or the price.
-  const real = usages.filter((m) => m.model !== '<synthetic>');
-  const priced = real.map((m) => costOf(m.model, m.usage));
-  const turnSum = results.some((r) => num(r.num_turns) !== null) ? results.reduce((s, r) => s + (num(r.num_turns) ?? 0), 0) : null;
-  return {
-    model: init?.model ?? real.at(-1)?.model ?? null,
-    cwd: init?.cwd ?? null,
-    turns: turnSum ?? (usages.length ? usages.length : null),
-    ctx: real.length ? side(real.at(-1).usage) : null,
-    tokensIn: usages.length ? usages.reduce((s, m) => s + side(m.usage), 0) : null,
-    tokensOut: usages.length ? usages.reduce((s, m) => s + (m.usage.output_tokens ?? 0), 0) : null,
-    cost: num(last?.total_cost_usd),
-    estCost: real.length && priced.every((c) => c !== null) ? priced.reduce((s, c) => s + c, 0) : null,
-    isError: typeof last?.is_error === 'boolean' ? last.is_error : null,
-    apiStatus: last?.api_error_status ?? null,
-    rate: rate ? { ...windowsOf(rate), resetsAt: num(rate.resetsAt) } : null,
-  };
+  return /"SessionStart"/.test(command) && ageMs > LOGIN_MS ? { state: 'waiting', waitNote: 'login or folder trust?' } : null;
 }
+
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 const readText = (file) => {
   try {
@@ -90,12 +69,7 @@ export function roleOf(tag, record) {
 /** owner/name of a work folder's origin, read with git alone; null where git cannot tell. */
 function originIn(cwd) {
   if (!cwd || !existsSync(cwd)) return null;
-  try {
-    const url = execFileSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url)?.[1] ?? null;
-  } catch {
-    return null;
-  }
+  return cloneRepo(cwd, 5000);
 }
 
 /** ps's elapsed time ([[dd-]hh:]mm:ss) in milliseconds; null for anything else. */
@@ -106,17 +80,13 @@ export function etimeMs(text) {
 
 /** The processes as { pid, ageMs, command }, from ps; throws when ps is not here or cannot run (the events step needs to tell that
  * from no process). */
-export function readProcesses(paths = ['/bin/ps', '/usr/bin/ps']) {
-  for (const ps of paths) {
-    if (!existsSync(ps)) continue;
-    return execFileSync(ps, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
-      .split('\n')
-      .flatMap((l) => {
-        const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
-        return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
-      });
-  }
-  throw new Error('ps is not on this host');
+export function readProcesses() {
+  return execFileSync(PS, ['-axo', 'pid=,etime=,command='], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] })
+    .split('\n')
+    .flatMap((l) => {
+      const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(l);
+      return m ? [{ pid: Number(m[1]), ageMs: etimeMs(m[2]), command: m[3] }] : [];
+    });
 }
 
 /** The same, with [] when ps cannot run: what the view shows. */
@@ -135,11 +105,8 @@ export function leadOf(command) {
   return m && TEAM.test(m[2]) && /\bclaude\b/.test(command) ? { repo: m[1], team: m[2] } : null;
 }
 
-/** The teams whose Lead runs on a repository, sorted. */
+/** The teams whose Lead runs on a repository, sorted: the rule `factory use` restarts a Lead by (#179). */
 export const leadTeams = (repo, processes = psList) => [...new Set(processes().map((p) => leadOf(p.command)).filter((l) => l?.repo === repo).map((l) => l.team))].sort();
-
-/** Whether a Lead of a repository runs: the rule used by `factory use` (#179). */
-export const leadRunning = (repo, processes = psList) => leadTeams(repo, processes).length > 0;
 
 function branchIn(cwd) {
   if (!cwd) return null;
@@ -193,31 +160,6 @@ export function local(ms, now) {
   return startOfDay(ms) === startOfDay(now) ? hm(ms) : `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${hm(ms)}`;
 }
 
-// The Lead's state from its newest hook event (packs/pstack/bin/transcript-copy.mjs writes state.json): Claude Code's Notification
-// types and the hooks the launcher sets. It is data, to be adjusted from what real Leads send; an event it does not name leaves the
-// state the Lead's log gives.
-const LEAD_STATES = {
-  'Notification:permission_prompt': 'waiting',
-  'Notification:elicitation_dialog': 'waiting',
-  'Notification:idle_prompt': 'idle',
-  Stop: 'idle',
-  SessionStart: 'idle',
-  UserPromptSubmit: 'working',
-};
-
-/** The Lead's state from state.json's event and its process: { state, stateAt, waitNote? }, or null to leave it to the log. An event
- * older than the process belongs to an earlier session. A process that carries the new SessionStart hook, is over a minute old and
- * has run none of its hooks waits at the login or the folder trust. That is an inference: whether SessionStart fires only after the
- * trust dialog has not been seen yet; it is seen at zalo-gateway's first Lead start. A Lead started before the hook existed never
- * gets this line. */
-export function leadStateOf({ event, command, ageMs, now }) {
-  const at = event ? Date.parse(event.at) : NaN;
-  if (Number.isFinite(at) && (ageMs == null || at >= now - ageMs)) {
-    const state = LEAD_STATES[event.type ? `${event.event}:${event.type}` : event.event];
-    return state ? { state, stateAt: at } : null;
-  }
-  return /"SessionStart"/.test(command) && ageMs > LOGIN_MS ? { state: 'waiting', waitNote: 'login or folder trust?' } : null;
-}
 
 /** The effort the factory's one table gives a role (INN-39): a seat's, or the pack Lead's (lead.remote); null for another role or inherit. */
 function effortOf(role) {
@@ -284,7 +226,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
     }
     for (const n of names) {
       const m = /^run-(.+)\.jsonl$/.exec(n);
-      if (!m || m[1].endsWith('.claim')) continue;
+      if (!m) continue;
       const tag = m[1];
       const file = join(dir, n);
       let st;
@@ -318,7 +260,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
       const s = statSync(join(dir, n));
       if (!newest || s.mtimeMs > newest.mtimeMs) newest = { file: join(dir, n), mtimeMs: s.mtimeMs, st: s };
     }
-    const repo = [...clones.keys()].find((r) => r.split('/')[1] === repoName) ?? null;
+    const repo = byName(clones.keys(), repoName);
     const cwd = repo ? clones.get(repo) : null;
     let event = null;
     try {
@@ -344,7 +286,7 @@ export function gatherSessions({ runs, state, now, root = null, clones = new Map
   for (const s of out) {
     if (s.repo || !s.folder) continue;
     const m = /^(.+)-\d+$/.exec(s.folder);
-    s.repo = m?.[1] === 'issue' ? (root ? originCached(root) : null) : ([...names].find((r) => r.split('/')[1] === m?.[1]) ?? null);
+    s.repo = m?.[1] === 'issue' ? (root ? originCached(root) : null) : byName(names, m?.[1]);
   }
   if (cache) cache.logs = seenLogs;
   const rank = (s) => ROLE_ORDER.indexOf(s.role) === -1 ? ROLE_ORDER.length : ROLE_ORDER.indexOf(s.role);
@@ -364,13 +306,9 @@ export function eventsOf(state) {
 
 /** The queue's and the alerts' state: the time in the newest `queue-*.ok`, the `queue-*.failed` files, every `*.failed` file. */
 export function queueOf(dir) {
-  let names = [];
-  try {
-    names = readdirSync(dir).sort();
-  } catch {}
-  const first = (f) => readText(join(dir, f)).split('\n')[0].trim();
-  const oks = names.filter((f) => /^queue-.*\.ok$/.test(f)).map(first).filter(Boolean).sort();
-  const failed = names.filter((f) => f.endsWith('.failed')).map((f) => ({ file: f, text: first(f) }));
+  const markers = readMarkers(dir) ?? [];
+  const oks = markers.filter((m) => m.kind === 'ok' && m.name.startsWith('queue-')).map((m) => m.line).filter(Boolean).sort();
+  const failed = markers.filter((m) => m.kind === 'failed').map((m) => ({ file: m.file, text: m.line }));
   return { lastSweep: oks.at(-1) ?? null, queueFailed: failed.filter((f) => f.file.startsWith('queue-')).length, failed };
 }
 
@@ -381,11 +319,13 @@ const firstLine = (e) => String(e.stderr || e.message || e).trim().split('\n')[0
 const NET = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 
 /** The claims on a repository as `claim --list` reads them: the tip of each refs/heads/claim/<n>, by its subject. The URL is
- * built from the repository's name alone (`url` is for tests), never asked of a clone, whose config a worker can write. Every
- * git call runs in a bare repository of the view's own, `<state>/top/<owner>-<name>.git`, made on first use, so that only its
- * config applies and nothing is written into a clone or the folder the view runs from; `--` ends the options before the URL. */
-export async function readClaims(repo, state, { url = `https://github.com/${repo}.git` } = {}) {
+ * built from the repository's name alone, never asked of a clone, whose config a worker can write; a test points it at a local
+ * folder with git's own url.<folder>.insteadOf. Every git call runs in a bare repository of the view's own,
+ * `<state>/top/<owner>-<name>.git`, made on first use, so that only its config applies and nothing is written into a clone or the
+ * folder the view runs from; `--` ends the options before the URL. */
+export async function readClaims(repo, state) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error(`not owner/name: ${JSON.stringify(repo)}`);
+  const url = `https://github.com/${repo}.git`;
   const git = async (cwd, ...a) => (await run('git', ['-C', cwd, ...a], { encoding: 'utf8', timeout: CALL_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })).stdout.trim();
   const top = join(state, 'top');
   const cache = join(top, `${repo.replace('/', '-')}.git`);
@@ -427,10 +367,7 @@ function readSharedGithub(state) {
 function writeSharedGithub(state, data, good) {
   try {
     mkdirSync(state, { recursive: true });
-    const file = join(state, GH_FILE);
-    const tmp = `${file}.tmp-${process.pid}`;
-    writeFileSync(tmp, JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
-    renameSync(tmp, file);
+    writeAtomic(join(state, GH_FILE), JSON.stringify({ data, good }, mapOut), { mode: 0o600 });
   } catch {
     // a view that cannot write the file reads GitHub again next time
   }
@@ -576,11 +513,14 @@ function groupOf(repo, number, gh, sessions) {
   const merged = Boolean(pr?.mergedAt);
   const closed = issue?.state === 'CLOSED';
   const step = merged ? 'merged' : closed ? 'closed' : pr ? 'PR open' : held ? 'claimed' : gh?.claimsOk === false ? '?' : 'unclaimed';
+  // The kit runs no review job since FAC-100; a repository still on the kit before it runs its own until FAC-102 moves it, and that job
+  // is not among the kit's required checks, so it is read from the rollup.
+  const oldReview = (pr?.statusCheckRollup ?? []).filter((c) => c.name === 'review').at(-1);
   let waiting = '–';
   if (pr && !merged) {
     if (labels.some((l) => l === 'tier-3' || l === 'needs-human') && checks.tier && checks.tier.status === 'COMPLETED' && checks.tier.conclusion !== 'SUCCESS') waiting = 'the Human';
     else if (pr.reviewDecision === 'REVIEW_REQUIRED' && gh.required.every((n) => MARK(checks[n]) === '✓')) waiting = 'the Human';
-    else if (checks.review && checks.review.status !== 'COMPLETED') waiting = 'the reviewer';
+    else if (oldReview && oldReview.status !== 'COMPLETED') waiting = 'the reviewer';
   }
   if (waiting === '–' && sessions.some((s) => s.live)) waiting = 'the team';
   return {

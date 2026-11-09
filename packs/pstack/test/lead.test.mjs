@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { enabledPlugins, exitCodeOf, findNode, leadArgs, refusal } from '../bin/lead.mjs';
+import { enabledPlugins, exitCodeOf, findNode, leadArgs } from '../bin/lead.mjs';
+import { refusal } from '../../../bin/lib/repos.mjs';
 import { pushHook } from '../../../bin/lib/force-push.mjs';
 import { readRules } from '../../../bin/lib/deny-read.mjs';
 import { MODELS, pstackModels } from '../../../bin/lib/models.mjs';
@@ -132,7 +133,7 @@ describe('leadArgs', () => {
     assert.deepEqual(list('--allowedTools'), [
       'Read', 'Glob', 'Grep', 'Write', 'Edit',
       'Bash(git fetch:*)', 'Bash(git worktree:*)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)',
-      'Bash(git rev-parse:*)', 'Bash(git branch:*)', 'Bash(git push -u origin HEAD)',
+      'Bash(git rev-parse:*)', 'Bash(git branch:*)', 'Bash(git push origin HEAD)',
       'Bash(cd:*)', 'Bash(ls:*)', 'Bash(mkdir:*)',
       'Bash(.gate/bin/claim:*)', 'Bash(.gate/bin/tier:*)', 'Bash(.gate/bin/verify:*)', 'Bash(.gate/bin/red-check:*)',
       'Bash(gh issue view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue create:*)', 'Bash(gh issue comment:*)', 'Bash(gh issue edit:*)',
