@@ -2,9 +2,8 @@
 // runs from the factory checkout: the seats (bin/lib/seat.mjs), the pack Lead (packs/pstack/bin/lead.mjs), the MacBook Lead and Colly
 // (bin/lib/factory.mjs), `factory codex` (packs/pstack/bin/codex-step.mjs) and the pstack role lines a Lead's profile gets as
 // rules/pstack-models.md, which Claude Code loads with the user memory (2.1.319). The Watcher keeps its own frozen setting,
-// bin/lib/reader.json (docs/decisions.md, "The Watcher's freeze, 2026-11-07"), tested by test/reader.test.mjs. The gate's reviewer keeps its
-// own pin in the kit (kit/.gate/bin/lib/reviewer.json): a served repository's CI has no factory checkout. Each launcher takes the table as
-// an argument, this one by default, and its test gives it a made-up one (test/models.test.mjs).
+// bin/lib/reader.json (docs/decisions.md, "The Watcher's freeze, 2026-11-07"), tested by test/reader.test.mjs. Each launcher takes the
+// table as an argument, this one by default, and its test gives it a made-up one (test/models.test.mjs).
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

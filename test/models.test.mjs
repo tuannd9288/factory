@@ -1,6 +1,5 @@
 // INN-39, contract H7: each launcher takes its model and effort from the table it is given: the factory's one table, bin/lib/models.json,
-// for every role that runs from the factory checkout, and the kit's own pin for the gate's reviewer (test/claude-reviewer.test.mjs). The
-// launchers here get a made-up table, so every expectation is written out, never read from models.json; the approved defaults are one
+// for every role that runs from the factory checkout. The launchers here get a made-up table, so every expectation is written out, never read from models.json; the approved defaults are one
 // matrix of their own. The MacBook Lead, Colly and `factory codex` get theirs in test/factory-here, test/factory-colly and
 // packs/pstack/test/codex-step. The Watcher keeps its own frozen setting, bin/lib/reader.json, tested by test/reader.test.mjs.
 import { test } from 'node:test';
