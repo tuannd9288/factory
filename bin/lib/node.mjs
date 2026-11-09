@@ -90,12 +90,12 @@ export const gitEnv = (pairs) => ({
 /** The environment the factory's own gh and git run with on this node (#366): on the factory host none, since its gh has the agents' login.
  * Elsewhere the node's agents token alone: GH_TOKEN, an empty GITHUB_TOKEN, an empty gh folder under `state` (so no login of the person
  * whose machine it is is read), and TOKEN_GIT. { env }, or { refusal } in one line when the node holds no agents token. The token is
- * only ever in the returned environment. */
-export function nodeLogin(env, state) {
-  if (placeOf(env) === 'factory') return { env: {} };
+ * only ever in the returned environment. `more` are git settings the caller adds, after TOKEN_GIT's, and on the host alone. */
+export function nodeLogin(env, state, more = []) {
+  if (placeOf(env) === 'factory') return { env: more.length ? gitEnv(more) : {} };
   const token = nodeGithubToken(env);
   if (!token) return { refusal: `this node holds no GitHub token for the agents (factory store ${agentOf(env)}), so the factory's gh and git do not run here` };
   const empty = join(state, 'node', 'gh-empty');
   mkdirSync(empty, { recursive: true, mode: 0o700 });
-  return { env: { GH_TOKEN: token, GITHUB_TOKEN: '', GH_CONFIG_DIR: empty, GIT_TERMINAL_PROMPT: '0', ...gitEnv(TOKEN_GIT) } };
+  return { env: { GH_TOKEN: token, GITHUB_TOKEN: '', GH_CONFIG_DIR: empty, GIT_TERMINAL_PROMPT: '0', ...gitEnv([...TOKEN_GIT, ...more]) } };
 }
