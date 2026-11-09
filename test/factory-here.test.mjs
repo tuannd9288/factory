@@ -9,8 +9,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tokenStoreDeny } from '../bin/lib/seat.mjs';
-import { readRules } from '../bin/lib/deny-read.mjs';
-import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
+import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
+import { gitReadsUnderConfig, mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
 import { freeWord, teamsOf } from '../bin/lib/team-names.mjs';
 import { HOST_ENV, factory } from './helpers.mjs';
 
@@ -113,20 +113,40 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_COMMITTER_NAME: 'Agent Ánh', GIT_COMMITTER_EMAIL: 'agent.anh@example.invalid',
       GIT_TERMINAL_PROMPT: '0',
       GIT_SSH_COMMAND: "sh -c 'echo git over ssh is off for a MacBook Lead, pushes go from the Mac mini >&2; exit 1'",
-      GIT_CONFIG_COUNT: '4',
+      GIT_CONFIG_GLOBAL: join(s.home, '.gitconfig'),
+      GIT_CONFIG_COUNT: '6',
       GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
       GIT_CONFIG_KEY_1: push, GIT_CONFIG_VALUE_1: 'https://github.com/',
       GIT_CONFIG_KEY_2: push, GIT_CONFIG_VALUE_2: 'git@github.com:',
       GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
+      GIT_CONFIG_KEY_4: 'core.excludesFile', GIT_CONFIG_VALUE_4: '/dev/null',
+      GIT_CONFIG_KEY_5: 'core.attributesFile', GIT_CONFIG_VALUE_5: '/dev/null',
     });
+    // Its Read rules deny all of ~/.config, and Claude Code merges them into its sandbox, where git stops on a config file it may not
+    // read: its git reads none of its own files there (FAC-79).
+    assert.deepEqual(gitReadsUnderConfig(env, s.home, s.dir), []);
     assert.deepEqual(permissions.deny, [...tokenStoreDeny, ...readRules({ profiles: join(s.dir, 'profiles'), role: 'lead' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)']);
     // It runs as the user of this Mac: its Read tool refuses each protected category and still reads what the work needs (FAC-38, INN-39).
+    // Its shell's sandbox is the sandbox's own denyRead with these Read rules merged in, as Claude Code merges them: all of ~/.config stays
+    // refused there too (FAC-79). The probe's home stands for the session's.
     const w = probeWorld();
     try {
-      assert.deepEqual(mismatches({ 'here file': (p) => refusedRead(permissions.deny, p, w) }, w), []);
+      const denyRead = settingsOf(args).sandbox.filesystem.denyRead.map((p) => p.replace(s.home, w.home));
+      assert.deepEqual(mismatches({
+        'here file': (p) => refusedRead(permissions.deny, p, w),
+        'here shell': (p) => refusedRead(permissions.deny, p, w) || refusedSandbox(denyRead, p),
+      }, w), []);
     } finally {
       w.done();
     }
+    // Its shell runs in Claude Code's sandbox (FAC-79 (b)): it reads none of the list's shell paths, writes here, in the runs folder and
+    // the temporary folder, reaches only github.com, and, as a user that starts no seat, runs only `factory` outside it.
+    assert.deepEqual(settingsOf(args).sandbox, {
+      enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
+      filesystem: { denyRead: sandboxPaths(s.home, join(s.dir, 'profiles')), allowWrite: [realpathSync(factory), join(s.home, 'factory-runs'), realpathSync(tmpdir())] },
+      network: { strictAllowlist: true, allowedDomains: ['github.com'], allowLocalBinding: false },
+      excludedCommands: ['factory *'],
+    });
     assert.ok(args.includes('--name') && args[args.indexOf('--name') + 1] === `alpha-${freeWord('alpha', [])}`, args.join(' '));
     assert.equal(statSync(empty).mode & 0o777, 0o700);
     assert.deepEqual(readdirSync(empty), []);
@@ -418,7 +438,7 @@ exit "$(cat "$FAKE/host.exit" 2>/dev/null || echo 0)"
   chmodSync(file, 0o755);
 }
 
-test('linear refuses a usage error on the MacBook before any ssh, and a body that names a file', () => {
+test('linear refuses a usage error on the MacBook before any ssh, and a body file it cannot read', () => {
   const s = world();
   try {
     hostFactory(s);
@@ -470,6 +490,11 @@ test('linear hands a title with quotes and a dollar sign to the host unchanged, 
     assert.deepEqual(s.nuls('host.args'), args);
     assert.equal(s.read('host.stdin'), body);
     assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '/);
+    // A body the session wrote as a file goes on stdin too (FAC-79 (b)), since a pipe would keep the call in its sandbox.
+    writeFileSync(join(s.dir, 'body.md'), 'from a file\n');
+    s.fac(['linear', 'comment', 'FAC-12', '--team', 'lead', '--body-file', join(s.dir, 'body.md')]);
+    assert.deepEqual(s.nuls('host.args'), ['linear', 'comment', 'FAC-12', '--team', 'lead', '--body-file', '-']);
+    assert.equal(s.read('host.stdin'), 'from a file\n');
     s.w('ssh-down', '');
     assert.equal(s.fac(['linear', 'read', 'FAC-12']).code, 255, 'ssh\'s own exit code when it cannot reach the host');
   } finally {
@@ -807,6 +832,21 @@ test('wake refuses a bad repository, issue or team, a flag twice and any other w
       assert.match(r.out, /usage: bin\/factory/);
     }
     assert.equal(s.calls(), '', 'no ssh call');
+  } finally {
+    s.done();
+  }
+});
+
+test('events sends the Mac mini only the words it checked, and refuses any other text before any ssh (FAC-79 (b))', () => {
+  const s = world();
+  try {
+    // The fake ssh runs the remote command through a shell, as the Mac mini's does: text that reached it would make the marker.
+    const marker = join(s.dir, 'marker');
+    for (const args of [['--follow', '--after', `1; touch ${marker}`], ['--follow', '--file', marker]]) assert.equal(s.fac(['events', ...args]).code, 2, args.join(' '));
+    assert.equal(existsSync(marker), false);
+    assert.equal(s.calls(), '', 'no ssh call');
+    s.fac(['events', '--follow', '--after', '5']);
+    assert.equal(s.calls(), "ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 factory@tuans-mac-mini zsh -lc '~/WORKSPACES/bin/factory events --follow --after 5'\n");
   } finally {
     s.done();
   }

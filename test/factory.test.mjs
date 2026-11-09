@@ -420,9 +420,11 @@ test('no part of a seat\'s token reaches the table or the JSON', () => {
   }
 });
 
-test('from the MacBook, use waits as long as the Mac mini does while every other command keeps 60 seconds (#179)', async () => {
+test('from the MacBook, use and events wait as long as the Mac mini does while every other command keeps 60 seconds (#179)', async () => {
   const { remoteTimeout } = await import('../bin/lib/factory.mjs');
   assert.equal(remoteTimeout('use'), undefined);
+  // Colly's Monitor follows the Mac mini's events for as long as the link lives (FAC-79 (b)).
+  assert.equal(remoteTimeout('events'), undefined);
   assert.equal(remoteTimeout('logout'), 60000);
 });
 

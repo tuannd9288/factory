@@ -14,9 +14,9 @@
 # `--after <seq>` (a whole number, 0 or more) starts after that seq in place of the cursor; it is how the reader says how far it got,
 # since a write to a link that has died, unnoticed by the Mac mini, is lost. A seq (or a cursor) above the file's highest starts from
 # its first line and says so on stderr. Colly also follows the MacBook's own events, through the share the MacBook's daemon writes, in a
-# second Monitor of its own seq (packs/colly/colly.md has that command). Colly runs this one from the MacBook, and a dead link ends the ssh and
-# the Monitor with it:
-#   ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 factory@tuans-mac-mini /Users/factory/WORKSPACES/bin/factory-events --follow
+# second Monitor of its own seq (packs/colly/colly.md has that command). Colly runs this one from the MacBook by ssh, and a dead link ends
+# the ssh and the Monitor with it, through the one command its sandbox lets out (bin/lib/factory.mjs events(), FAC-79):
+#   factory events --follow
 # When the Monitor ends, start it again with `--after <the last seq Colly saw>` added; in a new session, which knows no seq, leave
 # `--after` out.
 # The six lines of a Lead's news (#370: seat-ended, seat-no-result, checks-red, checks-green, conflict, merged) are the Lead's, so every run

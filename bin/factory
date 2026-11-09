@@ -22,10 +22,11 @@
 #                                  and exit code kept; refuses gh auth but status (and its -t / --show-token), --recover, and a file given with
 #                                  --body-file, --notes-file, --env-file, --input, --field or -F (pass it on stdin: --body-file -, -F name=@-,
 #                                  --input -); on the Mac mini it runs gh itself (#349); with the agents' GitHub token in this node's own
-#                                  token store, gh runs here with it, refusing only the gh auth commands above (#366)
+#                                  token store, gh runs here with it, refusing only the gh auth commands above (#366); by ssh,
+#                                  --body-file <file> is read here and sent on stdin (FAC-79)
 #   factory linear <verb> ...      a Lead's steps on a repository on Linear (#404; bin/lib/linear-cli.mjs has the verbs): take, release, read, list, comment, ask,
 #                                  answered, create and onboard, as the Factory app; one JSON object on stdout, exit 0, 1 (Linear refused) or 2 (usage); a
-#                                  body comes on stdin (--body-file -); it runs on a node whose own token store holds the Factory app's credentials,
+#                                  body comes on stdin (--body-file -) or as a file, read here and sent on stdin (FAC-79); it runs on a node whose own token store holds the Factory app's credentials,
 #                                  else on the Mac mini by ssh, stdin kept; Colly's decision-create and decision-close always run on the Mac mini
 #   factory codex --role <role> [--effort <e>] [--write <folder>]  a pstack step that asks for another model family, on Codex on the verifier's
 #                                  profile, never on Claude (#182; packs/pstack/bin/codex-step.mjs has the roles and the rest): the brief on stdin,
@@ -35,6 +36,13 @@
 #                                  the issue (the message itself is a comment there) and types nothing into its pane; on the Mac mini it posts to the socket
 #                                  its hook recorded in ~/factory-runs/<repo>-<team>/socket; on the MacBook to the socket `lead --here` recorded when that
 #                                  team's Lead runs there, else the same command runs on the Mac mini by ssh; exit 0 posted, 1 not posted (with the reason), 2 usage
+#   factory events --follow [--local] [--after <seq>]  Colly's Monitor on the events (FAC-79): from the MacBook, bin/factory-events --follow on the Mac
+#                                  mini by ssh; with --local, on this MacBook's share; only these words, each once, and --after a whole number
+#   factory ship [<ship's arguments>] | factory pr-body <n> <file>  the --here Lead's ship and pr-body (FAC-79): the pack's scripts/ship or
+#                                  scripts/pr-body beside this command, run in the working folder outside the Lead's sandbox with this node's
+#                                  agents login; only in a clone of tuannd9288/factory, read from the folder's origin with the caller's GIT_*
+#                                  and GH_* variables dropped, and gh held to that repository; git with no hooks, no fsmonitor, no lazy fetch
+#                                  and https alone; exit 2 refused, else the script's code; no pacing of its own (FAC-109)
 #   factory account remove <account>       on this node: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
 # it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes each account's quota from the run logs of its sessions. On the

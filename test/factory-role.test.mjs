@@ -51,7 +51,7 @@ test('lead --here passes the pack role as an appended system prompt; run as a us
       assert.ok(!role.includes('/bin/seat'), 'no seat path');
       assert.doesNotMatch(role, /\{\{|<!--/, 'no token or form marker is left');
       const expected = roleFor(readFileSync(new URL('../packs/pstack/lead.md', import.meta.url), 'utf8'),
-        { linear: linear && { key: 'ALP' }, team: 'beta', seat: null, runs: join(state, 'factory-runs') });
+        { linear: linear && { key: 'ALP' }, team: 'beta', seat: null, runs: join(state, 'factory-runs'), here: true });
       assert.equal(role, expected);
     }
     rmSync(join(state, '.agent-profiles/tokens/fixture'));
@@ -86,10 +86,13 @@ test('lead --here run as the agents\' user on a machine that is not the host, th
     assert.equal(cmd, 'claude');
     const seat = join(state, '.local/share/factory/checkout/bin/seat');
     assert.equal(options.env.FACTORY_TEAM, 'alpha-beta', 'its own team, not the caller\'s');
-    assert.deepEqual(JSON.parse(args[args.indexOf('--settings') + 1]).permissions.allow, [`Bash(${seat}:*)`]);
+    const settings = JSON.parse(args[args.indexOf('--settings') + 1]);
+    assert.deepEqual(settings.permissions.allow, [`Bash(${seat}:*)`]);
+    // That bin/seat, which reads the tokens by design, runs outside its sandbox beside `factory` (FAC-79 (b)).
+    assert.deepEqual(settings.sandbox.excludedCommands, ['factory *', `${seat} *`]);
     const role = args[args.indexOf('--append-system-prompt') + 1];
     assert.ok(role.includes(seat), 'the role names the bin/seat its grant allows');
-    assert.equal(role, roleFor(readFileSync(new URL('../packs/pstack/lead.md', import.meta.url), 'utf8'), { linear: null, team: 'beta', seat, runs: join(state, 'factory-runs') }));
+    assert.equal(role, roleFor(readFileSync(new URL('../packs/pstack/lead.md', import.meta.url), 'utf8'), { linear: null, team: 'beta', seat, runs: join(state, 'factory-runs'), here: true }));
   } finally {
     t.mock.restoreAll();
     syncBuiltinESMExports();
