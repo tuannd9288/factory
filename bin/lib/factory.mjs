@@ -746,9 +746,10 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     // would start a seat as that user; FACTORY_HOST_NAME names the factory host's machine (placeOf). So none may carry either; nothing a
     // Lead runs needs them.
     // The session runs as the user of this Mac, so its Read tool is denied the paths no agent reads (bin/lib/deny-read.mjs: ssh, gh's login,
-    // Claude's and Codex's folders, the profiles, by their absolute path too), not only the profiles (FAC-38); its own config folder is under
+    // Claude's and Codex's folders, the profiles, by their absolute path too), not only the profiles (FAC-38). Claude Code merges these rules
+    // into its sandbox, so of ~/.config they name the stores alone and git reads its own settings there (role lead-here); its own config folder is under
     // the profiles, already denied, which Claude Code reads itself and the Read tool never needs.
-    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...readRules({ profiles: agentProfiles, role: 'lead' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
+    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...readRules({ profiles: agentProfiles, role: 'lead-here' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
     // Its shell runs in Claude Code's sandbox (FAC-79 (b)), as seatworks-v3 runs its Lead and the factory its seats. It writes the runs
     // folder too, where the pack Lead's --add-dir lets it write: its issues' run folders and worktrees, its seats' run folders and its own
     // transcripts. It reaches GitHub for git (github.com) and for scripts/ship's gh (api.github.com). `factory` reaches the Mac mini by

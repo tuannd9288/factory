@@ -7,10 +7,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 /** Every channel a probe can ask: Claude Code's file tools of a seat, the pack Lead, the MacBook Lead, Colly and a served repository (kit),
- * the seats' shell sandbox, and Codex. */
-export const CHANNELS = ['seat file', 'lead file', 'here file', 'colly file', 'kit file', 'seat shell', 'codex'];
+ * the seats' shell sandbox, the MacBook Lead's and Colly's shell sandbox, into which Claude Code merges their Read rules, and Codex. */
+export const CHANNELS = ['seat file', 'lead file', 'here file', 'colly file', 'kit file', 'seat shell', 'here shell', 'colly shell', 'codex'];
 const ALL = CHANNELS;
-const FACTORY_FILE_TOOLS = ['seat file', 'lead file', 'here file', 'colly file'];
+const ALL_OF_CONFIG = ['seat file', 'lead file'];
 
 /** [what, path under home (or `./` under the work folder), the channels that refuse it]. */
 export const ROWS = [
@@ -27,9 +27,10 @@ export const ROWS = [
   ["Claude Code's data", '.local/share/claude/versions/2.1.319', ALL],
   ["Cursor's login", '.cursor/cli-config.json', ALL],
   ["a repository's .env file, which its tests may load in a seat's shell", './.env', ALL.filter((c) => c !== 'seat shell')],
-  // All of ~/.config is denied to the factory's own file tools; the shells, Codex and the kit name its stores (INN-39, question 1).
-  ["another tool's login under ~/.config", '.config/some-tool/token', FACTORY_FILE_TOOLS],
-  ["git's own settings, which git reads in a shell", '.config/git/config', FACTORY_FILE_TOOLS],
+  // All of ~/.config is denied to the seats' and the pack Lead's file tools; the shells, Codex and the kit name its stores (INN-39,
+  // question 1), and so do the MacBook Lead and Colly, whose Read rules reach their sandbox, so git reads its settings there (FAC-79 (b)).
+  ["another tool's login under ~/.config", '.config/some-tool/token', ALL_OF_CONFIG],
+  ["git's own settings, which git reads in a shell", '.config/git/config', ALL_OF_CONFIG],
   ["git's settings in home", '.gitconfig', []],
   ["a file of the repository", './README.md', []],
   ['a plugin of the cache outside the profiles', '.local/share/factory/plugins/p/skills/s/SKILL.md', []],

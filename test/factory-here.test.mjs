@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tokenStoreDeny } from '../bin/lib/seat.mjs';
 import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
-import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
+import { mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
 import { freeWord, teamsOf } from '../bin/lib/team-names.mjs';
 import { HOST_ENV, factory } from './helpers.mjs';
 
@@ -119,11 +119,17 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_CONFIG_KEY_2: push, GIT_CONFIG_VALUE_2: 'git@github.com:',
       GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
     });
-    assert.deepEqual(permissions.deny, [...tokenStoreDeny, ...readRules({ profiles: join(s.dir, 'profiles'), role: 'lead' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)']);
+    assert.deepEqual(permissions.deny, [...tokenStoreDeny, ...readRules({ profiles: join(s.dir, 'profiles'), role: 'lead-here' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)']);
     // It runs as the user of this Mac: its Read tool refuses each protected category and still reads what the work needs (FAC-38, INN-39).
+    // Its shell's sandbox is the sandbox's own denyRead with these Read rules merged in, as Claude Code merges them: it still reads git's
+    // settings under ~/.config while the named stores stay refused (FAC-79 (b)). The probe's home stands for the session's.
     const w = probeWorld();
     try {
-      assert.deepEqual(mismatches({ 'here file': (p) => refusedRead(permissions.deny, p, w) }, w), []);
+      const denyRead = settingsOf(args).sandbox.filesystem.denyRead.map((p) => p.replace(s.home, w.home));
+      assert.deepEqual(mismatches({
+        'here file': (p) => refusedRead(permissions.deny, p, w),
+        'here shell': (p) => refusedRead(permissions.deny, p, w) || refusedSandbox(denyRead, p),
+      }, w), []);
     } finally {
       w.done();
     }

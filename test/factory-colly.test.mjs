@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { quote } from '../packs/pstack/bin/lead.mjs';
 import { main, noPushGitEnv } from '../bin/lib/factory.mjs';
 import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
-import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
+import { mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
 import { HOST_ENV } from './helpers.mjs';
 
 /** Whether a Bash(...) rule matches a command, by the three rules of Claude Code's permissions page ("Wildcard patterns", read 2026-11-06):
@@ -76,9 +76,15 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
     assert.ok(settings.autoMode.environment.some((e) => /Colly pushes nothing/.test(e)));
     assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)']);
     // Its Read tool refuses each protected category and still reads what the work needs (FAC-38, INN-39).
+    // Its shell's sandbox is the sandbox's own denyRead with these Read rules merged in, as Claude Code merges them: it still reads git's
+    // settings under ~/.config while the named stores stay refused (FAC-79 (b)). The probe's home stands for the session's.
     const w = probeWorld();
     try {
-      assert.deepEqual(mismatches({ 'colly file': (p) => refusedRead(settings.permissions.deny, p, w) }, w), []);
+      const denyRead = settings.sandbox.filesystem.denyRead.map((p) => p.replace(state, w.home));
+      assert.deepEqual(mismatches({
+        'colly file': (p) => refusedRead(settings.permissions.deny, p, w),
+        'colly shell': (p) => refusedRead(settings.permissions.deny, p, w) || refusedSandbox(denyRead, p),
+      }, w), []);
     } finally {
       w.done();
     }
