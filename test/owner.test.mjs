@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { factory } from './helpers.mjs';
 import { GATE, MAIN, TRUSTED, render } from '../bin/lib/gate-settings.mjs';
+import { gh } from '../bin/lib/owner.mjs';
 
 /** The three gate workflows as main holds them once bin/onboard filled them in with `values` (#335). */
 const onMain = (values) => Object.fromEntries([MAIN, GATE, TRUSTED].map((p) => [p, render(p, readFileSync(join(factory, 'kit', p), 'utf8'), values)]));
@@ -865,3 +866,17 @@ for (const merge of [undefined, 'squash', 'merge']) {
     } finally { w.cleanup(); }
   });
 }
+
+test('gh reads an answer larger than Node\'s 1 MiB default, as the kit\'s one gh runner allows (FAC-85)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'owner-gh-'));
+  const path = process.env.PATH;
+  try {
+    writeFileSync(join(dir, 'gh'), `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({ big: 'x'.repeat(2 * 1024 * 1024) }));\n`);
+    chmodSync(join(dir, 'gh'), 0o755);
+    process.env.PATH = `${dir}:${path}`;
+    assert.equal(gh(['api', 'repos/o/n/rulesets?per_page=100']).big.length, 2 * 1024 * 1024);
+  } finally {
+    process.env.PATH = path;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
