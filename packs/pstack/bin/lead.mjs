@@ -37,8 +37,10 @@ const RUNS_TOKEN = '{{RUNS}}'; // in lead.md: the absolute runs folder, whose pa
 
 /** lead.md for one Lead: the form of its repository, its team, its Linear team key, the bin/seat its grant names and its runs folder.
  * With no `seat` (a MacBook Lead that does not run as the agents' user, #366) it takes the <!--noseat--> form, which starts no seat, and
- * names no bin/seat. Each value goes in as written (a function replacement, so no `$` in a path is read as a pattern). */
-export const roleFor = (text, { linear, team, seat = null, runs }) => formOf(roleOf(text, Boolean(linear)), seat ? 'seat' : 'noseat', seat ? 'noseat' : 'seat')
+ * names no bin/seat. With `here` (a `factory lead --here` Lead, whose shell runs in a sandbox, FAC-79) it takes the <!--here--> form, else the
+ * <!--nohere--> one. Each value goes in as written (a function replacement, so no `$` in a path is read as a pattern). */
+export const roleFor = (text, { linear, team, seat = null, runs, here = false }) => formOf(formOf(roleOf(text, Boolean(linear)), seat ? 'seat' : 'noseat', seat ? 'noseat' : 'seat'),
+  here ? 'here' : 'nohere', here ? 'nohere' : 'here')
   .replaceAll(TEAM_TOKEN, () => team).replaceAll(TEAM_KEY_TOKEN, () => linear?.key ?? '').replaceAll(SEAT_TOKEN, () => seat ?? '').replaceAll(RUNS_TOKEN, () => runs);
 
 /** The text with each span of `drop` taken out, markers included (a span that starts a line takes its line break with it), and the markers

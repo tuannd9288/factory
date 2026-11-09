@@ -106,7 +106,7 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    `FAIL` rounds, ask the Human. `scripts/ship` arms only a head whose newest reviewer record, on that head or one with
    the same patch, concludes `PASS`, so a commit that changes the change needs its own review.
 7. Run `.gate/bin/tier` in the worktree; it prints the tier, which you need before you write the body. Push from the
-   worktree (`cd <worktree>`, then `git push origin HEAD`), then run `scripts/ship --body-file <file>`. It takes one
+   worktree (`cd <worktree>`, then `git push origin HEAD`), then run <!--nohere-->`scripts/ship --body-file <file>`<!--/nohere--><!--here-->`factory ship --body-file <file>` there, the pack's ship outside your sandbox, for the factory's own repository alone<!--/here-->. It takes one
    step a run: run it again at once, run after run, until it says `armed`, stops, or that the draft stays one, and only
    then end the turn, naming what it waits on. On tier 3 the body opens with the template's `**Tóm tắt cho anh**` (#386, #411) and
    its three lines, Anh quyết, Đề xuất and Rủi ro, in Vietnamese plain words with the terms in English (PR, main,
@@ -115,7 +115,7 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    decision for the Human is numbered in Đề xuất, each with your recommendation; add a fourth line, "Nếu không trả
    lời" / "If no answer", only when silence has a consequence; on tier 1 and 2 leave both blocks out. Your detail goes
    below them, in the template's `<details>` block. When a later push makes the summary untrue, rewrite it in the same
-   turn with `scripts/pr-body <n> <file>`; do the same to add it when a pull request becomes tier 3 after it was
+   turn with <!--nohere-->`scripts/pr-body <n> <file>`<!--/nohere--><!--here-->`factory pr-body <n> <file>`<!--/here-->; do the same to add it when a pull request becomes tier 3 after it was
    opened (the reviewer's raise, a `needs-human` label). The body also carries <!--github-->`Closes #<n>`, so GitHub closes the issue on merge,
    `Issue: #<n>`, `Claim: <sha>` and `Team: {{TEAM}}`,<!--/github--><!--linear-->`Fixes <KEY>`, so Linear closes the issue on merge, `Issue: <KEY>`
    and `Team: {{TEAM}}` (and `Claim: <sha>`, once `.gate/bin/claim` takes a key),<!--/linear--> outside that block. When the
@@ -164,7 +164,7 @@ never answers a permission prompt, and you never treat it as one. It has one of 
   - `seat-no-result`: the seat ended without its result, or its process is gone after a restart: read its log in the run
     folder, then resume it in a fix round or report.
   - `checks-red`: read step 8's `gate-red` skill first.
-  - `checks-green`: on a draft, it only says the draft is green. Run `scripts/ship` in its worktree, which readies and arms it (FAC-55),
+  - `checks-green`: on a draft, it only says the draft is green. Run <!--nohere-->`scripts/ship`<!--/nohere--><!--here-->`factory ship`<!--/here--> in its worktree, which readies and arms it (FAC-55),
     only once its review has passed: step 6's reviewer `PASS`, or, where a supervisor accepts your pull requests, that acceptance. A pull
     request held for a fix or a review stays a draft. Otherwise nothing to run: an armed pull request merges by itself and a `merged`
     wake follows.
