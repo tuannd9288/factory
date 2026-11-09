@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from '../packs/pstack/bin/lead.mjs';
-import { main, noPushGitEnv } from '../bin/lib/factory.mjs';
+import { macbookGitEnv, main } from '../bin/lib/factory.mjs';
 import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
-import { mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
+import { gitReadsUnderConfig, mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
 import { HOST_ENV } from './helpers.mjs';
 
 /** Whether a Bash(...) rule matches a command, by the three rules of Claude Code's permissions page ("Wildcard patterns", read 2026-11-06):
@@ -66,18 +66,22 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
     // GitHub push URL rewritten to an unreachable one, so a push never uses his credential helper or SSH key.
     const push = 'url.file:///nonexistent/factory-lead-pushes-from-the-mac-mini/.pushInsteadOf';
     const gitPairs = Array.from({ length: Number(settings.env.GIT_CONFIG_COUNT) }, (_, i) => [settings.env[`GIT_CONFIG_KEY_${i}`], settings.env[`GIT_CONFIG_VALUE_${i}`]]);
-    assert.deepEqual(gitPairs, [['credential.helper', ''], [push, 'https://github.com/'], [push, 'git@github.com:'], [push, 'ssh://git@github.com/']]);
+    assert.deepEqual(gitPairs, [['credential.helper', ''], [push, 'https://github.com/'], [push, 'git@github.com:'], [push, 'ssh://git@github.com/'],
+      ['core.excludesFile', '/dev/null'], ['core.attributesFile', '/dev/null']]);
     assert.equal(settings.env.GIT_TERMINAL_PROMPT, '0');
     assert.match(settings.env.GIT_SSH_COMMAND, /git over ssh is off/);
-    for (const [key, value] of Object.entries(noPushGitEnv())) assert.equal(settings.env[key], value, key);
+    for (const [key, value] of Object.entries(macbookGitEnv(state))) assert.equal(settings.env[key], value, key);
+    // Its Read rules deny all of ~/.config, and Claude Code merges them into its sandbox, where git stops on a config file it may not
+    // read: its git reads none of its own files there (FAC-79).
+    assert.deepEqual(gitReadsUnderConfig(settings.env, state, state), []);
     // Its classifier is not told that a push is routine for it.
     assert.equal(settings.autoMode.environment[0], '$defaults');
     assert.ok(!settings.autoMode.environment.some((e) => /Pushes to them go/.test(e)), 'no source-control write is routine for Colly');
     assert.ok(settings.autoMode.environment.some((e) => /Colly pushes nothing/.test(e)));
     assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)']);
     // Its Read tool refuses each protected category and still reads what the work needs (FAC-38, INN-39).
-    // Its shell's sandbox is the sandbox's own denyRead with these Read rules merged in, as Claude Code merges them: it still reads git's
-    // settings under ~/.config while the named stores stay refused (FAC-79 (b)). The probe's home stands for the session's.
+    // Its shell's sandbox is the sandbox's own denyRead with these Read rules merged in, as Claude Code merges them: all of ~/.config stays
+    // refused there too (FAC-79). The probe's home stands for the session's.
     const w = probeWorld();
     try {
       const denyRead = settings.sandbox.filesystem.denyRead.map((p) => p.replace(state, w.home));

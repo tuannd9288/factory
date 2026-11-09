@@ -33,8 +33,7 @@ export const SCOPES = {
   'not-the-shell': { channels: ['file', 'kit', 'codex'], why: "a repository's tests may load its .env files in a seat's shell" },
   'factory-file-tools': {
     channels: ['file'],
-    roles: ['seat', 'lead'],
-    why: "all of ~/.config for the seats' and the pack Lead's file tools, as before; a sandbox, which the kit's rules reach too, would stop git, which reads ~/.config/git, so the shells, Codex and the kit name each store instead (INN-39, his question 1), and so do the MacBook Lead and Colly, whose Read rules Claude Code merges into their sandbox (FAC-79 (b))",
+    why: "all of ~/.config for the factory's own file tools, as before; a sandbox, which the kit's rules reach too, would stop git, which reads ~/.config/git, so the shells, Codex and the kit name each store instead (INN-39, his question 1). The MacBook Lead's and Colly's Read rules reach their sandbox too, so their git reads nothing under ~/.config (NO_XDG_GIT in bin/lib/factory.mjs, FAC-79)",
   },
   'seats-only': { channels: ['file'], roles: ['seat'], why: "a Lead's transcript copies are its own (#185)" },
 };
@@ -69,7 +68,7 @@ export const deniedBy = (entry, channel, role = null) => {
 const baseOf = (e) => e.base ?? 'home';
 const both = (p) => [`Read(${p})`, `Read(${p}/**)`];
 
-/** Claude Code's Read rules of `channel` (`file`, or `kit`) for `role` (`seat`, `lead`, `lead-here` for the MacBook Lead, or `colly`): a home entry as itself, which names a
+/** Claude Code's Read rules of `channel` (`file`, or `kit`) for `role` (`seat`, `lead` or `colly`): a home entry as itself, which names a
  * file such as ~/.claude.json, and with /**, which names what a folder holds; a work entry as ./<path>; a profiles entry under
  * ~/.agent-profiles. With `profiles`, the profiles folder by its absolute path too, whole and with its entries, for one outside home. */
 export const readRules = ({ channel = 'file', role = null, profiles = null } = {}) => [

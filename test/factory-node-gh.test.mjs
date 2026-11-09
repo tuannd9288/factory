@@ -60,7 +60,8 @@ console.log(process.env.FAKE_GH_BODY ?? JSON.stringify({ login: 'fake-agent', id
     const config = Array.from({ length: Number(settings.env.GIT_CONFIG_COUNT) }, (_, i) => [settings.env[`GIT_CONFIG_KEY_${i}`], settings.env[`GIT_CONFIG_VALUE_${i}`]]);
     assert.deepEqual(config[0], ['credential.helper', '']);
     assert.ok(!config.some(([key]) => key.includes('pushInsteadOf')));
-    assert.deepEqual(config.slice(2), [['url.https://github.com/.insteadOf', 'git@github.com:'], ['url.https://github.com/.insteadOf', 'ssh://git@github.com/']]);
+    assert.deepEqual(config.slice(2), [['url.https://github.com/.insteadOf', 'git@github.com:'], ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'],
+      ['core.excludesFile', '/dev/null'], ['core.attributesFile', '/dev/null']]);
     const helper = config[1][1].slice(1);
     const credentials = original('sh', ['-c', `${helper} get`], { env: { GH_TOKEN: token }, encoding: 'utf8' });
     assert.equal(credentials.status, 0);

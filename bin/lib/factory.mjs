@@ -473,8 +473,21 @@ const gitConfigEnv = (pairs) => ({
 
 /** The git fence of a factory session on this MacBook that holds no agents' GitHub token: a `--here` Lead without one (#366) and Colly,
  * always (#365 B8). No password prompt, ssh off (GIT_SSH_COMMAND), every credential helper emptied, and GitHub's push URLs rewritten to
- * an unreachable one (GIT_CONFIG), so a push can never use the Human's own credential helper or SSH key. Fetches are untouched. */
-export const noPushGitEnv = () => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, ...gitConfigEnv(GIT_CONFIG) });
+ * an unreachable one (GIT_CONFIG), so a push can never use the Human's own credential helper or SSH key. Fetches are untouched. `more`
+ * are git settings the caller adds. */
+export const noPushGitEnv = (more = []) => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, ...gitConfigEnv([...GIT_CONFIG, ...more]) });
+
+// The two files git looks for under ~/.config/git when no setting names them: none.
+const NO_XDG_GIT = [['core.excludesFile', '/dev/null'], ['core.attributesFile', '/dev/null']];
+
+/** git in a MacBook session, the `--here` Lead or Colly (FAC-79): their Read rules deny all of ~/.config, Claude Code merges them into
+ * their sandbox, and git stops on a config file it may not read and warns on its ignore and attributes files. So git reads nothing under
+ * ~/.config: ~/.gitconfig is its only global file (GIT_CONFIG_GLOBAL) and NO_XDG_GIT names its other two. With the agents' token
+ * (`token`), TOKEN_GIT; without it, the git fence (noPushGitEnv). */
+export const macbookGitEnv = (home, token = false) => ({
+  GIT_CONFIG_GLOBAL: join(home, '.gitconfig'),
+  ...(token ? { GIT_TERMINAL_PROMPT: '0', ...gitConfigEnv([...TOKEN_GIT, ...NO_XDG_GIT]) } : noPushGitEnv(NO_XDG_GIT)),
+});
 
 // What the auto-mode classifier of a MacBook Lead is told is inside its boundary (#366): it trusts only the working folder and its
 // remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat goes through
@@ -764,7 +777,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   const copy = { hooks: [{ type: 'command', command: `CLAUDE_CONFIG_DIR=${quote(config)} ${[process.execPath, transcriptHook, join(runDir, 'transcripts')].map(quote).join(' ')}` }] };
   // With the node's agents token, git pushes to GitHub over HTTPS with it: one credential helper for https://github.com that reads
   // $GH_TOKEN from the session's environment, and GitHub's ssh addresses rewritten to HTTPS. Without it, pushes stay blocked (GIT_CONFIG).
-  const gitConfig = token ? TOKEN_GIT : GIT_CONFIG;
+  // Either way git reads nothing under ~/.config (macbookGitEnv).
   const settings = {
     autoMode: { environment: autoModeEnvironment(seat) },
     hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },
@@ -774,7 +787,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     env: {
       GH_CONFIG_DIR: empty, ...(token ? {} : { GH_TOKEN: '' }), GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
-      ...(token ? { GIT_TERMINAL_PROMPT: '0', ...gitConfigEnv(gitConfig) } : noPushGitEnv()),
+      ...macbookGitEnv(env.HOME, Boolean(token)),
     },
     // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
     // env and printenv as for every role and seat (#181): the session's environment holds the team's Claude token and, with a stored
@@ -782,10 +795,10 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     // would start a seat as that user; FACTORY_HOST_NAME names the factory host's machine (placeOf). So none may carry either; nothing a
     // Lead runs needs them.
     // The session runs as the user of this Mac, so its Read tool is denied the paths no agent reads (bin/lib/deny-read.mjs: ssh, gh's login,
-    // Claude's and Codex's folders, the profiles, by their absolute path too), not only the profiles (FAC-38). Claude Code merges these rules
-    // into its sandbox, so of ~/.config they name the stores alone and git reads its own settings there (role lead-here); its own config folder is under
+    // Claude's and Codex's folders, all of ~/.config, the profiles, by their absolute path too), not only the profiles (FAC-38). Claude Code
+    // merges these rules into its sandbox, so its git reads nothing under ~/.config (macbookGitEnv); its own config folder is under
     // the profiles, already denied, which Claude Code reads itself and the Read tool never needs.
-    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...readRules({ profiles: agentProfiles, role: 'lead-here' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
+    permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...readRules({ profiles: agentProfiles, role: 'lead' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
     // Its shell runs in Claude Code's sandbox (FAC-79 (b)), as seatworks-v3 runs its Lead and the factory its seats. It writes the runs
     // folder too, where the pack Lead's --add-dir lets it write: its issues' run folders and worktrees, its seats' run folders and its own
     // transcripts. It reaches github.com alone, for git. gh, a Go program, fails TLS verification in a macOS sandbox
@@ -933,8 +946,8 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
     // Colly reaches the Mac mini by ssh (factory gh, bin/factory-events --follow), as a MacBook Lead does, but pushes nothing (#365 B8).
     autoMode: { environment: COLLY_AUTO_MODE_ENVIRONMENT },
     // No gh login of the Human's, and the git fence of a MacBook Lead with no agents' token: a push from Colly's pane never uses his
-    // credential helper or SSH key (#365 B8, H9 rule 3).
-    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '', ...noPushGitEnv() },
+    // credential helper or SSH key (#365 B8, H9 rule 3), and git reads nothing under ~/.config, which its Read rules deny (FAC-79).
+    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '', ...macbookGitEnv(env.HOME) },
     permissions: {
       defaultMode: 'auto',
       // Colly sees the accounts table on every node, which prints no token (#365, his requirement of 2026-11-06).

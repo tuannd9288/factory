@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tokenStoreDeny } from '../bin/lib/seat.mjs';
 import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
-import { mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
+import { gitReadsUnderConfig, mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
 import { freeWord, teamsOf } from '../bin/lib/team-names.mjs';
 import { HOST_ENV, factory } from './helpers.mjs';
 
@@ -113,16 +113,22 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
       GIT_COMMITTER_NAME: 'Agent Ánh', GIT_COMMITTER_EMAIL: 'agent.anh@example.invalid',
       GIT_TERMINAL_PROMPT: '0',
       GIT_SSH_COMMAND: "sh -c 'echo git over ssh is off for a MacBook Lead, pushes go from the Mac mini >&2; exit 1'",
-      GIT_CONFIG_COUNT: '4',
+      GIT_CONFIG_GLOBAL: join(s.home, '.gitconfig'),
+      GIT_CONFIG_COUNT: '6',
       GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
       GIT_CONFIG_KEY_1: push, GIT_CONFIG_VALUE_1: 'https://github.com/',
       GIT_CONFIG_KEY_2: push, GIT_CONFIG_VALUE_2: 'git@github.com:',
       GIT_CONFIG_KEY_3: push, GIT_CONFIG_VALUE_3: 'ssh://git@github.com/',
+      GIT_CONFIG_KEY_4: 'core.excludesFile', GIT_CONFIG_VALUE_4: '/dev/null',
+      GIT_CONFIG_KEY_5: 'core.attributesFile', GIT_CONFIG_VALUE_5: '/dev/null',
     });
-    assert.deepEqual(permissions.deny, [...tokenStoreDeny, ...readRules({ profiles: join(s.dir, 'profiles'), role: 'lead-here' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)']);
+    // Its Read rules deny all of ~/.config, and Claude Code merges them into its sandbox, where git stops on a config file it may not
+    // read: its git reads none of its own files there (FAC-79).
+    assert.deepEqual(gitReadsUnderConfig(env, s.home, s.dir), []);
+    assert.deepEqual(permissions.deny, [...tokenStoreDeny, ...readRules({ profiles: join(s.dir, 'profiles'), role: 'lead' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)']);
     // It runs as the user of this Mac: its Read tool refuses each protected category and still reads what the work needs (FAC-38, INN-39).
-    // Its shell's sandbox is the sandbox's own denyRead with these Read rules merged in, as Claude Code merges them: it still reads git's
-    // settings under ~/.config while the named stores stay refused (FAC-79 (b)). The probe's home stands for the session's.
+    // Its shell's sandbox is the sandbox's own denyRead with these Read rules merged in, as Claude Code merges them: all of ~/.config stays
+    // refused there too (FAC-79). The probe's home stands for the session's.
     const w = probeWorld();
     try {
       const denyRead = settingsOf(args).sandbox.filesystem.denyRead.map((p) => p.replace(s.home, w.home));
