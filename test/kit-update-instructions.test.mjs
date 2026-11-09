@@ -6,7 +6,7 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { commit, git, quiet, run } from './helpers.mjs';
+import { commit, factoryAt, git, quiet, run } from './helpers.mjs';
 import { world } from './world.mjs';
 import { FIVE, rulebook } from './instruction-fixtures.mjs';
 
@@ -33,14 +33,14 @@ function made({ seedFiles = {}, link = null } = {}) {
   git(w.repo, 'push', '-q', 'origin', 'main');
   return w;
 }
-/** The factory as a bare repository, for GATE_FACTORY_URL, at its present commits. */
+/** The factory as a bare repository, for factoryAt, at its present commits. */
 const bareOf = (w) => {
   const bare = join(w.dir, 'factory.git');
   git(w.dir, 'clone', '-q', '--bare', w.fac, bare);
   return bare;
 };
 const objects = (w, base, bare) =>
-  run(w.repo, process.execPath, [join(w.fac, 'kit/.gate/bin/lib/instructions.mjs'), 'objects', '--repo', w.repo, '--base', base, '--head', 'HEAD'], { GATE_FACTORY_URL: bare });
+  run(w.repo, process.execPath, [join(w.fac, 'kit/.gate/bin/lib/instructions.mjs'), 'objects', '--repo', w.repo, '--base', base, '--head', 'HEAD'], factoryAt(bare));
 
 describe('bin/kit-update replaces only the Gate block', () => {
   for (const [name, options, carrier] of [

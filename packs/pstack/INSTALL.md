@@ -31,8 +31,8 @@ auto-merge once `verify` passed on its head and it has no conflict, and the queu
 holds that landing, which the queue's merge of `main` into it brings (INN-38 A, 2026-11-07 07:33:46 +07).
 
 A repository that copied `scripts/ship` before FAC-55 copies it again, step 1, in a pack refresh pull request: the queue readies no
-draft now, and an older copy cannot ready one. A kit older than the one whose `.gate/bin/lib/subject.mjs` exports `titleProblem`, which
-`ship` imports, is brought up first with `bin/kit-update`.
+draft now, and an older copy cannot ready one. `ship` imports the kit's `.gate/bin/lib/subject.mjs` (its `titleProblem`) and
+`.gate/bin/lib/gh.mjs` (FAC-85): a kit older than the one that has both is brought up first with `bin/kit-update`, or `ship` fails at load.
 
 ## The live verifier's login
 

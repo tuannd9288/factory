@@ -44,7 +44,7 @@
 # is fetched, and a fetch that fails is red; onboard and kit-update ask the same of origin/main), holds that block, is not older
 # than the base's, and leaves the tail and CLAUDE.md as they were. A deliberate roll back of the kit is refused by that rule; it
 # waits until the factory's main has moved on. A block that main reverted later still passes while it is not older than the
-# base's. The variable GATE_FACTORY_URL is for tests and takes only an absolute local folder.
+# base's.
 # FACTORY_ROOT (default: this clone) is where repositories live; FACTORY_HUMAN (default: tuannd9288) is the code owner
 # of tier 3; FACTORY_AGENT (default: nami9288) the agents' account.
 set -euo pipefail
