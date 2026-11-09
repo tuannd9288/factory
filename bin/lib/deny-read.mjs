@@ -11,15 +11,21 @@
 //     file    Claude Code's file tools (Read rules) in the factory's own sessions: every seat role, both Leads, Colly
 //     kit     Claude Code's file tools in a served repository's sessions (kit/.claude/settings.json), which Claude Code also merges into the
 //             sandbox of a session there
-//     shell   the seats' command sandbox (Claude Code's sandbox.filesystem.denyRead)
+//     shell   Claude Code's command sandbox (sandbox.filesystem.denyRead) of the seats, the MacBook Lead and Colly
 //     codex   Codex's permission profile, which binds its commands, its only way to read
-//   Residual gaps the list does not close: the Read rules bind Claude Code's file tools, so a Lead's or Colly's shell, which runs in no
-//   sandbox, and a hook or an MCP server of any session read what the user can read; `factory codex`, where a seat is granted it, runs
-//   Codex outside Claude's sandbox, bounded by this list through another enforcer. A command a sandbox excludes (sandbox.excludedCommands)
-//   runs with no filesystem restriction, so an exclusion is a gap until a probe shows it bounded (the excluded command chained with a read
-//   of a synthetic denied file, which must be refused); naming a factory command does not bound it, since every verb and every program a
-//   verb runs would read what the user reads. The seats exclude none and set allowUnsandboxedCommands false (their sandbox object is
-//   pinned whole in test/seat-sandbox.test.mjs), but a work folder's own .claude/settings.json is a settings layer too.
+//   Residual gaps the list does not close: the Read rules bind Claude Code's file tools, so the pack Lead's shell, which runs in no
+//   sandbox, and a hook, an MCP server or the status line of any session read what the user can read; `factory codex`, where a seat is
+//   granted it, runs Codex outside Claude's sandbox, bounded by this list through another enforcer. A command a sandbox excludes
+//   (sandbox.excludedCommands) runs with no filesystem restriction, so an exclusion is a gap until a probe shows it bounded (the excluded
+//   command chained with a read of a synthetic denied file, which must be refused); naming a factory command does not bound it, since every
+//   verb and every program a verb runs would read what the user reads. The seats exclude none and set allowUnsandboxedCommands false (their
+//   sandbox object is pinned whole in test/seat-sandbox.test.mjs), but a work folder's own .claude/settings.json is a settings layer too.
+//   Open gaps of the MacBook Lead's and Colly's sandboxes (bin/lib/factory.mjs), each until its probe shows it bounded:
+//     `factory *` (both): every verb runs with full access, Colly's Monitors (`factory events`) among them; the permission rules
+//       (tokenStoreDeny and Colly's denies) are the only guard left on the verbs that touch the token store, and `factory gh`, with the
+//       agents' GitHub token in this node's store, sends a local file it is given.
+//     `<bin/seat> *` (the MacBook Lead as the agents' user): bin/seat reads the tokens by design, and it takes any file as the brief, so a
+//       brief outside the work and run folders reaches the model; the probe is a seat started on a synthetic denied file.
 //   Not here: commands (`Bash(...)` rules, bin/lib/seat.mjs).
 export const SCOPES = {
   all: { channels: ['file', 'kit', 'shell', 'codex'], why: 'a credential or a login: no channel reads it' },
@@ -27,7 +33,7 @@ export const SCOPES = {
   'not-the-shell': { channels: ['file', 'kit', 'codex'], why: "a repository's tests may load its .env files in a seat's shell" },
   'factory-file-tools': {
     channels: ['file'],
-    why: "all of ~/.config for the factory's own file tools, as before; a sandbox, which the kit's rules reach too, would stop git, which reads ~/.config/git, so the shells, Codex and the kit name each store instead (INN-39, his question 1)",
+    why: "all of ~/.config for the factory's own file tools, as before; a sandbox, which the kit's rules reach too, would stop git, which reads ~/.config/git, so the shells, Codex and the kit name each store instead (INN-39, his question 1). The MacBook Lead's and Colly's Read rules reach their sandbox too, so their git reads nothing under ~/.config (NO_XDG_GIT in bin/lib/factory.mjs, FAC-79)",
   },
   'seats-only': { channels: ['file'], roles: ['seat'], why: "a Lead's transcript copies are its own (#185)" },
 };

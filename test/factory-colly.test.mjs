@@ -9,9 +9,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from '../packs/pstack/bin/lead.mjs';
-import { main, noPushGitEnv } from '../bin/lib/factory.mjs';
-import { readRules } from '../bin/lib/deny-read.mjs';
-import { mismatches, probeWorld, refusedRead } from './deny-probe.mjs';
+import { macbookGitEnv, main } from '../bin/lib/factory.mjs';
+import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
+import { gitReadsUnderConfig, mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
 import { HOST_ENV } from './helpers.mjs';
 
 /** Whether a Bash(...) rule matches a command, by the three rules of Claude Code's permissions page ("Wildcard patterns", read 2026-11-06):
@@ -66,19 +66,29 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
     // GitHub push URL rewritten to an unreachable one, so a push never uses his credential helper or SSH key.
     const push = 'url.file:///nonexistent/factory-lead-pushes-from-the-mac-mini/.pushInsteadOf';
     const gitPairs = Array.from({ length: Number(settings.env.GIT_CONFIG_COUNT) }, (_, i) => [settings.env[`GIT_CONFIG_KEY_${i}`], settings.env[`GIT_CONFIG_VALUE_${i}`]]);
-    assert.deepEqual(gitPairs, [['credential.helper', ''], [push, 'https://github.com/'], [push, 'git@github.com:'], [push, 'ssh://git@github.com/']]);
+    assert.deepEqual(gitPairs, [['credential.helper', ''], [push, 'https://github.com/'], [push, 'git@github.com:'], [push, 'ssh://git@github.com/'],
+      ['core.excludesFile', '/dev/null'], ['core.attributesFile', '/dev/null']]);
     assert.equal(settings.env.GIT_TERMINAL_PROMPT, '0');
     assert.match(settings.env.GIT_SSH_COMMAND, /git over ssh is off/);
-    for (const [key, value] of Object.entries(noPushGitEnv())) assert.equal(settings.env[key], value, key);
+    for (const [key, value] of Object.entries(macbookGitEnv(state))) assert.equal(settings.env[key], value, key);
+    // Its Read rules deny all of ~/.config, and Claude Code merges them into its sandbox, where git stops on a config file it may not
+    // read: its git reads none of its own files there (FAC-79).
+    assert.deepEqual(gitReadsUnderConfig(settings.env, state, state), []);
     // Its classifier is not told that a push is routine for it.
     assert.equal(settings.autoMode.environment[0], '$defaults');
     assert.ok(!settings.autoMode.environment.some((e) => /Pushes to them go/.test(e)), 'no source-control write is routine for Colly');
     assert.ok(settings.autoMode.environment.some((e) => /Colly pushes nothing/.test(e)));
     assert.deepEqual(settings.permissions.allow, ['Bash(factory use:*)', 'Bash(bin/factory use:*)', 'Bash(factory lead:*)', 'Bash(bin/factory lead:*)', 'Bash(factory account list:*)', 'Bash(bin/factory account list:*)']);
     // Its Read tool refuses each protected category and still reads what the work needs (FAC-38, INN-39).
+    // Its shell's sandbox is the sandbox's own denyRead with these Read rules merged in, as Claude Code merges them: all of ~/.config stays
+    // refused there too (FAC-79). The probe's home stands for the session's.
     const w = probeWorld();
     try {
-      assert.deepEqual(mismatches({ 'colly file': (p) => refusedRead(settings.permissions.deny, p, w) }, w), []);
+      const denyRead = settings.sandbox.filesystem.denyRead.map((p) => p.replace(state, w.home));
+      assert.deepEqual(mismatches({
+        'colly file': (p) => refusedRead(settings.permissions.deny, p, w),
+        'colly shell': (p) => refusedRead(settings.permissions.deny, p, w) || refusedSandbox(denyRead, p),
+      }, w), []);
     } finally {
       w.done();
     }
@@ -96,6 +106,14 @@ test('colly isolates GitHub and git, grants use, lead and account list, and runs
       assert.ok(allowed(command), command);
     for (const command of ['factory account add colly', 'factory account remove ann', 'factory store ann', 'bin/factory account add ann --node macbook', 'node bin/lib/factory.mjs account remove ann', 'node bin/lib/factory.mjs store ann'])
       assert.ok(deny.some((r) => bashMatches(r, command)), command);
+    // Its shell runs in Claude Code's sandbox with no network (FAC-79 (b)): it reads none of the list's shell paths, writes only its folder
+    // and the temporary folder, and runs only `factory` outside it, its Monitors (`factory events`) included.
+    assert.deepEqual(settings.sandbox, {
+      enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false,
+      filesystem: { denyRead: sandboxPaths(state, join(state, '.agent-profiles')), allowWrite: [process.cwd(), fs.realpathSync(tmpdir())] },
+      network: { strictAllowlist: true, allowedDomains: [], allowLocalBinding: false },
+      excludedCommands: ['factory *'],
+    });
     result = { status: 7 };
     assert.equal(await main(['colly'], env), 7);
     result = { error: { code: 'ENOENT' } };
@@ -257,5 +275,25 @@ test('colly supplies the brief and status line, records its socket, and reuses t
     t.mock.restoreAll();
     syncBuiltinESMExports();
     fs.rmSync(state, { recursive: true, force: true });
+  }
+});
+
+test('Colly\'s MacBook Monitor, events --local, follows the fixed share here, and is refused on the Mac mini (FAC-79 (b))', async (t) => {
+  const calls = [];
+  t.mock.method(childProcess, 'spawnSync', (cmd, args) => {
+    calls.push({ cmd, args });
+    return { status: 0 };
+  });
+  t.mock.method(console, 'error', () => {});
+  syncBuiltinESMExports();
+  try {
+    const env = { HOME: '/nonexistent-home', FACTORY_HOST_USER: 'nobody-here' };
+    assert.equal(await main(['events', '--follow', '--local', '--after', '3'], env), 0);
+    assert.deepEqual(calls, [{ cmd: fileURLToPath(new URL('../bin/factory-events', import.meta.url)), args: ['--follow', '--file', '/Users/Shared/factory/events.jsonl', '--after', '3'] }]);
+    assert.equal(await main(['events', '--follow', '--local'], { ...env, ...HOST_ENV }), 2);
+    assert.equal(calls.length, 1);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
   }
 });

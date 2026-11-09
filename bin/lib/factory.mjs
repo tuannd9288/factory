@@ -18,15 +18,16 @@ import { readClaude } from './claude-code.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
 export { readClaude };
-import { HOST, TOKEN_GIT, agentOf, installedRoot, isAgentsUser, nodeGithubToken, placeOf } from './node.mjs';
+import { HOST, TOKEN_GIT, agentOf, gitEnv, installedRoot, isAgentsUser, nodeGithubToken, nodeLogin, placeOf } from './node.mjs';
 import { lastStatusLine, quotaRows } from './quota.mjs';
 import { alive, post, wakeLine } from './wake.mjs';
-import { accountEvent, accountOut, liveOfAccount, resetPassed, tokenStoreDeny } from './seat.mjs';
+import { MACBOOK_SHARE } from './events.mjs';
+import { accountEvent, accountOut, liveOfAccount, resetPassed, sandboxSettings, tokenStoreDeny } from './seat.mjs';
 import { readRules } from './deny-read.mjs';
 import { markOnboarded, quote, roleFor, copyHook } from '../../packs/pstack/bin/lead.mjs';
 import { onLinear } from './linear-repos.mjs';
 import { TEAM, parseTeam } from './names.mjs';
-import { FACTORY_REPO, repoOk } from './repos.mjs';
+import { FACTORY_REPO, githubRepo, repoOk } from './repos.mjs';
 import { teamRows } from './teams.mjs';
 import { pickTeam } from './team-names.mjs';
 import { leadTeams } from './colly-status.mjs';
@@ -512,7 +513,9 @@ const USAGE = `usage: bin/factory account list [--all] [--json]
        bin/factory gh <gh arguments>   (under the agents' login: here, with this node's stored agents GitHub token; otherwise, on the MacBook, on the Mac mini)
        bin/factory linear take|release|accept|decline|duplicate|read|list|comment|ask|answered|create|onboard ...   (a Lead's Linear steps, #404; here when this node's store holds the Factory app's credentials, else on the Mac mini, a body on stdin; decision-create and decision-close always on the Mac mini)
        bin/factory codex --role <role> [--effort <e>] [--write <folder>]   (a pstack step on another model family, on Codex, #182; the brief on stdin)
-       bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)`;
+       bin/factory wake <repo> --issue <n> [--team <name>]   (wakes the Lead of a team that holds the issue, with no keys typed into its pane; on the MacBook, by ssh unless its own Lead runs there)
+       bin/factory events --follow [--local] [--after <seq>]   (Colly's Monitor on the events: the Mac mini's, by ssh from the MacBook; with --local, this MacBook's share)
+       bin/factory ship [<ship's arguments>] | pr-body <n> <file>   (the pack's ship or pr-body here, outside a --here Lead's sandbox, in a clone of tuannd9288/factory alone)`;
 
 /** On the MacBook: the same `factory <sub> <args>` on the Mac mini, in a login shell over ssh, on this terminal's own streams;
  * -t asks for a terminal of its own. The exit code is the remote command's. */
@@ -622,8 +625,21 @@ const gitConfigEnv = (pairs) => ({
 
 /** The git fence of a factory session on this MacBook that holds no agents' GitHub token: a `--here` Lead without one (#366) and Colly,
  * always (#365 B8). No password prompt, ssh off (GIT_SSH_COMMAND), every credential helper emptied, and GitHub's push URLs rewritten to
- * an unreachable one (GIT_CONFIG), so a push can never use the Human's own credential helper or SSH key. Fetches are untouched. */
-export const noPushGitEnv = () => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, ...gitConfigEnv(GIT_CONFIG) });
+ * an unreachable one (GIT_CONFIG), so a push can never use the Human's own credential helper or SSH key. Fetches are untouched. `more`
+ * are git settings the caller adds. */
+export const noPushGitEnv = (more = []) => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, ...gitConfigEnv([...GIT_CONFIG, ...more]) });
+
+// The two files git looks for under ~/.config/git when no setting names them: none.
+const NO_XDG_GIT = [['core.excludesFile', '/dev/null'], ['core.attributesFile', '/dev/null']];
+
+/** git in a MacBook session, the `--here` Lead or Colly (FAC-79): their Read rules deny all of ~/.config, Claude Code merges them into
+ * their sandbox, and git stops on a config file it may not read and warns on its ignore and attributes files. So git reads nothing under
+ * ~/.config: ~/.gitconfig is its only global file (GIT_CONFIG_GLOBAL) and NO_XDG_GIT names its other two. With the agents' token
+ * (`token`), TOKEN_GIT; without it, the git fence (noPushGitEnv). */
+export const macbookGitEnv = (home, token = false) => ({
+  GIT_CONFIG_GLOBAL: join(home, '.gitconfig'),
+  ...(token ? { GIT_TERMINAL_PROMPT: '0', ...gitConfigEnv([...TOKEN_GIT, ...NO_XDG_GIT]) } : noPushGitEnv(NO_XDG_GIT)),
+});
 
 // What the auto-mode classifier of a MacBook Lead is told is inside its boundary (#366): it trusts only the working folder and its
 // remotes by default, so it refused `ssh factory@<host>` on 2026-11-06, and every `factory gh`, `factory linear` and seat goes through
@@ -633,7 +649,7 @@ export const noPushGitEnv = () => ({ GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND, 
 const autoModeEnvironment = (seat) => [
   '$defaults',
   `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). This Lead runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (linear, wake, account list, and gh while this MacBook holds no agents' GitHub token), and reads of that account's git settings.`,
-  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear runs on this MacBook itself when its own token store holds the Factory app's credentials, otherwise on ${HOST} over that ssh, and Colly's decision-create and decision-close always run on ${HOST}; factory wake runs on ${HOST} over that ssh. factory use and factory account add are the Human's, never this Lead's.${seat ? ` ${seat}, of this MacBook's installed copy of the factory, starts this Lead's workers and reviewers on this MacBook, on the team's own account.` : ''}`,
+  `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login: on this MacBook itself when its own token store holds the agents' GitHub token, otherwise on ${HOST} over ssh factory@${HOST}. factory linear runs on this MacBook itself when its own token store holds the Factory app's credentials, otherwise on ${HOST} over that ssh, and Colly's decision-create and decision-close always run on ${HOST}; factory wake runs on ${HOST} over that ssh. factory ship and factory pr-body run the pack's ship and pr-body on this MacBook, as the agents, for the pull requests of tuannd9288/factory alone: ship opens, readies and arms one for auto-merge, pr-body rewrites its body. factory use and factory account add are the Human's, never this Lead's.${seat ? ` ${seat}, of this MacBook's installed copy of the factory, starts this Lead's workers and reviewers on this MacBook, on the team's own account.` : ''}`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it; the factory's Leads read and write their issues and pull requests through factory gh. Pushes to them go over HTTPS as the agents' GitHub account: from this MacBook when it holds the agents' GitHub token, otherwise from ${HOST}.`,
 ];
 
@@ -642,7 +658,7 @@ const autoModeEnvironment = (seat) => [
 // the built-in entries.
 const COLLY_AUTO_MODE_ENVIRONMENT = [
   '$defaults',
-  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). Colly, the Human's own assistant on this MacBook, runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list) and its watch of the factory's events with /Users/factory/WORKSPACES/bin/factory-events --follow. It also watches this MacBook's own events with ~/.local/share/factory/checkout/bin/factory-events --follow --file /Users/Shared/factory/events.jsonl, which only reads the share the MacBook's daemon writes.`,
+  `Key internal services: the factory host ${HOST}, the Human's own Mac mini, reached over ssh as factory@${HOST} (factory is the agents' macOS account there). Colly, the Human's own assistant on this MacBook, runs its routine work there through that ssh: the factory's own command ~/WORKSPACES/bin/factory (gh, linear, wake, account list, events), its watch of the factory's events among them, which it starts with factory events --follow. It also watches this MacBook's own events with factory events --follow --local, which only reads the share the MacBook's daemon writes.`,
   `Org-specific CLIs: factory, the factory's own command (bin/factory of this checkout). factory gh runs gh under the agents' GitHub login, on ${HOST} over ssh factory@${HOST}, or on this MacBook itself when its token store holds the agents' GitHub token; factory linear runs on this MacBook itself when its token store holds the Factory app's credentials, else on ${HOST}, and decision-create and decision-close always run on ${HOST}; factory wake runs on ${HOST}. On the Human's spoken word Colly runs factory use and factory lead; factory account add, factory account remove and factory store are the Human's, never Colly's.`,
   `Source control: github.com/tuannd9288, the Human's GitHub account, and every repository under it. Colly reads them, and reads and writes their issues and pull requests only through factory gh, as the agents. Colly pushes nothing and makes no source-control write of its own: its git cannot push to GitHub, and a git push, a force push, or a branch or tag write by Colly is never routine.`,
 ];
@@ -703,6 +719,79 @@ async function wake(args, env) {
   return 1;
 }
 
+/** `factory events --follow [--local] [--after <seq>]` (FAC-79 (b)): Colly's two Monitors on the events, so that Colly's sandbox excludes
+ * them as `factory *` and no raw ssh line, whose words the Mac mini's shell would run. It adds nothing to bin/factory-events: from the
+ * MacBook, `factory events --follow` on the Mac mini by ssh (remote), which there runs bin/factory-events --follow on its own events; with
+ * --local, bin/factory-events --follow on this MacBook's share, the fixed MACBOOK_SHARE. Only these words pass, each once, and --after only
+ * with a whole number, so no text of the caller's reaches a shell; anything else is refused in one line before ssh runs. */
+function events(args, env) {
+  const seen = new Set();
+  let after = null;
+  let ok = true;
+  for (let i = 0; i < args.length && ok; i++) {
+    const flag = args[i];
+    ok = ['--follow', '--local', '--after'].includes(flag) && !seen.has(flag);
+    seen.add(flag);
+    if (ok && flag === '--after') {
+      after = args[++i] ?? '';
+      ok = /^\d+$/.test(after) && Number.isSafeInteger(Number(after));
+    }
+  }
+  if (!ok || !seen.has('--follow')) {
+    console.error('bin/factory: events takes --follow, and --local and --after <a whole number>, each once');
+    return 2;
+  }
+  const local = seen.has('--local');
+  const onHost = placeOf(env) === 'factory';
+  if (local && onHost) {
+    console.error('bin/factory: events --local reads the MacBook\'s share; on the Mac mini use factory events --follow');
+    return 2;
+  }
+  const rest = after === null ? [] : ['--after', after];
+  if (!local && !onHost) return remote('events', ['--follow', ...rest], env);
+  const r = spawnSync(fileURLToPath(new URL('../factory-events', import.meta.url)), ['--follow', ...(local ? ['--file', MACBOOK_SHARE] : []), ...rest], { stdio: 'inherit', env });
+  if (r.error) {
+    console.error(`bin/factory: events: bin/factory-events did not run (${r.error.code ?? 'error'})`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
+// The only repository `factory ship` and `factory pr-body` act on: a constant of this file, which the --here Lead's sandbox cannot write.
+const FACTORY_GITHUB = `tuannd9288/${FACTORY_REPO}`;
+// Every git call they make or start: no hooks and no fsmonitor, so no program the working folder names runs outside the sandbox through git.
+const SHIP_GIT = [['core.hooksPath', '/dev/null'], ['core.fsmonitor', 'false']];
+
+/** `factory ship [<ship's arguments>]` and `factory pr-body <n> <file>` (FAC-79): the pack's scripts/ship or scripts/pr-body beside this
+ * bin/factory, the installed copy's when `factory` is the one bin/install-factory put on the PATH (no variable moves it, as FACTORY_CHECKOUT
+ * moves installedRoot), run in the working folder outside the --here Lead's sandbox, which excludes `factory *`, with this node's agents
+ * login (nodeLogin). The factory's own repository alone: the caller's GIT_* variables but the commit identity, and its GH_* ones, are
+ * dropped, so neither GIT_DIR nor GIT_CONFIG_COUNT moves git and no GH_REPO or GH_HOST moves gh; then every URL git reads for the working
+ * folder's origin (insteadOf applied, as a fetch uses it) must be FACTORY_GITHUB, else it refuses before any token is read; and gh gets
+ * GH_REPO=FACTORY_GITHUB, so it never picks another remote of the folder (gh prefers `upstream` to `origin`). git runs with SHIP_GIT, no
+ * lazy fetch and https alone. Its arguments go to the script unread; exit 2 on a refusal, else the script's code. */
+function packScript(name, args, env) {
+  const own = Object.fromEntries(Object.entries(env).filter(([k]) => !/^(GIT_|GH_|GITHUB_)/.test(k) || /^GIT_(AUTHOR|COMMITTER)_/.test(k)));
+  const fence = { GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: 'https', GH_REPO: FACTORY_GITHUB };
+  const got = spawnSync('git', ['remote', 'get-url', '--all', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...own, ...fence, ...gitEnv(SHIP_GIT) } });
+  const urls = got.status === 0 ? got.stdout.split('\n').filter(Boolean) : [];
+  if (!urls.length || !urls.every((u) => githubRepo(u)?.toLowerCase() === FACTORY_GITHUB)) {
+    console.error(`bin/factory: ${name}: runs only in a clone of ${FACTORY_GITHUB}; this folder's origin is ${urls.map((u) => githubRepo(u) ?? 'not on GitHub').join(', ') || 'none'}`);
+    return 2;
+  }
+  const login = nodeLogin(env, contextOf(env).state, SHIP_GIT);
+  if (login.refusal) {
+    console.error(`bin/factory: ${name}: ${login.refusal}`);
+    return 2;
+  }
+  const r = spawnSync(fileURLToPath(new URL(`../../packs/pstack/scripts/${name}`, import.meta.url)), args, { stdio: 'inherit', env: { ...own, ...login.env, ...fence } });
+  if (r.error) {
+    console.error(`bin/factory: ${name}: packs/pstack/scripts/${name} did not run (${r.error.code ?? 'error'})`);
+    return 1;
+  }
+  return r.status ?? 1;
+}
+
 /** Copies bin/lib/<name>.mjs (socket-hook, statusline-hook) to <dir>/<name>-<sha7 of its bytes>.mjs unless a copy is there (reused, never
  * written again), and returns the path. A changed script has another name, so an earlier copy stays for the Leads that run it; each
  * imports only node: modules. */
@@ -732,6 +821,15 @@ function markTrusted(config, folder) {
   const mode = statSync(file).mode & 0o777;
   writeAtomic(file, `${JSON.stringify({ ...json, projects: { ...projects, [folder]: { ...entry, hasTrustDialogAccepted: true } } }, null, 2)}\n`, { mode });
 }
+
+/** Claude Code's own sandbox for a session the factory starts in this terminal (FAC-79 (b)): the seats' block (bin/lib/seat.mjs,
+ * sandboxSettings), so its shell reads none of bin/lib/deny-read.mjs's shell paths nor the profiles folder, writes only the working folder,
+ * `writes` and the temporary folder besides Claude Code's defaults, reaches only `hosts` through the sandbox's proxy, and runs only
+ * `excluded` outside it. Each excluded command runs with full access: an open gap, named in bin/lib/deny-read.mjs's header. */
+const hereSandbox = ({ home, cwd, profiles, writes = null, hosts = [], excluded }) => {
+  const base = sandboxSettings({ home, run: writes, work: cwd, profiles: resolve(profiles) });
+  return { ...base, excludedCommands: excluded, network: { ...base.network, allowedDomains: hosts } };
+};
 
 /** `factory lead <repo> --here [--team <name>] [-- <claude arguments>]` (#349), on the MacBook: `claude` in this terminal and folder
  * as the Lead of the repository, with the Human's GitHub login out of its reach. Through `--settings`, whose `env` reaches every
@@ -790,7 +888,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   let roleText;
   try {
     const linear = onLinear(repo, state);
-    roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat, runs: contextOf(env).runs }) : '';
+    roleText = existsSync(rolePath) ? roleFor(readFileSync(rolePath, 'utf8'), { linear, team, seat, runs: contextOf(env).runs, here: true }) : '';
   } catch (e) {
     console.error(`bin/factory: lead --here: ${e.message}`);
     return 2;
@@ -831,7 +929,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
   const copy = { hooks: [{ type: 'command', command: `CLAUDE_CONFIG_DIR=${quote(config)} ${[process.execPath, transcriptHook, join(runDir, 'transcripts')].map(quote).join(' ')}` }] };
   // With the node's agents token, git pushes to GitHub over HTTPS with it: one credential helper for https://github.com that reads
   // $GH_TOKEN from the session's environment, and GitHub's ssh addresses rewritten to HTTPS. Without it, pushes stay blocked (GIT_CONFIG).
-  const gitConfig = token ? TOKEN_GIT : GIT_CONFIG;
+  // Either way git reads nothing under ~/.config (macbookGitEnv).
   const settings = {
     autoMode: { environment: autoModeEnvironment(seat) },
     hooks: { SessionStart: [...record, copy], SessionEnd: [...record, copy], Stop: [copy], UserPromptSubmit: [copy], Notification: [copy] },
@@ -841,7 +939,7 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     env: {
       GH_CONFIG_DIR: empty, ...(token ? {} : { GH_TOKEN: '' }), GITHUB_TOKEN: '',
       GIT_AUTHOR_NAME: id.name, GIT_AUTHOR_EMAIL: id.email, GIT_COMMITTER_NAME: id.name, GIT_COMMITTER_EMAIL: id.email,
-      ...(token ? { GIT_TERMINAL_PROMPT: '0', ...gitConfigEnv(gitConfig) } : noPushGitEnv()),
+      ...macbookGitEnv(env.HOME, Boolean(token)),
     },
     // defaultMode repeats the start mode, as agent-orchestrator does for an explicit mode, so Claude Code never offers to make auto the default.
     // env and printenv as for every role and seat (#181): the session's environment holds the team's Claude token and, with a stored
@@ -849,9 +947,20 @@ function leadHere(repo, team, passed, env, cwd = process.cwd()) {
     // would start a seat as that user; FACTORY_HOST_NAME names the factory host's machine (placeOf). So none may carry either; nothing a
     // Lead runs needs them.
     // The session runs as the user of this Mac, so its Read tool is denied the paths no agent reads (bin/lib/deny-read.mjs: ssh, gh's login,
-    // Claude's and Codex's folders, the profiles, by their absolute path too), not only the profiles (FAC-38); its own config folder is under
+    // Claude's and Codex's folders, all of ~/.config, the profiles, by their absolute path too), not only the profiles (FAC-38). Claude Code
+    // merges these rules into its sandbox, so its git reads nothing under ~/.config (macbookGitEnv); its own config folder is under
     // the profiles, already denied, which Claude Code reads itself and the Read tool never needs.
     permissions: { defaultMode: 'auto', ...(seat ? { allow: [`Bash(${seat}:*)`] } : {}), deny: [...tokenStoreDeny, ...readRules({ profiles: agentProfiles, role: 'lead' }), 'Bash(env:*)', 'Bash(printenv:*)', 'Bash(gh auth:*)', 'Bash(security:*)', 'Bash(/usr/bin/security:*)', 'Bash(*FACTORY_HOST_USER*)', 'Bash(*FACTORY_HOST_NAME*)'] },
+    // Its shell runs in Claude Code's sandbox (FAC-79 (b)), as seatworks-v3 runs its Lead and the factory its seats. It writes the runs
+    // folder too, where the pack Lead's --add-dir lets it write: its issues' run folders and worktrees, its seats' run folders and its own
+    // transcripts. It reaches github.com alone, for git. gh, a Go program, fails TLS verification in a macOS sandbox
+    // (code.claude.com/docs/en/sandboxing), so every gh the Lead runs goes through `factory` (`factory gh`, `factory ship`, `factory pr-body`,
+    // FAC-79), as does its ssh to the Mac mini, which the sandbox refuses; a Lead that starts seats runs bin/seat, which reads the tokens by
+    // design: both run outside it.
+    sandbox: hereSandbox({
+      home: env.HOME, cwd, profiles: agentProfiles, writes: contextOf(env).runs, hosts: ['github.com'],
+      excluded: ['factory *', ...(seat ? [`${seat} *`] : [])],
+    }),
   };
   // Keep every session beside the wake socket so a restored pane can recover its team and working folder (#366).
   const sessionFlag = passed.includes('--resume') ? '--resume' : '--session-id';
@@ -989,8 +1098,8 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
     // Colly reaches the Mac mini by ssh (factory gh, bin/factory-events --follow), as a MacBook Lead does, but pushes nothing (#365 B8).
     autoMode: { environment: COLLY_AUTO_MODE_ENVIRONMENT },
     // No gh login of the Human's, and the git fence of a MacBook Lead with no agents' token: a push from Colly's pane never uses his
-    // credential helper or SSH key (#365 B8, H9 rule 3).
-    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '', ...noPushGitEnv() },
+    // credential helper or SSH key (#365 B8, H9 rule 3), and git reads nothing under ~/.config, which its Read rules deny (FAC-79).
+    env: { GH_CONFIG_DIR: empty, GH_TOKEN: '', GITHUB_TOKEN: '', ...macbookGitEnv(env.HOME) },
     permissions: {
       defaultMode: 'auto',
       // Colly sees the accounts table on every node, which prints no token (#365, his requirement of 2026-11-06).
@@ -1005,6 +1114,9 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
         'Bash(*lib/factory.mjs account add*)', 'Bash(*lib/factory.mjs account remove*)', 'Bash(*lib/factory.mjs store*)',
       ],
     },
+    // Its shell runs in Claude Code's sandbox with no network (FAC-79 (b)). `factory` reaches the Mac mini by ssh, which the sandbox refuses,
+    // and writes the state folder, as its Monitors do (`factory events`), so `factory` alone runs outside it.
+    sandbox: hereSandbox({ home: env.HOME, cwd: process.cwd(), profiles: agentProfiles, excluded: ['factory *'] }),
   };
   // /login is the only sign-in: no token or key from the caller's shell, and no other profile's plugin cache.
   const childEnv = { ...env, CLAUDE_CONFIG_DIR: config };
@@ -1020,6 +1132,24 @@ else process.stderr.write(r.stderr || 'factory colly --brief failed\\n');`;
 // A word that starts with `=` is never bare: zsh would read it as a command's path.
 const SAFE_WORD = /^[A-Za-z0-9_.,:/@%+-][A-Za-z0-9_.,:/=@%+-]*$/;
 
+const GH_STDIN = 'pass it on stdin with - (--body-file -, --input -) or @- (-F name=@-)';
+
+/** A body named as a file (FAC-79 (b)): a call that pipes or redirects a body into `factory` stays in Claude Code's sandbox, where `factory`
+ * reaches neither ssh nor Linear, so a Lead or Colly writes the body with its Write tool and names it: `--body-file <file>` (or
+ * `--body-file=<file>`), read here and passed on as `--body-file -` with its bytes on stdin. `-` stays stdin. Returns { args, body }, body
+ * null when no file is named, or { refused } when the file cannot be read. */
+function bodyFile(args) {
+  const i = args.findIndex((a) => a === '--body-file' || a.startsWith('--body-file='));
+  const inline = i !== -1 && args[i].startsWith('--body-file=');
+  const path = i === -1 ? undefined : inline ? args[i].slice('--body-file='.length) : args[i + 1];
+  if (path === undefined || path === '-') return { args, body: null };
+  try {
+    return { args: [...args.slice(0, i), '--body-file', '-', ...args.slice(i + (inline ? 1 : 2))], body: readFileSync(path) };
+  } catch (e) {
+    return { refused: `the body file ${path} cannot be read (${e.code ?? 'error'})` };
+  }
+}
+
 /** The reason `gh <args>` may not go to the Mac mini, or null. Refused: `gh auth` but `status`, and `gh auth status` with
  * `-t` or `--show-token`, which print a token; `--recover`; and a file given with `--body-file`, `--notes-file`, `--env-file`,
  * `--input`, `--field` or `-F` (alone or in a cluster of short flags), which names a file on this Mac and not on the Mac mini, so
@@ -1030,7 +1160,7 @@ function ghRefusal(args, local = false) {
   if (args[0] === 'auth' && args.slice(2).some((a) => /^--show-token(=.*)?$/s.test(a) || /^-[A-Za-z]*t[A-Za-z]*(=.*)?$/s.test(a))) return 'gh auth status -t / --show-token is refused here; it prints a token';
   if (local) return null;
   const api = args[0] === 'api';
-  const stdinHint = 'the Mac mini cannot read a file on this Mac; pass it on stdin with - (--body-file -, --input -) or @- (-F name=@-)';
+  const stdinHint = `the Mac mini cannot read a file on this Mac; ${GH_STDIN}`;
   const fieldFile = (v) => {
     const path = /^[^=]+=@(.*)$/s.exec(v)?.[1];
     return path !== undefined && path !== '-';
@@ -1059,7 +1189,7 @@ function ghRefusal(args, local = false) {
  * code. Each argument is quoted for `zsh -lc`, and the whole line once
  * more for the remote login shell. With the agents' token in this node's own token store, gh runs here instead, the token in its
  * GH_TOKEN alone (#366), so it works with the Mac mini off and a local file works. On the factory host it runs gh itself, unchanged,
- * whatever the token store holds. */
+ * whatever the token store holds. By ssh, a `--body-file <file>` is read here and sent on stdin (bodyFile). */
 function ghCmd(args, env) {
   const token = nodeGithubToken(env);
   if (token) {
@@ -1077,14 +1207,16 @@ function ghCmd(args, env) {
     }
     return r.status ?? 1;
   }
-  const refused = ghRefusal(args);
+  const b = bodyFile(args);
+  const refused = b.refused ? `${b.refused}; or ${GH_STDIN}` : ghRefusal(b.args);
   if (refused) {
     console.error(`bin/factory: gh: ${refused}`);
     return 2;
   }
   const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
-  const script = `d=$(mktemp -d) && cd "$d" || exit 2; ${['gh', ...args.map(word)].join(' ')}; c=$?; cd /; rm -rf "$d"; exit $c`;
-  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { stdio: 'inherit', env });
+  const script = `d=$(mktemp -d) && cd "$d" || exit 2; ${['gh', ...b.args.map(word)].join(' ')}; c=$?; cd /; rm -rf "$d"; exit $c`;
+  const stdio = b.body === null ? { stdio: 'inherit' } : { stdio: ['pipe', 'inherit', 'inherit'], input: b.body };
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(script)}`], { ...stdio, env });
   if (r.error) {
     console.error(`bin/factory: gh: ssh did not run (${r.error.code ?? 'error'})`);
     return 1;
@@ -1096,13 +1228,21 @@ function ghCmd(args, env) {
  * reads the Factory app's token in its own process. On another node it runs there too when the node's own token store holds the app's
  * client id and secret (FAC-38, #490's shape for `factory gh`): the node mints its own token, which leaves the host's alive, and reads its
  * own registry. Otherwise, and always for the verbs that act as Colly, it runs the same command on the host, in the host user's login shell
- * over ssh, with stdin passed through. A body comes on stdin (`--body-file -`); the arguments are checked here first, so no token or file of
- * this Mac is involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or 2 (usage). */
+ * over ssh, with stdin passed through. A body comes on stdin (`--body-file -`), or as a file read here and sent on stdin (bodyFile); the
+ * arguments are checked here first, so no token of this Mac is involved. One JSON object on stdout; exit 0, 1 (Linear refused or failed) or
+ * 2 (usage). */
 async function linearCmd(args, env) {
   const cli = await import('./linear-cli.mjs');
   const { appStored } = await import('./linear.mjs');
+  const b = bodyFile(args);
+  if (b.refused) {
+    console.log(JSON.stringify({ ok: false, error: b.refused }));
+    return 2;
+  }
+  ({ args } = b);
+  const { body } = b;
   const here = !cli.COLLY_VERBS.includes(args[0]) && appStored(env.AGENT_PROFILES ?? join(env.HOME, '.agent-profiles'));
-  if (placeOf(env) === 'factory' || here) return cli.main(args, env);
+  if (placeOf(env) === 'factory' || here) return cli.main(args, env, body === null ? {} : { readStdin: () => Promise.resolve(body.toString('utf8')) });
   try {
     cli.parse(args);
   } catch (e) {
@@ -1110,7 +1250,8 @@ async function linearCmd(args, env) {
     return 2;
   }
   const word = (a) => (SAFE_WORD.test(a) ? a : quote(a));
-  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(['~/WORKSPACES/bin/factory', 'linear', ...args.map(word)].join(' '))}`], { stdio: 'inherit', env });
+  const stdio = body === null ? { stdio: 'inherit' } : { stdio: ['pipe', 'inherit', 'inherit'], input: body };
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=10', `factory@${HOST}`, `zsh -lc ${quote(['~/WORKSPACES/bin/factory', 'linear', ...args.map(word)].join(' '))}`], { ...stdio, env });
   if (r.error) {
     console.error(`bin/factory: linear: ssh did not run (${r.error.code ?? 'error'})`);
     return 1;
@@ -1287,14 +1428,14 @@ async function store(args, env) {
 
 /** How long ssh may run for a command: none for `use`, whose restart waits up to ten minutes for a busy Lead (`ConnectTimeout`
  * already covers a Mac mini that cannot be reached); 60 seconds for every other. */
-export const remoteTimeout = (cmd) => (cmd === 'use' ? undefined : 60000);
+export const remoteTimeout = (cmd) => (cmd === 'use' || cmd === 'events' ? undefined : 60000);
 
 /** `use` and `wake` from the MacBook run on the Mac mini: `use`'s arguments are checked here first (a row is a number or
  * <repo>-<team>, a letter is a to z), then the host runs the command in a login shell over ssh, on the
  * terminal's own streams. With an argument of `use` missing, ssh gets -t so the host's list and its question reach the Human. */
 function remote(cmd, args, env) {
-  const bad = cmd === 'wake'
-    ? null // checked by wake() before it comes here
+  const bad = cmd === 'wake' || cmd === 'events'
+    ? null // checked by wake() and events() before it comes here
     : cmd === 'use'
     ? (args.length > 2 ? 'use takes a row and a letter' : args[0] !== undefined && !/^[1-9][0-9]*$/.test(args[0]) && !parseTeam(args[0]) ? 'the row is a number or <repo>-<team>' : args[1] !== undefined && !/^[a-z]+$/.test(args[1]) ? 'the account is a letter, a to z' : null)
     : null;
@@ -1303,7 +1444,9 @@ function remote(cmd, args, env) {
     return 2;
   }
   const tty = cmd === 'use' && args.length < 2;
-  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: remoteTimeout(cmd), killSignal: 'SIGKILL' });
+  // A Monitor that follows the events ends when the link dies, so Colly starts it again with --after.
+  const keepAlive = cmd === 'events' ? ['-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3'] : [];
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', ...keepAlive, ...(tty ? ['-t'] : []), `factory@${HOST}`, `zsh -lc '~/WORKSPACES/bin/factory ${[cmd, ...args].join(' ')}'`], { stdio: 'inherit', env, timeout: remoteTimeout(cmd), killSignal: 'SIGKILL' });
   if (r.error) {
     console.error(`bin/factory: ${cmd} did not reach the Mac mini: ${r.error.code === 'ETIMEDOUT' ? 'timed out' : (r.error.code ?? 'failed')}`);
     return 1;
@@ -1612,6 +1755,8 @@ export async function main(argv, env = process.env, io = { isTTY: Boolean(proces
   if (cmd === 'linear') return linearCmd(rest, env);
   if (cmd === 'codex') return codexCmd(rest, env);
   if (cmd === 'wake') return wake(rest, env);
+  if (cmd === 'events') return events(rest, env);
+  if (cmd === 'ship' || cmd === 'pr-body') return packScript(cmd, rest, env);
   if (argv.some((a) => a !== '--all' && a !== '--json')) {
     console.error(USAGE);
     return 2;

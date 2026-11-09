@@ -3,11 +3,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main } from '../bin/lib/factory.mjs';
-import { HOST_ENV } from './helpers.mjs';
+import { HOST_ENV, factory, git } from './helpers.mjs';
 
 test('a node with its agents token uses local gh and git with the other node down (#366)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'factory-node-gh-'));
@@ -60,7 +60,8 @@ console.log(process.env.FAKE_GH_BODY ?? JSON.stringify({ login: 'fake-agent', id
     const config = Array.from({ length: Number(settings.env.GIT_CONFIG_COUNT) }, (_, i) => [settings.env[`GIT_CONFIG_KEY_${i}`], settings.env[`GIT_CONFIG_VALUE_${i}`]]);
     assert.deepEqual(config[0], ['credential.helper', '']);
     assert.ok(!config.some(([key]) => key.includes('pushInsteadOf')));
-    assert.deepEqual(config.slice(2), [['url.https://github.com/.insteadOf', 'git@github.com:'], ['url.https://github.com/.insteadOf', 'ssh://git@github.com/']]);
+    assert.deepEqual(config.slice(2), [['url.https://github.com/.insteadOf', 'git@github.com:'], ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'],
+      ['core.excludesFile', '/dev/null'], ['core.attributesFile', '/dev/null']]);
     const helper = config[1][1].slice(1);
     const credentials = original('sh', ['-c', `${helper} get`], { env: { GH_TOKEN: token }, encoding: 'utf8' });
     assert.equal(credentials.status, 0);
@@ -117,3 +118,31 @@ test('a stored token leaves factory-host gh, lead --here and store unchanged (#3
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** `factory <args>` in a clone of another repository, with the caller's GIT_DIR on a clone of the factory and GH_REPO on the factory, which
+ * must not move the check: refused, naming the repository it found, and gh never runs. */
+const refusesAnotherRepository = (args) => () => {
+  const dir = mkdtempSync(join(tmpdir(), 'factory-ship-'));
+  try {
+    const clones = { factory: 'https://github.com/tuannd9288/factory.git', other: 'https://github.com/someone/other.git' };
+    for (const [name, url] of Object.entries(clones)) {
+      mkdirSync(join(dir, name));
+      git(join(dir, name), 'init', '-q');
+      git(join(dir, name), 'remote', 'add', 'origin', url);
+    }
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'bin/gh'), `#!/bin/sh\ntouch ${JSON.stringify(join(dir, 'gh-ran'))}\n`, { mode: 0o755 });
+    const env = { HOME: dir, AGENT_PROFILES: join(dir, 'profiles'), FACTORY_STATE: join(dir, 'state'), FACTORY_HOST_USER: 'absent-test-user',
+      PATH: `${join(dir, 'bin')}:${process.env.PATH}`, GIT_DIR: join(dir, 'factory/.git'), GH_REPO: 'tuannd9288/factory' };
+    const r = childProcess.spawnSync(join(factory, 'bin/factory'), args, { cwd: join(dir, 'other'), env, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /someone\/other/);
+    assert.ok(!existsSync(join(dir, 'gh-ran')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+test('factory ship refuses a clone of another repository, whatever GIT_DIR and GH_REPO the caller sets (FAC-79)', refusesAnotherRepository(['ship', '--title', 'test(x): y', '--body-file', 'body.md']));
+
+test('factory pr-body refuses a clone of another repository, whatever GIT_DIR and GH_REPO the caller sets (FAC-79)', refusesAnotherRepository(['pr-body', '1', 'body.md']));
