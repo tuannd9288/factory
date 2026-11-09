@@ -10,6 +10,7 @@ import { enabledPlugins, exitCodeOf, findNode, leadArgs } from '../bin/lead.mjs'
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { pushHook } from '../../../bin/lib/force-push.mjs';
 import { readRules } from '../../../bin/lib/deny-read.mjs';
+import { MODELS, pstackModels } from '../../../bin/lib/models.mjs';
 import { matches, rulesAfter } from '../../../test/bash-rule.mjs';
 import { FORMS, HARMLESS } from '../../../test/login-forms.mjs';
 
@@ -84,8 +85,8 @@ describe('leadArgs', () => {
   });
 
   test('model, effort, role text, permission mode, add-dir and name', () => {
-    assert.equal(after('--model'), 'opus');
-    assert.equal(after('--effort'), 'high');
+    assert.equal(after('--model'), MODELS.lead.remote.model);
+    assert.equal(after('--effort'), MODELS.lead.remote.effort);
     assert.equal(after('--append-system-prompt'), roleText);
     assert.ok(!argv.includes('--append-system-prompt-file'));
     assert.equal(after('--permission-mode'), 'auto');
@@ -271,42 +272,23 @@ describe('exitCodeOf', () => {
   });
 });
 
-test('the model rule copies mapped defaults on every start without changing other config files', async () => {
+test('the model rule writes the table\'s pstack lines on every start without changing other config files', async () => {
   const { writeModels } = await import('../bin/lead.mjs');
   const config = tmp();
-  const root = fileURLToPath(new URL('../../..', import.meta.url));
   try {
     mkdirSync(join(config, 'rules'));
     const others = ['.claude.json', 'settings.json', 'rules/other.md'];
     for (const name of others) writeFileSync(join(config, name), 'keep me\n', { mode: 0o600 });
     const before = others.map((name) => ({ bytes: readFileSync(join(config, name)), stat: statSync(join(config, name)) }));
     const file = join(config, 'rules/pstack-models.md');
-    writeModels(config, root);
+    writeModels(config);
     const first = readFileSync(file);
-    assert.deepEqual(first, readFileSync(join(root, 'packs/pstack/pstack-models.md')));
-    assert.deepEqual(first.toString().split('\n').filter((line) => line && !line.startsWith('#')), [
-      'feature, refactoring: inherit-parent',
-      'bug-fix: inherit-parent',
-      'perf-issue: inherit-parent',
-      'hillclimb: inherit-parent',
-      'judgment and prose: opus xhigh',
-      'hardest tasks: opus xhigh',
-      'how explorer: inherit-parent',
-      'how explainer: opus xhigh',
-      'why investigators: inherit-parent',
-      'why synthesizer: opus xhigh',
-      'reflect tooling: inherit-parent',
-      'reflect judgment, divergent, synthesizer: opus xhigh',
-      'arena runners: opus xhigh, codex high',
-      'arena cross-judge pool: codex high',
-      'swarm workers: inherit-parent',
-      'architect runners: opus xhigh, codex high',
-      'interrogate reviewers: opus xhigh, codex high',
-    ]);
-    writeModels(config, root);
+    assert.equal(first.toString(), pstackModels(MODELS.pstack));
+    assert.deepEqual(first.toString().split('\n').filter((line) => line && !line.startsWith('#')), Object.entries(MODELS.pstack.roles).map(([role, value]) => `${role}: ${value}`));
+    writeModels(config);
     assert.deepEqual(readFileSync(file), first);
     writeFileSync(file, 'stale rule\n');
-    writeModels(config, root);
+    writeModels(config);
     assert.deepEqual(readFileSync(file), first, 'each start replaces the whole rule');
     assert.deepEqual(readdirSync(config).sort(), ['.claude.json', 'rules', 'settings.json']);
     assert.deepEqual(readdirSync(join(config, 'rules')).sort(), ['other.md', 'pstack-models.md']);
