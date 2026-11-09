@@ -5,6 +5,7 @@
 // Posted digests read records/* in better-factory; local rows and quota commands keep their local sources.
 // See bin/factory-ledger for the arguments.
 import { revertedTitle } from '../../kit/.gate/bin/lib/subject.mjs';
+import { gh as runGh } from '../../kit/.gate/bin/lib/gh.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -611,9 +612,8 @@ number title url createdAt closedAt state stateReason
 timelineItems(first:50,itemTypes:[LABELED_EVENT]){nodes{__typename ... on LabeledEvent{createdAt label{name}}}}
 closedByPullRequestsReferences(first:20,includeClosedPrs:true){nodes{number}}}}}`;
 
-function gh(args) {
-  return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
-}
+// The kit's one gh runner (FAC-85). The digest's reads page through many pull requests and issues, so they take 120 s, not its 60.
+const gh = (args) => runGh(args, { timeout: 120_000 });
 
 /** Every issue of a Linear team that matches `filter`, with the fields `pick` names, across pages. */
 async function linearIssues(api, teamKey, filter, fields) {
