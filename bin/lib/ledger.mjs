@@ -22,6 +22,7 @@ import { cloneRepo, clonesUnder } from './repos.mjs';
 import { switchSince } from './switch-watch.mjs';
 import { claimJob } from './job-claim.mjs';
 import { lastRecords, readSessions } from './records.mjs';
+import { humanOf, rootOf, runsOf, stateDirOf } from './node.mjs';
 import { clearFailed, markFailed, readMarkers, repoMarker } from './status.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import them from here.
@@ -799,9 +800,9 @@ async function main(argv) {
   }
   // The quota is read only by --quota and the digest; a run log that cannot be read gives one line, not a failed ledger.
   const quotaNow = () => {
-    const runs = resolve(process.env.FACTORY_RUNS ?? join(process.env.HOME, 'factory-runs'));
+    const runs = runsOf();
     try {
-      const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+      const state = stateDirOf();
       return { rows: quotaRows({ runs, state, root: process.env.FACTORY_ROOT, statusFiles: opts.statusFiles }), now: Date.now() };
     } catch (error) {
       return { error: `The runs folder or a log in it could not be read (${error.code ?? 'error'}), so there is no quota table.` };
@@ -819,13 +820,13 @@ async function main(argv) {
   const day = (d) => d.toISOString().slice(0, 10);
   opts.until ??= day(new Date());
   opts.since ??= day(new Date(Date.parse(opts.until) - 7 * 864e5));
-  const root = process.env.FACTORY_ROOT ?? join(here, '..', '..');
+  const root = rootOf();
   // Nothing of the digest reaches a public repository (#209): the target is read before anything is built or posted.
   if (opts.post) {
     const visibility = JSON.parse(gh(['repo', 'view', opts.post, '--json', 'visibility'])).visibility;
     if (visibility !== 'PRIVATE') throw new Error(`${opts.post} is ${visibility ?? 'of unknown visibility'}, not PRIVATE; the digest lists private tasks, so nothing posted`);
   }
-  const state = process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory');
+  const state = stateDirOf();
   if (opts.post && !claimJob(root, state, 'digest', `${opts.since}_${opts.until}`)) return;
   const shared = opts.post || opts.lastWeek ? sharedRecords(state, opts.since, opts.until) : null;
   const sessions = shared?.sessions ?? readSessions(state);
@@ -833,7 +834,7 @@ async function main(argv) {
   opts.codexWaits = codexWaits(state, opts.since, opts.until);
   const seat = seatCosts(sessions);
   const recorded = new Set(sessions.map((r) => r.session).filter(Boolean));
-  const human = process.env.FACTORY_HUMAN ?? 'tuannd9288';
+  const human = humanOf();
   let linear = null;
   const linearApi = () => (linear ??= createLinear({ state }));
   const unread = new Map();
@@ -955,7 +956,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     // leaves queue-run.failed (#209);
     // a run that prints to stdout, and plist, keep no state.
     const args = process.argv.slice(2);
-    if (args[0] !== 'plist' && args.includes('--post')) markFailed(process.env.FACTORY_STATE ?? join(process.env.HOME, '.local/state/factory'), 'digest', why);
+    if (args[0] !== 'plist' && args.includes('--post')) markFailed(stateDirOf(), 'digest', why);
     process.exit(1);
   }
 }

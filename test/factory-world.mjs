@@ -10,7 +10,6 @@ import { HOST_ENV, factory } from './helpers.mjs';
 export const EMAIL = 'ann.example@secret-corp.example';
 export const ORG = 'org-00000000-1111-2222-3333-444444444444';
 export const claudeJson = (email, plan = 'max') => JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email, orgId: ORG, orgName: 'Secret Corp', subscriptionType: plan });
-export const rowOf = (out, profile) => out.split('\n').find((l) => l.startsWith(profile));
 
 // Each fake logs its argv and environment to calls.log, and answers from files in $FAKE.
 const SCRIPTS = {

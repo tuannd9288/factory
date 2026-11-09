@@ -137,7 +137,7 @@ a file you write with the Write tool under `{{RUNS}}`, named with `--body-file <
    `/pstack:maintain-verification-skill` (where a seat's log shows that line did not start the skill, the brief tells it
    to read `skills/maintain-verification-skill/SKILL.md` from its plugin root and follow it instead); it names
    `feature-map/` as step 0's target and no edit scope, orders steps 0 to 3 from the source with step 1's index fixes
-   reported as drift, step 4 not run (no session can run the app until #264) and step 5's sorting of each finding, and
+   reported as drift, step 4 not run (no session can run the app until FAC-24) and step 5's sorting of each finding, and
    asks for the outcome, `blocked`, with each finding, its kind, its feature file and its source path. On its
    `seat-ended` wake, run `git worktree remove ~/factory-runs/<repo>-map-pass/w` (nothing removes it otherwise), then
    file the doc drift as one issue of this repository and each product gap as its own, as step 4 files a finding.
