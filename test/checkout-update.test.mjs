@@ -161,7 +161,8 @@ test('a start that waits for the lock gives up after its wait, and a lock a cras
     assert.throws(() => withStartLock(dir, dir, () => 1, { wait: 60 }), /update of the checkout is in progress/);
     writeFileSync(join(held, 'holder'), '4242 the update of the checkout\n');
     let ran = false;
-    assert.throws(() => withStartLock(dir, dir, () => { ran = true; }, { wait: 60 }), /held by the update of the checkout \(pid 4242\)/);
+    // busy is what bin/seat turns into a Refused, exit 2 (seat.mjs), and the message names the holder.
+    assert.throws(() => withStartLock(dir, dir, () => { ran = true; }, { wait: 60 }), (e) => e.busy === true && /held by the update of the checkout \(pid 4242\)/.test(e.message));
     assert.equal(ran, false, 'a refused start registers nothing');
     const old = new Date(Date.now() - 600_000);
     utimesSync(held, old, old);
