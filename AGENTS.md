@@ -168,7 +168,7 @@ decisions (#58, #79, #68, #132) and the map. A "Prior art" line quotes an organi
 - **H7**: Model choice lives outside the way of working. Checked by: none yet (#62 and #63 do part of it).
   Prior art [SD3]: "The `model_stylesheet` graph attribute provides CSS-like rules for setting default LLM configuration on nodes."
 - **H8**: An improvement comes back as ordinary work.
-  Checked by: `scripts/ship`'s stop on `needs-human` (`packs/pstack/scripts/lib/ship.mjs:162`) and
+  Checked by: `scripts/ship`'s stop on `needs-human` (`packs/pstack/scripts/lib/ship.mjs:168@86f5e7a`) and
   `.github/workflows/approval.yml`, which reads his approval of such a pull request from `.github/CODEOWNERS:4`.
   Prior art [F1]: "When patterns cross a threshold, it files Linear tickets automatically."
 - **H9**: A surface is only a window. Five rules (#68; surfaces page §5.2): (1) a surface never starts or owns the
@@ -234,7 +234,7 @@ command or key, or a deprecation, is MINOR; a fix is PATCH.
   `verify` green, armed by `scripts/ship`: its merge switch is at `all` (The factory's own merge switch, in Decisions).
   One that needs the Human, a release, a first design or a change to a design or architecture, carries `needs-human`
   (`gh issue edit <n> --add-label needs-human`), and Colly takes it to him. This repository runs no `tier`, so only
-  `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:162`). It goes on
+  `scripts/ship` holds such a pull request: it stops on the label (`packs/pstack/scripts/lib/ship.mjs:168@86f5e7a`). It goes on
   when he approves its head on GitHub, which `approval` reads, so the Lead sees it with no relay, or on his word, which
   Colly records on the issue. Then the Lead removes the label (`gh issue edit <n> --remove-label needs-human`) and runs
   `scripts/ship` again. GitHub asks his review only on a pull request that changes `.github/CODEOWNERS`. Each body
