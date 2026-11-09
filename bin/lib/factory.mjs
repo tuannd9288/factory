@@ -109,14 +109,14 @@ const readGh = (text) => {
 /** codex login status exits 0 when logged in and 1 when not; any other exit (127 for a missing command, a failed shell) says nothing. */
 const readCodex = (code) => ({ loggedIn: code === 0 ? true : code === 1 ? false : null, account: null, plan: null });
 
-/** An account's token stat and date-only sidecar: { ok, note, expiry }, expiry the date the token ends (YYYY-MM-DD) or null when its added
- * date is unknown; the token content is never read. */
-function tokenState(agentProfiles, account, now = Date.now()) {
+/** An account's token stat and date-only sidecar: { ok, note, added, expiry, mode }, added the recorded date or 'unknown', expiry the date
+ * the token ends (YYYY-MM-DD) or null when its added date is unknown; the token content is never read. */
+export function tokenState(agentProfiles, account, now = Date.now()) {
   let s;
   try {
     s = statSync(join(tokenDir(agentProfiles), account));
   } catch {
-    return { ok: false, note: 'no token file', expiry: null };
+    return { ok: false, note: 'no token file', added: null, expiry: null, mode: null };
   }
   const mode = (s.mode & 0o777).toString(8);
   const added = tokenAdded(agentProfiles, account);
@@ -133,7 +133,7 @@ function tokenState(agentProfiles, account, now = Date.now()) {
     ends = expiry.toISOString().slice(0, 10);
     expiryNote = `expiry ${ends}${warning ? `; ${warning}` : ''}`;
   }
-  return { ok: true, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, added ${added}; ${expiryNote}`, expiry: ends };
+  return { ok: true, note: `token file, mode ${mode}${mode === '600' ? '' : ' (should be 600)'}, added ${added}; ${expiryNote}`, added, expiry: ends, mode };
 }
 
 /** The profile's login state by its own vendor command: { loggedIn: true|false|null, account, plan, note }. A row of the accounts
@@ -230,7 +230,7 @@ export function readPlace(place, ctx) {
     const q = quota.find((x) => x.account === account) ?? null;
     rows.push({ ...blank(place, { profile: `${place}/tokens/${account}`, role: 'node token', kind: 'claude' }, { loggedIn: true, account, plan: null }, t.note),
       five_hour: win(q?.windows?.five_hour), seven_day: win(q?.windows?.seven_day), asOf: q?.asOf ?? null,
-      n: null, letter: letters.get(account) ?? null, team: false, expiry: t.expiry, ...limitOf(ctx, account, seatRows, q, now) });
+      n: null, letter: letters.get(account) ?? null, team: false, added: t.added, expiry: t.expiry, mode: t.mode, ...limitOf(ctx, account, seatRows, q, now) });
   }
   return rows;
 }
@@ -275,7 +275,7 @@ export function readFactory(ctx) {
       account: s(x.account) && x.accountFrom === 'read' ? x.account : null, accountFrom: x.accountFrom === 'read' ? 'read' : null, plan: s(x.plan),
       five_hour: w(x.five_hour), seven_day: w(x.seven_day), asOf: n(x.asOf), live: n(x.live), shared: [], login: s(x.login), note: s(x.note) ?? '', n: n(x.n), letter: s(x.letter),
       // FAC-117: what the MacBook needs to say how the row stands and what to type for it there.
-      team: x.team === true, expiry: s(x.expiry), outUntil: n(x.outUntil), warned: x.warned === true,
+      team: x.team === true, added: s(x.added), expiry: s(x.expiry), mode: s(x.mode), outUntil: n(x.outUntil), warned: x.warned === true,
       ...(x.accountFrom === 'expected' && s(x.account) ? { expectedRemote: x.account } : {}),
     }));
   } catch {
@@ -317,11 +317,11 @@ function fixesOf(r, here, rows, agent) {
   const where = MACHINE[r.place];
   const fixes = [];
   if (r.account && r.state !== 'out') {
-    fixes.push({ cmd: `factory account add ${r.account}${r.place === here ? '' : ` --node ${NODE[r.place]}`}`, needs: `${BROWSER} that makes a token, then you paste it`, why: `a new token for ${r.account} on ${where}` });
+    fixes.push({ cmd: `factory account add ${r.account}${r.place === here ? '' : ` --node ${NODE[r.place]}`}`, needs: `${BROWSER} that makes a token, then you paste it`, why: '' });
   }
   if (r.state !== 'ending') {
     const other = rows.find((o) => o.place === r.place && o.role === 'node token' && o.letter && o.account !== r.account && o.account !== agent && ['works', 'warned', 'ending'].includes(o.state));
-    if (other) fixes.push({ cmd: `factory use${r.place === 'factory' && here === 'factory' ? '' : ` --node ${NODE[r.place]}`} ${r.n} ${other.letter}`, needs: 'no login', why: `moves the row to ${other.account}, which works on ${where}` });
+    if (other) fixes.push({ cmd: `factory use${r.place === 'factory' && here === 'factory' ? '' : ` --node ${NODE[r.place]}`} ${r.n} ${other.letter}`, needs: 'no login', why: `moves the row to ${other.account}, which works there` });
   }
   return fixes;
 }
@@ -385,27 +385,6 @@ const windowCell = (w, now) => (w ? `${pct(w.use)} ${w.resetsAt != null && w.res
 
 const red = (text) => (process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[31m${text}\x1b[0m` : text);
 
-/** The lines of the lettered accounts, for `factory use` on the MacBook (hereListing): for each, its 5h and 7d use with the reset, the token
- * file, and the numbers of the rows that name it. The quota is the newest a run of that account reported; "?" where none did. */
-export function accountsText(rows, accounts, { now = Date.now(), agentProfiles, title = 'ACCOUNTS' }) {
-  const win = (w) => (w ? windowCell(w, now) : '?');
-  const heads = accounts.map(({ name, letter }) => {
-    const members = rows.filter((r) => r.n && r.account === name);
-    const q = members.filter((r) => r.asOf).sort((a, b) => b.asOf - a.asOf)[0];
-    const t = tokenState(agentProfiles, name, now);
-    return { name, letter, members, q, t };
-  });
-  const nameW = Math.max(0, ...heads.map((h) => h.name.length));
-  const rowsOf = (h) => (h.members.length ? `rows ${h.members.map((r) => r.n).join(', ')}` : 'no row');
-  const rowsW = Math.max(0, ...heads.map((h) => rowsOf(h).length));
-  const lines = [title];
-  for (const h of heads) {
-    const text = `  ${h.letter}  ${pad(h.name, nameW)}  5H ${pad(win(h.q?.five_hour), 17)}  7D ${pad(win(h.q?.seven_day), 17)}  ${pad(rowsOf(h), rowsW)}  ${h.t.note}`;
-    lines.push(h.t.ok ? text : red(text));
-  }
-  return lines;
-}
-
 /** What a row's state says, in his words. */
 function stateText(r) {
   switch (r.state) {
@@ -437,20 +416,24 @@ const PROBLEM = ['no-token', 'expired', 'out', 'not-logged-in'];
 const titleOf = (place, here) => (place === 'macbook' ? `MacBook${here === 'macbook' ? ' (this machine)' : ''}`
   : place === 'factory' ? `Mac mini (${HOST}, ${here === 'factory' ? 'this machine' : 'read by ssh'})` : 'piggery (on the Mac mini as tuannguyen, read by ssh)');
 
-/** One line for each account a machine holds, a token or a row's (FAC-117): its name only, how it stands, its use, the rows on it, its token
- * file. The agents' GitHub token, which shares a node's store, is said to be one. */
+/** The token file in a few words: its two dates, and its mode only when it is not 600. */
+const tokenText = (t) => (t ? `added ${t.added}, ends ${t.expiry ?? 'unknown'}${t.mode && t.mode !== '600' ? `, mode ${t.mode}, not 600` : ''}` : 'no token file');
+
+/** Each account a machine holds, a token or a row's (FAC-117), in at most two lines that fit 105 columns: its name only, how it stands, the
+ * rows on it and its token's dates; then, once a session has reported it, its 5h and 7d use with their resets. The agents' GitHub token,
+ * which shares a node's store, is said to be one. */
 function accountLines(place, rows, { now, agent }) {
   const mine = rows.filter((r) => r.place === place && !r.unreachable && (r.role === 'node token' || r.team) && r.account && r.account !== 'unknown');
   const names = [...new Set(mine.map((r) => r.account))].sort();
   if (!names.length) return [];
-  const win = (w) => (w ? windowCell(w, now) : '?');
   const heads = names.map((name) => {
     const of = mine.filter((r) => r.account === name);
     const token = of.find((r) => r.role === 'node token');
     const any = token ?? of[0];
     const state = name === agent && token ? "the agents' GitHub token, not for a Lead" : token ? stateText(token) : 'NO TOKEN';
     const team = of.filter((r) => r.team).map((r) => r.n);
-    return { name, state, any, rows: team.length ? `rows ${team.join(', ')}` : 'no row', note: token ? token.note : 'no token file', bad: !token || PROBLEM.includes(token.state) };
+    const use = name !== agent && (any.five_hour || any.seven_day) ? `5H ${windowCell(any.five_hour, now)}   7D ${windowCell(any.seven_day, now)}` : '';
+    return { name, state, use, rows: team.length ? `rows ${team.join(', ')}` : 'no row', token: tokenText(token), bad: !token || PROBLEM.includes(token.state) };
   });
   const w = (f) => Math.max(...heads.map((h) => String(f(h)).length));
   const nameW = w((h) => h.name);
@@ -458,9 +441,9 @@ function accountLines(place, rows, { now, agent }) {
   const rowsW = w((h) => h.rows);
   const lines = [`  Accounts on ${MACHINE[place]}:`];
   for (const h of heads) {
-    const use = h.name === agent ? ' '.repeat(56) : `5H ${pad(win(h.any.five_hour), 23)}  7D ${pad(win(h.any.seven_day), 23)}  `;
-    const text = `    ${pad(h.name, nameW)}  ${pad(h.state, stateW)}  ${use}${pad(h.rows, rowsW)}  ${h.note}`.trimEnd();
+    const text = `    ${pad(h.name, nameW)}  ${pad(h.state, stateW)}  ${pad(h.rows, rowsW)}  ${h.token}`;
     lines.push(h.bad ? red(text) : text);
+    if (h.use) lines.push(`    ${' '.repeat(nameW)}  ${h.use}`);
   }
   return lines;
 }
@@ -500,13 +483,16 @@ export function listText(rows, { here, now = Date.now(), agent = agentOf() }) {
     for (const r of todo) {
       out.push(`  ${SHORT[r.place]}${r.n ? ` ${r.n}` : ''}, ${r.profile.slice(r.profile.indexOf('/') + 1)}: ${problemText(r)}`);
       const w = Math.max(...r.fixes.map((f) => f.cmd.length));
-      for (const f of r.fixes) out.push(`    ${pad(f.cmd, w)}   ${f.needs}${f.why ? `; ${f.why}` : ''}`);
+      // One line for each command while the entry fits 105 columns, else what it needs on the line below, so no line wraps.
+      const tail = (f) => `${f.needs}${f.why ? `; ${f.why}` : ''}`;
+      const fits = r.fixes.every((f) => 4 + w + 3 + tail(f).length <= 105);
+      for (const f of r.fixes) out.push(...(fits ? [`    ${pad(f.cmd, w)}   ${tail(f)}`] : [`    ${f.cmd}`, `      ${tail(f)}`]));
     }
     out.push('');
   }
-  out.push('"works": a token is there, it has not ended, and Claude Code has not refused the account for quota. No request tests a token, so a revoked one shows only when a session fails.');
-  if (places.includes('macbook')) out.push('A MacBook Lead\'s status line carries its use but no refusal: the MacBook sees an account refused only when the Mac mini\'s runs use it too.');
-  out.push(`USE is each account's newest reading, a Mac mini run or a MacBook Lead's status line; "?" where none has run. Times are this machine's (UTC${zoneOf(new Date(now))}).`);
+  out.push('"works": a token is there, it has not ended, and Claude Code has not refused the account for quota.', 'No request tests a token, so a revoked one shows only when a session fails.');
+  if (places.includes('macbook')) out.push('A MacBook Lead\'s status line has no refusal, so the MacBook sees one only from the Mac mini\'s runs.');
+  out.push('USE is each account\'s newest reading, from a Mac mini run or a MacBook Lead\'s status line; "?" if none.', `Times are this machine's (UTC${zoneOf(new Date(now))}).`);
   if (rows.some((r) => r.accountFrom === 'expected')) out.push('* = the expected account (a local file), not one read.');
   return out.join('\n');
 }
@@ -1465,16 +1451,20 @@ async function use(args, env, io) {
 
 /** The MacBook's list for `use`: the team rows of its accounts file, numbered in name order, and its accounts, lettered from its own
  * token store (INN-31 1B: one token for each node and account). */
-function hereListing(ctx) {
+function hereListing(ctx, env) {
   const rows = Object.entries(readAccounts(ctx.state))
     .filter(([profile]) => profile.startsWith('factory/') && parseTeam(profile.slice('factory/'.length)))
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([profile, account], i) => ({ n: i + 1, profile, account }));
   const accounts = nodeAccountList(ctx.agentProfiles);
-  const letters = new Map(accounts.map((a) => [a.name, a.letter]));
-  const w = Math.max(0, ...rows.map((r) => r.profile.length));
-  const lines = ['ROWS ON macbook', ...rows.map((r) => `  ${r.n}  ${pad(r.profile, w)}  ${r.account}${letters.has(r.account) ? ` (${letters.get(r.account)})` : ' (no token here)'}`)];
-  return { rows, accounts, text: [...lines, '', ...accountsText(rows, accounts, ctx)].join('\n') };
+  // What `use` prints when an argument is missing, in the Mac mini's form (FAC-117): the MacBook's own list, then each letter inside a
+  // `factory use` line, beside its account's name. Read only when printed, since it runs the vendors' checks.
+  const text = () => {
+    const agent = agentOf(env);
+    const listed = finish(readPlace('macbook', ctx), readAccounts(ctx.state), { here: 'macbook', agent });
+    return [listText(listed, { here: 'macbook', agent }), '', 'The accounts factory use takes here:', ...accounts.map((a) => `  factory use --node macbook <row> ${a.letter}   ${a.name}`)].join('\n');
+  };
+  return { rows, accounts, text };
 }
 
 /** `use` on the MacBook (#366): the line `factory/<repo>-<team>=<account>` of its own accounts file, which `factory lead <repo> --team
@@ -1485,10 +1475,10 @@ async function useHere(args, env, io) {
     return 2;
   }
   const ctx = contextOf(env);
-  const { rows, accounts, text } = hereListing(ctx);
+  const { rows, accounts, text } = hereListing(ctx, env);
   let [row, letter] = args;
   if (row === undefined || letter === undefined) {
-    console.log(text);
+    console.log(text());
     if (!io.isTTY) {
       console.error('bin/factory: use needs a row and an account letter');
       return 2;

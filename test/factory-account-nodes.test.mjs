@@ -59,6 +59,22 @@ test('on the MacBook, the use line printed under its own team row changes the Ma
   } finally { s.done(); }
 });
 
+test('on the MacBook, use with an argument missing prints each letter in a factory use line that acts on the MacBook (FAC-117)', () => {
+  const s = sandbox();
+  try {
+    macBook(s, 'factory/factory-ops=dan\n', 'ann');
+    const r = s.fac('use', '--node', 'macbook');
+    assert.equal(r.code, 2, r.out);
+    const line = r.out.split('\n').map((l) => l.trim()).find((l) => l.startsWith('factory use ') && l.endsWith(' ann'));
+    assert.ok(line, r.out);
+    const before = s.calls().length;
+    const used = s.fac(...line.split(/\s+/).slice(1, -1).map((w) => (w === '<row>' ? '1' : w)));
+    assert.doesNotMatch(s.calls().slice(before), /factory use/, 'no ssh to the Mac mini');
+    assert.equal(readFileSync(join(s.state, 'accounts'), 'utf8'), 'factory/factory-ops=ann\n');
+    assert.equal(used.code, 0, used.out);
+  } finally { s.done(); }
+});
+
 test('on the MacBook, an account the Mac mini\'s runs show refused is out on the MacBook\'s rows of it too: one account, one quota (FAC-117)', () => {
   const s = sandbox();
   try {
