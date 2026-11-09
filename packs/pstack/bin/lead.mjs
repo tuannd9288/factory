@@ -26,6 +26,7 @@ import { pickTeam } from '../../../bin/lib/team-names.mjs';
 import { refusal } from '../../../bin/lib/repos.mjs';
 import { heldNames, tokenStoreDeny } from '../../../bin/lib/seat.mjs';
 import { readRules } from '../../../bin/lib/deny-read.mjs';
+import { MODELS, claudeModelArgs, entryOf, pstackModels } from '../../../bin/lib/models.mjs';
 import { which } from '../../../bin/lib/launchd.mjs';
 import { setJsonKey, writeAtomic } from '../../../bin/lib/files.mjs';
 import { accountRefusal, readAccounts, readTokenFile, tokenDir } from '../../../bin/lib/token.mjs';
@@ -124,8 +125,10 @@ const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Notification', 'Stop',
 /** The folder to start in and the command: root is the factory checkout (~/WORKSPACES); roleText is packs/<pack>/lead.md's text.
  * hook is the command of the hooks (HOOK_EVENTS), which copy the session's own transcript on Stop and SessionEnd to
  * <runs>/<repo>-<team>/transcripts, outside every profile (#185); it runs the script through node (the path findNode gave), so the script
- * needs no exec bit. runs is the runs folder (runsOf, bin/lib/node.mjs), ~/factory-runs unless FACTORY_RUNS names another. */
-export function leadArgs({ repo, team, home, runs = join(home, 'factory-runs'), root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs') }) {
+ * needs no exec bit. runs is the runs folder (runsOf, bin/lib/node.mjs), ~/factory-runs unless FACTORY_RUNS names another. Its model and
+ * effort are the lead.remote entry of models, the factory's one table (INN-39). */
+export function leadArgs({ repo, team, home, runs = join(home, 'factory-runs'), root, roleText, node, resume = null, message = null, sessionId = null, hookScript = join(root, 'packs/pstack/bin/transcript-copy.mjs'), models = MODELS }) {
+  const model = claudeModelArgs(entryOf(models, 'lead', 'remote'));
   const cwd = join(root, repo);
   const hook = [node, hookScript, join(runs, `${repo}-${team}`, 'transcripts')].map(quote).join(' ');
   const hooks = [{ hooks: [{ type: 'command', command: hook }] }];
@@ -134,7 +137,7 @@ export function leadArgs({ repo, team, home, runs = join(home, 'factory-runs'), 
     hook,
     argv: [
       'direnv', 'exec', '.', 'claude',
-      '--model', 'opus', '--effort', 'high',
+      ...model,
       '--append-system-prompt', roleText,
       '--permission-mode', 'auto',
       '--add-dir', runs,
@@ -201,10 +204,11 @@ export function markOnboarded(config) {
   setJsonKey(join(config, '.claude.json'), 'hasCompletedOnboarding', true);
 }
 
-/** Copy pstack's mapped skill defaults into the Lead profile on every start (#436). Model changes are the Human's. */
-export function writeModels(config, root) {
+/** Write pstack's mapped skill defaults into the Lead profile on every start (#436), rendered from the factory's one table of models,
+ * bin/lib/models.json (INN-39); Claude Code loads the profile's rules/ with its user memory (2.1.319). Model changes are the Human's. */
+export function writeModels(config, models = MODELS) {
   const file = join(config, 'rules/pstack-models.md');
-  const text = readFileSync(join(root, 'packs/pstack/pstack-models.md'));
+  const text = pstackModels(models.pstack);
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   try {
     writeAtomic(file, text, { mode: 0o600 });
@@ -404,7 +408,7 @@ function main(argv, env) {
   const token = t.token;
   try {
     markOnboarded(config);
-    writeModels(config, root);
+    writeModels(config);
   } catch (e) {
     process.stderr.write(`bin/lead: ${e.message}\n`);
     return 2;

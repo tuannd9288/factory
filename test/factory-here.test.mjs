@@ -8,6 +8,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { main } from '../bin/lib/factory.mjs';
 import { tokenStoreDeny } from '../bin/lib/seat.mjs';
 import { readRules, sandboxPaths } from '../bin/lib/deny-read.mjs';
 import { gitReadsUnderConfig, mismatches, probeWorld, refusedRead, refusedSandbox } from './deny-probe.mjs';
@@ -64,18 +65,26 @@ function world() {
   const w = (name, text) => writeFileSync(join(fake, name), text);
   const read = (name) => (existsSync(join(fake, name)) ? readFileSync(join(fake, name), 'utf8') : '');
   const nuls = (name) => read(name).split('\0').slice(0, -1);
-  const fac = (args, input, cwd = factory) => {
+  const account = (args) => {
     const selected = args.indexOf('--team');
     if (args[0] === 'lead' && args.includes('--here') && (selected !== -1 || !existsSync(join(state, 'accounts')))) {
       const team = selected === -1 ? freeWord('alpha', []) : args[selected + 1];
       writeFileSync(join(state, 'accounts'), `factory/alpha-${team}=fixture\n`);
     }
-    const { NODE_TEST_CONTEXT, ...outer } = process.env;
+  };
+  const { NODE_TEST_CONTEXT, ...outer } = process.env;
+  const fac = (args, input, cwd = factory) => {
+    account(args);
     const r = spawnSync(process.execPath, ['--', join(factory, 'bin/lib/factory.mjs'), ...args], { cwd, encoding: 'utf8', env: { ...outer, ...env }, input });
     return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
+  // main in this process, given a table of models of the test's own (INN-39); the fakes still run from env's PATH.
+  const facWith = (args, models) => {
+    account(args);
+    return main(args, { ...outer, ...env }, undefined, models);
+  };
   return {
-    dir, fake, home, state, w, read, nuls, fac, calls: () => read('calls.log'),
+    dir, fake, home, state, w, read, nuls, fac, facWith, calls: () => read('calls.log'),
     // The host's user here, on the machine named `name`: by default this one, so here is the factory host.
     onHost: (name = HOST_ENV.FACTORY_HOST_NAME) => { Object.assign(env, HOST_ENV, { FACTORY_HOST_NAME: name }); },
     identity: (name = 'Agent Ann', email = 'agent.ann@example.invalid') => { w('git-user.name', `${name}\n`); w('git-user.email', `${email}\n`); },
@@ -97,6 +106,9 @@ test('the shared fixture adds no account team before a Lead is launched', () => 
   } finally { s.done(); }
 });
 
+// The MacBook Lead's model and effort are the factory's one table's (INN-39); inherit passes none, so the account's default applies.
+const { MODELS, claudeModelArgs } = await import('../bin/lib/models.mjs');
+
 test('lead --here starts claude here with the empty gh folder, the agents\' git identity, no credential helper and gh auth denied', () => {
   const s = world();
   try {
@@ -104,6 +116,7 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
     const r = s.fac(['lead', 'alpha', '--here']);
     assert.equal(r.code, 0, r.out);
     const args = s.nuls('claude.args');
+    assert.deepEqual(args.slice(0, args.indexOf('--append-system-prompt')), claudeModelArgs(MODELS.lead.here));
     const { env, permissions } = settingsOf(args);
     const empty = join(s.state, 'lead-here/gh-empty');
     const push = 'url.file:///nonexistent/factory-lead-pushes-from-the-mac-mini/.pushInsteadOf';
@@ -152,6 +165,24 @@ test('lead --here starts claude here with the empty gh folder, the agents\' git 
     assert.deepEqual(readdirSync(empty), []);
     // The identity is read on the factory host, as the host's user, in its login shell.
     assert.match(s.calls(), /ssh .*factory@tuans-mac-mini zsh -lc '.*git config --global user\.name.*git config --global user\.email/);
+  } finally {
+    s.done();
+  }
+});
+
+test('lead --here passes lead.here of the table it is given, never lead.remote, and starts nothing without it (INN-39)', async () => {
+  const s = world();
+  try {
+    s.identity();
+    const remote = { model: 'mock-lead-remote', effort: 'remoteeffort' };
+    const start = ['lead', 'alpha', '--team', 'beta', '--here'];
+    assert.equal(await s.facWith(start, { lead: { remote, here: { model: 'mock-lead-here', effort: 'hereeffort' } } }), 0);
+    assert.deepEqual(s.nuls('claude.args').slice(0, 5), ['--model', 'mock-lead-here', '--effort', 'hereeffort', '--append-system-prompt']);
+    assert.equal(await s.facWith(start, { lead: { remote, here: {} } }), 0);
+    assert.equal(s.nuls('claude.args')[0], '--append-system-prompt');
+    s.w('claude.args', '');
+    assert.equal(await s.facWith(start, { lead: { remote } }), 1);
+    assert.deepEqual(s.nuls('claude.args'), []);
   } finally {
     s.done();
   }

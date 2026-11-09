@@ -16,6 +16,7 @@ import { byName, cloneRepo, clonesUnder } from './repos.mjs';
 import { PS } from './ps.mjs';
 import { PRESETS, resetPassed, runLive } from './seat.mjs';
 import { TEAM, parseTeam } from './names.mjs';
+import { INHERIT, MODELS, entryOf } from './models.mjs';
 
 // Moved to claude-code.mjs (INN-39 item 3) and exported here too while callers still import it from here.
 export { parseLog };
@@ -160,13 +161,20 @@ export function local(ms, now) {
 }
 
 
+/** The effort the factory's one table gives a role (INN-39): a seat's, or the pack Lead's (lead.remote); null for another role or inherit. */
+function effortOf(role) {
+  const path = Object.hasOwn(MODELS.seats, role) ? ['seats', role] : role === 'lead' ? ['lead', 'remote'] : null;
+  const effort = path && entryOf(MODELS, ...path).effort;
+  return effort && effort !== INHERIT ? effort : null;
+}
+
 function shape(p, { record, role, name, issue, folder, seat, live, mtime, start, cwd, repo, branch, harness, now, override = null, pane = null, team = null }) {
   const ageMs = now - mtime;
   return {
     name, role, team, recordTeam: record?.team ?? null, issue, folder, repo, seat, harness, live, pane,
     ...(override ?? stateOf(p, { live, ageMs, record, now })),
     model: p.model ?? record?.model?.split(',')[0] ?? null,
-    effort: PRESETS[role]?.effort ?? (role === 'lead' ? 'high' : null),
+    effort: effortOf(role),
     ctx: p.ctx, turns: p.turns ?? num(record?.turns), tokensIn: p.tokensIn, tokensOut: p.tokensOut,
     cost: p.cost ?? num(record?.total_cost_usd), estCost: p.cost === null ? p.estCost : null,
     startedAt: start, lastAt: mtime, cwd: cwd ?? null, branch: branch ?? null,
