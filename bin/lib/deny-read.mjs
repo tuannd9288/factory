@@ -33,7 +33,7 @@ export const SCOPES = {
   'not-the-shell': { channels: ['file', 'kit', 'codex'], why: "a repository's tests may load its .env files in a seat's shell" },
   'factory-file-tools': {
     channels: ['file'],
-    why: "all of ~/.config for the factory's own file tools, as before; a sandbox, which the kit's rules reach too, would stop git, which reads ~/.config/git, so the shells, Codex and the kit name each store instead (INN-39, his question 1)",
+    why: "all of ~/.config for the factory's own file tools, as before; a sandbox, which the kit's rules reach too, would stop git, which reads ~/.config/git, so the shells, Codex and the kit name each store instead (INN-39, his question 1). The MacBook Lead's and Colly's Read rules reach their sandbox too, so their git reads nothing under ~/.config (NO_XDG_GIT in bin/lib/factory.mjs, FAC-79)",
   },
   'seats-only': { channels: ['file'], roles: ['seat'], why: "a Lead's transcript copies are its own (#185)" },
 };

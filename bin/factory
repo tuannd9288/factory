@@ -38,6 +38,11 @@
 #                                  team's Lead runs there, else the same command runs on the Mac mini by ssh; exit 0 posted, 1 not posted (with the reason), 2 usage
 #   factory events --follow [--local] [--after <seq>]  Colly's Monitor on the events (FAC-79): from the MacBook, bin/factory-events --follow on the Mac
 #                                  mini by ssh; with --local, on this MacBook's share; only these words, each once, and --after a whole number
+#   factory ship [<ship's arguments>] | factory pr-body <n> <file>  the --here Lead's ship and pr-body (FAC-79): the pack's scripts/ship or
+#                                  scripts/pr-body beside this command, run in the working folder outside the Lead's sandbox with this node's
+#                                  agents login; only in a clone of tuannd9288/factory, read from the folder's origin with the caller's GIT_*
+#                                  and GH_* variables dropped, and gh held to that repository; git with no hooks, no fsmonitor, no lazy fetch
+#                                  and https alone; exit 2 refused, else the script's code; no pacing of its own (FAC-109)
 #   factory account remove <account>       on this node: moves the account's token into ~/.agent-profiles/archive/tokens, never deleting it
 # The list runs the vendors' own checks (claude auth status, codex login status, gh auth status) for the profiles of the place
 # it runs in (factory when the user is FACTORY_HOST_USER, default factory, else macbook), and takes each account's quota from the run logs of its sessions. On the
